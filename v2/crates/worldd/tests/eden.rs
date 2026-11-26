@@ -1797,7 +1797,9 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
                                     BTreeMap::new(),
                                     900_000_000,
                                 );
-                                (soul.1, r, t.elapsed().as_secs_f64())
+                                let secs = t.elapsed().as_secs_f64();
+                                println!("walked from the {from}: {} {r:?} in {secs:.0} s", soul.1);
+                                (soul.1, r, secs)
                             })
                         })
                         .collect();
@@ -1825,13 +1827,18 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
                 for ((body, walked, secs), (name, &place)) in
                     walks.into_iter().zip(landforms.iter().zip(places))
                 {
-                    ran.push((from, *name, place, walked, secs, last[&body]));
+                    ran.push((from, *name, place, walked, secs, last.get(&body).copied()));
                 }
             });
         }
     });
     let mut failed = Vec::new();
     for (from, name, place, walked, secs, pose) in ran.into_inner().unwrap() {
+        // A body that never moved has no row.
+        let Some(pose) = pose else {
+            failed.push(format!("{from} -> {name}: {walked:?}, never moved"));
+            continue;
+        };
         let p = pose.position;
         let gap = replica::select::gap(&im.tree, place, ground, p).unwrap();
         let ahead = pose
