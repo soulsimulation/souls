@@ -19,7 +19,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** A launcher with a binding and a stand-in directory. `dir` options: `starting` world-starting answers per key before
  *  it is placed, `expireMs` how long a token is accepted after its first use, `route` false: placed without its route
- *  (the test writes it), `fail` a queue of failures for the next asks ('drop' no answer, 'store' store-unreachable). */
+ *  (the test writes it), `fail` a queue of failures for the next asks ('drop' no answer, 'store' store-unreachable),
+ *  `gateway` the gatewayd its route names. */
 async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   const dir = mkdtempSync(new URL('w1-create-', scratch)), data = join(dir, 'data'), file = join(dir, 'binding.json'), routes = join(dir, 'routes.json');
   const client = join(dir, 'client'), bodies = join(dir, 'bodies'), web = join(dir, 'web');
@@ -34,7 +35,7 @@ async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   v2Switch({ binding: file, slug: 'eden', stream: '/s/eden/', routes, client, staticDir: join(dir, 'static-eden'), bodies });
   const writeRoute = (slug) => {
     const table = JSON.parse(readFileSync(routes, 'utf8'));
-    table.worlds[slug] = { gateway: 'http://127.0.0.1:1', stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, canonical: true };
+    table.worlds[slug] = { gateway: opts.gateway ?? 'http://127.0.0.1:1', stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, canonical: true };
     writeFileSync(routes, JSON.stringify(table));
   };
 
@@ -215,4 +216,50 @@ test('W1: with the flag off, New world is not sent to the directory', async t =>
   const out = await create({ name: 'Old Way', template: 'empty' }, 'Bearer dev:ada');
   assert.equal(stub.asks.length, 0);
   assert.notEqual(out.body.engine, 'new'); assert.equal(out.body.code, 'boot-failed', 'the old create ran (its world command is refused here)');
+});
+
+test('26 Nov: a created world answers its agents: the bootstrap the client pairs from, its gateway\'s paths and its socket', async t => {
+  // the world's gatewayd: answers each agent path it is sent, and takes the socket
+  const seen = [];
+  const gateway = createServer((req, res) => {
+    const chunks = []; req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { seen.push([req.method, req.url, req.headers.authorization ?? null, Buffer.concat(chunks).toString('utf8')]); res.writeHead(200, { 'content-type': 'application/json' }).end('{"from":"gatewayd"}'); });
+  });
+  gateway.on('upgrade', (req, socket) => { seen.push(['UPGRADE', req.url]); socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n'); });
+  const G = await testPort(1); await new Promise(r => gateway.listen(G, '127.0.0.1', r));
+  t.after(() => gateway.close());
+  const { base, create } = await fixture(t, { dir: { gateway: `http://127.0.0.1:${G}` } });
+  const first = await create({ name: 'Mars Lab', template: 'hello-hamlet' }, 'Bearer dev:ada');
+  const made = await create({ name: 'Mars Lab', template: 'hello-hamlet', key: first.body.key, slug: first.body.slug }, 'Bearer dev:ada');
+  assert.equal(made.status, 201, JSON.stringify(made.body));
+  const slug = made.body.slug, at = `${base}/w/${slug}`;
+
+  // the bootstrap, as the v2 origin gives a moved world's (v2/tools/origin/world-routes.mjs), from its route
+  const boot = await fetch(`${at}/v1/bootstrap`);
+  assert.equal(boot.status, 200);
+  assert.deepEqual(await boot.json(), { world: slug, stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, directory: '/', gateway: `/w/${slug}/v2/ws`, creatorToken: `/w/${slug}/v2/creator-token` });
+  // (its world, directory and gateway are what the client's pairAddress checks before any pairing: on the 404 before,
+  // every `pair <url>` stopped with `pair-world-routing`)
+  assert.equal((await fetch(`${at}/v1/bootstrap`, { method: 'POST' })).status, 405, 'read-only');
+
+  // a creator's token and the entries go to the world's gatewayd, at its own /v2/ paths, body and bearer unchanged
+  const token = await fetch(`${at}/v2/creator-token`, { method: 'POST', headers: { authorization: 'Bearer creator-x', 'content-type': 'application/json' }, body: '{"ask":1}' });
+  assert.deepEqual([token.status, await token.json()], [200, { from: 'gatewayd' }]);
+  assert.equal((await fetch(`${at}/v2/entries`, { headers: { authorization: 'Bearer soul-x' } })).status, 200);
+  assert.deepEqual(seen, [['POST', '/v2/creator-token', 'Bearer creator-x', '{"ask":1}'], ['GET', '/v2/entries', 'Bearer soul-x', '']]);
+
+  // its socket reaches the gatewayd's /v2/ws (a replaced agent's `?free=1` too)
+  const { connect } = await import('node:net');
+  const upgrade = (path) => new Promise((resolve) => {
+    const s = connect(Number(new URL(base).port), '127.0.0.1', () => s.write(`GET ${path} HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16).toString('base64')}\r\n\r\n`));
+    let got = ''; s.on('data', (d) => { got += d; }); s.on('close', () => resolve(got)); s.on('error', () => resolve(got));
+  });
+  assert.match(await upgrade(`/w/${slug}/v2/ws`), /^HTTP\/1\.1 101/);
+  assert.match(await upgrade(`/w/${slug}/v2/ws?free=1`), /^HTTP\/1\.1 101/);
+  assert.deepEqual(seen.slice(2), [['UPGRADE', '/v2/ws'], ['UPGRADE', '/v2/ws?free=1']]);
+
+  // a world with no route is still not served, and its socket is refused as before
+  const none = await fetch(`${base}/w/nowhere/v1/bootstrap`);
+  assert.deepEqual([none.status, (await none.json()).code], [404, 'world.not-served']);
+  assert.match(await upgrade('/w/nowhere/v2/ws'), /^HTTP\/1\.1 404/);
 });

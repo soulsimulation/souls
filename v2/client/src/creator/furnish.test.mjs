@@ -87,6 +87,49 @@ test('the edit is checked under its claim: a piece the check refuses is dropped,
   }
 });
 
+// #5006 row 22: the Hello Hamlet cottage's bedroom as its world has it (`describe`): 2.23 × 2.72 m, its 1.2 m door to
+// the next room halfway along a long wall. Its double bed (1.47 × 2.06 m) leaves at most 0.72 m to that wall.
+const smallBedroom = (width = 2230) => [
+  { id: `${S}-1`, kind: 'eden:ground@1', parent: null, fields: {} },
+  { id: `${S}-2`, kind: 'eden:cottage@1', parent: `${S}-1`, fields: { 2: hex('core-cottage@3') }, pose: pose(`${S}-1`) },
+  { id: `${S}-3`, kind: 'eden:floor@1', parent: `${S}-2`, fields: { 5: 0 }, pose: pose(`${S}-2`) },
+  { id: `${S}-4`, kind: 'eden:room@1', parent: `${S}-3`, pose: pose(`${S}-3`),
+    fields: { 1: hex('e_1/bedroom'), 11: [[-width / 2, -1360], [width / 2, -1360], [width / 2, 1360], [-width / 2, 1360]], 22: [[{ id: `${S}-9` }, 'eden:door', width / 2 + 60, -25, 90012, 1200, 2100]] },
+    links: [{ id: `${S}-9`, type: 'eden:doorway', ends: [`${S}-4`, `${S}-5`], owner: 0 }] },
+  { id: `${S}-5`, kind: 'eden:room@1', parent: `${S}-3`, pose: pose(`${S}-3`, [3_000_000, 0, 0]), fields: { 1: hex('e_1/landing'), 11: [[-800, -1360], [800, -1360], [800, 1360], [-800, 1360]] } },
+];
+const beds = (single) => ({
+  kinds: { 'eden:room@1': {}, 'eden:bed@1': {}, ...(single ? { 'eden:bunk@1': {} } : {}) },
+  entries: { 'eden:bed': { geometry: { bounds_mm: [1470, 960, 2060] } }, 'eden:bunk': { geometry: { bounds_mm: [1010, 1800, 2010] } } },
+});
+
+test('#5006 row 22: a double bed that leaves no room to reach it gives way to a single bed, and the answer says so', () => {
+  const out = furnishOps(smallBedroom(), `${S}-4`, beds(true));
+  assert.deepEqual(out.placed.map((p) => [p.name, p.kind]), [['e_1/bedroom-bed', 'eden:bunk']], JSON.stringify(out));
+  // where the world's own furnish put it on that cottage: against the back wall, west of the doorway's way
+  assert.deepEqual([out.ops[0].kind, out.ops[0].at, out.ops[0].orientation], ['eden:bunk@1', [-228, 0, -315], [1 << 30, 0, 0, 0]]);
+  assert.deepEqual(out.instead, [{ name: 'e_1/bedroom-bed', kind: 'eden:bunk', for: 'eden:bed', why: 'in a doorway' }]);
+  assert.match(out.says, /1 pieces in 1 rooms, 4 dropped; e_1\/bedroom-bed is a single bed \(eden:bunk\): a double \(eden:bed\) does not fit with room to reach it/);
+  const sent = checkedFurnish(out, () => ({ ok: true }));
+  assert.match(sent.says, /^furnish \S+ \(cottage, front s\): 1 pieces in 1 rooms, 4 dropped; e_1\/bedroom-bed is a single bed \(eden:bunk\): .+; dropped: e_1\/bedroom-rug \(no kind/);
+  // a check that refuses the single bed drops it, and the answer no longer says it was placed
+  const refused = checkedFurnish(furnishOps(smallBedroom(), `${S}-4`, beds(true)), (ops) => (ops.length ? { ok: false, code: 'edit.admits', op: 0 } : { ok: true }));
+  assert.equal(refused.code, 'furnish.nothing');
+  // a bedroom the double fits keeps it
+  assert.deepEqual(furnishOps(smallBedroom(3200), `${S}-4`, beds(true)).placed.map((p) => p.kind), ['eden:bed']);
+});
+
+test('#5006 row 22: where no bed fits, the bed is dropped saying so, with why for each', () => {
+  const none = furnishOps(smallBedroom(1500), `${S}-4`, beds(true));
+  assert.equal(none.ops.length, 0, JSON.stringify(none.ops));
+  assert.match(none.dropped[0].why, /^no bed fits: eden:bed .+; eden:bunk .+/);
+  assert.equal(none.dropped[0].name, 'e_1/bedroom-bed');
+  // a world with no single bed among its kinds says that
+  const pinned = furnishOps(smallBedroom(), `${S}-4`, beds(false));
+  assert.match(pinned.dropped[0].why, /^no bed fits: eden:bed .+; no single bed among the world's kinds$/);
+  assert.match(checkedFurnish(pinned, () => ({ ok: true })).detail, /e_1\/bedroom-bed \(no bed fits: /);
+});
+
 test('#3961: a furnish whose ways check dropped a piece is still one edit under its claim: refused edit.claimed in another\'s', () => {
   // The kitchen is inside a live claim. The stand-in judge is the claims rule (#3701): a batch under no claim that
   // places anything in the claimed room is refused edit.claimed at that operation; under the claim it is made.

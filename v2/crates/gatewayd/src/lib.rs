@@ -162,6 +162,10 @@ pub const SEQUENCE_IN_USE: &str = "intent.seq-in-use";
 /// answers per actor to answer a repeat with (`sim::commit::acts::KEPT`).
 pub const ENDED: usize = 16;
 
+/// The gateway's own refusal of an intent a socket sends for a Soul's grant after another socket signed in for it and
+/// took it (#4978): it never reaches the world. The same name as the socket's close ([`REPLACED`]).
+pub const AGENT_REPLACED: &str = "agent.replaced";
+
 /// The close code a socket gets when another signs in for its grant (the last device wins): 4001, with the reason
 /// `agent.replaced`. Its client does not take the Soul back by itself, so two clients of one Soul do not take it from
 /// each other several times a second: it signs in again when its own agent next asks it for something, and meanwhile
@@ -192,11 +196,14 @@ struct Held {
     /// W10: the grant's intents sent while a message given to it is open, by sequence, and their verbs. Only acts
     /// begun after the pickup are told to the owner, so an older act never reads as the answer.
     doing: BTreeMap<u64, String>,
-    /// A shared grant's intents not yet answered, by sequence: who sent each, so their answers go to that socket
-    /// (#5006). Empty for a Soul's grant.
+    /// The grant's intents not yet answered, by sequence: who sent each, so their answers go to that socket (#5006),
+    /// and which intent it was (#4978).
     senders: BTreeMap<u64, Out>,
-    /// A shared grant's last [`ENDED`] answered intents, `(sequence, session)`, oldest first ([`SEQUENCE_IN_USE`]).
-    ended: std::collections::VecDeque<(u64, u64)>,
+    /// The grant's last [`ENDED`] answered intents, `(sequence, session, digest)`, oldest first ([`SEQUENCE_IN_USE`]).
+    ended: std::collections::VecDeque<(u64, u64, u64)>,
+    /// A Soul's grant: the newest sequence the gateway sent to the world for it, from any of its clients. Each sign-in
+    /// is told it, so a client that takes the Soul from another numbers its next intent after the other's (#4978).
+    newest: u64,
 }
 
 /// An intent out on a shared grant: the session that sent it, and the newest session signed in then. A socket signed
@@ -206,6 +213,16 @@ struct Held {
 struct Out {
     session: u64,
     newest: u64,
+    /// The intent's bytes, hashed ([`digest`]): the same intent sent again is told from another under its sequence.
+    digest: u64,
+}
+
+/// An intent's bytes, hashed: equal for the same intent sent again (#4978).
+pub fn digest(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
 }
 
 /// One signed-in socket: its queue of the stream's frames, its queue for the owner's messages, the ids of the
@@ -249,7 +266,7 @@ impl Held {
             if self.ended.len() == ENDED {
                 self.ended.pop_front();
             }
-            self.ended.push_back((a.sequence, out.session));
+            self.ended.push_back((a.sequence, out.session, out.digest));
         }
         self.sessions
             .keys()
@@ -267,6 +284,8 @@ pub struct Attached {
     pub outcome: &'static str,
     /// Kept frames after the cursor, sent right after the outcome.
     pub replay: Vec<Vec<u8>>,
+    /// A Soul's grant: the newest sequence sent for it, told with the outcome (#4978); 0 if none, or a creator's.
+    pub newest: u64,
     /// The owner's messages for this socket, as text frames (R13).
     pub mail: mpsc::Receiver<String>,
     /// Notified when the socket is let go for a full queue (#4979): its task closes it as [`AGENT_BEHIND`] at once,
@@ -373,6 +392,7 @@ impl Gateway {
         );
         held.who = Some(who);
         self.tell_watchers(&grant.key(), mailbox::agent(grant, true));
+        let newest = if shared(grant) { 0 } else { held.newest };
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
             Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c, seen)) {
@@ -385,6 +405,7 @@ impl Gateway {
             frames: rx,
             outcome,
             replay,
+            newest,
             mail: mail_rx,
             behind,
         })
@@ -429,15 +450,67 @@ impl Gateway {
             .senders
             .get(&sequence)
             .is_some_and(|o| other(o.session))
-            || held.ended.iter().any(|(q, s)| *q == sequence && other(*s))
+            || held
+                .ended
+                .iter()
+                .any(|(q, s, _)| *q == sequence && other(*s))
         {
             return false;
         }
-        held.senders.insert(sequence, Out { session, newest });
+        held.senders.insert(
+            sequence,
+            Out {
+                session,
+                newest,
+                digest: 0,
+            },
+        );
         true
     }
 
-    /// An intent [`Gateway::sending`] noted was answered on its socket alone, by the gateway, before it reached the
+    /// A Soul's grant (one holder, #4978): the socket signed in as `session` sends intent `sequence`, its bytes hashed
+    /// to `digest`, now. Its clients (the same token in two homes) take turns holding it and share the world's one
+    /// numbering of its intents, so it is refused by name, nothing noted and nothing sent, when another socket has
+    /// signed in for the grant since ([`AGENT_REPLACED`]), or when another intent went under the same sequence and is
+    /// still out or among the last [`ENDED`] answered ([`SEQUENCE_IN_USE`]): the world would take it as a repeat of
+    /// that one and answer it with that one's answer. The same intent sent again (after a lost socket) is not refused.
+    pub fn holding(
+        &self,
+        grant: Grant,
+        sequence: u64,
+        session: u64,
+        digest: u64,
+    ) -> Result<(), &'static str> {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let newest = hub.next_session;
+        let held = hub.grants.entry(grant.key()).or_default();
+        if held.sessions.keys().any(|s| *s > session) {
+            return Err(AGENT_REPLACED);
+        }
+        if held
+            .senders
+            .get(&sequence)
+            .is_some_and(|o| o.digest != digest)
+            || held
+                .ended
+                .iter()
+                .any(|(q, _, d)| *q == sequence && *d != digest)
+        {
+            return Err(SEQUENCE_IN_USE);
+        }
+        held.senders.insert(
+            sequence,
+            Out {
+                session,
+                newest,
+                digest,
+            },
+        );
+        held.newest = held.newest.max(sequence);
+        Ok(())
+    }
+
+    /// An intent [`Gateway::sending`] or [`Gateway::holding`] noted was answered on its socket alone, by the gateway, before it reached the
     /// world or its stream (an own answer, not kept): its sender is forgotten.
     pub fn unsent(&self, grant: Grant, sequence: u64) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
@@ -583,6 +656,7 @@ impl Gateway {
     pub fn tell(&self, key: &[u8], sequence: u64, frame: Vec<u8>) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(held) = hub.grants.get_mut(key) {
+            held.newest = held.newest.max(sequence);
             let to = held.route(Answering {
                 sequence,
                 ends: true,
@@ -616,6 +690,8 @@ impl Gateway {
     pub fn deliver(&self, key: Vec<u8>, a: Answering, at: Cursor, frame: Vec<u8>) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         let held = hub.grants.entry(key.clone()).or_default();
+        // #4978: an answer names a sequence sent for the grant, also one sent before the gateway restarted.
+        held.newest = held.newest.max(a.sequence);
         self.answered(held, &key, &frame);
         held.kept.push(at, frame.clone());
         let trace = world_link::delivery_trace(&frame);
@@ -900,6 +976,45 @@ mod tests {
         assert!(gw.senders(soul).is_empty());
         gw.deliver(soul.key(), ends(1), at(1), b"soul-1".to_vec());
         assert_eq!(got(&mut new), [b"soul-1".to_vec()]);
+    }
+
+    #[test]
+    fn a_souls_clients_share_one_numbering_and_a_replaced_ones_intent_is_refused() {
+        let gw = gateway();
+        let soul = grant("soul");
+        let first = sign_in(&gw, soul);
+        assert_eq!(first.newest, 0, "nothing sent for it yet");
+        assert_eq!(gw.holding(soul, 5, first.session, digest(b"a5")), Ok(()));
+        assert_eq!(gw.holding(soul, 6, first.session, digest(b"a6")), Ok(()));
+        gw.deliver(soul.key(), ends(5), at(1), b"a5-answer".to_vec());
+        // Another client takes the Soul: it is told the newest sequence sent, so it numbers after it.
+        let second = sign_in(&gw, soul);
+        assert_eq!(second.newest, 6);
+        // The first one's intent read after that is refused by name, and nothing is noted.
+        assert_eq!(
+            gw.holding(soul, 7, first.session, digest(b"a7")),
+            Err(AGENT_REPLACED)
+        );
+        // A client that numbered on its own: another intent under a sequence still out, or lately answered.
+        assert_eq!(
+            gw.holding(soul, 6, second.session, digest(b"b6")),
+            Err(SEQUENCE_IN_USE)
+        );
+        assert_eq!(
+            gw.holding(soul, 5, second.session, digest(b"b5")),
+            Err(SEQUENCE_IN_USE)
+        );
+        // The same intent sent again after a lost socket is not refused; the next number is free.
+        assert_eq!(gw.holding(soul, 6, second.session, digest(b"a6")), Ok(()));
+        assert_eq!(gw.holding(soul, 7, second.session, digest(b"b7")), Ok(()));
+        // The first takes it back and is told the second's newest.
+        let back = sign_in(&gw, soul);
+        assert_eq!(back.newest, 7);
+        assert_eq!(gw.holding(soul, 8, back.session, digest(b"a8")), Ok(()));
+        assert!(
+            gw.holding(soul, 9, second.session, digest(b"b9")).is_err(),
+            "the second, replaced in turn"
+        );
     }
 
     #[test]

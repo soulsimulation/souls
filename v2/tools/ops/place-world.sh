@@ -91,7 +91,9 @@ if [ "$CONFIG_ONLY" = 0 ]; then
   link() { if [ -L "$2" ]; then [ "$(readlink "$2")" = "$1" ] || die "placement link differs"; elif [ -e "$2" ]; then die "placement link is occupied"; else ln -s "$1" "$2"; fi; }
   link "$WORLD/views" "$R$LINKS/views"
   link "$WORLD/history" "$R$LINKS/history"
-  if [ "$DATA_ONLY" = 0 ] && [ -z "$R" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$WORLD" "$DATA/run" "$LINKS"; fi
+  # views/w too (not its other worlds' links): a root-run placement that made it must not leave it root's, or the next
+  # placement, run as souls, cannot make its world's folder there.
+  if [ "$DATA_ONLY" = 0 ] && [ -z "$R" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$WORLD" "$DATA/run" "$LINKS"; chown souls:souls "$(dirname "$LINKS")"; fi
 fi
 if [ "$DATA_ONLY" = 0 ]; then
   # Configuration-only never reads or mutates DATA. Every identity above comes from the protected descriptor.

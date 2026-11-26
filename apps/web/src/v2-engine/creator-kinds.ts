@@ -18,6 +18,7 @@
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
 import { KIT_ROLES } from '@souls/generators';
 import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
+import { layerDraws } from './layer-draws.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
 
@@ -246,7 +247,7 @@ export class CreatorKinds {
     }
     const live = new Set<string>();
     for (const [id, n] of this.nodes) {
-      if (n.origin) continue; // the world's own scene: the layer has it, and world-state.ts moves it
+      if (layerDraws(n)) continue; // the world's own scene: the layer has it, and world-state.ts moves it
       // W2 (0.135): a kind neither defined by a creator nor shown by the world's own things draws by its library def,
       // else by its content entry's own shape
       const own = this.defs.get(n.kind), old = own ? undefined : this.oldDefs.get(plain(n.kind));

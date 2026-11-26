@@ -27,6 +27,9 @@ const ROOM = 'eden:room', FLOOR = 'eden:floor', WINDOW = 'eden:window', DOOR = '
 const Q = 1 << 30;
 /** The most operations one edit carries (`replica::edit::OPS_MOST`). */
 const OPS_MOST = 256;
+/** A recipe's double bed, and the single bed placed where it does not fit with room to reach it (#5006 row 22): the
+ *  world's only bed one body wide (`eden:bunk`, 1.01 m; the double is 1.47 m). */
+const DOUBLE_BED = 'eden:bed', SINGLE_BED = 'core/bunk@1';
 
 const no = (code, detail) => ({ ok: false, code, detail });
 const plain = (k) => String(k ?? '').split('@')[0];
@@ -136,7 +139,7 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
   const solid = (size) => size[1] > 60;
 
   const want = isRoom ? [target.id] : roomsAll.map(({ r }) => r.id);
-  const ops = [], placed = [], dropped = [];
+  const ops = [], placed = [], dropped = [], instead = [];
   for (const { r, f } of roomsAll) {
     if (!want.includes(r.id)) continue;
     const level = floorAt.get(f.id).level, fr = frames.get(r.id);
@@ -160,11 +163,32 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
       ...stairs.filter((s) => s.from === level || s.to === level).map((s) => s.flight),
     ];
     const ways = waysOf(outline, doors.filter((d) => d.level === level), stairs.flatMap((s) => [...(s.from === level ? [s.foot] : []), ...(s.to === level ? [s.head] : [])]).filter((p) => inside(outline, p)));
+    /** The recipe item's first pose for a piece of `size` that stays in the room, out of every doorway and the stairs,
+     *  clear of every piece and of the room's ways; else why none does. */
+    const fit = (it, size) => {
+      let why = 'no pose fits';
+      for (const [fx, fz, face = 's'] of it.try ?? [[...(it.at ?? [0.5, 0.5]), it.face ?? 's']]) {
+        const fyaw = FRONT_YAW[face] ?? 0, side = face === 'e' || face === 'w';
+        const hx = (side ? size[2] : size[0]) / 2 + 40, hz = (side ? size[0] : size[2]) / 2 + 40;
+        if (ax1 - ax0 < 2 * hx || az1 - az0 < 2 * hz) { why = 'too big for the room'; continue; }
+        const p = R([ax0 + hx + fx * (ax1 - ax0 - 2 * hx), az0 + hz + fz * (az1 - az0 - 2 * hz)]);
+        // its footprint is its own width and depth turned as it faces (#5006 row 22: one facing east or west was
+        // checked as if it faced south, so a bed across a room was let into a doorway's way or kept out of a free one)
+        const box = turned(p, [size[0] / 2, size[2] / 2], fyaw + th);
+        if (solid(size) && zones.slice(0, doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'in a doorway'; continue; }
+        if (zones.slice(doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'at the stairs'; continue; }
+        if (solid(size) && taken.some((t) => meets(box, t))) { why = 'overlaps another piece'; continue; }
+        const yaw = fyaw + th, depth = (side ? size[0] : size[2]) / 2 + 300, front = [p[0] + Math.sin(yaw) * depth, p[1] + Math.cos(yaw) * depth];
+        if (solid(size)) { const w = ways.ok(taken, box, fronts, front); if (!w.ok) { why = w.why; continue; } }
+        return { got: { p, box, yaw: fyaw + th, front }, why };
+      }
+      return { got: null, why };
+    };
     const named = {};
     for (const it of items) {
       const name = `${origin}-${it.name ?? 'item'}`.slice(0, 48);
       if (names.has(name)) { notes.push(`${name} already there`); continue; }
-      const kind = (Array.isArray(it.def) ? it.def : [it.def]).map((d) => kindFor(d, kinds)).find(Boolean);
+      let kind = (Array.isArray(it.def) ? it.def : [it.def]).map((d) => kindFor(d, kinds)).find(Boolean);
       if (!kind) { dropped.push({ name, why: `no kind among ${[].concat(it.def).join(', ')}` }); continue; }
       const field = { 1: { hex: Buffer.from(name).toString('hex') } };
       if (it.on) {
@@ -178,22 +202,16 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
         continue;
       }
       if (!admits(kinds, r.kind, kind)) { dropped.push({ name, why: `a room does not admit ${plain(kind)}` }); continue; }
-      const size = sizeOf(kind);
+      let size = sizeOf(kind);
       if (!size) { dropped.push({ name, why: `no size known for ${plain(kind)}` }); continue; }
-      let why = 'no pose fits', got = null;
-      for (const [fx, fz, face = 's'] of it.try ?? [[...(it.at ?? [0.5, 0.5]), it.face ?? 's']]) {
-        const fyaw = FRONT_YAW[face] ?? 0, side = face === 'e' || face === 'w';
-        const hx = (side ? size[2] : size[0]) / 2 + 40, hz = (side ? size[0] : size[2]) / 2 + 40;
-        if (ax1 - ax0 < 2 * hx || az1 - az0 < 2 * hz) { why = 'too big for the room'; continue; }
-        const p = R([ax0 + hx + fx * (ax1 - ax0 - 2 * hx), az0 + hz + fz * (az1 - az0 - 2 * hz)]);
-        const box = turned(p, [hx - 40, hz - 40], fyaw + th);
-        if (solid(size) && zones.slice(0, doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'in a doorway'; continue; }
-        if (zones.slice(doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'at the stairs'; continue; }
-        if (solid(size) && taken.some((t) => meets(box, t))) { why = 'overlaps another piece'; continue; }
-        const yaw = fyaw + th, depth = (side ? size[0] : size[2]) / 2 + 300, front = [p[0] + Math.sin(yaw) * depth, p[1] + Math.cos(yaw) * depth];
-        if (solid(size)) { const w = ways.ok(taken, box, fronts, front); if (!w.ok) { why = w.why; continue; } }
-        got = { p, box, yaw: fyaw + th, front };
-        break;
+      let { got, why } = fit(it, size);
+      // #5006 row 22: a double bed with no pose that leaves room to reach it gives way to a single bed in the same
+      // poses; with neither, the bed is dropped saying no bed fits, and why for each. The clearances stay as they are.
+      if (!got && plain(kind) === DOUBLE_BED) {
+        const single = kindFor(SINGLE_BED, kinds), small = single && admits(kinds, r.kind, single) ? sizeOf(single) : null;
+        const second = small ? fit(it, small) : null;
+        if (second?.got) { instead.push({ name, kind: plain(single), for: plain(kind), why }); kind = single; size = small; got = second.got; }
+        else why = `no bed fits: ${plain(kind)} ${why}; ${second ? `${plain(single)} ${second.why}` : 'no single bed among the world\'s kinds'}`;
       }
       if (!got) { dropped.push({ name, why }); continue; }
       if (solid(size)) { taken.push(got.box); fronts[taken.length - 1] = got.front; }
@@ -208,8 +226,12 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
   }
   if (ops.length > OPS_MOST) return no('furnish.too-many', `${ops.length} pieces; one edit places at most ${OPS_MOST}: furnish one room at a time`);
   const rooms = new Set(placed.map((p) => p.room)).size;
-  return { ops, placed, dropped, notes, says: `furnish ${building.id} (${st}, front ${front}): ${placed.length} pieces in ${rooms} rooms, ${dropped.length} dropped` };
+  return { ops, placed, dropped, notes, instead, says: `furnish ${building.id} (${st}, front ${front}): ${placed.length} pieces in ${rooms} rooms, ${dropped.length} dropped${swapped(instead, placed)}` };
 }
+
+/** What furnish placed in place of what the recipe names (#5006 row 22), of the pieces still `placed`, in words. */
+const swapped = (instead = [], placed = []) => instead.filter((i) => placed.some((p) => p.name === i.name))
+  .map((i) => `; ${i.name} is a single bed (${i.kind}): a double (${i.for}) does not fit with room to reach it (${i.why})`).join('');
 
 /** The claims refusals (#3701): the world's claims judge answers for the whole edit, never for one piece. */
 const CLAIM_REFUSALS = new Set(['edit.claimed', 'edit.outside-claim', 'edit.claim-unknown']);
@@ -219,6 +241,7 @@ const CLAIM_REFUSALS = new Set(['edit.claimed', 'edit.outside-claim', 'edit.clai
  *  it, and the rest checked again, as today drops a piece that does not fit; a claims refusal is the furnish's own. */
 export function checkedFurnish(out, check) {
   let { ops } = out;
+  const head = out.says.slice(0, out.says.length - swapped(out.instead, out.placed).length);
   for (let k = 0; k < 64 && ops.length; k++) {
     const v = check(ops);
     if (CLAIM_REFUSALS.has(v.code)) return { ...v, ok: false };
@@ -231,5 +254,5 @@ export function checkedFurnish(out, check) {
   }
   if (!ops.length) return no('furnish.nothing', `nothing to furnish: ${out.notes.concat(out.dropped.map((d) => `${d.name} (${d.why})`)).slice(0, 8).join('; ')}`);
   const why = out.dropped.slice(0, 8).map((d) => `${d.name} (${d.why})`);
-  return { ops, says: `${out.says.replace(/\d+ pieces/, `${ops.length} pieces`).replace(/\d+ dropped/, `${out.dropped.length} dropped`)}${why.length ? `; dropped: ${why.join(', ')}` : ''}` };
+  return { ops, says: `${head.replace(/\d+ pieces/, `${ops.length} pieces`).replace(/\d+ dropped/, `${out.dropped.length} dropped`)}${swapped(out.instead, out.placed)}${why.length ? `; dropped: ${why.join(', ')}` : ''}` };
 }
