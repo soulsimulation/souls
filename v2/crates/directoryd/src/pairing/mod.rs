@@ -557,7 +557,10 @@ impl Pairing {
         tx.commit().map_err(|_| ("store", None))?;
         drop(db);
         self.note_world(&code, &grant).map_err(|e| (e, None))?;
-        self.note_name(&code, &grant).map_err(|e| (e, None))?;
+        // The asked-for name is best-effort: the approval is committed, and its daemon posts the name again.
+        if let Err(e) = self.note_name(&code, &grant) {
+            eprintln!("directoryd: degraded: pair-name {e}");
+        }
         Ok(grant)
     }
 
