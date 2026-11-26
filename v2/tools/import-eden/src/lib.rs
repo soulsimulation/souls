@@ -2276,7 +2276,9 @@ pub fn body_slots(
     let mut next = vec![(tree.root(), false)];
     while let Some((h, on_ground)) = next.pop() {
         let n = tree.node(h);
-        let ground = n.is_some_and(|n| plain(n.kind().as_str()) == GROUND);
+        let ground = n
+            .as_ref()
+            .is_some_and(|n| plain(n.kind().as_str()) == GROUND);
         next.extend(tree.children(h).unwrap_or(&[]).iter().map(|&c| (c, ground)));
         let Some(n) = n else { continue };
         all += slots_on(
