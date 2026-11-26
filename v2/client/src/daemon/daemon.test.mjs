@@ -122,7 +122,7 @@ after(async () => {
 
 test('A1: the first command starts it, and it outlives the command that started it', async () => {
   const cli = join(v2, 'client/src/daemon/client.mjs');
-  const first = spawnSync(process.execPath, [cli, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+  const first = spawnSync(process.execPath, [cli, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG, SOULS_REPLACED_RETRY_MS: process.env.SOULS_REPLACED_RETRY_MS }, encoding: 'utf8' });
   outputs.push(first.stdout, first.stderr);
   const said = JSON.parse(first.stdout);
   assert.equal(said.started, true, first.stdout);
