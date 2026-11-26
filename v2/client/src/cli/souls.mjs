@@ -722,7 +722,7 @@ export const CARRY_HELP = [
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place; to turn it square into a slot, every carrier sends the same',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
@@ -731,7 +731,7 @@ export const CARRY_HELP = [
   'carry offer anyone   a crew offered to every Soul within 20 m (five at most, nearest first)',
   'carry accept [<name>]   join the crew that Soul offered you, or with no name the newest offer to you',
 ];
-const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. The carriers of a lifted load must walk together: if one walks and the other stays, the carry breaks off and the load is set down (`set-down` in `wait`, `why`). So the leader says the exact `carry to` and a moment ("on go"), and every carrier sends it then. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. When the front of a lifted load walks (its `carry to`), the rest of the crew walks with it, each keeping its place, and the load does not turn; to turn it square into a slot, every carrier sends that same `carry to`. A carrier who walks elsewhere or leaves can break the carry off, and the load is set down (`set-down` in `wait`, `why`). A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
 
 /** `help build`: how a rack bay goes up, step by step, as a crew of Souls does it. */
 export const BUILD_HELP = [
@@ -743,7 +743,7 @@ export const BUILD_HELP = [
   'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
   'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
 ];
-const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; every carrier sends the same carry to at the same moment.';
+const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; the front\'s carry to walks the whole crew, and into a slot every carrier sends the same one.';
 
 /**
  * A carry step's `next` (the daemon's `nextStep`), made true to how it ended: none for a refused step (its refusal
@@ -758,7 +758,7 @@ export async function nextOf(ask, req, answer) {
     const crew = (await ask({ op: 'carry', do: 'list' }, 15_000).catch(() => null))?.crews?.find((c) => c.id === (answer.crew ?? req.crew));
     if (crew && !crew.holds.length) {
       answer.carry = 'broke off';
-      answer.next = 'the crew holds nothing now: the carry broke off and the load was set down on the way (`wait` shows set-down and why; carriers-apart: not every carrier walked). Take it again, and every carrier sends the same carry to at the same moment';
+      answer.next = 'the crew holds nothing now: the carry broke off and the load was set down on the way (`wait` shows set-down and why; carriers-apart: a carrier fell more than 1 m from its place). Take it again; the front\'s carry to walks the whole crew';
     }
   }
   if (req.kind === 'part' && req.do === 'put' && /^[0-9a-f]{32}-\d+$/.test(String(req.into ?? ''))) {

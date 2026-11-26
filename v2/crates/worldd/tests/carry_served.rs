@@ -1790,7 +1790,6 @@ async fn group_a_carrier_lets_go_mid_walk() {
     for (s, t) in souls.iter().zip(&tokens) {
         crew.push(Soul::connect(&url, *s, lineage, t).await);
     }
-    let bodies: Vec<Id> = souls.iter().map(|s| body_of(&dir, *s)).collect();
     let bl = Load::of(&construction("rack_beam.json")).unwrap();
     let [back, front] = bl.places();
     let places = [
@@ -1804,6 +1803,8 @@ async fn group_a_carrier_lets_go_mid_walk() {
     for s in crew.iter_mut() {
         s.answer().await.expect("walks to its place");
     }
+    // A body is born at its Soul's first act.
+    let bodies: Vec<Id> = souls.iter().map(|s| body_of(&dir, *s)).collect();
     together(&dir, &bodies, &places, 60).await;
     let offered = crew[0]
         .act(
