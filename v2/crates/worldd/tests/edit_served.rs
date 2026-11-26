@@ -2245,6 +2245,9 @@ async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refuse
 #[path = "edit_served/k18d.rs"]
 mod k18d;
 
+#[path = "edit_served/shade.rs"]
+mod shade;
+
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
     let mut out = std::collections::BTreeSet::new();
