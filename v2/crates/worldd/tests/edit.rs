@@ -2208,13 +2208,28 @@ fn a5006_a_building_placed_live_brings_its_rooms_and_doorways_in_one_edit() {
         3,
         "three rooms on it"
     );
+    // The doorways' rows on their rooms, each a link the floor's scene reads; the front door's leads outside.
+    let mut ways = Vec::new();
+    for r in tree.children(fh).unwrap_or_default() {
+        if let Some(Value::Array(rows)) = tree.node(*r).and_then(|n| n.fields().get(&22).cloned()) {
+            for row in rows {
+                let Value::Array(row) = row else { continue };
+                ways.push(replica::effects::read_id(&row[0]).expect("a doorway's link"));
+            }
+        }
+    }
+    assert_eq!(ways.len(), 3, "three doorways, each in its room's row");
     let scene = sim::ground::scene::Scene::of(tree, floors[0]).expect("the floor's scene");
-    assert_eq!(scene.doorways.len(), 3, "every doorway read on the floor");
-    let outside = scene
-        .doorways
+    for l in &ways {
+        assert!(
+            scene.doorways.iter().any(|d| d.link == *l),
+            "the floor reads doorway {l:?}"
+        );
+    }
+    let outside = ways
         .iter()
-        .filter(|d| {
-            tree.link(d.link)
+        .filter(|l| {
+            tree.link(**l)
                 .is_some_and(|(_, ends, ..)| ends.contains(&ground))
         })
         .count();
