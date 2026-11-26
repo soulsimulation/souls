@@ -797,7 +797,11 @@ fn the_souls_in_each_world_come_from_its_health_file() {
     health(5);
     let t = crate::accounts::serve::now() + 1;
     let at = |now| w.souls_of(std::slice::from_ref(&folder), now)[&folder];
-    assert_eq!(at(t), Some(4), "within {SOULS_EVERY} s: the count read before");
+    assert_eq!(
+        at(t),
+        Some(4),
+        "within {SOULS_EVERY} s: the count read before"
+    );
     assert_eq!(at(t + SOULS_EVERY), Some(5));
     let _ = std::fs::remove_dir_all(root);
 }

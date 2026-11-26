@@ -247,7 +247,10 @@ fn folder_of(row: &Json) -> Option<String> {
 /// The Souls a world's `health.json` says are embodied in it (rule 9), if it says.
 fn souls_in(root: &Path, folder: &str) -> Option<u64> {
     let text = std::fs::read(root.join(folder).join("health.json")).ok()?;
-    serde_json::from_slice::<Json>(&text).ok()?.get("souls")?.as_u64()
+    serde_json::from_slice::<Json>(&text)
+        .ok()?
+        .get("souls")?
+        .as_u64()
 }
 
 fn row_creator(row: &Json) -> Option<&str> {
@@ -287,7 +290,10 @@ impl<S: Store> Worlds<S> {
                 read.1.insert(f.clone(), souls_in(root, f));
             }
         }
-        folders.iter().map(|f| (f.clone(), read.1.get(f).copied().flatten())).collect()
+        folders
+            .iter()
+            .map(|f| (f.clone(), read.1.get(f).copied().flatten()))
+            .collect()
     }
 
     /// Every world's lineage (hex) and creator (a principal's text), unlisted ones too: whom a world's prayers go to

@@ -786,7 +786,10 @@ mod tests {
         m.souls(Some(4));
         assert!(health(&m).ends_with(",\"souls\":4}\n"), "{}", health(&m));
         m.souls(Some(0));
-        assert!(health(&m).ends_with(",\"souls\":0}\n"), "none embodied is 0, not unset");
+        assert!(
+            health(&m).ends_with(",\"souls\":0}\n"),
+            "none embodied is 0, not unset"
+        );
         m.souls(None);
         assert!(!health(&m).contains("\"souls\""));
     }

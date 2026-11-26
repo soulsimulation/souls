@@ -318,7 +318,7 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   // the directory's world list names them; quiet is unlisted
   const { createServer } = await import('node:http');
   const directory = createServer((req, res) => res.writeHead(req.url === '/v1/worlds' ? 200 : 404, { 'content-type': 'application/json' })
-    .end(JSON.stringify({ worlds: [{ name: 'fresh', label: 'Fresh Fields', template: 'empty', creator: 'abc:1', made: 1700000000 }, { name: 'quiet', label: 'Quiet', unlisted: true }] })));
+    .end(JSON.stringify({ worlds: [{ name: 'fresh', label: 'Fresh Fields', template: 'empty', creator: 'abc:1', made: 1700000000, souls: 3 }, { name: 'quiet', label: 'Quiet', unlisted: true }] })));
   const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname, started = [];
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {}, cutoverBindingFile: file, webDir: web, v2DirectoryUrl: `http://127.0.0.1:${D}`,
@@ -331,6 +331,7 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   const fresh = list.worlds.find(w => w.slug === 'fresh');
   assert.equal(fresh?.name, 'Fresh Fields', 'listed under its directory label'); assert.equal(fresh.engine, 'new'); assert.equal(fresh.url, '/w/fresh/?dev=1');
   assert.deepEqual(list.worlds.map(w => w.slug).sort(), ['eden', 'fresh'], 'the unlisted, previewed and archived routes are not listed');
+  assert.equal(fresh.souls, 3, '26 Nov: the Souls in it now, from the directory\'s row');
 
   const page = await get('/w/fresh/');
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
@@ -455,14 +456,20 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
   writeFileSync(join(clientDir, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
   // eden is the newest world, so a start's wake-recent and the keep-alive would pick it first
-  const worlds = [{ slug: 'eden', createdAt: 2, souls: 23 }, { slug: 'other', createdAt: 1 }].map(w => ({ ...w, name: w.slug, template: 'empty', owner: 'synthetic-owner' }));
+  const worlds = [{ slug: 'eden', createdAt: 2, souls: 23, entities: 5020 }, { slug: 'other', createdAt: 1 }].map(w => ({ ...w, name: w.slug, template: 'empty', owner: 'synthetic-owner' }));
   writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: [], worlds }));
   writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:1', stream: '/s/eden/', canonical: true } } }));
+  // the directory's world list counts the Souls in eden now (worldd's health.json, read by directoryd's list)
+  const { createServer } = await import('node:http');
+  let directoryAsked = 0;
+  const directory = createServer((req, res) => { directoryAsked += req.url === '/v1/worlds'; res.writeHead(req.url === '/v1/worlds' ? 200 : 404, { 'content-type': 'application/json' }).end(JSON.stringify({ worlds: [{ name: 'eden', label: 'Eden', souls: 4 }] })); });
+  const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
+  t.after(() => directory.close());
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname, asked = [];
   // the old world's program is not there: any start of eden's old process would be a spawn of a missing file
   const missing = join(dir, 'no-such-old-server');
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, webDir, base: '/', log: () => {}, eager: 4, keepAlive: true, keepAliveMs: 30, prewarm: false,
-    cutoverBinding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir },
+    cutoverBinding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir }, v2DirectoryUrl: `http://127.0.0.1:${D}`,
     command: (w, port) => { asked.push(w.slug); return w.slug === 'eden' ? { cmd: missing, args: [] } : { cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port) } }; } });
   t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
   const get = (path, headers = {}) => fetch(`${base}/w/eden${path}`, { headers });
@@ -489,8 +496,12 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   // the site's own pages and the world list need no world process
   const listed = (await (await fetch(`${base}/__sim/worlds.json`)).json()).worlds.find(w => w.slug === 'eden');
   assert.deepEqual([listed?.status, listed?.engine], ['running', 'new'], 'listed as live on the new engine, not asleep');
-  // 26 Nov: the registry's 23 is the old engine's count (the homepage showed "Eden 2026 · 23 Souls" while Explore listed 4)
-  assert.equal(listed.souls, null, 'no Soul count from the old engine for a world the new engine runs');
+  // 26 Nov: the registry's 23 is the old engine's count (the homepage showed "Eden 2026 · 23 Souls" while Explore listed 4):
+  // the card shows the Souls in it now, the directory's count, and no "things" figure from the old engine
+  assert.deepEqual([listed.souls, listed.entities], [4, null], 'the new engine\'s Souls, not the old engine\'s 23 Souls and 5020 things');
+  // the list asks the directory at most every 10 s, whatever the page asks
+  for (let i = 0; i < 20; i++) await fetch(`${base}/__sim/worlds.json`).then(r => r.arrayBuffer());
+  assert.equal(directoryAsked, 1, 'twenty more lists, no more asks of the directory');
   // wake-recent at start and the keep-alive have had their turns: they keep other living, never eden
   for (let i = 0; i < 100 && launcher.pool.status('other').status !== 'running'; i++) await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 200));
