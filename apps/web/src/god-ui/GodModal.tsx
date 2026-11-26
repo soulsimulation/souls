@@ -85,7 +85,7 @@ export function Connect({ url, grant = null, state }: { url: string; grant?: str
     <h3 id="gm-connect-h"><i className="gm-connect-dot" aria-hidden="true" />Connect your agent to God mode
       <span className={'gm-state ' + state} data-gateway-state={state} role="status">{STATE_WORD[state]}</span></h3>
     <ol className="gm-steps">
-      <li className={state === 'not-paired' ? 'now' : 'done'}>Give your agent this line:</li>
+      <li className={state === 'connecting' ? 'done' : 'now'}>Give your agent this line:</li>
     </ol>
     <div className="gm-connect-line">
       <p data-connect-line={line}>Read <a href={url} target="_blank" rel="noreferrer" data-skill-link="1">{url}<span className="gm-out">{OUT}</span></a> and follow it to build this world as its {grant
