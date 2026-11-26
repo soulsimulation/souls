@@ -14,7 +14,8 @@
 # VIEWERS=<m> (0.133 P3) adds m viewers on the world's public stream while the agents act (viewers.mjs; its arm is
 # this rung's), on VIEWER_CPUS (default DRIVER_CPUS); they need replica's wasm-bindgen package at REPLICA_PKG
 # (default $CARGO_TARGET_DIR/wasm-load/pkg). The rung's own processes are stopped by pid when it ends or is stopped,
-# and it refuses a folder under /var/lib/souls or /etc/souls (a served machine's worlds).
+# and it refuses a folder under /var/lib/souls or /etc/souls (a served machine's worlds). TRACE=1 has the driver write
+# its trace (run/trace.txt), whose `sent`, `first`, `ack` and `end` lines time each act to its first answer and its end.
 set -u
 N=$1 ARM=$2 RATE=$3 CPUS=$4 SECS=${5:-120}
 V2=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -97,7 +98,7 @@ SP=$!
 sleep 1
 date +%s > "$D/win.txt"
 taskset -c "$DRIVER_CPUS" "$B/driver" --schedule "$D/schedule.txt" --dir "$D/run" --tokens "$W/souls.tokens" \
-  --remote "ws://$ADDR" --speech --stream "$STREAM_URL" > "$D/driver.out" 2>&1 &
+  --remote "ws://$ADDR" --speech --stream "$STREAM_URL" ${TRACE:+--trace "$D/run/trace.txt"} > "$D/driver.out" 2>&1 &
 # In the background and waited for, so a stop's trap runs at once rather than after the driver's end.
 DP=$!
 wait "$DP"
