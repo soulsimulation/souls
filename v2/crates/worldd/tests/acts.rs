@@ -338,7 +338,8 @@ fn entries() -> Json {
     )
     .unwrap();
     // A create names its kind pinned (C25's `stock`).
-    // #3991: a bell's ring sets `ringing` and a timer whose world form, with no steps, clears it.
+    // #3991: a bell's ring (by hand, as a thaumatrope's disc is released, or at once) sets `ringing` and a timer whose
+    // world form, with no steps, clears it.
     let rack = parse(
         &r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
       "state": { "ringing": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
@@ -349,15 +350,9 @@ fn entries() -> Json {
             { "step": "move", "move": "press", "at": "edge" }],
           "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
             { "change": "timer", "form": "fade", "after_us": 1000000, "event": "will_fade" }] },
-        "ring_long": { "who": "anyone", "starts": "act", "steps": [],
-          "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
-            { "change": "timer", "form": "fade", "after_us": 2000000, "event": "will_fade" }] },
         "ring": { "who": "anyone", "starts": "act", "steps": [],
           "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
-            { "change": "timer", "form": "fade", "after_us": 1000000, "event": "will_fade" }] },
-        "ring_late": { "who": "anyone", "starts": "act", "steps": [{ "step": "wait", "us": 300000 }],
-          "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
-            { "change": "timer", "form": "fade", "after_us": 1000000, "event": "will_fade" }] },
+            { "change": "timer", "form": "fade", "after_us": 2000000, "event": "will_fade" }] },
         "fade": { "who": "world", "starts": "timer", "steps": [],
           "needs": [{ "need": "state", "field": "ringing", "is": true }],
           "effects": [{ "change": "set", "field": "ringing", "to": false, "event": "faded" }] }, "put": { "who": "anyone",
