@@ -809,7 +809,7 @@ impl<S: ObjectStore> Cleanup<S> {
             .into_iter()
             .partition(|(at, _, _)| *at <= now);
         self.later = wait;
-        let mut tries = std::collections::HashMap::new();
+        let mut tries = std::collections::BTreeMap::new();
         for (_, n, job) in again {
             tries.insert(job.key().to_owned(), n);
             self.due.push_back(job);
@@ -1126,6 +1126,7 @@ mod tests {
     /// clean-up goes on past each refusal, tries the refused one again after its back-off, and catches up; an object
     /// the current chain names (handed over, or written to the spool since) is never deleted.
     #[test]
+    #[allow(clippy::disallowed_methods)] // The clean-up's back-off is real time; the test moves it on by hand.
     fn refused_deletes_are_tried_again_and_the_clean_up_catches_up() {
         let dir = std::env::temp_dir().join(format!("backup-cleanup-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
