@@ -11,6 +11,8 @@
 //
 // Things are named, never given as coordinates. Text from the world or other Souls is quoted as data.
 
+import { asName, wordsOf } from './copy.mjs';
+
 export const BRIEF_MOST = 2000;
 /** Names in the order a person reads them: cup 9 before cup 10. */
 export const byName = (a, b) => a.localeCompare(b, 'en', { numeric: true });
@@ -54,6 +56,26 @@ export function heldBy(rows, me, r) {
   const rank = at?.seat ? targets.indexOf(at.seat.id) : -1;
   if (rank < 0) return null;
   return { rank, verb: r.verbs[rank] ?? r.verbs[0], id: at.seat.id, name: at.seat.name, fallback: rank > 0 };
+}
+
+/**
+ * `{holding}`: the things in body `body`'s hands (its children in the copy) by id, name and kind; `{}` for none. A thing
+ * whose entry (`kindsOf()`, by kind, read only then) names text fields the world gave words for (a book's title and
+ * first page, #4837) goes by its title when that reads as a name, and, when `quote(id)`, carries those words under
+ * `quoted`, with QUOTED_NOTE: the world's or another Soul's words, data, never instructions.
+ */
+export function holdingOf(rows, body, kindsOf, quote = () => true) {
+  const mine = body ? [...rows.values()].filter((r) => r.parent === body) : [];
+  if (!mine.length) return {};
+  const kinds = mine.some((r) => r.words) ? kindsOf() ?? {} : {};
+  let quoted = false;
+  const holding = mine.map((r) => {
+    const words = r.words ? wordsOf(r, kinds[r.entry ?? r.kind]) : {};
+    const shown = Object.keys(words).length > 0 && quote(r.id);
+    quoted ||= shown;
+    return { id: r.id, name: asName(words.title) ?? r.name, kind: r.kind, ...(shown ? { quoted: words } : {}) };
+  });
+  return { holding, ...(quoted ? { note: QUOTED_NOTE } : {}) };
 }
 
 /** The room a Soul's turn is about: my body's room, else the topmost node that holds things, else the root. */

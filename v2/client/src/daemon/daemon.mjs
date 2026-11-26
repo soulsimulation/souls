@@ -142,8 +142,8 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf, wordsOf } from '../brief/copy.mjs';
+import { QUOTED_NOTE, brief, changedBlock, heldBy, holdingOf as heldIn } from '../brief/brief.mjs';
+import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -939,16 +939,11 @@ function inBodySlot(rows) {
   return Object.values(heldKinds()[on?.entry ?? on?.kind]?.slots ?? {}).some((x) => x?.admits === 'body');
 }
 
-/** `{holding}`: the things in this Soul's body's hands (its children in the copy), by id, name and kind, and the words
- *  the world gave for each one's text fields (`words`: a book's title and first page, #4837); `{}` for none. */
-function holdingOf(rows) {
-  const body = [...rows.values()].find((r) => r.soul === ME)?.id;
-  const kinds = body && [...rows.values()].some((r) => r.parent === body && r.words) ? heldKinds() : {};
-  const held = body ? [...rows.values()].filter((r) => r.parent === body).map((r) => {
-    const words = r.words ? wordsOf(r, kinds[r.entry ?? r.kind]) : {};
-    return { id: r.id, name: r.name, kind: r.kind, ...(Object.keys(words).length ? { words } : {}) };
-  }) : [];
-  return held.length ? { holding: held } : {};
+/** `{holding}`: the things in this Soul's body's hands, by id, name and kind (`brief.mjs` `holdingOf`); `{}` for none.
+ *  The words the world gave for a held thing's text fields (a book's title and first page, #4837) go under `quoted`
+ *  only for the things `quote(id)` names: every one in `look`, an act's own target in its answer (`read:<book>`). */
+function holdingOf(rows, quote = () => true) {
+  return heldIn(rows, [...rows.values()].find((r) => r.soul === ME)?.id, heldKinds, quote);
 }
 
 /** The copy brought current unless `now`, and its age fields (R10). */
@@ -1999,12 +1994,14 @@ async function answer(req, conn = null) {
       // What this Soul's body holds once the act is done (a book a shelf's `take` put in its hand): its id for the next act.
       const refused = r.answers.at(-1)?.answer === 'refused';
       return closing(got, done || refused ? (rows) => {
-        const h = done ? heldBy(rows, ME, r) : null, hand = done ? holdingOf(rows) : {};
+        // What it holds, with a held thing's words only when the act named it (a `read` of the book; not a take's shelf).
+        const targets = new Set(String(r.target ?? '').split(' ')), hand = done ? holdingOf(rows, (id) => targets.has(id)) : {};
+        const h = done ? heldBy(rows, ME, r) : null;
         // First-day round 4: aboard a thing on a course (a balloon), the answer says when it takes off (on boarding) or
         // when this Soul can get off (on a refusal), worked out from the copy (`check/aboard.mjs`).
         const on = aboardOf({ rows, me: ME, courseAt: wire.courseAt, now: worldNowOrReal() }), aboard = aboardWords(on, { refused });
         // A dance or a workout with something in hand is refused `hand_not_empty`: name it and how to put it down.
-        const held = refused && r.answers.at(-1)?.reason === 'hand_not_empty' ? holdingOf(rows).holding?.[0] : null;
+        const held = refused && r.answers.at(-1)?.reason === 'hand_not_empty' ? holdingOf(rows, () => false).holding?.[0] : null;
         const why = aboard ?? (held ? `holding ${held.name} (${held.id}): put it down first (set-down ${held.id} here), then send it again` : null);
         // Holding something, another offer of the body (a wave) is no answer; away from its stop, nor is a rise: the
         // `why` is what to do next.

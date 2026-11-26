@@ -127,6 +127,12 @@ export function wordsOf(row, entry) {
   return out;
 }
 
+/** The longest words that still read as a thing's name (a screen's title, a calendar entry's words); longer, or more
+ *  than one line (a book's first page, #4837), they are its text, not its name. */
+export const NAME_MOST = 120;
+/** `words` when they read as a name ([`NAME_MOST`]), else null. */
+export const asName = (words) => (typeof words === 'string' && words.length <= NAME_MOST && !words.includes('\n') ? words : null);
+
 /** A field's public words given beside its record (`{21: id}`, key 27), or null when there are none. */
 function wordsAt(copy, fields, n) {
   const v = fields.get(n) ?? fields.get(BigInt(n));
@@ -260,10 +266,11 @@ export function rowsOf(copy) {
     const full = String(m.get(2)), entry = own.has(full) ? full : entryKind(m);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
-    // 0.133 Q1: a Soul's body goes by its owner's name for it (field 30), so another Soul finds it by that name. A
-    // thing's own field 30 is its entry's (a book's first page, #4837), never its name.
-    const body = of || kind === 'souls:body';
-    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? (body ? wordsAt(copy, fields, F_BODY_NAME) : null) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    // 0.133 Q1: a Soul's body goes by its owner's name for it (field 30), so another Soul finds it by that name; a
+    // thing by its field 30 words (a screen's title, a calendar entry's words) when they read as a name, never by a
+    // page of text there (a book's first page, #4837: a held book is named by its title, `brief.mjs` `holdingOf`).
+    const body = of || kind === 'souls:body', at30 = wordsAt(copy, fields, F_BODY_NAME);
+    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? (body ? at30 : asName(at30)) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
