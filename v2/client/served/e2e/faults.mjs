@@ -230,14 +230,16 @@ async function measure(arm, w, A, B, fault, { note = '' } = {}) {
     return r;
   }
   await say(`${arm} before`);
-  const walk = await A.req({ op: 'act', acts: ['bench-1'] }, 30_000);
+  const bench = (await A.req({ op: 'find', words: 'west bench' }, 15_000)).found?.find((r) => r.kind?.startsWith('eden:bench'));
+  const walk = await A.req({ op: 'act', acts: [bench?.id ?? 'bench-1'] }, 30_000);
   const walkSeq = walk.sequence;
-  // A `wait` begun before the fault: when does it come back, and with what?
-  const waitAt = Date.now();
-  const waiting = A.req({ op: 'wait', seconds: 120 }, 130_000).then((r) => ({ ms: Date.now() - waitAt, ok: r.ok, events: (r.events ?? []).map((e) => e.kind).join(','), gap: r.gap?.why ?? null, stale: !!r.stale, connected: r.connected }))
-    .catch((e) => ({ ms: Date.now() - waitAt, error: e.code ?? e.message }));
   // The walk's first answer (accepted, its route planned) before the fault, so the fault is mid-walk.
   await waitFor('the walk accepted', async () => { await A.pull(); return A.answers(walkSeq).length > 0; }, 20_000).catch(() => null);
+  await A.req({ op: 'read' }, 5000).catch(() => null); // what came so far is taken: the wait below waits for what is next
+  // A `wait` begun before the fault: when does it come back, and with what?
+  const waitAt = Date.now();
+  const waiting = A.req({ op: 'wait', seconds: 120 }, 130_000).then((r) => ({ ms: Date.now() - waitAt, ok: r.ok, events: (r.events ?? []).map((e) => e.kind + (e.kind === 'answer' ? `${e.sequence}:${ANSWER[e.answer]}` : '')).join(','), gap: r.gap?.why ?? null, stale: !!r.stale }))
+    .catch((e) => ({ ms: Date.now() - waitAt, error: e.code ?? e.message }));
   await pause(2000);
   const faultAt = Date.now();
   const during = [];
@@ -253,7 +255,7 @@ async function measure(arm, w, A, B, fault, { note = '' } = {}) {
     const until = Date.now() + 2000;
     while (Date.now() < until && actAgain === null) {
       await A.pull();
-      const got = pending.map((q) => A.answers(q).find((e) => e.answer !== 3)).filter(Boolean).sort((a, b) => a.t - b.t)[0];
+      const got = pending.map((q) => A.answers(q).find((e) => e.answer === 1)).filter(Boolean).sort((a, b) => a.t - b.t)[0];
       if (got) actAgain = got.t - faultEnd;
       else await pause(100);
     }
@@ -273,7 +275,8 @@ async function measure(arm, w, A, B, fault, { note = '' } = {}) {
   const finals = seqs.map((q) => ({ q, n: A.final(q).length, last: A.final(q).map((e) => ANSWER[e.answer] + (e.reason ? `:${e.reason}` : '')).join('|') }));
   const once = finals.filter((f) => f.n === 1).length, dup = finals.filter((f) => f.n > 1), lost = finals.filter((f) => f.n === 0);
   // Speech: each line A said with a receipt should be heard by B once; a line refused should not be heard.
-  const speech = said.map((x) => ({ words: x.words, receipt: x.sequence ? A.final(x.sequence).some((e) => e.answer === 1) : false, heard: B.heard(x.words).length }));
+  const speech = said.map((x) => ({ words: x.words, receipt: x.sequence ? A.final(x.sequence).some((e) => e.answer === 1) : false, heard: B.heard(x.words).length,
+    late_ms: B.heard(x.words).length && x.sequence && A.final(x.sequence)[0] ? B.heard(x.words)[0].t - A.final(x.sequence)[0].t : null }));
   const heardTwice = speech.filter((x) => x.heard > 1), lostSpeech = speech.filter((x) => x.receipt && x.heard === 0), unanswered = speech.filter((x) => !x.receipt && x.heard > 0);
   // Silent: connected said true for more than 10 s while the network was stalled or the gateway was gone.
   const faultWindow = timeline.filter((x) => x.t >= faultAt - t0 + 10_000 && x.t <= faultEnd - t0);
@@ -293,6 +296,7 @@ async function measure(arm, w, A, B, fault, { note = '' } = {}) {
     heard_twice: heardTwice.map((x) => x.words),
     lost_speech: lostSpeech.map((x) => x.words),
     heard_without_receipt: unanswered.map((x) => x.words),
+    heard_late_ms_most: Math.max(0, ...speech.map((x) => x.late_ms ?? 0)),
     connected_while_down_ms: claimed,
     status_end: st ? { connected: st.connected, unanswered: st.unanswered, connects: st.connects, drops: st.drops, resumed: st.resumed, cannotResume: st.cannotResume } : null,
     answers: finals.map((f) => `#${f.q}:${f.last || 'none'}`).join(' '),
@@ -481,11 +485,11 @@ const one = async (a) => {
 await base();
 if (process.env.FAULTS_PARALLEL === '1') await Promise.all(chosen.map(one)); else for (const a of chosen) await one(a);
 writeFileSync(join(ROOT, 'faults.json'), JSON.stringify(rows, null, 1));
-console.log('\n| arm | answered once | never answered | duplicate | walk | act again (s) | wait across the fault | heard twice | lost speech | connected while down (ms) | end |');
-console.log('|---|---|---|---|---|---:|---|---|---|---:|---|');
+console.log('\n| arm | answered once | never answered | duplicate | walk | act again (s) | wait across the fault | heard twice | lost speech | heard late (ms) | connected while down (ms) | end |');
+console.log('|---|---|---|---|---|---:|---|---|---|---:|---:|---|');
 for (const r of rows) {
   if (r.error) { console.log(`| ${r.arm} | ERROR ${r.error.split('\n')[0]} |||||||||`); continue; }
-  console.log(`| ${r.arm} | ${r.answered_once ?? r.back} | ${(r.never_answered ?? []).join(' ')} | ${(r.duplicate_answers ?? []).join(' ')} | ${r.walk ?? ''} | ${r.act_again_s ?? r.act_again_p50_s ?? '—'} | ${r.wait ? JSON.stringify(r.wait) : ''} | ${(r.heard_twice ?? []).join('; ')} | ${(r.lost_speech ?? []).join('; ')} | ${r.connected_while_down_ms ?? ''} | ${JSON.stringify(r.status_end ?? {})} |`);
+  console.log(`| ${r.arm} | ${r.answered_once ?? r.back} | ${(r.never_answered ?? []).join(' ')} | ${(r.duplicate_answers ?? []).join(' ')} | ${r.walk ?? ''} | ${r.act_again_s ?? r.act_again_p50_s ?? '—'} | ${r.wait ? JSON.stringify(r.wait) : ''} | ${(r.heard_twice ?? []).join('; ')} | ${(r.lost_speech ?? []).join('; ')} | ${r.heard_late_ms_most ?? ''} | ${r.connected_while_down_ms ?? ''} | ${JSON.stringify(r.status_end ?? {})} |`);
 }
 for (const p of procs) p.kill('SIGKILL');
 process.exit(0);
