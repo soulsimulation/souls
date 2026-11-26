@@ -148,10 +148,14 @@ each resource it holds, and each phase end is one timer in K9's due list. Nothin
 move's resources cancels it at its next phase end (`claim-taken`).
 
 **Aimed moves** (0.134 B1). A move that touches nothing says so with the effector `aim` (`{1: 4}`): a point, a wave, a
-nod, a bow and a look aim at their target instead of reaching it. An aimed move has no contact, and its reach is sight:
-the target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every other move touches, and its reach
-stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Distance alone is checked; a wall
-between does not block an aim, and the move does not turn the body.
+nod, a bow and a look aim at their target instead of reaching it. An aimed move has no contact, and its reach is the
+target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every other move touches, and its reach
+stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Within 20 m distance alone is
+checked; a wall between does not block an aim. Beyond it, up to `SIGHT` (60 m, the client's sight), an aim at a thing
+the body sees is made from afar (#5063): the geometry's `Reach::seen` says so (worldd: both on the open ground, or the
+thing on the body's own storey of the same building), and the act's end says `from afar`. A thing in a closed
+container, behind a wall, on another storey or past 60 m is refused `out-of-reach`, its words saying which. The move
+does not turn the body in the world; the page draws the standing body turned toward its target.
 
 ## Postures and seats (B3)
 
