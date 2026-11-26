@@ -7,6 +7,7 @@
 //! supervisor exited <world>     the unit's ExecStopPost: record how it ended, from $SERVICE_RESULT and $EXIT_*
 //! supervisor health [<world>]   print the health record (every world's, without a name)
 //! supervisor pin <world> <hash> pin a build in the directory (W8's set_build)
+//! supervisor generation <world> print the world's store generation, its folder's `generation` (#4954), or `none`
 //! supervisor hash <file>        a build's hash
 //! supervisor directory-get <key> print the directory store's object at <key> (exit 3 when there is none)
 //! supervisor alarms             the machine's alarm daemon (O2, #2731): wakes sleeping worlds, on $WORLDS_ROOT/alarms.sock
@@ -19,7 +20,8 @@
 //!
 //! The machine's folder is `$WORLDS_ROOT`: `builds/<hash>/worldd`, `worlds/<world>/` (each world's state), `cache/`
 //! (the cached copy of each world's record) and `health/`. The directory is the object store `DIRECTORY_STORE_*`
-//! names, or the folder `$WORLDS_ROOT/directory` on a machine without one.
+//! names, or the folder `$WORLDS_ROOT/directory` on a machine without one. A world's own objects there are under its
+//! store generation's place when its folder names one (`launch` and `pin`, [`supervisor::bucket::Generation`]).
 
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -28,6 +30,7 @@ use std::process::Command;
 use directoryd::directory::s3::S3;
 use directoryd::directory::store::Store;
 use replica::encode::{from_hex, to_hex};
+use supervisor::bucket::Generation;
 use supervisor::folder::Folder;
 use supervisor::health::{self, Event};
 use supervisor::wake::{Daemon, Program, Systemd, Waker};
@@ -67,6 +70,17 @@ fn with_store<T>(root: &Path, f: impl FnOnce(&dyn Store) -> T) -> Result<T, Stri
     }
 }
 
+/// Runs `f` against `world`'s store: the directory's, with the world's own objects under the store generation its folder
+/// names (#4954). A folder whose `generation` cannot be read refuses.
+fn with_world_store<T>(
+    root: &Path,
+    world: &World,
+    f: impl FnOnce(&dyn Store) -> T,
+) -> Result<T, String> {
+    let label = supervisor::generation(&supervisor::world_folder(root, world))?;
+    with_store(root, |s| f(&Generation::new(s, *world, label.as_deref())))
+}
+
 fn world_arg(args: &[String]) -> Result<World, String> {
     World::parse(args.get(2).ok_or("no world named")?)
 }
@@ -82,13 +96,15 @@ fn launch(root: &Path, world: &World) -> i32 {
         || PathBuf::from("/etc/souls/placement-data/archived"),
         PathBuf::from,
     );
-    if let Err(e) =
-        with_store(root, |s| supervisor::archive_guard(s, &fences, world)).and_then(|r| r)
+    if let Err(e) = with_world_store(root, world, |s| {
+        supervisor::archive_guard(s, &fences, world)
+    })
+    .and_then(|r| r)
     {
         eprintln!("launch: {e}");
         return EXIT_PIN_MISSING;
     }
-    let pinned = with_store(root, |s| pin(s, root, world)).and_then(|r| r);
+    let pinned = with_world_store(root, world, |s| pin(s, root, world)).and_then(|r| r);
     let (build, from) = match pinned {
         Ok(p) => p,
         Err(e) => {
@@ -232,7 +248,13 @@ fn run(args: &[String]) -> Result<i32, String> {
         Some("pin") => {
             let world = world_arg(args)?;
             let build = from_hex(args.get(3).ok_or("no build named")?)?;
-            with_store(&root, |s| set_pin(s, &world, &build))??;
+            with_world_store(&root, &world, |s| set_pin(s, &world, &build))??;
+            Ok(0)
+        }
+        Some("generation") => {
+            let world = world_arg(args)?;
+            let label = supervisor::generation(&supervisor::world_folder(&root, &world))?;
+            println!("{}", label.as_deref().unwrap_or("none"));
             Ok(0)
         }
         Some("alarms") => {
@@ -289,7 +311,7 @@ fn run(args: &[String]) -> Result<i32, String> {
             }
         }
         _ => Err(
-            "usage: supervisor launch|ready|exited|health|pin|hash|directory-get|alarms|wake ... (see the crate's docs)"
+            "usage: supervisor launch|ready|exited|health|pin|generation|hash|directory-get|alarms|wake ... (see the crate's docs)"
                 .into(),
         ),
     }

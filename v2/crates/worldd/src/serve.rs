@@ -143,7 +143,7 @@ use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
-use supervisor::bucket::{Patient, Under, patiently};
+use supervisor::bucket::{Generation, Patient, Under, patiently};
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
@@ -2348,8 +2348,19 @@ fn recorded_body(
     Ok((moved, build))
 }
 
-/// The world's store; its reads at the start are made [`patiently`] (#1960).
-type Bucket = Shared<Patient<supervisor::bucket::Bucket>>;
+/// The world's store; its reads at the start are made [`patiently`] (#1960), and its own objects are under the store
+/// generation its folder names (#4954, [`placed`]).
+type Bucket = Shared<Patient<Generation<supervisor::bucket::Bucket>>>;
+
+/// The world by its name, and the store generation its folder names (`generation`, #4954): a rebuilt world's own
+/// objects are under `g/<label>/` in the store, so it starts on an empty place and nothing of the old world's moves. A
+/// `generation` file that cannot be read refuses the start: a world never ships to a place it did not name.
+fn placed(name: &str, dir: &Path) -> R<(supervisor::World, Option<String>)> {
+    Ok((
+        supervisor::World::parse(name)?,
+        supervisor::generation(dir)?,
+    ))
+}
 
 /// Public navigation only: the same restored header/root as the live writer, beside the history export.
 fn public_history_live(dir: &Path, name: &str, header: &Header, key: &Key) -> R<()> {
@@ -3243,12 +3254,21 @@ fn off_machine(
         text,
     } = source;
     let (first, records) = (recovered.first, recovered.records.as_slice());
-    let store: Bucket = Shared(Arc::new(Patient::new(
+    let (world, generation) = placed(name, dir)?;
+    let store: Bucket = Shared(Arc::new(Patient::new(Generation::new(
         supervisor::bucket::Bucket::from_spec(spec)
             .map_err(refusal)?
             .for_world(),
-    )));
-    println!("store: {}", store.0.store.what());
+        world,
+        generation.as_deref(),
+    ))));
+    println!(
+        "store: {}{}",
+        store.0.store.store.what(),
+        generation
+            .as_deref()
+            .map_or_else(String::new, |g| format!(", its own objects under g/{g}/"))
+    );
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
     // A fork's archive base decides how its records go to the archive, so it is read before the world listens: tried
     // until the store answers, never an exit on a slow one (R17). An unforked world reads nothing here.
@@ -4074,18 +4094,31 @@ fn serve(args: &[String]) -> R<()> {
         .as_deref()
         .map(str::to_owned)
         .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()));
-    let stream_store = Patient::new(
+    // The world's own objects under the store generation its folder names (#4954), as the shipper's.
+    let (stream_world, generation) = placed(&name, &dir)?;
+    let stream_store = Patient::new(Generation::new(
         supervisor::bucket::Bucket::from_spec(&stream_spec)
             .map_err(refusal)?
             .for_world(),
-    );
+        stream_world,
+        generation.as_deref(),
+    ));
     // R15: the stream's backup to the store, on its own thread with its own client.
-    let backup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
-        .map_err(refusal)?
-        .for_world();
-    // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
-    // store moved to another bucket is learned again rather than fenced on.
-    let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
+    let backup_store = Generation::new(
+        supervisor::bucket::Bucket::from_spec(&stream_spec)
+            .map_err(refusal)?
+            .for_world(),
+        stream_world,
+        generation.as_deref(),
+    );
+    // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address (and
+    // its generation's place), so a store moved to another bucket or place is learned again rather than fenced on.
+    let backup_identity = replica::encode::to_hex(&replica::ids::sha256(
+        generation
+            .as_deref()
+            .map_or_else(|| stream_spec.clone(), |g| format!("{stream_spec} g/{g}/"))
+            .as_bytes(),
+    ));
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -5129,7 +5162,7 @@ mod tests {
             .for_world();
         let again = Again {
             store: Under {
-                store: Shared(Arc::new(Patient::new(bucket))),
+                store: Shared(Arc::new(Patient::new(bucket.into()))),
                 prefix: "h/w/".into(),
             },
             public: dir.join("history"),
@@ -5328,7 +5361,8 @@ mod tests {
                 &format!("folder:{}", dir.join("store").display()),
                 |_| String::new(),
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
         )));
         let public = dir.join("public");
         let adapter = Again {
@@ -5448,7 +5482,8 @@ mod tests {
                 &format!("folder:{}", dir.join("store").display()),
                 |_| String::new(),
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
         )));
         let public = dir.join("public");
         let adapter = Again {

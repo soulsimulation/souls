@@ -83,6 +83,70 @@ impl World {
             self.zone.counter()
         )
     }
+
+    /// Whether `key` is one of this world's own objects in the directory's store: its record `world/<L>/<Z>` (its
+    /// pin, claims and mark) and every key under `ckpt/<L>/<Z>/`, `part/<L>/<Z>/`, `stream-recovery/<L>/<Z>/` and
+    /// `h/<world>/` (`<L>` its lineage, `<Z>` its zone as `<scope>-<counter>`). Its name record, list row and Souls'
+    /// records are the directory's, not its own.
+    pub fn owns(&self, key: &str) -> bool {
+        let zone = format!(
+            "{}/{}-{}",
+            to_hex(&self.lineage),
+            to_hex(&self.zone.scope().0),
+            self.zone.counter()
+        );
+        let under = |p: &str| {
+            key.strip_prefix(p)
+                .and_then(|k| k.strip_prefix(zone.as_str()))
+                .is_some_and(|k| k.starts_with('/'))
+        };
+        key.strip_prefix("world/") == Some(zone.as_str())
+            || under("ckpt/")
+            || under("part/")
+            || under("stream-recovery/")
+            || key
+                .strip_prefix("h/")
+                .and_then(|k| k.strip_prefix(self.name().as_str()))
+                .is_some_and(|k| k.starts_with('/'))
+    }
+}
+
+/// The file in a world's folder that names its store generation (#4954): the place in the directory's store its own
+/// objects ([`World::owns`]) are under, `g/<label>/` ([`bucket::Generation`]). A rebuilt world is seeded with a fresh
+/// label, so it starts on an empty place and nothing of the old world's moves; the old folder, set aside, still names
+/// the old place (no file: the keys as they are), so putting it back is the whole undo. `worldd serve`, the launcher's
+/// pin and `deploy` read it.
+pub const GENERATION_FILE: &str = "generation";
+
+/// The store generation `folder` names ([`GENERATION_FILE`]): `None` without the file. A file that cannot be read, or
+/// holds anything but one label of 1 to 64 letters, digits, `.`, `_` or `-`, refuses: a world is never served from a
+/// place it did not name.
+pub fn generation(folder: &Path) -> Result<Option<String>, String> {
+    let path = folder.join(GENERATION_FILE);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("generation-unreadable: {}: {e}", path.display())),
+    };
+    let label = text.trim();
+    let ok = !label.is_empty()
+        && label.len() <= 64
+        && label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-');
+    if ok {
+        Ok(Some(label.to_owned()))
+    } else {
+        Err(format!(
+            "generation-bad: {} holds no label (1 to 64 of A-Z a-z 0-9 . _ -)",
+            path.display()
+        ))
+    }
+}
+
+/// The world's folder on this machine, `$WORLDS_ROOT/worlds/<world>`.
+pub fn world_folder(root: &Path, world: &World) -> PathBuf {
+    root.join("worlds").join(world.name())
 }
 
 /// A build's hash: the multihash (SHA-256) of its `worldd` file's bytes, 34 bytes, as `sha256sum` gives with `1220`
@@ -98,9 +162,13 @@ pub fn build_path(root: &Path, build: &[u8]) -> PathBuf {
     root.join("builds").join(to_hex(build)).join("worldd")
 }
 
-/// Where this machine keeps its cached copy of a world's record.
+/// Where this machine keeps its cached copy of a world's record: one per store generation, so a folder put back by an
+/// undo never starts on the pin a rebuilt world's record held.
 fn cache_path(root: &Path, world: &World) -> PathBuf {
-    root.join("cache").join(world.name())
+    match generation(&world_folder(root, world)) {
+        Ok(Some(label)) => root.join("cache").join(format!("{}@{label}", world.name())),
+        _ => root.join("cache").join(world.name()),
+    }
 }
 
 /// Where the pin came from: the store, or this machine's cached copy because the store was out of reach.
@@ -189,6 +257,99 @@ mod tests {
         let w = world();
         assert_eq!(World::parse(&w.name()), Ok(w));
         assert!(World::parse("a-b-c").is_err());
+    }
+
+    /// #4954: a world rebuilt on a fresh store generation reads and writes its own objects under `g/<label>/` and the
+    /// directory's keys as they are; the old world's objects are never read, written or moved, and the folder without
+    /// the file (the undo) is the old world's store again, record, pin and all.
+    #[test]
+    fn a_fresh_generation_starts_on_an_empty_place_and_moves_nothing() {
+        use bucket::Generation;
+        use directoryd::directory::store::When;
+        let dir =
+            std::env::temp_dir().join(format!("supervisor-generation-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Folder::new(dir.join("directory"));
+        let w = world();
+        let (l, z) = ("ab".repeat(16), format!("{}-7", "01".repeat(16)));
+        assert!(w.owns(&format!("world/{l}/{z}")));
+        assert!(w.owns(&format!("part/{l}/{z}/0/t/1")));
+        assert!(w.owns(&format!("h/{}/{l}/archive/head", w.name())));
+        assert!(!w.owns(&format!("world/{l}/{z}0")), "another zone's");
+        assert!(!w.owns(&format!("part/{l}/{z}7/x")), "another zone's");
+        assert!(!w.owns("world-name/eden"), "the directory's");
+
+        // The old world: pinned, with a part and a name record of the directory's.
+        let old = build_hash(b"old");
+        set_pin(&store, &w, &old).expect("pinned");
+        let part = format!("part/{l}/{z}/0/t/1");
+        store.put(&part, b"old part", When::Absent).expect("a part");
+        store
+            .put("world-name/eden", b"name", When::Absent)
+            .expect("a name");
+        let before = store.list("").expect("listed");
+
+        let folder = world_folder(&dir, &w);
+        std::fs::create_dir_all(&folder).expect("a folder");
+        assert_eq!(generation(&folder), Ok(None));
+        std::fs::write(folder.join(GENERATION_FILE), "20261126T120000Z\n").expect("written");
+        let label = generation(&folder).expect("read");
+        assert_eq!(label.as_deref(), Some("20261126T120000Z"));
+        let fresh = Generation::new(&store, w, label.as_deref());
+        assert!(
+            pin(&fresh, &dir, &w)
+                .unwrap_err()
+                .starts_with("pin.missing"),
+            "the fresh place holds no record"
+        );
+        assert_eq!(fresh.get(&part).expect("read"), None, "nor the old part");
+        assert_eq!(
+            fresh.list(&format!("part/{l}/{z}/")).expect("listed"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            fresh.get("world-name/eden").expect("read").map(|o| o.bytes),
+            Some(b"name".to_vec()),
+            "the directory's keys as they are"
+        );
+        let new = build_hash(b"new");
+        set_pin(&fresh, &w, &new).expect("pinned");
+        fresh
+            .put(&part, b"new part", When::Absent)
+            .expect("a part of its own");
+        assert_eq!(pin(&fresh, &dir, &w).map(|p| p.0), Ok(new));
+        assert_eq!(
+            fresh.list(&format!("part/{l}/{z}/")).expect("listed"),
+            vec![part.clone()]
+        );
+        // Nothing of the old world's was touched: every key it had holds the same bytes, and the new ones are all
+        // under g/<label>/.
+        let after = store.list("").expect("listed");
+        for k in &before {
+            assert!(after.contains(k), "{k} stayed");
+        }
+        assert!(
+            after
+                .iter()
+                .filter(|k| !before.contains(k))
+                .all(|k| k.starts_with("g/20261126T120000Z/"))
+        );
+        assert_eq!(
+            store.get(&part).expect("read").map(|o| o.bytes),
+            Some(b"old part".to_vec())
+        );
+
+        // The undo: the folder without the file is the old world's place again, its pin with it.
+        std::fs::remove_file(folder.join(GENERATION_FILE)).expect("removed");
+        let back = Generation::new(&store, w, generation(&folder).expect("read").as_deref());
+        assert_eq!(pin(&back, &dir, &w).map(|p| p.0), Ok(old));
+        std::fs::write(folder.join(GENERATION_FILE), "../x").expect("written");
+        assert!(
+            generation(&folder)
+                .unwrap_err()
+                .starts_with("generation-bad")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
