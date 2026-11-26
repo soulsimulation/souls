@@ -1534,7 +1534,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
   const cards = cardsAt(sim.plays, s.tick);
   return (
     <section className="wide world-viewer" data-world-viewer="1" style={embedded ? { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, ...(entityWorld ? { position: 'relative' as const } : {}) } : (entityWorld ? { position: 'relative' } : undefined)}>
-      {entityWorld && godUi && <Suspense fallback={null}><GodPanel flagMode={flagMode} onFlagMode={setFlagMode} entitiesAt={entitiesAt} /></Suspense>}
+      {entityWorld && godUi && <Suspense fallback={null}><GodPanel flagMode={flagMode} onFlagMode={setFlagMode} entitiesAt={entitiesAt} soulName={(id) => context.current.sim.conn.replica.souls.get(id)?.name ?? null} /></Suspense>}
       {!hideControls && <div className="row">
         <h2 style={{ margin: 0 }}>World</h2>
         {mode === 'live' && !status ? <span className="ok"><b>● Live</b></span> : null}

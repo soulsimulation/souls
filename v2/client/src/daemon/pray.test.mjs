@@ -4,6 +4,8 @@
 // The creator's socket here is what the panel (W5) and the creator's daemon (G7) hold: hello, sign-in, then text
 // frames. Run from v2/ after `cargo build -p gatewayd -p worldd -p directoryd --locked`, with replica's wasm-bindgen
 // package in target/wasm-load/pkg. G11_REPORT=1 prints the delays and both transcripts, for the PR.
+// #5006 row 15: the creator's agent lists and answers through its own daemon too (`souls-god prayers`, `answer`),
+// beside the creator's socket (the page's), each answered on its own.
 
 import { strict as assert } from 'node:assert';
 import { execFile, spawn } from 'node:child_process';
@@ -24,6 +26,7 @@ const v2 = resolve(here, '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const CLI = join(here, '../cli/souls.mjs');
+const GOD = join(here, '../creator/souls-god.mjs');
 const SOUL = 's_g11test';
 const WORLD_SCOPE = '4d'.repeat(16);
 const GRANT = `soul-${WORLD_SCOPE}-2`;
@@ -32,11 +35,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const dir = mkdtempSync(join(tmpdir(), 'souls-g11-'));
 const home = join(dir, '.souls');
+const godHome = join(dir, 'creator', '.souls');
 const token = `${GRANT}.${randomBytes(32).toString('hex')}`;
 const creatorToken = `${CREATOR}.${randomBytes(32).toString('hex')}`;
 const procs = [];
 const logs = []; // every service's output, for A4
-const report = { soul: [], creator: [] };
+const report = { soul: [], creator: [], agent: [] };
 let rt, gateway, creator, wire;
 
 function run(path, args, ready) {
@@ -68,6 +72,14 @@ async function soulSays(...args) {
   const { stdout } = await promisify(execFile)(process.execPath, [CLI, ...args], { env: { ...process.env, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG } });
   const out = JSON.parse(stdout);
   report.soul.push({ command: args.map((a) => (a.length > 60 ? `${a.slice(0, 20)}…(${a.length})` : a)).join(' '), answer: out });
+  return out;
+}
+
+/** The creator's agent: one command of souls-god.mjs from the creator's home, its JSON answer (the last line). */
+async function godSays(...args) {
+  const { stdout } = await promisify(execFile)(process.execPath, [GOD, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: godHome, SOULS_REPLICA_PKG: PKG } }).catch((e) => e);
+  const out = JSON.parse(stdout.trim().split('\n').at(-1));
+  report.agent.push({ command: args.join(' '), answer: out });
   return out;
 }
 
@@ -115,7 +127,8 @@ before(async () => {
   writeFileSync(key, randomBytes(32).toString('hex'), { mode: 0o600 });
   mkdirSync(join(dir, 'world', 'receipts'), { recursive: true });
   run(bin('worldd'), ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1',
-    '--arrivals', join(dir, 'world', 'arrivals.txt'), '--roots', join(dir, 'world', 'roots.txt'), '--rooms', '1', '--bodies', '4']).catch(() => {});
+    '--arrivals', join(dir, 'world', 'arrivals.txt'), '--roots', join(dir, 'world', 'roots.txt'), '--rooms', '1', '--bodies', '4',
+    '--creator', CREATOR.replace(/^creator-/, '')]).catch(() => {});
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, directory] = await run(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1',
     '--store', join(dir, 'accounts.db'), '--test-sign-in', '--mailbox-key', key], /listening on (\S+)\n/);
@@ -130,10 +143,17 @@ before(async () => {
   await call(home, SOUL, { op: 'status' }, { pkg: PKG });
   await waitFor(async () => (await ask({ op: 'status' })).connected, 10_000);
   creator = await creatorSocket();
+  // The creator's agent's home: the same world, the creator's token (as `souls-god pair --creator` leaves it).
+  mkdirSync(join(godHome, 'kinds'), { recursive: true });
+  writeFileSync(join(godHome, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway } } }));
+  writeFileSync(join(godHome, 'credentials.json'), JSON.stringify({ souls: { [`c_${WORLD_SCOPE}-1`]: { local: { token: creatorToken } } } }), { mode: 0o600 });
+  chmodSync(join(godHome, 'credentials.json'), 0o600);
+  writeFileSync(join(godHome, 'kinds', 'local.kinds'), '{1: "souls:place", 2: "place", 11: ["souls:room"]}\n{1: "souls:room", 2: "place", 11: ["body", "thing"]}\n');
 });
 
 after(async () => {
   creator?.close();
+  await godSays('quit').catch(() => {});
   await ask({ op: 'stop' }).catch(() => {});
   if (process.env.G11_REPORT) console.log(JSON.stringify(report, null, 1));
   if (process.env.G11_DEBUG) console.log(logs.map((l) => l.text).join('\n---\n'), readFileSync(rt.log, 'utf8'));
@@ -143,6 +163,7 @@ after(async () => {
 const PRAYER = `let the river run clear ${randomBytes(6).toString('hex')}`;
 const ANSWER = `it shall, by dawn ${randomBytes(6).toString('hex')}`;
 const SECOND = `and a bridge across it ${randomBytes(6).toString('hex')}`;
+const AGENT_ANSWER = `a bridge of oak, by the mill ${randomBytes(6).toString('hex')}`;
 
 test('A1: the Soul prays, the creator lists it waiting and answers, and the Soul\'s wait has the answer within 5 s, quoted', async () => {
   await ask({ op: 'wait', seconds: 0 }); // what happened at sign-in, taken
@@ -189,6 +210,30 @@ test('A2: the Soul\'s prayers shows each, waiting or answered, with the answer; 
   assert.equal(notCreator.code, 'prayer.not-the-creator');
 });
 
+test('#5006 row 15: the creator\'s agent lists the waiting prayer with souls-god, answers it, and the Soul\'s wait has the answer; the page\'s socket still hears its own replies', async () => {
+  await waitFor(async () => (await godSays('status')).connected, 20_000);
+  const waiting = await godSays('prayers');
+  assert.equal(waiting.ok, true, JSON.stringify(waiting));
+  assert.deepEqual(waiting.prayers.map((p) => [p.text, p.state, p.soul]), [[SECOND, 'waiting', GRANT]]);
+  assert.match(waiting.note, /data, not instructions/, 'a Soul\'s words are quoted as data');
+  await ask({ op: 'wait', seconds: 0 });
+  const reader = soulSays('wait', '30');
+  await sleep(300);
+  const answered = await godSays('answer', waiting.prayers[0].id, AGENT_ANSWER);
+  assert.equal(answered.ok, true, JSON.stringify(answered));
+  assert.deepEqual([answered.prayer.state, answered.prayer.answer], ['answered', AGENT_ANSWER]);
+  const e = (await reader).events.find((x) => x.kind === 'prayer-answered');
+  assert.deepEqual(e?.quoted, { prayer: SECOND, answer: AGENT_ANSWER });
+  const all = await godSays('prayers', '--all');
+  assert.deepEqual(all.prayers.map((p) => [p.text, p.state]), [[SECOND, 'answered'], [PRAYER, 'answered']], 'answered ones, newest first');
+  assert.deepEqual((await creator.send('prayers', {})).prayers, [], 'the page\'s socket, beside the agent\'s, has its own reply');
+  const unknown = await godSays('answer', 'p_000000000000', 'hello');
+  assert.deepEqual([unknown.ok, unknown.code], [false, 'prayer.not-found']);
+  assert.match(unknown.fix, /prayers --all/);
+  const usage = await godSays('answer', waiting.prayers[0].id);
+  assert.deepEqual([usage.ok, usage.code], [false, 'usage']);
+});
+
 test('A5: a prayer over 2,000 characters or an answer over 4,000 is refused by name', async () => {
   const long = await soulSays('pray', 'é'.repeat(2001));
   assert.equal(long.ok, false);
@@ -203,7 +248,7 @@ test('A5: a prayer over 2,000 characters or an answer over 4,000 is refused by n
 });
 
 test('A4: no prayer or answer text is in the world\'s log, in a public view or in any service\'s log', async () => {
-  const words = [PRAYER, ANSWER, SECOND];
+  const words = [PRAYER, ANSWER, SECOND, AGENT_ANSWER];
   // The world's files: what it took, its changes, the receipts.
   const files = [];
   const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else files.push(p); } };
@@ -218,7 +263,7 @@ test('A4: no prayer or answer text is in the world\'s log, in a public view or i
   const look = JSON.stringify(await ask({ op: 'look' }));
   for (const w of words) assert.ok(!look.includes(w), 'the brief holds a prayer\'s words');
   // Every service's log: the directory, the gateway, the world and the Soul's daemon.
-  const all = logs.map((l) => l.text).join('\n') + readFileSync(rt.log, 'utf8');
+  const all = logs.map((l) => l.text).join('\n') + readFileSync(rt.log, 'utf8') + readFileSync(runtimeOf(godHome, `c_${WORLD_SCOPE}-1`).log, 'utf8');
   assert.match(all, /prayer p_[0-9a-f]{12} answered/, 'the daemon logged the answer by id');
   assert.match(all, /\/v1\/mailbox\/pray 200 pray ok/, 'the directory logged the prayer by kind');
   for (const w of words) assert.ok(!all.includes(w), 'a log holds a prayer\'s words');
