@@ -244,8 +244,9 @@ fn inside(p: Vec3, r: [i64; 4]) -> bool {
 }
 
 /// A3's check on every table a town holds: no place within `CLEAR` of a link's end on its node, nor within half the
-/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; on
-/// a building's floor, a flight's line where it lies from a step below the place to a body's height above it).
+/// link's width and half `CLEAR` of its line (#4072: a step's or a doorway's line within half `CLEAR`, its ends holding
+/// its width; on a building's floor, a flight's line where it lies from a step below the place to a body's height
+/// above it).
 /// Returns how many places it checked.
 fn no_place_in_a_passage(t: &Town) -> usize {
     let mut n = 0;
@@ -270,7 +271,7 @@ fn no_place_in_a_passage(t: &Town) -> usize {
                                 "A3: a place at a link's end"
                             );
                         }
-                        let reach = if l.kind == Kind::Step {
+                        let reach = if matches!(l.kind, Kind::Step | Kind::Doorway) {
                             CLEAR / 2
                         } else {
                             l.width / 2 + CLEAR / 2
@@ -717,6 +718,64 @@ fn c8_the_boxes_give_the_same_passages() {
     }
     println!("C8: {checked} points, {inside} in a passage, the same with and without the boxes");
     assert!(inside > 0 && checked > inside);
+}
+
+/// #5003's Eden audit: a doorway's passage is its ends' and its line's, not a disc of its width. A point at an end, on
+/// the room's side, is in the passage and at the doorway's mouth; one between the ends is in the doorway, no mouth; and
+/// one 1.5 m out past an end is in neither, though the doorway be 11.6 m wide (a market pavilion's open side, whose
+/// width counted out from its line swallowed the pavilion).
+#[test]
+fn a_doorways_passage_is_its_ends_and_its_line_and_its_mouth_is_on_the_rooms_side() {
+    use sim::walk::town::{in_mouth_indexed, in_passage, passages_of};
+    let (t, nodes) = town();
+    let f0 = nodes["building/floor-0"];
+    let door = nodes["door-building-a-b"];
+    let (bi, li) = t
+        .buildings
+        .iter()
+        .enumerate()
+        .find_map(|(bi, b)| Some((bi, b.links.iter().position(|l| l.door == Some(door))?)))
+        .expect("the doorway a-b");
+    let l = &t.buildings[bi].links[li];
+    let (a, c) = (l.line[0], l.line[l.line.len() - 1]);
+    let len = flat(a, c);
+    // `k` µm from end 0 along the line toward end 1 (out past it when below 0).
+    let along = |k: i64| {
+        Vec3::new(
+            a.x + (i128::from(c.x - a.x) * i128::from(k) / i128::from(len)) as i64,
+            a.y,
+            a.z + (i128::from(c.z - a.z) * i128::from(k) / i128::from(len)) as i64,
+        )
+    };
+    let passages = passages_of(&t.buildings, t.ground);
+    let mouth = |bs: &[sim::links::Building], p: Vec3| {
+        in_mouth_indexed(bs, &passages, t.ground, f0, p, None)
+    };
+    let at_end = along(-400_000);
+    assert!(
+        in_passage(&t.buildings, &[], t.ground, f0, at_end),
+        "at an end"
+    );
+    assert!(
+        mouth(&t.buildings, at_end),
+        "at an end, on the room's side: the mouth"
+    );
+    let inside = along(len / 2);
+    assert!(
+        in_passage(&t.buildings, &[], t.ground, f0, inside),
+        "in the doorway"
+    );
+    assert!(!mouth(&t.buildings, inside), "in the doorway: no mouth");
+    let out = along(-1_500_000);
+    let mut wide = t.buildings.clone();
+    wide[bi].links[li].width = 11_600_000;
+    for (name, bs) in [("as built", &t.buildings), ("11.6 m wide", &wide)] {
+        assert!(
+            !in_passage(bs, &[], t.ground, f0, out),
+            "{name}: 1.5 m out past an end"
+        );
+        assert!(!mouth(bs, out), "{name}: 1.5 m out past an end, no mouth");
+    }
 }
 
 /// #1960 (#3688's class): a move at a door aimed in its wall, short of the doorway, from a room on either side. Every
