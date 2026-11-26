@@ -5796,7 +5796,10 @@ fn indoor_things_do_what_a_person_asks() {
             let ok = match want {
                 Done => answer.is_ok(),
                 Refused(name) => answer.as_ref().is_err_and(|e| e == name),
-                Gap(_) => true,
+                Gap(why) => {
+                    println!("INDOOR gap: {ask}: {why}");
+                    true
+                }
             };
             if !ok {
                 failed.push(format!(
