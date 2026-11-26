@@ -4,10 +4,11 @@ use super::*;
 
 /// N2's test world with a timber shade's parts at its build site (`content/kinds/carpentry/`): the site marked at the
 /// site's centre, its two bents standing loose on their slots' places, its two rails lying 0.5 m outside theirs and its
-/// cloth lying under its own, so each crew takes a part and puts it from where it stands, no load carried. The parts
-/// have no walk boxes. The folder of entries: the construction kinds (the carry), the carpentry kinds and the body.
-/// Returns the facts and the site's slot numbers, by name.
-fn shade_world(d: &Path) -> (String, BTreeMap<String, u64>) {
+/// cloth lying under its own, so each crew takes a part and puts it from where it stands, no load carried. With
+/// `posts`, each bent has the walk boxes of its two posts (its entry's `solids_mm`, as the Mars camp's bents have
+/// them); else the parts have none. The folder of entries: the construction kinds (the carry), the carpentry kinds
+/// and the body. Returns the facts and the site's slot numbers, by name.
+fn shade_world(d: &Path, posts: bool) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
     std::fs::create_dir_all(&entries).unwrap();
@@ -99,6 +100,12 @@ fn shade_world(d: &Path) -> (String, BTreeMap<String, u64>) {
                         ("scale_ppm".into(), num(1_000_000)),
                         ("name".into(), json::Value::s(id)),
                     ];
+                    if r == 1 && posts {
+                        // Each post 100 mm square and 1.8 m high, 850 mm either side of the bent's middle.
+                        let post = |cx: i64| ints(&[cx, 0, 50, 50, 0, 0, 1_800, 5, 0]);
+                        let boxes = json::Value::Arr(vec![post(-850), post(850)]);
+                        t.push(("solids".into(), boxes));
+                    }
                     if r == 0 {
                         let rows = slots
                             .iter()
@@ -134,7 +141,7 @@ fn shade_world(d: &Path) -> (String, BTreeMap<String, u64>) {
 #[test]
 fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_rails() {
     let d = scratch("shade");
-    let (facts, slots) = shade_world(&d);
+    let (facts, slots) = shade_world(&d, false);
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     let w = seed_entries(
         &d,
@@ -348,4 +355,296 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     for k in 0..4 {
         leave(&mut hands, k, four);
     }
+}
+
+/// Each Soul named walks to its place, all at once; every walk ends there.
+fn walk_all(hands: &mut [Hand], g: Id, to: &[(usize, Vec3)], what: &str) {
+    for (k, p) in to {
+        hands[*k].walk_to(g, *p);
+    }
+    for (k, _) in to {
+        let got = socket_end(&mut hands[*k].s);
+        assert_eq!(got.kind, 1, "{what}: Soul {}: {got:?}", k + 1);
+    }
+}
+
+/// A carry crew Soul `a` offers on the open ground to `others`, who each accept.
+fn crew_of_all(w: &Seeded, hands: &mut [Hand], a: usize, others: &[usize]) -> Id {
+    let bodies = others
+        .iter()
+        .map(|o| body_of(w, w.souls[*o]).to_value())
+        .collect();
+    let got = hands[a].act(
+        "activity:offer",
+        w.ground,
+        BTreeMap::from([
+            (1, pinned_activity(w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(bodies)),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let made = created_by(w, &got.entries, "mars:carry_activity@");
+    for o in others {
+        let got = hands[*o].act("activity:accept", made, BTreeMap::new());
+        assert_eq!(got.kind, 1, "Soul {} accepts: {got:?}", o + 1);
+    }
+    made
+}
+
+fn done(got: Got, what: &str) {
+    println!("{what}: {got:?}");
+    assert_eq!(got.kind, 1, "{what}");
+}
+
+/// Every load the world set down off its crew, and why (`souls:carry-set-down`: blocked, apart, a partner left).
+fn set_downs(w: &Seeded) -> Vec<String> {
+    logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .map(|ev| match ev.fields.get(&3) {
+            Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => String::new(),
+        })
+        .collect()
+}
+
+/// PR #5033's run 2 (six build the shade, two crews taking the two bents at once): the second crew's carry was stopped
+/// `souls:carry-blocked` by its own bent's posts where the bent had stood. The carries' fixed geometry is kept from
+/// step to step while the walkers' ground is unchanged, and a take changes no walker's map: read while the first
+/// crew carried and the second bent still stood, it kept that bent there. In a served world whose bents have their
+/// posts' walk boxes, by the Souls' own intents:
+///
+/// - Crew A (Souls 1 and 2) takes bent 1 where it stands and carries it 3 m west: its carry reads the ground's fixed
+///   geometry, bent 2 standing.
+/// - Crew B (Souls 3 and 4) stands 400 mm south of bent 2's faces, so the bent it takes is held clear of where its
+///   own posts stood (on the plan it is 1.8 m by 0.1 m, its posts 100 mm square on its line), and takes it.
+/// - Both crews walk at once: A 1 m further west, B 1.2 m north, its bent across where it stood. Both bents ride their
+///   crews at the end, and the world set nothing down.
+#[test]
+fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stood() {
+    let d = scratch("shade2bents");
+    let (facts, _) = shade_world(&d, true);
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        4,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let bents = [im.nodes["timber-bent-1"], im.nodes["timber-bent-2"]];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let at = |dx: i64, dz: i64| v3((x + dx) * 1000, 0, (z + dz) * 1000);
+    let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
+
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(0, 700)), (1, at(0, -3_700))],
+        "crew A to bent 1's faces",
+    );
+    let a = crew_of_all(&w, &mut hands, 0, &[1]);
+    done(
+        hands[0].act("part:take", a, part(bents[0])),
+        "crew A takes bent 1",
+    );
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(-3_000, 700)), (1, at(-3_000, -3_700))],
+        "crew A carries bent 1 3 m west",
+    );
+
+    walk_all(
+        &mut hands,
+        g,
+        &[(2, at(0, 4_100)), (3, at(0, -300))],
+        "crew B 400 mm south of bent 2's faces",
+    );
+    let (p, q) = (
+        body_at(&w, body_of(&w, w.souls[2])),
+        body_at(&w, body_of(&w, w.souls[3])),
+    );
+    let middle = (p.z + q.z) / 2;
+    println!(
+        "crew B's middle {} mm south of bent 2",
+        (middle - (z + 1_500) * 1000) / 1000
+    );
+    // The bent held there clears its posts' old boxes (z + 1450 to 1550 mm) by more than 100 mm.
+    assert!(
+        middle - 50_000 > (z + 1_550 + 100) * 1000,
+        "crew B stands clear of bent 2's posts: {p:?} {q:?}"
+    );
+    let b = crew_of_all(&w, &mut hands, 2, &[3]);
+    done(
+        hands[2].act("part:take", b, part(bents[1])),
+        "crew B takes bent 2",
+    );
+    walk_all(
+        &mut hands,
+        g,
+        &[
+            (0, at(-4_000, 700)),
+            (1, at(-4_000, -3_700)),
+            (2, at(0, 2_900)),
+            (3, at(0, -1_500)),
+        ],
+        "both crews carry at once, bent 2 across where it stood",
+    );
+    let set_down = set_downs(&w);
+    println!("set down: {set_down:?}");
+    assert_eq!(
+        [where_is(&w, bents[0]).0, where_is(&w, bents[1]).0],
+        [Some(a), Some(b)],
+        "both bents ride their crews; set down: {set_down:?}"
+    );
+    assert!(set_down.is_empty(), "nothing set down: {set_down:?}");
+    let at_b = where_is(&w, bents[1]).2;
+    assert!(
+        at_b.z < (z + 1_000) * 1000,
+        "bent 2 carried past where it stood: {at_b:?}"
+    );
+}
+
+/// PR #5033's run 1 (the take-down by four): a rail's carriers stood at its ends on its own line, which is its bents'
+/// posts' line, so the rail they unseated came down at their middle against a post, and its carry out was stopped
+/// `souls:carry-blocked`. A part is unseated to its carriers' middle; carriers who stand 0.9 m outside the posts'
+/// line (`carry grip <rail> back|front --from 2.2 --out 0.9`, as the build sets a rail in from there) have it come
+/// down clear of the posts, and carry it away. In a served world whose bents have their posts' walk boxes, by the
+/// Souls' own intents:
+///
+/// - The frame built: two take each bent and put it in its slot, one staying to hold it; two take each rail and put
+///   it across both bents.
+/// - The rail crew stands 0.9 m outside rail 1's posts, 2.2 m beyond its middle each way, and unseats it: it is at
+///   their middle, more than 0.8 m from the posts' line. They carry it 1.1 m on west and lay it there: it lies there,
+///   and the world set nothing down.
+#[test]
+fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_away() {
+    let d = scratch("shaderailout");
+    let (facts, slots) = shade_world(&d, true);
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        4,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let site = im.nodes["shade-site"];
+    let bents = [im.nodes["timber-bent-1"], im.nodes["timber-bent-2"]];
+    let rails = [im.nodes["timber-rail-1"], im.nodes["timber-rail-2"]];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let at = |dx: i64, dz: i64| v3((x + dx) * 1000, 0, (z + dz) * 1000);
+    let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
+    let into = |slot: &str| BTreeMap::from([(1, site.to_value()), (2, Value::Uint(slots[slot]))]);
+
+    // The bents, each held by one of its crew: Soul 2 holds bent 1, Soul 3 bent 2.
+    for (k, (faces, holder, slot)) in [
+        ([at(0, 700), at(0, -3_700)], 1, "bent_a"),
+        ([at(0, -700), at(0, 3_700)], 2, "bent_b"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        walk_all(
+            &mut hands,
+            g,
+            &[(0, faces[0]), (holder, faces[1])],
+            "to a bent's faces",
+        );
+        let hold = crew_of_all(&w, &mut hands, 0, &[holder]);
+        done(
+            hands[0].act("part:take", hold, part(bents[k])),
+            "a bent taken",
+        );
+        done(hands[0].act("part:put", hold, into(slot)), slot);
+        done(
+            hands[0].act("activity:leave", hold, BTreeMap::new()),
+            "Soul 1 lets go",
+        );
+    }
+    // The rails, by Souls 1 and 4 at each rail's ends, across both bents.
+    let mut rail = None;
+    for (k, (dx, slot)) in [(-1_350, "rail_l"), (1_350, "rail_r")]
+        .into_iter()
+        .enumerate()
+    {
+        walk_all(
+            &mut hands,
+            g,
+            &[(0, at(dx, -2_200)), (3, at(dx, 2_200))],
+            "Souls 1 and 4 to a rail's ends",
+        );
+        let c = *rail.get_or_insert_with(|| crew_of_all(&w, &mut hands, 0, &[3]));
+        done(hands[0].act("part:take", c, part(rails[k])), "a rail taken");
+        done(hands[0].act("part:put", c, into(slot)), slot);
+    }
+    let rail = rail.unwrap();
+
+    // Rail 1 (rail_l, on the posts' line 850 mm west of the site's middle) out: its crew 0.9 m outside that line.
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(-1_750, -2_200)), (3, at(-1_750, 2_200))],
+        "the rail crew 0.9 m outside rail 1's posts",
+    );
+    done(
+        hands[0].act("part:unseat", rail, part(rails[0])),
+        "rail 1 unseated",
+    );
+    let out = where_is(&w, rails[0]);
+    println!("rail 1 unseated: {out:?}");
+    assert_eq!(out.0, Some(rail), "rail 1 rides its crew");
+    assert!(
+        ((x - 850) * 1000 - out.2.x) > 800_000,
+        "rail 1 came down clear of its posts' line: {out:?}"
+    );
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(-2_850, -2_200)), (3, at(-2_850, 2_200))],
+        "rail 1 carried 1.1 m on west",
+    );
+    let set_down = set_downs(&w);
+    assert_eq!(
+        where_is(&w, rails[0]).0,
+        Some(rail),
+        "rail 1 still rides its crew; set down: {set_down:?}"
+    );
+    done(
+        hands[0].act(
+            "part:put",
+            rail,
+            BTreeMap::from([
+                (1, g.to_value()),
+                (
+                    3,
+                    Value::Array(vec![int((x - 2_850) * 1000), int(0), int(z * 1000)]),
+                ),
+            ]),
+        ),
+        "rail 1 laid down",
+    );
+    let (parent, _, lies) = where_is(&w, rails[0]);
+    println!("rail 1 lies at {lies:?}");
+    assert_eq!(parent, Some(g), "rail 1 on the open ground");
+    assert!(
+        (lies.x - (x - 2_850) * 1000).abs() < 300_000 && (lies.z - z * 1000).abs() < 300_000,
+        "where it was laid: {lies:?}"
+    );
+    let set_down = set_downs(&w);
+    assert!(set_down.is_empty(), "nothing set down: {set_down:?}");
 }
