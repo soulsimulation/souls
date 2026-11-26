@@ -39,7 +39,8 @@
 //!
 //! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
 //!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
-//!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
+//!   timer ([`Acts::fired`]). Those the tree holds at a start (a restart, a sleeping world woken) go back on the list
+//!   at the first tick (#3991). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
 //!   ([`sim::walk::stall::Watch`]) against the corner its line aims at and that line's leg's end (never the walk's
@@ -1509,6 +1510,8 @@ pub struct Acts {
     ties: BTreeMap<Id, Tie>,
     /// Whether [`Acts::ties`] was read from the world as it stands (a restart's seated bodies), once.
     tied: bool,
+    /// Whether the forms' timers the tree holds were put back on the due list (#3991), once, at the first tick.
+    timed: bool,
     /// The world's stocked containers (#4837, [`crate::stock`]): given again to forms read back at a restart.
     stocks: Arc<sim::forms::Stocks>,
 }
@@ -2091,6 +2094,7 @@ impl Acts {
             held: None,
             ties: BTreeMap::new(),
             tied: false,
+            timed: false,
             stocks: Arc::default(),
         }
     }
@@ -2855,6 +2859,10 @@ impl Acts {
     /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
     /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
+        if !self.timed {
+            self.timed = true;
+            self.timers_from_state(tree);
+        }
         let mut bodies = bodies;
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
@@ -2948,6 +2956,49 @@ impl Acts {
         {
             let _ = sim::host::carry(&staged, &mut b.runner.controller, &mut b.town, now);
         }
+    }
+
+    /// The forms' timers the tree holds (#3991): each pending timer whose node's entry has the form it names goes on
+    /// the due list, as [`Acts::out`] puts one there when it is written. The tree carries them over a restart (a
+    /// deploy, a sleeping world woken, effects.md rule 15) and the due list did not, so a timer pending then never fired
+    /// and its thing stayed as it was (a bell ringing, a lamp lit). One already due fires in the first tick, at its
+    /// due time. The sky's and the loose things' timers name no form of their node and are left to their own lists.
+    fn timers_from_state(&mut self, tree: &Tree) {
+        for (id, t) in tree.timers() {
+            if self.timers.contains_key(id) {
+                continue;
+            }
+            let Some((ns, form)) = t.name.as_str().split_once(':') else {
+                continue;
+            };
+            let named = tree
+                .handle(t.node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| entry_in(&self.kinds, tree, &n))
+                .is_some_and(|e| {
+                    let kind = e.get("kind").and_then(Json::str).and_then(|k| k.split_once(':'));
+                    kind.map_or("souls", |(k, _)| k) == ns
+                        && e.get("forms").and_then(|fs| fs.get(form)).is_some()
+                });
+            if !named {
+                continue;
+            }
+            let timer = Timer {
+                node: t.node,
+                id: *id,
+                due: t.due,
+                name: t.name.clone(),
+            };
+            if self.due.set(timer).is_ok() {
+                self.timers.insert(*id, (t.node, t.name.clone()));
+            }
+        }
+    }
+
+    /// The earliest due time on the forms' due list (#3991): their timers, and their runs' moves and pauses. The world
+    /// counts it with its other due lists, so it neither sleeps past a form's timer nor says it is still until later.
+    pub fn next_due(&self) -> Option<Micros> {
+        self.due.next_due()
     }
 
     /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as

@@ -5686,13 +5686,14 @@ impl Clock {
     }
 
     /// The earliest due time over the world's due lists (O2): the sky's, the bodies' (moves and the wind-down), the
-    /// activities' and the loose things' ends.
+    /// activities', the loose things' ends and the forms' timers (#3991: a bell's fade, a planter's next stage).
     fn next_due(&self) -> Option<Micros> {
         [
             self.sky.as_ref().and_then(|h| h.due.next_due()),
             self.bodies.as_ref().and_then(Bodies::next_due),
             self.engine.as_ref().and_then(Engine::next_due),
             self.loose.next_due(),
+            self.forms.next_due(),
         ]
         .into_iter()
         .flatten()
