@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { encode } from '../history/day.mjs';
-import { allFields, posesOf, rememberPublicWords, rowsOf, wordsOf } from './copy.mjs';
+import { allFields, posesOf, rememberPublicWords, rowsOf, takeRecords, wordsOf } from './copy.mjs';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc');
@@ -50,6 +50,38 @@ test('rows read after every step of a walk keep the heap flat', () => {
   assert.equal(rows.size, 2002);
   assert.deepEqual(rows.get('73636f7065-2').pos, [300, 0, 0], 'the body where its last step put it');
   assert.deepEqual(posesOf(copy).get('73636f7065-101').at, [1, 0, 0]);
+});
+
+// 26 Nov 2026: the daemon read Eden's 9,588 rows afresh for every command, follow and hearing, and its loop was held for
+// seconds at a time (`schedule: no beat for 25 s`, commands answered `daemon-not-answering`). An unchanged copy gives
+// the rows it gave; a step reads again only the nodes it re-hashed, and a sync's records are decoded as they come.
+test('rows are read again only where the copy changed', () => {
+  const copy = walkingCopy(2000), record = copy.record;
+  let reads = 0;
+  copy.record = (h) => { reads++; return record(h); };
+  copy.step(0);
+  const first = rowsOf(copy);
+  assert.equal(rowsOf(copy), first, 'an unchanged copy: the same rows, nothing read');
+  copy.step(1);
+  reads = 0;
+  const after = rowsOf(copy);
+  assert.equal(reads, 2, 'the body a step on and its room; no chair read again');
+  assert.equal(after.get('73636f7065-100'), first.get('73636f7065-100'), 'a chair\'s row is the one read before');
+  assert.notEqual(after.get('73636f7065-2'), first.get('73636f7065-2'));
+  assert.deepEqual(after.get('73636f7065-2').pos, [1, 0, 0]);
+  assert.equal(after.size, 2002);
+});
+
+test('a sync\'s records taken as they come are not decoded again when the rows are read', () => {
+  const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return h; };
+  const chairs = Array.from({ length: 50 }, (_, i) => put(new Map([[1, [scope, 100 + i]], [2, 'eden:chair'], [10, []]])));
+  const room = put(new Map([[1, [scope, 1]], [2, 'eden:place'], [10, chairs.map((h) => Buffer.from(h, 'hex'))]]));
+  let reads = 0;
+  const copy = { roots: () => JSON.stringify({ 0: room }), record: (h) => { reads++; return held.get(h); } };
+  const asked = encode(new Map([[20, 1], [22, [room, ...chairs].map((h) => Buffer.from(h, 'hex'))]]));
+  takeRecords(copy, encode(new Map([[22, [room, ...chairs].map((h) => held.get(h))]])), asked);
+  assert.equal(rowsOf(copy).size, 51);
+  assert.equal(reads, 0, 'every record was decoded as the sync took it');
 });
 
 // #4713: the open ground's terrain tiles are a record of their own, named by the ground's key 0.
