@@ -501,7 +501,15 @@ fn a5_the_bytes_the_fork_wrote_and_the_parents_files_unchanged() {
         before,
         "the parent's files are unchanged"
     );
-    let written = files(&d.join("fork"));
+    let mut written = files(&d.join("fork"));
+    // The open log's file runs on into zeros, room for its next ticks (`sim::log` rule 10): not bytes it wrote.
+    let log = written.get_mut("log").expect("the fork's log");
+    let end = f.log.durable_at().offset as usize;
+    assert!(
+        log[end..].iter().all(|b| *b == 0),
+        "past its end, the log's room is zeros"
+    );
+    log.truncate(end);
     for (name, b) in &written {
         println!("A5: fork wrote {name}: {} bytes", b.len());
     }
