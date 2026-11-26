@@ -168,8 +168,8 @@ import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
 import { BARE, bareAct } from '../check/bare.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
-import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
-import { folderStamp, keptOne } from '../check/kept.mjs';
+import { definedIn, kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
+import { folderStamp, keptKinds, keptOne } from '../check/kept.mjs';
 import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -1065,11 +1065,12 @@ async function ageAfter({ now = false } = {}) {
 /** The kind entries held in `<home>/kinds/` and the creator's own from the copy (#3697), the Soul's own body kind given
  *  its family's forms (E21, #2791). */
 function heldKinds() {
-  // Kept while the copy's roots and the folder's files are the same (G-late): a form act read them all each time.
+  // Kept while the copy's roots and the folder are the same (G-late): a form act read them all each time. A changed
+  // copy reads the folder's entries again only if the folder changed too (`keptKinds`).
   const dir = join(home, 'kinds'), stamp = folderStamp(dir);
   return kindsKept.get([copy.roots(), stamp], () => {
     const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
-    const kinds = kindsHeld(dir, copy, me?.kind);
+    const kinds = { ...definedIn(copy), ...folderKinds(dir, me?.kind) };
     // The same entries (the folder's files, the body's kind, and the creator kinds by their full names, which name their
     // bytes) give the same object back, so the state's memo of records holds across a changed copy.
     const sig = `${stamp}\n${me?.kind}\n${Object.keys(kinds).sort().join(' ')}`;
@@ -1078,7 +1079,7 @@ function heldKinds() {
   });
 }
 const kindsSame = { sig: null, kinds: null };
-const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {};
+const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {}, folderKinds = keptKinds();
 /** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same; when
  *  a sync changed the copy, only the records it changed are read again (`stateMemo`). */
 const heldState = (kinds) => stateKept.get([copy.roots(), kinds], () => stateOf(copy, kinds, ME, stateMemo));
@@ -1772,7 +1773,7 @@ async function answer(req, conn = null) {
       // knows now (waiting for them, every find past a world's restart answered stale, `public-names-timeout`, in 2 s+).
       if (!age.stale && ws) publicNames.hydrate(ws, performance.now() + SYNC_WITHIN).catch((e) => log(`public names: ${String(e.message ?? e).slice(0, 160)}`));
       // Nearest first among equal matches, each with its metres from this Soul's body: anywhere in the world, no radius.
-      return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
+      return closing({ ok: true }, (rows) => find(rows, req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
         metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id, { placed: true }) ?? undefined, kinds: heldKinds() }), { age });
     }
     case 'wait': {
