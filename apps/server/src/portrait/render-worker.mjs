@@ -1,5 +1,5 @@
 // Automatic portrait renderer (child process of the world server; no browser, no GPU).
-// stdin: one JSON request per line {id, look}; stdout: one JSON reply per line {id, ok, png (base64)} | {id, ok:false, error}.
+// stdin: one JSON request per line {id, soulId, look} (soulId picks the background tint); stdout: one JSON reply per line {id, ok, png (base64)} | {id, ok:false, error}.
 // The viewer's humanoid kit code (apps/web, mars/viewer) is TypeScript with features node's type stripping refuses, so this
 // process transforms repo .ts with esbuild, and pins every `three` import to the server's own copy (a release installs only
 // the server's dependencies). The kit is read from this checkout's mars/viewer/public/modular/humanoid.
@@ -40,7 +40,7 @@ createInterface({input: process.stdin}).on('line', line => {
     let id = null;
     try {
       const req = JSON.parse(line); id = req.id;
-      const png = await humanoidPortraitPNG(kit, req.look);
+      const png = await humanoidPortraitPNG(kit, req.look, undefined, undefined, typeof req.soulId === 'string' ? req.soulId : '');
       reply({id, ok: true, png: Buffer.from(png).toString('base64')});
     } catch (e) { reply({id, ok: false, error: String(e && e.message || e).slice(0, 300)}); }
   });
