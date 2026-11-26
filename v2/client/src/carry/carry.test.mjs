@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
 import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
-import { nextOf } from '../cli/souls.mjs';
+import { newCrew, nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
 const ROOT = join(import.meta.dirname, '../../../../content/kinds');
@@ -329,4 +329,18 @@ test('a refused step says no next; a part seated in a bay reads the bay as it st
   await nextOf(async (r) => { asked.push(r); return { ok: true, built: '6 of 6 slots filled' }; }, { op: 'carry', kind: 'part', do: 'put', crew: id(8), into: id(5), slot: 'beam_low_r' }, done);
   assert.deepEqual(asked, [{ op: 'inspect', this: id(5) }]);
   assert.match(done.next, /it is built/);
+});
+
+test('an offer names the crew this Soul fronts, when another Soul offered one at the same moment', async () => {
+  // Ada and Cy offer at once (the shade's two rail crews): Ada's copy holds both new crews, Cy's listed first.
+  const crews = [
+    { id: id(30), with: [{ name: 'Cy', role: 'front', body: id(31) }] },
+    { id: id(32), with: [{ name: 'you', role: 'front', body: id(6) }] },
+  ];
+  const ask = async () => ({ crews: [{ id: id(8), with: [] }, ...crews] });
+  assert.deepEqual(await newCrew(ask, [id(8)], { sleep: async () => {} }), { crew: id(32) }, 'the one this Soul fronts');
+  const one = async () => ({ crews: [{ id: id(33), with: [] }] });
+  assert.deepEqual(await newCrew(one, [], { sleep: async () => {} }), { crew: id(33) }, 'the only new crew');
+  const unsure = async () => ({ crews: crews.map((c) => ({ ...c, with: [] })) });
+  assert.equal((await newCrew(unsure, [], { tries: 2, sleep: async () => {} })).crew, null, 'two new crews, neither shown as this Soul\'s: no guess');
 });

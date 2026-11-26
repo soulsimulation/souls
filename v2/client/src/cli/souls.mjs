@@ -776,11 +776,13 @@ export async function nextOf(ask, req, answer) {
   }
 }
 
-/** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
+/** 0.135 C: the crew an offer made, a crew in the copy that was not there before it and that this Soul fronts (two
+ *  Souls offering at once each see both new crews), or the only new one: `{crew}`, or a note. */
 export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   for (let i = 0; i < tries; i++) {
     const listed = await ask({ op: 'carry', do: 'list' }, DAEMON_PATIENCE_MS);
-    const made = (listed?.crews ?? []).find((c) => !before.includes(c.id));
+    const fresh = (listed?.crews ?? []).filter((c) => !before.includes(c.id));
+    const made = fresh.find((c) => (c.with ?? []).some((m) => m.name === 'you' && m.role === 'front')) ?? (fresh.length === 1 ? fresh[0] : null);
     if (made) return { crew: made.id };
     await sleep(200);
   }
