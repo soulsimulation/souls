@@ -2955,7 +2955,8 @@ fn i4575_a_sit_and_a_pick_up_of_the_bench_one_holds_it_the_other_is_refused() {
 }
 
 /// #4575, the rule per form, on content's own entries as bound: a bench's sit and a locomotive's board take a seat
-/// and reserve only it; a locomotive's drive also sets its fields, so it reserves the whole thing.
+/// and reserve only it; so do a locomotive's drive and every ride's `ride`, which also set the thing's `under_way`, so
+/// one rider never holds a whole ride (a balloon's basket, a big wheel, a cable car, a carousel, a sailboat).
 #[test]
 fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
     use skills::form_runner::{Arg, Args, bind_effects_args, bind_with};
@@ -2966,7 +2967,13 @@ fn i4575_a_form_that_only_takes_a_seat_reserves_the_seat() {
     for (file, form, place, whole) in [
         ("seating/bench.json", "sit", "left", false),
         ("vehicles/locomotive.json", "board", "fireman", false),
-        ("vehicles/locomotive.json", "drive", "driver", true),
+        ("vehicles/locomotive.json", "drive", "driver", false),
+        ("rides/balloon.json", "ride", "rider_2", false),
+        ("rides/balloon.json", "board", "rider_3", false),
+        ("rides/big_wheel.json", "ride", "gondola_1", false),
+        ("rides/cable_car.json", "ride", "red_cabin", false),
+        ("rides/carousel.json", "ride", "horse_1", false),
+        ("vehicles/sailboat.json", "sail", "port", false),
     ] {
         let e = entry(file);
         // The form's one slot argument, by the name its entry gives it.

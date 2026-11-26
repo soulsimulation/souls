@@ -707,6 +707,17 @@ impl Pairing {
         .map(|_| ())
     }
 
+    /// The signed-in `account` keeps its Soul `grant`: its agent's ask to retire it is cleared, so the agent's
+    /// `retire wait` hears the owner kept it. Nothing else changes.
+    pub fn keep(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "UPDATE soul_profiles_v1 SET retire_asked = 0 WHERE grant_text = ?1",
+            params![grant],
+        ))
+        .map(|_| ())
+    }
+
     /// The agent holding a Soul's `token` asks for it to be retired. Nothing changes but the ask, which the owner's
     /// list shows until the owner confirms. The Soul's grant.
     pub fn ask_retire(&self, token: &str) -> Result<String, &'static str> {
