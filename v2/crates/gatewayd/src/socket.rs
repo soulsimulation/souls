@@ -160,6 +160,17 @@ fn control(name: &str) -> Vec<u8> {
     encode(&Value::Map([(4, Value::Text(name))].into())).unwrap_or_default()
 }
 
+/// The sign-in's outcome, `{4: name}`, and on a Soul's grant whose intents were sent before, `5`: the newest sequence
+/// sent for it (#4978). A client that took the Soul from another numbers its next intent after it.
+fn outcome(name: &str, newest: u64) -> Vec<u8> {
+    let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
+    let mut m: BTreeMap<u64, Value> = [(4, Value::Text(name))].into();
+    if newest > 0 {
+        m.insert(5, Value::Uint(newest));
+    }
+    encode(&Value::Map(m)).unwrap_or_default()
+}
+
 /// An answer the gateway gives itself to bytes it could not read: `{2: answer}`, with no version, not kept.
 fn own_answer(answer: Answer) -> Vec<u8> {
     encode(&Value::Map([(2, answer.to_value())].into())).unwrap_or_default()
@@ -379,7 +390,7 @@ async fn serve(
         let _ = socket.send(Message::Close(Some(close))).await;
         return;
     };
-    let mut ok = send(&mut socket, control(attached.outcome)).await;
+    let mut ok = send(&mut socket, outcome(attached.outcome, attached.newest)).await;
     for frame in std::mem::take(&mut attached.replay) {
         ok = ok && send(&mut socket, times::finish(frame)).await;
     }
@@ -388,6 +399,8 @@ async fn serve(
     // gateway stops: then the socket closes with 1012 (O16).
     let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
     let mut closing = gw.closing.subscribe();
+    // The newest sequence of an intent read from this socket (#4978): told when another takes the grant from it.
+    let mut read = 0;
     while ok {
         tokio::select! {
             _ = stopped(&mut closing) => {
@@ -425,7 +438,7 @@ async fn serve(
                     let _ = send(&mut socket, control(token::REFUSED)).await;
                     break;
                 }
-                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received) {
+                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
                 }
@@ -448,7 +461,10 @@ async fn serve(
                 // and its client does not sign in again at once. Or this one fell too far behind, and it may resume.
                 None => {
                     if gw.replaced(grant, attached.session) {
-                        let close = CloseFrame { code: crate::REPLACED, reason: "agent.replaced".into() };
+                        // #4978: the newest intent it read from this socket; one its client sent later never reached
+                        // the world, and its client refuses it by name.
+                        let _ = socket.send(Message::Text(format!(r#"{{"replaced":{{"read":{read}}}}}"#).into())).await;
+                        let close = CloseFrame { code: crate::REPLACED, reason: crate::AGENT_REPLACED.into() };
                         let _ = socket.send(Message::Close(Some(close))).await;
                     }
                     break;
@@ -662,6 +678,7 @@ fn take_intent(
     session: u64,
     bytes: Vec<u8>,
     received: u64,
+    read: &mut u64,
 ) -> Option<Vec<u8>> {
     // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
     if let Ok(d) = decode(&bytes)
@@ -699,15 +716,21 @@ fn take_intent(
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
+    *read = (*read).max(sequence);
     // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket; a sequence
-    // another of them sent, out or lately answered, is refused here, on this socket, and never sent.
-    if !gw.sending(grant, sequence, session) {
-        return Some(refused(
-            actor,
-            sequence,
-            crate::SEQUENCE_IN_USE,
-            gw.link.now(),
-        ));
+    // another of them sent, out or lately answered, is refused here, on this socket, and never sent. #4978: on a
+    // Soul's, one sent after another socket took the grant, or under a sequence another intent went under.
+    let turn = if crate::shared(grant) {
+        if gw.sending(grant, sequence, session) {
+            Ok(())
+        } else {
+            Err(crate::SEQUENCE_IN_USE)
+        }
+    } else {
+        gw.holding(grant, sequence, session, crate::digest(&bytes))
+    };
+    if let Err(reason) = turn {
+        return Some(refused(actor, sequence, reason, gw.link.now()));
     }
     match gw
         .link

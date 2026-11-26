@@ -453,6 +453,47 @@ test('another client of the Soul takes it: this one is told so, never takes it f
   }
 });
 
+test('#4978: two clients of the Soul acting in turn share its one numbering: every act reaches the world once and is answered once, on its own client', async () => {
+  await waitFor(async () => (await status()).connected);
+  const other = join(dir, 'other-4978', '.souls');
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, 'config.json'), readFileSync(join(home, 'config.json')));
+  writeFileSync(join(other, 'credentials.json'), readFileSync(join(home, 'credentials.json')), { mode: 0o600 });
+  const otherRt = runtimeOf(other, SOUL);
+  start(other, SOUL, PKG);
+  try {
+    await waitFor(async () => (await request(otherRt.socket, { op: 'status' }).catch(() => null))?.connected, 60_000);
+    const before = taken().length, acts = [];
+    // Each client's own counter would give both the same numbers: the world would take only the first of each.
+    for (let k = 0; k < 4; k++) {
+      for (const socket of [rt.socket, otherRt.socket]) {
+        const a = await request(socket, { op: 'act', verb: k % 2 ? 'r2:switch_off' : 'r2:switch_on', target: LAMP });
+        outputs.push(JSON.stringify(a));
+        assert.equal(a.ok, true, JSON.stringify(a));
+        acts.push({ socket, sequence: a.sequence });
+        await sleep(300);
+      }
+    }
+    const finals = (r) => (r?.receipt?.answers ?? []).filter((x) => x.answer !== 'accepted');
+    for (const { socket, sequence } of acts) {
+      await waitFor(async () => finals(await request(socket, { op: 'receipt', sequence })).length > 0, 30_000);
+    }
+    await sleep(500);
+    for (const { socket, sequence } of acts) {
+      const r = await request(socket, { op: 'receipt', sequence });
+      assert.equal(finals(r).length, 1, `act ${sequence}: ${JSON.stringify(r.receipt)}`);
+    }
+    // Each act reached the world as an intent of its own: none was taken for a repeat of the other client's.
+    const now = taken().slice(before).map((l) => Number(l.split(' ')[1]));
+    assert.equal(now.length, acts.length, `the world took ${now.join(' ')}`);
+    assert.equal(new Set(now).size, acts.length);
+  } finally {
+    await request(otherRt.socket, { op: 'stop' }).catch(() => {});
+  }
+  // Replaced by the other's last act, this one signs in again by itself once the other has gone.
+  await waitFor(async () => (await status()).connected, 15_000);
+});
+
 test('#4980: a socket given up over a stalled network is let go at once; an act then is held, sent at the next sign-in and answered once; that sign-in is not held back', async () => {
   await waitFor(async () => { const s = await status(); return s.connected && !s.syncing && s; });
   const said = () => readFileSync(rt.log, 'utf8').split('\n');

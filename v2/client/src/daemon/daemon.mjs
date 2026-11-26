@@ -265,13 +265,15 @@ const unhex = (s) => new Uint8Array(Buffer.from(s, 'hex'));
 const scope = unhex(seat.grant.scope);
 
 // --- State on disk: the cursor and the sequences ------------------------------------------------------------------
-const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
+// #4978: `foreign`, the ranges of sequences another client of this Soul numbered (`[from, to]`, the newest last), whose
+// answers are not this client's; `alias`, an own intent sent under a later sequence than the one its agent was told.
+const state = { cursor: null, sequence: 0, unanswered: [], foreign: [], alias: {}, ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
 const save = () => { if (ended) return; writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
-const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
+const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, foreign: 0, build: null };
 // Bounded transport diagnostics: item kinds only, never tokens, words or encoded frames.
 const viewKinds = [];
 let viewGrants = 0;
@@ -357,8 +359,9 @@ let retryTimer = null, gaveUpAt = -Infinity; // the next sign-in (or ask whether
 let lostAt = null; // #4977: when a signed-in socket was lost, until the next is current
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
-function send(bytes, sequence, ranked) {
+function send(bytes, sequence, ranked, world = sequence) {
   sentAt = performance.now();
+  (ws.sent ??= []).push({ world, sequence }); // #4978: what went on this socket, for a replaced one's refusals
   // Written down before it goes, so neither a drop nor a restart sends it again.
   state.unanswered.push(sequence);
   save();
@@ -366,6 +369,51 @@ function send(bytes, sequence, ranked) {
   rankedOf.set(sequence, ranked);
   trace.write({ k: 'send', seq: sequence, ranked });
   ws.send(bytes);
+}
+
+// --- #4978: one numbering for every client of this Soul -----------------------------------------------------------
+// Two clients of one Soul (its token in two homes) take turns holding it, and the world numbers its intents once: a
+// second intent under a sequence it has seen is a repeat of the first, answered with the first's answer. The gateway
+// tells each sign-in the newest sequence sent for the Soul; a client that took it from another numbers after that.
+
+/** Whether `sequence` is one another client of this Soul numbered. */
+const foreign = (sequence) => state.foreign.some(([from, to]) => sequence >= from && sequence <= to);
+
+/**
+ * Signed in, told the newest sequence sent for this Soul (by whichever client): if another client numbered past this
+ * one's, the range between is its, and the acts held for this sign-in go under sequences after it. Their agents keep
+ * the sequences they were told: the answers come under those.
+ */
+function numberAfter(newest) {
+  const own = state.sequence - queued.length; // the newest this client sent
+  if (!Number.isSafeInteger(newest) || newest <= own) return;
+  state.foreign.push([own + 1, newest]);
+  if (state.foreign.length > 64) state.foreign.shift();
+  let next = newest;
+  for (const q of queued) {
+    next++;
+    if (q.world !== undefined) delete state.alias[String(q.world)]; // numbered after an earlier sign-in that dropped
+    q.bytes = q.build(next);
+    q.world = next;
+    state.alias[String(next)] = q.sequence;
+  }
+  state.sequence = next;
+  log(`another client of this Soul numbered up to ${newest}: this one's next intent is ${next + 1}`);
+  save();
+}
+
+/** An own intent that never reached the world, refused here by name, as the gateway's refusal of it would be. */
+function refusedHere(sequence, reason) {
+  const k = state.unanswered.indexOf(sequence);
+  if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
+  trace.write({ k: 'answer', seq: sequence, cause: causeOf(2, reason, rankedOf.get(sequence)), achieved: false });
+  rankedOf.delete(sequence); movesOf.delete(sequence); joinsOf.delete(sequence);
+  if (serving.has(sequence)) closeMail(serving.get(sequence), 'failed', reason);
+  save();
+  const answered = { kind: 'answer', sequence, version: null, answer: 2, reason };
+  note(answered);
+  keyAnswered(answered);
+  editsWaiting.get(sequence)?.(answered);
 }
 
 /** The agents' socket's frame limit (`replica` `intent_limits.txt`); a creator's larger edit goes by `sendBulk`. */
@@ -429,7 +477,7 @@ function current() {
   attempt = refusals = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
-  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
+  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked, q.world); }
   follow();
   scheduleWorld();
 }
@@ -483,10 +531,16 @@ function follow() {
 }
 
 /** R13: a text frame, the mailbox's: a message for this Soul, noted once. */
-function onText(text) {
+function onText(text, sock) {
   let f;
   try { f = JSON.parse(text); } catch { return; }
   if (onPrayerText(f)) return;
+  // #4978: another client took the Soul; the gateway read this socket's intents up to `read`. One sent after never
+  // reached the world: refused here by name, as the gateway refuses one it reads then.
+  if (Number.isSafeInteger(f.replaced?.read)) {
+    for (const x of sock.sent ?? []) if (x.world > f.replaced.read && state.unanswered.includes(x.sequence)) refusedHere(x.sequence, 'agent.replaced');
+    return;
+  }
   const m = f.mail;
   if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
   mail.set(m.id, m);
@@ -700,7 +754,7 @@ function connect() {
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
-    if (typeof m.data === 'string') { onText(m.data); return; }
+    if (typeof m.data === 'string') { onText(m.data, sock); return; }
     const bytes = new Uint8Array(m.data);
     try {
       if (step === 'hello') {
@@ -709,7 +763,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
+      let { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); refusals++; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -717,6 +771,7 @@ function connect() {
         log(`signed in: ${a}`);
         refusals = 0;
         if (replacedAt !== null) { replacedAt = null; log('the Soul was free again: this client holds it'); }
+        numberAfter(decode(bytes).get(5));
         owed = ownOwed = 0; // versions named on an earlier socket may be another epoch's
         again = 0;
         refreshKinds();
@@ -735,6 +790,14 @@ function connect() {
       // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
       // gateway replays those at the cursor after the ones counted here, and none twice.
       if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
+      // #4978: an answer to another client of this Soul is not this one's; an own intent sent under a later sequence
+      // is answered under the one its agent was told.
+      if (a !== '-' && state.alias[a] === undefined && foreign(Number(a))) { counts.foreign++; save(); return; }
+      if (a !== '-' && state.alias[a] !== undefined) {
+        const told = state.alias[a];
+        if (Number(c) !== 3) delete state.alias[a];
+        a = String(told);
+      }
       if (a !== '-') {
         const s = Number(a);
         const k = state.unanswered.indexOf(s);
@@ -808,6 +871,8 @@ function connect() {
       cutWhy = 'replaced';
       if (held) {
         replacedAt = Date.now();
+        // #4978: an act held for the sign-in another client's took the Soul from is refused by name, not kept.
+        for (const q of queued.splice(0)) refusedHere(q.sequence, 'agent.replaced');
         log('another client of this Soul signed in (the last to connect wins); signing in again at the next command, or once it is free');
         note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command, or by itself once the other has gone' });
       }
@@ -1481,17 +1546,19 @@ const standsFromSeat = (candidates) => risesFromSeat(candidates, { rows: rowsOf(
  * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
  */
 function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false, replaces }) {
-  // Encoded first: an intent that does not encode throws by name and takes no sequence.
-  const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence + 1),
+  // Encoded first: an intent that does not encode throws by name and takes no sequence. Held, it may go under a later
+  // sequence than its agent is told (`numberAfter`).
+  const build = (sequence) => wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
     params ? JSON.stringify(params) : undefined, reflex, replaces === undefined ? undefined : BigInt(replaces));
+  const bytes = build(state.sequence + 1);
   state.sequence++;
   receiptSent(state.sequence, ranked, { target, replaces, words });
   if (!signedIn) save(); // signed in, send() writes it down once, before it goes
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
-  if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
+  if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length, build });
   return { sequence, sent };
 }
 
