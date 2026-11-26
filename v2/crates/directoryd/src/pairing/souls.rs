@@ -175,7 +175,15 @@ impl Pairing {
         from: std::net::IpAddr,
         now: u64,
     ) -> Result<
-        Vec<(String, String, String, Option<String>, u64, Option<String>, Option<String>)>,
+        Vec<(
+            String,
+            String,
+            String,
+            Option<String>,
+            u64,
+            Option<String>,
+            Option<String>,
+        )>,
         &'static str,
     > {
         let mut codes: Vec<(String, u64)> = {

@@ -171,8 +171,7 @@ pub fn route(
                     .and_then(|()| match text(&b, "name") {
                         Some(n) if new => p.ask_name(&a.code, &n),
                         _ => Ok(()),
-                    })
-                {
+                    }) {
                     // Refused by its own name: an unplaced world is the caller's (400), the store's is ours (500).
                     Err(e) => refuse(if e == "store" { 500 } else { 400 }, e),
                     Ok(()) => {
