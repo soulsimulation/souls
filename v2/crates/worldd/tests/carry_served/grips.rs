@@ -120,8 +120,11 @@ fn field(dir: &Path, activity: Id) -> Option<Holds> {
 }
 
 /// The grips `holds` name, by body.
-fn by_body(h: &Holds) -> BTreeMap<Id, String> {
-    h.holds.iter().map(|h| (h.body, h.grip.clone())).collect()
+fn by_body(h: &Holds) -> BTreeMap<String, String> {
+    h.holds
+        .iter()
+        .map(|h| (replica::world_model::show(h.body), h.grip.clone()))
+        .collect()
 }
 
 /// Where a crew of `n` stands at a load whose middle is `at`, lying along z, its front north: the front and the back
