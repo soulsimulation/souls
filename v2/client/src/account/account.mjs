@@ -163,7 +163,7 @@ function seatOf(home, soul) {
   const key = Object.keys(worlds).find((k) => typeof worlds[k]?.token === 'string');
   if (!key) return null;
   let directory; try { directory = new URL(config.worlds?.[key]?.url).origin; } catch { fail('soul-world-unknown', 'this home does not know where the Soul was paired; adopt it again'); }
-  return { token: worlds[key].token, address: { directory } };
+  return { token: worlds[key].token, address: { directory }, world: key };
 }
 /** A Soul of the connected account, by its local id, grant or name: its row in `list --account`. */
 async function accountSoul(home, named, as, io) {
@@ -193,21 +193,27 @@ export async function soulProfile(home, soul, args, io = {}) {
   if (body.name && b.profile?.name) { const c = read(home, 'config.json'); c.souls = { ...c.souls, [soul]: { ...c.souls?.[soul], id: soul, name: b.profile.name } }; put(home, 'config.json', c); }
   return { ok: true, soul, profile: { name: b.profile?.name ?? null, description: b.profile?.description ?? null, photo: b.profile?.picture ?? 'auto', retireAsked: !!b.profile?.retire_asked } };
 }
-/** `retire <name|id>` asks; the owner's click on their Souls page decides. `retire wait` waits for that click. */
+/** Where the owner confirms a retire (0.137): the Soul's card on its world's page, signed in (there is no separate
+ *  Souls page). `#soul/<id>` opens that card. */
+const confirmAt = (directory, world, soul) => (directory && world ? `${directory}/w/${encodeURIComponent(world)}/${soul ? `#soul/${soul}` : ''}` : null);
+/** `retire <name|id>` asks; the owner's click on the Soul's card decides. `retire wait` waits a minute for that click. */
 export async function soulRetire(home, soul, named, { as, ...io } = {}) {
   const seat = soul ? seatOf(home, soul) : null;
-  let grant;
-  if (seat) grant = (await post(seat.address, '/v1/pair/retire', { token: seat.token }, null, io.send), grantOf(soul));
+  let grant, page;
+  if (seat) { grant = (await post(seat.address, '/v1/pair/retire', { token: seat.token }, null, io.send), grantOf(soul)); page = confirmAt(seat.address.directory, seat.world, soul); }
   else {
     const { a, row } = await accountSoul(home, named, as, io);
     if (!row) fail('not-yours', 'choose a Soul from list --account');
     await post(a.address, '/v1/agent/account/retire', { soul: row.id }, a.token, io.send);
     grant = row.id;
+    let origin = null; try { origin = new URL(a.address.directory).origin; } catch { origin = null; }
+    page = confirmAt(origin, row.world, null);
   }
   const c = read(home, 'config.json'); c.pendingRetire = { soul: soul ?? null, grant, account: seat ? null : aliasOf(c, as) }; put(home, 'config.json', c);
-  return { ok: true, retire: 'asked', soul: soul ?? grant, next: 'Ask your person to confirm it on their Souls page. Nothing is retired until they click. Then: retire wait' };
+  return { ok: true, retire: 'asked', soul: soul ?? grant, ...(page ? { page } : {}),
+    next: `Ask your person to open ${page ?? "the Soul's world page"} signed in, click the Soul and press Retire for good on its card. Nothing is retired until they do. Then: retire wait` };
 }
-export async function soulRetireWait(home, { within = 600_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), ...io } = {}) {
+export async function soulRetireWait(home, { within = 60_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), ...io } = {}) {
   const p = read(home, 'config.json').pendingRetire;
   if (!p) fail('no-retire', 'no retire waits here; ask for one: retire <name>');
   const clear = (c = read(home, 'config.json')) => { delete c.pendingRetire; put(home, 'config.json', c); };

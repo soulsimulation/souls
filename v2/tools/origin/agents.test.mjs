@@ -31,6 +31,13 @@ test('the front door sends every agent path to the relay on 7330; the page and i
   for (const path of ['/w/eden/v2/ws/x', '/w/eden/v2/wsx', '/v2/ws', '/w/eden/s/v2/ws', '/preview/w/eden/v2/ws']) assert.ok(!agents.test(path), path);
 });
 
+test('the front door sends the owner\'s Soul calls of a world page to the directory on 7310, its retire too (0.137)', () => {
+  const paths = /@pairing path (.+)/.exec(caddy)[1].trim().split(/\s+/);
+  assert.equal(upstream('pairing'), '7310');
+  // Retire for good on a Soul card of a new-engine world: answered 404 by today's launcher when it was not routed
+  for (const p of ['/v1/account/souls', '/v1/account/souls/profile', '/v1/account/souls/retire', '/v1/account/view-token']) assert.ok(paths.includes(p), p);
+});
+
 let dir, gateway, relay, stats, port;
 before(async () => {
   const scratch = fileURLToPath(new URL('../../../.local/', import.meta.url));
