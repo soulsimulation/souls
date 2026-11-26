@@ -1209,7 +1209,31 @@ fn w16_scoped_handoff_revokes_creator_preserves_souls_other_world_and_reopens() 
     let registry = root.join("authority.json");
     let registry_bytes=serde_json::to_vec(&serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,"worlds":{"garden":{"instance":instance,"creator":crate::accounts::principal_text(a)},"forest":{"instance":other,"creator":crate::accounts::principal_text(a)}},"aliases":{"old-garden":"garden"}})).unwrap();
     std::fs::write(&registry, &registry_bytes).unwrap();
+    assert_eq!(
+        p.can_hand_on("garden"),
+        Err("world-authority-required"),
+        "no registry: no handoff can be published"
+    );
+    assert_eq!(p.world_keys("garden"), Ok(vec!["garden".to_owned()]));
     p.authority_file = Some(registry.clone());
+    let mut keys = p.world_keys("garden").unwrap();
+    keys.sort();
+    let mut named = vec![
+        "garden".to_owned(),
+        "old-garden".to_owned(),
+        instance.clone(),
+    ];
+    named.sort();
+    assert_eq!(keys, named, "the world's name, instance and alias");
+    assert_eq!(p.can_hand_on("garden"), Ok(()));
+    assert_eq!(p.can_hand_on("forest"), Ok(()));
+    for unnamed in ["meadow", "old-garden", instance.as_str()] {
+        assert_eq!(
+            p.can_hand_on(unnamed),
+            Err("world-unplaced"),
+            "only the world's own name, as its row is named: {unnamed}"
+        );
+    }
     let reader_owner = owner.clone();
     p.current_owner_reader(Arc::new(move |world| {
         let mut value = reader_owner.read().unwrap().clone();
@@ -2066,4 +2090,282 @@ fn a_removal_write_is_tried_again_after_a_short_failure() {
         Err(std::io::Error::other("lasting"))
     });
     assert!(failed.is_err() && tries == 3, "{tries}");
+}
+
+#[test]
+fn others_living_counts_other_peoples_souls_by_every_name_of_the_world_and_unpaired_imports() {
+    let (p, tokens) = store();
+    let instance = format!("{}-{}-0", "04".repeat(16), "03".repeat(16));
+    {
+        let db = p.db.lock().unwrap();
+        for (grant, account, world, retired) in [
+            ("soul-aa-0", "acct_cid", Some("garden"), None),
+            ("soul-bb-0", "acct_dee", Some("old-garden"), None),
+            ("soul-b2-0", "acct_dee", Some(instance.as_str()), None),
+            ("soul-cc-0", "acct_bea", Some("garden"), None),
+            ("soul-dd-0", "acct_cid", Some("garden"), Some(5)),
+            ("soul-ee-0", "acct_cid", Some("forest"), None),
+            ("soul-ff-0", "acct_cid", None, None),
+            ("soul-op-0", "operator:test-souls", Some("garden"), None),
+            ("creator-gg-0", "acct_cid", Some("garden"), None),
+        ] {
+            db.execute(
+                "INSERT INTO paired_souls_v1(grant_text, account) VALUES (?1, ?2)",
+                rusqlite::params![grant, account],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO soul_profiles_v1(grant_text, world, retired_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![grant, world, retired],
+            )
+            .unwrap();
+        }
+        // An imported Soul retired before it paired.
+        db.execute(
+            "INSERT INTO soul_profiles_v1(grant_text, retired_at) VALUES ('soul-i3-0', 7)",
+            [],
+        )
+        .unwrap();
+    }
+    let keys: Vec<String> = ["garden", "old-garden", instance.as_str()]
+        .map(str::to_owned)
+        .to_vec();
+    // Brought over and not paired yet: Eve's counts (once, though listed twice), Bea's own does not, one already
+    // paired is counted by its profile, and one retired does not.
+    let imported: Vec<(String, String)> = [
+        ("soul-i1-0", "acct_eve"),
+        ("soul-i1-0", "acct_eve"),
+        ("soul-i2-0", "acct_bea"),
+        ("soul-aa-0", "acct_cid"),
+        ("soul-i3-0", "acct_eve"),
+    ]
+    .map(|(g, a)| (g.to_owned(), a.to_owned()))
+    .to_vec();
+    // Cid's, Dee's under the alias and under the instance, and Eve's import. Not: Bea's own Soul, a retired one,
+    // another world's, one with no world, the operator's test Soul, a creator grant.
+    assert_eq!(p.others_living(&keys, "acct_bea", &imported), Ok(4));
+    assert_eq!(
+        p.others_living(&keys[..1], "acct_bea", &[]),
+        Ok(1),
+        "the name alone misses the Souls paired under the world's alias and instance"
+    );
+    assert_eq!(p.others_living(&["forest".into()], "acct_cid", &[]), Ok(0));
+    assert_eq!(p.others_living(&["meadow".into()], "acct_bea", &[]), Ok(0));
+
+    // The import tables as X11 left them in the account store: the Souls brought over for any of the world's names.
+    let accounts = tokens.with_file_name("accounts.sqlite");
+    {
+        let db = rusqlite::Connection::open(&accounts).unwrap();
+        db.execute_batch("CREATE TABLE imported_souls_v1(world TEXT,old_soul TEXT,soul TEXT); CREATE TABLE souls_v1(soul TEXT,account_id TEXT,name TEXT,description TEXT);").unwrap();
+        for (world, soul, account) in [
+            ("old-garden", format!("{}:0", "05".repeat(16)), "acct_eve"),
+            ("forest", format!("{}:0", "06".repeat(16)), "acct_eve"),
+        ] {
+            db.execute(
+                "INSERT INTO imported_souls_v1 VALUES(?1,'s_old',?2)",
+                rusqlite::params![world, soul],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO souls_v1 VALUES(?1,?2,'Imported','')",
+                rusqlite::params![soul, account],
+            )
+            .unwrap();
+        }
+    }
+    let store = crate::accounts::store::Store::open(&accounts).unwrap();
+    assert_eq!(
+        store.imported_in(&keys).unwrap(),
+        vec![(format!("soul-{}-0", "05".repeat(16)), "acct_eve".to_owned())]
+    );
+}
+
+/// One HTTP request to a served directory: its status and JSON answer.
+fn served(
+    addr: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: &serde_json::Value,
+) -> (u16, serde_json::Value) {
+    use std::io::{Read, Write};
+    let body = body.to_string();
+    let auth = bearer.map_or(String::new(), |b| format!("authorization: Bearer {b}\r\n"));
+    let mut s = std::net::TcpStream::connect(addr).expect("connects");
+    write!(
+        s,
+        "POST {path} HTTP/1.1\r\nhost: {addr}\r\n{auth}content-length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let status = out[9..12].parse().unwrap();
+    (
+        status,
+        serde_json::from_str(out.split("\r\n\r\n").nth(1).unwrap()).unwrap_or_default(),
+    )
+}
+
+/// 26 Nov (my-mars-lab-2, the first world made by New world on soul.game): a world made through the directory's own
+/// create and then placed (its registry row written as the placement writes it) pairs its creator's agent for that
+/// world named by any of its registry keys (name, instance or alias), and only the creator's account approves it; a
+/// request naming no world, as the creator's client sent before, is the `world-required` the owner was shown. An
+/// ordinary Soul's pairing there keeps its world. Served, as the agent and the page's card ask.
+#[test]
+fn a_created_world_pairs_its_creator_by_any_key_and_a_soul_there_keeps_its_world() {
+    use crate::accounts::serve::{App, now, run};
+    use crate::directory::{Directory, store::Memory};
+    use crate::worlds::list::{Template, Worlds};
+    use serde_json::json;
+    use std::sync::Arc;
+    let root = std::env::temp_dir().join(format!("souls-created-pair-{}", to_hex(&random::<8>())));
+    std::fs::create_dir_all(root.join("worlds")).unwrap();
+    let root = root.canonicalize().unwrap();
+    let registry = root.join("authority.json");
+    let place = |worlds: serde_json::Value, aliases: serde_json::Value| {
+        let map = json!({"format": "souls/world-authority/1", "worldsRoot": root, "worlds": worlds, "aliases": aliases});
+        std::fs::write(&registry, serde_json::to_vec(&map).unwrap()).unwrap();
+    };
+    place(json!({}), json!({}));
+    let mut pairing =
+        Pairing::open(&root.join("pairing.sqlite"), None, "http://127.0.0.1:1").unwrap();
+    pairing.authority_file = Some(registry.clone());
+    let store: &'static (dyn crate::directory::store::Store + Send + Sync) =
+        Box::leak(Box::new(Memory::default()));
+    let mut templates = BTreeMap::new();
+    let zone = replica::ids::Id::new(replica::ids::Scope([0xe0; 16]), 1).unwrap();
+    templates.insert(
+        "hello-hamlet".to_owned(),
+        Template {
+            dir: "hello-hamlet".into(),
+            lineage: [0xe0; 16],
+            zone,
+        },
+    );
+    let worlds = Worlds::new(
+        Directory::new(store, replica::encode::Name::new("m1").unwrap()),
+        templates,
+        Box::new(|_| Ok(())),
+    );
+    let app = Arc::new(App {
+        store: crate::accounts::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: None,
+        origin: None,
+        mailbox_key: None,
+        pairing: Some(pairing),
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: Some(worlds),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let serving = app.clone();
+    std::thread::spawn(move || run(listener, serving));
+    let p = app.pairing.as_ref().unwrap();
+
+    // Ada makes the world (New world), and the placement registers it under its name, its instance and an alias.
+    let ask = json!({"key": "click-1", "name": "my-mars-lab-2", "template": "hello-hamlet", "label": "My Mars Lab"});
+    let (status, made) = served(&addr, "/v1/worlds", Some("test:Ada"), &ask);
+    assert_eq!(status, 200, "{made}");
+    let row = &made["world"];
+    let creator = row["creator"].as_str().unwrap().to_owned();
+    let instance = format!(
+        "{}-{}",
+        row["lineage"].as_str().unwrap(),
+        row["zone"].as_str().unwrap().replace(':', "-")
+    );
+    std::fs::create_dir_all(root.join("worlds").join(&instance)).unwrap();
+    std::fs::write(root.join("worlds").join(&instance).join("tokens"), "").unwrap();
+    place(
+        json!({"my-mars-lab-2": {"instance": instance, "creator": creator}}),
+        json!({"mars-lab": "my-mars-lab-2"}),
+    );
+    let grant = format!("creator-{}", creator.replace(':', "-"));
+    let tokens =
+        || std::fs::read_to_string(root.join("worlds").join(&instance).join("tokens")).unwrap();
+
+    // The creator's agent asks, as `god pair` does, naming the world.
+    let request = |world: Option<&str>, n: u8| {
+        let secret = to_hex(&[n; 32]);
+        let mut ask = json!({"secret_hash": to_hex(&sha256(secret.as_bytes())), "device": "studio laptop",
+                             "label": "souls-god.mjs", "scope": "creator", "creator": grant});
+        if let Some(w) = world {
+            ask["world"] = json!(w);
+        }
+        let (status, asked) = served(&addr, "/v1/pair/request", None, &ask);
+        assert_eq!(status, 200, "{asked}");
+        (secret, asked["code"].as_str().unwrap().to_owned())
+    };
+    let approve = |person: &str, code: &str| {
+        served(
+            &addr,
+            "/v1/pair/approve",
+            None,
+            &json!({"test_person": person, "code": code, "confirm": true}),
+        )
+    };
+    // As before the fix: no world, so the owner's approval cannot say whose world it is.
+    let (_, code) = request(None, 1);
+    assert_eq!(
+        approve("Ada", &code),
+        (409, json!({"refused": "world-required", "device": null}))
+    );
+    // Someone else's account is refused.
+    let (_, code) = request(Some("my-mars-lab-2"), 2);
+    assert_eq!(approve("Bea", &code).1["refused"], "not-the-creator");
+    // The creator approves, by each of the world's keys (each before any of them connected: a second approval once
+    // the agent holds the world's token is `soul-connected` unless forced), and its agent is handed a creator token
+    // for that world.
+    let mut approved = Vec::new();
+    for (n, key) in [
+        (3, "my-mars-lab-2"),
+        (4, instance.as_str()),
+        (5, "mars-lab"),
+    ] {
+        let (secret, code) = request(Some(key), n);
+        assert_eq!(
+            approve("Ada", &code),
+            (200, json!({"approved": true, "soul": grant})),
+            "{key}"
+        );
+        approved.push((secret, key));
+    }
+    for (secret, key) in approved {
+        let Poll::Token { token, grant: got } = p.poll(&secret, now() + INTERVAL + 1) else {
+            panic!("a token for {key}")
+        };
+        assert_eq!(got, grant);
+        assert!(
+            tokens().contains(&format!("{grant} {}", to_hex(&sha256(token.as_bytes())))),
+            "{key}"
+        );
+    }
+    assert!(
+        tokens().contains(&format!("# souls-creator/1 0 {creator}")),
+        "{}",
+        tokens()
+    );
+
+    // An ordinary Soul paired for the created world keeps its world.
+    let secret = to_hex(&[9; 32]);
+    let ask = json!({"secret_hash": to_hex(&sha256(secret.as_bytes())), "device": "laptop", "label": "agent",
+                     "new": true, "world": "my-mars-lab-2"});
+    let (status, asked) = served(&addr, "/v1/pair/request", None, &ask);
+    assert_eq!(status, 200, "{asked}");
+    let (status, approved) = approve("Bea", asked["code"].as_str().unwrap());
+    assert_eq!(status, 200, "{approved}");
+    let soul = approved["soul"].as_str().unwrap().to_owned();
+    let Poll::Token { token, .. } = p.poll(&secret, now() + INTERVAL + 1) else {
+        panic!("a Soul's token")
+    };
+    assert!(tokens().contains(&format!("{soul} {}", to_hex(&sha256(token.as_bytes())))));
+    let (_, mine) = served(
+        &addr,
+        "/v1/account/souls",
+        None,
+        &json!({"test_person": "Bea"}),
+    );
+    assert_eq!(mine["souls"][0]["world"], "my-mars-lab-2", "{mine}");
+    let _ = std::fs::remove_dir_all(&root);
 }

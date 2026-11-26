@@ -167,28 +167,32 @@ const depth = (byId, id) => { let d = 0; for (let p = byId.get(id); p && p.paren
 const yawOf = (o) => (Array.isArray(o) ? 2 * Math.atan2(Number(o[2]), Number(o[0])) : 0);
 const textOf = (v) => (v && typeof v === 'object' && v.hex !== undefined ? Buffer.from(v.hex, 'hex').toString() : typeof v === 'string' ? v : '');
 
-/** Each node's spot on the open ground, metres: its pose carried up through its parents' (a shape: its outline's or
- *  line's middle). */
+/** Each node's spot on the open ground, metres: its pose carried up through its parents' frames (a shape: its outline's
+ *  or line's middle, drawn in its own frame). A thing in a room stands in the room's frame, never at the room's middle
+ *  (#5006 row 30: a hall's chairs were matched at the hall's own origin). */
 export function spotsOf(nodes) {
-  const byId = new Map(nodes.map((n) => [n.id, n])), out = new Map();
-  const at = (n) => {
-    if (out.has(n.id)) return out.get(n.id);
+  const byId = new Map(nodes.map((n) => [n.id, n])), frames = new Map(), out = new Map();
+  /** A point (x, z metres) in frame `f`, on the open ground. */
+  const put = (f, x, z) => { const c = Math.cos(f.yaw), si = Math.sin(f.yaw); return { x: f.x + x * c + z * si, z: f.z - x * si + z * c, yaw: f.yaw }; };
+  const frame = (n) => {
+    if (frames.has(n.id)) return frames.get(n.id);
     const p = n.parent === null ? null : byId.get(n.parent);
-    const base = p ? at(p) : { x: 0, z: 0, yaw: 0 };
-    let s;
+    const base = p ? frame(p) : { x: 0, z: 0, yaw: 0 };
+    let f = base;
     if (n.pose) {
-      const [x, , z] = n.pose.at.map((v) => Number(v) / 1e6), c = Math.cos(base.yaw), si = Math.sin(base.yaw);
-      s = { x: base.x + x * c + z * si, z: base.z - x * si + z * c, yaw: base.yaw + yawOf(n.pose.orientation) };
-    } else s = base;
-    // A shape stands at its parent's origin and draws its points: its spot is their middle.
-    const pts = n.fields?.[F.OUTLINE] ?? n.fields?.[F.LINE];
-    if (Array.isArray(pts) && pts.length && n.parent !== null) {
-      s = { ...s, x: pts.reduce((a, q) => a + Number(q[0]), 0) / pts.length / 1000, z: pts.reduce((a, q) => a + Number(q[1]), 0) / pts.length / 1000 };
+      const [x, , z] = n.pose.at.map((v) => Number(v) / 1e6);
+      f = { ...put(base, x, z), yaw: base.yaw + yawOf(n.pose.orientation) };
     }
-    out.set(n.id, s);
-    return s;
+    frames.set(n.id, f);
+    return f;
   };
-  for (const n of nodes) at(n);
+  for (const n of nodes) {
+    const f = frame(n);
+    // A shape draws its points in its own frame: its spot is their middle there.
+    const pts = n.fields?.[F.OUTLINE] ?? n.fields?.[F.LINE];
+    const shape = Array.isArray(pts) && pts.length && n.parent !== null;
+    out.set(n.id, shape ? put(f, pts.reduce((a, q) => a + Number(q[0]), 0) / pts.length / 1000, pts.reduce((a, q) => a + Number(q[1]), 0) / pts.length / 1000) : f);
+  }
   return out;
 }
 

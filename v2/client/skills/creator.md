@@ -168,7 +168,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 ## Export and import
 
 - `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
-  default: kinds, places, fields and poses, and the world's public names.
+  default: kinds, places, fields and poses, the world's public names, and the words of its titles and calendar entries.
 - `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
   What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
   changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the

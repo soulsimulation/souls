@@ -1057,7 +1057,7 @@ function onEntry(e) {
     const rows = rowsOf(copy), mine = mineIn(rows), body = mine[1] ?? ME;
     keepKinds(rows);
     for (const ev of offers) {
-      const n = offerNote(ev, body);
+      const n = offerNote(ev, body, e.at);
       // Who declined, or did not answer (the event's field 3), for the offerer. One asked is told its offer's `from`,
       // and the offer's word from the offer it was told of (its node may never have been in this Soul's copy).
       const was = n?.from ? logged.findLast((x) => (x.what === 'offered' ? x.offer : x.what === 'invited' ? x.conversation : null) === n.conversation) : null;
@@ -1755,7 +1755,8 @@ async function clonePlan(w) {
   const made = cloneFile(target.nodes, w.ref, { at, step, count, yaw, width, ...lifted });
   if (made.ok === false) return made;
   let plan;
-  try { plan = importOf(made.file, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+  // #5006 row 33: a copy keeps its titles and calendar words, as an import of an export does
+  try { plan = importOf({ ...made.file, words: target.words }, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
   return { plan, says: made.says, copies: made.file.nodes.filter((n) => n.parent === src.parent && n.id.startsWith('clone-')).map((n) => n.id) };
 }
 
@@ -2084,7 +2085,8 @@ async function answer(req, conn = null) {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
       return {
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
+      // #5006 row 17: `name` only for a thing's own name (a title, a body's name), never its kind and counter
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.titled ? { name: r.name } : {}), ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });
@@ -2645,7 +2647,9 @@ async function carry(req) {
   // A loading spot (carry/spot.mjs): the crew's ends and size, and the things on the open ground that may fill a bay.
   const crewSize = (crew) => rows.get(crew)?.members?.length;
   const loose = () => all.filter((r) => r.parent === ground && !r.soul && !isCrew(r.kind) && !/:(place|humanoid|body)$/.test(String(r.kind ?? '').split('@')[0])).map((r) => r.id);
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, crewSize, loose, seated, heldBy, served: activitiesServed(home, seat.world) });
+  // What a part is seated in (its parent): `carry grip <part> back --out <m>` stands outside it.
+  const parentOf = (id) => rows.get(id)?.parent ?? null;
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, parentOf, crewMiddle, crewEnds, crewSize, loose, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   // `--go <time>`: sent at the moment the crew's leader named, so every carrier sets off together. Carriers that set off
   // a second apart (each its own command, on a busy machine) drift past the world's 1 m stretch and the carry breaks off.

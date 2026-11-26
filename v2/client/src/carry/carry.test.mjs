@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
 import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
-import { nextOf } from '../cli/souls.mjs';
+import { newCrew, nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
 const ROOT = join(import.meta.dirname, '../../../../content/kinds');
@@ -73,6 +73,21 @@ test('a grip is the load\'s place from its entry; a standing part\'s 2.2 m along
   near(walk({ do: 'grip', thing: id(4), end: 'right' }), [1.2e6, 0, 5.85e6], 'beside the frame');
   assert.equal(send({ do: 'grip', thing: id(4), end: 'up' }).code, 'carry-usage');
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
+});
+
+test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
+  // The beam along z at (2, 6) as if seated in the bay at (12, 6): its ends 0.9 m off its line, on the side away from the
+  // bay (west), both ends the same side; unseated, it comes down at their middle, clear of the bay's posts.
+  const seated = { ...ctx, parentOf: (n) => (n === id(2) ? id(5) : rows.get(n)?.parent ?? null) };
+  const walk = (req) => carryIntents(req, seated)[0].params[1];
+  near(walk({ do: 'grip', thing: id(2), end: 'back', from: '2.2', out: '0.9' }), [1.1e6, 0, 3.8e6], 'its back, outside');
+  near(walk({ do: 'grip', thing: id(2), end: 'front', from: '2.2', out: '0.9' }), [1.1e6, 0, 8.2e6], 'its front, the same side');
+  near(gripSpot({ pos: [2e6, 0, 6e6] }, loadOf(kinds['mars:rack_beam']), 'back', 2_200_000, { by: 900_000, from: [-5e6, 6e6] }), [2.9e6, 3.8e6], 'away from a bay to its west: east');
+  const loose = carryIntents({ do: 'grip', thing: id(2), end: 'back', out: '0.9' }, { ...ctx, parentOf: (n) => rows.get(n)?.parent ?? null });
+  assert.equal(loose.code, 'carry-out-unseated', 'a part on the open ground is seated in nothing');
+  assert.equal(carryIntents({ do: 'grip', thing: id(2), end: 'right', out: '0.9' }, seated).code, 'carry-usage', 'front or back only');
+  assert.equal(carryIntents({ do: 'grip', thing: id(2), end: 'back', out: '9' }, seated).code, 'carry-usage', 'under 5 m');
+  assert.deepEqual(requestOf(['carry', 'grip', id(2), 'back', '--from', '2.2', '--out', '0.9']).req, { op: 'carry', do: 'grip', thing: id(2), end: 'back', from: '2.2', out: '0.9' });
 });
 
 test('a crew of six takes the 6.1 m frame at its six grips: front, back, and four sides beside the grips between', () => {
@@ -214,6 +229,13 @@ test('a carry\'s offer reaches the asked Soul as a carry; the crews are listed w
   const pin = activityPin('mars:carry', kinds['mars:carry']);
   const ev = { name: 'souls:offer', fields: { 1: id(8), 2: pin, 3: [id(7)], 4: 60_000_000, 5: id(6) } };
   assert.deepEqual(offerNote(ev, id(7)), { kind: 'carry', what: 'offered', offer: id(8), from: id(6) });
+  // With its entry's world time, the offer says how long it has left; a crew offered to several, how accepts renew it.
+  const crew = { ...ev, fields: { ...ev.fields, 3: [id(7), id(9)], 4: 70_000_000, 7: 60_000_000, 8: 310_000_000 } };
+  assert.deepEqual(offerNote(crew, id(7), 10_000_000), {
+    kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 60, each_accept_s: 60, open_most_s: 300,
+    note: 'open 60 s from when it was made; each accept keeps it open 60 s more for the rest, 300 s at most: answer before it lapses',
+  });
+  assert.deepEqual(offerNote(ev, id(7), 15_000_000), { kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 45, note: 'open 45 s from when it was made: answer before it lapses' });
   const held = new Map([...rows, [id(10), { id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam', parent: id(8) }]]);
   assert.deepEqual(crewsIn(held), [{ id: id(8), on: id(1), holds: [{ id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam' }] }]);
 });
@@ -257,6 +279,9 @@ test('an open crew offer is accepted by its offerer\'s name, or the newest with 
     { kind: 'carry', what: 'offered', offer: id(31), from: cy }];
   const offers = openCrewOffers(logged, crews, mine);
   assert.deepEqual(offers, [{ crew: id(30), from: ada }, { crew: id(31), from: cy }], 'gone (33) and joined (32) offers are not open');
+  // A crew that formed stays in the copy after its offer lapsed: the lapse told to this Soul closes it.
+  const lapsed = [...logged, { kind: 'conversation', what: 'lapsed', conversation: id(30), from: ada }];
+  assert.deepEqual(openCrewOffers(lapsed, crews, mine), [{ crew: id(31), from: cy }], 'a lapsed offer is not open');
   const nameOf = (b) => ({ [ada]: 'Ada', [cy]: 'Cy' })[b];
   assert.deepEqual(crewOffered('ada', offers, nameOf), { crew: id(30) });
   assert.deepEqual(crewOffered(undefined, offers, nameOf), { crew: id(31) }, 'the newest');
@@ -322,4 +347,18 @@ test('a refused step says no next; a part seated in a bay reads the bay as it st
   await nextOf(async (r) => { asked.push(r); return { ok: true, built: '6 of 6 slots filled' }; }, { op: 'carry', kind: 'part', do: 'put', crew: id(8), into: id(5), slot: 'beam_low_r' }, done);
   assert.deepEqual(asked, [{ op: 'inspect', this: id(5) }]);
   assert.match(done.next, /it is built/);
+});
+
+test('an offer names the crew this Soul fronts, when another Soul offered one at the same moment', async () => {
+  // Ada and Cy offer at once (the shade's two rail crews): Ada's copy holds both new crews, Cy's listed first.
+  const crews = [
+    { id: id(30), with: [{ name: 'Cy', role: 'front', body: id(31) }] },
+    { id: id(32), with: [{ name: 'you', role: 'front', body: id(6) }] },
+  ];
+  const ask = async () => ({ crews: [{ id: id(8), with: [] }, ...crews] });
+  assert.deepEqual(await newCrew(ask, [id(8)], { sleep: async () => {} }), { crew: id(32) }, 'the one this Soul fronts');
+  const one = async () => ({ crews: [{ id: id(33), with: [] }] });
+  assert.deepEqual(await newCrew(one, [], { sleep: async () => {} }), { crew: id(33) }, 'the only new crew');
+  const unsure = async () => ({ crews: crews.map((c) => ({ ...c, with: [] })) });
+  assert.equal((await newCrew(unsure, [], { tries: 2, sleep: async () => {} })).crew, null, 'two new crews, neither shown as this Soul\'s: no guess');
 });

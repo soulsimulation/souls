@@ -1,7 +1,7 @@
 //! Pairing over HTTP (W2). Bodies are JSON both ways; the card is the one HTML page.
 //!
-//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?, name?}`, or a
-//!   creator's `{secret_hash, device, label, creator, scope: "creator", force?}` (G7) →
+//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, world, scope: "soul", force?, name?}`, or
+//!   a creator's `{secret_hash, device, label, creator | soul, world, scope: "creator", force?}` (G7) →
 //!   `{code, link, interval}`. No sign-in: the daemon asks. A Soul of today's client (R18) is asked for as
 //!   `{…, former: "s_…", world, scope: "soul"}` in place of `soul` or `new`: the owner's approval pairs the Soul X11
 //!   brought over for that former id at that world (`imported_souls_v1`), only for the account that owns it, and

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { REPO_ROOT } from '../../lib/paths.mjs';
 import { runner, templateFacts } from '../rack-bay/rack-bay.mjs';
-import { AT, LABELS, buildFour, buildSix, takeDown } from './shade.mjs';
+import { AT, LABELS, RAIL_OUT, buildFour, buildSix, takeDown } from './shade.mjs';
 
 test('the template exports its shade yard in the carpentry kinds, each named, where the trial expects it', () => {
   const dir = mkdtempSync(join(REPO_ROOT, '.local', 'shade-yard-'));
@@ -63,4 +63,11 @@ test('the take-down takes the cloth off first and holds the bents while the rail
   assert.ok(unseat('cloth') < Math.min(unseat('r1'), unseat('r2')), 'the cloth off before either rail');
   assert.ok(said.indexOf(holds[1]) < Math.min(unseat('r1'), unseat('r2')), 'both bents held before the rails come out');
   assert.ok(Math.max(unseat('r1'), unseat('r2')) < Math.min(unseat('b1'), unseat('b2')), 'the bents last');
+  // A rail is unseated to its carriers' middle: both its ends stand outside the posts' line first, as far out as the
+  // build set it in from (rail_l's posts 0.85 m west of the site's middle, AT.railIn 0.9 m further).
+  assert.ok(Math.abs(AT.site[0] - 0.85 - RAIL_OUT - AT.railIn[0][0]) < 1e-9, 'as far out as the build sets a rail in from');
+  for (const rail of ['r1', 'r2']) {
+    const grips = said.slice(0, unseat(rail)).filter((w) => w[1] === 'carry' && w[2] === 'grip' && w[3] === rail);
+    assert.deepEqual(grips.map((w) => [w[4], w[w.indexOf('--out') + 1]]).sort(), [['back', String(RAIL_OUT)], ['front', String(RAIL_OUT)]], `${rail}: its ends stand outside`);
+  }
 });
