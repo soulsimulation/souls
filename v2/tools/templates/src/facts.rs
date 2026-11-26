@@ -1,11 +1,13 @@
 //! A template published from a facts file (N1's import) with the public serving support `worldd seed --souls 0` made
 //! beside it: `templates <facts> <out> --name <name> [--support <seeded folder>]` (installed as `publish-template`).
 //!
-//! The tree is built the way `worldd` builds a world from the same facts and entries (`import_eden::load_with`): a
-//! kind whose entry joins parts (a rack bay, a frame stand, a shade site, a loading spot) takes its slots, and its
-//! name's hash, from its entry. Built from the facts alone, those kinds were pinned differently from the support's
-//! boot pins, so `worldd fork --template` refused the template (`template-pins-mismatch`), and the joining kinds had
-//! no slots to build into.
+//! The tree is built with the entries `worldd seed` kept (`import_eden::load_with`), as `worldd` loads them: a kind
+//! whose entry joins parts (a rack bay, a frame stand, a shade site, a loading spot) takes its slots, and its name's
+//! hash, from its entry. Built from the facts alone, those kinds were pinned differently from the support's boot pins,
+//! so `worldd fork --template` refused the template (`template-pins-mismatch`), and the joining kinds had no slots to
+//! build into. Not yet as `worldd` builds a world: its courses step (`serve`'s `courses`: the punts it puts on the
+//! water and the rides' courses) is not run, so a template of a world with punts or rides (Eden) has neither; and a
+//! seed's code hatches (`hatches/`) are not carried.
 
 use replica::encode::{Name, Value, decode, from_hex};
 use replica::ids::{Hash, Purpose, Scope, sha256};
@@ -180,7 +182,7 @@ pub fn support_entries(files: &[(PathBuf, Vec<u8>)]) -> Result<Vec<(String, Stri
 }
 
 /// Publishes `facts` as the template `name` in `out/<name>`, its source checkpoint in `out/<name>.source`, under the
-/// fresh lineage `scope`. With `support` (a folder `worldd seed --souls 0` made from the same facts), the tree is built
+/// fresh lineage `scope` (built in `out/.<name>.partial`, renamed when whole). With `support` (a folder `worldd seed --souls 0` made from the same facts), the tree is built
 /// with its entries and the template carries its boot pins and public files; refused if either folder exists.
 pub fn publish_facts(
     facts: &str,
@@ -194,8 +196,14 @@ pub fn publish_facts(
     if !valid_name(name) {
         return Err(format!("template-name-invalid: {name}"));
     }
-    let (dir, source) = (out.join(name), out.join(format!("{name}.source")));
-    for d in [&dir, &source] {
+    // Published into a hidden sibling and renamed at the end, so a publish that fails part way never leaves a folder
+    // with a `template` file the directory would list.
+    let (dir, source, partial) = (
+        out.join(name),
+        out.join(format!("{name}.source")),
+        out.join(format!(".{name}.partial")),
+    );
+    for d in [&dir, &source, &partial] {
         if std::fs::symlink_metadata(d).is_ok() {
             return Err(format!("template-exists: {}", d.display()));
         }
@@ -209,7 +217,7 @@ pub fn publish_facts(
     crate::checkpoint(&mut im.tree, root.scope(), &source).map_err(|e| e.to_string())?;
     let t = crate::publish_with_kinds(
         &source,
-        &dir,
+        &partial,
         name,
         scope,
         seed,
@@ -219,12 +227,13 @@ pub fn publish_facts(
     )
     .map_err(|e| e.to_string())?;
     for (relative, bytes) in files {
-        let path = dir.join(relative);
+        let path = partial.join(relative);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::write(path, bytes).map_err(|e| e.to_string())?;
     }
+    std::fs::rename(&partial, &dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     Ok(t)
 }
 
