@@ -24,6 +24,14 @@
 //! store with no head gets this writer's; neither is fenced. A spool of another store (the store moved: its address
 //! changed) also puts every object kept on this disk to the new one again before its first head there, so the new
 //! store holds the whole chain its head names, as a new machine reads it.
+//!
+//! **Clean-up** (#3833, #4954). Old generations' chains are deleted from the store by a second thread with its own
+//! client ([`Cleanup`]), never by the backup's: a slow or refusing delete holds back no put, and neither touches the
+//! world's clock or the stream. A refused delete is tried again after its own back-off (1, 2, 4 … 60 s, for ever) while
+//! the rest go on; the clean-up never switches itself off (before #4954 one refused delete did, until the world
+//! restarted, and Eden's store kept 35,257 stream objects against about 1,300 live). An object the current chain names
+//! is never deleted: the spool keeps the chain's objects as the writer last handed them over, and every object written
+//! to it since ([`Spool::live`]), and each delete is checked against both.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -39,10 +47,11 @@ use replica::encode::to_hex;
 /// first waits the shortest again: the store is answering, and one unanswered put in a few hundred (the offsite bucket
 /// holds about one request in a hundred past 5 s, 25 Nov 2026) must not hold a backlog of thousands at a pass a minute.
 pub const BACKOFF_MS: [u64; 7] = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
-/// Old generations' recovery objects deleted from the store in one pass (#3833).
+/// Old generations' recovery objects the clean-up deletes before it looks for new work (#3833): it goes on at once
+/// while more wait, one delete at a time, so its pace is the store's.
 const DELETES_PER_PASS: usize = 64;
-/// The generations closed long enough ago to delete waiting, at most: a rollover adds one, so this holds hours of
-/// them; past it the oldest is left in the store (best effort, as deletion always was).
+/// The generations closed long enough ago to delete waiting for the clean-up's thread to take them, at most: it takes
+/// them within a second, and a rollover adds one; past it the newest are left in the store until a restart finds them.
 const PRUNES_HELD: usize = 64;
 /// The spool's copies of the objects the store holds, under their store keys.
 const KEPT: &str = "kept";
@@ -70,12 +79,19 @@ pub struct Spool {
     pub(super) dir: PathBuf,
     store: String,
     wake: Option<SyncSender<()>>,
+    /// Tells the clean-up's thread there is more; dropped with the spool, which ends it.
+    tidy: Option<SyncSender<()>>,
     prunes: Prunes,
+    live: Live,
     progress: Arc<Progress>,
 }
 
 /// Old generations' records to delete by, each with the objects the chain then named (never deleted).
 type Prunes = Arc<Mutex<Vec<(String, BTreeSet<Vec<u8>>)>>>;
+
+/// The store keys of the current chain's objects as the writer last handed them over ([`Spool::live`]), and of every
+/// object written to the spool since: the clean-up deletes none of them.
+type Live = Arc<Mutex<(BTreeSet<String>, BTreeSet<String>)>>;
 
 /// The passes made, whether the last left the store holding the spool's head, and whether the backup is fenced.
 #[derive(Default)]
@@ -137,7 +153,9 @@ impl Spool {
             dir,
             store,
             wake: None,
+            tidy: None,
             prunes: Arc::default(),
+            live: Arc::default(),
             progress: Arc::default(),
         }
     }
@@ -158,8 +176,12 @@ impl Spool {
         super::write_whole(&path, bytes)
     }
 
-    /// Writes `bytes` under `key` (an object once: its name is their hash).
+    /// Writes `bytes` under `key` (an object once: its name is their hash). Named by the chain from now on, so the
+    /// clean-up never deletes it, even when an old generation named the same bytes.
     pub(super) fn object(&self, key: &str, bytes: &[u8]) -> super::R<()> {
+        if let Ok(mut live) = self.live.lock() {
+            live.1.insert(key.to_owned());
+        }
         if self.path(key).is_file() || self.kept(key).is_file() {
             return Ok(());
         }
@@ -205,6 +227,17 @@ impl Spool {
         {
             p.push((record_key, live));
         }
+        if let Some(t) = &self.tidy {
+            let _ = t.try_send(());
+        }
+    }
+
+    /// The current chain's objects (store keys), as the writer holds them after a rollover or a start: what the
+    /// clean-up never deletes, with every object written to the spool from now on.
+    pub(super) fn live(&self, keys: BTreeSet<String>) {
+        if let Ok(mut live) = self.live.lock() {
+            *live = (keys, BTreeSet::new());
+        }
     }
 
     /// The handle a stop drains the backup by, once the backup runs.
@@ -240,15 +273,28 @@ fn confirm(dir: &Path, store: &str, head_key: &str, bytes: &[u8], etag: &str) ->
 }
 
 /// Starts the backup of `spool`'s chain under `prefix` to `store`, on its own thread; `report` is told each change of
-/// its state.
-pub(super) fn start<S: ObjectStore + Send + 'static>(
+/// its state. Old generations are deleted from the store through `cleanup`, another client, on a thread of their own.
+pub(super) fn start<S: ObjectStore + Send + 'static, C: ObjectStore + Send + 'static>(
     spool: &mut Spool,
     store: S,
+    cleanup: C,
     prefix: String,
     report: Box<dyn Fn(State) + Send>,
 ) -> super::R<()> {
     let (wake, woken) = std::sync::mpsc::sync_channel(1);
     spool.wake = Some(wake);
+    let (tidy, tidied) = std::sync::mpsc::sync_channel(1);
+    spool.tidy = Some(tidy);
+    let cleanup = Cleanup::new(
+        cleanup,
+        spool.dir.clone(),
+        Arc::clone(&spool.prunes),
+        Arc::clone(&spool.live),
+    );
+    std::thread::Builder::new()
+        .name("stream-cleanup".into())
+        .spawn(move || cleanup.run(&tidied))
+        .map_err(super::io)?;
     let head_key = format!("{prefix}head");
     let found = std::fs::read(spool.dir.join(confirmed_key(&head_key))).ok();
     // Known only when it is this store's: a spool with none, or one of another store, learns the store's head again.
@@ -293,13 +339,10 @@ pub(super) fn start<S: ObjectStore + Send + 'static>(
         prefix,
         head_key,
         identity: spool.store.clone(),
-        prunes: Arc::clone(&spool.prunes),
         progress: Arc::clone(&spool.progress),
         confirmed,
         known,
         tried,
-        deletes: std::collections::VecDeque::new(),
-        deleting: true,
         moved: 0,
     };
     std::thread::Builder::new()
@@ -410,7 +453,6 @@ struct Worker<S> {
     head_key: String,
     /// The store's identity, kept with the confirmed head.
     identity: String,
-    prunes: Prunes,
     progress: Arc<Progress>,
     /// The head this writer last knew the store to hold, and its ETag; none: the store had no head.
     confirmed: Option<(Vec<u8>, String)>,
@@ -418,8 +460,6 @@ struct Worker<S> {
     known: bool,
     /// Heads put since, whose answers were lost: if the store holds one, it is this writer's.
     tried: Vec<Vec<u8>>,
-    deletes: std::collections::VecDeque<String>,
-    deleting: bool,
     /// Objects the current pass has put (or found there).
     moved: u64,
 }
@@ -532,7 +572,6 @@ impl<S: ObjectStore> Worker<S> {
             }
             _ => true,
         };
-        self.prune();
         Ok(current)
     }
 
@@ -635,49 +674,205 @@ impl<S: ObjectStore> Worker<S> {
         Ok(())
     }
 
-    /// Old generations' chains off the store (#3833), a few at a time, and off `kept/`; a store that cannot delete is
-    /// left as it is.
-    fn prune(&mut self) {
-        if self.deletes.is_empty() {
-            let todo = self
-                .prunes
-                .lock()
-                .map(|mut p| std::mem::take(&mut *p))
-                .unwrap_or_default();
-            for (record_key, live) in todo {
-                // This disk's copy first: the store is read only for a record this machine never held.
-                let bytes = match std::fs::read(self.kept(&record_key)) {
-                    Ok(b) => b,
-                    Err(_) if self.deleting => match self.store.get(&record_key) {
-                        Ok(Some(o)) => o.bytes,
-                        _ => continue,
-                    },
-                    Err(_) => continue,
-                };
-                let Ok(r) = super::object_map(&bytes) else {
-                    continue;
-                };
-                if let Some(replica::encode::Value::Array(objects)) = r.get(&3) {
-                    for o in objects {
-                        if let replica::encode::Value::Bytes(h) = o
-                            && !live.contains(h)
-                        {
-                            self.deletes
-                                .push_back(format!("{}objects/{}", self.prefix, to_hex(h)));
-                        }
-                    }
+}
+
+/// What the clean-up has to do: an old generation's record to read (with the objects the chain then named, never
+/// deleted), or an object to delete.
+enum Job {
+    Record(String, BTreeSet<Vec<u8>>),
+    Object(String),
+}
+
+impl Job {
+    fn key(&self) -> &str {
+        match self {
+            Job::Record(k, _) | Job::Object(k) => k,
+        }
+    }
+}
+
+/// Old generations' chains off the store (#3833) and off `kept/`, on the clean-up's own thread with its own client
+/// (#4954). A refused read or delete is tried again after its own back-off ([`BACKOFF_MS`]) while the rest go on.
+struct Cleanup<S> {
+    store: S,
+    dir: PathBuf,
+    prunes: Prunes,
+    live: Live,
+    /// What waits its turn, oldest generation first.
+    due: std::collections::VecDeque<Job>,
+    /// What was refused, each with when it is tried again and the refusals in a row so far.
+    later: Vec<(Instant, u32, Job)>,
+    deleted: u64,
+    refused: u64,
+    /// Objects found named by the current chain, so not deleted.
+    kept_live: u64,
+}
+
+impl<S: ObjectStore> Cleanup<S> {
+    fn new(store: S, dir: PathBuf, prunes: Prunes, live: Live) -> Cleanup<S> {
+        Cleanup {
+            store,
+            dir,
+            prunes,
+            live,
+            due: std::collections::VecDeque::new(),
+            later: Vec::new(),
+            deleted: 0,
+            refused: 0,
+            kept_live: 0,
+        }
+    }
+
+    #[allow(clippy::disallowed_methods)] // The clean-up's waits are real time, off the world's clock.
+    fn run(mut self, woken: &Receiver<()>) {
+        // Passes in a row that were refused and deleted nothing: the back-off's step.
+        let mut stuck = 0usize;
+        loop {
+            let (done, fault) = self.pass(Instant::now());
+            self.gauge();
+            let wait = match fault {
+                Some(fault) => {
+                    let wait;
+                    (stuck, wait) = backoff(stuck, done);
+                    eprintln!(
+                        "worldd: the stream's clean-up was refused, viewers unaffected: {fault}; {} to delete wait, {} of them to try again, the next pass in {wait} ms",
+                        self.due.len() + self.later.len(),
+                        self.later.len()
+                    );
+                    wait
                 }
-                self.deletes.push_back(record_key);
+                None => {
+                    stuck = 0;
+                    // More waiting: on at once, at the store's pace; else when told, or a second on.
+                    if self.due.is_empty() { 1_000 } else { 0 }
+                }
+            };
+            let gone = if wait == 0 {
+                matches!(
+                    woken.try_recv(),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected)
+                )
+            } else {
+                matches!(
+                    woken.recv_timeout(Duration::from_millis(wait)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+                )
+            };
+            if gone {
+                // The writer is gone, and the world with it.
+                return;
             }
         }
+    }
+
+    /// How the clean-up stands, in `health.json` (`stream_cleanup`).
+    fn gauge(&self) {
+        crate::measures::CLEANUP.set(
+            (self.due.len() + self.later.len()) as u64,
+            self.later.len() as u64,
+            self.deleted,
+            self.refused,
+        );
+    }
+
+    fn kept(&self, key: &str) -> PathBuf {
+        self.dir.join(KEPT).join(key)
+    }
+
+    /// Up to [`DELETES_PER_PASS`] reads and deletes at `now`; the deletes it made, and the refusal that ended it.
+    fn pass(&mut self, now: Instant) -> (u64, Option<String>) {
+        if let Ok(mut p) = self.prunes.lock() {
+            self.due
+                .extend(p.drain(..).map(|(key, live)| Job::Record(key, live)));
+        }
+        // What was refused and has waited its back-off goes back in line, behind the rest.
+        let (again, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.later)
+            .into_iter()
+            .partition(|(at, _, _)| *at <= now);
+        self.later = wait;
+        let mut tries = std::collections::HashMap::new();
+        for (_, n, job) in again {
+            tries.insert(job.key().to_owned(), n);
+            self.due.push_back(job);
+        }
+        let mut done = 0u64;
         for _ in 0..DELETES_PER_PASS {
-            let Some(key) = self.deletes.pop_front() else {
-                return;
+            let Some(job) = self.due.pop_front() else {
+                break;
             };
-            let _ = std::fs::remove_file(self.kept(&key));
-            if self.deleting && self.store.delete(&key).is_err() {
-                self.deleting = false;
+            let refusal = match &job {
+                // This disk's copy first: the store is read only for a record this machine never held.
+                Job::Record(key, live) => match std::fs::read(self.kept(key)) {
+                    Ok(b) => {
+                        self.expand(key, &b, live);
+                        None
+                    }
+                    Err(_) => match self.store.get(key) {
+                        Ok(Some(o)) => {
+                            self.expand(key, &o.bytes, live);
+                            None
+                        }
+                        // Gone already.
+                        Ok(None) => None,
+                        Err(e) => Some(e),
+                    },
+                },
+                Job::Object(key) => {
+                    if self.is_live(key) {
+                        self.kept_live += 1;
+                        continue;
+                    }
+                    let _ = std::fs::remove_file(self.kept(key));
+                    match self.store.delete(key) {
+                        Ok(()) => {
+                            self.deleted += 1;
+                            done += 1;
+                            None
+                        }
+                        Err(e) => Some(e),
+                    }
+                }
+            };
+            if let Some(e) = refusal {
+                // Skipped and tried again after its own back-off. The pass ends here, so a store out of reach is asked
+                // once a pass, not once an object.
+                self.refused += 1;
+                let n = tries.get(job.key()).copied().unwrap_or(0) + 1;
+                let wait = BACKOFF_MS[(n as usize - 1).min(BACKOFF_MS.len() - 1)];
+                self.later.push((now + Duration::from_millis(wait), n, job));
+                return (done, Some(format!("{}: {}", e.name, e.detail)));
             }
+        }
+        (done, None)
+    }
+
+    /// Whether the current chain names `key`: never deleted.
+    fn is_live(&self, key: &str) -> bool {
+        // A poisoned lock: deleting nothing is the safe side.
+        self.live
+            .lock()
+            .map_or(true, |l| l.0.contains(key) || l.1.contains(key))
+    }
+
+    /// An old generation's record read: its objects the chain then did not name, then the record, first in line.
+    fn expand(&mut self, record_key: &str, bytes: &[u8], live: &BTreeSet<Vec<u8>>) {
+        let Ok(r) = super::object_map(bytes) else {
+            return;
+        };
+        let prefix = record_key.rsplit_once("objects/").map_or("", |(p, _)| p);
+        let mut jobs = Vec::new();
+        if let Some(replica::encode::Value::Array(objects)) = r.get(&3) {
+            for o in objects {
+                if let replica::encode::Value::Bytes(h) = o
+                    && !live.contains(h)
+                {
+                    jobs.push(Job::Object(format!("{prefix}objects/{}", to_hex(h))));
+                }
+            }
+        }
+        jobs.push(Job::Object(record_key.to_owned()));
+        for job in jobs.into_iter().rev() {
+            self.due.push_front(job);
         }
     }
 }
@@ -748,13 +943,10 @@ mod tests {
             prefix: prefix.clone(),
             head_key: format!("{prefix}head"),
             identity: "test-store".into(),
-            prunes: Arc::default(),
             progress: Arc::default(),
             confirmed: None,
             known: true,
             tried: Vec::new(),
-            deletes: std::collections::VecDeque::new(),
-            deleting: false,
             moved: 0,
         };
         assert!(worker.pass().is_err(), "the sixth put is not answered");
@@ -854,5 +1046,190 @@ mod tests {
         );
         assert_eq!(backoff(0, 0), (1, 1_000));
         assert_eq!(backoff(1, 0), (2, 2_000));
+    }
+
+    /// A store that does not answer every `every`th delete.
+    struct Flaky {
+        store: Memory,
+        deletes: Cell<usize>,
+        every: usize,
+    }
+
+    impl ObjectStore for Flaky {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.store.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.store.put(key, bytes, when)
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.store.list(prefix)
+        }
+        fn delete(&self, key: &str) -> R<()> {
+            self.deletes.set(self.deletes.get() + 1);
+            if self.deletes.get().is_multiple_of(self.every) {
+                return Err(super::super::Refusal {
+                    name: "store-unreachable",
+                    detail: format!("{key}: timeout: receive response"),
+                });
+            }
+            self.store.delete(key)
+        }
+    }
+
+    /// An old generation in `store`: its objects, and its record naming them; the record's key.
+    fn generation<S: ObjectStore>(store: &S, prefix: &str, g: u8, objects: &[Vec<u8>]) -> String {
+        use replica::encode::Value;
+        let key = |b: &[u8]| format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(b)));
+        for o in objects {
+            store.put(&key(o), o, When::Absent).unwrap();
+        }
+        let record = super::super::wire(Value::Map(std::collections::BTreeMap::from([
+            (1, Value::Bytes(Vec::new())),
+            (2, Value::Uint(u64::from(g))),
+            (
+                3,
+                Value::Array(
+                    objects
+                        .iter()
+                        .map(|o| Value::Bytes(replica::ids::sha256(o).to_vec()))
+                        .collect(),
+                ),
+            ),
+        ])))
+        .unwrap();
+        store.put(&key(&record), &record, When::Absent).unwrap();
+        key(&record)
+    }
+
+    /// Eden, 26 Nov (#4954): one refused delete switched the clean-up off until the world restarted, and the store kept
+    /// 35,257 stream objects against about 1,300 live. Against a store that does not answer every third delete, the
+    /// clean-up goes on past each refusal, tries the refused one again after its back-off, and catches up; an object
+    /// the current chain names (handed over, or written to the spool since) is never deleted.
+    #[test]
+    fn refused_deletes_are_tried_again_and_the_clean_up_catches_up() {
+        let dir = std::env::temp_dir().join(format!("backup-cleanup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let prefix = "s/w/";
+        let key = |b: &[u8]| format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(b)));
+        let spool = Spool::new(dir.clone(), "test-store".into());
+        let store = Flaky {
+            store: Memory::default(),
+            deletes: Cell::new(0),
+            every: 3,
+        };
+        // Three old generations of 40 objects; the first also names an object the current chain names (handed over),
+        // the second one the chain names later (written to the spool after the hand-over).
+        let (handed, later) = (b"handed".to_vec(), b"later".to_vec());
+        let mut records = Vec::new();
+        for g in 0..3u8 {
+            let mut objects: Vec<Vec<u8>> = (0..40u8).map(|i| vec![g, i]).collect();
+            match g {
+                0 => objects.push(handed.clone()),
+                1 => objects.push(later.clone()),
+                _ => {}
+            }
+            records.push(generation(&store.store, prefix, g, &objects));
+        }
+        spool.live([key(&handed)].into());
+        for r in &records {
+            // No live set with the prune: the check at each delete alone keeps the chain's objects.
+            spool.prune(r.clone(), BTreeSet::new());
+        }
+        spool.object(&key(&later), &later).unwrap();
+        let mut cleanup = Cleanup::new(
+            store,
+            dir.clone(),
+            Arc::clone(&spool.prunes),
+            Arc::clone(&spool.live),
+        );
+        let mut now = Instant::now();
+        let (mut passes, mut refused_passes, mut deleted_after_refusal) = (0, 0, 0);
+        loop {
+            let (done, fault) = cleanup.pass(now);
+            passes += 1;
+            if refused_passes > 0 {
+                deleted_after_refusal += done;
+            }
+            if fault.is_some() {
+                refused_passes += 1;
+            }
+            if cleanup.due.is_empty() && cleanup.later.is_empty() || passes > 500 {
+                break;
+            }
+            // Past the longest back-off: whatever was refused is due again.
+            now += Duration::from_secs(61);
+        }
+        assert!(
+            cleanup.due.is_empty() && cleanup.later.is_empty(),
+            "caught up in {passes} passes"
+        );
+        assert!(refused_passes > 10, "{refused_passes} refused passes");
+        assert!(deleted_after_refusal > 100, "{deleted_after_refusal}");
+        assert_eq!(cleanup.deleted, 3 * 41, "every old object and record, once each");
+        assert_eq!(cleanup.refused, refused_passes);
+        assert_eq!(cleanup.kept_live, 2);
+        let mut left = cleanup.store.store.list("").unwrap();
+        left.sort();
+        let mut live = vec![key(&handed), key(&later)];
+        live.sort();
+        assert_eq!(left, live, "only the current chain's objects are left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A store whose deletes take 3 s each.
+    struct Slow(Memory);
+
+    impl ObjectStore for Slow {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.0.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.0.put(key, bytes, when)
+        }
+        #[allow(clippy::disallowed_methods)] // A slow store's wait is real time.
+        fn delete(&self, key: &str) -> R<()> {
+            std::thread::sleep(Duration::from_secs(3));
+            self.0.delete(key)
+        }
+    }
+
+    /// #4954: the clean-up runs on its own thread with its own client. A backlog of slow deletes (here 3 s each)
+    /// holds back no put: the backup holds a new head well before the first delete is answered.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The backup's drain is real time.
+    fn slow_deletes_hold_back_no_put() {
+        let dir = std::env::temp_dir().join(format!("backup-slow-cleanup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let prefix = "s/w/";
+        let mut spool = Spool::new(dir.clone(), "test-store".into());
+        let old = Slow(Memory::default());
+        let objects: Vec<Vec<u8>> = (0..5u8).map(|i| vec![9, i]).collect();
+        let record = generation(&old.0, prefix, 9, &objects);
+        start(
+            &mut spool,
+            Memory::default(),
+            old,
+            prefix.to_owned(),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        spool.prune(record, BTreeSet::new());
+        let begun = Instant::now();
+        let new = b"new part".to_vec();
+        let key = format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(&new)));
+        spool.object(&key, &new).unwrap();
+        spool.head(&format!("{prefix}head"), b"head").unwrap();
+        assert!(
+            spool.drainer().unwrap().drain(Duration::from_secs(10)),
+            "the backup holds the head"
+        );
+        assert!(
+            begun.elapsed() < Duration::from_secs(3),
+            "before the first delete is answered: {:?}",
+            begun.elapsed()
+        );
+        drop(spool);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

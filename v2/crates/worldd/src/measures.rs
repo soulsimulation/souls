@@ -365,6 +365,7 @@ impl Measures {
         SYNCS.json(&mut o);
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
+        CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
         ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         HISTORY_EXPORT.json(&mut o);
@@ -493,6 +494,54 @@ pub static STREAM: Stream = Stream(Mutex::new(String::new()));
 /// R15: the stream's recovery chain, backed up to the store behind it (`stream_backup` in `health.json`). Viewers read
 /// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
 pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
+
+/// The stream's clean-up of old generations from the store (#3833, #4954; `stream_cleanup` in `health.json`): the
+/// reads and deletes waiting (`waiting`), those of them waiting to be tried again after a refusal (`retrying`), and
+/// the objects deleted and the refusals since the start. One per process, written by the clean-up's own thread; absent
+/// until it first runs.
+pub struct Cleanup {
+    on: std::sync::atomic::AtomicBool,
+    waiting: AtomicU64,
+    retrying: AtomicU64,
+    deleted: AtomicU64,
+    refused: AtomicU64,
+}
+
+/// This process's stream clean-up.
+pub static CLEANUP: Cleanup = Cleanup {
+    on: std::sync::atomic::AtomicBool::new(false),
+    waiting: AtomicU64::new(0),
+    retrying: AtomicU64::new(0),
+    deleted: AtomicU64::new(0),
+    refused: AtomicU64::new(0),
+};
+
+impl Cleanup {
+    /// How the clean-up stands after a pass.
+    pub fn set(&self, waiting: u64, retrying: u64, deleted: u64, refused: u64) {
+        self.waiting.store(waiting, Ordering::Relaxed);
+        self.retrying.store(retrying, Ordering::Relaxed);
+        self.deleted.store(deleted, Ordering::Relaxed);
+        self.refused.store(refused, Ordering::Relaxed);
+        self.on.store(true, Ordering::Relaxed);
+    }
+
+    /// `,"stream_cleanup":{"waiting":n,"retrying":n,"deleted":n,"refused":n}`, or nothing before it runs.
+    fn json(&self, o: &mut String) {
+        if !self.on.load(Ordering::Relaxed) {
+            return;
+        }
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            ",\"stream_cleanup\":{{\"waiting\":{},\"retrying\":{},\"deleted\":{},\"refused\":{}}}",
+            l(&self.waiting),
+            l(&self.retrying),
+            l(&self.deleted),
+            l(&self.refused)
+        );
+    }
+}
 
 /// R17: the start's reads of the store that the world no longer waits on (`shipping`, `archive` and `creator` in
 /// `health.json`): `degraded` with the fault, the tries so far and the wait before the next while the store does not
