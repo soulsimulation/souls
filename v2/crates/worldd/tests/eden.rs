@@ -4805,17 +4805,20 @@ fn zz_probe_hand_in_hand_past_a_stump() {
         // Stand side by side at the start.
         let s1 = a.act("eden:walk", Some(ground), point(13.0 + dx, -33.0));
         let s2 = b.act("eden:walk", Some(ground), point(13.0 + dx + 0.8, -33.0));
+        let served_kinds = replica::rules::json::parse(&std::fs::read_to_string(dir.join("activities.json")).unwrap()).unwrap();
+        let hold = served_kinds.get("activities").and_then(|l| l.arr()).unwrap().iter().find(|e| e.get("kind").and_then(|k| k.str()) == Some("eden:hold_hands")).unwrap().clone();
+        let (pin, role) = (hold.get("name").and_then(|n| n.str()).unwrap().to_owned(), hold.get("offerer").and_then(|n| n.str()).unwrap().to_owned());
         let offer = a.act(
             "activity:offer",
             Some(ground),
             BTreeMap::from([
-                (1, Value::Text(name("eden:hold_hands"))),
-                (2, Value::Text(name("eden:one"))),
+                (1, Value::Text(name(&pin))),
+                (2, Value::Text(name(&role))),
                 (3, Value::Array(vec![b.1.to_value()])),
             ]),
         );
         std::thread::sleep(Duration::from_secs(1));
-        let held = created_of(&dir, "eden:hold_hands");
+        let held = created_of(&dir, &pin);
         let acc = b.act("activity:accept", held, BTreeMap::new());
         std::thread::sleep(Duration::from_secs(3));
         // A leads past the stump (13, -37.7).
@@ -4826,8 +4829,8 @@ fn zz_probe_hand_in_hand_past_a_stump() {
             .values()
             .map(|(_, _, x, z)| format!("({x:.3},{z:.3}) {:.3} m from the stump", (x - 13.0).hypot(z + 37.7)))
             .collect();
-        let wb = b.act_within("eden:walk", Some(fountain), BTreeMap::new(), 20_000_000);
-        let wa = a.act_within("eden:walk", Some(fountain), BTreeMap::new(), 20_000_000);
+        let wb = b.act("eden:walk", Some(ground), point(16.0, -45.0));
+        let wa = a.act("eden:walk", Some(fountain), BTreeMap::new());
         println!(
             "PROBE dx {dx}: start {s1:?} {s2:?} offer {offer:?} held {held:?} accept {acc:?} lead {lead:?} at {near:?}; then B walk {wb:?}, A walk {wa:?}"
         );
