@@ -417,7 +417,7 @@ pub const OFFER_LAPSED: &str = "souls:offer-lapsed";
 
 /// The bodies an offer's event is addressed to, for the queue of events addressed to a Soul (R4): an offer goes to
 /// each body asked, a refusal to the asker, and a lapse to the asker and to the bodies it names (those that did not
-/// answer, or the one whose accepted pair never started), so no one is left waiting on an offer that is gone.
+/// answer, or those whose accepted pair never started), so no one is left waiting on an offer that is gone.
 /// `None` for any other event.
 pub fn addressed(name: &str, fields: &BTreeMap<u64, Value>) -> Option<BTreeSet<Id>> {
     let listed = |v: Option<&Value>| -> BTreeSet<Id> {

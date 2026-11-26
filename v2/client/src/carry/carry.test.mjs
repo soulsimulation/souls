@@ -233,9 +233,9 @@ test('a carry\'s offer reaches the asked Soul as a carry; the crews are listed w
   const crew = { ...ev, fields: { ...ev.fields, 3: [id(7), id(9)], 4: 70_000_000, 7: 60_000_000, 8: 310_000_000 } };
   assert.deepEqual(offerNote(crew, id(7), 10_000_000), {
     kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 60, each_accept_s: 60, open_most_s: 300,
-    note: 'open 60 s; each accept keeps it open 60 s more for the rest, 300 s at most: answer before it lapses',
+    note: 'open 60 s from when it was made; each accept keeps it open 60 s more for the rest, 300 s at most: answer before it lapses',
   });
-  assert.deepEqual(offerNote(ev, id(7), 15_000_000), { kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 45, note: 'open 45 s: answer before it lapses' });
+  assert.deepEqual(offerNote(ev, id(7), 15_000_000), { kind: 'carry', what: 'offered', offer: id(8), from: id(6), open_s: 45, note: 'open 45 s from when it was made: answer before it lapses' });
   const held = new Map([...rows, [id(10), { id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam', parent: id(8) }]]);
   assert.deepEqual(crewsIn(held), [{ id: id(8), on: id(1), holds: [{ id: id(10), name: 'rack_beam 10', kind: 'mars:rack_beam' }] }]);
 });

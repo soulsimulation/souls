@@ -83,11 +83,11 @@ export function offerTime(f, at) {
   if (!Number.isFinite(now) || !Number.isFinite(until)) return {};
   const s = (us) => Math.max(0, Math.round(us / 1e6)), open_s = s(until - now);
   const each = Number(f[7]), most = Number(f[8]);
-  if (!Number.isFinite(each) || !Number.isFinite(most)) return { open_s, note: `open ${open_s} s: answer before it lapses` };
+  if (!Number.isFinite(each) || !Number.isFinite(most)) return { open_s, note: `open ${open_s} s from when it was made: answer before it lapses` };
   const each_accept_s = s(each), open_most_s = s(most - now);
   return {
     open_s, each_accept_s, open_most_s,
-    note: `open ${open_s} s; each accept keeps it open ${each_accept_s} s more for the rest, ${open_most_s} s at most: answer before it lapses`,
+    note: `open ${open_s} s from when it was made; each accept keeps it open ${each_accept_s} s more for the rest, ${open_most_s} s at most: answer before it lapses`,
   };
 }
 
@@ -103,7 +103,7 @@ export function offerNote(ev, me, at) {
   const what = OFFER_EVENTS[ev.name];
   if (!what) return null;
   const f = ev.fields ?? {}, opener = f[what === 'invited' ? 5 : 2], mine = opener === me;
-  // A lapse is told to those asked too (field 3: who did not answer, or the one whose accepted pair never started,
+  // A lapse is told to those asked too (field 3: who did not answer, or those whose accepted pair never started,
   // field 4 that pair): the offer is gone, so `wait`ing on it is over.
   if (what === 'lapsed' && !mine && idsOf(f[3]).includes(me)) {
     return { kind: 'conversation', what, conversation: f[1], from: opener, ...(f[4] !== undefined ? { pair: f[4] } : {}) };

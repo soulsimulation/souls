@@ -446,7 +446,7 @@ impl Activities {
         for m in &node.members {
             bound.extend(self.role_link(tree, mint, &o.kind, o.place, m)?);
         }
-        let renewed = self.renewed(&o, body, ask.at);
+        let renewed = self.renewed(offer, &o, body, ask.at);
         let mut fields = BTreeMap::from([(1, offer.to_value())]);
         if let Some(to) = renewed {
             fields.insert(2, at(to));
@@ -589,7 +589,7 @@ impl Activities {
         ];
         let mut fields = BTreeMap::from([(1, offer.to_value())]);
         // The crew is still forming: its node, not started yet, holds the offer's renewed lapse as its expiry.
-        let renewed = self.renewed(o, body, ask.at);
+        let renewed = self.renewed(offer, o, body, ask.at);
         if let Some(to) = renewed {
             if node.state == State::Proposed {
                 node.expires = to;
@@ -651,15 +651,20 @@ impl Activities {
         Ok(offer)
     }
 
-    /// The lapse an accept by `body` at `now` renews offer `o` to, when its kind takes more than two and some other
-    /// body asked has still to answer: the kind's `proposal_lasts` from now, never past [`OPEN_MOST`] of them from the
-    /// offer, never earlier than it was. None when `body` is the last to answer (nothing is left to wait for) or the
-    /// kind is a pair's.
-    fn renewed(&self, o: &Open, body: Id, now: Micros) -> Option<Micros> {
+    /// The lapse an accept by `body` at `now` renews `offer` (open as `o`) to, when its kind takes more than two, the
+    /// accept leaves a place in its activity and some other body asked has still to answer: the kind's
+    /// `proposal_lasts` from now, never past [`OPEN_MOST`] of them from the offer, never earlier than it was. None when
+    /// `body` is the last to answer or fills the activity (nothing is left to wait for), or the kind is a pair's.
+    fn renewed(&self, offer: Id, o: &Open, body: Id, now: Micros) -> Option<Micros> {
         let k = self.kinds.get(&o.kind)?;
         let lasts = k.proposal_lasts;
         // Only a group forms from several accepts; a pair kind's offer to several makes a pair of each.
+        let room = self
+            .live
+            .get(&offer)
+            .is_some_and(|l| l.node.members.len() + 1 < k.most);
         let waiting = k.most > 2
+            && room
             && o.asked
                 .iter()
                 .any(|b| *b != body && !o.answered.contains(b));
