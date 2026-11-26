@@ -213,7 +213,9 @@ slot) with the stance the request named. Postures are the controller's stance in
 `sit` or `rise` (`eden:sit`, as T10's fixtures) is taken like any act (I4), then committed at the next tick by what
 already moves bodies: a walk is N7's walk behind the host, sent to a point (`Runner::send`, N9), to a target's point
 (parameter 1, `[x, y, z]` µm) or a seat's stand point, at the gait parameter 2 names (`gait:walk`, `gait:jog` or
-`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks); a sit is B3's `Slots::commit`, one tick's sits together; a
+`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks), and for a lifted
+carry's front, the carry's heading at its goal (parameter 3, `[x, z]`: the crew turns with it, `moving-group.md`; read
+from no other walker); a sit is B3's `Slots::commit`, one tick's sits together; a
 rise is B3's `Slots::rise`. The checks are the moves' own, made as they start: claims, reach, the seat, the route.
 Bodies step in ticks caught up to world time. A move writes an entry when it starts and one when it ends, both caused
 by the intent, and is answered once, at its end: a receipt naming both when done, else a refusal naming how it ended

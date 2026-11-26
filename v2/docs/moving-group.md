@@ -76,16 +76,32 @@ either member's leave, the other's own walk or act, or a restart (moves are not 
 
 **Carrying together** is `carried-load` with every carrier a walker: when a lifted carry's front walks, it leads,
 and every other carrier that is not moving on its own (no move, no order of its own) walks with it by its own
-`souls:follow` order, keeping a place at a fixed offset from the front on the plan (parameter 4, `[x, z]` µm,
-`skills::close::Follow::at`): the offset it stood at when the order began (worldd's `keep_carry_orders`). The group
-moves as the front walks and does not turn, so the load arrives where the front's walk takes it, turned as it was
-lifted. So one walk moves the crew: separate agents need not set off within the 0.7 s a 1 m stretch allows. A
-carrier's own act takes its legs back (B2) and it walks its own way, still in the carry, as before (a late carrier's
-own `carry to` does not fight the group; to turn a load square into a slot, every carrier sends the same one); once its
-own walk ends while the front's still goes, it takes a place again where it stands. The leave rule is the carry's: a
-side's leave with the load's crew left closes up, its order cancelled; a carry that breaks off (`souls:partner-left`,
-`souls:carriers-apart`, `souls:carry-blocked`) stops the front's walk with that reason and cancels the walkers' orders,
-so the whole group stops with one reason. A restart sets the load down (C3) and cancels the orders.
+`souls:follow` order, keeping its place in the carry's frame as an offset from the front on the plan (parameter 4,
+`[x, z]` µm, `skills::close::Follow::at`): the back the carry's span behind the front, a side where it stood at the
+lift or take (worldd's `keep_carry_orders`, the engine's `carry_follows`). So one walk moves the crew: separate agents
+need not set off within the 0.7 s a 1 m stretch allows.
+
+**The crew turns with its front.** A front's walk that names the carry's heading at its goal (the walk's parameter 3,
+`[x, z]`, from the back toward the front: the client's `carry to <crew> <bay> <slot>` sends it, so a load goes into a
+slot square), or that goes to a pose of the way a lift found (0.135 R2: its front within 0.1 m of the walk's goal),
+turns the group: each order also names the goal and the place's offset there (parameter 5, `[goal x, goal z, x, z]`,
+`Follow::turning`), and the place swings about the front by the share of the way to the goal the front has walked,
+keeping its length; the carrier is fed its place's own pace, so it keeps up as the place swings. A front's new walk
+takes the places again when it or the walk before turns the crew; a straight one keeps them. A walk that names no
+heading and goes to no pose leaves the load turned as it is.
+
+A carrier's own act takes its legs back (B2) and it walks its own way, still in the carry, as before (a late carrier's
+own `carry to` does not fight the group); once its own walk ends while the front's still goes, it takes its place
+again. The leave rule is the carry's: a side's leave with the load's crew left closes up, its order cancelled; a carry
+that breaks off (`souls:partner-left`, `souls:carriers-apart`, `souls:carry-blocked`) stops the front's walk with that
+reason and cancels the walkers' orders, so the whole group stops with one reason. A restart sets the load down (C3)
+and cancels the orders.
+
+**Others keep apart from a carried load.** The walkers' map learns where a load rests only when it is set down or
+seated, so while it is carried it stands among the bodies a walker keeps apart from (`sim::host::Carried`, the route
+skill's `Ask::Near`): points across its outline as held, at most 0.4 m apart and drawn in a walker's own space from
+its edge, moving with it, so a walker never passes between them and goes round it as round a row of standing bodies.
+Its own carriers do not see it.
 
 No task needs a seventh idea: each is one of these with its own data (places, outline, speed, region, stops).
 
