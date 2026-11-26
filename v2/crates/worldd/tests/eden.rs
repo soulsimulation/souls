@@ -1835,8 +1835,10 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
                     vec![None; walks.len()]
                 };
                 let mut ran = ran.lock().unwrap();
-                for (((_, walked, secs), (name, &place)), pose) in
-                    walks.into_iter().zip(landforms.iter().zip(places)).zip(poses)
+                for (((_, walked, secs), (name, &place)), pose) in walks
+                    .into_iter()
+                    .zip(landforms.iter().zip(places))
+                    .zip(poses)
                 {
                     ran.push((from, *name, place, walked, secs, pose));
                 }
@@ -1846,7 +1848,9 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
     let mut failed = Vec::new();
     for (from, name, place, walked, secs, pose) in ran.into_inner().unwrap() {
         let Some(pose) = pose else {
-            failed.push(format!("{from} -> {name}: {walked:?}, no pose for each Soul in the log"));
+            failed.push(format!(
+                "{from} -> {name}: {walked:?}, no pose for each Soul in the log"
+            ));
             continue;
         };
         let p = pose.position;
