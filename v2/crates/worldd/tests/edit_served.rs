@@ -6734,7 +6734,7 @@ fn a_gesture_added_by_the_upgrade_starts(
     old: &Path,
     release: &Path,
     at: (i64, i64),
-) {
+) -> (PathBuf, Seeded) {
     let d = scratch(tag);
     let w = seed_entries(&d, facts, 2, at, Some(old));
     let name = w.dir.file_name().unwrap().to_str().unwrap().to_owned();
@@ -6843,6 +6843,7 @@ fn a_gesture_added_by_the_upgrade_starts(
     }
     // The whole log, the gesture's parts and its definition among them, still replays from empty.
     let _ = served_copy(&w);
+    (d, w)
 }
 
 /// [`a_gesture_added_by_the_upgrade_starts`] on N2's test world: seeded with the body alone.
@@ -6868,13 +6869,74 @@ fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
         release.join("greetings/wave_together.json"),
     )
     .unwrap();
-    a_gesture_added_by_the_upgrade_starts(
+    let (d, w) = a_gesture_added_by_the_upgrade_starts(
         "added-tw-w",
         &testworld::generate(1, 0).unwrap().text,
         &old,
         &release,
         (-40, 30),
     );
+    // A later release changes the added gesture (its lead bows): a new revision of its activity, which the next start
+    // takes at the revision the world defined, as a header's kind is taken; nothing is defined again.
+    let path = release.join("greetings/wave_together.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replacen("\"move\": \"wave\"", "\"move\": \"bow\"", 1),
+    )
+    .unwrap();
+    let (status, out) = entries_cmd("stage", &w.dir, &release);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains(&format!("change {GESTURE} ")), "{out}");
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let records = log_records(&w).len();
+    let s = serve_with(&w, &d.join("s3"), None);
+    let line = s.line("kinds added since the world's header: ", 900);
+    println!("{line}");
+    assert!(
+        line.contains(": 0 to define at the first tick []")
+            && line
+                .split_once("taken at the world's revision [")
+                .is_some_and(|(_, taken)| taken.contains(&format!("{GESTURE}_activity@"))),
+        "{line}"
+    );
+    let mut souls = connect_socket(&d.join("s3"));
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    let body_b = body_of(&w, w.souls[1]);
+    let offered = intent_on(
+        &mut souls,
+        &w,
+        w.souls[0],
+        3,
+        "activity:offer",
+        w.ground,
+        BTreeMap::from([
+            (1, pinned_activity(&w, &format!("{GESTURE}_activity"))),
+            (2, Value::Text(Name::new("eden:one").unwrap())),
+            (3, Value::Array(vec![body_b.to_value()])),
+        ]),
+    );
+    assert_eq!(
+        offered.kind, 1,
+        "offered at the world's revision: {offered:?}"
+    );
+    let created = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            replica::effects::Body::Changes(cs) => Some(cs),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| {
+            matches!(&c.change, replica::effects::Change::Create { kind, .. }
+                if kind.as_str() == replica::kinds::defined::kind().0)
+        })
+        .count();
+    assert!(log_records(&w).len() > records);
+    assert_eq!(created, 2, "the gesture and its activity, defined once");
 }
 
 /// The release's library (`content/kinds`) as a world seeded before the group gestures had it: without `greetings/`.
