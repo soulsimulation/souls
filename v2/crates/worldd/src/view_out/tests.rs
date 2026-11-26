@@ -4100,14 +4100,15 @@ fn t_late_run(incremental: bool) -> (Vec<u8>, u64) {
 /// A remove (a gesture's end, a thing taken away) is published from its rows, not as a whole cut (about 0.6 s of the
 /// writer's time a part on Eden's 10,000 nodes): a node taken out with the nodes under it (one private), the links at
 /// them (one to a private node, never public) and their timers; an activity's node taken out in the cut that makes
-/// another node; a node made under one and taken out with it in one cut; and a node alone. The parts and the reader's
-/// state are the same bytes as when every cut is whole.
+/// another node; a node made under one and taken out with it in one part; a node made with a link and a timer in one
+/// part and taken out in the next, one cut; and a node alone. The parts and the reader's state are the same bytes as
+/// when every cut is whole.
 #[test]
 fn removes_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
     let (rows, rows_whole) = removes_run(true);
     let (whole, whole_whole) = removes_run(false);
     assert!(rows == whole, "the cuts by rows differ from the whole cuts");
-    assert_eq!(whole_whole, 4, "every reference cut is whole");
+    assert_eq!(whole_whole, 5, "every reference cut is whole");
     assert_eq!(rows_whole, 0, "a remove is a cut by rows");
 }
 
@@ -4126,6 +4127,7 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
     let (carrier, child, grand, secret, other, activity, stand, fresh, late) =
         (n(1), n(2), n(3), n(4), n(5), n(6), n(7), n(8), n(9));
     let (l1, l2, l3, t1, t2) = (n(10), n(11), n(12), n(13), n(14));
+    let (brief, l4, t3) = (n(15), n(16), n(17));
     let mut out = PublicWriter::open(
         PublicStart {
             root: &d.join("views"),
@@ -4207,16 +4209,26 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
             remove(14, activity),
             change(15, other, everyone, set(other, 1, Value::Uint(7))),
         ],
-        // A node made under one taken out with it, in one cut: never public.
+        // A node made under one taken out with it, in one part: never public.
         vec![w3e_create(&h, 16, late, stand, everyone), remove(17, stand)],
-        vec![remove(18, other)],
+        // A node made with a link to it and a timer, then taken out in the next part of the same cut: never public.
+        vec![
+            w3e_create(&h, 18, brief, h.zone, everyone),
+            link(19, l4, [fresh, brief]),
+            timer(20, t3, brief, everyone),
+        ],
+        vec![remove(21, brief)],
+        vec![remove(22, other)],
     ];
     let mut whole = 0;
     for (i, effects) in log.into_iter().enumerate() {
         let bytes = w3e_packet(&h, effects);
         actual.apply_bytes(&bytes).unwrap();
         out.push(i as u64, &bytes).unwrap();
-        out.flush().unwrap();
+        // The part that makes `brief` is cut with the one that takes it out.
+        if i != 4 {
+            out.flush().unwrap();
+        }
         if i == 0 {
             whole = out.whole_cuts;
         }

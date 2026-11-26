@@ -3744,10 +3744,16 @@ impl<S: ObjectStore> PublicWriter<S> {
             ids.extend(rows_of(self.player.state()));
             ids
         });
+        // A cut by rows names no version of a node it made and took out again (made in one part, gone in a later one):
+        // it is in neither state, as a whole cut leaves it out.
+        let tree = self.canonical.tree();
         let changed = self
             .changes
             .iter()
             .filter(|(i, _)| shown_ids.as_ref().is_none_or(|s| s.contains(i)))
+            .filter(|(i, _)| {
+                after.is_some() || !self.made.contains(i) || tree.handle(**i).is_some()
+            })
             .map(|(i, v)| (*i, *v))
             .collect::<Vec<_>>();
         // A whole cut's rows that differ from the published state: its context's delta, and what the words index
