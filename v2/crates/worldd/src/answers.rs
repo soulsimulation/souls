@@ -719,9 +719,9 @@ pub struct Config {
     /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
     /// its settings keeps them. `None`: a world without settings has no sky.
     pub sky: Option<daylight::Config>,
-    /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`),
-    /// each its pin and its entry's bytes: written at this start's first tick as definitions in the world's history
-    /// ([`Clock::put_kinds`]), so things and activities of them are made and every copy applies them.
+    /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`), by
+    /// pin: written at this start's first tick as definitions in the world's history ([`Clock::put_kinds`]), so things
+    /// and activities of them are made and every copy applies them.
     pub define: Definitions,
     /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
     pub served: Option<crate::views::served::Feed>,
@@ -841,8 +841,8 @@ pub struct Synced {
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
 pub type Offer = Box<dyn FnMut(u64, Vec<u8>) + Send>;
-/// Kinds a start defines in the world's history (#4954, [`Config::define`]): each its pin and its entry's bytes.
-pub type Definitions = Vec<(Name, Vec<u8>)>;
+/// Kinds a start defines in the world's history (#4954, [`Config::define`]), by pin.
+pub type Definitions = Vec<Name>;
 
 /// See [`Config::follow`].
 pub type Follow = Box<dyn FnOnce(Durable) -> Offer + Send>;
@@ -4061,9 +4061,12 @@ impl Clock {
 
     /// Step 1 for the kinds the release added (#4954, [`Config::define`]): at this start's first tick, each its world
     /// neither pins in its header nor defines yet is defined, as a creator's kind is (#3697): a `souls:kind` node at the
-    /// zone's root, for everyone, its name the pin and its record the entry's bytes, all in one entry of the world's own.
-    /// The world's log before it is unchanged, and every copy (a replay, the public stream, a fork) learns the kinds from
-    /// the entry. A refused entry is said and writes nothing: the kinds are then refused per act, as before.
+    /// zone's root, for everyone, its name the pin, all in one entry of the world's own. The record is left empty: the
+    /// world's rules for the kind come from its entries, which keep the entry, and a copy needs only the name, so the
+    /// checkpoints and the stream's snapshots do not carry each entry's bytes. The world's log before it is unchanged,
+    /// and every copy (a replay, the public stream, a fork) learns the kinds from the entry. When the world refuses the
+    /// one entry, each kind is written in an entry of its own, and each refused one is said by name and stays refused
+    /// per act (`kind-not-in-header`), as before.
     fn put_kinds(&mut self, now: Micros) {
         let Some((define, mut mint)) = self.define.take() else {
             return;
@@ -4075,7 +4078,7 @@ impl Clock {
         let header = self.replica.header();
         let mut creates = Vec::new();
         let mut names = Vec::new();
-        for (pin, bytes) in define {
+        for pin in define {
             if header.kinds.contains(&pin) || replica::kinds::defined::defines(tree, &pin) {
                 continue;
             }
@@ -4099,26 +4102,34 @@ impl Clock {
                 audience: Audience::Everyone,
                 fields: BTreeMap::from([
                     (replica::kinds::defined::NAME, Value::Text(pin)),
-                    (replica::kinds::defined::ENTRY, Value::Bytes(bytes)),
+                    (replica::kinds::defined::ENTRY, Value::Bytes(Vec::new())),
                 ]),
             });
         }
         if creates.is_empty() {
             return;
         }
-        let effect = Effect {
+        let effect = |creates: Vec<Change>| Effect {
             envelope: Clock::own(root, now),
             body: Body::Changes(recs_of(creates)),
             events: None,
             rest: Rest::new(),
         };
-        match self.try_own(vec![effect]) {
-            Ok(()) => println!("kinds defined: {} [{}]", names.len(), names.join(", ")),
-            Err(r) => eprintln!(
-                "worldd: the kinds added were not defined ({}: {}): each is refused per act",
-                r.name, r.detail
-            ),
+        if self.try_own(vec![effect(creates.clone())]).is_ok() {
+            println!("kinds defined: {} [{}]", names.len(), names.join(", "));
+            return;
         }
+        let mut written = Vec::new();
+        for (create, name) in creates.into_iter().zip(names) {
+            match self.try_own(vec![effect(vec![create])]) {
+                Ok(()) => written.push(name),
+                Err(r) => eprintln!(
+                    "worldd: the kind added {name} was not defined ({}: {}): it is refused per act",
+                    r.name, r.detail
+                ),
+            }
+        }
+        println!("kinds defined: {} [{}]", written.len(), written.join(", "));
     }
 
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at

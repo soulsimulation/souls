@@ -6734,7 +6734,7 @@ fn a_gesture_added_by_the_upgrade_starts(
     old: &Path,
     release: &Path,
     at: (i64, i64),
-) -> (PathBuf, Seeded) {
+) -> (PathBuf, Seeded, Id) {
     let d = scratch(tag);
     let w = seed_entries(&d, facts, 2, at, Some(old));
     let name = w.dir.file_name().unwrap().to_str().unwrap().to_owned();
@@ -6827,28 +6827,37 @@ fn a_gesture_added_by_the_upgrade_starts(
     );
     println!("accept: {accepted:?}");
     assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
-    let end = Instant::now() + Duration::from_secs(20);
-    loop {
-        let started = logged(&w)
-            .iter()
-            .flat_map(|p| p.effects.iter())
-            .filter(|e| e.envelope.node == gesture)
-            .flat_map(|e| e.events.iter().flatten())
-            .any(|ev| ev.name.as_str() == "souls:activity-started");
-        if started {
-            break;
-        }
-        assert!(Instant::now() < end, "the gesture starts");
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    assert!(started_within(&w, gesture), "the gesture starts");
     // The whole log, the gesture's parts and its definition among them, still replays from empty.
     let _ = served_copy(&w);
-    (d, w)
+    (d, w, gesture)
 }
 
-/// [`a_gesture_added_by_the_upgrade_starts`] on N2's test world: seeded with the body alone.
-#[test]
-fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
+/// Whether the log holds `souls:activity-started` on `activity`, within 20 s.
+fn started_within(w: &Seeded, activity: Id) -> bool {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let started = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| e.envelope.node == activity)
+            .flat_map(|e| e.events.iter().flatten())
+            .any(|ev| ev.name.as_str() == "souls:activity-started");
+        if started || Instant::now() > end {
+            return started;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on N2's test world: seeded with the body alone. Then a later release
+/// changes the added gesture (its lead bows): a new revision of its activity, which the next start takes at the
+/// revision the world defined, as a header's kind is taken; nothing is defined again. The gesture open across the
+/// restart keeps its rules (its member leaves it), a new one is offered, accepted and starts, and a creator's edit that
+/// changes the ground (a wall, so the town and the planner commit it under their own rules) and makes a node of the
+/// gesture's activity at the world's revision commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
     let d = scratch("added-tw");
     let content = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let (old, release) = (d.join("old"), d.join("release"));
@@ -6869,15 +6878,13 @@ fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
         release.join("greetings/wave_together.json"),
     )
     .unwrap();
-    let (d, w) = a_gesture_added_by_the_upgrade_starts(
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
         "added-tw-w",
         &testworld::generate(1, 0).unwrap().text,
         &old,
         &release,
         (-40, 30),
     );
-    // A later release changes the added gesture (its lead bows): a new revision of its activity, which the next start
-    // takes at the revision the world defined, as a header's kind is taken; nothing is defined again.
     let path = release.join("greetings/wave_together.json");
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
@@ -6889,31 +6896,50 @@ fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
     assert_eq!(status, 0, "{out}");
     assert!(out.contains(&format!("change {GESTURE} ")), "{out}");
     supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let (c, creator) = creator(0xc4);
+    static_creator(&w, c);
     let records = log_records(&w).len();
-    let s = serve_with(&w, &d.join("s3"), None);
+    let activity = format!("{GESTURE}_activity");
+    let socket = d.join("s3");
+    let s = serve_with(&w, &socket, None);
     let line = s.line("kinds added since the world's header: ", 900);
     println!("{line}");
     assert!(
         line.contains(": 0 to define at the first tick []")
             && line
                 .split_once("taken at the world's revision [")
-                .is_some_and(|(_, taken)| taken.contains(&format!("{GESTURE}_activity@"))),
+                .is_some_and(|(_, taken)| taken.contains(&format!("{activity}@"))),
         "{line}"
     );
-    let mut souls = connect_socket(&d.join("s3"));
+    s.line("listening ", 900);
+    let mut souls = connect_socket(&socket);
     souls
         .set_read_timeout(Some(Duration::from_secs(120)))
         .unwrap();
-    let body_b = body_of(&w, w.souls[1]);
+    let (a, b) = (w.souls[0], w.souls[1]);
+    // The gesture open across the restart is of the world's revision, whose rules this start took.
+    let left = intent_on(
+        &mut souls,
+        &w,
+        b,
+        3,
+        "activity:leave",
+        open,
+        BTreeMap::new(),
+    );
+    println!("leave the open gesture: {left:?}");
+    assert_eq!(left.kind, 1, "left at the world's revision: {left:?}");
+    let body_b = body_of(&w, b);
+    let pinned = pinned_activity(&w, &activity);
     let offered = intent_on(
         &mut souls,
         &w,
-        w.souls[0],
+        a,
         3,
         "activity:offer",
         w.ground,
         BTreeMap::from([
-            (1, pinned_activity(&w, &format!("{GESTURE}_activity"))),
+            (1, pinned.clone()),
             (2, Value::Text(Name::new("eden:one").unwrap())),
             (3, Value::Array(vec![body_b.to_value()])),
         ]),
@@ -6922,6 +6948,18 @@ fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
         offered.kind, 1,
         "offered at the world's revision: {offered:?}"
     );
+    let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
+    let accepted = intent_on(
+        &mut souls,
+        &w,
+        b,
+        4,
+        "activity:accept",
+        gesture,
+        BTreeMap::new(),
+    );
+    assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+    assert!(started_within(&w, gesture), "the changed gesture starts");
     let created = logged(&w)
         .iter()
         .flat_map(|p| p.effects.iter())
@@ -6937,6 +6975,45 @@ fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
         .count();
     assert!(log_records(&w).len() > records);
     assert_eq!(created, 2, "the gesture and its activity, defined once");
+    // A creator's edit through the walkers' town (a wall changes the ground) that makes a node of the activity at the
+    // world's revision: the town and the planner commit it under the rules this start took.
+    let Value::Array(pin) = &pinned else {
+        panic!("a pin")
+    };
+    let (Value::Text(plain), Value::Bytes(hash)) = (&pin[0], &pin[1]) else {
+        panic!("a pin's name and hash")
+    };
+    let full = Name::new(&format!(
+        "{}@{}",
+        plain.as_str(),
+        replica::encode::to_hex(hash)
+    ))
+    .unwrap();
+    let made = Op::Place {
+        name: 2,
+        kind: full,
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(-30 * M, 0, 34 * M),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: w.ground,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(&w, creator, 1, 0, vec![wall(&w, -30 * M, 30 * M), made]),
+    )
+    .await;
+    println!("a wall and the gesture's activity at the world's revision: {got:?}");
+    assert_eq!(got.kind, 1, "the edit commits: {got:?}");
 }
 
 /// The release's library (`content/kinds`) as a world seeded before the group gestures had it: without `greetings/`.

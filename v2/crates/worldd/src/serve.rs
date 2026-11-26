@@ -1479,17 +1479,19 @@ fn renamed(built: &mut Built, renames: &BTreeMap<String, String>) {
 }
 
 /// The kinds the release added to a running world (#4954): those of its entries (an entry's kind, or its activity's,
-/// `<kind>_activity`) that this build pins and the world's header does not ([`Built::anew`]), because the release's
-/// entries upgrade added the entry after the world was seeded (`entries_upgrade`). The header is fixed for the world's
-/// life, so such a kind is pinned the way a creator's is (#3697): by a definition in the world's history, a
-/// `souls:kind` node at the zone's root, its name the pin and its record the entry's bytes, which the engine writes at
-/// this start's first tick (`answers::Config::define`) and every copy then applies things and activities of.
+/// `<kind>_activity`) that this build pins and the world's header does not, by any revision ([`Built::anew`]), because
+/// the release's entries upgrade added the entry after the world was seeded (`entries_upgrade`). A new revision of a
+/// kind the header pins is not one: [`adopt`] pairs it or leaves it unpaired on purpose (another owner, or none kept),
+/// and it stays unmade here (`kind-not-in-header`, per act). The header is fixed for the world's life, so an added kind
+/// is pinned the way a creator's is (#3697): by a definition in the world's history, a `souls:kind` node at the zone's
+/// root naming the pin, which the engine writes at this start's first tick (`answers::Config::define`) and every copy
+/// then applies things and activities of. Its rules are the entry's, which the world's entries keep.
 ///
 /// `tree` is the world as its log leaves it. A kind it defines already (an earlier start wrote it) is not written
-/// again. One whose entry the release changed since (a pin of the same plain name it defines, with no other pinned
-/// here) is taken at the world's revision, as [`adopt`] takes a header's: its rules are this build's definition under
-/// the world's pin, and its activity is made by that pin, so a member of one open across the restart keeps its rules.
-/// Returns the definitions to write, each its pin and its entry's bytes, in pin order.
+/// again. One whose entry the release changed since (a pin of the same plain name an earlier start defined, with no
+/// other pinned here) is taken at the world's revision, as [`adopt`] takes a header's: its rules are this build's
+/// definition under the world's pin, and its activity is made by that pin, so a member of one open across the restart
+/// keeps its rules. A creator's definition is never taken so. Returns the pins to define, in pin order.
 pub(crate) fn added_kinds(
     built: &mut Built,
     tree: &replica::tree::Tree,
@@ -1503,23 +1505,35 @@ pub(crate) fn added_kinds(
             .find(|(k, _)| k == p || p.strip_suffix("_activity") == Some(k.as_str()))
             .map(|(_, e)| e)
     };
-    let defined: Vec<String> = defined::nodes(tree)
+    // Each definition's name, and whether a start wrote it (a creator's reads as a creator's record).
+    let defined: Vec<(String, bool)> = defined::nodes(tree)
         .into_iter()
-        .map(|(_, n, _)| n)
+        .map(|(_, n, bytes)| {
+            let started = defined::stored(&n, &bytes).is_none();
+            (n, started)
+        })
         .collect();
     let mut renames = BTreeMap::new();
     let mut out = Vec::new();
     for ours in std::mem::take(&mut built.anew) {
-        let Some(entry) = entry_of(&ours) else {
+        let in_header = built
+            .header
+            .kinds
+            .iter()
+            .any(|k| plain(k.as_str()) == plain(&ours));
+        if in_header || entry_of(&ours).is_none() {
             built.anew.push(ours);
             continue;
-        };
-        if defined.contains(&ours) {
+        }
+        if defined.iter().any(|(d, _)| *d == ours) {
             continue;
         }
         let theirs: Vec<&String> = defined
             .iter()
-            .filter(|d| plain(d) == plain(&ours) && !built.rules.kinds.contains_key(d.as_str()))
+            .filter(|(d, started)| {
+                *started && plain(d) == plain(&ours) && !built.rules.kinds.contains_key(d.as_str())
+            })
+            .map(|(d, _)| d)
             .collect();
         if let [theirs] = theirs.as_slice()
             && let Some(kind) = built.rules.kinds.get(&ours).cloned()
@@ -1531,7 +1545,7 @@ pub(crate) fn added_kinds(
         let Some(name) = Name::new(&ours) else {
             continue;
         };
-        out.push((name, entry.to_json().into_bytes()));
+        out.push(name);
     }
     renamed(built, &renames);
     let taken: Vec<String> = renames
@@ -1542,10 +1556,7 @@ pub(crate) fn added_kinds(
         "kinds added since the world's header: {} to define at the first tick [{}]; {} defined already, taken at the \
          world's revision [{}]",
         out.len(),
-        out.iter()
-            .map(|(n, _)| n.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
+        out.iter().map(Name::as_str).collect::<Vec<_>>().join(", "),
         taken.len(),
         taken.join(", ")
     );
@@ -3879,10 +3890,14 @@ fn serve(args: &[String]) -> R<()> {
         }
     };
     // `resumed` is the engine's starting point (a checkpoint's tree and record) when it differs from the stream's.
-    let (initial, resumed, stream_mapping, checkpoint, (mut town, planner)) = started;
+    let (initial, resumed, stream_mapping, checkpoint, (mut town, mut planner)) = started;
     // New Soul Actions (#4954): the kinds the release's entries upgrade added since the header, defined in the world's
-    // history at the first tick; before the activities are served and the rules handed to the engine.
+    // history at the first tick; before the activities are served and the rules handed to the engine. The town and the
+    // planner commit the edits that change the ground (BUILDSAFE) under their doors' rules, made before: each takes the
+    // rules as they are now, a changed added kind at the world's revision included.
     let define = added_kinds(&mut built, &town.tree, &kinds);
+    town.doors.rules.clone_from(&built.rules);
+    planner.doors.rules.clone_from(&built.rules);
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
@@ -6545,6 +6560,45 @@ mod header_tests {
         );
         // Everything else, kind lines and boot targets included, is as this build wrote it.
         assert_eq!(b.kinds_text, text.replace(&ours, &theirs));
+    }
+
+    /// #4954: a kind the release added (the header pins no revision of it) is defined; a new revision of a kind the
+    /// header pins, which `adopt` leaves unpaired (owned otherwise), is not, though an entry names it: defining it would
+    /// write a second revision of the header's kind into the world's history for good.
+    #[test]
+    fn only_a_kind_the_header_pins_no_revision_of_is_defined_as_added() {
+        let (mut b, _, h2) = with_two_halls(built());
+        let wave = pin("eden:wave", 5);
+        let place = b.rules.kinds[&h2].clone();
+        b.rules.kinds.insert(wave.clone(), place);
+        b.header = kinds_of(&b.header, |k| k.push(wave.clone()));
+        let h3 = pin("eden:hall", 3);
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h2 && *k != wave);
+            k.push(h3.clone());
+        });
+        adopt(&mut b, world.clone(), &owners_of(&[(&h3, "thing")]));
+        assert_eq!(b.anew, vec![h2.clone(), wave.clone()], "both unpaired");
+        let copy = Replica::start(world.stored()).unwrap();
+        let entry = |k: &str| {
+            (
+                k.to_owned(),
+                json::parse(&format!("{{\"kind\": \"{k}\"}}")).unwrap(),
+            )
+        };
+        let define = added_kinds(
+            &mut b,
+            copy.tree(),
+            &[entry("eden:hall"), entry("eden:wave")],
+        );
+        let names: Vec<&str> = define.iter().map(Name::as_str).collect();
+        assert_eq!(names, [wave.as_str()], "the added kind alone");
+        assert_eq!(
+            b.anew,
+            vec![h2],
+            "the header's kind's revision stays unmade"
+        );
+        assert!(!b.rules.kinds.contains_key(&h3));
     }
 }
 
