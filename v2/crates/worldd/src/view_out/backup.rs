@@ -1364,35 +1364,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A store whose deletes take 3 s each.
-    struct Slow(Memory);
+    /// A store whose deletes each say they began (`began`), then wait until the test lets them go (`go` sent or
+    /// dropped).
+    struct Slow {
+        store: Memory,
+        began: std::sync::mpsc::Sender<()>,
+        go: std::sync::mpsc::Receiver<()>,
+    }
 
     impl ObjectStore for Slow {
         fn get(&self, key: &str) -> R<Option<Object>> {
-            self.0.get(key)
+            self.store.get(key)
         }
         fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
-            self.0.put(key, bytes, when)
+            self.store.put(key, bytes, when)
         }
-        #[allow(clippy::disallowed_methods)] // A slow store's wait is real time.
         fn delete(&self, key: &str) -> R<()> {
-            std::thread::sleep(Duration::from_secs(3));
-            self.0.delete(key)
+            let _ = self.began.send(());
+            let _ = self.go.recv();
+            self.store.delete(key)
         }
     }
 
-    /// #4954: the clean-up runs on its own thread with its own client. A backlog of slow deletes (here 3 s each)
-    /// holds back no put: the backup holds a new head well before the first delete is answered.
+    /// #4954: the clean-up runs on its own thread with its own client. A delete that does not return holds back no
+    /// put: with one under way, the backup still puts a new part and head and holds them.
     #[test]
-    #[allow(clippy::disallowed_methods)] // The backup's drain is real time.
     fn slow_deletes_hold_back_no_put() {
         let dir = std::env::temp_dir().join(format!("backup-slow-cleanup-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let prefix = "s/w/";
         let mut spool = Spool::new(dir.clone(), "test-store".into());
-        let old = Slow(Memory::default());
+        let (began, delete_began) = std::sync::mpsc::channel();
+        let (go, wait) = std::sync::mpsc::channel();
+        let old = Slow {
+            store: Memory::default(),
+            began,
+            go: wait,
+        };
         let objects: Vec<Vec<u8>> = (0..5u8).map(|i| vec![9, i]).collect();
-        let record = generation(&old.0, prefix, 9, &objects);
+        let record = generation(&old.store, prefix, 9, &objects);
         start(
             &mut spool,
             Memory::default(),
@@ -1402,20 +1412,25 @@ mod tests {
         )
         .unwrap();
         spool.prune(record, BTreeSet::new());
-        let begun = Instant::now();
+        // The clean-up may delete once the backup has made two passes; the first delete then begins, and waits.
+        spool.poke();
+        assert!(
+            delete_began.recv_timeout(Duration::from_secs(20)).is_ok(),
+            "a delete is under way"
+        );
         let new = b"new part".to_vec();
         let key = format!("{prefix}objects/{}", to_hex(&replica::ids::sha256(&new)));
         spool.object(&key, &new).unwrap();
         spool.head(&format!("{prefix}head"), b"head").unwrap();
         assert!(
-            spool.drainer().unwrap().drain(Duration::from_secs(10)),
-            "the backup holds the head"
+            spool.drainer().unwrap().drain(Duration::from_secs(20)),
+            "the backup holds the head while the delete is under way"
         );
         assert!(
-            begun.elapsed() < Duration::from_secs(3),
-            "before the first delete is answered: {:?}",
-            begun.elapsed()
+            delete_began.try_recv().is_err(),
+            "the first delete has not returned"
         );
+        drop(go);
         drop(spool);
         let _ = std::fs::remove_dir_all(&dir);
     }
