@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 Object.assign(globalThis, { location: { origin: 'https://soul.example', pathname: '/w/hamlet/', search: '', hash: '', href: 'https://soul.example/w/hamlet/' } });
-const { Connect } = await import('./GodModal.tsx');
+const { Connect, OwnerGod } = await import('./GodModal.tsx');
 const { creatorPrompt } = await import('./god-api.ts');
 const { agentPaired, godAgentState } = await import('./god-agent-state.ts');
 const { isCreatorRequest, nextWaiting, waitingOf } = await import('./V2PairDialog.tsx');
@@ -24,6 +24,16 @@ test('the line for the agent names the world\'s creator guide and the creator gr
   const old = renderToStaticMarkup(<Connect url={GUIDE} state="not-paired" />);
   assert.ok(old.includes(`data-connect-line="Read ${GUIDE} and follow it to build this world as its god."`));
   assert.doesNotMatch(old, /--creator/);
+});
+
+test('#5006: on a new-engine world the creator\'s own tools (Build among them) show without the agent; elsewhere they wait for it', () => {
+  const tools = <button data-build-open="place">Place</button>;
+  const v2 = renderToStaticMarkup(<OwnerGod connectUrl={GUIDE} grant={GRANT} tools={tools} forsake={null} paired={false} ownTools />);
+  assert.match(v2, /data-gateway-state="not-connected"/, 'the line for the agent is still there');
+  assert.match(v2, /data-god-tools="1"[^>]*><button data-build-open="place"/, 'and Build beside it');
+  assert.doesNotMatch(v2, /data-god-console/, 'the command box waits for the agent');
+  const old = renderToStaticMarkup(<OwnerGod connectUrl={GUIDE} tools={tools} forsake={null} paired={false} />);
+  assert.doesNotMatch(old, /data-build-open/, 'an old-engine world\'s tools wait for its agent, as before');
 });
 
 test('on a new-engine world the agent is paired while the creator\'s mailbox says it is connected, and only then', () => {

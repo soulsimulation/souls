@@ -320,7 +320,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     {approvalModal}
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
-    {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
+    {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} ownTools={!!v2} prayers={<PrayersWaiting />} more={more}
       forsake={v2 ? null : <ForsakeWorld name={name} />} />}
   </>;
 }

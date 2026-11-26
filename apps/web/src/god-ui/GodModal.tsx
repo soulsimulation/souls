@@ -47,7 +47,7 @@ function Head({ title = 'God Mode', right, back }: { title?: string; right?: Rea
 }
 
 /** The owner's God Mode: one view, or the Forsake danger zone over it. */
-export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, forsake, paired }: { banner?: ReactNode; connectUrl: string | null; grant?: string | null; tools: ReactNode; prayers?: ReactNode; more?: ReactNode; forsake: ReactNode | null; paired: boolean }) {
+export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, forsake, paired, ownTools = false }: { banner?: ReactNode; connectUrl: string | null; grant?: string | null; tools: ReactNode; prayers?: ReactNode; more?: ReactNode; forsake: ReactNode | null; paired: boolean; ownTools?: boolean }) {
   const { section, inbox } = useGod();
   const connected = !!inbox?.connected;
   if (section === 'forsake' && forsake) return <Frame label="Forsake world" wide>
@@ -58,13 +58,16 @@ export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, fors
     <i aria-hidden="true" />{presenceWord(inbox.presence, connected)}
   </span> : null;
   // #2279: until the agent is paired and connected the sheet is only the gateway (the steps and their state); the prayers,
-  // the command box and its tools appear once it is connected, and a drop brings the gateway back (the draft is kept)
+  // the command box and its tools appear once it is connected, and a drop brings the gateway back (the draft is kept).
+  // #5006: on a world the new engine runs the page edits on its own creator socket (`ownTools`), so its tools (Build,
+  // undo, weather) are there with or without the agent; only the prayers and the command box wait for it.
   const live = paired && connected;
   return <Frame label="God Mode" wide>
     <Head right={pill} />
     <div className="gm-scroll" data-god-panel="1" data-section="agent" data-gateway={live ? undefined : '1'}>
       {banner}
       {!live && connectUrl && <Connect url={connectUrl} grant={grant ?? null} state={grant ? 'not-connected' : !paired ? 'not-paired' : 'connecting'} />}
+      {!live && ownTools && <div className="gm-tools" data-god-tools="1">{tools}</div>}
       {live && <GodConsole paired={paired} tools={tools} prayers={prayers} />}
       {live && more}
       {forsake && <footer className="gm-foot"><button type="button" className="gm-forsake-open" data-forsake-open="1" onClick={() => showSection('forsake')}>Forsake world</button></footer>}
