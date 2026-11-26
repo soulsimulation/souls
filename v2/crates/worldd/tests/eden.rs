@@ -5273,3 +5273,392 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// One ask of the outdoor audit: what a person's agent asks of a thing on Eden's open ground.
+struct Ask {
+    /// The kind, as the audit's table names it.
+    kind: &'static str,
+    /// The person's words.
+    ask: &'static str,
+    /// The thing, by its facts name.
+    thing: &'static str,
+    /// The act: a form of the thing or the world's move (`eden:<word>`) on it, or, with `arg`, the Soul's own body's
+    /// form (`eden:sit_down`) taking the thing as that argument.
+    verb: &'static str,
+    arg: Option<&'static str>,
+    /// An act on another thing first, `(verb, thing)`: seated elsewhere.
+    first: Option<(&'static str, &'static str)>,
+    /// `None`: a person would expect it done. `Some(why)`: why it is not, tonight.
+    not_tonight: Option<&'static str>,
+}
+
+const fn ask(
+    kind: &'static str,
+    ask: &'static str,
+    thing: &'static str,
+    verb: &'static str,
+) -> Ask {
+    Ask {
+        kind,
+        ask,
+        thing,
+        verb,
+        arg: None,
+        first: None,
+        not_tonight: None,
+    }
+}
+
+/// The campus quad, where every new Soul arrives (`place-region-campus-quad`), and what is near it.
+const AT_THE_QUAD: &[Ask] = &[
+    ask(
+        "fountain",
+        "sit on the fountain's edge",
+        "campus-quad-fountain",
+        "eden:sit",
+    ),
+    ask(
+        "fountain",
+        "sit on the fountain's edge (2 of 4 at once)",
+        "campus-quad-fountain",
+        "eden:sit",
+    ),
+    ask(
+        "fountain",
+        "sit on the fountain's edge (3 of 4 at once)",
+        "campus-quad-fountain",
+        "eden:sit",
+    ),
+    ask(
+        "fountain",
+        "sit on the fountain's edge (4 of 4 at once)",
+        "campus-quad-fountain",
+        "eden:sit",
+    ),
+    Ask {
+        arg: Some("spot"),
+        ..ask(
+            "fountain",
+            "sit down by the fountain (body's sit_down)",
+            "campus-quad-fountain",
+            "eden:sit_down",
+        )
+    },
+    Ask {
+        first: Some(("eden:sit", "campus-quad-bench-2")),
+        ..ask(
+            "fountain",
+            "seated on a bench: sit on the fountain's edge",
+            "campus-quad-fountain",
+            "eden:sit",
+        )
+    },
+    ask(
+        "bench",
+        "sit on the bench, across the square",
+        "campus-quad-bench-1",
+        "eden:sit",
+    ),
+    ask(
+        "tree",
+        "rest in the tree's shade",
+        "trees-set-51",
+        "eden:go_to_shade",
+    ),
+    ask("tree", "sit under the tree", "trees-set-51", "eden:sit"),
+    Ask {
+        arg: Some("spot"),
+        ..ask(
+            "tree",
+            "sit down under the tree (body's sit_down)",
+            "trees-set-51",
+            "eden:sit_down",
+        )
+    },
+    ask(
+        "log",
+        "sit on the log",
+        "street-log-fallenlog-2",
+        "eden:sit",
+    ),
+    ask("stump", "sit on the stump", "street-stump-1", "eden:sit"),
+    ask(
+        "picnic table",
+        "sit at the picnic table",
+        "artists-green-picnic-3",
+        "eden:sit",
+    ),
+    ask(
+        "campfire",
+        "warm up by the fire",
+        "social-eden-fire",
+        "eden:warm",
+    ),
+    ask(
+        "campfire",
+        "sit by the fire",
+        "social-eden-fire",
+        "eden:sit",
+    ),
+    ask(
+        "chess table",
+        "play chess (white)",
+        "commons-chess-table",
+        "eden:play_white",
+    ),
+    ask(
+        "bridge",
+        "cross the bridge",
+        "land-canal-bridge-south",
+        "eden:cross",
+    ),
+    ask(
+        "pond",
+        "walk around the pond",
+        "land-commons-shore-pond",
+        "eden:walk_around",
+    ),
+    ask(
+        "flower garden",
+        "wander the flower garden",
+        "land-commons-flowers",
+        "eden:wander",
+    ),
+    ask(
+        "deck",
+        "walk out onto the deck",
+        "commons-deck",
+        "eden:walk",
+    ),
+    ask(
+        "terrace",
+        "sit on the terrace",
+        "land-abbey-cloister-court",
+        "eden:sit",
+    ),
+];
+
+/// The park and the street's play corner (born where [`SEATS`] births its swing).
+const AT_THE_PARK: &[Ask] = &[
+    ask("swings", "swing", "park-swings", "eden:swing"),
+    ask(
+        "swings",
+        "swing (the street's)",
+        "street-swings-swing-1",
+        "eden:swing",
+    ),
+    ask(
+        "slide",
+        "go down the slide",
+        "park-slide",
+        "eden:slide_down",
+    ),
+    ask(
+        "climbing frame",
+        "climb the frame",
+        "park-climbing-frame",
+        "eden:climb",
+    ),
+    ask("see-saw", "ride the see-saw", "park-see-saw", "eden:ride"),
+    ask(
+        "sandpit",
+        "build a sandcastle",
+        "street-sandpit-sandbox-1",
+        "eden:build_sandcastle",
+    ),
+    ask(
+        "hammock",
+        "lie in the hammock",
+        "street-hammock-1",
+        "eden:lie",
+    ),
+    ask(
+        "drinking fountain",
+        "have a drink",
+        "park-drinking-water",
+        "eden:drink",
+    ),
+    ask(
+        "picnic blanket",
+        "sit on the picnic blanket",
+        "park-picnic-blanket",
+        "eden:sit",
+    ),
+    Ask {
+        arg: Some("spot"),
+        ..ask(
+            "picnic blanket",
+            "sit down on the blanket (body's sit_down)",
+            "park-picnic-blanket",
+            "eden:sit_down",
+        )
+    },
+    ask(
+        "helter-skelter",
+        "go down the helter-skelter",
+        "festival-helter-skelter",
+        "eden:slide_down",
+    ),
+];
+
+/// Eden seeded at its old entry with its arrival place named `place`, as production Eden is, and served: its Souls
+/// are born round that place.
+fn serve_arriving(facts: &str, place: &str, tag: &str) -> (Served, PathBuf) {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::temp_dir().join(format!("eden-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    let entries = format!("{root}/content/kinds");
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", facts, "--dir"])
+        .arg(&dir)
+        .args(["--entries", &entries, "--souls", "0", "--at", "0,0"])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let named = Command::new(worldd)
+        .args(["arrival", "--dir"])
+        .arg(&dir)
+        .args(["--place", place])
+        .output()
+        .unwrap();
+    assert!(
+        named.status.success(),
+        "{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    (served, dir)
+}
+
+/// Each ask of `asks` by its own Soul, joined in `dir` in turn and acting at once on its own thread: one line each,
+/// `kind | ask | act | ending`. A sit or lie that is done says whether the body is logged in one of the thing's slots.
+fn ask_all(
+    dir: &Path,
+    asks: &'static [Ask],
+    ids: &BTreeMap<String, Id>,
+    lineage: Scope,
+) -> Vec<String> {
+    let souls: Vec<(Client, Id)> = (0..asks.len())
+        .map(|n| {
+            let soul = join(dir, n as u64 + 2, lineage);
+            let body = births(dir).last().expect("its birth logged").0;
+            (soul, body)
+        })
+        .collect();
+    std::thread::scope(|s| {
+        let runs: Vec<_> = asks
+            .iter()
+            .zip(souls)
+            .map(|(a, (mut soul, body))| {
+                s.spawn(move || {
+                    soul.0
+                        .set_read_timeout(Some(Duration::from_secs(600)))
+                        .unwrap();
+                    let thing = ids[a.thing];
+                    let first = a
+                        .first
+                        .map(|(verb, on)| soul.act(verb, Some(ids[on]), BTreeMap::new()));
+                    let done = match a.arg {
+                        Some(arg) => soul.act(a.verb, Some(body), args(&[(arg, thing.to_value())])),
+                        None => soul.act(a.verb, Some(thing), BTreeMap::new()),
+                    };
+                    let seated = last_frames(dir).get(&body).copied();
+                    let how = match (&done, seated) {
+                        (Err(name), _) => format!("refused {name}"),
+                        (Ok(_), Some((on, Some(slot)))) if on == thing => {
+                            format!("done, in its slot {slot}")
+                        }
+                        (Ok(_), _) if a.verb.ends_with(":sit") || a.verb.ends_with(":lie") => {
+                            "done, but not in its slot".to_owned()
+                        }
+                        (Ok(_), _) => "done".to_owned(),
+                    };
+                    let first = first.map_or(String::new(), |f| format!(" (first {f:?})"));
+                    format!(
+                        "{} | {} | {} {}{first} | {how}",
+                        a.kind, a.ask, a.verb, a.thing
+                    )
+                })
+            })
+            .collect();
+        runs.into_iter().map(|r| r.join().unwrap()).collect()
+    })
+}
+
+/// Eden's outdoor things do what a person asks: from the campus quad, where every new Soul arrives, and from the
+/// park, each [`Ask`] of [`AT_THE_QUAD`] and [`AT_THE_PARK`] by its own Soul, all at once (four Souls sit on the
+/// fountain's edge together; one first sits on a bench). Prints `kind | ask | act | ending`; every ask a person would
+/// expect done is done (a sit or lie in one of the thing's slots), and each other ask names why not.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn eden_outdoor_things_do_what_a_person_asks() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let all = replica::rules::json::parse(&text).unwrap();
+    let ids: BTreeMap<String, Id> = all
+        .get("things")
+        .and_then(|t| t.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|t| {
+            let id = t.get("id")?.str()?;
+            Some((t.get("name")?.str()?.to_owned(), *im.nodes.get(id)?))
+        })
+        .collect();
+    let lines = std::thread::scope(|s| {
+        let quad = s.spawn(|| {
+            let (served, dir) = serve_arriving(&facts, "place-region-campus-quad", "outdoor-quad");
+            let out = ask_all(&dir, AT_THE_QUAD, &ids, lineage);
+            drop(served);
+            let _ = std::fs::remove_dir_all(&dir);
+            out
+        });
+        let park = s.spawn(|| {
+            let (served, first, dir) = serve(&facts, "18.0,99.0", "outdoor-park", lineage);
+            drop(first);
+            let out = ask_all(&dir, AT_THE_PARK, &ids, lineage);
+            drop(served);
+            let _ = std::fs::remove_dir_all(&dir);
+            out
+        });
+        let mut lines = quad.join().unwrap();
+        lines.extend(park.join().unwrap());
+        lines
+    });
+    let mut wrong = Vec::new();
+    for (a, line) in AT_THE_QUAD.iter().chain(AT_THE_PARK).zip(&lines) {
+        let ok = line.ends_with("| done") || line.contains("| done, in its slot");
+        let why = a
+            .not_tonight
+            .map_or(String::new(), |w| format!(" | not tonight: {w}"));
+        println!("OUTDOOR {line}{why}");
+        if !ok && a.not_tonight.is_none() {
+            wrong.push(line.clone());
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} asks not done:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
