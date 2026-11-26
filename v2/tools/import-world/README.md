@@ -42,7 +42,8 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   each tick. One the walk in reaches (ending on the target's piece) and the walk back does not (refused, ended short,
   or no answer in 600 s of the world's time) is counted in the row's `one-way (walked)` column and named with why;
   what the walk in does not reach is listed apart. Measured on Saturn (26 Nov): the Mars template from `-6,-30` 0
-  one-way of 101 in 2 s; Eden 2026 from the quad: EDEN_RESULT.
+  one-way of 101 (18 not reached) in 3 s; Eden 2026 from the quad 0 of 3245 (334 not reached: 97 refused a standing
+  spot, 237 ended done off the target's piece) in 18 min.
 
 A world whose own backup is not at hand imports from its template's kept outputs on the asset CDN (#4281); the
 template builder that ran today's server code (`template-world.ts`) was removed with v1 (0.134 D3).
