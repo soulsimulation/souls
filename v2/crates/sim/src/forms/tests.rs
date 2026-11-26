@@ -3091,3 +3091,36 @@ fn a_forms_walk_ends_facing_the_way_its_stand_point_says() {
         );
     }
 }
+
+/// A form that only goes to its thing and waits there ([`super::only_there`]: Eden's campfire `warm`, a bridge's
+/// `cross`) holds nothing. Seen on a served Eden: while one Soul warmed at the campfire, three asked to sit on its logs
+/// were refused `thing-reserved`. Here, while Ada's wait at the bench runs, the bench is held by nobody; Bea's wait
+/// and then her sit on it start, not refused; every run ends `done`, Bea in her seat.
+#[test]
+fn a_form_that_only_waits_at_a_thing_holds_nothing() {
+    use skills::form_runner::Step;
+    let (mut b, bench, [_, right], ada, bea) = two_seat_bench();
+    let limits = Limits::default();
+    let wait = || vec![Step::Wait(3_000_000)];
+    let warm = b.steps(ada, bench, wait(), intent(ada, 0), limits);
+    assert!(matches!(warm, Ok(Asked::Started(_))), "{warm:?}");
+    assert_eq!(b.forms.holder(bench), None, "a wait at it holds nothing");
+    let also = b.steps(bea, bench, wait(), intent(bea, 0), limits);
+    assert!(matches!(also, Ok(Asked::Started(_))), "{also:?}");
+    let sit = b.steps(bea, bench, sit_at(right), intent(bea, 1), limits);
+    println!("only there: Ada's wait {warm:?}; Bea's wait {also:?}, then her sit {sit:?}");
+    assert!(matches!(sit, Ok(Asked::Started(_))), "{sit:?}");
+    b.run(30_000_000);
+    let hows: Vec<_> = b
+        .forms
+        .ended
+        .iter()
+        .map(|e| (e.body, e.how.as_str().to_owned()))
+        .collect();
+    println!("only there: ended {hows:?}");
+    assert!(hows.contains(&(ada, "done".to_owned())), "{hows:?}");
+    assert!(hows.contains(&(bea, "done".to_owned())), "{hows:?}");
+    let slots = b.slots.as_ref().expect("slots");
+    assert_eq!(slots.holder_in(bench, right), Some(bea));
+    b.clean();
+}
