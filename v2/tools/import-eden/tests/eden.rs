@@ -670,6 +670,27 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
         (0, 3),
         "no slots of its own, no course: no seats"
     );
+    // An entry that flies a loop from its stop (a balloon's) gives its seats to such a thing with no course yet too: a
+    // world seeded before its rides flew, which `worldd serve` gives the course at its start.
+    let replica::rules::json::Value::Obj(mut aloft) = sofa.clone() else {
+        panic!("an entry")
+    };
+    aloft.push((
+        "ride".into(),
+        replica::rules::json::parse(
+            r#"{"stops": ["f1", "f1"], "returns": false, "ground": "air", "speed_mm_s": 6000}"#,
+        )
+        .unwrap(),
+    ));
+    let (seats, _) = import_eden::body_slots(
+        &im.tree,
+        &[("eden:sofa".into(), replica::rules::json::Value::Obj(aloft))],
+    );
+    assert_eq!(
+        seats.len(),
+        3,
+        "a ride aloft with no course yet: the entry's seats"
+    );
     let flying = SMALL.replace(
         r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,
         r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000, "entry": "eden:sofa",

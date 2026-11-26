@@ -1187,6 +1187,38 @@ impl Engine {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
         }
+        // A ride that flies a loop from its stop and was seeded with no course (Eden's launch balloon on a world seeded
+        // before its rides flew) is given its course at the start's first tick: from now, at its home, so it stands
+        // there for its boarding minute first and never jumps onto its loop.
+        for (thing, mut c) in slots.courses_given() {
+            let held = live
+                .handle(thing)
+                .and_then(|h| live.node(h))
+                .map(|n| n.fields().contains_key(&replica::schedule::F_COURSE));
+            if held != Some(false) {
+                continue;
+            }
+            c.t0 = now;
+            let home = c.stations.first().map_or(Vec3::ZERO, |s| s.at);
+            let e = slots.moving(thing, &c, home).and_then(|()| {
+                crate::carrier::entry(
+                    live,
+                    thing,
+                    vec![crate::carrier::set(
+                        thing,
+                        replica::schedule::F_COURSE,
+                        c.to_value(),
+                    )],
+                    now,
+                    Cause::World,
+                    Actor::World,
+                )
+            });
+            match e {
+                Ok(e) => self.out.push(e),
+                Err(r) => eprintln!("worldd: {}'s course is not written: {r}", show(thing)),
+            }
+        }
         // N14: the courses of the rides whose runs were registered (a start) or registered again (a god edit).
         let changed = slots.runs_changed();
         if !changed.is_empty() {

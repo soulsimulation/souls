@@ -2032,6 +2032,11 @@ function suggestionFor(r) {
     const slots = on && on.id !== target ? Object.values(heldKinds()[on.entry ?? on.kind]?.slots ?? {}) : [];
     if (slots.some((x) => x?.admits === 'body')) return { act: `${NS}:rise`, name: 'rise', checked: 'unknown', then: again, why: `${body.name} is in ${on.name}` };
   }
+  // A thing another Soul's act holds is held for every offer of it (a balloon's `board` is refused as its `ride` is):
+  // the same act once it is free, never another offer refused the same way. A seat named that is taken: the same act
+  // with no seat named, and the world gives the first free one.
+  if (r.answers.at(-1)?.reason === 'thing-reserved') return { act: again, name: verb, checked: 'unknown', why: 'held by another Soul\'s act: wait until it is free, then send it again' };
+  if (r.answers.at(-1)?.reason === 'place-taken') return { act: again, name: verb, checked: 'unknown', why: 'that place is taken: send it with no place named and the world gives a free one' };
   const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
   const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
   const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));

@@ -2295,8 +2295,9 @@ pub fn body_slots_of(
     out
 }
 
-/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach, other places).
-type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64, Vec<Vec3>)>>;
+/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach, other places); with whether
+/// the entry is a ride that flies a loop from its stop (`sim::courses::rides::Ride::loops_aloft`).
+type ByKind<'a> = BTreeMap<&'a str, (bool, Vec<(u64, bool, Vec3, Vec3, i64, Vec<Vec3>)>)>;
 
 fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKind<'_> {
     use replica::rules::json::Value as J;
@@ -2356,10 +2357,31 @@ fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKi
             })
             .collect();
         if !found.is_empty() {
-            by_kind.insert(plain(kind), found);
+            by_kind.insert(plain(kind), (loops_aloft(e), found));
         }
     }
     by_kind
+}
+
+/// Whether entry `e`'s `ride` flies a loop from its stop: its stops one point, no line back, the air its ground and a
+/// speed, as `sim::courses::rides::Ride::loops_aloft` reads it (that crate depends on this one).
+fn loops_aloft(e: &replica::rules::json::Value) -> bool {
+    use replica::rules::json::Value as J;
+    let Some(r) = e.get("ride") else {
+        return false;
+    };
+    let stops: Vec<&str> = r
+        .get("stops")
+        .and_then(J::arr)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(J::str)
+        .collect();
+    !stops.is_empty()
+        && stops.iter().all(|s| *s == stops[0])
+        && !matches!(r.get("returns"), Some(J::Bool(true)))
+        && r.get("ground").and_then(J::str) == Some("air")
+        && matches!(r.get("speed_mm_s"), Some(J::Int(n)) if *n > 0)
 }
 
 /// The body slots of one thing onto `out`; returns how many its entry declares.
@@ -2371,16 +2393,18 @@ fn slots_on(
     out: &mut Vec<BodySlot>,
 ) -> usize {
     let entry = entry_name(kind, fields);
-    let Some(found) = by_kind.get(entry) else {
+    let Some((aloft, found)) = by_kind.get(entry) else {
         return 0;
     };
     // A thing that borrows another kind's entry (field 27: a Mars chair names `eden:chair`) has its own shape: each
     // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
     // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered. A ride on its
     // course whose kind declares no slots at all (Eden's launch balloon, a `core/balloon` by another name, flying the
-    // balloon's loop) has no shape of its own to fit: it takes the entry's seats as they are.
+    // balloon's loop) has no shape of its own to fit: it takes the entry's seats as they are. So does one whose entry
+    // flies a loop aloft and that has no course yet (a world seeded before its rides flew): `worldd serve` gives it its
+    // course at its start.
     let has_slots = matches!(fields.get(&F_SLOTS), Some(Value::Array(rows)) if !rows.is_empty());
-    let bare_ride = !has_slots && fields.contains_key(&replica::schedule::F_COURSE);
+    let bare_ride = !has_slots && (*aloft || fields.contains_key(&replica::schedule::F_COURSE));
     let borrowed = entry != plain(kind) && !bare_ride;
     out.extend(
         found

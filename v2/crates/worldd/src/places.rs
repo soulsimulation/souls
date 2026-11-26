@@ -194,6 +194,40 @@ pub fn runs(
     out
 }
 
+/// The rides on `town`'s ground that fly a loop from their stop (their entry in `kinds`, the one the thing names, has a
+/// ride that [`sim::courses::rides::Ride::loops_aloft`]) and have no course in the tree: a world seeded before its
+/// rides flew (soul.game's Eden, whose launch balloon then had neither seats nor a course). Each with the course
+/// `worldd seed` would give it from where it stands, over the terrain beneath it, its lap starting at world time 0;
+/// the world starts it at its first tick ([`sim::slots::Slots::give_course`]).
+pub fn rides_given(town: &Town, kinds: &[(String, Json)]) -> Vec<(Id, sim::courses::Course)> {
+    let tree = &town.tree;
+    let Some(ground) = tree.handle(town.ground) else {
+        return Vec::new();
+    };
+    let terrain = sim::ground::Terrain::of(tree, town.ground).ok().flatten();
+    tree.children(ground)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|&h| {
+            let n = tree.node(h)?;
+            if n.fields().contains_key(&replica::schedule::F_COURSE) {
+                return None;
+            }
+            let name = import_eden::entry_name(n.kind().as_str(), n.fields());
+            let (_, entry) = kinds.iter().find(|(k, _)| k == name)?;
+            let ride = sim::courses::rides::Ride::of(entry)?;
+            let home = n.place()?.position;
+            let c = sim::courses::rides::course(
+                &ride,
+                home,
+                |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+                0,
+            )?;
+            Some((n.id(), c))
+        })
+        .collect()
+}
+
 /// What the trips of the rides that fly a loop from their stop set back when they end (a balloon's `under_way`,
 /// `sim::courses::rides::trip_ends`): each thing of `places` on a course whose entry in `kinds` has a ride that
 /// [`sim::courses::rides::Ride::loops_aloft`], with its ends. Its trip ends when it next stands at its home, so a balloon
