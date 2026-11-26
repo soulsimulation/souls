@@ -1723,7 +1723,8 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, with the
-/// answers of the tick in which a form's run or a gateway walk's route gets its deadline (W11, #4087).
+/// answers of the tick in which a form's run, a gateway walk's route or a gateway sit's, lie's or rise's move gets its
+/// deadline (W11, #4087).
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -4765,11 +4766,15 @@ impl Clock {
     }
 
     /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
-    /// answer, a receipt when `done`.
+    /// answer, a receipt when `done`, else a refusal with `why` as its words (what blocked the walk; a move out of
+    /// reach: how far and the reach, #5019 follow-up), which only a blocked walk's entry carries too.
     fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        let noted = match &why {
+            Some(w) if how == acts::BLOCKED => format!("{how}: {w}"),
+            _ => how.clone(),
+        };
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -4780,7 +4785,13 @@ impl Clock {
                 names: BTreeMap::new(),
             });
         } else {
-            self.end(id, |c| c.refusal(actor, sequence, &how));
+            self.end(id, |c| {
+                let mut a = c.refusal(actor, sequence, &how);
+                if let Answer::Refused { detail, .. } = &mut a {
+                    *detail = why.as_deref().and_then(replica::intents::answer_detail);
+                }
+                a
+            });
         }
     }
 
@@ -5164,7 +5175,17 @@ impl Clock {
         }
         for (id, r) in started {
             match r {
-                Ok(()) => self.note(id, MOVE_STARTED, None, now),
+                Ok(()) => {
+                    self.note(id, MOVE_STARTED, None, now);
+                    // A sit, a lie or a rise under way is answered accepted now, as a walk is once its route is read
+                    // (W11): its first answer was its receipt at the move's end, about 0.93 s for a rise (#5019
+                    // follow-up). It is due as a form's step of the same move is (`sim::forms::span`).
+                    if self.bodies.as_ref().is_some_and(|b| b.placing(id)) {
+                        let span =
+                            sim::forms::span(&[skills::form_runner::Step::Rise], &acts::limits());
+                        self.run_started(id, now.saturating_add(span), now);
+                    }
+                }
                 Err(r) => {
                     if let Some(b) = self.bodies.as_mut() {
                         b.took(id);

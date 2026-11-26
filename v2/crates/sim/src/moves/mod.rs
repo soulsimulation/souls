@@ -228,17 +228,28 @@ impl Moves {
                 ),
             );
         };
+        // The answer's words (#5019 follow-up): how far, in whole mm rounded up, and the reach, so an agent and a bench
+        // can tell a far target from a reach measured wrong; a move at a thing argument names that thing. A thing
+        // argument the world does not name (in a closed container, `Reach::aimed`) is not measured aloud either.
         if d > mv.reach {
-            return refuse(
-                "out-of-reach",
-                format!(
-                    "{}: {d} µm to {} of {}, reach {} µm",
-                    mv.name.as_str(),
-                    mv.contact.as_str(),
-                    replica::world_model::show(target),
-                    mv.reach
+            let (name, reach) = (mv.name.as_str(), mv.reach / 1000);
+            let words = match geo.aimed(body, &mv.contact) {
+                Some(t) => format!(
+                    "{name}: {} mm to {}, reach {reach} mm",
+                    d.saturating_add(999) / 1000,
+                    replica::world_model::show(t)
                 ),
-            );
+                None if mv.contact.as_str() == crate::reach::AT_ARG => {
+                    format!("{name}: beyond its reach of {reach} mm")
+                }
+                None => format!(
+                    "{name}: {} mm to {} of {}, reach {reach} mm",
+                    d.saturating_add(999) / 1000,
+                    mv.contact.as_str(),
+                    replica::world_model::show(target)
+                ),
+            };
+            return refuse("out-of-reach", words);
         }
         let id = mint.mint().map_err(|e| Refusal {
             name: "id-counter-exhausted",
