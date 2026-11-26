@@ -71,6 +71,24 @@
         760,
         0
       ]
+    },
+    "second_back": {
+      "role": "stand",
+      "at_mm": [
+        550,
+        0,
+        -450
+      ],
+      "yaw_mdeg": -90000
+    },
+    "second_far": {
+      "role": "stand",
+      "at_mm": [
+        -550,
+        0,
+        -450
+      ],
+      "yaw_mdeg": 90000
     }
   },
   "geometry": {
@@ -232,7 +250,9 @@
       "steps": [
         {
           "step": "walk_to",
-          "point": "second_stand"
+          "point": {
+            "arg": "stand"
+          }
         },
         {
           "step": "move",
@@ -253,7 +273,12 @@
           "to": "first",
           "event": "turn_passed"
         }
-      ]
+      ],
+      "takes": {
+        "stand": {
+          "type": "part"
+        }
+      }
     },
     "take_2_second": {
       "who": "anyone",
@@ -290,7 +315,9 @@
       "steps": [
         {
           "step": "walk_to",
-          "point": "second_stand"
+          "point": {
+            "arg": "stand"
+          }
         },
         {
           "step": "move",
@@ -311,7 +338,12 @@
           "to": "first",
           "event": "turn_passed"
         }
-      ]
+      ],
+      "takes": {
+        "stand": {
+          "type": "part"
+        }
+      }
     },
     "restart": {
       "who": "anyone",
@@ -385,7 +417,7 @@
   },
   "text": {
     "card": "Seven-counter track: two sides take one or two in turn; the last counter wins.",
-    "rules": "The gold meter shows counters remaining; red means first side and blue means second side. First side: one player. Second side: one to three players sharing its turn. First begins. Take one or two; taking the last counter wins. At zero counters the side opposite turn won. An empty pile ends the round; first may restart with seven. Native activity role binding is required before play.",
+    "rules": "The gold meter shows counters remaining; red means first side and blue means second side. First side: one player. Second side: one to three players sharing its turn. First begins. Take one or two; taking the last counter wins. At zero counters the side opposite turn won. An empty pile ends the round; first may restart with seven. Each second-side player chooses a separate free stand: second_stand, second_back or second_far. Keep that stand for each turn.",
     "first_to_play": "First side\u2019s turn; wait for them to take counters.",
     "second_to_play": "Second side\u2019s turn; wait for them to take counters.",
     "join_first": "Join or accept the activity as the first side before taking counters.",

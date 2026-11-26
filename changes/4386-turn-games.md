@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Add counter-match rule data; native activity role binding is still required before shared play.
+Add a shared two-side counter game with separate stand choices for up to three teammates.
