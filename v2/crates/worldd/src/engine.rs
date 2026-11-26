@@ -3323,7 +3323,7 @@ impl Engine {
         let over: Vec<Id> = self
             .led
             .keys()
-            .filter(|a| !self.carries.get(a).is_some_and(|c| !c.lowering()))
+            .filter(|a| self.carries.get(a).is_none_or(|c| c.lowering()))
             .copied()
             .collect();
         let mut out = Vec::new();
