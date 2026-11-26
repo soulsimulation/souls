@@ -701,6 +701,7 @@ fn take_intent(
             return Some(own_answer(Answer::Unread { reason }));
         }
     };
+    *read = (*read).max(intent.sequence);
     if intent.actor != actor {
         return refuse(
             gw,
@@ -716,7 +717,6 @@ fn take_intent(
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
-    *read = (*read).max(sequence);
     // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket; a sequence
     // another of them sent, out or lately answered, is refused here, on this socket, and never sent. #4978: on a
     // Soul's, one sent after another socket took the grant, or under a sequence another intent went under.

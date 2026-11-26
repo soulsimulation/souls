@@ -426,6 +426,70 @@ async fn a_socket_replaced_by_a_newer_sign_in_is_closed_as_replaced() {
     assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(1));
 }
 
+/// #4978: two clients of one Soul share its one numbering. A sign-in is told the newest sequence sent for the Soul with
+/// its outcome (key 5); the socket it replaces is told the newest intent read from it before its 4001 close; another
+/// intent under a sequence already sent is refused by name and never reaches the world; the same intent sent again is
+/// not refused.
+#[tokio::test]
+async fn two_clients_of_a_soul_share_one_numbering() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(22));
+    let r = start("numbering", tokens).await;
+    let (mut first, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    put(&mut first, intent(soul(22), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut first).await.unwrap()), Some(1));
+    // The other client signs in: its outcome names sequence 1.
+    let (mut second, _) = tokio_tungstenite::connect_async(r.url.as_str())
+        .await
+        .unwrap();
+    put(&mut second, hello()).await;
+    next(&mut second).await.unwrap();
+    put(&mut second, sign_in(t.reveal(), None, None)).await;
+    let Value::Map(o) = next(&mut second).await.unwrap() else {
+        panic!("an outcome");
+    };
+    assert_eq!(
+        o.get(&5),
+        Some(&Value::Uint(1)),
+        "the newest sent for the Soul"
+    );
+    // The first is told what was read from it, then closed as replaced.
+    let told = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut text = None;
+        loop {
+            match first.next().await {
+                Some(Ok(Message::Text(t))) => text = Some(t.as_str().to_owned()),
+                Some(Ok(Message::Close(c))) => return (text, c.map(|c| u16::from(c.code))),
+                Some(Ok(_)) => continue,
+                _ => return (text, None),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        told,
+        (
+            Some(r#"{"replaced":{"read":1}}"#.to_owned()),
+            Some(gatewayd::REPLACED)
+        )
+    );
+    // Another intent under sequence 1: refused by name, the world not asked.
+    let before = r.answered.load(Ordering::SeqCst);
+    put(&mut second, intent_to(soul(22), 1, "eden:other")).await;
+    assert_eq!(
+        refusal(&next(&mut second).await.unwrap()),
+        (Some(1), gatewayd::SEQUENCE_IN_USE.to_owned())
+    );
+    // The same intent sent again (after a lost socket) goes as it did; the next number is the other client's own.
+    put(&mut second, intent(soul(22), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(1));
+    put(&mut second, intent(soul(22), 2)).await;
+    assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(2));
+    assert!(r.answered.load(Ordering::SeqCst) > before);
+}
+
 /// A sign-in that asks only if the Soul is free (`?free=1`, a client another took the Soul from) is closed as
 /// `agent.held` while a live socket holds it, and that socket goes on; once none holds it, the same sign-in takes it.
 #[tokio::test]

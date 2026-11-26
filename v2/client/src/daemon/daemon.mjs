@@ -272,6 +272,11 @@ const scope = unhex(seat.grant.scope);
 // #4978: `foreign`, the ranges of sequences another client of this Soul numbered (`[from, to]`, the newest last), whose
 // answers are not this client's; `alias`, an own intent sent under a later sequence than the one its agent was told.
 const state = { cursor: null, sequence: 0, unanswered: [], foreign: [], alias: {}, ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
+// #4978: a Soul's acts held when the daemon last stopped were never sent, and the other client may number into them.
+if (seat.grant.actor !== 'creator' && state.sent !== undefined && state.sequence > state.sent) {
+  state.foreign.push([state.sent + 1, state.sequence]);
+  state.sent = state.sequence;
+}
 const save = () => { if (ended) return; writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
@@ -365,7 +370,10 @@ let lostAt = null; // #4977: when a signed-in socket was lost, until the next is
 let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked, world = sequence) {
   sentAt = performance.now();
-  (ws.sent ??= []).push({ world, sequence }); // #4978: what went on this socket, for a replaced one's refusals
+  // #4978: what went on this socket and is unanswered, for a replaced one's refusals; the newest handed to a socket.
+  ws.sent = (ws.sent ?? []).filter((x) => state.unanswered.includes(x.sequence));
+  ws.sent.push({ world, sequence });
+  state.sent = Math.max(state.sent ?? 0, world);
   // Written down before it goes, so neither a drop nor a restart sends it again.
   state.unanswered.push(sequence);
   save();
@@ -395,7 +403,7 @@ function lent(sequence) {
  * the sequences they were told: the answers come under those.
  */
 function numberAfter(newest) {
-  const own = state.sequence - queued.length; // the newest this client sent
+  const own = state.sent ?? state.sequence - queued.length; // the newest this client handed to a socket
   if (!Number.isSafeInteger(newest) || newest <= own) return;
   state.foreign.push([own + 1, newest]);
   if (state.foreign.length > 64) state.foreign.shift();

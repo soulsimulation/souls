@@ -496,7 +496,7 @@ impl Gateway {
         Ok(())
     }
 
-    /// An intent [`Gateway::sending`] noted was answered on its socket alone, by the gateway, before it reached the
+    /// An intent [`Gateway::sending`] or [`Gateway::holding`] noted was answered on its socket alone, by the gateway, before it reached the
     /// world or its stream (an own answer, not kept): its sender is forgotten.
     pub fn unsent(&self, grant: Grant, sequence: u64) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
@@ -642,6 +642,7 @@ impl Gateway {
     pub fn tell(&self, key: &[u8], sequence: u64, frame: Vec<u8>) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(held) = hub.grants.get_mut(key) {
+            held.newest = held.newest.max(sequence);
             let to = held.route(Answering {
                 sequence,
                 ends: true,
@@ -675,6 +676,8 @@ impl Gateway {
     pub fn deliver(&self, key: Vec<u8>, a: Answering, at: Cursor, frame: Vec<u8>) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         let held = hub.grants.entry(key.clone()).or_default();
+        // #4978: an answer names a sequence sent for the grant, also one sent before the gateway restarted.
+        held.newest = held.newest.max(a.sequence);
         self.answered(held, &key, &frame);
         held.kept.push(at, frame.clone());
         let trace = world_link::delivery_trace(&frame);
