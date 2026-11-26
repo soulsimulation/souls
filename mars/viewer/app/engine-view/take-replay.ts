@@ -4,6 +4,7 @@ import {WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 // Everything is random access in take time, so scrubbing, pausing, the speed
 // and whether the engine camera is on can never change what is shown at a
 // given t (spec §18: the take plays identically with any camera).
+import {CLIP_FADE} from './clip-library.ts';
 import {PIANO_FADE} from './activity-poses.ts';
 import {lastPostureChange} from './posture-transition.ts';
 import {recordedBody,admittedBodyUrl} from './recorded-body.ts';
@@ -184,6 +185,11 @@ export class TakePeople {
   private waveActs = new Map<string,{t:number[];v:string[]}>();
   private waveTakes = new WeakMap<Take,boolean>();
   private activityStreams = new WeakMap<Take,{changes:Take['changes'];activityAt:Set<string>;hasWave:boolean}>();
+  private clipOwnerTicks=new Map<string,number[]>();
+  private clipOwnerStreams=new WeakMap<Take,Map<string,number[]>>();
+  private clipContext = {};
+  private clipFirstTick=Infinity;
+  private clipChains = new Map<string,{boundary:number;origin:NonNullable<SampledHuman['clipOrigin']>}>();
   private acts = new Map<string, { t: number[]; v: string[]; pt: number[]; pv: string[]; bt: number[]; bv: (string | null)[]; it?:number[];iv?:(string|null)[] }>();
   private base: SpatialScene;
   private stairKey = '';
@@ -256,6 +262,7 @@ export class TakePeople {
     this.walkOffsets = walkOffsets;
     if (take === this.take) return;
     this.setSupplementalStairs([]);
+    if(!adjacentTakes(this.take,take)){this.clipContext={};this.clipChains.clear();this.clipFirstTick=Infinity;}
     this.take = take;
     this.indexWalks();
     this.stairKey = '';
@@ -354,6 +361,50 @@ export class TakePeople {
     return history;
   }
 
+  private clipOrigin(id: string, tick: number, current: SampledHuman): SampledHuman['clipOrigin'] {
+    if(current.itemPose||current.handActuator||current.transfer||current.watering||current.cup||current.letGo||current.grip||current.on||current.prop||current.instrument||current.handHold||current.rps||current.hands?.left||current.hands?.right||current.formPress?.length||current.walk>=.01)return undefined;
+    const a=this.acts.get(id);if(!a)return undefined;
+    const index=this.runAt(a,tick),newest=a.t[index],boundary=(this.take.startTick+newest)*this.take.dt;
+    const age=(tick-newest)*this.take.dt;
+    // An owner acquired/released during this fade is a different drawn origin. Yield the whole boundary
+    // to the existing contact handoff, including after release; random seeks use the same recorded barrier.
+    if(this.clipOwnerTicks.get(id)?.some(at=>at>=newest-CLIP_FADE/this.take.dt&&at<=tick))return undefined;
+    if(index<1||age<0||age>=CLIP_FADE)return undefined;
+    const prior=this.clipChains.get(id);
+    if(prior?.boundary===boundary)return {...prior.origin,age};
+    const sources:{offset:number;age:number;sample:SampledHuman}[]=[];
+    let at=tick;
+    // Keep the contributing chain flat. A stable, fully completed fade ends it; rapid changes do not
+    // truncate a visible origin. The renderer collapses these immutable boundaries iteratively.
+    for(let k=this.runAt(a,tick);k>=1;k--){
+      const age=(at-a.t[k])*this.take.dt;if(age<0||age>=CLIP_FADE||this.clipOwnerTicks.get(id)?.some(owner=>owner>=a.t[k]-CLIP_FADE/this.take.dt&&owner<=at))break;
+      const before=a.t[k]-1e-5,activity=a.v[k-1];
+      const take=before>=0?this.take:this.history.find(t=>{const offset=t.startTick-this.take.startTick;return before>=offset&&before<offset+t.ticks;});
+      if(!take)break;
+      const e=sampleTake(take,(before+this.take.startTick-take.startTick)*take.dt).entities[id];
+      if(!e||e.hands?.left||e.hands?.right||e.state.grip||e.state.on||e.state.prop||e.state.handHold||e.state.rps||e.state.handActuator||e.state.itemTransferV1||e.state.heldItemsV1||e.state.handTransferV1||e.state.carryContactV1||e.state.wateringV1||e.state.letGoV1||e.state.cupV1||Array.isArray(e.state.formPress)&&e.state.formPress.length)break;
+      const track=this.walks.get(id),steps=track?this.gaitSteps(id):null,walk=steps?walkWeightAt(steps,before,this.take.dt):0;
+      // Every historical context field comes from this boundary's record/history, never the newer frame.
+      // Only the native anchor is deliberately current: cosmetic origins cannot own another movement path.
+      const sample:SampledHuman={id,p:current.p,yaw:current.yaw,walk,walkDist:(track?this.walked(track,before):0)+(this.walkOffsets[id]??0),activity,
+        baseActivity:typeof e.state.baseActivity==='string'?e.state.baseActivity:undefined,
+        ...(typeof e.state.instrument==='string'?{instrument:e.state.instrument}:{}),
+        ...(typeof e.state.partner==='string'?{partner:e.state.partner}:{}),
+        ...(typeof e.state.seatHeight==='number'?{seatHeight:e.state.seatHeight}:{}),
+        ...this.activityHistory(id,before,activity,walk)};
+      sources.push({offset:(newest-a.t[k])*this.take.dt,age,sample});at=before;
+      const priorBoundary=(this.take.startTick+a.t[k-1])*this.take.dt,priorAge=(before-a.t[k-1])*this.take.dt;
+      if(prior&&prior.boundary===priorBoundary&&priorAge<CLIP_FADE){
+        const offset=boundary-priorBoundary;
+        sources.push({offset,age:priorAge,sample:prior.origin.sample},...(prior.origin.history??[]).map(source=>({...source,offset:source.offset+offset})));
+        break;
+      }
+    }
+    if(!sources.length)return undefined;
+    const [source,...history]=sources,origin={age:source.age,sample:source.sample,history,context:this.clipContext};
+    this.clipChains.set(id,{boundary,origin});return origin;
+  }
+
   /**
    * Idle-variety onset clock: seconds since the body last walked at a full stride or did something other than stand
    * (absent: unknown). A walk that has not reached a full stride (its start, a short nudge) does not restart it, so a
@@ -386,7 +437,7 @@ export class TakePeople {
    *  the retained adjacent windows preserve interrupted transition origins (the live bridge retains twelve seconds): the new engine's live windows are half a second,
    *  and a posture change (posture-transition.ts) or a crossfade lost its age at the next window but one. */
   private indexActs() {
-    this.acts.clear();
+    this.acts.clear();this.clipOwnerTicks.clear();
     const windows: [Take, number][] = [[this.take, 0]];
     const ending = new Map<number, Take[]>();
     for (const take of this.history) { const end = take.startTick + take.ticks; const list = ending.get(end) ?? []; list.push(take); ending.set(end, list); }
@@ -395,6 +446,9 @@ export class TakePeople {
       const at: Take = first;
       first = (ending.get(at.startTick) ?? []).find((t) => t !== at && t.ticks > 0 && adjacentTakes(t, at) && t.rulesVersion === at.rulesVersion) ?? null;
     }
+    const firstTick=windows[0][0].startTick;
+    if(firstTick<this.clipFirstTick){this.clipContext={};this.clipChains.clear();}
+    this.clipFirstTick=Math.min(this.clipFirstTick,firstTick);
     const add=(take:Take,offset:number)=>{
       let parsed=this.activityStreams.get(take);
       if(!parsed){const changes=take.changes.filter(c=>c[2]==='activity'||c[2]==='baseActivity'||c[2]==='instrument');parsed={changes,activityAt:new Set(changes.filter(c=>c[2]==='activity').map(c=>c[1]+'@'+c[0])),hasWave:changes.some(c=>c[2]==='activity'&&c[3]==='wave')};this.activityStreams.set(take,parsed);}
@@ -414,7 +468,19 @@ export class TakePeople {
       }
       this.waveTakes.set(take,parsed.hasWave);
     };
-    for(const [take,offset]of windows)add(take,offset);
+    for(const [take,offset]of windows){
+      add(take,offset);
+      let owners=this.clipOwnerStreams.get(take);
+      if(!owners){
+        owners=new Map();
+        const fields=new Set(['hands','grip','on','prop','instrument','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
+        for(const [tick,id,field,value]of take.changes)if(fields.has(field)&&value&&(typeof value!=='object'||Object.keys(value).length)){
+          let ticks=owners.get(id);if(!ticks)owners.set(id,(ticks=[]));ticks.push(tick);
+        }
+        this.clipOwnerStreams.set(take,owners);
+      }
+      for(const [id,ticks]of owners){let all=this.clipOwnerTicks.get(id);if(!all)this.clipOwnerTicks.set(id,(all=[]));all.push(...ticks.map(t=>t+offset));}
+    }
     this.waveActs.clear();this.waveOwners.clear();
     // Cached discovery scans each immutable take once. Ordinary forward idle
     // chunks are already inspected by the existing activity-index pass above.
@@ -568,7 +634,8 @@ export class TakePeople {
       const seatHeight=this.nativeBoat?.seatHeightFor(frame,id)??(typeof st.seatHeight==='number'&&Number.isFinite(st.seatHeight)?st.seatHeight:undefined);
       const publicSoulKey=(src.human as {soul?:unknown}|undefined)?.soul;
       const game=recordedGame(e.state.game);
-      people.push({itemPose:itemPoseOf(e.state.itemTransferV1 as NonNullable<Entity['human']>['itemTransferV1'],e.state.heldItemsV1 as NonNullable<Entity['human']>['heldItemsV1'],this.take.startTick+frame.tick,this.take.dt),...(e.state.handActuator?{handActuator:e.state.handActuator as NonNullable<Entity['human']>['handActuator'],handActuatorTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.handTransferV1?{transfer:e.state.handTransferV1 as NonNullable<Entity['human']>['handTransferV1'],transferTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.wateringV1?{watering:e.state.wateringV1 as NonNullable<Entity['human']>['wateringV1'],wateringTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.letGoV1?{letGo:e.state.letGoV1 as NonNullable<Entity['human']>['letGoV1'],letGoTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.cupV1?{cup:e.state.cupV1 as NonNullable<Entity['human']>['cupV1'],cupTime:(this.take.startTick+frame.tick)*this.take.dt}:{}), ...(body?.modelUrl?{bodyModel:admittedBodyUrl(body.modelUrl)??body.modelUrl}:body?.params&&typeof body.model==='string'?{bodyModel:body.model}:{}),...(typeof publicSoulKey==='string'?{publicSoulKey}:{}), ...(seatHeight!==undefined?{seatHeight}:{}), ...(shore.status==='recorded'?{shore:shore.contact}:{}), shoreTime:(this.take.startTick+t/this.take.dt)*this.take.dt,waterTransition:this.waterTransition(id,t), ...(Array.isArray(e.state.formPress)?{formPress:e.state.formPress as SampledHuman['formPress']}:{}), id, p: e.p, yaw: e.yaw, walk, walkDist: dist, activity: e.activity, grip: g?.entity, gripSlot: g?.slot, carryWeight, hands: e.hands, baseActivity: st.baseActivity ?? undefined, ...this.activityHistory(id, frame.tick, e.activity ?? 'idle', climbing ? 0 : walk), ...(typeof (st as {partner?: unknown}).partner==='string'?{partner:(st as {partner:string}).partner}:{}), ...(e.state.handHold||e.state.rps?{...(e.state.handHold?{handHold:e.state.handHold as HandHoldState}:{}),...(e.state.rps?{rps:e.state.rps as RpsState}:{}),handGameTick:this.take.startTick+frame.tick,handGameDt:this.take.dt}:{}), ...(typeof st.prop==='string'?{prop:st.prop}:{}), ...(typeof e.state.instrument==='string'?{instrument:e.state.instrument}:{}),...(game?{game,gameTick:this.take.startTick+frame.tick,gameDt:this.take.dt}:{}),...(Number.isFinite(speed)?{speed:Math.abs(speed)}:{}), on: st.on ?? undefined, ...(proneYaw !== undefined ? { proneYaw } : {}), ...(phaseK !== undefined ? { phaseK } : {}), ...(st.sleepPose ? { sleepPose: recordedSleepPose(this.take,id,frame.tick,st.sleepPose) } : {}) });
+      const person:SampledHuman={itemPose:itemPoseOf(e.state.itemTransferV1 as NonNullable<Entity['human']>['itemTransferV1'],e.state.heldItemsV1 as NonNullable<Entity['human']>['heldItemsV1'],this.take.startTick+frame.tick,this.take.dt),...(e.state.handActuator?{handActuator:e.state.handActuator as NonNullable<Entity['human']>['handActuator'],handActuatorTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.handTransferV1?{transfer:e.state.handTransferV1 as NonNullable<Entity['human']>['handTransferV1'],transferTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.wateringV1?{watering:e.state.wateringV1 as NonNullable<Entity['human']>['wateringV1'],wateringTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.letGoV1?{letGo:e.state.letGoV1 as NonNullable<Entity['human']>['letGoV1'],letGoTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.cupV1?{cup:e.state.cupV1 as NonNullable<Entity['human']>['cupV1'],cupTime:(this.take.startTick+frame.tick)*this.take.dt}:{}), ...(body?.modelUrl?{bodyModel:admittedBodyUrl(body.modelUrl)??body.modelUrl}:body?.params&&typeof body.model==='string'?{bodyModel:body.model}:{}),...(typeof publicSoulKey==='string'?{publicSoulKey}:{}), ...(seatHeight!==undefined?{seatHeight}:{}), ...(shore.status==='recorded'?{shore:shore.contact}:{}), shoreTime:(this.take.startTick+t/this.take.dt)*this.take.dt,waterTransition:this.waterTransition(id,t), ...(Array.isArray(e.state.formPress)?{formPress:e.state.formPress as SampledHuman['formPress']}:{}), id, p: e.p, yaw: e.yaw, walk, walkDist: dist, activity: e.activity, grip: g?.entity, gripSlot: g?.slot, carryWeight, hands: e.hands, baseActivity: st.baseActivity ?? undefined, ...this.activityHistory(id, frame.tick, e.activity ?? 'idle', climbing ? 0 : walk), ...(typeof (st as {partner?: unknown}).partner==='string'?{partner:(st as {partner:string}).partner}:{}), ...(e.state.handHold||e.state.rps?{...(e.state.handHold?{handHold:e.state.handHold as HandHoldState}:{}),...(e.state.rps?{rps:e.state.rps as RpsState}:{}),handGameTick:this.take.startTick+frame.tick,handGameDt:this.take.dt}:{}), ...(typeof st.prop==='string'?{prop:st.prop}:{}), ...(typeof e.state.instrument==='string'?{instrument:e.state.instrument}:{}),...(game?{game,gameTick:this.take.startTick+frame.tick,gameDt:this.take.dt}:{}),...(Number.isFinite(speed)?{speed:Math.abs(speed)}:{}), on: st.on ?? undefined, ...(proneYaw !== undefined ? { proneYaw } : {}), ...(phaseK !== undefined ? { phaseK } : {}), ...(st.sleepPose ? { sleepPose: recordedSleepPose(this.take,id,frame.tick,st.sleepPose) } : {}) };
+      person.clipOrigin=this.clipOrigin(id,frame.tick,person);people.push(person);
     }
     this.stairs(comps);
     // PC03 (#682): a recorded loose-material transport is drawn by the entity layer's authored mesh at this same recorded
