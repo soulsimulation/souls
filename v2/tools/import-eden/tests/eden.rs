@@ -672,7 +672,7 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
     );
     // An entry that flies a loop from its stop (a balloon's) gives its seats to such a thing on the open ground with no
     // course yet too: a world seeded before its rides flew, which `worldd serve` gives the course at its start. In a
-    // room (this chair's kitchen) it is given no course, so no seats.
+    // room (this chair's kitchen) it is given no course, so no seats. Outside the house, it stands on the open ground.
     let replica::rules::json::Value::Obj(mut aloft) = sofa.clone() else {
         panic!("an entry")
     };
@@ -690,10 +690,11 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
         r#""parent": "e_house", "slot": {"room": "kitchen"},
      "pose": [1000, 0, 500, 0],"#,
         r#""parent": null,
-     "pose": [10500, 100, 21000, 90000],"#,
+     "pose": [30000, 0, 30000, 0],"#,
     );
     assert_ne!(outside, bare);
     let im = load(&outside).expect("loads");
+    assert_eq!(parent_key(&im, "e_chair"), "ground");
     let (seats, _) = import_eden::body_slots(&im.tree, &aloft);
     assert_eq!(
         seats.len(),
