@@ -2832,7 +2832,7 @@ fn i4187_a_waiting_act_is_turned_with_its_thing_once() {
         assert_eq!(
             b.forms.due(run).is_none(),
             case != "at once",
-            "{case}: waits behind the seat step"
+            "{case}: waits behind the sit or rise"
         );
         while stand(&b, run).is_none() && b.now < 30_000_000 {
             b.tick();
