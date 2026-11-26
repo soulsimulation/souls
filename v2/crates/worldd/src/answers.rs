@@ -89,7 +89,10 @@
 //! 6. the frozen copy is published (K8);
 //! 7. the answers thread waits for the tick's words to be on the disk, appends and syncs the records, then hands the
 //!    synced tick to the view tier (R3) and sends the answers;
-//! 8. the auditor checks a slice of the tree (K11).
+//! 8. the auditor checks a slice of the tree (K11), at most [`AUDIT_TIME`] of it; its faults are queued for the
+//!    auditor's own printer thread, which writes them to stderr (#3422): a blocked stderr never holds the clock on an
+//!    audit line, and a line the queue ([`AUDIT_LINES`]) has no room for is dropped, counted and said, never waited
+//!    for. Passes, cut slices and lines are in `health.json`'s `audit`.
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
@@ -126,7 +129,7 @@ use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::directory::Directory;
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
-use crate::measures::{self, Measures, Stamps};
+use crate::measures::{self, AUDIT, Measures, Stamps};
 use crate::syncs::{self, ToSync};
 use crate::views::Tier;
 use crate::words;
@@ -151,7 +154,7 @@ use replica::sync::Records;
 use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
-use sim::audit::Auditor;
+use sim::audit::{Auditor, Fault};
 use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
@@ -172,7 +175,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -443,6 +446,11 @@ impl Door {
             .is_ok()
     }
 }
+
+/// The most the auditor's slice takes of a tick (K21, #3422): it stops there and carries on next tick.
+pub const AUDIT_TIME: Duration = Duration::from_millis(2);
+/// The fault lines the auditor's printer queues (#3422): a line the queue has no room for is dropped and counted.
+pub const AUDIT_LINES: usize = 1024;
 
 /// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
 /// that refused a part; a loaded machine catches up well within it.
@@ -1310,6 +1318,8 @@ struct Clock {
     outstanding: usize,
     auditor: Auditor,
     audit: usize,
+    /// The auditor's faults, to the thread that prints them (#3422).
+    audit_out: SyncSender<Fault>,
     faults: u64,
     checkpoints: Option<Checkpoints>,
     /// Log records written, the input records included.
@@ -5545,13 +5555,24 @@ impl Clock {
                 .and_then(|s| s.place_in(thing, slot))
                 .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX))
         };
+        // The slice stops at AUDIT_TIME, and its faults are printed on the auditor's own thread (#3422): one write to
+        // a loaded stderr blocked for 300 ms. The clock only queues a line, and drops and counts one with no room.
+        let until = Instant::now() + AUDIT_TIME;
+        let mut cut = false;
         let slice = self
             .auditor
-            .slice_most(self.replica.tree(), self.audit, &most);
-        for f in &slice.faults {
-            eprintln!("worldd: audit: {f:?}");
-        }
+            .slice_within(self.replica.tree(), self.audit, &most, &mut || {
+                cut = Instant::now() >= until;
+                cut
+            });
+        AUDIT.slice(cut, self.auditor.passes);
         self.faults += slice.faults.len() as u64;
+        for f in slice.faults {
+            match self.audit_out.try_send(f) {
+                Ok(()) => AUDIT.sent(),
+                Err(_) => AUDIT.dropped(),
+            }
+        }
         at[8] = mark();
         if let Some(m) = &self.measures {
             // The Souls embodied now, for `health.json` (the home page's count, 26 Nov): off the tick's phases.
@@ -5704,6 +5725,27 @@ fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
     eprintln!(
         "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
     );
+}
+
+/// The auditor's printer (#3422): each fault the clock queued, in the `worldd: audit: Fault { … }` form, and after
+/// any line the clock dropped while this thread was behind, how many. A blocked stderr holds this thread, and the
+/// process's stderr lock with it. A write that fails is passed over, so this thread outlives a closed stderr. A drop
+/// happens only while the queue is full, so a line read after it always says it.
+fn print_audit(faults: Receiver<Fault>) {
+    let mut said = 0;
+    for f in faults {
+        let _ = writeln!(std::io::stderr().lock(), "worldd: audit: {f:?}");
+        AUDIT.printed();
+        let dropped = AUDIT.drops();
+        if dropped > said {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "worldd: audit: {} fault lines dropped while the printer was behind ({dropped} in all, {AUDIT_LINES} queued at most)",
+                dropped - said
+            );
+            said = dropped;
+        }
+    }
 }
 
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
@@ -6387,6 +6429,11 @@ pub fn start<S: Storage + 'static>(
             }
         })
         .map_err(io)?;
+    let (audit_out, audit_in) = sync_channel(AUDIT_LINES);
+    thread::Builder::new()
+        .name("audit".into())
+        .spawn(move || print_audit(audit_in))
+        .map_err(io)?;
     let measures = cfg.measures.then(|| Arc::new(Measures::default()));
     if let (Some(m), Some(path)) = (&measures, cfg.health.take()) {
         measures::write_health(Arc::clone(m), path, measures::EVERY);
@@ -6521,6 +6568,7 @@ pub fn start<S: Storage + 'static>(
         outstanding: 0,
         auditor: Auditor::new(),
         audit: cfg.audit,
+        audit_out,
         faults: 0,
         checkpoints,
         records,
