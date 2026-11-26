@@ -1432,40 +1432,48 @@ fn births(w: &Seeded) -> Vec<(Id, Vec3)> {
 }
 
 /// #5006 (god-mode audit row 37): the creator names where new Souls arrive, on a served world, with no restart. Set to
-/// N2's build site, a joining Soul is born round its middle; an unknown place is refused `edit.arrival-unknown`;
-/// cleared, the next is born round the world's entry.
+/// N2's build site, a joining Soul is born round its middle; an unknown place is refused `edit.arrival-unknown`; the
+/// first set is undone and redone; cleared, the next is born round the world's entry. A newcomer is always born where it
+/// can walk from: named the square and then walled in round its middle, a Soul is born at the entry, and naming it now
+/// is refused `edit.arrival-cut-off`; with no ground within 16 m of its middle, a Soul is born at the entry, and naming
+/// it is refused `edit.arrival-no-ground`.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_entry() {
     let text = testworld::generate(1, 0).unwrap().text;
     let im = import_eden::load(&text).unwrap();
-    let (origin, middle) = {
+    let place = |id: &str| {
         let t = &im.tree;
-        let n = t.node(t.handle(im.nodes["site"]).unwrap()).unwrap();
+        let n = t.node(t.handle(im.nodes[id]).unwrap()).unwrap();
         (
             n.fields()[&import_eden::F_ORIGIN].clone(),
-            replica::arrival::middle(n.fields()).expect("the build site has an outline"),
+            replica::arrival::middle(n.fields()).expect("the place has an outline"),
         )
     };
+    let ((origin, middle), (square_origin, square_middle)) = (place("site"), place("square.area"));
+    assert_eq!(square_middle, (0, 0), "the square is round the origin");
     let d = scratch("arrival");
-    let w = seed(&d, &text, 2, (-40, 30));
+    let w = seed(&d, &text, 4, (-40, 30));
     let bucket = d.join("bucket");
     let (c, creator) = creator(0xc3);
     record(&bucket, &w, c);
     let socket = d.join("s");
     let s = serve(&w, &socket, &bucket);
     s.line("listening ", 60);
-    // The build site as the served world holds it (its node by the facts' id of it).
-    let site = {
+    // The build site and the square as the served world holds them (each node by the facts' id of it).
+    let (site, square) = {
         let (copy, _) = served_copy(&w);
         let t = copy.tree();
         let ground = t.handle(w.ground).unwrap();
-        t.children(ground)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|&c| t.node(c))
-            .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(&origin))
-            .expect("the served world holds the build site")
-            .id()
+        let by = |origin: &Value| {
+            t.children(ground)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|&c| t.node(c))
+                .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(origin))
+                .expect("the served world holds the place")
+                .id()
+        };
+        (by(&origin), by(&square_origin))
     };
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
@@ -1501,6 +1509,22 @@ async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_e
     )
     .await;
     assert_eq!(got.kind, 1, "the build site is named: {got:?}");
+    // The first set added the root's field: its undo sets it back to none (the empty list), and the redo names it again.
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 4, got.version, &Asked::Undo),
+    )
+    .await
+    .0;
+    println!("undo of the first arrival: {got:?}");
+    assert_eq!(got.kind, 1, "the first arrival is undone: {got:?}");
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 5, got.version, &Asked::Redo),
+    )
+    .await
+    .0;
+    assert_eq!(got.kind, 1, "and redone: {got:?}");
     let mut souls = connect_socket(&socket);
     souls
         .set_read_timeout(Some(Duration::from_secs(60)))
@@ -1539,28 +1563,109 @@ async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_e
         edit_intent(
             &w,
             creator,
-            4,
+            6,
             walked.version,
             arrival(Value::Array(Vec::new())),
         ),
     )
     .await;
     assert_eq!(got.kind, 1, "the arrival is cleared: {got:?}");
-    walk(&mut souls, &w, w.souls[1], 1, -37 * M, 30 * M);
-    let walked = socket_end(&mut souls);
+    // Each next Soul is born at the entry, and walks a few metres from it.
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let off = near(born[n].1, (-40 * M, 30 * M));
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(1, 30, "once cleared").await;
+    // The square is named; then walled in round its middle (a pen 8 m across, no Soul in it).
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 7, version, arrival(square.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square is named: {got:?}");
+    let solids = |boxes: &[[i64; 4]]| {
+        let mut op = wall(&w, 0, 0);
+        if let Op::Place { fields, .. } = &mut op {
+            let boxes = boxes
+                .iter()
+                .map(|&[cx, cz, hx, hz]| {
+                    Value::Array(
+                        [cx, cz, hx, hz, 0, 0, 2_500, 5, 0]
+                            .iter()
+                            .map(|&v| int(v))
+                            .collect(),
+                    )
+                })
+                .collect();
+            fields.insert(import_eden::F_SOLIDS, Value::Array(boxes));
+        }
+        op
+    };
+    let pen = solids(&[
+        [0, 4_000, 4_200, 100],
+        [0, -4_000, 4_200, 100],
+        [4_000, 0, 100, 4_200],
+        [-4_000, 0, 100, 4_200],
+    ]);
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 8, got.version, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let version = at_entry(2, 33, "with the square's middle walled in").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 9, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named once walled in: {got:?}");
     assert_eq!(
-        walked.kind, 1,
-        "the second Soul is born and walks: {walked:?}"
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
     );
-    let born = births(&w);
-    assert_eq!(born.len(), 2, "two bodies born");
-    let at_entry = near(born[1].1, (-40 * M, 30 * M));
-    println!(
-        "born once cleared: ({:.2}, {:.2}) m, {at_entry:.2} m from the entry (-40, 30) m",
-        born[1].1.x as f64 / 1e6,
-        born[1].1.z as f64 / 1e6
+    // The pen gives way to one solid 34 m across over the square's middle: no ground within 16 m of it.
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            10,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    let version = at_entry(3, 27, "with no ground round the square's middle").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 11, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named with no ground round its middle: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::NO_GROUND),
+        "{got:?}"
     );
-    assert!(at_entry <= 9.0, "born round the entry: {at_entry} m");
 }
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'

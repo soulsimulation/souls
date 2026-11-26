@@ -6,7 +6,10 @@
 //! `souls-god arrival --clear` writes, and what an undo of the first set leaves) names none: Souls then arrive where
 //! the world's host put them (`world.json`'s `arrival`, else its `entry`). A place removed since names none either.
 //!
-//! A set of anything else is refused `edit.arrival-unknown`, by name, with what was wrong.
+//! A set of anything else is refused `edit.arrival-unknown`, by name, with what was wrong. A place Souls born at could not
+//! walk away from is refused when the set is made: its middle cut off from where they otherwise arrive
+//! ([`CUT_OFF`]), or no ground to stand on round it ([`NO_GROUND`]). Births check again, since the world changes after
+//! a set: a place gone bad puts them where the host would.
 
 use crate::encode::Value;
 use crate::ids::Id;
@@ -18,6 +21,12 @@ use std::collections::BTreeMap;
 pub const F_ARRIVAL: u64 = 92;
 /// The refusal of an arrival that names no place of the world.
 pub const UNKNOWN: &str = "edit.arrival-unknown";
+/// The refusal of an arrival whose middle is on ground no walk from where Souls otherwise arrive reaches (a walled pen):
+/// Souls born there could not leave. `worldd` checks it on its town when the set is made.
+pub const CUT_OFF: &str = "edit.arrival-cut-off";
+/// The refusal of an arrival with no spot births try round it (16 m) that a Soul can stand on and walk from: every join
+/// would wait for ground. `worldd` checks it on its town when the set is made.
+pub const NO_GROUND: &str = "edit.arrival-no-ground";
 /// A place's outline, `[[x, z] mm …]` (import-eden's field 11).
 const OUTLINE: u64 = 11;
 /// A path's or a line place's line, `[[x, z] mm …]` (import-eden's field 16).
@@ -76,7 +85,12 @@ pub fn is_place(fields: &BTreeMap<u64, Value>, on_ground: bool) -> bool {
 /// when the world's root names no place, or the place it names is gone or no longer one.
 pub fn point(tree: &Tree) -> Option<(Id, Vec3)> {
     let root = tree.node(tree.root())?;
-    let place = read(root.fields().get(&F_ARRIVAL)?).ok()??;
+    point_of(tree, read(root.fields().get(&F_ARRIVAL)?).ok()??)
+}
+
+/// Where Souls arriving at `place` are born round in `tree`: the open ground's id and the place's middle on it, µm.
+/// None when it is gone or not a place.
+pub fn point_of(tree: &Tree, place: Id) -> Option<(Id, Vec3)> {
     let node = tree.handle(place).and_then(|h| tree.node(h))?;
     let ground = node.parent()?;
     let g = tree.handle(ground).and_then(|h| tree.node(h))?;

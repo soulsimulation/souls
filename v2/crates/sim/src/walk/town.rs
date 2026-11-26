@@ -1653,6 +1653,15 @@ impl Town {
         };
     }
 
+    /// Whether `at` (µm, `node`'s frame) is dry ground no walk from `from` reaches, for a body of `size`: [`Floors::sealed`]
+    /// with `from` for the world's entry. A creator's arrival place is checked from where Souls otherwise arrive (#5006).
+    ///
+    /// [`Floors::sealed`]: crate::mover::Floors::sealed
+    pub fn cut_off(&self, from: (Id, Vec3), node: Id, at: Vec3, size: Size) -> bool {
+        self.geometry(size)
+            .is_ok_and(|(m, ..)| sealed_on(m, Some(from), node, at))
+    }
+
     /// The main ground as a start prints it: how many of the standard map's dry pieces are in the entry's part (the
     /// main ground), and how many in all. `None` when no entry is known.
     pub fn main_ground(&self) -> Option<(usize, usize)> {
