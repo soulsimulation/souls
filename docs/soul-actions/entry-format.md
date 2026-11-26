@@ -3,11 +3,11 @@
 An **entry** is one kind written as data for Engine v2 (spec [#2635](https://github.com/soulsimulation/souls/issues/2635)):
 what a thing, a body's family or a kind of ground is, which state it keeps, where it can be held, stood at or sat in,
 and what can be done with it. Entries live in `content/kinds/<family>/<name>.json`, where the folder only groups
-them for people. Nothing in today's server reads them; the tools of the Soul Actions tranche
-([#2841](https://github.com/soulsimulation/souls/issues/2841)) do, and Engine v2's kinds loader (K3,
-[#2667](https://github.com/soulsimulation/souls/issues/2667)), shared rules (R2,
-[#2685](https://github.com/soulsimulation/souls/issues/2685)) and runner (F1,
-[#2766](https://github.com/soulsimulation/souls/issues/2766)) read this format as merged on main.
+them for people. The new engine reads the world's entry catalogue: `worldd seed --entries <dir>` copies entries
+into the world, and `worldd serve` loads that world's `entries/` into its rules and activity kinds
+([loader](../../v2/crates/worldd/src/serve.rs)). The development launcher copies `content/kinds` for a facts-backed
+world ([run.sh](../../v2/tools/dev/run.sh)). Editing a catalogue file alone neither updates an already-running
+world nor places an instance; a thing still needs the world's normal admission and placement path.
 
 ```sh
 node tools/entry/format.mjs content/kinds      # validate every entry; prints each kind's provisional reference
@@ -467,13 +467,18 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
-## An activity (proposed: `roles`)
+## An activity (`roles`)
 
-A group activity (a lecture, a supper, later a handshake, a dance or a bout) is a node Souls enter (SA-G1a,
-[#2872](https://github.com/soulsimulation/souls/issues/2872); Engine v2 B5, [#2724](https://github.com/soulsimulation/souls/issues/2724)).
-Its kind is an ordinary entry plus a `roles` section, which the validator does not take yet: it is proposed on
-[#2842](https://github.com/soulsimulation/souls/issues/2842), and until then the examples are test kinds
-(`packages/form-rules/cases/kinds/test/lecture_activity.json`, `supper.json`).
+`roles` is a supported section of an ordinary entry, validated by
+[`format.mjs`](../../tools/entry/format.mjs). At world startup,
+[`activity_kinds`](../../v2/crates/worldd/src/serve.rs) compiles entries with at least two roles into joint activity
+kinds. Examples include the [hall lecture](../../content/kinds/hall/lecture.json),
+[handshake](../../content/kinds/together/handshake.json) and
+[shared-beat dance](../../content/kinds/together/dance_together.json). Souls join through the existing activity
+offer/accept flow and leave through its activity commands; declaring roles does not create another group mechanism.
+A role can name a `move`, `on_beat: true` or `follows: true`; these are accepted by the validator and read by the
+runtime. A move still needs its compiled engine definition and a page drawing path; a role declaration alone does
+not prove visible contact.
 
 ```json
 "roles": {
@@ -490,10 +495,12 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
   thing's slot order. Only a slot that admits a body counts, and, if `posture` is given, only one with that posture.
   The first slot with room is the place. If no slot has room, the answer is `no_free_place`, naming the role.
-- **Entering is a form** of the kind. It links the role to the actor and moves the actor into a slot argument
-  (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
-- The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
-  Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
+- An entry's **forms** can link a role to the actor and reparent it into a slot. The form's `who`, needs and steps
+  govern that operation. Joint activities also use the runtime's offer, accept, use and leave commands; their
+  declared places supply the members' approach stands. Do not substitute a link-only form for consent.
+- Each Soul's approach and seating follow authoritative engine movement. A form's effects link and set the parent;
+  they do not let the page move the body. Anything needing another Soul's yes uses an offer with an expiry
+  (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
 - **Leaving is a form** too: the one that unlinks one role from the actor, and moves the actor out of its place by
   its own `reparent` (SA-G1b, [#2873](https://github.com/soulsimulation/souls/issues/2873)). The role's `need` is its
   rule for leaving. A `required` role leaving ends the activity. A `replaceable` one re-opens its place: its link
@@ -520,46 +527,14 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   anyone is in it, the form is refused and nothing changes.
   The examples are `packages/form-rules/cases/kinds/test/talk.json` and the lecture, `content/kinds/hall/lecture.json`.
 
-- **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
-  outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
-  a link type (a role with places) for those at the sitting now; `enough`, how many present start a sitting; and
-  `stage`, an enum field with the values `sitting` and `idle`. The list is closed: `members`, `present`, `enough`,
-  `stage`, `sitting`, `idle`.
+### Unsupported top-level activity sections
 
-  ```json
-  "standing": { "members": "member", "present": "present", "enough": 3, "stage": "phase", "sitting": "sitting", "idle": "idle" }
-  ```
-
-  Joining and parting are forms that link and unlink `members`, with no place. A standing activity does not end when
-  its last member parts, or when no one is present; it keeps its members, state and end date while empty. Whether a
-  sitting starts is checked when a member arrives (a role entered as above): once `enough` are present the rules set
-  the stage to `sitting` (event `sitting_began`), once. When the last one present rises the stage returns to `idle`
-  (event `sitting_ended`). Present is a subset of members: only a member may arrive (the form's `who`), and a member
-  who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
-  members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
-  are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
-
-- **Between two Souls** (proposed: a `pair` section; SA-G4, [#2876](https://github.com/soulsimulation/souls/issues/2876)):
-  give, hug, handshake, high five, dance, push the swing. Bodies touch only inside an activity both joined. A pair has
-  two `required` roles. The offer is a proposal for one Soul (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)):
-  its `invited` link names who may accept, a `proposer` link who may offer. The asker enters its role by its own act;
-  the invited Soul accepts by entering the other, while the countdown (`now.ends`) is above 0. At 0, with nobody
-  accepting, the world's timer form (`expires`) removes the offer: the asker is released (`released`) and the form's
-  event names the outcome. A give names the link to its thing (`gives`): the accepting form moves it into the
-  accepter's free hand in the same batch (`"what": {"link": "offered"}`), both sides or neither (E24,
-  [#2793](https://github.com/soulsimulation/souls/issues/2793)). `contact` states, in the activity's own frame, each
-  role's move, the point its effector touches in whole millimetres and the beat the contact lands on; a beat is
-  `beat_us` whole microseconds (B8, [#2740](https://github.com/soulsimulation/souls/issues/2740)). The list is closed:
-  `invited`, `accept`, `expires`, `gives`, `beat_us`, `contact`.
-
-  ```json
-  "pair": { "invited": "invited", "accept": "accept", "expires": "lapse", "beat_us": 500000,
-            "contact": [{ "role": "asker", "move": "press", "contact_mm": [-10, 1000, 0], "beat": 1 },
-                        { "role": "partner", "move": "press", "contact_mm": [10, 1000, 0], "beat": 1 }] }
-  ```
-
-  The examples are test kinds (`give`, `hug`, `handshake`, `high_five`, `dance`, `push_swing` in
-  `packages/form-rules/cases/kinds/test/`).
+`standing` and `pair` are not entry sections: the validator's closed `SECTIONS` table rejects them. Earlier
+proposals and test-rule examples using those keys are not authoring templates for a current entry. Persistent
+membership can be expressed with ordinary state, links and forms where their existing rules support it; it does
+not imply an automatic course or job lifecycle. Two-person actions use `roles` and the existing activity offer and
+accept mechanism, as the handshake entry does. Do not add a `pair.contact` table or assume it supplies hand targets
+on the page.
 
 ## A move
 
@@ -567,7 +542,8 @@ A form's `move` step names a move and a point; moves are their own data in `cont
 (SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
 and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
 classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
-`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`effector` (`hand`, `held_point` or `aim`), `reach_mm` (whole millimetres: at most 700 for contact, or 20000
+for `aim`) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. `seated: true` (#4143) marks a move made from a seat (a
 stretch, a slump): a body a seat, a bed or a standing slot holds makes it with its legs left to the slot, which its
 `locomotion` claim and block then skip; any other move that claims the legs is refused there `resource-held`. Contact is the one instant at the end of start-up; a phase
@@ -594,7 +570,11 @@ node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/ent
 (`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
 arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
 rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
-move the thing's frame into the world's: the caller passes world positions.
+move the thing's frame into the world's: the caller passes world positions. This is the authoring diagnostic's
+pose helper, not the page's rig. The native move loader accepts `hand` and `held_point` as its held-resource effector,
+and `aim` as a non-contact target ([Move::from_entry](../../v2/crates/replica/src/moves.rs)). That declaration and a
+sheet do not supply the page with actual hand targets: generic press/touch and take/put contact, including crew
+hand feeds, still need their stream-to-page integration and final-draw validation.
 
 ## The looks table
 
