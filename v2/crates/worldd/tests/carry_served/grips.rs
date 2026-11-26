@@ -543,6 +543,12 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
         Some("souls:grip-out-of-reach"),
         "its way back stopped by name"
     );
+    let laid = moves_of(&dir, beam).last().unwrap().position;
+    println!(
+        "set down where its way back stopped, its foot {} mm up",
+        laid.y / 1000
+    );
+    assert!(laid.y >= 0, "on the ground, not in it");
     let phases: Vec<String> = words(&dir, carry).into_iter().map(|h| h.phase).collect();
     println!("phases: {phases:?}");
     assert_eq!(

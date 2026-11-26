@@ -1890,7 +1890,10 @@ impl Engine {
                     self.header.clone(),
                     self.rules.clone(),
                 );
-                carry.track.push((now, here.0, here.1));
+                // Set down on the floor under where it stopped: the floor its carry was carried over, not where the
+                // set-in had lowered it to.
+                let over = Vec3::new(here.0.x, s.start.0.y, here.0.z);
+                carry.track.push((now, over, here.1));
                 carry.span = s.span;
                 carry.sides = self.set_sides.remove(&activity).unwrap_or_default();
                 if let Some(l) = self.held_load(tr, s.part) {
@@ -1963,6 +1966,7 @@ impl Engine {
             }
         }
         self.send(written);
+        self.collect(None);
     }
 
     fn send(&mut self, written: Vec<((Id, Id), Vec<Effect>)>) {

@@ -94,6 +94,16 @@ many lifts at once never make a tick late: a lift that names a destination is an
 the next tick when the search is quick), and one whose way has not come back by the act's deadline is refused
 `carry-way-late`. A way found is said to the carry's audience at the lift (`souls:carry-way`, each pose where the front
 and the back carriers stand), and the carriers walk it.
+Who holds which grip ([#5067](https://github.com/soulsimulation/souls/issues/5067)) is the carry's own rule: the two
+outermost grips go to the front and the back (the back the one at the carry's back as the load is held), the grips
+between to the side carriers in join order from the back. It is kept on the carry's node (its field 5) and said to its
+audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: phase, 4: since µs, 5?: until µs, 6:
+[{1: body, 2: point:<grip>, 3: grip [x, y, z], 4: [hand, hand]}, ...]}`, points in µm in the load's own (entry) frame,
+the two hands 0.2 m either side of where the carrier holds along the load's length, from the carry's back toward its
+front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
+ends) and `souls:released` (set down, seated or broken off; the last holds kept). A side carrier who leaves takes only its
+own hold away. A seating never moves a part out of a carrier's reach of its grip (0.7 m on the plan, its standing reach
+above its feet): refused before anyone moves, or stopped while its track runs, as `part.grip-out-of-reach`.
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
 load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
 (`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.

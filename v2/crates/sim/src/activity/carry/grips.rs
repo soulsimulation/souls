@@ -7,20 +7,21 @@
 //!   the front ([`Load::side_places`]). A load lifted the other way round ([`Load::reversed`]) or taken turned as it
 //!   lay is read as it is held, so its back carrier holds the grip at its back.
 //! - **Kept, not renumbered.** The holds are written on the carry's activity node ([`F_GRIPS`]) and said to its
-//!   audience ([`GRIPS`]) whenever they change: at the lift or a take (`carry`), a seating's set-in and its way back
-//!   (`set-in`, `return`, each with when its track ends), a carry taken up again (`carry`) and its end (`released`, the
-//!   last holds kept so a page can show the hands letting go). A side carrier who leaves takes only its own hold away:
-//!   every other carrier keeps its grip. The node is in the log, so the holds are there after a restart.
-//! - **What a hold says** ([`Hold`]): the carrier's body, its grip (the entry's point name), the grip's point and its two
-//!   hands' points, each µm in the load's own frame (its entry's frame: x and z centred, y from its floor up). The
-//!   hands are [`HAND_HALF`] either side of where the carrier holds along the load's long axis (kept within its
-//!   length): an end carrier at its grip, a side carrier at the grip's edge on the side it stands. The hands are in the
-//!   order they lie along the carry, from its back toward its front, so a page gives each to the hand on that side of
-//!   the body as it is drawn. A hand's target is the load's drawn pose times its point.
+//!   audience ([`GRIPS`]) whenever they change: at the lift or a take ([`CARRY`]), a seating's set-in and its way back
+//!   ([`SET_IN`], [`RETURN`], each with when its track ends), a carry taken up again ([`CARRY`]) and its end
+//!   ([`RELEASED`], the last holds kept so a page can show the hands letting go). A side carrier who leaves takes only
+//!   its own hold away: every other carrier keeps its grip. The node is in the log, so the holds are there after a
+//!   restart.
+//! - **What a hold says** ([`Hold`]): the carrier's body, its grip (the entry's point name, said as `point:<name>`), the
+//!   grip's point and its two hands' points, each µm in the load's own frame (its entry's frame: x and z centred, y from
+//!   its floor up). The hands are [`HAND_HALF`] either side of where the carrier holds along the load's long axis (kept
+//!   within its length): an end carrier at its grip, a side carrier at the grip's edge on the side it stands. The hands
+//!   are in the order they lie along the carry, from its back toward its front, so a page gives each to the hand on that
+//!   side of the body as it is drawn. A hand's target is the load's drawn pose times its point.
 //!
 //! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs, 5?: until µs, 6: [hold, ...]}`, a hold
-//! `{1: body, 2: grip, 3: [x, y, z], 4: [[x, y, z], [x, y, z]]}`. B9's board, a load of no entry, has no grips: its
-//! holds are empty.
+//! `{1: body, 2: point:<grip>, 3: [x, y, z], 4: [[x, y, z], [x, y, z]]}`. B9's board, a load of no entry, has no grips:
+//! its holds are empty.
 
 use std::collections::BTreeMap;
 
