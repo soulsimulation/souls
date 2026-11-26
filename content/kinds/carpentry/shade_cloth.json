@@ -50,31 +50,31 @@
   },
   "grip_back": {
    "role": "grip",
-   "at_mm": [0, 15, -1300]
+   "at_mm": [0, 25, -1300]
   },
   "grip_1": {
    "role": "grip",
-   "at_mm": [0, 15, -800]
+   "at_mm": [0, 25, -800]
   },
   "grip_2": {
    "role": "grip",
-   "at_mm": [0, 15, -300]
+   "at_mm": [0, 25, -300]
   },
   "grip_3": {
    "role": "grip",
-   "at_mm": [0, 15, 300]
+   "at_mm": [0, 25, 300]
   },
   "grip_4": {
    "role": "grip",
-   "at_mm": [0, 15, 800]
+   "at_mm": [0, 25, 800]
   },
   "grip_front": {
    "role": "grip",
-   "at_mm": [0, 15, 1300]
+   "at_mm": [0, 25, 1300]
   }
  },
  "geometry": {
-  "bounds_mm": [1900, 30, 2800]
+  "bounds_mm": [1900, 50, 2800]
  },
  "looks": {
   "shape": {
@@ -82,9 +82,9 @@
    "palette": {"cloth": "#e2cfa6", "batten": "#8a5d36"},
    "tags": ["shade", "cloth", "roof", "panel"],
    "shapes": [
-    {"kind": "box", "at": [0, 20, 0], "size": [1900, 12, 2800], "tint": "cloth"},
-    {"kind": "box", "at": [-850, 15, 0], "size": [60, 30, 2800], "tint": "batten"},
-    {"kind": "box", "at": [850, 15, 0], "size": [60, 30, 2800], "tint": "batten"}
+    {"kind": "box", "at": [0, 40, 0], "size": [1900, 12, 2800], "tint": "cloth"},
+    {"kind": "box", "at": [-850, 25, 0], "size": [60, 50, 2800], "tint": "batten"},
+    {"kind": "box", "at": [850, 25, 0], "size": [60, 50, 2800], "tint": "batten"}
    ]
   }
  },

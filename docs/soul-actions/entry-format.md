@@ -293,7 +293,9 @@ an optional `yaw_mdeg`. A `joint` point is where a part joins another (Engine v2
 [#3338](https://github.com/soulsimulation/souls/issues/3338)): it names its `connector` kind and the kind it `mates`
 with (a rack beam's `beam_end` mates with an upright's `beam_seat`); no other point names either. The joint itself is a
 link (section 4), never a parent: a beam seated between two uprights is a child of its bay
-(`content/kinds/construction/`).
+(`content/kinds/construction/`). The kind that declares the joining link bears on the kind it names, which stands; a
+kind whose link names a kind that itself bears rests on it, a tier up, and needs as many of those held up as the link's
+`most` (a shade cloth on its two rails, `content/kinds/carpentry/`).
 A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
 may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
 declares its bounds.
