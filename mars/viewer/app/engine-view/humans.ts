@@ -1284,8 +1284,10 @@ export class HumanViews {
     const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && (['idle', 'walk', 'run', 'jog'].includes(v.activity) || recordedPress && v.activity === 'operate');
+    const freeFootFit = !water && !waterFrom && !lib.water && freeBody && sitW <= 0 && !gait && !posed && !runFallback && !gripping && !hasHands
+      && !lib.posture && !lib.still && !act?.lying && !act?.ride && !act?.pairedContact && !v.handHold && !v.rps && !v.propWanted;
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
-    if (!(v.formPress || footFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame)) return;
+    if (!(v.formPress || footFit || freeFootFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame)) return;
     for (const s of v.saved) { s.p.copy(s.o.position); s.q.copy(s.o.quaternion); }
     v.layered = true;
     _fwd.set(Math.cos(yaw), 0, Math.sin(yaw)); // engine yaw 0 faces +x; holder.rotation.y = -yaw
@@ -1324,9 +1326,10 @@ export class HumanViews {
         v.legs.forEach((leg,i)=>{const f=runFallback.legs[leg.side>0?0:1],target=V().copy(h.position).addScaledVector(_fwd,f.forward).addScaledVector(_right,v.footLat[i]).addScaledVector(UP,v.dims!.ankleH+f.up);
           legTo(leg,v.ankle[i],target,V().copy(_fwd).addScaledVector(UP,.2),.97,footPitch(v,i,0));});
       }
-      // Only ordinary grounded locomotion: stairs, poses, water, seats and grips
-      // retain their dedicated contacts. Preserve the root and the clip's foot pitch.
+      // Free upright clips/overlays share ground support. Dedicated owners and authored
+      // kneeling/floor layouts retain their contacts; aimed partners alone do not own one.
       if (footFit && !seatClip) fitGroundFeet(v, h);
+      else if (freeFootFit && !seatClip) { const support = uprightLegs(v, h); if (support > 0) fitGroundFeet(v, h, support); }
       if (sitW <= 0 && pz.bend > 1e-4 && v.spine) bendTorso(v.spine, pz.bend);
     }
     if (keep) {
@@ -2630,15 +2633,55 @@ function footPitch(v: View, i: number, pitch: number) {
   return _qf.clone();
 }
 
-function fitGroundFeet(v: View, holder: THREE.Object3D) {
+/** Classify the drawn support, including library clips whose nominal body kind is 'stand'
+ * but which actually kneel. No activity-name list can describe the pose being drawn. */
+function uprightLegs(v: View, holder: THREE.Object3D) {
+  if (!v.dims || v.legs.length < 2) return 0;
+  holder.updateMatrixWorld(true);
+  let weight = 1;
+  for (const leg of v.legs) {
+    const hip = (leg.upper.getWorldPosition(V()).y - holder.position.y) / v.dims.hipH;
+    const knee = (leg.lower.getWorldPosition(V()).y - holder.position.y) / v.dims.shin;
+    // Fade before the authored kneeling layout takes over. Both ends have zero
+    // slope, so crossing the support boundary cannot switch the rig in a frame.
+    weight = Math.min(weight, smooth(Math.max(0, Math.min(1,(hip-.6)/.2))), smooth(Math.max(0, Math.min(1,(knee-.25)/.5))));
+  }
+  return weight;
+}
+
+function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number) {
   if (!v.dims || v.legs.length < 2) return;
   holder.updateMatrixWorld(true);
   for (const [i, leg] of v.legs.entries()) {
     const ankle = leg.foot.getWorldPosition(V());
-    const lift = groundFootLift(holder.position.y, lowestY(v.surf.foot.get(leg.side)), humanGroundSampler()?.(ankle.x, ankle.z));
-    if (lift < .001) continue;
+    if (fullSkinWeight === undefined) {
+      const lift = groundFootLift(holder.position.y, lowestY(v.surf.foot.get(leg.side)), humanGroundSampler()?.(ankle.x, ankle.z));
+      if (lift < .001) continue;
+      legTo(leg, v.ankle[i], ankle.setY(ankle.y + lift), V().copy(_fwd).addScaledVector(UP,.1), .999, leg.foot.getWorldQuaternion(new THREE.Quaternion()));
+      continue;
+    }
+    const originY = ankle.y, original = [leg.upper,leg.lower,leg.foot].map(b=>({p:b.position.clone(),q:b.quaternion.clone()}));
+    const pole = leg.lower.getWorldPosition(V()).sub(leg.upper.getWorldPosition(V()).add(ankle).multiplyScalar(.5));
+    if (pole.lengthSq() < 1e-8) pole.copy(_fwd).addScaledVector(UP,.1);
     const rotation = leg.foot.getWorldQuaternion(new THREE.Quaternion());
-    legTo(leg, v.ankle[i], ankle.setY(ankle.y + lift), V().copy(_fwd).addScaledVector(UP, .1), .999, rotation);
+    // Skin blends between shin and foot bones, so one ankle correction does not
+    // necessarily lift the complete surface by the same amount. Recheck the real
+    // skin with the same fixed-length IK, keeping the original 8 cm total bound.
+    for (let pass = 0; pass < 4; pass++) {
+      const low = Math.min(lowestY(v.surf.foot.get(leg.side)), lowestY(v.surf.leg?.get(leg.side)));
+      const lift = Math.min(.08 - (ankle.y - originY), groundFootLift(holder.position.y, low, humanGroundSampler()?.(ankle.x, ankle.z)));
+      if (lift < .0001) break;
+      legTo(leg, v.ankle[i], ankle.setY(ankle.y + lift), pole, .999, rotation);
+      holder.updateMatrixWorld(true);
+      leg.foot.getWorldPosition(ankle);
+    }
+    if (fullSkinWeight < 1) {
+      [leg.upper,leg.lower,leg.foot].forEach((bone,index)=>{
+        bone.position.lerp(original[index].p,1-fullSkinWeight);
+        bone.quaternion.slerp(original[index].q,1-fullSkinWeight);
+      });
+      holder.updateMatrixWorld(true);
+    }
   }
 }
 
