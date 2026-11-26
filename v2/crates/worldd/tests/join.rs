@@ -1184,9 +1184,12 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
 /// difference. Re-pinned by #4974: a gateway walk's place is asked in the tick the walk starts, so it is planned,
 /// answered and walking a tick sooner (904 records, 2,331 motion samples); main without that one change writes the
-/// previous pin (aafd0a80...), so it is the whole difference.
+/// previous pin (aafd0a80...), so it is the whole difference. Re-pinned by #5034: a walk sent to a point says how far
+/// from that point it ended (its end's field 7), not from the ground node (same 904 records, 2,331 motion samples). 41
+/// walk ends' field 7 went from 39.9 m to 48.1 m to 0 mm to 48 mm, and nothing else differs; the spot change alone
+/// leaves this history as it was, and main's three files write the previous pin (f7b20d34...).
 const PINNED_MOTION_HISTORY: &str =
-    "f7b20d34002b6b05b9ed86605a1e940eca51750dabd4656ad3f255f9d2030bd1";
+    "3148abac4afea323b3e04d9e0e466aed89503d96a3416b7ea84616be775186e9";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
