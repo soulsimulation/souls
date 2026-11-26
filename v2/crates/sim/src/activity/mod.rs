@@ -1109,6 +1109,38 @@ impl Activities {
         )
     }
 
+    /// The world's word of who holds which grip of `activity`'s load, and the same kept on its node (#5067:
+    /// [`carry::grips`]): `souls:carry-grips` with `holds`' fields, and its field [`carry::grips::F_GRIPS`] set to them,
+    /// in one effect at the activity's node, to its audience, acted and caused as `by` says.
+    pub fn carry_grips(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        holds: &carry::grips::Holds,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        let fields = holds.fields(activity)?;
+        let set = Change::Set {
+            node: activity,
+            field: carry::grips::F_GRIPS,
+            to: Value::Map(fields.clone()),
+            by: None,
+        };
+        self.emit(
+            tree,
+            activity,
+            audience,
+            by,
+            carry::grips::GRIPS,
+            fields,
+            vec![set],
+        )
+    }
+
     /// The world's word that `load`, held by `activity`, was kept as it stands, and `why` (0.135 A2: its last holder
     /// left and setting it down would leave a joined part hanging): `souls:hold-kept`, `{1: activity, 2: load, 3: why}`,
     /// as [`Activities::carry_set_down`] says it.

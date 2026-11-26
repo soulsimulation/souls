@@ -36,6 +36,14 @@
 //!   otherwise a leave breaks the carry off and the part is set down where it is (C3), so no part goes with an
 //!   activity that ends.
 //!
+//! - **Every carrier within reach of its grip (#5067 item 3).** The set-in track and the way back move the crew's node
+//!   while its carriers stand, so a put is refused before anyone moves when a carrier still holding the part would not
+//!   be within reach of its grip ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above
+//!   its feet) where the track starts or where it ends (`part.grip-out-of-reach`, naming it); on a straight track a
+//!   carrier who stands is nearest one end or the other. While a track runs, a carrier who has moved out of reach of
+//!   its grip stops it by name: a set-in goes back as a refused seating does, a way back stops where it is and the part
+//!   is set down there (`crate::engine`).
+//!
 //! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
 use std::collections::BTreeMap;
@@ -48,7 +56,7 @@ use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, show};
 use sim::activity::Activities;
-use sim::activity::carry::{HEIGHT, yaw_toward};
+use sim::activity::carry::{GRIP_REACH, HEIGHT, yaw_toward};
 use sim::activity::seating::{Seating, Target};
 use sim::ground::scene::{slot_points, xform_to};
 use sim::structure::Structure;
@@ -181,6 +189,46 @@ fn within_reach(above: i64, reach: i64) -> R<()> {
             "reach.too-high",
             format!("{above} µm above its carriers' feet, standing reach {reach} µm"),
         ));
+    }
+    Ok(())
+}
+
+/// A carrier holding a crew's part, for the reach of its grip (#5067 item 3): its body, where its feet are on the crew's
+/// ground, its standing reach, and where it holds the part in the crew's node's frame (µm).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Carrier {
+    pub body: Id,
+    pub feet: Vec3,
+    pub reach: i64,
+    pub grip: Vec3,
+}
+
+/// `part.grip-out-of-reach`, naming the first of `carriers` that would not reach where it holds the part with the crew's
+/// node at `node` (on the crew's ground, µm): more than [`GRIP_REACH`] from it on the plan, or it more than the
+/// carrier's standing reach above its feet.
+pub fn out_of_reach(carriers: &[Carrier], node: (Vec3, Quat)) -> R<()> {
+    for c in carriers {
+        let g = node
+            .1
+            .rotate(c.grip)
+            .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
+        let at = Vec3::new(node.0.x + g.x, node.0.y + g.y, node.0.z + g.z);
+        let (dx, dz) = (i128::from(at.x - c.feet.x), i128::from(at.z - c.feet.z));
+        let off = (dx * dx + dz * dz).isqrt();
+        let up = at.y - c.feet.y;
+        if off > i128::from(GRIP_REACH) || up > c.reach {
+            return Err(refusal(
+                "part.grip-out-of-reach",
+                format!(
+                    "{} would stand {} mm from its grip, {} mm below it; at most {} mm and {} mm",
+                    show(c.body),
+                    off / 1000,
+                    up / 1000,
+                    GRIP_REACH / 1000,
+                    c.reach / 1000
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -396,6 +444,7 @@ impl Assembly {
         from: (Vec3, Quat),
         ground: Id,
         apart: i64,
+        carriers: &[Carrier],
     ) -> R<Vec<Effect>> {
         let part = *self
             .held
@@ -429,6 +478,9 @@ impl Assembly {
             }
             (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
+        // #5067 item 3: every carrier within reach of its grip where the set-in starts and where it ends.
+        out_of_reach(carriers, from)?;
+        out_of_reach(carriers, (at, from.1))?;
         let (dx, dz) = (i128::from(at.x - from.0.x), i128::from(at.z - from.0.z));
         if dx * dx + dz * dz > i128::from(PUT_REACH).pow(2) {
             return Err(refusal(
@@ -527,6 +579,70 @@ impl Assembly {
             },
         );
         Ok(effects)
+    }
+
+    /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3), on its ground, µm, with
+    /// when that track ends and whether it is the way back.
+    pub fn tracks(&self, now: Micros) -> Vec<(Id, (Vec3, Quat), Micros, bool)> {
+        let at = |p: Vec3, v: Vec3, dt: Micros| {
+            let m = |a: i64, v: i64| a + (i128::from(v) * i128::from(dt) / 1_000_000) as i64;
+            Vec3::new(m(p.x, v.x), m(p.y, v.y), m(p.z, v.z))
+        };
+        let going = self.setting.iter().map(|(a, s)| {
+            let dt = now.clamp(s.t0, s.due) - s.t0;
+            (*a, (at(s.start.0, s.velocity, dt), s.start.1), s.due, false)
+        });
+        let back = self.returning.iter().map(|(a, (s, end, track))| {
+            // It gets to where its set-in started at `end`: back from there by the time left.
+            let v = match track {
+                Owner::Track(Track::Straight { velocity, .. }) => *velocity,
+                _ => Vec3::ZERO,
+            };
+            let left = -(end.saturating_sub(now).max(0));
+            (*a, (at(s.start.0, v, left), s.end.1), *end, true)
+        });
+        going.chain(back).collect()
+    }
+
+    /// Stops crew `activity`'s set-in by `why` (#5067 item 3: a carrier out of reach of its grip): refused to the put's
+    /// intent and stopped as a seating refused at its track's end is ([`Assembly::stop`]).
+    pub fn refuse_set_in(&mut self, activity: Id, why: Refusal) {
+        if let Some(s) = self.setting.remove(&activity) {
+            self.refused.push((s.by.0, s.by.1, why));
+            self.stopped.push((activity, s));
+        }
+    }
+
+    /// Stops crew `activity`'s way back at `now` where it has the node (#5067 item 3), writing on `tree`: the node handed
+    /// from its track to its mover there. The setting it came back from, the entries, and where it stopped.
+    pub fn halt(
+        &mut self,
+        tree: &mut Tree,
+        now: Micros,
+        activity: Id,
+    ) -> Option<(Setting, Vec<Effect>, (Vec3, Quat))> {
+        let here = self
+            .tracks(now)
+            .into_iter()
+            .find(|t| t.0 == activity && t.3)?
+            .1;
+        let (s, _, track) = self.returning.remove(&activity)?;
+        match self.hand_off(
+            tree,
+            now,
+            activity,
+            s.ground,
+            (track, Owner::Mover),
+            here,
+            Vec3::ZERO,
+        ) {
+            Ok(effects) => Some((s, effects, here)),
+            Err(r) => {
+                eprintln!("worldd: a crew's way back was not stopped: {r}");
+                self.seating.parts.clear();
+                None
+            }
+        }
     }
 
     /// Whether a crew is setting a part in.

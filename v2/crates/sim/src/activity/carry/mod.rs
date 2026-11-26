@@ -81,6 +81,7 @@
 
 #[cfg(test)]
 mod tests;
+pub mod grips;
 pub mod turn;
 
 use std::collections::BTreeMap;
