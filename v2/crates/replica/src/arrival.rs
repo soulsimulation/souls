@@ -33,6 +33,9 @@ const OUTLINE: u64 = 11;
 const LINE: u64 = 16;
 /// The fields [`middle`] reads of a place.
 pub const READS: [u64; 2] = [OUTLINE, LINE];
+/// The farthest a point births ring round may lie from the world's origin on either axis, µm (a million km): far past
+/// any world, and far enough from the integers' ends that the rings round it never overflow on the clock.
+pub const FAR_MOST: i64 = 1_000_000_000_000_000;
 
 /// What an arrival value names: a place's id, none (the empty list), or why it is neither.
 pub fn read(v: &Value) -> Result<Option<Id>, String> {
@@ -99,16 +102,17 @@ pub fn point_of(tree: &Tree, place: Id) -> Option<(Id, Vec3)> {
     if !is_place(node.fields(), is_ground(g.kind().as_str())) {
         return None;
     }
-    let (x, z) = middle(node.fields())?;
     let at = node.place().map_or(Vec3::ZERO, |p| p.position);
-    Some((
-        ground,
-        Vec3::new(
-            at.x.checked_add(x.checked_mul(1000)?)?,
-            0,
-            at.z.checked_add(z.checked_mul(1000)?)?,
-        ),
-    ))
+    Some((ground, moved(at, middle(node.fields())?)?))
+}
+
+/// `at` (µm) moved by `(x, z)` mm, on the ground: None out of range or past [`FAR_MOST`], so a place named and then
+/// moved or reshaped far away names none.
+fn moved(at: Vec3, (x, z): (i64, i64)) -> Option<Vec3> {
+    let near = |v: i64| (v.unsigned_abs() <= FAR_MOST.unsigned_abs()).then_some(v);
+    let x = near(at.x.checked_add(x.checked_mul(1000)?)?)?;
+    let z = near(at.z.checked_add(z.checked_mul(1000)?)?)?;
+    Some(Vec3::new(x, 0, z))
 }
 
 #[cfg(test)]
@@ -152,6 +156,17 @@ mod tests {
         assert!(!is_place(&BTreeMap::new(), true), "a thing has no outline");
         assert!(is_ground("eden:ground@1220ab") && is_ground("testworld:ground"));
         assert!(!is_ground("eden:room@1220ab") && !is_ground("eden:groundskeeper"));
+    }
+
+    #[test]
+    fn a_point_past_any_world_is_none() {
+        assert_eq!(
+            moved(Vec3::new(5, 7, -9), (1_000, -2_000)),
+            Some(Vec3::new(1_000_005, 0, -2_000_009))
+        );
+        assert_eq!(moved(Vec3::ZERO, (i64::MAX / 1000, 0)), None);
+        assert_eq!(moved(Vec3::new(0, 0, -FAR_MOST), (0, -1)), None);
+        assert_eq!(moved(Vec3::new(i64::MAX, 0, 0), (1, 0)), None);
     }
 
     #[test]
