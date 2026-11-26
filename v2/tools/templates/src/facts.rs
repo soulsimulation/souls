@@ -1,13 +1,14 @@
 //! A template published from a facts file (N1's import) with the public serving support `worldd seed --souls 0` made
 //! beside it: `templates <facts> <out> --name <name> [--support <seeded folder>]` (installed as `publish-template`).
 //!
-//! The tree is built with the entries `worldd seed` kept (`import_eden::load_with`), as `worldd` loads them: a kind
-//! whose entry joins parts (a rack bay, a frame stand, a shade site, a loading spot) takes its slots, and its name's
-//! hash, from its entry. Built from the facts alone, those kinds were pinned differently from the support's boot pins,
-//! so `worldd fork --template` refused the template (`template-pins-mismatch`), and the joining kinds had no slots to
-//! build into. Not yet as `worldd` builds a world: its courses step (`serve`'s `courses`: the punts it puts on the
-//! water and the rides' courses) is not run, so a template of a world with punts or rides (Eden) has neither; and a
-//! seed's code hatches (`hatches/`) are not carried.
+//! The tree is built as `worldd` builds a world from its facts: first its courses step (`worldd::courses::facts`: the
+//! punts it puts on the water, the rides' and boats' courses, a kind for each entry kind), then the import with the
+//! entries `worldd seed` kept (`import_eden::load_with`). A kind whose entry joins parts (a rack bay, a frame stand, a
+//! shade site, a loading spot) takes its slots, and its name's hash, from its entry. Built from the facts alone, those
+//! kinds were pinned differently from the support's boot pins, so `worldd fork --template` refused the template
+//! (`template-pins-mismatch`), and the joining kinds had no slots to build into. Without the courses step, a world
+//! forked from Eden's template had no punts and its rides and boats no courses. A seed's code hatches (`hatches/`) are
+//! not carried.
 
 use replica::encode::{Name, Value, decode, from_hex};
 use replica::ids::{Hash, Purpose, Scope, sha256};
@@ -212,7 +213,19 @@ pub fn publish_facts(
         .map(|p| support(p, facts.as_bytes()))
         .transpose()?;
     let (pins, files) = public_support.unwrap_or_default();
-    let mut im = import_eden::load_with(facts, &support_entries(&files)?)?;
+    let texts = support_entries(&files)?;
+    let entries = texts
+        .iter()
+        .map(|(k, t)| {
+            Ok((
+                k.clone(),
+                json::parse(t).map_err(|e| format!("{k}: {e:?}"))?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    // The punts, courses and entry kinds a world seeded from the same facts and entries starts with.
+    let prepared = worldd::courses::facts(facts, &entries, |_| {})?;
+    let mut im = import_eden::load_with(&prepared, &texts)?;
     let root = im.tree.node(im.tree.root()).ok_or("no root")?.id();
     crate::checkpoint(&mut im.tree, root.scope(), &source).map_err(|e| e.to_string())?;
     let t = crate::publish_with_kinds(
