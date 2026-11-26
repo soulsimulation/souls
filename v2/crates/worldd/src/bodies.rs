@@ -254,8 +254,8 @@ pub struct Bodies {
     pub schedule: BTreeMap<Micros, u64>,
     /// Where a free-running clock took fewer batches than were out, for the recorder: body time and batches taken.
     late: Vec<(Micros, u64)>,
-    /// The planner's answers for the next tick.
-    planned: Planned,
+    /// The planner's answers for the next tick; a queue's approach reads them too (`crate::orders::step`, B7c).
+    pub(crate) planned: Planned,
     /// Batches sent to the planner and taken back so far (S8): a request still out is not asked again.
     sent: u64,
     taken: u64,
@@ -1845,7 +1845,7 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
-            crate::orders::step(self, at);
+            let order_lines = crate::orders::step(self, at);
             self.wind_step(at);
             let mut planned = std::mem::take(&mut self.planned);
             planned.batches = Some(Batches {
@@ -1854,6 +1854,8 @@ impl Bodies {
             });
             self.unstuck.planned(&self.runner, &planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            // A queue's approach whose straight way was not clear asks the same planner batch for its line (B7c).
+            wants.lines.extend(order_lines);
             // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
             let rungs = self.unstuck.after(&mut self.runner, &mut self.town);
             self.wind_log.extend(rungs);

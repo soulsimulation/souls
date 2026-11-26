@@ -78,6 +78,8 @@ pub const CANCELLED: &str = "souls:order-cancelled";
 pub const REPLACED: &str = "souls:order-replaced";
 pub const TARGET_GONE: &str = "souls:order-target-gone";
 pub const DISPLACED: &str = "souls:order-displaced";
+/// A queue with no supported way to its spot: the planner refused the route, or the body is on another floor (B7c).
+pub const NO_WAY: &str = "souls:no-way";
 /// A queue's head took its slot.
 pub const DONE: &str = "souls:done";
 /// An input an order produced: `{1: intent, 2: velocity [x, y, z] µm/s}` or `{1: intent, 3: stance}`.
@@ -159,6 +161,9 @@ pub struct SlotAt {
 
 /// The world as orders read it: N9's ground, and the slots that are there.
 pub trait Where: Ground {
+    /// Where `body` aims next on the town's supported way to `to` (its floor's frame): the existing planner's corner,
+    /// prepared for this body's class and this exact goal. None is no supported way (the queue ends `souls:no-way`).
+    fn toward(&self, body: Id, to: Vec3) -> Option<Vec3>;
     fn slot(&self, thing: Id) -> Option<SlotAt>;
 }
 
@@ -353,11 +358,18 @@ impl Default for Orders {
 struct Seeing<'a> {
     c: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
+    world: &'a dyn Where,
 }
 
 impl Geometry for Seeing<'_> {
-    fn ask(&self, _: Id, _: &Ask) -> Option<Answer> {
-        None
+    /// A queue's way to its spot is the town's supported route ([`Where::toward`]), never a straight line (B7c).
+    fn ask(&self, body: Id, ask: &Ask) -> Option<Answer> {
+        match ask {
+            Ask::Toward { from, to } if *from == body => {
+                self.world.toward(body, *to).map(Answer::Point)
+            }
+            _ => None,
+        }
     }
 
     fn read(&self, node: Id) -> Option<Seen> {
@@ -415,6 +427,26 @@ impl Orders {
             .get(&slot)
             .map(|l| l.bodies.clone())
             .unwrap_or_default()
+    }
+
+    /// Each queueing body whose order is running on its line's floor, with its spot: the goals the world asks the
+    /// existing planner's way to, before the tick's skills step (B7c).
+    pub fn approaches<'a>(
+        &'a self,
+        c: &'a Controller,
+        now: Micros,
+    ) -> impl Iterator<Item = (&'a crate::mover::Body, Option<Vec3>)> + 'a {
+        self.open.iter().filter_map(move |(id, open)| {
+            let What::Queue { slot, .. } = &open.order.what else {
+                return None;
+            };
+            let body = c.body(*id)?;
+            let line = self.lines.get(slot)?;
+            (now < open.order.expires
+                && node_of(body) == line.at.floor
+                && c.claims(*id)?.running().contains_key(&open.driver))
+            .then(|| (body, self.spot(*id)))
+        })
     }
 
     /// The spot `body` was given in its line, if any (µm, its floor's frame).
@@ -721,10 +753,21 @@ impl Orders {
                     What::Follow { leader, .. } => c.body(*leader).is_none(),
                     What::Queue { slot, .. } => w.slot(*slot).is_none(),
                 };
+                // A body on another floor than its line's has no way to it on this one (B7c): ended by name.
+                let elsewhere = match &o.order.what {
+                    What::Queue { slot, .. } => c.body(*b).is_some_and(|body| {
+                        self.lines
+                            .get(slot)
+                            .is_some_and(|l| node_of(body) != l.at.floor)
+                    }),
+                    _ => false,
+                };
                 if now >= o.order.expires {
                     Some((*b, EXPIRED))
                 } else if gone {
                     Some((*b, TARGET_GONE))
+                } else if elsewhere {
+                    Some((*b, NO_WAY))
                 } else {
                     None
                 }
@@ -741,10 +784,10 @@ impl Orders {
             .map(|(s, _)| *s)
             .collect();
         for slot in free {
-            let Some((head, stand)) = self
+            let Some((head, floor, stand)) = self
                 .lines
                 .get(&slot)
-                .and_then(|l| Some((*l.bodies.first()?, l.at.stand)))
+                .and_then(|l| Some((*l.bodies.first()?, l.at.floor, l.at.stand)))
             else {
                 continue;
             };
@@ -756,7 +799,7 @@ impl Orders {
             };
             let there = c
                 .body(head)
-                .is_some_and(|b| apart(b.pose.position, stand) <= ARRIVED);
+                .is_some_and(|b| node_of(b) == floor && apart(b.pose.position, stand) <= ARRIVED);
             if !there {
                 continue;
             }
@@ -786,6 +829,7 @@ impl Orders {
             let seeing = Seeing {
                 c,
                 fields: &self.fields,
+                world: w,
             };
             step(
                 &self.tree,
