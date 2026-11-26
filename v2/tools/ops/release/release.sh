@@ -31,7 +31,9 @@
 #                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`.
 #                                  Just before each world's deploy, `entries stage` for that world: its deploy rehearses
 #                                  the new build on them and swaps them in between the pin and the restart, so only the
-#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged
+#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged.
+#                                  A world other than the canary whose rehearsal fails keeps its build and the other
+#                                  worlds move; the move then refuses before the gateway, and a rerun deploys only it
 #   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
 #                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
 #                                  at its commit) by this release's `worldd entries`, every world when none is named:
