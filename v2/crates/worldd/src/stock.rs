@@ -5,7 +5,8 @@
 //!
 //! - **In the world's folder.** `worldd seed --stock <stock.json>` keeps the file as `stock.json` and each library it
 //!   names as `library/<name>.json`; every start reads them ([`Data::read`]). A world with no `stock.json` has no stock
-//!   here: a take makes its kind with no carried fields, as before.
+//!   here: a take makes its kind with no carried fields, as before. A kept copy seeds again as it is (`seed --stock
+//!   <folder>/stock.json`: [`Data::load`] reads a `library/` beside the file first), as a reseed does.
 //! - **Each copy's row** is worked out from the facts at each start ([`World::of`]), in the facts' order (the
 //!   template's): a copy's room is the room slot it, or a thing it stands in, holds (`slot.room`); its building is its
 //!   outermost holder's name; its name its own. A row's `where` matches each named key by prefix (all keys given;
@@ -55,8 +56,9 @@ pub struct Data {
 }
 
 impl Data {
-    /// The stock file `path` and the libraries it names, each found under the nearest folder above the file that
-    /// holds it (`content/library/books.json` from `content/worlds/eden/stock.json`).
+    /// The stock file `path` and the libraries it names: each `library/<name>.json` beside the file when there (a world
+    /// folder's kept copy, or a release's staged one), else found under the nearest folder above the file that holds
+    /// its path (`content/library/books.json` from `content/worlds/eden/stock.json`).
     pub fn load(path: &Path) -> R<Data> {
         let stock = read(path)?;
         let mut libraries = BTreeMap::new();
@@ -64,11 +66,17 @@ impl Data {
             let rel = at
                 .str()
                 .ok_or(format!("stock-library: {name} names no file"))?;
-            let found = path
-                .ancestors()
-                .skip(1)
-                .map(|a| a.join(rel))
-                .find(|p| p.is_file())
+            let kept = path
+                .parent()
+                .map(|d| d.join(LIBRARIES).join(format!("{name}.json")));
+            let found = kept
+                .filter(|p| p.is_file())
+                .or_else(|| {
+                    path.ancestors()
+                        .skip(1)
+                        .map(|a| a.join(rel))
+                        .find(|p| p.is_file())
+                })
                 .ok_or(format!(
                     "stock-library: {rel} not found above {}",
                     path.display()
@@ -473,5 +481,159 @@ mod tests {
         assert!(matches(&row(r#"{"name": ["commons-reading"]}"#), at("e_d")));
         assert!(matches(&row(r#"{"building": ["eden-house"]}"#), at("e_c")));
         assert!(matches(&row("{}"), at("e_d")));
+    }
+
+    /// A tiny world as the importer reads it: three bookcases and one placed book, in the open.
+    const TINY: &str = r#"{
+      "format": "souls/import-eden/1",
+      "kinds": [
+        {"ref": "core-bookcase@1", "hash": "aa", "name": "core:bookcase", "form": "point"},
+        {"ref": "core-book@1", "hash": "bb", "name": "core:book", "form": "point"}
+      ],
+      "things": [
+        {"id": "e_a", "def": "core-bookcase@1", "ref": "core-bookcase@1", "parent": null, "name": "stacks-a",
+         "pose": [0, 0, 0, 0], "world": [0, 0, 0, 0], "scale_ppm": 1000000},
+        {"id": "e_b", "def": "core-bookcase@1", "ref": "core-bookcase@1", "parent": null, "name": "stacks-b",
+         "pose": [3000, 0, 0, 0], "world": [3000, 0, 0, 0], "scale_ppm": 1000000},
+        {"id": "e_c", "def": "core-bookcase@1", "ref": "core-bookcase@1", "parent": null, "name": "kitchen-case",
+         "pose": [6000, 0, 0, 0], "world": [6000, 0, 0, 0], "scale_ppm": 1000000},
+        {"id": "e_d", "def": "core-book@1", "ref": "core-book@1", "parent": null, "name": "commons-reading-book",
+         "pose": [9000, 0, 0, 0], "world": [9000, 0, 0, 0], "scale_ppm": 1000000}
+      ],
+      "doors": [],
+      "places": [],
+      "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
+      "bake": {"things": 4},
+      "byRef": {"core-bookcase@1": 3, "core-book@1": 1}
+    }"#;
+
+    /// #4837: a world's stock from tiny facts and their import. Two bookcase rows (the first drawing only `story`
+    /// books), a row naming a stock the entry lacks (left out, said), and a placed book. Each shelf's take yields the
+    /// top of its own pile, the placed book carries its row, and every library row's words are kept by reference.
+    #[test]
+    fn a_world_stocks_its_shelves_and_its_placed_copy_from_its_rows() {
+        let im = import_eden::load(TINY).expect("the tiny world imports");
+        let entries = vec![
+            (
+                "eden:bookcase".to_owned(),
+                json::parse(
+                    r#"{"kind": "eden:bookcase", "state": {"books": {"n": 28}},
+                        "stock": {"books": {"kind": "eden:book", "count": "books", "carries": ["title", "first_page"]}}}"#,
+                )
+                .unwrap(),
+            ),
+            (
+                "eden:book".to_owned(),
+                json::parse(
+                    r#"{"kind": "eden:book", "state": {"title": {"n": 29}, "first_page": {"n": 30}}}"#,
+                )
+                .unwrap(),
+            ),
+        ];
+        let books = json::parse(
+            r#"{"library": "books", "books": [
+              {"id": "b0", "title": "Zero", "first_page": "z", "tags": ["fact"]},
+              {"id": "b1", "title": "One", "first_page": "o", "tags": ["story"]},
+              {"id": "b2", "title": "Two", "first_page": "t", "tags": ["story"]},
+              {"id": "b3", "title": "Three", "first_page": "h", "tags": ["story"]}
+            ]}"#,
+        )
+        .unwrap();
+        let stock = json::parse(
+            r#"{"libraries": {"books": "library/books.json"}, "rows": [
+              {"entry": "eden:bookcase", "stock": "books", "where": {"name": ["stacks"]}, "count": 2,
+               "draw": {"library": "books", "tags": ["story"]}},
+              {"entry": "eden:bookcase", "stock": "nope", "where": {}},
+              {"entry": "eden:bookcase", "stock": "books", "where": {}, "count": 1, "draw": {"library": "books"}},
+              {"entry": "eden:book", "where": {"name": ["commons-reading"]}, "draw": {"library": "books", "tags": ["fact"]}}
+            ]}"#,
+        )
+        .unwrap();
+        let data = Data {
+            stock,
+            libraries: BTreeMap::from([("books".to_owned(), books)]),
+        };
+        let w = World::of(
+            &data,
+            &json::parse(TINY).unwrap(),
+            &im.nodes,
+            &im.tree,
+            &entries,
+        )
+        .expect("the stock");
+        assert_eq!(w.notes, ["stock-row 1: eden:bookcase has no stock nope"]);
+        let node = |id: &str| im.nodes[id];
+        // The book's two fields as references to library row `row`.
+        let row = |row: usize| {
+            let r = |f: &str| {
+                Value::Map(BTreeMap::from([(
+                    REFERENCE,
+                    reference("books", f, row).unwrap().to_value(),
+                )]))
+            };
+            BTreeMap::from([(29, r("title")), (30, r("first_page"))])
+        };
+        assert_eq!(w.stocks.len(), 3, "three shelves stocked");
+        // Row 0's pool is the story books (library rows 1, 2, 3); its copies hold two each, from 0 and from 2.
+        let a = &w.stocks[&node("e_a")];
+        assert_eq!(
+            (a.kind.as_str(), a.count, a.start, a.offset),
+            ("eden:book", 28, 2, 0)
+        );
+        assert_eq!(
+            a.carried(None),
+            row(2),
+            "stacks-a: the top of pool[0..2] is library row 2"
+        );
+        assert_eq!(
+            w.stocks[&node("e_b")].carried(None),
+            row(1),
+            "stacks-b: pool[2..4] wraps to row 1"
+        );
+        assert_eq!(
+            w.stocks[&node("e_b")].carried(Some(1)),
+            row(3),
+            "one left: the bottom, row 3"
+        );
+        // The kitchen's case falls through the bad row to the row matching everything: every book, one on it.
+        assert_eq!(w.stocks[&node("e_c")].carried(None), row(0));
+        // The placed book is no container: it carries its own row (the one fact book), from the world's start.
+        assert!(!w.stocks.contains_key(&node("e_d")));
+        assert_eq!(w.placed.get(&node("e_d")), Some(&row(0)));
+        // Every row's words by reference, its id and tags left out.
+        assert_eq!(w.words.len(), 8);
+        assert_eq!(
+            w.words.get(&reference("books", "title", 2).unwrap()),
+            Some(&b"Two".to_vec())
+        );
+        assert_eq!(
+            w.words.get(&reference("books", "first_page", 0).unwrap()),
+            Some(&b"z".to_vec())
+        );
+    }
+
+    /// A world folder's kept copy reads back with `load`, its `library/` beside it, as a reseed passes it to `seed`.
+    #[test]
+    fn a_kept_stock_loads_from_its_folder() {
+        let dir = std::env::temp_dir().join(format!("worldd-stock-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = Data {
+            stock: json::parse(
+                r#"{"libraries": {"books": "content/library/books.json"}, "rows": []}"#,
+            )
+            .unwrap(),
+            libraries: BTreeMap::from([(
+                "books".to_owned(),
+                json::parse(r#"{"library": "books", "books": [{"id": "b0", "title": "Zero"}]}"#)
+                    .unwrap(),
+            )]),
+        };
+        data.keep(&dir).unwrap();
+        let back = Data::load(&dir.join(FILE)).expect("the kept copy loads");
+        assert_eq!(
+            back.libraries["books"].to_json(),
+            data.libraries["books"].to_json()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
