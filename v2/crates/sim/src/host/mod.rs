@@ -1087,25 +1087,21 @@ impl Runner {
     /// Every body's mark as it stands now, for the turns and the spot tables. Read on the runner's threads (N17b):
     /// each mark reads one body alone.
     fn marks(&self) -> Vec<Mark> {
-        let bodies: Vec<&Moved> = self.controller.bodies().collect();
+        let (controller, fields, staying, asks) =
+            (&self.controller, &self.fields, &self.staying, &self.asks);
+        let bodies: Vec<&Moved> = controller.bodies().collect();
         crate::par::map(&bodies, self.threads, CHUNK * 4, |b| Mark {
             who: b.id,
             node: node_of(b),
             at: b.pose.position,
-            waiting: waiting(self.fields.get(&b.id)),
-            crossing: self.controller.carrying(b.id),
-            carried: self.controller.carried(b.id),
-            staying: self.staying.contains(&b.id),
+            waiting: waiting(fields.get(&b.id)),
+            crossing: controller.carrying(b.id),
+            carried: controller.carried(b.id),
+            staying: staying.contains(&b.id),
             // An ask stands while its order lasts and the body is not held (walked out by the world).
-            spot: self
-                .asks
+            spot: asks
                 .get(&b.id)
-                .filter(|_| {
-                    !self
-                        .fields
-                        .get(&b.id)
-                        .is_some_and(|f| f.contains_key(&F_HELD))
-                })
+                .filter(|_| !fields.get(&b.id).is_some_and(|f| f.contains_key(&F_HELD)))
                 .copied(),
         })
     }
