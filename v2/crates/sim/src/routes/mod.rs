@@ -237,11 +237,9 @@ pub struct Route {
     pub waypoints: Vec<[i64; 3]>,
     /// Its length by the coarse search, mm.
     pub length: u64,
-    /// Its length as a body walks it, mm ([`Map::walked`]): never more than `length`. The coarse search measures a
-    /// crossing from a square's edge at the middle of the whole stretch it shares with the next square (up to 16 m
-    /// long), so a goal just past an edge can measure several metres longer than its walk; this is what N9's spot
-    /// tables weigh a place by.
-    pub walked: u64,
+    /// The portals the search crossed, in order, each with the piece (or `LINK` and the link) it was reached across;
+    /// none for a line inside one piece. What [`Map::walked`] measures by.
+    pub crossed: Vec<(u32, u32)>,
     /// Portals taken from the search's queue.
     pub searched: u32,
 }
@@ -1827,7 +1825,7 @@ impl Map {
                     piece: from.piece,
                 }],
                 length,
-                walked: length,
+                crossed: Vec::new(),
                 first_line,
                 waypoints: Vec::new(),
                 searched: 0,
@@ -1906,7 +1904,6 @@ impl Map {
             .map(|(p, _)| self.portals[*p as usize].world)
             .collect();
         let length = u64::from(sc.seen[goal as usize].1);
-        let walked = self.walked(sc, start_xz, goal_xz, &chain).min(length);
         let target = chain
             .first()
             .filter(|(p, _)| *p != goal)
@@ -1918,18 +1915,43 @@ impl Map {
             first_line,
             waypoints,
             length,
-            walked,
+            crossed: chain,
             searched,
         })
     }
 
-    /// The length of a searched route's `chain` as a body walks it, mm: across each square's edge where the straight
-    /// way on from the last crossing to the goal meets that portal (or at the portal's end nearer that way), each piece's
-    /// own line between (#5012's short walk: measured at the middle of a 16 m stretch, a grip 2.8 m past a square's edge
-    /// cost 7.9 m more than its walk, so a place 3.5 m short of it on the walker's own square was granted instead).
-    /// `u64::MAX` for a route across a link (a doorway, a stair, a shore): its ends lie on other frames, and it keeps the
-    /// coarse length.
-    fn walked(
+    /// [`Map::walked_in`] with the map's own scratch.
+    pub fn walked(&mut self, r: &Route, from: Spot, to: Spot) -> u64 {
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let w = self.walked_in(&mut scratch, r, from, to);
+        self.keep(&mut scratch);
+        self.scratch = scratch;
+        w
+    }
+
+    /// The length of route `r` from `from` to `to` as a body could walk it, mm, never more than its coarse `length`.
+    /// The coarse search measures each crossing of a square's edge at the middle of the whole stretch the two squares
+    /// share (up to 16 m long), so a goal just past an edge can measure several metres longer than its walk: here the
+    /// crossing is where the straight way on from the last one to the goal meets that portal (or the portal's end
+    /// nearer that way), each piece's own line between. N9's spot tables weigh a place by it (PR #5012's short walk: a
+    /// grip 2.8 m past an edge cost 7.9 m more than its walk, so a place 3.5 m short of it on the walker's own square
+    /// was granted instead). A route across a link (a doorway, a stair, a shore) keeps its coarse length: its ends lie
+    /// on other frames.
+    pub fn walked_in(&self, sc: &mut Scratch, r: &Route, from: Spot, to: Spot) -> u64 {
+        if r.crossed.is_empty() {
+            return r.length;
+        }
+        self.through(
+            sc,
+            [from.at[0], from.at[2]],
+            [to.at[0], to.at[2]],
+            &r.crossed,
+        )
+        .min(r.length)
+    }
+
+    /// [`Map::walked_in`]'s length along `chain` from `start` to `end`; `u64::MAX` across a link.
+    fn through(
         &self,
         sc: &mut Scratch,
         start: [i64; 2],

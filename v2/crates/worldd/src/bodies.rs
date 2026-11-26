@@ -1908,11 +1908,11 @@ impl Bodies {
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
                 if let Some((t, point)) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
-                    // From the point it was sent to (a grip's place on the ground), not from the ground's origin.
-                    let gap = match point {
-                        Some(p) => self.gap_to(body, t, p),
-                        None => self.gap_of(t, body),
-                    };
+                    // From the point it was sent to (a grip's place on the ground), not from the ground node it named; a walk
+                    // that ended in another frame (overflowed from a floor onto the open ground) as before.
+                    let gap = point
+                        .and_then(|p| self.gap_to(body, t, p))
+                        .or_else(|| self.gap_of(t, body));
                     if let Some(mm) = gap {
                         self.away_of.insert(id, mm);
                     }
