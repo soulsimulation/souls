@@ -2202,7 +2202,10 @@ fn a_created_world_pairs_its_creator_by_any_key_and_a_soul_there_keeps_its_world
     // Someone else's account is refused.
     let (_, code) = request(Some("my-mars-lab-2"), 2);
     assert_eq!(approve("Bea", &code).1["refused"], "not-the-creator");
-    // The creator approves, by each of the world's keys, and its agent is handed a creator token for that world.
+    // The creator approves, by each of the world's keys (each before any of them connected: a second approval once
+    // the agent holds the world's token is `soul-connected` unless forced), and its agent is handed a creator token
+    // for that world.
+    let mut approved = Vec::new();
     for (n, key) in [
         (3, "my-mars-lab-2"),
         (4, instance.as_str()),
@@ -2214,6 +2217,9 @@ fn a_created_world_pairs_its_creator_by_any_key_and_a_soul_there_keeps_its_world
             (200, json!({"approved": true, "soul": grant})),
             "{key}"
         );
+        approved.push((secret, key));
+    }
+    for (secret, key) in approved {
         let Poll::Token { token, grant: got } = p.poll(&secret, now() + INTERVAL + 1) else {
             panic!("a token for {key}")
         };
