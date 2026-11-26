@@ -210,11 +210,22 @@ pub struct Keeps {
 /// not zero): along `h` and across it (`[-h.z, h.x]`), as [`Carry::place_of`] reads a place.
 pub fn on_plan(place: [i64; 2], h: [i64; 2]) -> [i64; 2] {
     let (h0, h1) = (i128::from(h[0]), i128::from(h[1]));
-    let l = (h0 * h0 + h1 * h1).isqrt().max(1);
+    let l = h0
+        .saturating_mul(h0)
+        .saturating_add(h1.saturating_mul(h1))
+        .isqrt()
+        .max(1);
     let (a, c) = (i128::from(place[0]), i128::from(place[1]));
     let v = |n: i128| i64::try_from(n / l).unwrap_or(0);
-    [v(a * h0 - c * h1), v(a * h1 + c * h0)]
+    [
+        v(a.saturating_mul(h0).saturating_sub(c.saturating_mul(h1))),
+        v(a.saturating_mul(h1).saturating_add(c.saturating_mul(h0))),
+    ]
 }
+
+/// The most a walk's heading for its carry (parameter 3) may be on either axis, µm: a direction, read at any length
+/// up to this; one beyond is no heading.
+pub const HEADING_MOST: i64 = 1 << 40;
 
 /// How near a pose of a carry's way (0.135 R2) its front's walk must go to turn the crew to that pose, µm: half the
 /// way's lattice step.
@@ -2911,7 +2922,11 @@ impl Engine {
             return None;
         }
         let at = [p.x, p.z];
-        if let Some(h) = heading.filter(|h| *h != [0, 0]) {
+        if let Some(h) = heading.filter(|h| {
+            *h != [0, 0]
+                && h.iter()
+                    .all(|c| c.unsigned_abs() <= HEADING_MOST.unsigned_abs())
+        }) {
             return Some((at, h));
         }
         let now = carry

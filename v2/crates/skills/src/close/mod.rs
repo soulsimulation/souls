@@ -29,8 +29,9 @@
 //!   a target, as beside, and a place not kept ends the same way ([`LOST_PLACE`]). With a **turn** (a leader's goal
 //!   and the offset there), the group turns as the leader goes: the offset swings from the first to the second, about
 //!   the leader, by the share of the way to its goal the leader has walked since the follow began, and keeps its
-//!   length ([`Follow::turning`]). The follower is fed its place's own pace, so a place that swings faster than the
-//!   leader walks is kept as closely.
+//!   length ([`Follow::turning`]), at most [`SWING`] a second, so a large turn on a short walk is a pivot that goes on
+//!   after the leader stops. The follower is fed its place's own pace, so a place that swings faster than the leader
+//!   walks is kept as closely.
 //!
 //! Circle, go near and follow end only when replaced (another skill claims the legs; they are `cancelled_by`
 //! locomotion), cancelled (the body releases them) or expired (`until`, world time). None of them ever picks a new
@@ -81,6 +82,10 @@ pub const LOST_PLACE: &str = "souls:follow-lost-place";
 
 /// A step that met the edge of the ground ends with this name.
 pub const WALLED: &str = "souls:step-walled";
+/// The fastest a turning follow's place swings about its leader, µm a second along the swing's chord: a jog's pace,
+/// so with the leader's walk on top a follower still keeps up within its fastest.
+pub const SWING: i64 = FAST;
+
 /// A follower that fell back to a route says so with an event of this name.
 pub const FELL_BACK: &str = "souls:follow-fell-back";
 
@@ -410,6 +415,8 @@ pub struct Follow {
     pub turn: Option<([i64; 2], [i64; 2])>,
     /// Turning: the leader's distance to its goal when the follow first saw it, µm.
     first: Option<i64>,
+    /// Turning: the offset the place has swung to, and when.
+    swing: Option<([i64; 2], Micros)>,
     /// With `at`: the place at the last step, and when, for its pace.
     place: Option<(Vec3, Micros)>,
 }
@@ -433,6 +440,7 @@ impl Follow {
             at: None,
             turn: None,
             first: None,
+            swing: None,
             place: None,
         }
     }
@@ -463,18 +471,33 @@ impl Follow {
         }
     }
 
-    /// The offset of the place now, the leader at `them`: `offset`, or with a turn, swung toward its end by the share
-    /// of the way to the goal walked since the first step.
-    fn offset_now(&mut self, them: Vec3, offset: [i64; 2]) -> [i64; 2] {
+    /// The offset of the place now, the leader at `them` at `now`: `offset`, or with a turn, swung toward its end by the
+    /// share of the way to the goal walked since the first step (all of it, for a leader at its goal then), the swing
+    /// at most [`SWING`] a second along its chord from where it was, so a short walk's large turn (or one finished
+    /// where the walk ended) is a pivot the follower keeps up with, never a jump of its place.
+    fn offset_now(&mut self, them: Vec3, offset: [i64; 2], now: Micros) -> [i64; 2] {
         let Some((goal, end)) = self.turn else {
             return offset;
         };
         let left = apart(them, Vec3::new(goal[0], them.y, goal[1]));
         let first = *self.first.get_or_insert(left);
-        if first == 0 {
-            return end;
-        }
-        swung(offset, end, first - left.min(first), first)
+        let want = if first == 0 {
+            end
+        } else {
+            swung(offset, end, first - left.min(first), first)
+        };
+        let (was, at) = self.swing.unwrap_or((offset, now));
+        let most =
+            i64::try_from(i128::from(SWING) * i128::from(now.saturating_sub(at)) / 1_000_000)
+                .unwrap_or(i64::MAX);
+        let gap = apart(Vec3::new(was[0], 0, was[1]), Vec3::new(want[0], 0, want[1]));
+        let to = if gap <= most {
+            want
+        } else {
+            swung(was, want, most, gap)
+        };
+        self.swing = Some((to, now));
+        to
     }
 
     /// One step toward the place `offset` from the leader at `them`: at the place's own pace (the leader's, or more
@@ -487,13 +510,13 @@ impl Follow {
         pace: i64,
         offset: [i64; 2],
     ) -> Progress {
-        let offset = self.offset_now(them, offset);
+        let now = host.now();
+        let offset = self.offset_now(them, offset, now);
         let place = Vec3::new(
             them.x.saturating_add(offset[0]),
             me.y,
             them.z.saturating_add(offset[1]),
         );
-        let now = host.now();
         // The place's own pace: the leader's, and the swing's while it turns.
         let pace = match self.place.replace((place, now)) {
             Some((was, at)) if now > at && self.turn.is_some() => i64::try_from(

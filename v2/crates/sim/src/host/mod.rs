@@ -681,7 +681,7 @@ impl Carried {
         if l > 0 {
             let inset = |half: i64| (half - room).max(0);
             let (along, across) = (inset(l / 2), inset(half_width));
-            let count = |half: i64| half * 2 / CARRIED_GAP + 1;
+            let count = |half: i64| (half * 2 + CARRIED_GAP - 1) / CARRIED_GAP + 1;
             let (na, nc) = (count(along), count(across));
             let mid = [(front[0] + back[0]) / 2, (front[1] + back[1]) / 2];
             let at = |k: i64, n: i64, half: i64| {
