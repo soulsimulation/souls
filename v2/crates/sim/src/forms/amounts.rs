@@ -8,13 +8,17 @@
 //!   above its least and the room the target has left, and writes the source's set (minus it) and the target's (plus
 //!   it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to zero. Nothing
 //!   to move is refused `nothing-to-move`. The two ends' kinds may number the field differently: the tree's balance
-//!   sums by the field's name (T6 rule 3.4, E5b).
+//!   sums by the field's name (T6 rule 3.4, E5b). Between two fields of one thing (`into_field`, #4103: a stock into
+//!   a well) the same one number is worked out from the two fields, and written as the two plain sets of one part:
+//!   the tree balances `by`s by the field's name, and these are two names.
 //! - **Take and put** are B4's transfer ([`crate::slots::transfer`], called, not edited): T1's leave and arrive under
 //!   one transfer id, into a free hand of the body or a slot of the node. A put moves a thing the body holds, or one
 //!   standing loose on what the body stands on (wheeled or pushed in, C12).
 //! - **Make** creates a thing of a kind into a free hand of the body or a slot of the node, written by its parent's
 //!   entry; a place that is not free is refused (`hands-full`, `slot-occupied`). It writes nothing about how long the
-//!   thing lasts: that is its kind's data (F10).
+//!   thing lasts: that is its kind's data (F10). The fields its `create` sets (#4104) are read against the made kind's
+//!   own, by name: a field it lacks is `field-unknown`, a number outside its bounds `out-of-range`, a name its enum
+//!   does not list `not-allowed`, a value of another type `value-type`; refused, nothing is made.
 //! - **Remove** takes only a thing the node contains or the body holds (`not-held` otherwise), written by its own
 //!   entry; its subtree goes with it (T2).
 //!
@@ -34,13 +38,13 @@ use replica::effects::{
 };
 use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter};
-use replica::kinds::Kinds;
+use replica::kinds::{Field, Kinds, Type};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::timed::Timed;
 use replica::tree::Tree;
 use replica::world_model::{Audience, plain, show};
-use skills::form_runner::{Amount, Effect as Bound, Of, Place};
+use skills::form_runner::{Amount, Effect as Bound, Init, Of, Place};
 
 use crate::slots::{Entry, in_slot, transfer};
 
@@ -106,6 +110,31 @@ pub fn limits(kinds: &Kinds) -> Limits {
             (def.name.as_str().to_owned(), fields)
         })
         .collect()
+}
+
+/// The state fields of every kind loaded, by the kind's full name and the field's number (#4104).
+pub type Defs = BTreeMap<String, BTreeMap<u64, Field>>;
+
+/// The state fields of `kinds`, which a made thing's fields are read against.
+pub fn defs(kinds: &Kinds) -> Defs {
+    kinds
+        .admits()
+        .keys()
+        .filter_map(|k| kinds.get(k))
+        .map(|def| (def.name.as_str().to_owned(), def.state.clone()))
+        .collect()
+}
+
+/// `kind`'s entry in `by_kind`: by its full name, or, for a kind written without its hash, the one revision loaded of
+/// that `namespace:name`.
+fn of_kind<'m, T>(by_kind: &'m BTreeMap<String, T>, kind: &str) -> Option<&'m T> {
+    by_kind.get(kind).or_else(|| {
+        let mut same = by_kind.iter().filter(|(n, _)| plain(n) == plain(kind));
+        match (same.next(), same.next()) {
+            (Some((_, x)), None) => Some(x),
+            _ => None,
+        }
+    })
 }
 
 /// The tree as of the tick's start, and the entries written since, latest last.
@@ -298,6 +327,8 @@ impl View<'_> {
 pub(crate) struct Cx<'a> {
     pub view: View<'a>,
     pub limits: &'a Limits,
+    /// Every kind's state fields: a made thing's fields are read against its kind's (#4104).
+    pub defs: &'a Defs,
     pub header: Option<&'a Header>,
     pub body: Id,
     /// The actor's Soul (the body, when the actor is not a Soul): a link `from: soul` ends at it (F15).
@@ -312,7 +343,7 @@ pub(crate) struct Cx<'a> {
     pub stocks: &'a super::Stocks,
 }
 
-fn set(node: Id, field: u64, to: i64, by: i64) -> Entry {
+fn set(node: Id, field: u64, to: i64, by: Option<i64>) -> Entry {
     (
         node,
         Audience::Everyone,
@@ -321,7 +352,7 @@ fn set(node: Id, field: u64, to: i64, by: i64) -> Entry {
                 node,
                 field,
                 to: value(to),
-                by: Some(by),
+                by,
             },
             rest: Rest::new(),
         }]),
@@ -346,17 +377,45 @@ impl Cx<'_> {
     /// The amount fields of `node`'s kind: by its full name, or, for a kind written without its hash, the one
     /// revision loaded of that `namespace:name`.
     fn fields(&self, node: Id) -> Option<&BTreeMap<u64, Limit>> {
-        let kind = self.view.kind(node)?;
-        let by_plain = |k: &str| {
-            let mut same = self.limits.iter().filter(|(n, _)| plain(n) == plain(k));
-            match (same.next(), same.next()) {
-                (Some((_, fs)), None) => Some(fs),
-                _ => None,
+        of_kind(self.limits, self.view.kind(node)?.as_str())
+    }
+
+    /// Field `name` of a thing of kind `kind` made with it set to `to` (#4104), read against that kind's own field
+    /// of the name: its number and the value written. A whole number within its least and capacity (`out-of-range`),
+    /// a flag, or one of its enum's values, written as a name in the made kind's namespace as a set writes one
+    /// (`not-allowed`). Refused `field-unknown` when the kind (or its fields) is not loaded or has no such field,
+    /// `value-type` for a value of another type.
+    fn init(&self, kind: &Name, name: &Name, to: &Init) -> R<(u64, Value)> {
+        let (n, f) = of_kind(self.defs, kind.as_str())
+            .and_then(|fs| fs.iter().find(|(_, f)| f.name == *name))
+            .ok_or_else(|| Refusal {
+                name: "field-unknown",
+                detail: format!("field {} of {}", name.as_str(), kind.as_str()),
+            })?;
+        let at = || format!("{} of {}: {to:?}", name.as_str(), kind.as_str());
+        let v = match (to, &f.ty) {
+            (Init::Int(i), Type::Int | Type::Duration) => {
+                let least = f.min.or(matches!(f.ty, Type::Duration).then_some(0));
+                if least.is_some_and(|m| *i < m) || f.max.is_some_and(|m| *i > m) {
+                    return refuse("out-of-range", at());
+                }
+                value(*i)
             }
+            (Init::Flag(b), Type::Bool) => Value::Uint(u64::from(*b)),
+            (Init::Name(v), Type::Enum(values)) => {
+                let bare = |t: &str| t.rsplit(':').next().unwrap_or(t).to_owned();
+                let ns = plain(kind.as_str())
+                    .split_once(':')
+                    .map_or("souls", |(ns, _)| ns);
+                let listed = values.iter().any(|x| bare(x.as_str()) == bare(v));
+                match Name::new(&format!("{ns}:{}", bare(v))) {
+                    Some(n) if listed => Value::Text(n),
+                    _ => return refuse("not-allowed", at()),
+                }
+            }
+            _ => return refuse("value-type", at()),
         };
-        self.limits
-            .get(kind.as_str())
-            .or_else(|| by_plain(kind.as_str()))
+        Ok((*n, v))
     }
 
     /// Field `field`'s limit on `node`'s kind, refused `field-unknown` when the kind has no such amount field.
@@ -493,13 +552,16 @@ impl Cx<'_> {
                 field,
                 from,
                 into,
+                into_field,
                 amount,
             } => {
                 let (from, into) = (self.of(*from), self.of(*into));
-                if from == into {
+                // The field it lands in: the same on another thing, or another field of the one thing (#4103).
+                let lands = into_field.as_ref().unwrap_or(field);
+                if from == into && lands == field {
                     return refuse("transfer-to-itself", show(from));
                 }
-                let ((nf, src), (ni, dst)) = (self.named(from, field)?, self.named(into, field)?);
+                let ((nf, src), (ni, dst)) = (self.named(from, field)?, self.named(into, lands)?);
                 let there = self.view.amount(from, nf).unwrap_or(src.default);
                 let has = self.view.amount(into, ni).unwrap_or(dst.default);
                 let above = there.saturating_sub(src.min.unwrap_or(0)).max(0);
@@ -519,16 +581,29 @@ impl Cx<'_> {
                         ),
                     );
                 }
+                // Between two fields of one thing the two sets are plain: the tree balances `by`s by the field's
+                // name, and these are two names. Both come from the one number worked out here.
+                let by = |b: i64| (from != into).then_some(b);
                 Ok(vec![
-                    set(from, nf, there - moved, -moved),
-                    set(into, ni, has + moved, moved),
+                    set(from, nf, there - moved, by(-moved)),
+                    set(into, ni, has + moved, by(moved)),
                 ])
             }
-            Bound::Make { kind, into } => {
+            Bound::Make {
+                kind,
+                into,
+                set: inits,
+            } => {
                 let frame = match into {
                     Place::Hand => self.free_hand()?,
                     Place::Slot(s) => self.free_slot(self.node, *s)?,
                 };
+                // The fields its `create` sets (#4104), each read against the made kind's own before any id is
+                // minted: one refused, nothing is made.
+                let inits = inits
+                    .iter()
+                    .map(|(name, to)| self.init(kind, name, to))
+                    .collect::<R<Vec<_>>>()?;
                 let node = mint(m)?;
                 let mut fields = made_fields(self.view.tree, kind);
                 // A stock's take (#4837): the made thing carries the row at the top of the container's pile.
@@ -539,6 +614,7 @@ impl Cx<'_> {
                 {
                     fields.extend(s.carried(self.view.amount(self.node, s.count)));
                 }
+                fields.extend(inits);
                 Ok(vec![(
                     frame.node,
                     Audience::Everyone,

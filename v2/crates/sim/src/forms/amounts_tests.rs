@@ -1171,7 +1171,14 @@ fn run_at(b: &mut Bench, form: &str, vals: &[(&str, Arg)], n: u64) -> Result<Str
         b.tick();
         b.flush();
     }
-    Ok(b.p.forms.ended.pop().expect("ended").how.as_str().to_owned())
+    Ok(b.p
+        .forms
+        .ended
+        .pop()
+        .expect("ended")
+        .how
+        .as_str()
+        .to_owned())
 }
 
 /// Form `form` asked again as intent `n`, as [`run_at`] asked it, then the bench run until nothing runs: the forms'
@@ -1410,6 +1417,7 @@ fn e5_transfer(at: usize, form: &str, args: &[(&str, u64)]) -> Result<Vec<E5Set>
             out: &[],
         },
         limits: &limits,
+        defs: &Default::default(),
         header: None,
         body: id(2),
         soul: id(2),
@@ -1482,6 +1490,7 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amoun
             out: &[],
         },
         limits: &limits,
+        defs: &Default::default(),
         header: None,
         body: id(2),
         soul: id(2),
@@ -1645,6 +1654,7 @@ fn a_make_at_a_stocked_container_carries_the_top_row_of_its_pile() {
                 out: &[],
             },
             limits: &limits,
+            defs: &Default::default(),
             header: None,
             body: id(2),
             soul: id(2),
@@ -1659,6 +1669,7 @@ fn a_make_at_a_stocked_container_carries_the_top_row_of_its_pile() {
             &skills::form_runner::Effect::Make {
                 kind: replica::encode::Name::new(kind).expect("a name"),
                 into: skills::form_runner::Place::Hand,
+                set: Vec::new(),
             },
         )
         .expect("made");
