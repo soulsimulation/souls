@@ -137,7 +137,7 @@ function moveRec(m: Map<number, unknown>, run?: unknown): MoveRec {
   const ends = (m.get(8) as unknown[]).map(num), raw = m.get(2), start = num(m.get(7));
   const name = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
   if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
-  return { ...(run === undefined ? {} : { run: runKey(run) }), body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
+  return { ...(run === undefined ? {} : { run: runKey(run) }), body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null, ...(Array.isArray(m.get(4)) ? { limbs: (m.get(4) as unknown[]).map(x => x instanceof Uint8Array ? new TextDecoder().decode(x) : String(x)) } : {}) };
 }
 
 type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };

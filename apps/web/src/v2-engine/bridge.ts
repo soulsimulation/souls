@@ -30,7 +30,7 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number; run?: string }[];
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; limbs?: string[]; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number; run?: string }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces;
   /** First-day round 4: when each still node on a course moves on, world µs (course-samples.ts `courseLeaves`). */
