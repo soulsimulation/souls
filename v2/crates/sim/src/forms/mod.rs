@@ -100,6 +100,9 @@
 
 pub mod amounts;
 mod links;
+pub mod stock;
+
+pub use stock::{Stocked, Stocks};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -618,6 +621,9 @@ pub struct Forms {
     /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
     /// (E14, [`other_slots`]).
     slots_of: BTreeMap<String, BTreeSet<u64>>,
+    /// The world's stocked containers (#4837): a `create` of a stock's kind at one gives the made thing its carried
+    /// fields ([`Forms::stocks`]).
+    stocks: std::sync::Arc<Stocks>,
 }
 
 /// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
@@ -1814,6 +1820,12 @@ impl Forms {
         self.header = Some(header);
     }
 
+    /// The world's stocked containers (#4837, [`stock`]): a `create` of a stock's kind at one of them gives the made
+    /// thing the fields of the row at the top of its pile. Called after [`Forms::new`] or [`Forms::recover`].
+    pub fn stocks(&mut self, stocks: std::sync::Arc<Stocks>) {
+        self.stocks = stocks;
+    }
+
     /// Writes run `run`'s effects at `at`, but no key already written or waiting to be. Each effect's entries, worked
     /// out against the tree and what is already in [`Forms::out`], go in order, the first carrying its key; they are
     /// one part. All of the run's effects or none: a refusal takes back what this call wrote and is returned.
@@ -1878,6 +1890,7 @@ impl Forms {
                 node: fr.node,
                 reserved: &reserved,
                 now: at,
+                stocks: &self.stocks,
             };
             let made = pin_made(self.header.as_ref(), e);
             let entries = match cx.entries(mint, made.as_ref().unwrap_or(e)) {

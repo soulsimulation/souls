@@ -172,6 +172,18 @@ fn serve_entries(
     tag: &str,
     lineage: Scope,
 ) -> (Served, Client, PathBuf, Vec<String>) {
+    serve_seeded(facts, entries, &[], at, tag, lineage)
+}
+
+/// [`serve_entries`], `seed` given the further arguments `more` (`--stock <file>`).
+fn serve_seeded(
+    facts: &str,
+    entries: &str,
+    more: &[&str],
+    at: &str,
+    tag: &str,
+    lineage: Scope,
+) -> (Served, Client, PathBuf, Vec<String>) {
     let dir = std::env::temp_dir().join(format!("eden-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let worldd = env!("CARGO_BIN_EXE_worldd");
@@ -179,6 +191,7 @@ fn serve_entries(
         .args(["seed", "--facts", facts, "--dir"])
         .arg(&dir)
         .args(["--entries", entries, "--souls", "0", "--at", at])
+        .args(more)
         .output()
         .unwrap();
     println!("seed: {}", String::from_utf8_lossy(&seeded.stdout).trim());
@@ -5944,6 +5957,261 @@ fn indoor_things_do_what_a_person_asks() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// Each `eden:book` the world's log creates, in order: its node, its parent (a body's hand for a take, a table for a
+/// placed copy) and its fields.
+fn books_made(dir: &Path) -> Vec<(Id, Id, BTreeMap<u64, Value>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if let Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node,
+                        kind,
+                        pose,
+                        fields,
+                        ..
+                    } = c.change
+                        && replica::world_model::plain(kind.as_str()) == "eden:book"
+                    {
+                        out.push((node, pose.frame.node, fields));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The public words (key 27) a whole sync of the world in `dir` gets beside its records, by reference: asked on the
+/// world's own socket as the gateway asks (R5b's frames: the place's hash, then every record it reaches, 64 to a
+/// request), with no actor.
+fn served_words(dir: &Path) -> BTreeMap<Id, Vec<u8>> {
+    use replica::sync::{self, Copy, wire};
+    let mut s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    let mut words = BTreeMap::new();
+    let mut ask = |m: BTreeMap<u64, Value>| -> BTreeMap<u64, Value> {
+        let bytes = encode(&Value::Map(m)).unwrap();
+        s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&bytes).unwrap();
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).unwrap();
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut frame).unwrap();
+        let Value::Map(a) = decode(&frame).unwrap().value else {
+            panic!("a sync answer")
+        };
+        if let Some(Value::Array(pairs)) = a.get(&worldd::views::names::PUBLIC_WORDS) {
+            for p in pairs {
+                if let Value::Array(p) = p
+                    && let [r, Value::Bytes(w)] = p.as_slice()
+                {
+                    words.insert(replica::effects::read_id(r).unwrap(), w.clone());
+                }
+            }
+        }
+        a
+    };
+    let mut copy = Copy::default();
+    let a = ask(BTreeMap::from([
+        (wire::ASK, Value::Uint(1)),
+        (wire::IDS, Value::Array(vec![])),
+    ]));
+    let (ids, hashes) = sync::read_hashes(&a).expect("hashes");
+    let mut d = copy.compare(&ids, hashes);
+    for n in 2.. {
+        let asked = copy.ask(&mut d, wire::RECORDS_MOST);
+        if asked.is_empty() {
+            break;
+        }
+        let hs = asked.iter().cloned().map(Value::Bytes).collect();
+        let a = ask(BTreeMap::from([
+            (wire::ASK, Value::Uint(n)),
+            (wire::RECORDS, Value::Array(hs)),
+        ]));
+        copy.take(&mut d, &asked, sync::read_records(&a).expect("records"))
+            .expect("the records match their hashes");
+    }
+    copy.finish(d).expect("the sync finishes");
+    words
+}
+
+/// #4837: books carry their titles and first pages as world facts, on Eden as it is served, seeded with its stock
+/// (`seed --stock content/worlds/eden/stock.json`). Souls born by the library's door each walk to a different shelf
+/// (bookcases and bookshelves) and take a book. Each book made holds, as its title and first page (eden:book's fields
+/// 29 and 30), references to one row of `content/library/books.json`: the row at the top of that shelf's pile, the
+/// same as `worldd::stock` works out from the same facts and files again here (drawn by nothing: the same world gives
+/// the same book). At least three different books are taken. The one book placed on its own (commons-reading-book)
+/// carries its row from the world's start. Every reference's words, as the world serves them beside the record, are
+/// that row's title and first page, read here from the library file itself.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn books_carry_their_titles_and_first_pages_from_their_shelves() {
+    use replica::rules::json::Value as Json;
+    let facts = facts_path();
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let stock_file = format!("{root}/content/worlds/eden/stock.json");
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let mut kinds = Vec::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut kinds);
+    let data = worldd::stock::Data::load(Path::new(&stock_file)).expect("the stock file");
+    let facts_json = replica::rules::json::parse(&text).unwrap();
+    let want = worldd::stock::World::of(&data, &facts_json, &im.nodes, &im.tree, &kinds)
+        .expect("the stock");
+    assert!(want.notes.is_empty(), "{:?}", want.notes);
+    println!(
+        "stock: {} containers stocked, {} placed copies",
+        want.stocks.len(),
+        want.placed.len()
+    );
+    // The library's own rows: a reference's row, title and first page.
+    let rows = data.libraries["books"]
+        .get("books")
+        .and_then(Json::arr)
+        .unwrap()
+        .to_vec();
+    let row_of = |fields: &BTreeMap<u64, Value>| -> Option<(usize, String, String)> {
+        let at = |n: u64| replica::audience::reference(fields.get(&n)?);
+        let (t, p) = (at(29)?, at(30)?);
+        let i =
+            (0..rows.len()).find(|&i| worldd::stock::reference("books", "title", i) == Some(t))?;
+        assert_eq!(
+            worldd::stock::reference("books", "first_page", i),
+            Some(p),
+            "the title and the first page are one row's"
+        );
+        let words = |c: &str| rows[i].get(c).and_then(Json::str).unwrap().to_owned();
+        assert_eq!(want.words.get(&t), Some(&words("title").into_bytes()));
+        assert_eq!(want.words.get(&p), Some(&words("first_page").into_bytes()));
+        Some((i, words("title"), words("first_page")))
+    };
+
+    let shelves = w10_things(
+        &facts,
+        (74.0, -1.0),
+        &[("core-bookcase@1", 3), ("core-bookshelf@1", 3)],
+    );
+    let (served, _first, dir, _) = serve_seeded(
+        &facts,
+        &format!("{root}/content/kinds"),
+        &["--stock", &stock_file],
+        "74.0,-1.0",
+        "books",
+        lineage,
+    );
+    // Its first record, the import: the placed book carries its row from the start.
+    let placed = facts_json
+        .get("things")
+        .and_then(Json::arr)
+        .unwrap()
+        .iter()
+        .find(|t| t.get("name").and_then(Json::str) == Some("commons-reading-book"))
+        .and_then(|t| im.nodes.get(t.get("id")?.str()?))
+        .copied()
+        .expect("the commons' book");
+    let made = books_made(&dir);
+    let (_, _, start) = made
+        .iter()
+        .find(|(n, ..)| *n == placed)
+        .expect("the commons' book is imported");
+    let carried = want
+        .placed
+        .get(&placed)
+        .expect("the commons' book carries a row");
+    for (n, v) in carried {
+        assert_eq!(start.get(n), Some(v), "field {n} of the commons' book");
+    }
+    let (_, title, page) = row_of(start).expect("the commons' book has a title and a first page");
+    println!("BOOK commons-reading-book: \"{title}\": {page}");
+
+    let mut known: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+    let souls: Vec<(Client, Option<Id>)> = (0..shelves.len())
+        .map(|i| {
+            let soul = join(&dir, 2 + i as u64, lineage);
+            soul.0
+                .set_read_timeout(Some(Duration::from_secs(600)))
+                .unwrap();
+            let now: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+            let body = now.difference(&known).next().copied();
+            known = now;
+            (soul, body)
+        })
+        .collect();
+    let threads: Vec<_> = souls
+        .into_iter()
+        .zip(&shelves)
+        .map(|((mut soul, body), (def, id, _))| {
+            let (shelf, def, id) = (im.nodes[id.as_str()], *def, id.clone());
+            std::thread::spawn(move || {
+                let walked =
+                    soul.act_within("eden:walk", Some(shelf), BTreeMap::new(), 300_000_000);
+                let took = soul.act_within("eden:take", Some(shelf), BTreeMap::new(), 300_000_000);
+                (def, id, shelf, body, walked, took)
+            })
+        })
+        .collect();
+    let answers: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    let made = books_made(&dir);
+    // The world's words as a client's sync gets them (the gateway's path): beside each record that holds a reference.
+    std::thread::sleep(worldd::SEAL_EVERY * 2);
+    let words = served_words(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let served_as = |fields: &BTreeMap<u64, Value>, n: u64, want: &str| {
+        let r = replica::audience::reference(fields.get(&n).expect("the field")).unwrap();
+        assert_eq!(
+            words
+                .get(&r)
+                .map(|w| String::from_utf8_lossy(w).into_owned()),
+            Some(want.to_owned()),
+            "field {n}'s words, served beside its record"
+        );
+    };
+    let (_, title, page) = row_of(start).unwrap();
+    served_as(start, 29, &title);
+    served_as(start, 30, &page);
+    let mut titles = std::collections::BTreeSet::new();
+    for (def, id, shelf, body, walked, took) in answers {
+        println!("TAKE {def} {id}: walk {walked:?}; take {took:?}");
+        if took.is_err() {
+            continue;
+        }
+        let body = body.expect("the Soul's body");
+        let (_, _, fields) = made
+            .iter()
+            .find(|(_, held, _)| *held == body)
+            .expect("a book in the body's hand");
+        let expected = want
+            .stocks
+            .get(&shelf)
+            .expect("a stocked shelf")
+            .carried(None);
+        assert_eq!(
+            fields.get(&29),
+            expected.get(&29),
+            "{id}: the top of its pile's title"
+        );
+        assert_eq!(fields.get(&30), expected.get(&30), "{id}: its first page");
+        let (row, title, page) = row_of(fields).expect("a title and a first page");
+        println!("BOOK {def} {id}: row {row} \"{title}\": {page}");
+        served_as(fields, 29, &title);
+        served_as(fields, 30, &page);
+        titles.insert(title);
+    }
+    assert!(
+        titles.len() >= 3,
+        "three different books from three shelves, got {titles:?}"
+    );
+}
+
 /// One ask of the outdoor audit: what a person's agent asks of a thing on Eden's open ground.
 struct Ask {
     /// The kind, as the audit's table names it.
@@ -6465,4 +6733,346 @@ fn souls_walk_on_from_a_stump_and_four_walk_to_the_quad_fountain() {
             );
         }
     }
+}
+
+/// Three Souls born on the quad (Soul 1 already joined as `first`, served from `dir`) each sit on the fountain by the
+/// gateway's bare sit, naming only the fountain, each in its own seat, and each rises. A seat is the thing's own slot
+/// row of its number (`rows`, field 13, `[n, x, y, z, yaw mdeg, capacity]` mm): the world places a seated body at its
+/// point (`sim::ground::scene` `slot_point`) and the page draws it by the same row (`apps/web/src/v2-engine/bridge.ts`
+/// `sample`: feet the row's height under the seat, facing the thing's +z turned by the row's yaw). Each row taken is on
+/// the rim, 575 mm up and 1925 mm out from the middle (the model's basin), facing out.
+fn three_sit_on_the_rim(
+    served: Served,
+    first: Client,
+    dir: &Path,
+    fountain: Id,
+    lineage: Scope,
+    rows: &[Value],
+) {
+    let mut souls = [first, join(dir, 2, lineage), join(dir, 3, lineage)];
+    let sat: Vec<_> = souls
+        .iter_mut()
+        .map(|s| s.act("eden:sit", Some(fountain), BTreeMap::new()))
+        .collect();
+    let mut slots: Vec<u64> = last_frames(dir)
+        .values()
+        .filter(|f| f.0 == fountain)
+        .filter_map(|f| f.1)
+        .collect();
+    slots.sort_unstable();
+    let rose: Vec<_> = souls
+        .iter_mut()
+        .map(|s| s.act("eden:rise", None, BTreeMap::new()))
+        .collect();
+    println!("sit on the fountain: {sat:?}, in its slots {slots:?}; rise: {rose:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(dir);
+    for s in &sat {
+        s.as_ref().expect("sat on the fountain's rim");
+    }
+    let mut each = slots.clone();
+    each.dedup();
+    assert_eq!(
+        each.len(),
+        3,
+        "three Souls, each in its own seat: {slots:?}"
+    );
+    let num = |v: &Value| match v {
+        Value::Uint(u) => i64::try_from(*u).ok(),
+        Value::Nint(u) => i64::try_from(*u).ok().map(|u| -u - 1),
+        _ => None,
+    };
+    for n in &slots {
+        let row: Vec<i64> = rows
+            .iter()
+            .find_map(|r| match r {
+                Value::Array(r) if r.first().and_then(num) == i64::try_from(*n).ok() => {
+                    Some(r.iter().filter_map(num).collect())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("slot {n} has a row"));
+        let (x, y, z, yaw) = (row[1] as f64, row[2], row[3] as f64, row[4] as f64);
+        let (r, turn) = (x.hypot(z), (yaw / 1000.0).to_radians());
+        let out = (turn.sin() * x + turn.cos() * z) / r;
+        println!("slot {n}: row {row:?}, {r:.0} mm out, facing out at cos {out:.5}");
+        assert_eq!(y, 575, "slot {n} at the rim's height");
+        assert!((r - 1925.0).abs() <= 2.0, "slot {n} on the rim: {r} mm out");
+        assert!(out > 0.9999, "slot {n} faces out: {out}");
+    }
+    for r in rose {
+        r.expect("each rises off the rim");
+    }
+}
+
+/// The fountain's slot rows as the import holds them (field 13).
+fn slot_rows(im: &import_eden::Import, thing: Id) -> Vec<Value> {
+    let node = im.tree.node(im.tree.handle(thing).unwrap()).unwrap();
+    match node.fields().get(&import_eden::F_SLOTS) {
+        Some(Value::Array(rows)) => rows.clone(),
+        _ => panic!("the fountain has slot rows"),
+    }
+}
+
+/// A Soul sits on the rim of the campus quad's fountain, where every new Soul arrives facing it (core-fountain@2's
+/// `rim-n` seats, `content/kinds/washing/fountain.json`'s `rim_n`), on Eden seeded from today's facts: three Souls born
+/// on the quad each sit on the rim ([`three_sit_on_the_rim`]). Before, the fountain's six rows were stand points on
+/// the paving and its entry had no seat: the sit was refused `place-unknown`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn three_souls_born_at_the_quad_each_sit_on_the_fountain_rim() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let fountain = im.nodes[&facts_id(&text, "campus-quad-fountain")];
+    let lineage = im.nodes["world"].scope();
+    let (served, first, dir) = serve(&facts, "-12.0,-88.0", "rim", lineage);
+    let rows = slot_rows(&im, fountain);
+    three_sit_on_the_rim(served, first, &dir, fountain, lineage, &rows);
+}
+
+/// The same on Eden as production has it, imported before core-fountain@2: its fountain's slot rows are @1's six stand
+/// points on the paving, numbered 1 to 6 (today's facts with the fountain's slots put back so), and its world holds the
+/// eden:fountain entry from before (no seat, no sit). The release's `worldd entries stage` stages the new entry and the
+/// deploy swaps it in (`supervisor::deploy::swap_entries`); then one creator edit sets the fountain's field 13 to @2's
+/// rows, as `v2/tools/ops/fountain-rim-seats.mjs` sends it. Three Souls born on the quad then each sit on the rim.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn production_eden_gets_the_rim_seats_by_its_entries_upgrade_and_one_creator_edit() {
+    use replica::rules::json::{self as js, Value as J};
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let fountain = im.nodes[&facts_id(&text, "campus-quad-fountain")];
+    let (lineage, rim) = (im.nodes["world"].scope(), slot_rows(&im, fountain));
+    let scratch = std::env::temp_dir().join(format!("eden-rim-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    // The facts with @1's rows, as production Eden's import wrote them.
+    let from = text
+        .find(r#""slots":[{"n":1,"id":"rim-1""#)
+        .expect("the rim seats in the facts");
+    let to = from + text[from..].find(r#""id":"edge-6""#).unwrap();
+    let to = to + text[to..].find("}]").unwrap() + 2;
+    let ring = [
+        (2250, 0, 270000),
+        (1125, 1949, 210000),
+        (-1125, 1949, 150000),
+        (-2250, 0, 90000),
+        (-1125, -1949, 30000),
+        (1125, -1949, 330000),
+    ];
+    let old: Vec<String> = (1..)
+        .zip(ring)
+        .map(|(n, (x, z, yaw))| {
+            format!(
+                r#"{{"n":{n},"id":"edge-{n}","kind":"stand","at":[{x},0,{z}],"yaw":{yaw},"capacity":1}}"#
+            )
+        })
+        .collect();
+    let old_facts = scratch.join("facts-v1.json");
+    std::fs::write(
+        &old_facts,
+        format!(
+            "{}\"slots\":[{}]{}",
+            &text[..from],
+            old.join(","),
+            &text[to..]
+        ),
+    )
+    .unwrap();
+    // The world's entries from before: the fountain's with no seat and no form.
+    let old_kinds = scratch.join("kinds");
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &old_kinds);
+    let entry = old_kinds.join("washing/fountain.json");
+    let J::Obj(fields) = js::parse(&std::fs::read_to_string(&entry).unwrap()).unwrap() else {
+        panic!("an entry")
+    };
+    let before = J::Obj(
+        fields
+            .into_iter()
+            .filter(|(k, _)| k != "slots" && k != "forms")
+            .collect(),
+    );
+    std::fs::write(&entry, before.to_json()).unwrap();
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    let dir = scratch.join("w");
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts"])
+        .arg(&old_facts)
+        .arg("--dir")
+        .arg(&dir)
+        .arg("--entries")
+        .arg(&old_kinds)
+        .args(["--souls", "0", "--at", "-12.0,-88.0"])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    // The release's entries step and its deploy's swap.
+    let staged = Command::new(worldd)
+        .args(["entries", "stage", "--dir"])
+        .arg(&dir)
+        .arg("--kinds")
+        .arg(format!("{root}/content/kinds"))
+        .output()
+        .unwrap();
+    let log = format!(
+        "{}{}",
+        String::from_utf8_lossy(&staged.stdout),
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    println!("entries stage: {log}");
+    assert!(
+        staged.status.success() && log.contains("change eden:fountain "),
+        "{log}"
+    );
+    supervisor::deploy::swap_entries(&dir, true).unwrap();
+    // The world's one creator, as production Eden names one.
+    let creator = Id::new(Scope([0xc7; 16]), 1).unwrap();
+    let meta = dir.join("world.json");
+    let m = std::fs::read_to_string(&meta).unwrap();
+    let (head, _) = m.rsplit_once('}').unwrap();
+    std::fs::write(
+        &meta,
+        format!(
+            "{head}, \"creator\": \"{}-1\"}}",
+            replica::encode::to_hex(&creator.scope().0)
+        ),
+    )
+    .unwrap();
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    let connect = || {
+        let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
+        s
+    };
+    let mut first = Client(
+        connect(),
+        Id::new(Scope([0xc1; 16]), 1).unwrap(),
+        0,
+        lineage,
+    );
+    first
+        .act(JOIN, None, BTreeMap::new())
+        .expect("born by the entry");
+    // The creator's edit, planned against version `planned`: its answer's kind (1 done, 2 refused), its reason and the
+    // world's version it names (as `souls-god.mjs` plans an edit on its copy of the world).
+    let mut god = connect();
+    let mut edit = |sequence: u64, planned: u64| {
+        let i = Intent {
+            actor: Actor::Creator(creator),
+            verb: name(replica::edit::wire::VERB),
+            target: None,
+            parameters: replica::edit::wire::parameters(&[replica::edit::Op::Set {
+                node: replica::edit::Ref::Node(fountain),
+                field: import_eden::F_SLOTS,
+                to: Value::Array(rim.clone()),
+            }]),
+            sequence,
+            basis: Version {
+                lineage,
+                zone: Id::new(lineage, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        god.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        god.write_all(&bytes).unwrap();
+        loop {
+            let mut len = [0u8; 4];
+            god.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            god.read_exact(&mut frame).unwrap();
+            let Value::Map(m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let (Some(Value::Map(a)), Some(Value::Array(v))) = (m.get(&2), m.get(&1)) else {
+                panic!("an answer with a version")
+            };
+            let kind = match a.get(&3) {
+                Some(Value::Uint(k)) => *k,
+                other => panic!("a kind: {other:?}"),
+            };
+            if kind == 3 {
+                continue;
+            }
+            let reason = match a.get(&4) {
+                Some(Value::Text(t)) => t.as_str().to_owned(),
+                _ => String::new(),
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a version")
+            };
+            return (kind, reason, *version);
+        }
+    };
+    // Planned on nothing, it is refused stale and names the world's version; planned on that version, it commits.
+    let (kind, reason, version) = edit(1, 0);
+    println!("planned on version 0: kind {kind} {reason:?}; the world is at {version}");
+    let edited = edit(2, version);
+    println!("the creator's edit of the fountain's rows: {edited:?}");
+    assert_eq!(edited.0, 1, "the creator's edit commits: {edited:?}");
+    // The rows the world now holds, as its log has them: the sits below are checked against these.
+    let Some(Value::Array(held)) = last_set(&dir, fountain, import_eden::F_SLOTS) else {
+        panic!("the world's log sets the fountain's slot rows")
+    };
+    assert_eq!(held, rim, "the world holds @2's rows");
+    three_sit_on_the_rim(served, first, &dir, fountain, lineage, &held);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// The last value the world's log in `dir` sets on `node`'s field `field`.
+fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = None;
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            let Body::Changes(changes) = e.body else {
+                continue;
+            };
+            for c in changes {
+                if let replica::effects::Change::Set {
+                    node: n,
+                    field: f,
+                    to,
+                    ..
+                } = c.change
+                    && n == node
+                    && f == field
+                {
+                    out = Some(to);
+                }
+            }
+        }
+    }
+    out
 }

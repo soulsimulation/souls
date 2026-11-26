@@ -24,6 +24,7 @@ pub mod places;
 pub mod setdown;
 pub mod shipping;
 pub mod start;
+pub mod stock;
 mod syncs;
 pub use syncs::SEAL_EVERY;
 pub mod testbodies;

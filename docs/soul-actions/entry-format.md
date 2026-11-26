@@ -50,7 +50,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `yaw_mdeg` (the way a body in it faces, the thing's +z turned by it; a thing placed live gets its slot rows from these), `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below); `solids_mm` (optional): the thing's own walk boxes, `[[cx, cz, hx, hz, yaw_mdeg, y0, y1]]` in its frame, given to what is placed of it in place of one box its bounds' size, so a thing with gaps (a rack frame's two posts) is walked through as one seeded from a model is |
 | 8 | `forms` | What can be done with it (below) |
 | 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
@@ -221,7 +221,12 @@ lowers the count by one in the same batch as the make (`takeStock` shows the bat
 nothing is made from nothing, and the check gate's `makes` rule counts the stock as what pays for it. Stock is free to
 take; buying, lending and debts are not here. A kind whose contents are
 closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
-or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Eden's own storage
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. On the new engine
+([#4837](https://github.com/soulsimulation/souls/issues/4837)) a world seeded with its stock file
+(`worldd seed --stock content/worlds/<world>/stock.json`, `v2/crates/worldd/src/stock.rs`) works out each container's
+pile from its stock row and draw; a take gives the thing it makes the carried fields of the row at the top of the pile,
+as references to the library row's words, which the world serves beside the record as public words. It does not yet
+lower the count. Eden's own storage
 (`content/kinds/storage/`, SA-X26 [#2916](https://github.com/soulsimulation/souls/issues/2916)) names each stock's take form `take`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,

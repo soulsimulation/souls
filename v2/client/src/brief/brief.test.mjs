@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock, heldBy } from './brief.mjs';
+import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock, heldBy, holdingOf } from './brief.mjs';
 import { changedBetween, decode, entryKind } from './copy.mjs';
 
 const eden = JSON.parse(readFileSync(new URL('./eden-busiest-room.json', import.meta.url), 'utf8'));
@@ -139,6 +139,30 @@ test('D12: a Soul lying in a bed names its bed and the bedroom around it, not th
   assert.deepEqual(b.seat, { name: 'bedroom-2-bed', kind: 'eden:bed', id: 'bed' }, 'the bed that holds the body');
   assert.deepEqual(b.here, ['bedside lamp'], 'what is in the room, not my bed');
   assert.deepEqual(heldBy(rows, 'soul-3', { verbs: ['eden:lie'], target: 'bed' }), { rank: 0, verb: 'eden:lie', id: 'bed', name: 'bedroom-2-bed', fallback: false });
+});
+
+// #4837 review: a held book's words are the world's (or another Soul's) text. They go under `quoted` with the note,
+// only for the things the answer is about (`quote`); the book is named by its title, never by its first page.
+test('a held book is named by its title, and its words are quoted only where asked', () => {
+  const book = { id: 'b', name: 'book 9', kind: 'eden:book', parent: 'me' };
+  Object.defineProperty(book, 'words', { value: { 29: 'How the Library Began', 30: 'It began with one shelf and a borrowed key.' } });
+  const rows = byId([{ id: 'me', name: 'me', kind: 'souls:body', parent: 'h' }, book, { id: 'c', name: 'cup 3', kind: 'eden:cup', parent: 'me' }]);
+  const kinds = { 'eden:book': { state: { title: { n: 29, type: 'text' }, first_page: { n: 30, type: 'text' } } } };
+  let read = 0;
+  const kindsOf = () => { read++; return kinds; };
+  const look = holdingOf(rows, 'me', kindsOf);
+  assert.equal(look.note, QUOTED_NOTE);
+  assert.deepEqual(look.holding, [
+    { id: 'b', name: 'How the Library Began', kind: 'eden:book', quoted: { title: 'How the Library Began', first_page: 'It began with one shelf and a borrowed key.' } },
+    { id: 'c', name: 'cup 3', kind: 'eden:cup' },
+  ]);
+  // A take answered at the shelf: the book is named, its words left out, and so is the note.
+  const took = holdingOf(rows, 'me', kindsOf, (id) => id === 'shelf');
+  assert.deepEqual(took, { holding: [{ id: 'b', name: 'How the Library Began', kind: 'eden:book' }, { id: 'c', name: 'cup 3', kind: 'eden:cup' }] });
+  assert.equal(holdingOf(rows, 'me', kindsOf, (id) => id === 'b').holding[0].quoted.title, 'How the Library Began', 'a read of the book quotes it');
+  assert.equal(read, 3, 'the kinds are read only when a held thing has words');
+  assert.deepEqual(holdingOf(byId([{ id: 'c', name: 'cup 3', kind: 'eden:cup', parent: 'me' }]), 'me', () => assert.fail('no words: no kinds read')), { holding: [{ id: 'c', name: 'cup 3', kind: 'eden:cup' }] });
+  assert.deepEqual(holdingOf(rows, null, kindsOf), {}, 'no body: nothing held');
 });
 
 test('trial 0.137: on open ground of thousands, the brief names what is near the body first, with ids and metres, and what it does and holds', () => {
