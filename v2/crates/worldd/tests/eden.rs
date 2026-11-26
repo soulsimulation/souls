@@ -4754,8 +4754,10 @@ fn births(dir: &Path) -> Vec<(Id, replica::pose::Pose)> {
 
 /// A Soul's first moment on Eden: a world that names its arrival place (`worldd arrival`, `world.json`'s `arrival`)
 /// has its joining Souls born round that place, not at its entry. Eden names the campus quad
-/// (`place-region-campus-quad`, its fountain at (-12, -97) m): two fresh joins land within 8 m of the fountain, on the
-/// open ground, at least two body radii apart, each facing the fountain (its +x within a degree of the way to it).
+/// (`place-region-campus-quad`, its fountain at (-12, -97) m): four fresh joins at once (the 0.137 trial had three
+/// born on one spot) land within 8 m of the fountain, on the open ground, at least two body radii apart, each facing
+/// the fountain (its +x within a degree of the way to it), and each then walks to the fountain: none starts unable to
+/// walk.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
@@ -4826,10 +4828,17 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
             .any(|l| l.contains("Souls arrive at place-region-campus-quad (-12.000,-97.000 m)")),
         "serve names the arrival place: {lines:?}"
     );
-    let _a = join(&dir, 1, lineage);
-    let _b = join(&dir, 2, lineage);
+    let mut souls: Vec<Client> = std::thread::scope(|s| {
+        let joins: Vec<_> = (1..=4)
+            .map(|n| {
+                let dir = &dir;
+                s.spawn(move || join(dir, n, lineage))
+            })
+            .collect();
+        joins.into_iter().map(|j| j.join().unwrap()).collect()
+    });
     let born = births(&dir);
-    assert_eq!(born.len(), 2, "two bodies born");
+    assert_eq!(born.len(), 4, "four bodies born");
     let fountain = (-12_000_000i64, -97_000_000i64);
     for (body, pose) in &born {
         let p = pose.position;
@@ -4860,11 +4869,24 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
         );
         assert!(dot * 100_000 >= len * 99_985, "faces the fountain");
     }
-    let (a, b) = (born[0].1.position, born[1].1.position);
-    let apart =
-        ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()) as f64 / 1e6;
-    println!("the two births {apart:.2} m apart");
-    assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
+    for (i, (_, a)) in born.iter().enumerate() {
+        for (_, b) in &born[i + 1..] {
+            let (a, b) = (a.position, b.position);
+            let apart = ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt())
+                as f64
+                / 1e6;
+            println!("two births {apart:.2} m apart");
+            assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
+        }
+    }
+    let basin = im.nodes["e_ce79121a"];
+    for s in &mut souls {
+        s.0.set_read_timeout(Some(Duration::from_secs(120)))
+            .unwrap();
+        let walked = s.act("eden:walk", Some(basin), BTreeMap::new());
+        println!("{:?} walks to the fountain: {walked:?}", s.1);
+        walked.expect("a Soul born in the burst walks to the fountain");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

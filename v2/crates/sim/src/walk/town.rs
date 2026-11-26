@@ -86,10 +86,6 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 
 /// How far a leg's end may lie off the ground and still be aimed at, mm: a link's end on its piece's edge.
 const AT_EDGE: i64 = 20;
-/// How far off the ground a walk may start, mm, from the nearest point of the ground (0.137 trial): a body left a
-/// little inside an obstacle's cut (over a stump, against a basin) walks out from the ground beside it, as its spot
-/// ask does (`spots::Ground::start`), and is never refused every walk for where it stands. A pitch of the spot tables.
-const START_NEAR: i64 = crate::spots::PITCH / 1000;
 /// How far a crossing's landing may be moved onto the far surface, µm: less than a body's radius (#3168).
 const LAND: i64 = HUMAN_RADIUS * 1000;
 /// How far from a link's near end a crossing may be asked, µm (the walk asks within 50 mm of it, #3168).
@@ -2558,12 +2554,13 @@ impl Ground for Grounds<'_> {
         Some((um(s.at), um(w)))
     }
 
-    /// Where it stands, else the nearest point of the ground within [`START_NEAR`] of it: the walk's own start
-    /// (`plan_on`, `View::search`), so a spot ask leaves from where the walk will.
+    /// Where it stands, else the nearest point of the ground within [`AT_EDGE`] of it: the walk's own start
+    /// (`plan_on`, `View::search`), so a spot ask leaves from where the walk will (0.137 trial: a body pressed on a
+    /// stump's edge, its centre a hair off the ground, was refused every target though its walk left from there).
     fn start(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         self.stand(node, p).or_else(|| {
             let m = self.map.get();
-            let s = m.spot_near(node, p, START_NEAR)?;
+            let s = m.spot_near(node, p, AT_EDGE)?;
             let w = m.world(s.piece, s.at);
             let um = |v: [i64; 3]| Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000);
             Some((um(s.at), um(w)))
@@ -2600,7 +2597,7 @@ impl Ground for Grounds<'_> {
         {
             return Some(flat(a, b));
         }
-        let from = self.map.get().spot_near(an, a, START_NEAR)?;
+        let from = self.map.get().spot_near(an, a, AT_EDGE)?;
         let to = self.map.get().spot_near(bn, b, AT_EDGE)?;
         // Pieces no portal or link joins: no route, decided without a search (a failed search walks the whole part
         // it starts in, twice; #4072).
@@ -2613,7 +2610,7 @@ impl Ground for Grounds<'_> {
 
     fn may_reach(&self, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
         let m = self.map.get();
-        match (m.spot_near(an, a, START_NEAR), m.spot_near(bn, b, AT_EDGE)) {
+        match (m.spot_near(an, a, AT_EDGE), m.spot_near(bn, b, AT_EDGE)) {
             (Some(from), Some(to)) => m.may_reach(from.piece, to.piece),
             _ => true,
         }
@@ -2864,7 +2861,7 @@ fn plan_on(
     let here = node_of(body);
     let from = map
         .get()
-        .spot_near(here, body.pose.position, START_NEAR)
+        .spot_near(here, body.pose.position, AT_EDGE)
         .ok_or_else(|| refusal("off-ground", show(here)))?;
     let to = map
         .get()
@@ -3222,7 +3219,7 @@ impl<'a> View<'a> {
         }
         let map = self.map;
         let (Some(from), Some(goal)) = (
-            map.spot_near(node, body.pose.position, START_NEAR),
+            map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
             map.spot_near(node, to, AT_EDGE),
         ) else {
