@@ -2659,11 +2659,11 @@ impl Clock {
                         })
                     })
             });
-            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
-            if r.step == crate::assembly::Step::Retired
-                && done
-                    .as_ref()
-                    .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
+            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2); so is
+            // any take or seating whose prepared map another commit changed first (two crews seating at once).
+            let stale = done.as_ref().err().map(|e| e.name);
+            if (stale == Some("edit.stale")
+                || (r.step == crate::assembly::Step::Retired && stale == Some("edit.body-stale")))
                 && let Some(e) = self.engine.as_mut()
                 && e.retry(r.clone())
             {

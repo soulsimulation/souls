@@ -2565,7 +2565,8 @@ impl Engine {
     }
 
     /// A retiring holder's set-down `r` whose walkers' maps went stale before its commit (its own body left meanwhile,
-    /// 0.135 A2): checked again, at most [`RETRIES`] times; `false` when it has been, and it is refused.
+    /// 0.135 A2), or a crew's take or seating whose prepared map another commit changed first: checked again, at most
+    /// [`RETRIES`] times; `false` when it has been, and it is refused.
     pub fn retry(&mut self, r: crate::assembly::Ready) -> bool {
         let n = self.retried.entry(r.activity).or_insert(0);
         *n += 1;
