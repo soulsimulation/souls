@@ -24,6 +24,7 @@ test('fountain@2 seats six on its rim at the rim\'s height, facing out; @1 keeps
     // facing: +z turned by yaw, pointing away from the middle
     assert.ok((Math.sin(s.yaw) * x + Math.cos(s.yaw) * z) / r > 0.9999, `${s.id} faces out`);
     assert.equal(s.capacity, 1);
+    assert.equal(s.height, 0.575, `${s.id}: its seat height, as the SEATDEF revisions store it`);
   }
   assert.deepEqual(next.slots.filter((s) => s.kind === 'stand').map((s) => s.id), old.slots.map((s) => s.id), "@1's stand points kept");
 });

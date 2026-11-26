@@ -6,12 +6,15 @@
 // creator's own edit (`souls-god.mjs batch`), each fountain's rows to the rows `import-eden`'s exporter gives
 // core-fountain@2: the six rim seats as 1 to 6, then @1's six stand points as 7 to 12. It touches only a node of kind
 // eden:fountain whose rows are exactly @1's; a second run finds none and sends nothing. `souls-god.mjs undo` takes it
-// back.
+// back. Run it before the release that carries the entry: until then nothing reads these rows (the old entry has no
+// seat, so nobody sits there and the edit is never refused `edit.in-use`); after the release and before this, a sit
+// lands on @1's stand points on the paving.
 //
 //   SOULS_HOME=<the creator's home> node v2/tools/ops/fountain-rim-seats.mjs [--dry-run]
 //
 // Needs a daemon paired as the world's creator (`souls-god.mjs pair <world url> --creator <grant>`) in SOULS_HOME.
-// Prints one JSON line: {ok, dryRun, fountains, edits}.
+// Prints one JSON line: {ok, dryRun, fountains, other, edits}: `fountains` set (or, dry, to set), `other` fountains
+// whose rows are neither @1's nor @2's (scaled, or edited since), left alone. Exits 1 on a refusal or any `other`.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,13 +39,22 @@ export function slotRows(ref, entry) {
   return slots.map((s) => [n.get(s.id), mm(s.p[0]), mm(s.p[1]), mm(s.p[2]), mdeg(s.yaw), s.capacity ?? 1]);
 }
 
-/** The set operations that bring each fountain of `world` (a `souls-world/1` export) from rows `was` to rows `now`. */
+/** The set operations that bring each fountain of `world` (a `souls-world/1` export) from rows `was` to rows `now`,
+ *  and the fountains whose rows are neither (`other`: scaled, or edited since; left alone and named). */
 export function rimOps(world, was, now) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  return world.nodes
-    .filter((n) => (typeof n.fields?.[F_ENTRY] === 'string' ? n.fields[F_ENTRY] : String(n.kind).split('@')[0]) === KIND)
-    .filter((n) => same(n.fields?.[F_SLOTS], was))
-    .map((n) => ({ op: 'set', node: n.id, field: F_SLOTS, value: now }));
+  const fountains = world.nodes.filter((n) => (typeof n.fields?.[F_ENTRY] === 'string' ? n.fields[F_ENTRY] : String(n.kind).split('@')[0]) === KIND);
+  return {
+    ops: fountains.filter((n) => same(n.fields?.[F_SLOTS], was)).map((n) => ({ op: 'set', node: n.id, field: F_SLOTS, value: now })),
+    other: fountains.filter((n) => !same(n.fields?.[F_SLOTS], was) && !same(n.fields?.[F_SLOTS], now)).map((n) => n.id),
+  };
+}
+
+/** `souls-god.mjs <words>`'s last JSON line, also when it exits non-zero on a refusal. */
+function god(...words) {
+  let out;
+  try { out = execFileSync(process.execPath, [GOD, ...words], { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'inherit'] }); } catch (e) { out = String(e.stdout ?? ''); }
+  try { return JSON.parse(out.trim().split('\n').pop()); } catch { return { ok: false, said: out.trim().slice(-300) }; }
 }
 
 function main() {
@@ -52,14 +64,15 @@ function main() {
   const was = slotRows('core/fountain@1', entry), now = slotRows('core/fountain@2', entry);
   const tmp = mkdtempSync(join(tmpdir(), 'fountain-rim-'));
   try {
-    const god = (...words) => { const out = execFileSync(process.execPath, [GOD, ...words], { encoding: 'utf8', maxBuffer: 1 << 26 }); return JSON.parse(out.trim().split('\n').pop()); };
     const file = join(tmp, 'world.souls.json'), exported = god('export', file);
-    if (!exported.ok) throw new Error(`export: ${JSON.stringify(exported).slice(0, 300)}`);
-    const ops = rimOps(JSON.parse(readFileSync(file, 'utf8')), was, now);
-    if (dry || !ops.length) { console.log(JSON.stringify({ ok: true, dryRun: dry, fountains: ops.map((o) => o.node), edits: 0 })); return; }
+    if (!exported.ok) { console.log(JSON.stringify({ ok: false, export: exported })); process.exitCode = 1; return; }
+    const { ops, other } = rimOps(JSON.parse(readFileSync(file, 'utf8')), was, now);
+    const fountains = ops.map((o) => o.node), ok = !other.length;
+    if (dry || !ops.length) { console.log(JSON.stringify({ ok, dryRun: dry, fountains, other, edits: 0 })); process.exitCode = ok ? 0 : 1; return; }
     const a = god('batch', JSON.stringify(ops));
-    if (!a.ok) { console.log(JSON.stringify({ ok: false, fountains: ops.map((o) => o.node), refused: a })); process.exit(1); }
-    console.log(JSON.stringify({ ok: true, dryRun: false, fountains: ops.map((o) => o.node), edits: 1 }));
+    if (!a.ok) { console.log(JSON.stringify({ ok: false, fountains, other, refused: a })); process.exitCode = 1; return; }
+    console.log(JSON.stringify({ ok, dryRun: false, fountains, other, edits: 1 }));
+    process.exitCode = ok ? 0 : 1;
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 }
 

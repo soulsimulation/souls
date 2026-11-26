@@ -23,7 +23,7 @@ const round = (v: number) => Math.round(v * 1000) / 1000;
 /** One seat on the rim for each of @1's stand points, on the same bearing, facing out (+z turned by `yaw`). */
 const rim: Slot[] = (v1.slots ?? []).filter((s) => s.kind === 'stand').map((s, i) => {
   const bearing = Math.atan2(s.p[0], s.p[2]);
-  return { id: `rim-${i + 1}`, kind: 'seat', p: [round(RIM.r * Math.sin(bearing)), RIM.y, round(RIM.r * Math.cos(bearing))], yaw: bearing, accepts: { tags: ['body'] }, capacity: 1 };
+  return { id: `rim-${i + 1}`, kind: 'seat', p: [round(RIM.r * Math.sin(bearing)), RIM.y, round(RIM.r * Math.cos(bearing))], yaw: bearing, height: RIM.y, accepts: { tags: ['body'] }, capacity: 1 };
 });
 
 export const FOUNTAIN_2: DefInput = {

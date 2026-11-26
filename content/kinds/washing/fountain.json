@@ -53,12 +53,12 @@
     }
   },
   "slots": {
-    "rim_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [1925, 575, 0], "stand": "edge_1" },
-    "rim_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [962, 575, 1667], "stand": "edge_2" },
-    "rim_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-962, 575, 1667], "stand": "edge_3" },
-    "rim_4": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-1925, 575, 0], "stand": "edge_4" },
-    "rim_5": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-962, 575, -1667], "stand": "edge_5" },
-    "rim_6": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [962, 575, -1667], "stand": "edge_6" }
+    "rim_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [1925, 575, 0], "yaw_mdeg": 90000, "stand": "edge_1" },
+    "rim_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [962, 575, 1667], "yaw_mdeg": 29994, "stand": "edge_2" },
+    "rim_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-962, 575, 1667], "yaw_mdeg": 330006, "stand": "edge_3" },
+    "rim_4": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-1925, 575, 0], "yaw_mdeg": 270000, "stand": "edge_4" },
+    "rim_5": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-962, 575, -1667], "yaw_mdeg": 209994, "stand": "edge_5" },
+    "rim_6": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [962, 575, -1667], "yaw_mdeg": 150006, "stand": "edge_6" }
   },
   "geometry": {
     "bounds_mm": [

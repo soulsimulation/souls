@@ -26,7 +26,7 @@ test('only a fountain whose rows are still @1\'s is set, to @2\'s; a second run 
     { id: 'a-3', kind: 'eden:bench', fields: { 13: was } },
     { id: 'a-4', kind: 'eden:fountain', fields: { 13: was.slice(1) } },
   ] };
-  assert.deepEqual(rimOps(world, was, now), [{ op: 'set', node: 'a-1', field: 13, value: now }]);
+  assert.deepEqual(rimOps(world, was, now), { ops: [{ op: 'set', node: 'a-1', field: 13, value: now }], other: ['a-4'] });
   world.nodes[0].fields[13] = now;
-  assert.deepEqual(rimOps(world, was, now), []);
+  assert.deepEqual(rimOps(world, was, now), { ops: [], other: ['a-4'] });
 });

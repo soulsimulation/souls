@@ -5819,6 +5819,41 @@ fn production_eden_gets_the_rim_seats_by_its_entries_upgrade_and_one_creator_edi
     let edited = edit(2, version);
     println!("the creator's edit of the fountain's rows: {edited:?}");
     assert_eq!(edited.0, 1, "the creator's edit commits: {edited:?}");
-    three_sit_on_the_rim(served, first, &dir, fountain, lineage, &rim);
+    // The rows the world now holds, as its log has them: the sits below are checked against these.
+    let Some(Value::Array(held)) = last_set(&dir, fountain, import_eden::F_SLOTS) else {
+        panic!("the world's log sets the fountain's slot rows")
+    };
+    assert_eq!(held, rim, "the world holds @2's rows");
+    three_sit_on_the_rim(served, first, &dir, fountain, lineage, &held);
     let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// The last value the world's log in `dir` sets on `node`'s field `field`.
+fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = None;
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            let Body::Changes(changes) = e.body else {
+                continue;
+            };
+            for c in changes {
+                if let replica::effects::Change::Set {
+                    node: n,
+                    field: f,
+                    to,
+                    ..
+                } = c.change
+                    && n == node
+                    && f == field
+                {
+                    out = Some(to);
+                }
+            }
+        }
+    }
+    out
 }
