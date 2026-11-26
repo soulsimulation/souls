@@ -67,8 +67,9 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
     t = setTimeout(poll, 6000);
     return () => { stopped = true; clearTimeout(t); cancel(); };
   }, []);
-  // the fullest worlds first; a world whose count is unknown goes last
-  const worlds = [...list.worlds].sort((a, b) => (b.entities ?? -1) - (a.entities ?? -1));
+  // the list's own order (featured first, then the most Souls, then the newest: tools/world-launcher/listing.mjs); a
+  // world the new engine runs has no "things" count, so sorting by it here sank those below every old one (26 Nov)
+  const worlds = list.worlds;
   // two worlds with one name are told apart by their address, shown only on those cards
   const shared = new Set(worlds.map((w) => w.name).filter((n, i, all) => all.indexOf(n) !== i));
   return (

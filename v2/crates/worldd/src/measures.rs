@@ -231,6 +231,9 @@ pub struct Measures {
     next_arrival: AtomicU64,
     /// `health.json` writes so far.
     pub written: AtomicU64,
+    /// The Souls embodied in the world as the last tick left them, plus one; 0 before a tick has set it (or in a world
+    /// with no joins). `souls` in `health.json`: the number a world's card on the home page shows (26 Nov).
+    souls: AtomicU64,
 }
 
 impl Measures {
@@ -286,6 +289,12 @@ impl Measures {
         if total > BUDGET_US {
             self.over_budget.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Clock thread: the Souls embodied in the world after a tick (`None`: a world with no joins, no field).
+    pub fn souls(&self, n: Option<usize>) {
+        let v = n.map_or(0, |n| u64::try_from(n).unwrap_or(u64::MAX - 1) + 1);
+        self.souls.store(v, Ordering::Relaxed);
     }
 
     /// Answers thread: an answer's stamps complete; its parts recorded and returned as the block, `[first stamp,
@@ -360,6 +369,9 @@ impl Measures {
         ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         HISTORY_EXPORT.json(&mut o);
         CREATOR.json("creator", &mut o);
+        if let Some(n) = self.souls.load(Ordering::Relaxed).checked_sub(1) {
+            let _ = write!(o, ",\"souls\":{n}");
+        }
         o.push_str("}\n");
         o
     }
@@ -763,6 +775,23 @@ mod tests {
             json(),
             ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
         );
+    }
+
+    /// The Souls embodied as the last tick left them are `souls` in `health.json`; never set, no field (26 Nov).
+    #[test]
+    fn the_souls_in_the_world_are_in_the_health_file() {
+        let m = Measures::default();
+        let health = |m: &Measures| m.health(steady_us());
+        assert!(!health(&m).contains("\"souls\""), "unset: no field");
+        m.souls(Some(4));
+        assert!(health(&m).ends_with(",\"souls\":4}\n"), "{}", health(&m));
+        m.souls(Some(0));
+        assert!(
+            health(&m).ends_with(",\"souls\":0}\n"),
+            "none embodied is 0, not unset"
+        );
+        m.souls(None);
+        assert!(!health(&m).contains("\"souls\""));
     }
 
     /// A key the public history mirror could not hold is counted in `health.json`, by its key; none, no field.

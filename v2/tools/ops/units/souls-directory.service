@@ -28,6 +28,8 @@ Environment=DIRECTORYD_WORLD_STORE=/var/lib/souls/worlds/directory
 Environment=DIRECTORYD_PLACEMENT=/etc/souls/placement-data
 Environment=DIRECTORYD_PLACEMENT_CONFIG=/etc/souls/placement.json
 Environment=DIRECTORYD_AUTHORITY_MAP=/etc/souls/placement-data/authority.json
+# The list's Souls in each world (rule 9 of directoryd's worlds::list): each world folder's health.json, read-only.
+Environment=DIRECTORYD_WORLDS_ROOT=/var/lib/souls/worlds/worlds
 
 [Install]
 WantedBy=multi-user.target

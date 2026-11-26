@@ -5121,6 +5121,8 @@ impl Clock {
         self.faults += slice.faults.len() as u64;
         at[8] = mark();
         if let Some(m) = &self.measures {
+            // The Souls embodied now, for `health.json` (the home page's count, 26 Nov): off the tick's phases.
+            m.souls(self.life.as_ref().map(|l| l.life.embodied().count()));
             let mut phases = [0; measures::NPHASES];
             for (i, p) in phases.iter_mut().enumerate() {
                 if let (Some(a), Some(b)) = (at[i], at[i + 1]) {
