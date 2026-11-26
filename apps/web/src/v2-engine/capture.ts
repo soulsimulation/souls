@@ -125,7 +125,21 @@ export function installCapture(host: Host, page: CapturePage): { retire(): void 
       return a ? { spot, aim: page.pin(a.eye, a.target) } : null;
     },
   };
-  const mine = { capture, director: { get t() { return page.t(); } } };
+  // The world as the client's page reads (`where`/`clear`/`free --page`, `view`: v2/web's WorldView): its nodes, and
+  // each node's frame as a matrix (three's column-major `elements`); bodies have no tracks here, so a body's frame is
+  // where the page draws it.
+  const world = {
+    get nodes() { return page.nodes() ?? new Map<string, CaptureNode>(); },
+    tracks: new Map<string, never>(),
+    frame(id: string | null): { elements: number[] } {
+      const nodes = page.nodes(), n = id ? nodes?.get(id) : undefined;
+      if (!nodes || !n) return { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
+      const b = isBody(n) ? page.body(n) : null, w = b ? { p: b.p, yaw: 0 } : placedOf(nodes, n.id) ?? { p: [0, 0, 0], yaw: 0 };
+      const c = Math.cos(w.yaw), s = Math.sin(w.yaw);
+      return { elements: [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, w.p[0], w.p[1], w.p[2], 1] };
+    },
+  };
+  const mine = { capture, world, director: { get t() { return page.t(); } } };
   host.v2 = mine;
   return { retire: () => { if (host.v2 === mine) delete host.v2; } };
 }

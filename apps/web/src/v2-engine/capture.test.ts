@@ -67,6 +67,14 @@ test('`v2.capture` waits for the page, aims through its pin and says what it sho
   assert.equal(+shot.aim.eye[1].toFixed(3), 4.3, 'the camera the pin set (lifted), not the one asked for');
   assert.equal(host.v2!.capture.aim('nothing here'), null);
   assert.ok(host.v2!.capture.where().some((s) => s.name === 'Ada'));
+  // the world as the client's `where --page` and `view` read it: a node's frame places its own points in the world
+  const w = (host.v2 as unknown as { world: { nodes: Map<string, unknown>; tracks: Map<string, unknown>; frame(id: string | null): { elements: number[] } } }).world;
+  assert.equal(w.nodes.size, NODES.size);
+  assert.equal(w.tracks.size, 0);
+  const e = w.frame('w.3').elements, ap = (x: number, z: number) => [e[0] * x + e[8] * z + e[12], e[2] * x + e[10] * z + e[14]].map((v) => +v.toFixed(3));
+  assert.deepEqual(ap(2, 0), [14, -10], 'the hall\'s own +x 2 m is the desk\'s place');
+  assert.deepEqual(w.frame('w.7').elements.slice(12, 15), [5, 0, 5], 'a body\'s frame is where the page draws it');
+  assert.deepEqual(w.frame(null).elements, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   retire();
   assert.equal(host.v2, undefined);
 });
