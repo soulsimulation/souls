@@ -168,3 +168,25 @@ test('a road a creator lays (place --path) is drawn along its line by its librar
   assert.deepEqual(d2.diff.defs, []);
   assert.deepEqual((d2.diff.upserts as { def: string }[]).map((u) => u.def), ['core-footpath@1']);
 });
+
+test('a piece furnish places in a room (named `<room>-<item>` in field 1, as today names it) is drawn, at its world pose; the building\'s rooms and windows are not', () => {
+  const k = new CreatorKinds();
+  const cottage = { id: 'e_cot1', def: 'core-cottage@3', in: { parent: 'world' }, p: [44, 0, 10] };
+  const layer = { seq: 4, model: { entities: new Map<string, { id: string }>([['e_cot1', cottage]]), defs: new Map<string, unknown>() } };
+  // as import-eden writes a cottage: the thing (its old entity), its floor, its bedroom and a window, under the bedroom
+  // the bunk furnish placed (#5006: `e_…/bedroom-bed`) and a lamp a creator placed there by hand (no name)
+  const under = (id: string, kind: string, parent: string, pos: [number, number, number], origin?: string) => ({ ...node(id, kind, pos, origin ? { origin } : {}), parent });
+  k.apply([root, under('c.1', 'eden:cottage@1220c1', 'root', [44_000_000, 0, 10_000_000], 'e_cot1'),
+    under('c.2', 'eden:floor@1220c2', 'c.1', [0, 0, 0], 'e_cot1/floor-0'), under('c.3', 'eden:room@1220c3', 'c.2', [-2_665_000, 100_000, -1_420_000], 'e_cot1/bedroom'),
+    under('c.4', 'eden:window@1220c4', 'c.3', [1_000_000, 900_000, 1_300_000], 'e_cot1/window-1'),
+    under('f.82', 'eden:bunk@1220b5', 'c.3', [-228_000, 0, -315_000], 'e_cot1/bedroom-bed'), under('h.1', 'eden:lamp_post@1220dd', 'c.3', [500_000, 0, 500_000])], []);
+  const d = k.next(layer, 1)!;
+  const up = d.diff.upserts as { id: string; def: string; p: number[] }[];
+  assert.deepEqual(up.map((e) => e.id).sort(), [entityId('f.82'), entityId('h.1')].sort(), 'the furnished bunk and the hand-placed lamp; not the cottage, its floor, room or window');
+  const bunk = up.find((e) => e.id === entityId('f.82'))!;
+  assert.match(bunk.def, /^core-bunk@\d+$/, 'drawn by its library def, as the template\'s own furniture is');
+  assert.deepEqual(bunk.p.map((v) => +v.toFixed(3)), [41.107, 0.1, 8.265], 'in the bedroom, through the cottage\'s floor');
+  for (const e of up) layer.model.entities.set(e.id, e);
+  k.apply([], ['f.82']);
+  assert.deepEqual(k.next(layer, 2)!.diff.removes, [entityId('f.82')], 'removed with its node');
+});
