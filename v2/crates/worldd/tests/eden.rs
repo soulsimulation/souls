@@ -7076,3 +7076,76 @@ fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
     }
     out
 }
+
+/// Each body's last logged pose in the world's log in `dir`, by body id.
+fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                out.insert(id, pose);
+            }
+        }
+    }
+    out
+}
+
+/// First-day round 2 (0.139, harbour): from `HARBOUR_FROM` (default the boardwalk west of the fish market), one fresh
+/// Soul per target walks to it by a plain walk, as `act <id>` sends it. Prints each answer and where it ended.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn harbour_walks_repro() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let from = std::env::var("HARBOUR_FROM").unwrap_or_else(|_| "5.0,139.0".to_owned());
+    let mut keys: Vec<String> = [
+        "e_edbbc6a7",
+        "e_edbbc6a7/floor-0",
+        "e_edbbc6a7/entrance",
+        "e_503a2c3b",
+        "e_503a2c3b/floor-0",
+        "e_503a2c3b/shop",
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    for n in [
+        "place-region-harbour",
+        "place-region-harbour-boardwalk",
+        "land-lighthouse-breakwater",
+    ] {
+        keys.push(facts_id(&text, n));
+    }
+    let names: BTreeMap<Id, String> = im.nodes.iter().map(|(k, v)| (*v, k.clone())).collect();
+    let (served, first, dir) = serve(&facts, &from, "harbour-repro", lineage);
+    drop(first);
+    let mut ran = Vec::new();
+    for (k, key) in keys.iter().enumerate() {
+        let mut soul = join(&dir, 2 + k as u64, lineage);
+        soul.0.set_read_timeout(Some(Duration::from_secs(400))).unwrap();
+        let t = answers::now();
+        let r = soul.act_within("eden:walk", Some(im.nodes[key]), BTreeMap::new(), 300_000_000);
+        let secs = (answers::now() - t) as f64 / 1e6;
+        ran.push((key.clone(), r, secs));
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    let poses: Vec<_> = last_poses(&dir).into_values().collect();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for ((key, r, secs), pose) in ran.iter().zip(poses.iter().skip(1)) {
+        let p = pose.position;
+        println!(
+            "from {from} to {key}: {r:?} in {secs:.0} s; ends on {} at ({:.1}, {:.2}, {:.1})",
+            names.get(&pose.frame.node).cloned().unwrap_or_else(|| format!("{:?}", pose.frame.node)),
+            p.x as f64 / 1e6,
+            p.y as f64 / 1e6,
+            p.z as f64 / 1e6
+        );
+    }
+}
