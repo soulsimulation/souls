@@ -6917,25 +6917,28 @@ async fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it
         .set_read_timeout(Some(Duration::from_secs(120)))
         .unwrap();
     let (a, b) = (w.souls[0], w.souls[1]);
-    // The gesture open across the restart is of the world's revision, whose rules this start took.
-    let left = intent_on(
-        &mut souls,
-        &w,
-        b,
-        3,
-        "activity:leave",
-        open,
-        BTreeMap::new(),
-    );
-    println!("leave the open gesture: {left:?}");
-    assert_eq!(left.kind, 1, "left at the world's revision: {left:?}");
+    // The gesture open across the restart is of the world's revision, whose rules this start took: its members leave
+    // it, each with a receipt, and the last one's leave takes it out.
+    for soul in [b, a] {
+        let left = intent_on(
+            &mut souls,
+            &w,
+            soul,
+            3,
+            "activity:leave",
+            open,
+            BTreeMap::new(),
+        );
+        println!("leave the open gesture: {left:?}");
+        assert_eq!(left.kind, 1, "left at the world's revision: {left:?}");
+    }
     let body_b = body_of(&w, b);
     let pinned = pinned_activity(&w, &activity);
     let offered = intent_on(
         &mut souls,
         &w,
         a,
-        3,
+        4,
         "activity:offer",
         w.ground,
         BTreeMap::from([
@@ -6959,19 +6962,7 @@ async fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it
         BTreeMap::new(),
     );
     assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
-    let events = |node: Id| -> Vec<String> {
-        logged(&w)
-            .iter()
-            .flat_map(|p| p.effects.iter())
-            .filter(|e| e.envelope.node == node)
-            .flat_map(|e| e.events.iter().flatten())
-            .map(|ev| format!("{} {:?}", ev.name.as_str(), ev.fields))
-            .collect()
-    };
-    let started = started_within(&w, gesture);
-    println!("the open gesture's events: {:?}", events(open));
-    println!("the new gesture's events: {:?}", events(gesture));
-    assert!(started, "the changed gesture starts");
+    assert!(started_within(&w, gesture), "the changed gesture starts");
     let created = logged(&w)
         .iter()
         .flat_map(|p| p.effects.iter())
