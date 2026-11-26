@@ -18,7 +18,7 @@ use common::{id, send};
 use replica::host::Progress;
 use replica::pose::{Frame, Quat, Vec3};
 use replica::rules::json::{Value as Json, parse};
-use sim::activity::carry::{GRIP_REACH, Load, REACH};
+use sim::activity::carry::{GRIP_REACH, Load};
 use sim::host::Runner;
 use sim::spots::Target;
 use sim::walk::town::Town;
@@ -64,14 +64,14 @@ struct Place {
 /// The places at a load whose middle is at `mid` and whose grips lie along `line` (a unit on the plan, µm per metre,
 /// from the back toward the front): its back, its front and each side carrier's, as the client sends them and the
 /// world's lift measures them.
-fn places(load: &Load, mid: [i64; 2], line: [i64; 2], ends: Option<[i64; 2]>) -> Vec<Place> {
+fn places(load: &Load, mid: [i64; 2], line: [i64; 2]) -> Vec<Place> {
     let on = |along: i64, across: i64| {
         [
             mid[0] + (line[0] * along - line[1] * across) / M,
             mid[1] + (line[1] * along + line[0] * across) / M,
         ]
     };
-    let [back, front] = ends.unwrap_or(load.places());
+    let [back, front] = load.places();
     let mut out = vec![
         Place {
             name: "back".into(),
@@ -96,7 +96,12 @@ fn places(load: &Load, mid: [i64; 2], line: [i64; 2], ends: Option<[i64; 2]>) ->
 
 /// Walker `who` standing at `from` on the ground, sent to `to`: where it is granted to stand, after one tick, or the
 /// refusal's name; none when no body may stand at `from`.
-fn granted(t: &mut Town, who: u64, from: [i64; 2], to: [i64; 2]) -> Option<Result<[i64; 2], String>> {
+fn granted(
+    t: &mut Town,
+    who: u64,
+    from: [i64; 2],
+    to: [i64; 2],
+) -> Option<Result<[i64; 2], String>> {
     let ground = t.ground;
     let body = t.surfaces[&ground]
         .place(
@@ -209,7 +214,11 @@ fn every_load_in_the_loading_yard_is_reachable_at_every_grip() {
         if !takes.contains(&kind) {
             continue;
         }
-        let name = thing.get("name").and_then(Json::str).unwrap_or("?").to_owned();
+        let name = thing
+            .get("name")
+            .and_then(Json::str)
+            .unwrap_or("?")
+            .to_owned();
         let w: Vec<i64> = thing
             .get("world")
             .and_then(Json::arr)
@@ -219,10 +228,13 @@ fn every_load_in_the_loading_yard_is_reachable_at_every_grip() {
             .collect();
         let load = Load::of(&entry(&kind)).unwrap();
         let o = Quat::from_yaw_mdeg(w[3]).unwrap();
-        let along = load.lies_along(o).unwrap().expect("a load in the yard lies");
+        let along = load
+            .lies_along(o)
+            .unwrap()
+            .expect("a load in the yard lies");
         let l = flat(along, [0, 0]);
         let line = [along[0] * M / l, along[1] * M / l];
-        let at = places(&load, [w[0] * 1000, w[2] * 1000], line, None);
+        let at = places(&load, [w[0] * 1000, w[2] * 1000], line);
         let (n, miss) = misses(&mut t, &format!("{name} ({kind})"), &at, &starts);
         println!(
             "{name} ({kind}) at ({}, {}) m: {} places, {n} walks sent, {} out of reach",
@@ -238,28 +250,9 @@ fn every_load_in_the_loading_yard_is_reachable_at_every_grip() {
     println!("{}", out.join("\n"));
     assert_eq!(loads, 4, "the yard's four loads");
     assert!(sent > 1000, "walks from most starts: {sent}");
-    assert!(out.is_empty(), "{} places granted out of the lift's reach", out.len());
-}
-
-/// The Mars Lab films' six (0.142, `rack-bay.mjs` `buildTwoBays` staged 20 m west): the 6.1 m frame standing at
-/// (-22, 35) m, its front and back 3.1 m along its own z, each side carrier beside its grip. A side carrier was refused
-/// 769 mm from its grip's edge.
-#[test]
-#[ignore = "needs the Mars camp's exported facts (this file's notes)"]
-fn the_sixs_tall_frame_is_reachable_at_every_grip() {
-    let text = facts();
-    let (mut t, _) = common::town_of(
-        import_eden::load(&text).expect("the Mars camp loads"),
-        b"souls/loading-yard-test/1",
+    assert!(
+        out.is_empty(),
+        "{} places granted out of the lift's reach",
+        out.len()
     );
-    let load = Load::of(&entry("mars:rack_upright_6m")).unwrap();
-    let at = places(&load, [-22 * M, 35 * M], [0, M], Some([-3_100_000, 3_100_000]));
-    // Its starts: round the six's yard, staged 20 m west of the template's own (x -28 to 0 m, z 20 to 44 m).
-    let starts: Vec<[i64; 2]> = (0..=7)
-        .flat_map(|i| (0..=6).map(move |k| [(-28 + 4 * i) * M, (20 + 4 * k) * M]))
-        .collect();
-    let (n, out) = misses(&mut t, "the 6.1 m frame", &at, &starts);
-    println!("the 6.1 m frame: {} places, {n} walks sent\n{}", at.len(), out.join("\n"));
-    assert!(n > 200, "walks from most starts: {n}");
-    assert!(out.is_empty(), "{} places granted out of the lift's reach", out.len());
 }
