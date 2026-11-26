@@ -504,11 +504,19 @@ async fn serve(
     }
     gw.detach(grant, attached.session);
     // #4979: its reason and close frame, if it can still take them; either way the socket is dropped. A client that
-    // fell behind on a slow link may take them only once its backlog is read: it learns by its own bound then.
+    // fell behind on a slow link may take them only once its backlog is read: it learns by its own bound then. One
+    // replaced meanwhile by a newer sign-in is told that instead, so it does not take the Soul back at once.
     if let_go {
-        let close = CloseFrame {
-            code: crate::BEHIND,
-            reason: crate::AGENT_BEHIND.into(),
+        let close = if gw.replaced(grant, attached.session) {
+            CloseFrame {
+                code: crate::REPLACED,
+                reason: "agent.replaced".into(),
+            }
+        } else {
+            CloseFrame {
+                code: crate::BEHIND,
+                reason: crate::AGENT_BEHIND.into(),
+            }
         };
         let _ =
             tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
