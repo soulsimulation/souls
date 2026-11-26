@@ -1,7 +1,7 @@
-//! The auditor's faults and the clock (K21 follow-up, #3430): a world whose every pass names standing faults runs on
+//! The auditor's faults and the clock (K21, #3422): a world whose every pass names standing faults runs on
 //! the real clock for ten seconds while its stderr drains slowly, as a loaded log reader does, so a write to stderr
 //! blocks. The clock never waits on a print: the auditor's phase stays far under one blocked write (250 ms here), and
-//! the lines its printer could not keep up with are dropped, counted (`health.json`'s `audit_print`) and said on
+//! the lines its printer could not keep up with are dropped, counted (`health.json`'s `audit`) and said on
 //! stderr. `cargo test -p worldd --release --test audit_print -- --nocapture` prints the numbers.
 //!
 //! The slow stderr is real: the test runs itself again as a child process whose stderr is a pipe this process reads
@@ -19,10 +19,10 @@ use replica::ids::Scope;
 use sim::log::Mem;
 use worldd::answers::{self, Config};
 use worldd::checkers::toggles;
-use worldd::measures::{AUDIT_PRINT, PHASES};
+use worldd::measures::{AUDIT, PHASES};
 
 const LINEAGE: Scope = Scope([0x21; 16]);
-const CHILD: &str = "WORLDD_AUDIT_PRINT_CHILD";
+const CHILD: &str = "WORLDD_AUDIT_CHILD";
 const NAME: &str = "the_clock_never_waits_on_the_auditors_prints";
 /// Bodies in the world, each holding two things in each hand.
 const BODIES: usize = 40;
@@ -39,15 +39,17 @@ const AUDIT_MOST_US: u64 = 100_000;
 fn child() {
     let mut w = toggles::World::build(1, BODIES, 0);
     let per_pass = w.overfill_hands();
-    let world = answers::start(
-        w.replica,
-        toggles::rules(),
-        Mem::with(Vec::new()),
-        Config::new(LINEAGE, 1),
-    )
-    .expect("the world starts");
+    let mut cfg = Config::new(LINEAGE, 1);
+    // 256 nodes a slice, not 64: about 80 fault lines a tick, so the printer's queue fills within a second or two
+    // even where a slice is cut short.
+    cfg.audit = 256;
+    let world = answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg)
+        .expect("the world starts");
     // The first tick, so the ticks run are counted from it.
+    let mut waits = 0;
     while world.beat.read().0 < 0 {
+        waits += 1;
+        assert!(waits < 2_000, "the world ticks within 10 s");
         std::thread::sleep(Duration::from_millis(5));
     }
     let (first, _) = world.beat.read();
@@ -60,12 +62,12 @@ fn child() {
         .expect("the audit phase");
     let health = m.health(0);
     let gauge = health
-        .split_once("\"audit_print\":")
+        .split_once("\"audit\":{\"passes")
         .and_then(|(_, g)| g.split_once('}'))
-        .map(|(g, _)| format!("{g}}}"));
+        .map(|(g, _)| format!("{{\"passes{g}}}"));
     println!(
         "audit-print: {per_pass} faults a pass; {ticks} ticks in {} s; worst tick {} us (p99 {} us); audit phase \
-         worst {} us (p99 {} us); printer {}",
+         worst {} us (p99 {} us); auditor {}",
         RUN.as_secs(),
         m.ticks.quantile(1.0),
         m.ticks.quantile(0.99),
@@ -80,7 +82,7 @@ fn child() {
     );
     assert!(gauge.is_some(), "health.json carries the printer's gauge");
     assert!(
-        AUDIT_PRINT.drops() > 0,
+        AUDIT.drops() > 0,
         "the printer fell behind, and the clock dropped lines rather than wait"
     );
 }

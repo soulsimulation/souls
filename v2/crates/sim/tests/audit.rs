@@ -408,7 +408,7 @@ impl Source for EveryNode<'_> {
     }
 }
 
-/// K21 (#3430): a slice bounded by time still audits every node within a stated number of slices. Out of time at
+/// K21 (#3422): a slice bounded by time still audits every node within a stated number of slices. Out of time at
 /// every step (the worst clock), each slice checks one node and a pass of N nodes and T timers ends within N + T + 1
 /// slices; out of time after every 7th node, within ⌈(N + T) / 7⌉ + 1; never out of time, as [`Auditor::slice`].
 /// Each arm names every node exactly once.

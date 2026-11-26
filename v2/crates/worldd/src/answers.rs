@@ -90,8 +90,9 @@
 //! 7. the answers thread waits for the tick's words to be on the disk, appends and syncs the records, then hands the
 //!    synced tick to the view tier (R3) and sends the answers;
 //! 8. the auditor checks a slice of the tree (K11), at most [`AUDIT_TIME`] of it; its faults are queued for the
-//!    auditor's own printer thread, which writes them to stderr (#3430): a blocked stderr never holds the clock, and a
-//!    line the queue ([`AUDIT_LINES`]) has no room for is dropped, counted and said, never waited for.
+//!    auditor's own printer thread, which writes them to stderr (#3422): a blocked stderr never holds the clock on an
+//!    audit line, and a line the queue ([`AUDIT_LINES`]) has no room for is dropped, counted and said, never waited
+//!    for. Passes, cut slices and lines are in `health.json`'s `audit`.
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
@@ -128,7 +129,7 @@ use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::directory::Directory;
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
-use crate::measures::{self, AUDIT_PRINT, Measures, Stamps};
+use crate::measures::{self, AUDIT, Measures, Stamps};
 use crate::syncs::{self, ToSync};
 use crate::views::Tier;
 use crate::words;
@@ -446,9 +447,9 @@ impl Door {
     }
 }
 
-/// The most the auditor's slice takes of a tick (K21, #3430): it stops there and carries on next tick.
+/// The most the auditor's slice takes of a tick (K21, #3422): it stops there and carries on next tick.
 pub const AUDIT_TIME: Duration = Duration::from_millis(2);
-/// The fault lines the auditor's printer queues (#3430): a line the queue has no room for is dropped and counted.
+/// The fault lines the auditor's printer queues (#3422): a line the queue has no room for is dropped and counted.
 pub const AUDIT_LINES: usize = 1024;
 
 /// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
@@ -1317,7 +1318,7 @@ struct Clock {
     outstanding: usize,
     auditor: Auditor,
     audit: usize,
-    /// The auditor's faults, to the thread that prints them (#3430).
+    /// The auditor's faults, to the thread that prints them (#3422).
     audit_out: SyncSender<Fault>,
     faults: u64,
     checkpoints: Option<Checkpoints>,
@@ -5533,19 +5534,22 @@ impl Clock {
                 .and_then(|s| s.place_in(thing, slot))
                 .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX))
         };
-        // The slice stops at AUDIT_TIME, and its faults are printed on the auditor's own thread (#3430): one write to
+        // The slice stops at AUDIT_TIME, and its faults are printed on the auditor's own thread (#3422): one write to
         // a loaded stderr blocked for 300 ms. The clock only queues a line, and drops and counts one with no room.
         let until = Instant::now() + AUDIT_TIME;
+        let mut cut = false;
         let slice = self
             .auditor
             .slice_within(self.replica.tree(), self.audit, &most, &mut || {
-                Instant::now() >= until
+                cut = Instant::now() >= until;
+                cut
             });
+        AUDIT.slice(cut, self.auditor.passes);
         self.faults += slice.faults.len() as u64;
         for f in slice.faults {
             match self.audit_out.try_send(f) {
-                Ok(()) => AUDIT_PRINT.sent(),
-                Err(_) => AUDIT_PRINT.dropped(),
+                Ok(()) => AUDIT.sent(),
+                Err(_) => AUDIT.dropped(),
             }
         }
         at[8] = mark();
@@ -5702,17 +5706,19 @@ fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
     );
 }
 
-/// The auditor's printer (#3430): each fault the clock queued, in the `worldd: audit: Fault { … }` form, and after
-/// any line the clock dropped while this thread was behind, how many. A blocked stderr holds this thread only. A drop
+/// The auditor's printer (#3422): each fault the clock queued, in the `worldd: audit: Fault { … }` form, and after
+/// any line the clock dropped while this thread was behind, how many. A blocked stderr holds this thread, and the
+/// process's stderr lock with it. A write that fails is passed over, so this thread outlives a closed stderr. A drop
 /// happens only while the queue is full, so a line read after it always says it.
 fn print_audit(faults: Receiver<Fault>) {
     let mut said = 0;
     for f in faults {
-        eprintln!("worldd: audit: {f:?}");
-        AUDIT_PRINT.printed();
-        let dropped = AUDIT_PRINT.drops();
+        let _ = writeln!(std::io::stderr().lock(), "worldd: audit: {f:?}");
+        AUDIT.printed();
+        let dropped = AUDIT.drops();
         if dropped > said {
-            eprintln!(
+            let _ = writeln!(
+                std::io::stderr().lock(),
                 "worldd: audit: {} fault lines dropped while the printer was behind ({dropped} in all, {AUDIT_LINES} queued at most)",
                 dropped - said
             );

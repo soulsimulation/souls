@@ -135,8 +135,9 @@ impl Auditor {
         self.slice_within(src, budget, most, &mut || false)
     }
 
-    /// [`Auditor::slice_most`], bounded by time as well (K21, #3430): `spent` is asked after each node and each batch
-    /// of timers, and the slice stops once it says the time is spent, carrying on next slice. The auditor reads no
+    /// [`Auditor::slice_most`], bounded by time as well (K21, #3422): `spent` is asked after each node, and the slice
+    /// stops once it says the time is spent, carrying on next slice (a batch of timers, up to the rest of `budget`,
+    /// is not cut, and ends the slice). The auditor reads no
     /// clock itself; the caller's `spent` does. A slice checks at least one node or timer whatever `spent` says, so a
     /// pass over a zone of N nodes and T pending timers ends within N + T + 1 slices, and within ⌈(N + T) / budget⌉ + 1
     /// when no slice runs out of time. One node's checks are not cut: they cost in proportion to its children and
