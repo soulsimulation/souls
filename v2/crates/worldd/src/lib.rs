@@ -11,6 +11,7 @@ pub mod buildsafe;
 pub mod carrier;
 pub mod checkers;
 pub mod closed;
+pub mod courses;
 pub mod directory;
 mod edit_places;
 pub mod engine;

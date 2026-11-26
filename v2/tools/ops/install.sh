@@ -9,6 +9,7 @@
 #   bash install.sh bundle <out> <cargo release dir> <page dist dir> [<templates> [<served client>]]
 #                                               puts a bundle together (the workflow)
 #   bash install.sh origin <out>                the origin's files alone (release.sh bundle's origin.tar)
+#   bash install.sh ops <out>                   the placement scripts alone, as $LIB/ops holds them (release.sh bundle)
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
@@ -455,6 +456,16 @@ origin_files() {
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/"
 }
 
+# The placement and archive scripts, as the install and each release (release.sh placement) put them in $LIB/ops.
+ops_files() {
+  local out=${1:?ops <out>}
+  rm -rf "$out"
+  mkdir -p "$out/proxy"
+  # is-main.mjs is tools/lib's, kept beside the scripts: their import of it resolves where they are installed ($LIB/ops).
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$HERE/is-main.mjs" "$out/"
+  cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/proxy/"
+}
+
 bundle() {
   local out=$1 bins=$2 page=$3 p
   [ -d "$page" ] || die "no page build at $page"
@@ -463,10 +474,7 @@ bundle() {
   rm -rf "$out/web"
   origin_files "$out/origin"
   cp -R "$page" "$out/web"
-  mkdir -p "$out/ops/proxy"
-  # is-main.mjs is tools/lib's, kept beside the scripts: their import of it resolves where they are installed ($LIB/ops).
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$HERE/is-main.mjs" "$out/ops/"
-  cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
+  ops_files "$out/ops"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   rm -rf "$out/client"
   if [ -n "${5:-}" ]; then
@@ -528,8 +536,9 @@ main() {
     check) check ;;
     bundle) bundle "$@" ;;
     origin) origin_files "$@" ;;
+    ops) ops_files "$@" ;;
     remote) remote "$@" ;;
-    *) die "plan|apply|uninstall|check|bundle|origin|remote (see the top of $0)" ;;
+    *) die "plan|apply|uninstall|check|bundle|origin|ops|remote (see the top of $0)" ;;
   esac
 }
 

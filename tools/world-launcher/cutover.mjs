@@ -38,6 +38,15 @@ function answer(dir, path) {
 }
 // The same public stream path the v2 origin's routes accept (v2/tools/origin/world-routes.mjs): `/s/…/`, no dot segments.
 const publicStream = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/.test(s) && !s.split('/').some(p => p === '.' || p === '..');
+// A world's gateway paths its agents use (the front door's `moved-gateway`): the socket, a creator's posts, the entries,
+// the kinds text and allowed uploads, each at `/v2/<path>` on that world's gatewayd.
+const AGENT_PATH = /^\/v2\/(ws|creator-token|creator-upload|creator-edit|creator-helper|entries|kinds|uploads\/1220[0-9a-f]{64})$/;
+// The routes file's gateway, `http://127.0.0.1:<port>` (or localhost), as the v2 origin accepts it: its port, else null.
+const loopbackPort = (s) => {
+  let u; try { u = new URL(s); } catch { return null; }
+  const ok = u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && !u.username && !u.password && u.pathname === '/' && !u.search && !u.hash && s === u.origin;
+  return ok ? Number(u.port) : null;
+};
 // B3-2b: the owner's box reaches the world's gateway (a same-origin WebSocket path) and the directory (this origin's
 // `/v1/account/*`, which the front door sends to it), as the v2 page does on soul.game (v2/tools/ops/proxy/soul-game.caddy)
 const samePath = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
@@ -130,6 +139,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   return {
     bound: () => !!load(),
     routeOnly: () => load()?.routeOnly() ?? [],
+    agent: (slug, path) => load()?.agent(slug, path) ?? null,
     inspect: (registry) => load()?.inspect(registry),
     v2Stream: (w) => load()?.v2Stream(w) ?? null,
     v2World: (w) => load()?.v2World(w) ?? null,
@@ -157,11 +167,27 @@ export const routeOnlyId = (slug) => `v2:${slug}`;
  *  binding's routes file, client and body folders; it has no static folder (no old views: the page draws from the stream). */
 function withRouteOnly(fence, bindings) {
   const first = bindings[0], bound = new Set(bindings.map((b) => b.canonicalSlug)), fences = new Map();
-  const routeOnly = () => {
-    let value; try { value = JSON.parse(readBounded(first.routesFile, 32 * 1024 * 1024)); } catch { return []; }
-    if (value?.schema !== 'souls/world-routes/1' || !value.worlds || typeof value.worlds !== 'object' || Array.isArray(value.worlds)) return [];
-    return Object.entries(value.worlds).filter(([slug, r]) => !bound.has(slug) && /^[a-z0-9][a-z0-9-]{0,62}$/.test(slug) && r && typeof r === 'object'
-      && r.canonical === true && r.archived !== true && publicStream(r.stream)).map(([slug]) => slug);
+  const table = () => {
+    let value; try { value = JSON.parse(readBounded(first.routesFile, 32 * 1024 * 1024)); } catch { return {}; }
+    if (value?.schema !== 'souls/world-routes/1' || !value.worlds || typeof value.worlds !== 'object' || Array.isArray(value.worlds)) return {};
+    return value.worlds;
+  };
+  const routed = (slug, r) => !bound.has(slug) && /^[a-z0-9][a-z0-9-]{0,62}$/.test(slug) && r && typeof r === 'object'
+    && r.canonical === true && r.archived !== true && publicStream(r.stream);
+  const routeOnly = () => Object.entries(table()).filter(([slug, r]) => routed(slug, r)).map(([slug]) => slug);
+  // 26 Nov: a world with no old twin answers its agents here, as the front door's own routes answer a moved world's
+  // (v2/tools/ops/proxy/soul-game-moved.caddy `moved-world`): the bootstrap (and world.json) the client pairs from,
+  // built from the routes file as the v2 origin builds it (v2/tools/origin/world-routes.mjs), and its gateway's agent
+  // paths, which the launcher passes to that world's gatewayd. A created world is in no caddy line, so without this its
+  // bootstrap was this launcher's 404 and no agent could pair with it or reach its gateway.
+  const agent = (slug, path) => {
+    const bootstrap = path === '/v1/bootstrap' || path === '/views/world.json';
+    if (!bootstrap && !AGENT_PATH.test(path)) return null;
+    const worlds = table(), r = Object.hasOwn(worlds, slug) ? worlds[slug] : null;
+    if (!routed(slug, r)) return null;
+    const base = `/w/${slug}`;
+    if (bootstrap) return { bootstrap: { world: slug, stream: r.stream, ...(publicStream(r.history) ? { history: r.history } : {}), directory: '/', gateway: `${base}/v2/ws`, creatorToken: `${base}/v2/creator-token` } };
+    return { port: loopbackPort(r.gateway) };
   };
   const of = (w) => {
     const slug = typeof w?.worldId === 'string' && w.worldId.startsWith('v2:') ? w.worldId.slice(3) : null;
@@ -173,6 +199,7 @@ function withRouteOnly(fence, bindings) {
   };
   return {
     routeOnly,
+    agent,
     inspect: (registry) => ({ ...fence.inspect(registry), routeOnly: routeOnly() }),
     v2Stream: (w) => (of(w) ?? fence).v2Stream(w),
     v2World: (w) => (of(w) ?? fence).v2World(w),

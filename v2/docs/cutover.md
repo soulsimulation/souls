@@ -115,6 +115,10 @@ not `archived`) that no binding binds and the launcher's registry does not hold.
 It serves its page at `/w/<world>/` itself (the old page with the same v2 fields, its stream and history from its route,
 its body path and gateway as above), its client and bodies from the first binding's folders, refuses its old writes
 (409 `world.new-engine`), and answers its other old routes 404 `world.new-engine` (the page draws from the stream alone).
+Its agents' paths are answered as the front door answers a moved world's (26 Nov; a created world has no caddy line):
+`/w/<world>/v1/bootstrap` (and `views/world.json`) from its route, as the v2 origin builds it, and its gateway's
+`/w/<world>/v2/(ws|creator-token|creator-upload|creator-edit|creator-helper|entries|kinds|uploads/<hash>)` passed to
+the gatewayd its route names, at `/v2/<path>`.
 `/__sim/worlds.json` lists it under its directory label (`GET /v1/worlds`, asked at most every 10 s; its name until the
 directory answers), not when the directory marks it unlisted. `/__sim/op/cutover` names these worlds in `routeOnly`; read
 it before a release, since a routed test world would be listed.
