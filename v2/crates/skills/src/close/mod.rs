@@ -497,6 +497,12 @@ impl Follow {
             swung(was, want, most, gap)
         };
         self.swing = Some((to, now));
+        // Turned all the way with the leader at its goal (a turn finished where a walk ended): the place is fixed
+        // there, whatever the leader's next walk.
+        if first == 0 && to == end {
+            self.at = Some(end);
+            self.turn = None;
+        }
         to
     }
 

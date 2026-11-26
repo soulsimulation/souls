@@ -2908,7 +2908,8 @@ impl Engine {
     /// Where carry `a`'s front walk to `goal` turns its crew (moving-group rule 3): the goal on its ground's plan and
     /// the carry's heading there, `heading` when the walk names one (not zero), else the heading of a pose of the
     /// carry's way (0.135 R2) whose front is within [`WAY_POSE_NEAR`] of the goal: of several, the one turned least from
-    /// the carry's heading now (the next pose of a way differs by one move). None for a walk to another node, or one
+    /// the carry's heading now (the next pose of a way differs by one move). A named heading more than a quarter turn
+    /// from the carry's now is a quarter turn, on its side: a crew turns at most that much in one walk. None for a walk to another node, or one
     /// that names no heading and goes to no pose of a way: the crew moves without turning.
     fn turn_of(
         &self,
@@ -2922,18 +2923,25 @@ impl Engine {
             return None;
         }
         let at = [p.x, p.z];
-        if let Some(h) = heading.filter(|h| {
-            *h != [0, 0]
-                && h.iter()
-                    .all(|c| c.unsigned_abs() <= HEADING_MOST.unsigned_abs())
-        }) {
-            return Some((at, h));
-        }
         let now = carry
             .ends()
             .ok()
             .flatten()
             .map(|(f, b)| [i128::from(f[0] - b[0]), i128::from(f[1] - b[1])])?;
+        if let Some(h) = heading.filter(|h| {
+            *h != [0, 0]
+                && h.iter()
+                    .all(|c| c.unsigned_abs() <= HEADING_MOST.unsigned_abs())
+        }) {
+            // At most a quarter turn a walk: a heading farther round is turned square across the load, on its side.
+            let (x, z) = (i128::from(h[0]), i128::from(h[1]));
+            if x * now[0] + z * now[1] < 0 {
+                let side = if now[0] * z - now[1] * x >= 0 { 1 } else { -1 };
+                let c = |v: i128| i64::try_from(v).unwrap_or(0);
+                return Some((at, [c(-now[1] * side), c(now[0] * side)]));
+            }
+            return Some((at, h));
+        }
         let unit = |v: [i128; 2]| (v[0] * v[0] + v[1] * v[1]).isqrt().max(1);
         carry
             .way

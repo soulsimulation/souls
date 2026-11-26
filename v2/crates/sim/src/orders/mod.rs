@@ -62,9 +62,9 @@ pub const BAND: (i64, i64) = (1_000_000, 2_500_000);
 /// The farthest a follow's place may be from its leader, µm, beside or at an offset on either axis: well past a crew's
 /// widest span, and far from where a step's sum could overflow.
 pub const PLACE_MOST: i64 = 20_000_000;
-/// The farthest a turning follow's goal may be from the frame's origin on either axis, µm: far past any world, and far
-/// from where a distance to it could overflow.
-pub const GOAL_MOST: u64 = 1 << 50;
+/// The farthest a turning follow's goal may be from the frame's origin on either axis, µm (about 137 km): past any
+/// world, and where the swing's sums stay in range.
+pub const GOAL_MOST: u64 = 1 << 37;
 /// A queue's head counts as on the stand point this near, µm.
 pub const ARRIVED: i64 = 50_000;
 /// The most spots tried along a line.
