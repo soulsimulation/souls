@@ -7119,6 +7119,46 @@ fn the_lighthouse_is_walked_to_from_the_boardwalk() {
     assert_eq!(ends.len(), targets.len());
 }
 
+/// First-day round 2 (0.139): from the park north of the harbour, a walk to the harbour (its district,
+/// `place-region-harbour`, as `context harbour` lists it) ends `done` in the harbour, out of the park. The district's
+/// middle is the sea between its piers, so the walk stood back 0.6 m outside its nearest edge, which the park's
+/// own area overlaps: the Soul ended in the park, by the pond. Now it walks into the nearest area the district holds
+/// that is ground (its boardwalk).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_walk_to_the_harbour_from_the_park_ends_in_the_harbour() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let (ground, harbour, park) = (
+        im.nodes["ground"],
+        im.nodes[&facts_id(&text, "place-region-harbour")],
+        im.nodes[&facts_id(&text, "place-region-park")],
+    );
+    let (served, mut soul, dir) = serve(&facts, "20.0,118.0", "harbour", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(400)))
+        .unwrap();
+    let r = soul.act_within("eden:walk", Some(harbour), BTreeMap::new(), 300_000_000);
+    std::thread::sleep(Duration::from_secs(1));
+    let end = end_pose(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let (node, at) = end.expect("the body's end");
+    let gap = |place| replica::select::gap(&im.tree, place, ground, at).unwrap();
+    println!(
+        "to the harbour: {r:?}, ends at ({:.1}, {:.1}) m, {} µm from the harbour, {} µm from the park",
+        at.x as f64 / 1e6,
+        at.z as f64 / 1e6,
+        gap(harbour),
+        gap(park)
+    );
+    r.expect("walked to the harbour, done");
+    assert_eq!(node, ground, "on the open ground");
+    assert_eq!(gap(harbour), 0, "in the harbour");
+    assert!(gap(park) > 0, "out of the park");
+}
+
 /// Each body's last logged pose in the world's log in `dir`, by body id.
 fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
     let bytes = std::fs::read(dir.join("log")).unwrap();

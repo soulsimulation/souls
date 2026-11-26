@@ -1355,6 +1355,28 @@ impl Bodies {
             // On it only when it is ground to stand on: its middle is (a square, a wood, a path), not a sea's or a
             // mountain's (its slopes may be on the map and still no way up).
             let walkable = view.stand_reached(ground, middle, from).is_some();
+            // First-day round 2 (0.139): a district round water (a harbour, its middle the sea between its piers) is
+            // walked into by the nearest area it holds whose middle the walker may stand on and reach (its
+            // boardwalk), the same way; stood back from, it ended over its border, in the park beside it.
+            if area && !walkable {
+                let inner = tree
+                    .handle(ground)
+                    .and_then(|g| tree.children(g).ok())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|c| tree.node(*c).map(|n| n.id()))
+                    .filter(|c| *c != node && place_half_width(tree, *c) == Some((0, true)))
+                    .filter(|c| select::within(tree, *c, node).unwrap_or(false))
+                    .filter_map(|c| {
+                        let (_, mid) = select::nearest_in(tree, c, ground, here).ok()?;
+                        view.stand_reached(ground, mid, from)?;
+                        Some((select::gap(tree, c, ground, here).ok()?, c))
+                    })
+                    .min();
+                if let Some((_, inner)) = inner {
+                    return self.goal(body, inner, None);
+                }
+            }
             let mut tries = walkable
                 .then_some(on)
                 .into_iter()

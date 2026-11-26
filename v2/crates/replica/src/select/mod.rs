@@ -356,6 +356,19 @@ pub fn nearest_in(tree: &Tree, target: Id, frame: Id, at: Vec3) -> R<(Vec3, Vec3
     Ok((x.inverse_xz(nearest_on(&s, p))?, x.inverse_xz(middle(&s))?))
 }
 
+/// Whether `inner`'s shape lies within `outer`'s area, on the level: every point of its outline, its line or its point
+/// inside it or on its edge. Never within a line or a point.
+pub fn within(tree: &Tree, inner: Id, outer: Id) -> R<bool> {
+    let v = View { tree };
+    let (i, o) = (v.shape(inner)?, v.shape(outer)?);
+    let points: &[Xz] = match &i {
+        Shape::Point(p) => std::slice::from_ref(p),
+        Shape::Line(l) => l,
+        Shape::Area(a) => a,
+    };
+    Ok(matches!(o, Shape::Area(_)) && points.iter().all(|p| gap_to(&o, *p) == 0))
+}
+
 /// [`gap`] on a shape in the root's frame.
 fn gap_to(s: &Shape, p: Xz) -> i64 {
     let seg = |a: Xz, b: Xz| -> i64 {
