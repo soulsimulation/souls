@@ -6959,7 +6959,19 @@ async fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it
         BTreeMap::new(),
     );
     assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
-    assert!(started_within(&w, gesture), "the changed gesture starts");
+    let events = |node: Id| -> Vec<String> {
+        logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| e.envelope.node == node)
+            .flat_map(|e| e.events.iter().flatten())
+            .map(|ev| format!("{} {:?}", ev.name.as_str(), ev.fields))
+            .collect()
+    };
+    let started = started_within(&w, gesture);
+    println!("the open gesture's events: {:?}", events(open));
+    println!("the new gesture's events: {:?}", events(gesture));
+    assert!(started, "the changed gesture starts");
     let created = logged(&w)
         .iter()
         .flat_map(|p| p.effects.iter())
