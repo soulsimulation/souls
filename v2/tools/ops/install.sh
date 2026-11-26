@@ -207,6 +207,9 @@ install_all() {
   # below stays 750.
   ensure_dir "$DATA" 751 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
+  # The views' links by world name (place-world.sh: views/w/<name>/{views,history}): the account's, since a placement
+  # runs as it and makes each world's folder here (a root-owned views/w refused Mars Lab's, 26 Nov).
+  ensure_dir "$DATA/views/w" 755 "$ACCOUNT" "$ACCOUNT"
   # The world route file (placement, the cut-over and the origin write or read it): Souls-owned, so a root-run
   # cut-over write never leaves a folder the placement child cannot lock.
   ensure_dir "$DATA/routes" 755 "$ACCOUNT" "$ACCOUNT"
@@ -355,6 +358,7 @@ check() {
   grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
   grep -qxF "would file $ETC/view.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the view key missing from plan"
   grep -qxF "would file $ETC/mailbox.key 640 root:$ACCOUNT (once, a new key)" "$tmp/plan" || die "check: the mailbox key missing from plan"
+  grep -qxF "would dir $DATA/views/w 755 $ACCOUNT:$ACCOUNT" "$tmp/plan" || die "check: views/w is not the account's in the plan"
   cp -R "$tmp/root" "$tmp/placed"
   mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
   printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
@@ -457,7 +461,8 @@ ops_files() {
   local out=${1:?ops <out>}
   rm -rf "$out"
   mkdir -p "$out/proxy"
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/"
+  # is-main.mjs is tools/lib's, kept beside the scripts: their import of it resolves where they are installed ($LIB/ops).
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$HERE/is-main.mjs" "$out/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/proxy/"
 }
 

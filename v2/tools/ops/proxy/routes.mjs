@@ -6,7 +6,7 @@
 //     --origin https://soul.game --out /var/lib/souls-routes
 // When the directory or the launcher does not answer, nothing is changed (the last map keeps routing) and it exits 1.
 // New slugs are added before stale ones are removed. Prints one line: `routes: <n> slugs (+a -r), sitemap <m> urls`.
-import { isMain } from '../../../../tools/lib/is-main.mjs';
+import { isMain } from '../is-main.mjs';
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWorldRoutes, WORLD_ROUTES } from '../../origin/world-routes.mjs';

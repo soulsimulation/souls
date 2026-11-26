@@ -11,9 +11,10 @@
 //! Items go to the socket that subscribed alone: they are not kept for a resume and never written to a file. The
 //! world sends the public entries and those of the audiences the gateway resolves for the socket's grant: today its
 //! actor's own principal id (T8 rule 1); the audience nodes it is a member of are the directory's to resolve. A socket
-//! whose item queue is full is let go, as a slow stream is; a view socket is also let go once it falls more than
-//! `socket::VIEW_BEHIND_MOST` behind its stream, a backlog in the kernel's buffers included (`view.behind`, #4078). A
-//! subscription outlives a restart of the world: it is sent again on reconnect, and the new hub opens with its grant.
+//! whose item queue is full is let go, as a slow stream is (an agent's closed as `agent.behind` at once, #4979); a
+//! view socket is also let go once it falls more than `socket::VIEW_BEHIND_MOST` behind its stream, a backlog in the
+//! kernel's buffers included (`view.behind`, #4078). A subscription outlives a restart of the world: it is sent again
+//! on reconnect, and the new hub opens with its grant.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,7 +26,7 @@ use replica::encode::{Value, decode, encode};
 use replica::ids::Id;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 
 use crate::Gateway;
 use crate::token::Grant;
@@ -63,11 +64,15 @@ pub struct Views {
     state: Mutex<State>,
 }
 
+/// A subscription: its subscribe frame to the world, its socket's item queue, and how an agent's socket is told at once
+/// that its queue was full (#4979).
+type Sub = (Vec<u8>, mpsc::Sender<Vec<u8>>, Option<Arc<Notify>>);
+
 #[derive(Default)]
 struct State {
     next: u64,
-    /// By number: its subscribe frame to the world, and its socket's item queue.
-    subs: BTreeMap<u64, (Vec<u8>, mpsc::Sender<Vec<u8>>)>,
+    /// By number.
+    subs: BTreeMap<u64, Sub>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
 }
 
@@ -77,8 +82,13 @@ impl Views {
     }
 
     /// Subscribes for a socket: its number, and the queue its items arrive on. Kept and sent again whenever the world
-    /// is reached; the queue closes when the socket is to be let go.
-    pub fn subscribe(&self, request: Value, audiences: &[Id]) -> (u64, mpsc::Receiver<Vec<u8>>) {
+    /// is reached; the queue closes when the socket is to be let go, and `behind`, if given, is notified then.
+    pub fn subscribe(
+        &self,
+        request: Value,
+        audiences: &[Id],
+        behind: Option<Arc<Notify>>,
+    ) -> (u64, mpsc::Receiver<Vec<u8>>) {
         let (tx, rx) = mpsc::channel(crate::OUTBOUND);
         let mut s = self.state();
         s.next += 1;
@@ -98,7 +108,7 @@ impl Views {
         if let Some(out) = &s.out {
             let _ = out.send(frame.clone());
         }
-        s.subs.insert(n, (frame, tx));
+        s.subs.insert(n, (frame, tx, behind));
         (n, rx)
     }
 
@@ -120,7 +130,7 @@ impl Views {
     fn connected(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut s = self.state();
-        for (frame, _) in s.subs.values() {
+        for (frame, ..) in s.subs.values() {
             let _ = tx.send(frame.clone());
         }
         s.out = Some(tx);
@@ -147,7 +157,7 @@ impl Views {
         };
         let bytes = encode(&Value::Map([to_client].into())).unwrap_or_default();
         let mut s = self.state();
-        let Some((_, tx)) = s.subs.get(&n) else {
+        let Some((_, tx, behind)) = s.subs.get(&n) else {
             return true;
         };
         match tx.try_send(bytes) {
@@ -157,7 +167,10 @@ impl Views {
                 true
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // Dropping its queue's sender ends the socket's task.
+                // Dropping its queue's sender ends the socket's task; an agent's is told at once (#4979).
+                if let Some(b) = behind {
+                    b.notify_one();
+                }
                 s.subs.remove(&n);
                 false
             }

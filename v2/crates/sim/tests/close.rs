@@ -18,7 +18,7 @@ use sim::controller::{Controller, Driver, Part};
 use sim::ground::{HUMAN_RADIUS, OpenGround, Piece, Scene};
 use sim::mover::Surface;
 use skills::close::{
-    Circle, FELL_BACK, Follow, LOST_PLACE, Near, SPEED, Side, Step, THERE, Target, WALLED,
+    Circle, FELL_BACK, Follow, LOST_PLACE, Near, SPEED, Side, Step, THERE, Target, WALLED, swung,
 };
 
 const TICK: Micros = 50_000;
@@ -843,4 +843,65 @@ fn a_carrier_keeps_its_place_from_the_front_without_turning() {
     assert!(most <= 200_000, "walked: {most} µm in a tick");
     assert!(far < 1_000_000, "never stretched a carry: {far} µm");
     assert!(apart(h.me, place) <= 50_000, "stands at its place");
+}
+
+/// Carrying together, turned with the front (moving-group rule 3): a carrier 3.4 m behind its front (the load along
+/// +x) keeps a place that swings a quarter turn about the front, to 3.4 m on its -z side, as the front walks 5 m east
+/// to its goal, then stands. The place swings by the share of the way walked, keeping its length ([`swung`]); the
+/// carrier is never more than 1 m from it after its first second (the world's stretch before a carry breaks off) nor
+/// nearer or farther from the front than its 3.4 m by 1 m, never moves more than a run's tick at a jog's pace, and
+/// stands within 50 mm of its turned place two seconds after the front stops.
+#[test]
+fn a_carrier_turns_with_its_front_a_quarter_turn_keeping_its_distance() {
+    let (from, to) = ([-3_400_000, 0], [0, -3_400_000]);
+    assert_eq!(swung(from, to, 0, 10), from);
+    assert_eq!(swung(from, to, 10, 10), to);
+    let half = swung(from, to, 5, 10);
+    let l = |v: [i64; 2]| (i128::from(v[0]).pow(2) + i128::from(v[1]).pow(2)).isqrt() as i64;
+    assert!(
+        (l(half) - 3_400_000).abs() <= 2,
+        "half way, as long: {half:?}"
+    );
+    assert!(
+        (half[0] - half[1]).abs() <= 2,
+        "half way, half turned: {half:?}"
+    );
+    let start = Vec3::new(0, 0, 10_000_000);
+    let goal = [5_000_000, 10_000_000];
+    let mut f = Follow::turning(id(2), from, goal, to, None);
+    let mut h = fake(Vec3::new(start.x + from[0], 0, start.z + from[1]), start);
+    let (mut most, mut far, mut span) = (0_i64, 0_i64, (i64::MAX, 0_i64));
+    for n in 0..160u32 {
+        let t = i64::from(n) * TICK;
+        let d = (SPEED * t / 1_000_000).min(5_000_000);
+        h.leader = Vec3::new(start.x + d, 0, start.z);
+        let was = h.me;
+        assert_eq!(f.step(&mut h), Progress::Going);
+        h.now += TICK;
+        most = most.max(apart(was, h.me));
+        let o = swung(from, to, d, 5_000_000);
+        let place = Vec3::new(h.leader.x + o[0], 0, h.leader.z + o[1]);
+        if t >= 1_000_000 {
+            far = far.max(apart(h.me, place));
+            let s = apart(h.me, h.leader);
+            span = (span.0.min(s), span.1.max(s));
+        }
+    }
+    let end = Vec3::new(goal[0] + to[0], 0, goal[1] + to[1]);
+    println!(
+        "a carrier turned with its front: at most {} mm from its swinging place, {} to {} mm from the front, at most {} \
+         mm a tick; {} mm from its turned place at the end",
+        far / 1000,
+        span.0 / 1000,
+        span.1 / 1000,
+        most / 1000,
+        apart(h.me, end) / 1000
+    );
+    assert!(far < 1_000_000, "kept its place as it swung: {far} µm");
+    assert!(
+        span.0 > 2_400_000 && span.1 < 4_400_000,
+        "kept its distance from the front: {span:?}"
+    );
+    assert!(most <= 200_000, "walked: {most} µm in a tick");
+    assert!(apart(h.me, end) <= 50_000, "stands at its turned place");
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // W3b's finite, root-owned initializer. The path unit supplies no arguments: the inbox is request identity only.
-import { isMain } from '../../../tools/lib/is-main.mjs';
+import { isMain } from './is-main.mjs';
 import { constants } from 'node:fs';
 import { lstat, realpath, readdir, mkdir, open, rename, chmod, copyFile } from 'node:fs/promises';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
@@ -77,9 +77,10 @@ export async function atomic(path, value, mode = 0o640) {
 }
 export async function command(program, args, env = process.env) {
   const child = spawn(program, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.resume(); child.stderr.resume();
+  // The last 600 bytes of its error output go into the refusal, so the journal says why a placement stopped.
+  child.stdout.resume(); let tail = ''; child.stderr.on('data', chunk => { tail = (tail + chunk).slice(-600); });
   const timer = setTimeout(() => child.kill('SIGTERM'), 240_000);
-  try { await new Promise((yes, no) => { child.once('error', no); child.once('exit', code => code === 0 ? yes() : no(Error('placement-command-failed'))); }); }
+  try { await new Promise((yes, no) => { child.once('error', no); child.once('exit', code => code === 0 ? yes() : no(Error(`placement-command-failed: ${program.split('/').pop()} ${args.slice(0, 2).join(' ')} | ${tail.replace(/\s+/g, ' ')}`))); }); }
   finally { clearTimeout(timer); }
 }
 const pause = ms => new Promise(yes => setTimeout(yes, ms));
@@ -273,11 +274,13 @@ export async function drain(config) {
       if (!(await lstat(kept)).isFile() || !REQUEST.test(request)) fail('placement-request-invalid');
       const { archiveRequest } = await import('./archive-world.mjs');
       if (!await archiveRequest(config, request)) await placeRequest(config, request);
-    } catch { console.error('placement: request refused; retained identity-bound status and world data'); }
+    } catch (error) { console.error(`placement: request refused (${error?.message ?? error}); retained identity-bound status and world data`); }
   }
 }
 
-if (isMain(import.meta.url)) {
+// No top-level await: drain imports archive-world.mjs, which imports this module, so an entry module still awaiting its
+// own evaluation would never settle that import (Node exits 13, every request set aside unplaced; 26 Nov).
+if (isMain(import.meta.url)) setImmediate(async () => {
   try {
     if (process.getuid?.() !== 0) fail('placement-root-only');
     const child = process.argv[2] === '--as-souls';
@@ -304,4 +307,4 @@ if (isMain(import.meta.url)) {
       if (mode === 'publish') await publishData(config, phase);
     } else await drain(config);
   } catch (error) { console.error(`placement: ${error.message}`); process.exitCode = 1; }
-}
+});

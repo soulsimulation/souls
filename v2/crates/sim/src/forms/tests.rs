@@ -397,6 +397,7 @@ fn a3_every_run_reaches_a_named_end() {
         e.at
     );
     assert_eq!((e.how.as_str(), e.at), ("deadline-passed", 1_000_000));
+    assert_eq!(e.why, None, "no refusal's words");
     b.clean();
 
     // A press beyond reach, refused by B2 at its start.
@@ -408,8 +409,19 @@ fn a3_every_run_reaches_a_named_end() {
     let [e] = b.forms.ended.as_slice() else {
         panic!("{:?}", b.forms.ended)
     };
-    println!("a press beyond reach: {} at {} µs", e.how.as_str(), e.at);
+    println!(
+        "a press beyond reach: {} at {} µs ({:?})",
+        e.how.as_str(),
+        e.at,
+        e.why
+    );
     assert_eq!(e.how.as_str(), "out-of-reach");
+    // The move's refusal words reach the run's end, for its act's answer: how far and the reach (#5019 follow-up).
+    let why = e.why.as_deref().expect("the refusal's words");
+    assert!(
+        why.contains(": 5000 mm to ") && why.contains(", reach "),
+        "{why}"
+    );
     b.clean();
 
     // A second form on a body with one in progress, from another actor, is refused by name (#4187: the Soul's own
