@@ -46,6 +46,8 @@ export const AT = {
 export const CAMERA = { position: [14, 5.5, 25], target: [14, 1.2, 15], fov: 50 };
 export const LABELS = ['ada', 'bo', 'cy', 'di', 'eve', 'fay'];
 const xz = (p) => p.join(',');
+/** The yard's things by their names, each its own find (a find answers a few things at most). */
+const NAMES = ['shade-site', 'timber-bent-1', 'timber-bent-2', 'timber-rail-1', 'timber-rail-2', 'shade-cloth'];
 
 /** A crew: `a` offers it (on the open ground, or `--on` a part to hold it), each of `others` accepts in turn. */
 async function crewOf({ run }, bodies, a, others, on = null) {
@@ -152,7 +154,7 @@ export async function takeDown(r, bodies, ids) {
 
 /** The shade yard's ids as Ada's own copy names them (`query find`). */
 export async function findIds(seat) {
-  const a = await seat.cli('query', JSON.stringify([{ find: 'timber' }, { find: 'shade' }]));
+  const a = await seat.cli('query', JSON.stringify(NAMES.map((find) => ({ find }))));
   const found = (a.answers ?? []).flatMap((x) => x.found ?? []);
   const key = (n) => String(n ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const named = (want) => { const f = found.find((x) => key(x.name) === want && /^mars:/.test(x.kind ?? '')); if (!f) throw new Error(`Ada's copy finds no "${want}" (found: ${found.map((x) => `${x.name} ${x.kind}`).join(', ')})`); return f.id; };
@@ -164,7 +166,7 @@ async function partsWhere(seat, ids) {
   const want = new Set([...ids.bents, ...ids.rails, ids.cloth]);
   let parts = [];
   for (let i = 0; i < 20; i++) {
-    const q = await seat.cli('query', JSON.stringify([{ find: 'timber' }, { find: 'shade' }]));
+    const q = await seat.cli('query', JSON.stringify(NAMES.map((find) => ({ find }))));
     parts = (q.answers ?? []).flatMap((x) => x.found ?? []).filter((f) => want.has(f.id)).map((f) => ({ id: f.id, name: f.name, in: f.in ?? null }));
     if (!parts.some((p) => /activity/.test(p.in ?? ''))) break;
     await new Promise((res) => setTimeout(res, 500));
@@ -227,7 +229,7 @@ async function main() {
       const { cameraShot } = await import('../../launch-video/scene.mjs');
       let done = null;
       out.clip = { file: join(dir, 'shade.mp4'), camera: CAMERA };
-      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: CAMERA }, record, 16 / 9), log, onPlay: () => { out.clip.playAt = Date.now(); done = play(); } });
+      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', fps: 24, mbps: 4, hour: '12:00', shot: cameraShot({ fixed: CAMERA }, record, 16 / 9), log, onPlay: () => { out.clip.playAt = Date.now(); done = play(); } });
       await done;
     } else await play();
     out.after = await partsWhere(seats.ada, out.ids); save();
