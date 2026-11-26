@@ -2259,11 +2259,12 @@ async fn group_a_passer_by_walks_round_a_carried_load() {
     let short = ((end.x - goal.x) as f64).hypot((end.z - goal.z) as f64);
     println!(
         "passer-by: {crossed:?} in {:.1} s; {} rows; nearest the beam's outline {:.0} mm; {} mm off the straight line at \
-         most; {short:.0} mm from its goal",
+         most; {:.0} mm from its goal",
         took.as_secs_f64(),
         walked.len(),
         nearest / 1000.0,
-        strayed / 1000
+        strayed / 1000,
+        short / 1000.0
     );
     crossed.expect("the passer-by's walk arrives");
     assert!(
