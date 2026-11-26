@@ -2654,7 +2654,7 @@ impl World for Town {
                             node: m.node,
                             from: m.at,
                             target,
-                            carried: m.crossing.is_some(),
+                            carried: m.carried || m.crossing.is_some(),
                         },
                         self.size_of(m.who),
                     )
@@ -3083,6 +3083,18 @@ impl<'a> View<'a> {
         self.stand_near_door(node, at, reach, from, None)
     }
 
+    /// Where a body stands at `at` (µm, `node`'s frame), when it may stand there and a walk from `from` (a node and a
+    /// point in its frame, where the walker stands) may reach it: both found on the map and its parts joined
+    /// (`Map::may_reach`, one lookup, no route search). What a walk to a place's edge steps back toward the walker by,
+    /// to the first point it can get to (worldd's `Bodies::goal`).
+    pub fn stand_reached(&self, node: Id, at: Vec3, from: (Id, Vec3)) -> Option<Vec3> {
+        let to = self.map.spot(node, at)?;
+        let start = self.map.spot_near(from.0, from.1, AT_EDGE)?;
+        let p = Vec3::new(to.at[0] * 1000, to.at[1] * 1000, to.at[2] * 1000);
+        let passage = in_passage_indexed(self.buildings, self.passages, self.ground, node, p, None);
+        (!passage && self.map.may_reach(start.piece, to.piece)).then_some(p)
+    }
+
     /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
     /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
     pub fn stand_near_door(
@@ -3373,11 +3385,17 @@ impl Town {
         // ([`Town::landing`]), or the crossing is refused before the body moves.
         let mut arrive = None;
         if here == self.ground || to == self.ground {
-            let place = buildings
+            let b = buildings
                 .iter()
                 .find(|b| b.link(link).is_some())
-                .map(|b| b.place)
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
+            let place = b.place;
+            // A body on a thing's own floor (a roof terrace on a hotel), not one of the building's, follows the line in
+            // that floor's frame, as a step between two things' floors does below: in the building's frame it was
+            // metres off its near end, and every walk down to the ground was refused `link-not-here`.
+            let own = (here != self.ground && !b.floors.contains_key(&here))
+                .then(|| self.frame_of(here))
+                .flatten();
             let out = |e: String| refusal("out-of-range", e);
             if let Some(e) = far {
                 // Where the map stands it, else the end's middle; then on the mover's surface (#3168).
@@ -3402,10 +3420,15 @@ impl Town {
                         .pose
                         .position;
                 }
-                let last = if to == self.ground {
-                    back(&place, stand).map_err(out)?
-                } else {
-                    stand
+                // The far end in the building's frame: the ground's point taken back into it, a thing's own floor's
+                // (the roof terrace, the walk up) through that floor's frame; a building's floor is in it already.
+                let last = match (to == self.ground, b.floors.contains_key(&to)) {
+                    (true, _) => back(&place, stand).map_err(out)?,
+                    (false, false) => match self.frame_of(to) {
+                        Some(pt) => pt.point(stand).and_then(|w| back(&place, w)).map_err(out)?,
+                        None => stand,
+                    },
+                    (false, true) => stand,
                 };
                 if let Some(p) = line.last_mut() {
                     *p = last;
@@ -3415,6 +3438,10 @@ impl Town {
             if here == self.ground {
                 for p in &mut line {
                     *p = place.point(*p).map_err(out)?;
+                }
+            } else if let Some(ph) = &own {
+                for p in &mut line {
+                    *p = place.point(*p).and_then(|w| back(ph, w)).map_err(out)?;
                 }
             }
         } else if let Some(b) = buildings.iter().find(|b| b.link(link).is_some())

@@ -345,6 +345,17 @@ pub fn gap(tree: &Tree, target: Id, frame: Id, at: Vec3) -> R<i64> {
     Ok(gap_to(&v.shape(target)?, p))
 }
 
+/// The point of `target`'s edge (its outline, its line or its point) nearest `at`, and its shape's middle, both in
+/// `frame`'s own frame on the level (`at` a point there): where a body that walked to a place (a range, a sea) stands
+/// back from, and what it turns to face.
+pub fn nearest_in(tree: &Tree, target: Id, frame: Id, at: Vec3) -> R<(Vec3, Vec3)> {
+    let v = View { tree };
+    let x = v.to_root(frame)?;
+    let s = v.shape(target)?;
+    let p = x.xz([at.x, at.z])?;
+    Ok((x.inverse_xz(nearest_on(&s, p))?, x.inverse_xz(middle(&s))?))
+}
+
 /// [`gap`] on a shape in the root's frame.
 fn gap_to(s: &Shape, p: Xz) -> i64 {
     let seg = |a: Xz, b: Xz| -> i64 {

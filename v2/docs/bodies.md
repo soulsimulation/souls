@@ -236,6 +236,13 @@ on a tie; a building whose main room the walker cannot reach is refused like any
 another body ends 1.2 m beside it on the walker's side (along +z when they stand on different floors), and to a seated
 body at the thing it sits in. That point is fixed when the walk starts: a body that moves on meanwhile is not followed,
 and `away_m` is measured from where it stands at the end. A walk to the world's root is refused `move.whole-world`.
+A walk to a place on the open ground (a child of the ground with an outline or a line and nothing built on it: a
+range, a sea, a lake, a wood, a square, a path) goes to its edge nearest the walker, worked out on the ground's frame
+from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself), else, where
+that cannot be stood on or the walker's part of the map does not reach it (a sea, a ridge), the first point a body may
+stand on that the walker may reach, stepping back toward the walker a metre at a time from 0.6 m outside the edge. A
+walker already within it, or with no such point nearer it, is there. It ends facing the nearest point of the place, or its middle when it stands on
+its edge.
 The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
 the move is checked by `replica::move_check`, the function a client's `can` runs (R8) on its copy and its own
 receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `resource-held` (a walk while seated),

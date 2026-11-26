@@ -1569,6 +1569,174 @@ fn a_soul_boards_the_rowing_boat_from_the_quay_and_gets_off_onto_it() {
     boards_from_the_bank_and_rises_onto_it("11.5,167.0", "e_4b754b5c", "seatrow", 12.7);
 }
 
+/// The facts' id of the thing or the place named `name` (its `things`, then its `places`): today's ids change with
+/// each export, the names do not.
+fn facts_id(text: &str, name: &str) -> String {
+    let f = replica::rules::json::parse(text).unwrap();
+    ["things", "places"]
+        .iter()
+        .filter_map(|list| f.get(list).and_then(|v| v.arr()))
+        .flatten()
+        .find(|t| t.get("name").and_then(|v| v.str()) == Some(name))
+        .and_then(|t| t.get("id").and_then(|v| v.str()))
+        .unwrap_or_else(|| panic!("no {name} in the facts"))
+        .to_owned()
+}
+
+/// Boats on the water: Eden's harbour rowing boat (its entry's `vehicle` on `deep_water`,
+/// `content/kinds/vehicles/rowing_boat.json`) floats where it is moored, so `worldd serve` gives it a course that stands
+/// there. Born on the quay, a Soul takes the oars, rows it out over the harbour (`carrier:steer`), is refused a rise
+/// out on the water (`boarding-frame-away`), lands it (`carrier:land`: back along its wake to its mooring) and gets off
+/// at its landing, onto the quay. Before, the steer was refused `not-a-carrier` ("moves on no course").
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_rows_the_harbour_rowing_boat_out_and_gets_off_at_its_landing() {
+    use replica::sky::int;
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let boat = im.nodes[&facts_id(&text, "harbour-rowing-boat-1")];
+    let (served, mut soul, dir) = serve(&facts, "11.5,167.0", "rowboat", im.nodes["world"].scope());
+    let point = |x: f64, z: f64| {
+        BTreeMap::from([(
+            1,
+            Value::Array(vec![int((x * 1e6) as i64), int((z * 1e6) as i64)]),
+        )])
+    };
+    let rode = soul.act("eden:ride", Some(boat), BTreeMap::new());
+    println!("take the oars: {rode:?}");
+    let out = soul.act("carrier:steer", Some(boat), point(16.0, 182.0));
+    println!("row out: {out:?}");
+    std::thread::sleep(Duration::from_secs(8));
+    let away = punt_place(&dir, boat);
+    let offshore = soul.act("eden:rise", None, BTreeMap::new());
+    println!("out at {away:?} m, a rise: {offshore:?}");
+    let landed = soul.act("carrier:land", Some(boat), BTreeMap::new());
+    println!("land: {landed:?}");
+    let mut off = Err(String::new());
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_secs(3));
+        off = soul.act("eden:rise", None, BTreeMap::new());
+        if off.as_ref().is_ok() || off.as_ref().is_err_and(|e| e != "boarding-frame-away") {
+            break;
+        }
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    let home = punt_place(&dir, boat);
+    let end = last_places(&dir);
+    println!("off at its landing: {off:?}; the boat at {home:?} m; the body {end:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    rode.expect("took the oars from the quay");
+    out.expect("rowed out: a boat on the water is a carrier");
+    let (_, az) = away.expect("the boat's course");
+    assert!(az > 170.0, "out over the harbour, at z {az} m");
+    assert_eq!(offshore, Err("boarding-frame-away".to_owned()));
+    landed.expect("landed");
+    off.expect("got off at its landing");
+    let (hx, hz) = home.expect("the boat's course");
+    assert!(
+        (hx - 16.0).abs() < 0.01 && (hz - 166.0).abs() < 0.01,
+        "back at its mooring: ({hx}, {hz}) m"
+    );
+    let ground = im.nodes["ground"];
+    let (_, (frame, _, x, _)) = end.into_iter().next().expect("the body");
+    assert_eq!(frame, ground, "on the ground");
+    assert!(x <= 12.7, "set down on the quay (x <= 12.7 m), at x {x} m");
+}
+
+/// A walk to a landform or a region (a range drawn as a line, the sea, the sea's region) goes to
+/// the nearest walkable point at its edge, not to its middle, and ends facing it: a step ahead of the body is nearer
+/// it than the body is. Before, each walk aimed at the shape's middle (out on the sea, the range's ridge) and was
+/// refused. An area a body can stand on (the park's sand) is still walked onto.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let ground = im.nodes["ground"];
+    let mut failed = Vec::new();
+    // Walked onto: an area of the open ground a body can stand on (the park's sand) ends on it, at its edge. (The
+    // harbour boardwalk's region lies over the boardwalk's own deck, not the open ground: a walk ends facing it.)
+    let onto = ["park-playground-sand"];
+    // The north from (7.4, -296.9) m: walks north from the channel's start (-14.0, -296.0) and from the town (45.0,
+    // -78.0) stop on the way, `goal-unreachable`, at (7.4, -296.9) and (27.7, -74.6) m whatever their goal (the walk
+    // is held there, not the goal).
+    for (at, names, tag) in [
+        (
+            "7.4,-296.9",
+            &["place-region-northern-mountains", "land-ring-north-range"][..],
+            "lfnorth",
+        ),
+        (
+            "40.0,120.0",
+            &[
+                "park-playground-sand",
+                "place-region-harbour-boardwalk",
+                "land-southern-sea",
+                "place-region-southern-sea",
+            ][..],
+            "lfsea",
+        ),
+    ] {
+        let (served, mut soul, dir) = serve(&facts, at, tag, lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+        for name in names {
+            let place = im.nodes[&facts_id(&text, name)];
+            let walked = soul.act("eden:walk", Some(place), BTreeMap::new());
+            // The turn to face it is the legs' input after the walk's end: logged a tick or two later.
+            std::thread::sleep(Duration::from_secs(2));
+            let bytes = std::fs::read(dir.join("log")).unwrap();
+            let mut last = None;
+            for r in sim::log::recover(&bytes).unwrap().records {
+                if sim::recorder::is_input(&r) {
+                    continue;
+                }
+                if let Ok(Value::Map(m)) = decode(&r).map(|d| d.value)
+                    && let Some(Value::Array(rows)) = m.get(&answers::BODIES)
+                {
+                    last = rows
+                        .iter()
+                        .filter_map(worldd::bodies::read_row)
+                        .next_back()
+                        .map(|(_, p, _)| p)
+                        .or(last);
+                }
+            }
+            let pose = last.expect("the body's pose");
+            let p = pose.position;
+            let gap = replica::select::gap(&im.tree, place, ground, p).unwrap();
+            let ahead = pose
+                .orientation
+                .rotate(replica::pose::Vec3::new(3_000_000, 0, 0))
+                .unwrap();
+            let step = replica::pose::Vec3::new(p.x + ahead.x, 0, p.z + ahead.z);
+            let gap_ahead = replica::select::gap(&im.tree, place, ground, step).unwrap();
+            println!(
+                "walk to {name}: {walked:?}, ends at ({:.1}, {:.1}) m, {:.1} m from it, {:.1} m a step ahead",
+                p.x as f64 / 1e6,
+                p.z as f64 / 1e6,
+                gap as f64 / 1e6,
+                gap_ahead as f64 / 1e6
+            );
+            if let Err(e) = &walked {
+                failed.push(format!("{name}: {e}"));
+            } else if onto.contains(name) && gap > 0 {
+                failed.push(format!("{name}: not on it"));
+            } else if gap > 0 && gap_ahead >= gap {
+                failed.push(format!("{name}: not facing it"));
+            }
+        }
+        drop(served);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
 /// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
 /// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
 /// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk
@@ -4557,6 +4725,389 @@ fn w10_everyday_takes_on_eden_need_reach() {
         println!("W10 {arm}: {ok} of {} taken", answers.len());
     }
     println!("W10 refusals by arm and reason: {refused:?}");
+}
+
+/// Each body born in the world's log in `dir` (the births' node creations), with its pose, in the order born.
+fn births(dir: &Path) -> Vec<(Id, replica::pose::Pose)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if let Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node, kind, pose, ..
+                    } = c.change
+                        && kind.as_str().contains("body")
+                    {
+                        out.push((node, pose));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A Soul's first moment on Eden: a world that names its arrival place (`worldd arrival`, `world.json`'s `arrival`)
+/// has its joining Souls born round that place, not at its entry. Eden names the campus quad
+/// (`place-region-campus-quad`, its fountain at (-12, -97) m): two fresh joins land within 8 m of the fountain, on the
+/// open ground, at least two body radii apart, each facing the fountain (its +x within a degree of the way to it).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (ground, lineage) = (im.nodes["ground"], im.nodes["world"].scope());
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::temp_dir().join(format!("eden-arrival-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    // Seeded at the old entry (the open commons lawn), then named its arrival place, as production Eden is.
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(&dir)
+        .args([
+            "--entries",
+            &format!("{root}/content/kinds"),
+            "--souls",
+            "0",
+            "--at",
+            "0,0",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let unknown = Command::new(worldd)
+        .args(["arrival", "--dir"])
+        .arg(&dir)
+        .args(["--place", "no-such-place"])
+        .output()
+        .unwrap();
+    assert!(
+        !unknown.status.success(),
+        "a place the facts lack is refused"
+    );
+    let named = Command::new(worldd)
+        .args(["arrival", "--dir"])
+        .arg(&dir)
+        .args(["--place", "place-region-campus-quad"])
+        .output()
+        .unwrap();
+    println!("arrival: {}", String::from_utf8_lossy(&named.stdout).trim());
+    assert!(
+        named.status.success(),
+        "{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let _served = Served(child);
+    let (mut line, mut lines) = (String::new(), Vec::new());
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        lines.push(std::mem::take(&mut line));
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("Souls arrive at place-region-campus-quad (-12.000,-97.000 m)")),
+        "serve names the arrival place: {lines:?}"
+    );
+    let _a = join(&dir, 1, lineage);
+    let _b = join(&dir, 2, lineage);
+    let born = births(&dir);
+    assert_eq!(born.len(), 2, "two bodies born");
+    let fountain = (-12_000_000i64, -97_000_000i64);
+    for (body, pose) in &born {
+        let p = pose.position;
+        let (dx, dz) = (fountain.0 - p.x, fountain.1 - p.z);
+        let d = ((i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt()) as f64 / 1e6;
+        let ahead = pose
+            .orientation
+            .rotate(replica::pose::Vec3::new(1 << 20, 0, 0))
+            .unwrap();
+        let dot = i128::from(ahead.x) * i128::from(dx) + i128::from(ahead.z) * i128::from(dz);
+        let len = (i128::from(ahead.x).pow(2) + i128::from(ahead.z).pow(2)).isqrt()
+            * (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+        println!(
+            "born {body:?} at ({:.2}, {:.2}) m, {d:.2} m from the fountain, facing it at cos {:.5}, on {:?}",
+            p.x as f64 / 1e6,
+            p.z as f64 / 1e6,
+            dot as f64 / len as f64,
+            pose.support
+        );
+        assert!(d <= 8.0, "born {d:.2} m from the quad's fountain");
+        assert_eq!(pose.frame.node, ground, "born on the open ground");
+        assert!(
+            matches!(
+                pose.support,
+                replica::pose::Support::Surface { height: 0, .. }
+            ),
+            "standing on walkable ground"
+        );
+        assert!(dot * 100_000 >= len * 99_985, "faces the fountain");
+    }
+    let (a, b) = (born[0].1.position, born[1].1.position);
+    let apart =
+        ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()) as f64 / 1e6;
+    println!("the two births {apart:.2} m apart");
+    assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every picnic table, parasol table and bench on Eden (#4901's seat numbering): a Soul walks to it, sits on it
+/// through the gateway's sit (its body logged in the thing's own slot), rises (on its feet off the thing) and walks
+/// on at once to a point on the open ground. Things are served in groups, a world each, its Souls born by the group's
+/// first thing so no walk is long; every Soul of a group acts on its own thread. `EDEN_FACTS` names the facts file.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn every_picnic_table_parasol_table_and_bench_walk_sit_rise_walk() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let all = replica::rules::json::parse(&text).unwrap();
+    let lineage = im.nodes["world"].scope();
+    let kinds = ["eden:picnic_table", "eden:parasol_table", "eden:bench"];
+    // (facts id, name, x m, z m) of every such thing on the open ground or a roof.
+    let mut things: Vec<(String, String, f64, f64)> = all
+        .get("things")
+        .and_then(|t| t.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter(|t| {
+            t.get("entry")
+                .and_then(|e| e.str())
+                .is_some_and(|e| kinds.contains(&e))
+        })
+        .filter_map(|t| {
+            let w = t.get("world")?.arr()?;
+            let m = |k: usize| match w.get(k) {
+                Some(replica::rules::json::Value::Int(v)) => Some(*v as f64 / 1000.0),
+                _ => None,
+            };
+            Some((
+                t.get("id")?.str()?.to_owned(),
+                t.get("name").and_then(|n| n.str()).unwrap_or("").to_owned(),
+                m(0)?,
+                m(2)?,
+            ))
+        })
+        .collect();
+    things.sort_by(|a, b| a.0.cmp(&b.0));
+    // Groups: each thing within 60 m of its group's first.
+    let mut groups: Vec<Vec<(String, String, f64, f64)>> = Vec::new();
+    for t in things {
+        match groups
+            .iter_mut()
+            .find(|g| (g[0].2 - t.2).hypot(g[0].3 - t.3) <= 60.0)
+        {
+            Some(g) => g.push(t),
+            None => groups.push(vec![t]),
+        }
+    }
+    println!(
+        "{} things in {} groups",
+        groups.iter().map(Vec::len).sum::<usize>(),
+        groups.len()
+    );
+    let failed = std::sync::Mutex::new(Vec::<String>::new());
+    // At most four worlds at once.
+    for (c, chunk) in groups.chunks(4).enumerate() {
+        std::thread::scope(|s| {
+            for (j, group) in chunk.iter().enumerate() {
+                let (failed, facts, ids) = (&failed, &facts, &im.nodes);
+                s.spawn(move || {
+                    let at = format!("{:.1},{:.1}", group[0].2 + 3.0, group[0].3 + 3.0);
+                    let tag = format!("sweep{}", c * 4 + j);
+                    let (served, first, dir) = serve(facts, &at, &tag, lineage);
+                    drop(first);
+                    // Each Soul joined in turn, where it was born read from the log before the next joins.
+                    let souls: Vec<(Client, (Id, replica::pose::Vec3))> = (0..group.len())
+                        .map(|n| {
+                            let soul = join(&dir, n as u64 + 2, lineage);
+                            (soul, end_pose(&dir).expect("its birth logged"))
+                        })
+                        .collect();
+                    std::thread::scope(|s2| {
+                        for ((id, name, ..), (soul, home)) in group.iter().zip(souls) {
+                            let dir = &dir;
+                            s2.spawn(move || {
+                                let (line, ok) =
+                                    walk_sit_rise_walk(soul, dir, ids[id.as_str()], home);
+                                // Found, not fixed here: from the shrine's bench and the market roof's bench the
+                                // planner finds no way back to a birth place a group away, though the sit got there
+                                // and a walk nearby is done (a Soul born beside them walks home). Refused by name.
+                                let ok = ok
+                                    || ROUTE_GAPS.contains(&id.as_str())
+                                        && line.ends_with("rise done, walk on goal-unreachable");
+                                let line = format!("{name} ({id}): {line}");
+                                println!("{line}");
+                                if !ok {
+                                    failed.lock().unwrap().push(line);
+                                }
+                            });
+                        }
+                    });
+                    drop(served);
+                    let _ = std::fs::remove_dir_all(&dir);
+                });
+            }
+        });
+    }
+    let failed = failed.into_inner().unwrap();
+    assert!(
+        failed.is_empty(),
+        "{} failed:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+/// Things the sweep's walk home from is refused `goal-unreachable` (see its note).
+const ROUTE_GAPS: [&str; 2] = ["e_bc93004a", "e_c6e13060"];
+
+/// One Soul's walk to `thing`, sit on it, rise and walk on at once back to `home` (the node and point, µm, where it was
+/// born): how each ended, and whether the sit, the rise and the walk on were done with the body logged in one
+/// of the thing's slots. The first walk is reported, not required: the sit walks to its seat itself.
+fn walk_sit_rise_walk(
+    mut soul: Client,
+    dir: &Path,
+    thing: Id,
+    home: (Id, replica::pose::Vec3),
+) -> (String, bool) {
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let walk = soul.act("eden:walk", Some(thing), BTreeMap::new());
+    let sit = soul.act("eden:sit", Some(thing), BTreeMap::new());
+    let seated = last_frames(dir)
+        .values()
+        .any(|f| f.0 == thing && f.1.is_some());
+    let rise = soul.act("eden:rise", None, BTreeMap::new());
+    let um = |v: i64| {
+        if v < 0 {
+            Value::Nint((-v - 1) as u64)
+        } else {
+            Value::Uint(v as u64)
+        }
+    };
+    let p = home.1;
+    let point = Value::Array(vec![um(p.x), um(p.y), um(p.z)]);
+    let on = soul.act("eden:walk", Some(home.0), BTreeMap::from([(1, point)]));
+    let ended =
+        |r: &Result<Vec<u64>, String>| r.as_ref().map_or_else(Clone::clone, |_| "done".to_owned());
+    let line = format!(
+        "walk {}, sit {} (in its slot: {seated}), rise {}, walk on {}",
+        ended(&walk),
+        ended(&sit),
+        ended(&rise),
+        ended(&on)
+    );
+    let ok = sit.is_ok() && seated && rise.is_ok() && on.is_ok();
+    (line, ok)
+}
+
+/// The release-0137 rehearsal's sit (#4901's seat numbering): a Soul by the quad fountain sits at
+/// `artists-green-picnic-3`, 54 m off, by the gateway's bare sit: it walks there and is logged in the table's slot. A
+/// walk while seated is refused `resource-held`, by name; it rises, and a walk sent at once after the rise is done. The
+/// rise's answer comes while the world still carries the body off the bench (its step off, no link): the walk's spot
+/// ask was made from the seat's point, inside the bench, and refused `spot-none-free`; now it waits for the carry's end.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_sits_at_a_picnic_table_from_afar_rises_and_walks_on_at_once() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (table, fountain) = (im.nodes["e_7945031e"], im.nodes["e_bbab9835"]);
+    let (served, mut soul, dir) =
+        serve(&facts, "-15.1,-94.2", "picnic3", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let sit = soul.act("eden:sit", Some(table), BTreeMap::new());
+    let seated = last_frames(&dir)
+        .values()
+        .any(|f| f.0 == table && f.1.is_some());
+    let held = soul.act("eden:walk", Some(fountain), BTreeMap::new());
+    let rise = soul.act("eden:rise", None, BTreeMap::new());
+    let on = soul.act("eden:walk", Some(fountain), BTreeMap::new());
+    println!(
+        "sit {sit:?} (in its slot: {seated}); walk seated {held:?}; rise {rise:?}; walk at once {on:?}"
+    );
+    let off = last_frames(&dir).values().all(|f| f.0 != table);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    sit.expect("walked to the table and sat");
+    assert!(seated, "the body is in one of the table's slots");
+    assert_eq!(
+        held,
+        Err("resource-held".into()),
+        "no walk while seated, by name"
+    );
+    rise.expect("rose");
+    on.expect("a walk sent at once after the rise is done, not refused spot-none-free");
+    assert!(off, "off the table");
+}
+
+/// A Soul walks up to the roof terrace of `seafront-hotel-2` (its parasol table, e_74be5224) and back down to the open
+/// ground, and again after sitting at the table and rising. The terrace is a thing's own floor, not one of the hotel's,
+/// so the stair's line, in the hotel's frame, was metres off the body at its near end: every walk down was refused
+/// `link-not-here` and a Soul that went up stayed on the roof.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_walks_down_from_a_roof_terrace_after_sitting_there() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (table, ground) = (im.nodes["e_74be5224"], im.nodes["ground"]);
+    let (served, mut soul, dir) =
+        serve(&facts, "137.5,124.0", "roofdown", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    // A point on the open ground in front of the hotel, µm.
+    let out = || {
+        BTreeMap::from([(
+            1,
+            Value::Array(vec![
+                Value::Uint(137_500_000),
+                Value::Uint(0),
+                Value::Uint(128_000_000),
+            ]),
+        )])
+    };
+    let up = soul.act("eden:walk", Some(table), BTreeMap::new());
+    let down = soul.act("eden:walk", Some(ground), out());
+    let first = end_pose(&dir);
+    let again = soul.act("eden:walk", Some(table), BTreeMap::new());
+    let sit = soul.act("eden:sit", Some(table), BTreeMap::new());
+    let rise = soul.act("eden:rise", None, BTreeMap::new());
+    let down2 = soul.act("eden:walk", Some(ground), out());
+    let last = end_pose(&dir);
+    println!(
+        "up {up:?}; down {down:?} at {first:?}; up {again:?}; sit {sit:?}; rise {rise:?}; down {down2:?} at {last:?}"
+    );
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    up.expect("walked up to the terrace");
+    down.expect("walked down to the open ground");
+    assert_eq!(first.map(|f| f.0), Some(ground), "on the open ground");
+    again.expect("up again");
+    sit.expect("sat at the terrace's table");
+    rise.expect("rose");
+    down2.expect("walked down after rising");
+    assert_eq!(last.map(|f| f.0), Some(ground), "on the open ground again");
 }
 
 /// One Eden seat-like thing a new person would use, by today's id: born at `at` (`x,z` m, outside its building's door,
