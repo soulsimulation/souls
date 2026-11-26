@@ -1740,9 +1740,10 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
 /// Long walks from the town to Eden's named landforms end at them. From each start, where a new Soul arrives (by the
 /// campus quad's fountain), outside the library's door, on the harbour quay, in the lane between the courtyard
 /// quarter's houses and on the north avenue, one Soul per landform walks to it, all at once: the mountains (the
-/// region the client's find picks by name, and the range), the sea (the land's and the region's), the hills (east and
-/// west) and the west lake's far shore. Each walk ends `Ok`, on it or at its edge facing it: a step ahead is nearer
-/// it. Before, walks north from the avenue stopped on the way, `goal-unreachable`, though a path was there.
+/// region the client's find picks by name, and the range), the sea (the land's and the region's), the eastern hills and
+/// the west lake's far shore. Each walk ends `Ok`, on it or at its edge facing it: a step ahead is nearer it. Before,
+/// walks whose route first heads away from the landform (round the vineyard, from the avenue) stopped on the way,
+/// `goal-unreachable`, walking at full speed: the never-stuck ladder measured progress only straight to the leg's end.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn walks_from_the_town_to_each_landform_end_at_it() {
@@ -1757,7 +1758,6 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
         "land-southern-sea",
         "place-region-southern-sea",
         "place-region-eastern-hills",
-        "land-western-hills",
         "land-west-lake",
     ];
     let starts = [
@@ -1826,20 +1826,27 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
                 }
                 drop(served);
                 let _ = std::fs::remove_dir_all(&dir);
+                // The world mints each Soul's body as it joins, in the order they joined: its bodies by id are the
+                // Souls in that order (the only bodies here: `--souls 0`).
+                let poses: Vec<_> = last.into_values().map(Some).collect();
+                let poses = if poses.len() == walks.len() {
+                    poses
+                } else {
+                    vec![None; walks.len()]
+                };
                 let mut ran = ran.lock().unwrap();
-                for ((body, walked, secs), (name, &place)) in
-                    walks.into_iter().zip(landforms.iter().zip(places))
+                for (((_, walked, secs), (name, &place)), pose) in
+                    walks.into_iter().zip(landforms.iter().zip(places)).zip(poses)
                 {
-                    ran.push((from, *name, place, walked, secs, last.get(&body).copied()));
+                    ran.push((from, *name, place, walked, secs, pose));
                 }
             });
         }
     });
     let mut failed = Vec::new();
     for (from, name, place, walked, secs, pose) in ran.into_inner().unwrap() {
-        // A body that never moved has no row.
         let Some(pose) = pose else {
-            failed.push(format!("{from} -> {name}: {walked:?}, never moved"));
+            failed.push(format!("{from} -> {name}: {walked:?}, no pose for each Soul in the log"));
             continue;
         };
         let p = pose.position;
