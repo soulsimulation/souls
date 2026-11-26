@@ -7795,3 +7795,257 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
         "the dance ends where the wave begins: {dance_end} {wave}"
     );
 }
+
+/// Carrying together, turned with the front (moving-group rule 3): a crew seats a beam square in a bay's slot by its
+/// front's commands alone, as the client's `carry to <crew> <bay> <slot>` sends them from the front (a walk to its end
+/// of the slot's line, naming the load's heading there, parameter 3). On N2's test world with a bay at its build
+/// site, two crews first seat its frames (each walk sent by both, as A3's), one holder left on each. Then:
+///
+/// - **A crew of four** (a front, a back and two sides west of the beam; the beam's entry given two grips between its
+///   ends, so four may take it) takes beam 1, its length along z. Only the
+///   front's Soul walks: to a point west of the bay with the load turned 60 degrees, then to its end of `beam_low_l`'s
+///   line with the heading along it. Each time the other three walk with it by their own follow orders, turning with
+///   it, and stand at their places (within 0.3 m), the back and the front on the slot's line; the front seats the beam.
+/// - **A crew of two** does the same with beam 2 into `beam_high_l`, over the low beam now seated.
+///
+/// Each beam is in its slot afterwards, and no carry broke off on the way.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_two() {
+    const ALONG: i64 = 2_200_000;
+    let d = scratch("hgturn");
+    let (facts, slots) = yard_world(&d);
+    // The beam with four grips, two between its ends, so a crew of four takes it (0.135 C5: no more than its grips).
+    let p = d.join("entries").join("rack_beam.json");
+    let mut e = json::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    let json::Value::Obj(top) = &mut e else {
+        panic!("an entry")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("points", json::Value::Obj(points)) = (k.as_str(), v) {
+            points.retain(|(_, p)| p.get("role").and_then(json::Value::str) != Some("grip"));
+            for (n, z) in [-1_097, -400, 400, 1_097].iter().enumerate() {
+                points.push((
+                    format!("grip_{n}"),
+                    json::Value::Obj(vec![
+                        ("role".into(), json::Value::s("grip")),
+                        (
+                            "at_mm".into(),
+                            json::Value::Arr([0, 51, *z].map(num).to_vec()),
+                        ),
+                    ]),
+                ));
+            }
+        }
+    }
+    std::fs::write(&p, e.to_json()).unwrap();
+    let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let (bay, fa, fb) = (
+        im.nodes["site-bay"],
+        im.nodes["yard-frame-1"],
+        im.nodes["yard-frame-2"],
+    );
+    let beams = [im.nodes["yard-beam-1"], im.nodes["yard-beam-2"]];
+    let g = w.ground;
+    let actors: Vec<Actor> = w.souls.iter().map(|s| Actor::Soul(*s)).collect();
+    let (url, tokens) = gateway(&socket, &actors).await;
+    let mut souls = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
+    }
+    let crew_kind = pinned_activity(&w, "mars:carry_activity");
+    let to = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
+    let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
+    let in_slot = |node: Id, k: u64| BTreeMap::from([(1, node.to_value()), (2, Value::Uint(k))]);
+    let slot_of = |node: Id, k: u64| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        sim::ground::scene::slot_points(t, t.handle(node).unwrap(), t.handle(g).unwrap())
+            .unwrap()
+            .into_iter()
+            .find(|(n, _)| *n == k)
+            .unwrap()
+            .1
+    };
+    // Each Soul named walks to its point; every walk is answered.
+    let walk_all = async |souls: &mut [GwSoul], walks: &[(usize, Vec3)], what: &str| {
+        for (k, v) in walks {
+            souls[*k].send("eden:walk", g, to(*v)).await;
+        }
+        for (k, _) in walks {
+            let e = souls[*k].end().await;
+            assert_eq!(e.kind, 1, "{what}, Soul {}: {e:?}", k + 1);
+        }
+    };
+    // A crew of `members` on the ground: the first offers in front, the rest accept in turn (the back, then sides).
+    let crew = async |souls: &mut [GwSoul], members: &[usize]| {
+        let asked = members[1..]
+            .iter()
+            .map(|k| body_of(&w, w.souls[*k]).to_value())
+            .collect();
+        let got = souls[members[0]]
+            .act(
+                "activity:offer",
+                g,
+                BTreeMap::from([
+                    (1, crew_kind.clone()),
+                    (2, Value::Text(Name::new("mars:front").unwrap())),
+                    (3, Value::Array(asked)),
+                ]),
+            )
+            .await;
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let c = created_by(&w, &got.entries, "mars:carry_activity@");
+        for k in &members[1..] {
+            let got = souls[*k].act("activity:accept", c, BTreeMap::new()).await;
+            assert_eq!(got.kind, 1, "accepted: {got:?}");
+        }
+        c
+    };
+    // Waits until each body stands within 0.3 m of its place, at most 30 s.
+    let settle = async |places: &[(Id, Vec3)], what: &str| {
+        let t0 = std::time::Instant::now();
+        loop {
+            let off: Vec<i64> = places
+                .iter()
+                .map(|(b, p)| {
+                    let q = body_at(&w, *b);
+                    (i128::from(q.x - p.x).pow(2) + i128::from(q.z - p.z).pow(2)).isqrt() as i64
+                })
+                .collect();
+            if off.iter().all(|d| *d < 300_000) {
+                return t0.elapsed();
+            }
+            assert!(
+                t0.elapsed() < Duration::from_secs(30),
+                "{what}: not all at their places within 30 s, µm off {off:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    };
+
+    // The frames, each by a crew of two whose two walks are sent by both (A3's): Soul 1 lets go, the other holds.
+    let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - ALONG), v3(at.x, 0, at.z + ALONG));
+    for (frame, slot, other) in [(fa, "upright_a", 1), (fb, "upright_b", 2)] {
+        let (f0, f1) = frame_ends(where_is(&w, frame).2);
+        walk_all(&mut souls, &[(0, f0), (other, f1)], "to the frame").await;
+        let c = crew(&mut souls, &[0, other]).await;
+        let got = souls[0].act("part:take", c, part(frame)).await;
+        assert_eq!(got.kind, 1, "frame taken: {got:?}");
+        let (f0, f1) = frame_ends(slot_of(bay, slots[slot]));
+        walk_all(&mut souls, &[(0, f0), (other, f1)], "the frame to the bay").await;
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
+        let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
+        assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
+    }
+
+    // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
+    // (`[along, across]`, +along toward the front, +across to the west while the length runs along +z).
+    let sides = [[500_000, 800_000], [-500_000, 800_000]];
+    let at_frame = |mid: Vec3, h: [i64; 2], p: [i64; 2]| {
+        let o = worldd::engine::on_plan(p, h);
+        v3(mid.x + o[0], 0, mid.z + o[1])
+    };
+    let turned = [866_025, 500_000];
+    for (beam, slot, members) in [
+        (beams[0], "beam_low_l", vec![0, 3, 4, 5]),
+        (beams[1], "beam_high_l", vec![0, 3]),
+    ] {
+        let n = members.len();
+        let places = |mid: Vec3, h: [i64; 2]| {
+            let mut v = vec![at_frame(mid, h, [ALONG, 0]), at_frame(mid, h, [-ALONG, 0])];
+            v.extend(sides[..n - 2].iter().map(|p| at_frame(mid, h, *p)));
+            v
+        };
+        let start = where_is(&w, beam).2;
+        let walks: Vec<(usize, Vec3)> =
+            members.iter().copied().zip(places(start, [0, M])).collect();
+        walk_all(&mut souls, &walks, "to the beam").await;
+        let c = crew(&mut souls, &members).await;
+        let got = souls[0].act("part:take", c, part(beam)).await;
+        assert_eq!(got.kind, 1, "beam taken: {got:?}");
+        let crew_bodies: Vec<Id> = members.iter().map(|k| body_of(&w, w.souls[*k])).collect();
+        // Only the front walks from here, naming the load's heading at its goal.
+        let s = slot_of(bay, slots[slot]);
+        let staged = v3(s.x - 4_500_000, 0, s.z);
+        for (mid, h, what) in [
+            (staged, turned, "turned 60 degrees, west of the bay"),
+            (s, [0, M], "square on the slot's line"),
+        ] {
+            let want = places(mid, h);
+            let mut walk = to(want[0]);
+            walk.insert(3, Value::Array(vec![int(h[0]), int(h[1])]));
+            let got = souls[0].act("eden:walk", g, walk).await;
+            assert_eq!(got.kind, 1, "the front's walk, {what}: {got:?}");
+            let took = settle(
+                &crew_bodies
+                    .iter()
+                    .copied()
+                    .zip(want.iter().copied())
+                    .collect::<Vec<_>>(),
+                what,
+            )
+            .await;
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            println!(
+                "crew of {n}, {what}: all at their places {} ms after the front's walk; the back {} mm east and {} mm \
+                 south of the front",
+                took.as_millis(),
+                (k.x - f.x) / 1000,
+                (k.z - f.z) / 1000
+            );
+        }
+        // Its last 0.3 m the back closes by two thirds a second: square on the slot's line within 5 s.
+        let t0 = std::time::Instant::now();
+        let across = loop {
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            if (f.x - k.x).abs() < 50_000 || t0.elapsed() > Duration::from_secs(5) {
+                break k.x - f.x;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        println!(
+            "crew of {n}: the back {} mm across from the front, on the slot's line",
+            across / 1000
+        );
+        assert!(
+            across.abs() < 50_000,
+            "square on the slot's line: the back {} mm across from the front",
+            across / 1000
+        );
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        println!(
+            "crew of {n} seats beam {} in {slot}: {got:?}",
+            beam.counter()
+        );
+        assert_eq!(got.kind, 1, "beam seated in {slot}");
+        for k in &members {
+            let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
+            assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);
+        }
+        assert_eq!(
+            where_is(&w, beam).1,
+            Some(slots[slot]),
+            "the beam is in {slot}"
+        );
+        // The sides step off the next beam's way.
+        let off: Vec<(usize, Vec3)> = members[2..]
+            .iter()
+            .enumerate()
+            .map(|(j, k)| (*k, v3(s.x - 8 * M, 0, s.z - 6 * M - j as i64 * M)))
+            .collect();
+        walk_all(&mut souls, &off, "the sides step away").await;
+    }
+    let downs = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .count();
+    assert_eq!(downs, 0, "no carry broke off");
+}

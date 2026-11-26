@@ -61,6 +61,7 @@ test('each carrier walks so the load goes into the first free bay, the far one f
   const r = to(copy());
   assert.equal(r.bay, 'bay_1');
   near(r[0].params[1], [27.6e6, 0, 25.35e6], 'the front, at the bay\'s south end');
+  assert.deepEqual(r[0].params[3], [0, 1e6], 'the load\'s heading there, its front to the south: the front\'s walk turns the crew');
   near(carryIntents({ do: 'to', crew: CREW, where: SPOT }, { ...ctxOf(copy()), me: SIDE })[0].params[1], [28.5e6, 0, 23.55e6], 'a side, beside it');
   // a pallet set down in bay 1: the next bay
   const one = copy([{ id: id(20), kind: 'mars:pallet_crates', pos: [27.5e6, 0, 24.3e6] }]);

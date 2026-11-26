@@ -14,7 +14,10 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   WATCHDOG=1 twice a second while its clock is not wedged. No word for 5 s ends it: a process frozen whole. K7's own
   watchdog inside says a stall (no tick for 0.5 s) in the journal (`watchdog: stalled`) and in `health.json`
   (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
-  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart.
+  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart. The
+  auditor's fault lines (`worldd: audit: Fault { … }`) are printed on their own thread, so a slow journal never holds
+  the clock on them; lines its queue has no room for are dropped and said (`worldd: audit: N fault lines dropped`),
+  and `health.json`'s `audit` counts passes, slices cut at 2 ms, and lines queued, printed and dropped.
 - **Exit 87, `disk-failed`.** The world's log or text store failed to write (`worldd: disk-failed: <reason>` in the
   journal), so it stopped rather than run on without a record of what happened. It restarts from its log, as after
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's

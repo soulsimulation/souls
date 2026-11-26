@@ -363,6 +363,8 @@ impl Measures {
         STALLS.json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
+        o.push_str(",\"audit\":");
+        AUDIT.json(&mut o);
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
         CLEANUP.json(&mut o);
@@ -423,6 +425,71 @@ impl Stalls {
             self.now_ms.load(Ordering::Relaxed),
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
+        );
+    }
+}
+
+/// The auditor (K11) and its printer (#3422): passes ended, slices cut short by `answers::AUDIT_TIME`, and the fault
+/// lines the clock queued for the printer, printed, and dropped because the queue was full or the printer gone (the
+/// clock never waits for it). One per process, written by the clock and the printer threads.
+pub struct Audit {
+    passes: AtomicU64,
+    cut: AtomicU64,
+    sent: AtomicU64,
+    printed: AtomicU64,
+    dropped: AtomicU64,
+}
+
+/// This process's auditor.
+pub static AUDIT: Audit = Audit {
+    passes: AtomicU64::new(0),
+    cut: AtomicU64::new(0),
+    sent: AtomicU64::new(0),
+    printed: AtomicU64::new(0),
+    dropped: AtomicU64::new(0),
+};
+
+impl Audit {
+    /// Clock thread: a slice ended, cut short by time or not, with the auditor's passes so far.
+    pub fn slice(&self, cut: bool, passes: u64) {
+        self.passes.store(passes, Ordering::Relaxed);
+        if cut {
+            self.cut.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Clock thread: a line queued.
+    pub fn sent(&self) {
+        self.sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Clock thread: a line dropped.
+    pub fn dropped(&self) {
+        self.dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Printer thread: a line printed.
+    pub fn printed(&self) {
+        self.printed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Lines dropped so far.
+    pub fn drops(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// `{"passes":n,"cut_slices":n,"limit":n,"queued":n,"printed":n,"dropped":n}`: `limit` the lines the queue
+    /// holds; `queued` the lines sent and not yet printed, the one being printed included (so up to `limit` + 1).
+    pub fn json(&self, o: &mut String) {
+        let printed = self.printed.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            "{{\"passes\":{},\"cut_slices\":{},\"limit\":{},\"queued\":{},\"printed\":{printed},\"dropped\":{}}}",
+            self.passes.load(Ordering::Relaxed),
+            self.cut.load(Ordering::Relaxed),
+            crate::answers::AUDIT_LINES,
+            self.sent.load(Ordering::Relaxed).saturating_sub(printed),
+            self.drops()
         );
     }
 }
