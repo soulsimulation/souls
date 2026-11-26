@@ -1109,8 +1109,8 @@ impl Runner {
     /// Whether a running walk on `who` still waits for its place: none granted, and not carried by the world's own rule
     /// (a rise's step off its seat, a climb out), from where no walk can start until it has landed.
     fn waits_for_place(&self, who: Id) -> bool {
-        !self.granted.contains_key(&who)
-            && !(self.controller.carried(who) && self.controller.carrying(who).is_none())
+        let world_carried = self.controller.carried(who) && self.controller.carrying(who).is_none();
+        !(self.granted.contains_key(&who) || world_carried)
     }
 
     /// The place questions of walks sent in this tick, asked now rather than with the next tick's wants (#4974): for
