@@ -722,7 +722,7 @@ export const CARRY_HELP = [
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
@@ -739,7 +739,7 @@ export const BUILD_HELP = [
   'frames first: two carry a frame from its stand (carry grip <frame> back | front, carry offer, carry accept, part take <crew> <frame>, both carry to <crew> <bay id> upright_a, part put <crew> <bay id> upright_a)',
   'a seated frame must stay held until beams join it: one of its crew stays (the other carry leave <crew>); a new holder takes over with carry grip <frame> left|right, carry offer <name> --on <frame>, and the old crew leaves',
   'then the second frame into upright_b, held the same way',
-  'beams: two carry each (carry grip <beam> back --from 2.2 | front --from 2.2), part take, both carry to <crew> <bay id> beam_low_l, part put; then beam_low_r (high beams the same)',
+  'beams: two carry each (carry grip <beam> back --from 2.2 | front --from 2.2), part take, both carry to <crew> <bay id> beam_low_l, part put; then beam_low_r (high beams the same). Bring each beam from its slot\'s side of the bay (_l from the bay\'s -x, _r from its +x): it stops outside, lined up, and its put sets it in',
   'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
   'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
 ];
