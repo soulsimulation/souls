@@ -3,20 +3,39 @@
 // would run well under 60 fps at full retina resolution. Rendering at 1 instead of 2 drawing-buffer pixels per CSS
 // pixel cut that GPU time by a third (8.6 → 5.8 ms), so the pixel ratio is the dial:
 //   - every 2 s window the median rAF interval is compared with the display's (the best median seen);
-//   - two slow windows in a row (median > 1.3× the display's) step the pixel ratio down by 15%, never below 1;
+//   - two slow windows in a row (median > 1.3× the display's) step the pixel ratio down by 15%, never below 0.5;
 //   - a step that does not make frames faster (CPU-bound) is undone, and no step down is tried for 2 min;
 //   - after 12 s of full-rate frames it steps back up; if that makes it slow again, it steps down and stays for 60 s.
-// A fast machine never leaves its device ratio (capped at 2, as before). Windows with a stall (> 250 ms: loading, a
-// hidden tab) do not count, and nothing adapts in the first 8 s. `?dpr=fixed` turns it off; `?dpr=<n>` pins a ratio.
+// A fast machine never leaves its device ratio (capped at 2, as before). Nothing adapts in the first 8 s (loading). After
+// that a window with a stall (one frame over 250 ms and over 4× the window's median: a hitch, a hidden tab) does not
+// count, but a renderer that is slow on every frame does: SwiftShader drew Eden at about 2 fps and, when every 2 s
+// window held a frame over 250 ms, it never stepped down. A software renderer (SwiftShader, llvmpipe: no GPU) starts at
+// 0.5 and LiveWorld turns its shadows off. `?dpr=fixed` turns it off; `?dpr=<n>` pins a ratio.
 import type * as THREE from 'three';
 
 const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const MODE = q.get('dpr');
+/** The lowest pixel ratio adaptive resolution steps down to, and where a software renderer starts. */
+export const MIN_PIXEL_RATIO = 0.5;
 
-/** W2b: screenshots use one drawing-buffer pixel per requested viewport pixel, even on slow GPUs. */
-export function worldResolution(renderer: THREE.WebGLRenderer, deviceRatio: number, entityWorld: boolean, shotMode: boolean) {
-  renderer.setPixelRatio(shotMode ? 1 : Math.min(deviceRatio, 2));
-  return entityWorld && !shotMode ? new AdaptiveResolution(renderer, deviceRatio) : null;
+/** A WebGL renderer string that names a software rasterizer (no GPU): SwiftShader, llvmpipe, softpipe. */
+export function softwareRenderer(name: string | null | undefined) {
+  return !!name && /swiftshader|llvmpipe|softpipe|software/i.test(name);
+}
+/** The renderer's WebGL renderer string (unmasked where the browser allows it); null when it cannot be read. */
+export function rendererName(renderer: THREE.WebGLRenderer): string | null {
+  try {
+    const gl = renderer.getContext(), x = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? '') || null;
+  } catch { return null; }
+}
+
+/** W2b: screenshots use one drawing-buffer pixel per requested viewport pixel, even on slow GPUs. A software renderer
+ *  (not in shot mode) starts at MIN_PIXEL_RATIO. */
+export function worldResolution(renderer: THREE.WebGLRenderer, deviceRatio: number, entityWorld: boolean, shotMode: boolean, software = false) {
+  const start = shotMode ? 1 : software ? Math.min(deviceRatio, MIN_PIXEL_RATIO) : Math.min(deviceRatio, 2);
+  renderer.setPixelRatio(start);
+  return entityWorld && !shotMode ? new AdaptiveResolution(renderer, deviceRatio, start) : null;
 }
 
 export class AdaptiveResolution {
@@ -37,11 +56,11 @@ export class AdaptiveResolution {
   // An explicit field, not a parameter property, so Node's strip-only TypeScript loader can run the tests.
   private readonly renderer: THREE.WebGLRenderer;
 
-  constructor(renderer: THREE.WebGLRenderer, deviceRatio: number) {
+  constructor(renderer: THREE.WebGLRenderer, deviceRatio: number, start?: number) {
     this.renderer = renderer;
     this.max = Math.min(deviceRatio, 2);
     const pinned = MODE && Number.isFinite(Number(MODE)) ? Math.max(0.5, Math.min(2, Number(MODE))) : null;
-    this.ratio = pinned ?? this.max;
+    this.ratio = pinned ?? start ?? this.max;
     if (pinned) renderer.setPixelRatio(pinned);
   }
   get pixelRatio() { return this.ratio; }
@@ -53,10 +72,13 @@ export class AdaptiveResolution {
     if (this.last) this.window.push(now - this.last);
     this.last = now;
     if (!this.windowStart) this.windowStart = now;
-    if (now - this.windowStart < 2000) return;
+    // a window is 2 s, held open (up to 10 s) until it has 3 frames, so a renderer at 1 fps is judged too
+    if (now - this.windowStart < 2000 || (this.window.length < 3 && now - this.windowStart < 10_000)) return;
     const iv = this.window; this.window = []; this.windowStart = now;
-    if (iv.length < 10 || iv.some((x) => x > 250) || now - this.started < 8000) { this.slowRuns = 0; return; }
+    if (iv.length < 3 || now - this.started < 8000) { this.slowRuns = 0; return; }
     const s = [...iv].sort((a, b) => a - b), median = s[s.length >> 1];
+    // a stall (one long frame among quicker ones) says nothing of the renderer; a frame that is slow like the rest does
+    if (s[s.length - 1] > Math.max(250, median * 4)) { this.slowRuns = 0; return; }
     this.best = Math.min(this.best, Math.max(median, 1000 / 240), 1000 / 60);   // never judge against less than 60 Hz: a slow machine is slow from its first frame
     const slow = median > this.best * 1.3, fast = median < this.best * 1.08;
     // a step down that did not help: the frame is CPU-bound, fewer pixels only blur it; undo and leave it for 2 min
@@ -66,7 +88,7 @@ export class AdaptiveResolution {
       if (++this.slowRuns >= 2 || (this.justRaised && now - this.justRaised < 6000)) {
         if (this.justRaised && now - this.justRaised < 6000) this.lockedUntil = now + 60_000;
         this.justRaised = 0; this.slowRuns = 0;
-        if (now > this.noDownUntil && this.ratio > 1) { this.lastDown = { from: this.ratio, median }; this.set(Math.max(1, this.ratio * 0.85), now, median); }
+        if (now > this.noDownUntil && this.ratio > MIN_PIXEL_RATIO) { this.lastDown = { from: this.ratio, median }; this.set(Math.max(MIN_PIXEL_RATIO, this.ratio * 0.85), now, median); }
       }
       return;
     }
