@@ -1241,8 +1241,14 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
         "a room behind the building's walls"
     );
     assert!(sight.seen(outside.0, beside.0), "a Soul on the open ground");
-    assert!(!sight.seen(outside.0, below.0), "a Soul inside, from outside");
-    assert!(!sight.seen(below.0, outside.0), "a Soul outside, from inside");
+    assert!(
+        !sight.seen(outside.0, below.0),
+        "a Soul inside, from outside"
+    );
+    assert!(
+        !sight.seen(below.0, outside.0),
+        "a Soul outside, from inside"
+    );
 }
 
 /// #4330, #4339: a move at a thing argument names that thing for viewers, unless it is in a closed container: the
