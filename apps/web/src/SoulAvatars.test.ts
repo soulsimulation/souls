@@ -36,3 +36,11 @@ test('a humanoid portrait frames the head and the top of the shoulders, not the 
   const hatted = soulPortraitView(root, false)!;
   assert.ok(hatted.height < .8 && hatted.target.y - hatted.height / 2 > 1.1, `hatted frame ${hatted.height.toFixed(3)} m`);
 });
+
+test('a mesh carried by a hidden rig frames the mesh, not the rig\'s head bone', () => {
+  const root = new THREE.Group(), wisp = new THREE.Mesh(new THREE.BoxGeometry(.8, 1.2, .8), new THREE.MeshBasicMaterial()); wisp.position.y = 1.2; root.add(wisp);
+  const head = new THREE.Bone(); head.name = 'Head'; head.position.y = 1.55; root.add(head);
+  const rig = new THREE.SkinnedMesh(new THREE.BoxGeometry(.5, 1.75, .3), new THREE.MeshBasicMaterial()); rig.bind(new THREE.Skeleton([head])); rig.visible = false; root.add(rig);
+  const view = soulPortraitView(root, false)!;
+  assert.ok(view.height >= 1.2 * .42 && view.target.y + view.height * view.slack / 2 > 1.8, `the whole top of the wisp is in frame (${view.height.toFixed(3)} m)`);
+});
