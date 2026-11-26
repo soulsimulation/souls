@@ -21,6 +21,7 @@ import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
 import { historyBase, setV2History, V2History } from './history.ts';
 import { streamReadUrl } from './stream-cdn.ts';
+import { arrivalMark } from '../arrival-marks.ts';
 import { claimEarlyReader, replicaUrl, takeEarlyScene, v2Stream } from './early-stream.ts';
 
 // The inline config as the page arrived with it: the app takes (deletes) window.__simConfig at its first config read
@@ -126,6 +127,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (bridge) {
         const v = bridge.view;
         st.takes = v.takes;
+        if (v.takes.chunks.length) arrivalMark('stream-first-take');   // the speed probes: when the page has its first live chunk
         // what the Souls said aloud, and (R3) private turns with their words withheld: one list while neither changes
         if (v.speech !== seenSpeech || v.conversations !== seenTurns) { seenSpeech = v.speech; seenTurns = v.conversations; said = v.conversations.length ? [...v.speech, ...v.conversations] : v.speech; }
         st.ticker = v.ticker; // R3: what the Souls did (take-talk.ts)

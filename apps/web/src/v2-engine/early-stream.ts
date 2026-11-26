@@ -8,6 +8,7 @@
 import { makeReader } from './reader.ts';
 import { streamReadUrl } from './stream-cdn.ts';
 import { apiPath } from '../world-path.ts';
+import { arrivalMark } from '../arrival-marks.ts';
 
 type PageConfig = { v2Stream?: unknown; v2Replica?: unknown; v2StreamOrigin?: unknown; v2Views?: unknown };
 const pageConfig = (): PageConfig | undefined => typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: PageConfig }).__simConfig;
@@ -66,12 +67,12 @@ export class EarlyReader extends EventTarget {
     if (this.started && !this.replaying) this.deliver(x); else this.held.push(x);
   }
   private replay() {
-    this.replaying = true;
+    this.replaying = true; arrivalMark('stream-claimed');
     const step = () => {
       const until = performance.now() + SLICE_MS;
       while (this.held.length && !this.stopped) { this.deliver(this.held.shift()!); if (performance.now() >= until) break; }
       if (this.held.length && !this.stopped) { setTimeout(step, 0); return; }
-      this.replaying = false;
+      this.replaying = false; arrivalMark('stream-replayed');
     };
     setTimeout(step, 0);
   }
