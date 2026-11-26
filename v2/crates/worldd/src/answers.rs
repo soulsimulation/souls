@@ -4480,9 +4480,9 @@ impl Clock {
     }
 
     /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29). The progress answer
-    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted within a tick or two of
-    /// its arrival rather than at its arrival deadline (W11, #4087), and the act is due at its run's own deadline from
-    /// here on. One whose act ends in this tick is dropped, as its answer says more.
+    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted the tick after its commit
+    /// (its place asked as it starts, #4974) rather than at its arrival deadline (W11, #4087), and the act is due at
+    /// its run's own deadline from here on. One whose act ends in this tick is dropped, as its answer says more.
     fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
         let Some(o) = self.open.get(&id) else {
             return;
