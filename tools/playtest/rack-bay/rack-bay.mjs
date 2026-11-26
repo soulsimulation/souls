@@ -293,7 +293,8 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
 
 /** Six Souls' ids by the titles the creator gave (`stageBatch6`), as Ada's copy names them. */
 export async function findIds6(seat) {
-  const a = await seat.cli('query', JSON.stringify([{ find: 'rack' }, { find: 'stand' }, { find: 'tall' }]));
+  // one find for each kind of part: a find names a dozen things at most
+  const a = await seat.cli('query', JSON.stringify([{ find: 'rack frame' }, { find: 'rack beam' }, { find: 'rack bay' }, { find: 'tall frame' }]));
   const found = (a.answers ?? []).flatMap((x) => x.found ?? []);
   const named = (want) => { const f = found.find((x) => x.name === want && /^mars:/.test(x.kind ?? '')); if (!f) throw new Error(`Ada's copy finds no "${want}" (found: ${found.map((x) => x.name).join(', ')})`); return f.id; };
   return {
