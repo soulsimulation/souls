@@ -922,7 +922,7 @@ fn a_thing_whose_room_has_floor_only_by_its_doorway_is_acted_at_from_the_doorway
     let mut g = Kitchen { room: false };
     // A bowl on the table, 1.2 m west of the doorway's mouth.
     let t = target(-1_500_000);
-    let ring = box_ring(150_000, 150_000);
+    let ring = box_ring(150_000, 150_000).map(|c| Vec3::new(c.x - 1_500_000, 0, c.z));
     let from = Some((node(), Vec3::new(5_000_000, 0, 0)));
     for p in [
         within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place by the outline"),
