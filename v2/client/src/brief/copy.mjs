@@ -221,6 +221,8 @@ export const F_COURSE = 80;
 export const F_TITLE = 4;
 /** A Soul's body's public name (worldd `words::NAME`, field 30): its owner's words for it, set by a describe (`{21: id}`). */
 export const F_BODY_NAME = 30;
+/** A room's, a place's or an area's outline (replica `select::F_OUTLINE`): `[[x, z] mm, ...]`, a room's in its own frame. */
+export const F_OUTLINE = 11;
 /** A place's aliases (#3699): a creator's words (`{21: id}`), one alias a line; `find` scores them. */
 export const F_ALIASES = 101;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
@@ -375,6 +377,10 @@ function nodeOf(copy, d, path, own) {
   row.own = d.own;
   // First-day round 4: its course as the record holds it, for `check/aboard.mjs` (not enumerable: never printed)
   if (moving) Object.defineProperty(row, 'course', { value: fields.get(F_COURSE) ?? fields.get(BigInt(F_COURSE)) });
+  // A room's outline ([[x, z] mm, ...], its own frame), for `brief.mjs` `whereOf`: a standing body's node is its
+  // floor's, so the room it stands in is found by it (not enumerable: never printed)
+  const outline = /:room$/.test(kind) ? fields.get(F_OUTLINE) ?? fields.get(BigInt(F_OUTLINE)) : null;
+  if (Array.isArray(outline)) Object.defineProperty(row, 'outline', { value: outline.map((p) => p.map(Number)) });
   // #4837: the public words its text fields hold, by field number (a book's title and first page), for `wordsOf`
   // (not enumerable: printed only where an answer names them)
   const said = saidAt(copy, fields);
