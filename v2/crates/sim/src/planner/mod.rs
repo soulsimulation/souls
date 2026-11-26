@@ -399,7 +399,7 @@ impl Planner {
             }
             None => {
                 trace.line("lookup-none", key);
-                // The tables hold a place back on purpose (a Soul mid-stair, #4171; a crowd's overflow spread over
+                // The tables hold a place back on purpose (a Soul the world carries, mid-stair or off a seat, #4171; a crowd's overflow spread over
                 // passes, A2-5; a body the world holds asks none): the walk waits. A class with no tables is never
                 // answered, and its ask fails every Soul's pass (`Town::spots`): refused now, by name.
                 if self.town.surfaces_for(self.town.size_of(body.id)).is_some() {

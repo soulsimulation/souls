@@ -26,7 +26,8 @@ type Rec=PublicRecord|'loading'|'unavailable';
 /** B3-3: on a world the new engine runs, the card says what the Soul is doing now (the stream's, souls.ts `status`).
  *  Read when this module loads: the page's main takes the inline config, and deletes it, when it mounts. */
 const V2=typeof window!=='undefined'&&!!v2Stream();
-const doingNow=(soul:PublicSoul)=>V2&&soul.doing?doingText(soul.doing,null,soul.id)||null:null;
+/** What it is doing now; `activity`, the one its body is drawn with, names a pose the doing only gives the posture of. */
+const doingNow=(soul:PublicSoul,activity?:string|null)=>V2&&soul.doing?doingText(soul.doing,activity,soul.id)||null:null;
 /** `held`: the viewer pulled out of following this Soul; the button says "Follow again", as the chip's hint does. */
 type Camera={following:boolean;held?:boolean;follow():void;stop():void};
 
@@ -45,7 +46,7 @@ function usePublicRecord(api:Api,soulId:string):Rec{
 /** The fade colour of an older server, as a body (green = present and awake); nothing new reads `fade` otherwise. */
 const fadeBody=(rec:PublicRecord|null):Body|null=>rec?.fade&&['green','yellow','red'].includes(rec.fade.colour)?{state:'awake',doing:null,since:0}:null;
 
-export type SoulCardProps={api:Api;soul:PublicSoul;owner:boolean;signedIn?:boolean;bodyEvent?:Body|null;camera?:Camera};
+export type SoulCardProps={api:Api;soul:PublicSoul;owner:boolean;signedIn?:boolean;bodyEvent?:Body|null;camera?:Camera;activity?:string|null};
 export function SoulCard(props:SoulCardProps){
  const rec=usePublicRecord(props.api,props.soul.id),r=rec==='loading'||rec==='unavailable'?null:rec;
  // COMMON-LINK §2 addendum: the replica's `now` is optional (present only when set); the record always carries it (or null)
@@ -53,13 +54,13 @@ export function SoulCard(props:SoulCardProps){
  const body=newest(readBody(x.body),r?.body??null,props.bodyEvent??null)??fadeBody(r);
  const now=newest(readNow(x.now),r?.now??null);
  const place=placeOf(r?.self?.placePath);
- return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline} doing={doingNow(props.soul)}/>;
+ return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline} doing={doingNow(props.soul,props.activity)}/>;
 }
-function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&{body:Body|null;now:Now|null;place:string|null}){
+function OwnerCard({api,soul,camera,signedIn=true,body,now,place,activity}:SoulCardProps&{body:Body|null;now:Now|null;place:string|null}){
  const {inbox,send}=useSoulInbox(api,soul.id),here=useAgentPresence(soul.id),code=useWindowCode();
  const link=ownerLink(here?.link??null,here);
  const disconnect=async()=>{const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
- return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} doing={doingNow(soul)}
+ return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} doing={doingNow(soul,activity)}
   prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true)}/>;
 }
 
