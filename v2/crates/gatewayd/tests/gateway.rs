@@ -393,6 +393,36 @@ async fn a4_a_client_resumes_from_its_cursor_or_is_told_it_cannot() {
     assert_eq!(o, "stream.cannot-resume");
 }
 
+/// The last device wins, and the socket let go is told so by name (`agent.replaced`, 4001), so its client does not
+/// sign in again at once and take the Soul back: two clients of one Soul did, about seven times a second each.
+#[tokio::test]
+async fn a_socket_replaced_by_a_newer_sign_in_is_closed_as_replaced() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(21));
+    let r = start("replaced", tokens).await;
+    let (mut first, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let (mut second, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let close = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match first.next().await {
+                Some(Ok(Message::Close(c))) => {
+                    return c.map(|c| (u16::from(c.code), c.reason.to_string()));
+                }
+                Some(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(close, Some((gatewayd::REPLACED, "agent.replaced".to_owned())));
+    // The newer socket goes on.
+    put(&mut second, intent(soul(21), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(1));
+}
+
 /// The wall clock, µs from the Unix epoch, for an intent's expiry (world time is real time).
 #[allow(clippy::disallowed_methods)] // a test that sets real expiries reads the wall clock
 fn unix_us() -> i64 {
