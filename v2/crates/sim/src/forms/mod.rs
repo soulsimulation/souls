@@ -1402,6 +1402,13 @@ impl Forms {
                 detail: replica::world_model::show(body),
             });
         }
+        // An act that waits behind its run's seat step (below) keeps its steps as asked: it is turned and fitted to the
+        // body's place once, when it starts and is opened again, never twice.
+        let asked = running
+            .and_then(|old| self.runs.get(&old))
+            .and_then(|fr| fr.runner.step())
+            .is_some_and(posture)
+            .then(|| steps.clone());
         // A turned thing's points are walked to turned with it (C13, #3440).
         let mut steps = steps;
         if node != body
@@ -1435,10 +1442,10 @@ impl Forms {
         // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
         // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
         // moves (a ride, a boat): its seats are left by its own forms. Asked while a sit or rise is still under way, it
-        // waits behind that run and rises first when it starts (#4187). A form with a rise, a sit or a settle of its
-        // own keeps its steps (a sit at a seat walks there by itself), and a walk the runner would skip (an approach to
-        // a hand step's thing already within reach, a cup by the chair, #4086) needs no rise, so that take is made
-        // from the seat.
+        // waits behind that run and is decided when it starts (#4187): after a sit it rises first, after a rise it
+        // walks from where it stands. A form with a rise, a sit or a settle of its own keeps its steps (a sit at a seat
+        // walks there by itself), and a walk the runner would skip (an approach to a hand step's thing already within
+        // reach, a cup by the chair, #4086) needs no rise, so that take is made from the seat.
         let held_in = w.places.as_ref().and_then(|p| {
             p.slots
                 .held_by(body)
@@ -1568,12 +1575,7 @@ impl Forms {
             // A seat taken or left, or a ground posture, runs to its end first, as a cancel lets it: the body is never
             // left half seated nor moved off a legal path. The new act waits, numbered now, and starts as the old run
             // is left after that step (`wake`); a later act takes its place, and the one it replaces ends `left`.
-            if self
-                .runs
-                .get(&old)
-                .and_then(|fr| fr.runner.step())
-                .is_some_and(posture)
-            {
+            if let Some(steps) = asked {
                 self.last += 1;
                 let run = self.last;
                 let waiting = Waiting {

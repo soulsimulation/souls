@@ -232,7 +232,11 @@ export async function soulRetireWait(home, { within = 60_000, sleep = (ms) => ne
       const c = read(home, 'config.json');
       if (p.soul) c.souls = { ...c.souls, [p.soul]: { ...c.souls?.[p.soul], retiredAt: new Date().toISOString() } };
       clear(c);
-      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone; its memory stays here' } : {}) };
+      // First day (26 Nov): its daemon stops and the folder's guide stops listing it, so nothing of it keeps running
+      // (a plain `quit` no longer finds a retired Soul) and the next chat is not told it lives here.
+      if (p.soul) await request(runtimeOf(home, p.soul).socket, { op: 'stop' }).catch(() => {});
+      try { writeGuide(home); } catch { /* the guide is a convenience; the retire is done */ }
+      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone and its client stopped; its memory stays here' } : {}) };
     }
     // The owner's Keep on its card clears the ask (directory `/v1/account/souls/keep`).
     if (state === 'kept') { clear(); return { ok: true, retire: 'kept', soul: p.soul ?? p.grant, retired: false, why: 'Your person kept it. Nothing changed.' }; }
@@ -249,6 +253,7 @@ export async function soulRevoke(home, named, { as, ...io } = {}) {
   if (held) {
     await request(runtimeOf(home, id).socket, { op: 'stop' }).catch(() => {});
     delete creds.souls[id]; put(home, CREDENTIALS, creds);
+    try { writeGuide(home); } catch { /* as retire's */ }
   }
   return { ok: true, revoked: true, soul: { id: row.id, name: row.name ?? null }, account: a.alias, ...(held ? { here: 'unpaired; its memory stays here' } : {}), next: `adopt ${row.name ?? row.id}   (brings it back here)` };
 }
