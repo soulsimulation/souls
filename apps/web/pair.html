@@ -20,7 +20,7 @@
   dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; border-top: 1px solid var(--line); padding-top: 1rem; }
   dt { color: var(--muted); }
   dd { margin: 0; overflow-wrap: anywhere; }
-  #code { font: 600 1.3rem ui-monospace, monospace; letter-spacing: .1em; }
+  #code, #asked-code { font: 600 1.3rem ui-monospace, monospace; letter-spacing: .1em; }
   input[type=text] { font: inherit; padding: .3rem .5rem; width: 12rem; }
   button { font: inherit; padding: .4rem 1rem; margin-top: 1rem; }
   [hidden] { display: none !important; }
@@ -38,6 +38,7 @@
   <h1 id="heading">A device is asking to act as your Soul</h1>
   <p class="warn">Approve only if you started this yourself, on a machine you control, and the code below matches the
     code on your own screen. Anyone who sent you this link can be asking for your Soul.</p>
+  <p id="asked-code"></p>
   <button id="signin" type="button">Sign in</button>
   <form id="who" hidden>
     <label>Test person <input type="text" id="person" autocomplete="off" required></label>
@@ -48,6 +49,7 @@
       <dt>Code</dt><dd id="code"></dd>
       <dt>Device</dt><dd id="device"></dd>
       <dt>Agent</dt><dd id="label"></dd>
+      <dt id="name-row-label" hidden>Name</dt><dd id="name" hidden></dd>
       <dt>Soul</dt><dd id="soul"></dd>
       <dt>Asked</dt><dd id="age"></dd>
       <dt>Now on</dt><dd id="connected"></dd>

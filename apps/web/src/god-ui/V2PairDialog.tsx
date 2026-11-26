@@ -16,7 +16,8 @@ import { countPairing } from '../visitor-counts.ts';
 import { OWNED_CHANGED_EVENT, v2WorldName } from '../v2-engine/owner-mailbox.ts';
 import './approval-card.css';
 
-export type WaitingPair = { code: string; device: string; label: string; soul: string | null; age: number; former: string | null };
+/** `name`: the name a new Soul's agent asked for (`souls.mjs pair --name`), when it asked for one. */
+export type WaitingPair = { code: string; device: string; label: string; soul: string | null; age: number; former: string | null; name?: string | null };
 type Directory = { directory: string };
 
 /** The request for `path` at the directory, signed in as the view-token exchange signs in: a provider session as the
@@ -35,7 +36,8 @@ export function waitingOf(body: unknown): WaitingPair[] {
   if (!Array.isArray(list)) return [];
   return list.filter((w): w is WaitingPair => !!w && typeof w === 'object' && typeof w.code === 'string' && CODE.test(w.code)
     && typeof w.device === 'string' && typeof w.label === 'string' && typeof w.age === 'number' && Number.isFinite(w.age)
-    && (w.soul === null || typeof w.soul === 'string') && (w.former === null || w.former === undefined || typeof w.former === 'string'));
+    && (w.soul === null || typeof w.soul === 'string') && (w.former === null || w.former === undefined || typeof w.former === 'string')
+    && (w.name === null || w.name === undefined || typeof w.name === 'string'));
 }
 
 /** The newest waiting request this tab has not closed, polled while `enabled` and the page is visible. */
@@ -84,7 +86,9 @@ export const ARRIVING_MS = 90_000;
 export function V2PairDialog({ place, request, onDone }: { place: Directory; request: WaitingPair; onDone: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [match, setMatch] = useState(false), [busy, setBusy] = useState(false), [said, setSaid] = useState<string | null>(null);
-  const [name, setName] = useState(''), [soul, setSoul] = useState<string | null>(null), [late, setLate] = useState(false);
+  // trial of 0.137: the Name field starts with the name the agent asked for
+  const asked = request.soul || request.former ? '' : (request.name ?? '').trim().slice(0, 40);
+  const [name, setName] = useState(asked), [soul, setSoul] = useState<string | null>(null), [late, setLate] = useState(false);
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof node.showModal !== 'function') return;
@@ -128,7 +132,7 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
       <button type="button" className="ap-close" aria-label="Close" onClick={close}>×</button>
       <div className="ap-head"><div className="ap-who">
         <span className="ap-kicker">{request.soul ? 'Connect your Soul' : 'New Soul'}</span>
-        <b className="ap-name">{soul && name.trim() ? clip(name, 'Your Soul') : agentWords(request.label)}</b>
+        <b className="ap-name">{(soul || asked) && name.trim() ? clip(name, 'Your Soul') : agentWords(request.label)}</b>
       </div></div>
       {soul ? <>
         <p className="ap-line ap-wait" role="status" data-pair-arriving={soul}><span className="ap-spinner" aria-hidden="true" />Approved. Your Soul is arriving…</p>
