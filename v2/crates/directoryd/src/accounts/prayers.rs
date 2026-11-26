@@ -6,8 +6,9 @@
 //! a Soul's grant has a scope of its own, `soul-<random>-0`, never its world's, so a prayer kept under it reached no
 //! creator). With none named (a world with no creator), under the Soul's own scope, as before. A creator lists and
 //! answers the prayers under its own principal, and under the worlds the list of worlds (W3/G9) names that principal
-//! the creator of, or its own grant's scope when the list has no row for it ([`creator_worlds`]): its own worlds'
-//! prayers, and no other's. The gateway has already checked the grant. A prayer is `waiting` until answered; an answer may be changed, and each answer is given to the Soul's socket until its daemon
+//! the creator of, or its own grant's scope when the list has no row for it ([`creator_worlds`]). A prayer stays with
+//! the creator named when it was sent: a handoff does not move waiting prayers, and a creator of two worlds lists both
+//! worlds' prayers in one list (#5006 row 15 review, M2). The gateway has already checked the grant. A prayer is `waiting` until answered; an answer may be changed, and each answer is given to the Soul's socket until its daemon
 //! says it has it (`delivered`). Text limits are in characters, as today's server counts them.
 
 use super::random;
