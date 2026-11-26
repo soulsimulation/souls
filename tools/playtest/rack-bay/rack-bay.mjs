@@ -139,7 +139,7 @@ async function groundOf(god) {
  *  title alone: no id passes from the creator to them. → {placed: the creator's answer, seen: Ada's find of it} */
 export async function spareFrame(god, { run, both }, seats, bodies, at = AT, log = () => {}) {
   const [x, z] = at.spare, ground = await groundOf(god);
-  const placed = await god('place', 'mars:rack_upright', '--in', ground, '--at', `${x * 1000},0,${z * 1000}`, '--title', SPARE);
+  const placed = await god('place', 'mars:rack_upright', '--in', ground, '--at', `${x},0,${z}`, '--title', SPARE);
   log(`creator: place mars:rack_upright --title "${SPARE}" -> ${placed.ok ? 'ok' : `REFUSED ${placed.code ?? ''} ${placed.detail ?? ''}`}`);
   if (!placed.ok) throw Object.assign(new Error(`the creator's place was refused ${placed.code}`), { answer: placed });
   let seen = [];

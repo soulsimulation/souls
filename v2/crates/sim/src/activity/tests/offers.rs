@@ -11,6 +11,7 @@ use replica::effects::{Actor, Cause, Effect, Event};
 use replica::encode::Value;
 use replica::ids::Id;
 use replica::time::Micros;
+use replica::world_model::show;
 
 use super::{PAIR, World, n, world};
 use crate::activity::offer::present;
@@ -355,6 +356,47 @@ fn c5_three_roles_are_offered_only_when_several_take_the_third() {
         roles,
         ["test:first", "test:second", "test:side", "test:side"]
     );
+}
+
+/// A crew accepted while its members are held elsewhere (its back and a side each still in another activity) starts
+/// once the last of them is free, the side included, and until then says why it has not: the refusal its start last
+/// met, naming the body held and what holds it (the rack trial's crew of four that joined and never started).
+#[test]
+fn c5_a_crew_whose_members_were_held_starts_when_the_last_is_free() {
+    let mut k = super::pair();
+    let mut side = k.roles[1].clone();
+    side.name = n("test:side");
+    k.roles.push(side);
+    k.most = 6;
+    let mut w = world(6, 0xc6);
+    let next = w.tree.to_state().next;
+    w.acts = crate::activity::Activities::new(
+        super::header(w.root),
+        super::rules(&w.souls),
+        next,
+        vec![k],
+    );
+    let back_held = w.pair(1, 4, 500);
+    let side_held = w.pair(2, 5, 500);
+    let asked = w.bodies[1..4].iter().copied().collect();
+    let offer = w.offer(0, asked, 1_000);
+    for who in 1..4 {
+        assert_eq!(w.accept(who, offer, 2_000).expect("accepted"), offer);
+    }
+    assert!(!w.acts.started(offer), "its back is held elsewhere");
+    let why = w.acts.unstarted_why(offer).expect("a reason");
+    assert!(why.contains("body-in-activity"), "{why}");
+    w.leave(1, back_held, 3_000);
+    assert!(!w.acts.started(offer), "its side is still held elsewhere");
+    let why = w.acts.unstarted_why(offer).expect("a reason");
+    assert!(
+        why.contains(&show(w.bodies[2])),
+        "names the side held: {why}"
+    );
+    w.leave(2, side_held, 4_000);
+    assert!(w.acts.started(offer), "it starts once its side is free");
+    assert_eq!(w.acts.unstarted_why(offer), None);
+    assert_eq!(w.acts.members(offer).map(<[_]>::len), Some(4));
 }
 
 /// Trial of 25 Nov: two Souls talking (a started conversation holds both) offered and accepted a follow, and it never
