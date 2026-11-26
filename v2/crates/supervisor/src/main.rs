@@ -125,6 +125,16 @@ fn launch(root: &Path, world: &World) -> i32 {
         eprintln!("launch: build.mismatch: {} is not {hex}", path.display());
         return EXIT_BUILD_MISMATCH;
     }
+    // #4954: a world on a store generation runs only a build that reads it. One from before (a rollback past it) would
+    // claim the old world's record and stop on a restart gap at every start; refused, it touches nothing.
+    if let Ok(Some(label)) = supervisor::generation(&supervisor::world_folder(root, world))
+        && !supervisor::reads_generation(&bytes)
+    {
+        eprintln!(
+            "launch: build.mismatch: {hex} reads no store generation, and the world is on g/{label}/ (#4954)"
+        );
+        return EXIT_BUILD_MISMATCH;
+    }
     println!("launch: world {name} build {hex} (pin from the {from:?})");
     let state = root.join("worlds").join(&name);
     let mut serve = Command::new(&path);
@@ -155,7 +165,8 @@ fn run(args: &[String]) -> Result<i32, String> {
                 let err = |e: replica::effects::Refusal| e.name.to_owned();
                 let describe = |p: archive::Phase| -> Result<String, String> {
                     let mut value = p.json();
-                    let (build, _) = pin(
+                    // Its record where its folder's store generation places it (#4954), as its launcher reads it.
+                    let (build, _) = supervisor::world_pin(
                         store,
                         &root,
                         &World {
