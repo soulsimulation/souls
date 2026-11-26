@@ -312,7 +312,7 @@ export const BUILDSAFE: Record<string, string> = {
 /** What a press answered when the creator's socket closed before the world answered it (`CreatorSession.closed`). */
 export const CLOSED = 'creator.closed';
 export const refusalText = (reason: string) => reason === CLOSED
-  ? 'The connection closed before the world answered (your agent may have signed in as this world\'s creator): try again.'
+  ? 'The world\'s answer did not reach this page (your agent, signed in as this world\'s creator, may hold its connection): look at the world before you press again.'
   : `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
 
 /** The creator's grant among a view token's grants (directoryd `view.rs`: `creator-<scope hex>-<counter>`): the box the

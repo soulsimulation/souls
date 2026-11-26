@@ -78,12 +78,12 @@ test('edits are numbered by the clock, never below the last, so the creator\'s a
   assert.equal(dec(sent.at(-1)!).get(5), 9_000, 'later: the clock again');
 });
 
-test('a socket that closes answers every waiting press creator.closed, in plain words, instead of leaving it Sending for ever', async () => {
+test('a socket that closes answers every waiting press creator.closed, in plain words, instead of leaving it Sending for ever (the edit may have been made)', async () => {
   const { s } = signedIn();
   const a = s.edit({ undo: 'undo' }), b = s.edit({ ops: [{ op: 'remove', node: WORLD }] });
   s.closed();
   assert.deepEqual([(await a as { reason: string }).reason, (await b as { reason: string }).reason], [CLOSED, CLOSED]);
-  assert.match(refusalText(CLOSED), /closed before the world answered.*try again/);
+  assert.match(refusalText(CLOSED), /answer did not reach this page.*look at the world before you press again/);
   s.frame(answer(100, 1, 3));   // a late answer finds nothing waiting
 });
 
