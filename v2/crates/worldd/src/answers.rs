@@ -1113,6 +1113,21 @@ pub fn now() -> Micros {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+        .saturating_add(test_step())
+}
+
+/// O10 (#2806): a test's step of the machine's clock, µs, read from the file `$WORLDD_TEST_CLOCK_STEP` names at each
+/// reading, so a test steps it while the world runs or before it starts (`tests/host_faults.rs`); a debug build's
+/// only.
+fn test_step() -> Micros {
+    #[cfg(debug_assertions)]
+    if let Some(f) = std::env::var_os("WORLDD_TEST_CLOCK_STEP") {
+        return std::fs::read_to_string(f)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+    }
+    0
 }
 
 /// The wall clock read once, at start, carried on by the monotonic clock (K7): µs from the Unix epoch, never a step.
