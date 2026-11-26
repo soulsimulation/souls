@@ -333,7 +333,8 @@ apply() {
   mkdir -p "$STATE"
   chmod 700 "$STATE"
   if [ -L "$STATE/current" ]; then
-    run=$(cd "$STATE/current" && pwd)
+    # -P: the run's own folder, not the link's name, so `last` below names it once `current` is removed
+    run=$(cd "$STATE/current" && pwd -P)
     say "resuming the move in $run"
   else
     check_new "$new"

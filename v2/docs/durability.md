@@ -125,6 +125,16 @@ ignores the same. The modelled store refuses the stale writer.
     the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
     every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
 
+15. **What a sync waits for is the disk's, measured (#4973).** Answers wait for both syncs (rule 14), so another
+    process's writes on the same disk can hold them. On the shared build machine's root disk (a consumer NVMe drive
+    without power-loss protection, 85 % full), 600 MB written by another process and written back by the kernel 30 s
+    later held 20 syncs a second of 2 KiB each for seconds whatever the way of syncing: an append and `fdatasync`
+    4.5 s, a write into room already written and synced (no journal commit) 3.7 s, `O_DSYNC` 3.7 s,
+    `O_DIRECT | O_DSYNC` (one FUA write, no cache flush) 2.3 s, against 14 to 37 ms without it. On the machine's other
+    disk (SATA, with power-loss protection) the same four kept under 120 ms, the 600 MB written on that disk included.
+    The stall is the disk's queue, not the log's way of syncing; a world's folder belongs on a disk with power-loss
+    protection, or on one of its own. `v2/tools/bench/stage2a/rung.sh` with `INJECT=<MB>` measures it on answers.
+
 ## What would quietly break this
 
 - **A lock or a lease alone.** A paused holder wakes and writes; only the store's check of the version stops it.
