@@ -1157,6 +1157,7 @@ mod w16_current_account_tests {
             path: path.into(),
             bearer: Some(format!("test:{who}")),
             soul: None,
+            creator: None,
             body: body.to_string().into_bytes(),
         };
         let worlds = app.worlds.as_ref().unwrap();
