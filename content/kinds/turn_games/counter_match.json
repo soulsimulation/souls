@@ -453,7 +453,8 @@
             60,
             650
           ],
-          "tint": "wood"
+          "tint": "wood",
+          "collide": true
         },
         {
           "kind": "box",
