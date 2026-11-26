@@ -557,6 +557,7 @@ impl Pairing {
         tx.commit().map_err(|_| ("store", None))?;
         drop(db);
         self.note_world(&code, &grant).map_err(|e| (e, None))?;
+        self.note_name(&code, &grant).map_err(|e| (e, None))?;
         Ok(grant)
     }
 
