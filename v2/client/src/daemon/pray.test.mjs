@@ -29,7 +29,9 @@ const CLI = join(here, '../cli/souls.mjs');
 const GOD = join(here, '../creator/souls-god.mjs');
 const SOUL = 's_g11test';
 const WORLD_SCOPE = '4d'.repeat(16);
-const GRANT = `soul-${WORLD_SCOPE}-2`;
+// A paired Soul's grant has a scope of its own, never its world's (directoryd pairing: `soul-<random>-0`); the gateway
+// names its world's creator on each prayer (#5006 row 15).
+const GRANT = `soul-${'5e'.repeat(16)}-2`;
 const CREATOR = `creator-${WORLD_SCOPE}-1`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -133,7 +135,8 @@ before(async () => {
   const [, directory] = await run(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1',
     '--store', join(dir, 'accounts.db'), '--test-sign-in', '--mailbox-key', key], /listening on (\S+)\n/);
   const [, gw] = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens,
-    '--build', `1220${'ab'.repeat(32)}`, '--receipts', join(dir, 'world', 'receipts'), '--mailbox', directory, '--mailbox-key', key], /listening (\S+)\n/);
+    '--build', `1220${'ab'.repeat(32)}`, '--receipts', join(dir, 'world', 'receipts'), '--mailbox', directory, '--mailbox-key', key,
+    '--creator', CREATOR.replace(/^creator-/, ''), '--directory', directory], /listening (\S+)\n/);
   gateway = `ws://${gw}/v2/ws`;
   mkdirSync(home);
   writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway } } }));
