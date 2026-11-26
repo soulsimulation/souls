@@ -29,7 +29,7 @@ use crate::effects::Refusal;
 use crate::encode::{Value, decode, encode};
 use crate::ids::{Hash, Id, Purpose, Version};
 use crate::tree::{Sealed, Tree};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 type R<T> = Result<T, Refusal>;
 
@@ -276,7 +276,7 @@ pub struct Copy {
     /// How many times each hash is named: once for each scope node at it, and once by each held record that names it
     /// below. A record named by nothing is let go, with what only it named: a sync's let go follows what the sync
     /// changed, not every record held (Eden's 9,588, walked at each confirm, held a daemon's loop for half a second).
-    named: HashMap<Vec<u8>, u32>,
+    named: BTreeMap<Vec<u8>, u32>,
     /// The bytes of every record held.
     bytes: u64,
 }
@@ -471,7 +471,11 @@ impl Copy {
         let missing = d
             .roots
             .values()
-            .chain(d.taken.iter().flat_map(|t| self.below.get(t).into_iter().flatten()))
+            .chain(
+                d.taken
+                    .iter()
+                    .flat_map(|t| self.below.get(t).into_iter().flatten()),
+            )
             .find(|h| !self.below.contains_key(*h))
             .cloned();
         if let Some(h) = missing {
