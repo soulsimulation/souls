@@ -44,7 +44,7 @@ fn grips_world(d: &Path) -> String {
     for (k, v) in top.iter_mut() {
         match (k.as_str(), v) {
             ("kinds", json::Value::Arr(a)) => {
-                for (r, name, _) in refs {
+                for (r, name, _, _) in refs {
                     let hash = replica::encode::to_hex(&replica::ids::sha256(
                         format!("souls/testworld/{r}").as_bytes(),
                     ));
@@ -57,9 +57,9 @@ fn grips_world(d: &Path) -> String {
                 }
             }
             ("things", json::Value::Arr(a)) => {
-                for (r, name, at) in refs {
+                for (r, _, id, at) in refs {
                     a.push(json::Value::Obj(vec![
-                        ("id".into(), json::Value::s(plain(name))),
+                        ("id".into(), json::Value::s(id)),
                         ("def".into(), json::Value::s(r)),
                         ("ref".into(), json::Value::s(r)),
                         ("parent".into(), json::Value::Null),
@@ -68,7 +68,7 @@ fn grips_world(d: &Path) -> String {
                             json::Value::Arr([at.x / 1000, 0, at.z / 1000, 0].map(num).to_vec()),
                         ),
                         ("scale_ppm".into(), num(1_000_000)),
-                        ("name".into(), json::Value::s(plain(name))),
+                        ("name".into(), json::Value::s(id)),
                     ]));
                 }
             }
@@ -230,7 +230,7 @@ async fn grips_crews_of_two_four_and_six_keep_their_grips_through_a_leave_and_a_
         ),
         (
             "a timber rail",
-            im.nodes["timber_rail"],
+            im.nodes["timber-rail"],
             rail_at(),
             Load::of(&carpentry("timber_rail.json")).unwrap(),
             vec![0, 1, 2, 3],
@@ -238,7 +238,7 @@ async fn grips_crews_of_two_four_and_six_keep_their_grips_through_a_leave_and_a_
         ),
         (
             "a timber bundle",
-            im.nodes["timber_bundle"],
+            im.nodes["timber-bundle"],
             bundle_at(),
             Load::of(&construction("timber_bundle.json")).unwrap(),
             vec![0, 1, 2, 3, 4, 5],
