@@ -277,7 +277,9 @@ export async function drain(config) {
   }
 }
 
-if (isMain(import.meta.url)) {
+// No top-level await: drain imports archive-world.mjs, which imports this module, so an entry module still awaiting its
+// own evaluation would never settle that import (Node exits 13, every request set aside unplaced; 26 Nov).
+if (isMain(import.meta.url)) setImmediate(async () => {
   try {
     if (process.getuid?.() !== 0) fail('placement-root-only');
     const child = process.argv[2] === '--as-souls';
@@ -304,4 +306,4 @@ if (isMain(import.meta.url)) {
       if (mode === 'publish') await publishData(config, phase);
     } else await drain(config);
   } catch (error) { console.error(`placement: ${error.message}`); process.exitCode = 1; }
-}
+});

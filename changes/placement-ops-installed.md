@@ -1,4 +1,4 @@
 ---
-type: internal
+type: fix
 ---
-The installed world-placement and archive programs load where install.sh puts them: they no longer import a repository file outside the install.
+New worlds get placed: the placement program now loads where it is installed and no longer stalls on its own archive step, which had set every create request aside.
