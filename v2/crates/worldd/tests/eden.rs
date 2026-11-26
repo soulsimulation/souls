@@ -172,6 +172,18 @@ fn serve_entries(
     tag: &str,
     lineage: Scope,
 ) -> (Served, Client, PathBuf, Vec<String>) {
+    serve_seeded(facts, entries, &[], at, tag, lineage)
+}
+
+/// [`serve_entries`], `seed` given the further arguments `more` (`--stock <file>`).
+fn serve_seeded(
+    facts: &str,
+    entries: &str,
+    more: &[&str],
+    at: &str,
+    tag: &str,
+    lineage: Scope,
+) -> (Served, Client, PathBuf, Vec<String>) {
     let dir = std::env::temp_dir().join(format!("eden-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let worldd = env!("CARGO_BIN_EXE_worldd");
@@ -179,6 +191,7 @@ fn serve_entries(
         .args(["seed", "--facts", facts, "--dir"])
         .arg(&dir)
         .args(["--entries", entries, "--souls", "0", "--at", at])
+        .args(more)
         .output()
         .unwrap();
     println!("seed: {}", String::from_utf8_lossy(&seeded.stdout).trim());
@@ -5584,6 +5597,621 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// What an ask on [`INDOOR`] should get: done, refused by this name because the ask cannot be done as things stand
+/// (the lamp is already on), or a known gap, printed and not checked.
+#[derive(Clone, Copy, Debug)]
+enum Want {
+    Done,
+    Refused(&'static str),
+    Gap(&'static str),
+}
+
+/// One building's indoor things, asked in order by one Soul born at `at` (`x,z` m, outside its door): each ask is a
+/// row `(what a person asks, verb, thing, what it should get)`; a later ask starts where the one before left the body
+/// (seated, lying, holding something), as a person's next ask does. `rise` takes no thing.
+type Visit = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str, Option<&'static str>, Want)],
+);
+
+use Want::{Done, Gap, Refused};
+
+/// Eden's indoor things a person's agent would ask about (Eden audit, 26 Nov): the act the client's look offers for
+/// each, as a person would ask it, from outside the building or from where the last ask left the body. Eden's lamps,
+/// pendants, candles and the teacher's computer start on, so asking to turn one on is refused `field_differs`.
+const INDOOR: &[Visit] = &[
+    (
+        "house 1 living room",
+        "34.0,15.0",
+        &[
+            ("sit on the sofa", "eden:sit", Some("e_35c2bab0"), Done),
+            (
+                "turn on the radio (from the sofa)",
+                "eden:switch_on",
+                Some("e_f04374e2"),
+                Done,
+            ),
+            (
+                "tune the radio",
+                "eden:tune_dance_band",
+                Some("e_f04374e2"),
+                Done,
+            ),
+            (
+                "take a book from the bookcase",
+                "eden:take",
+                Some("e_64a33a3a"),
+                Done,
+            ),
+            ("sit in the armchair", "eden:sit", Some("e_f8fec424"), Done),
+            (
+                "recline the armchair",
+                "eden:recline",
+                Some("e_f8fec424"),
+                Done,
+            ),
+            (
+                "turn on the floor lamp (on already)",
+                "eden:switch_on",
+                Some("e_2140621d"),
+                Refused("field_differs"),
+            ),
+            (
+                "turn off the floor lamp (from the armchair)",
+                "eden:switch_off",
+                Some("e_2140621d"),
+                Done,
+            ),
+            (
+                "turn off the pendant",
+                "eden:switch_off",
+                Some("e_ac640ad0"),
+                Done,
+            ),
+            ("flop on the sofa", "eden:flop", Some("e_35c2bab0"), Done),
+            (
+                "lie on the sofa",
+                "eden:lie",
+                Some("e_35c2bab0"),
+                Gap("its places are seats"),
+            ),
+        ],
+    ),
+    (
+        "house 1 kitchen",
+        "34.0,15.0",
+        &[
+            ("take the cup", "eden:take", Some("e_36478653"), Done),
+            (
+                "drink from the cup (no tea in it)",
+                "eden:sip",
+                Some("e_36478653"),
+                Refused("field_differs"),
+            ),
+            (
+                "turn on the stove",
+                "eden:switch_on",
+                Some("e_a718de40"),
+                Done,
+            ),
+            ("turn on the sink", "eden:turn_on", Some("e_092d77a4"), Done),
+            ("open the fridge", "eden:open", Some("e_5aad75d3"), Done),
+            ("close the fridge", "eden:close", Some("e_5aad75d3"), Done),
+            (
+                "sit on a kitchen chair",
+                "eden:sit",
+                Some("e_685266be"),
+                Done,
+            ),
+            (
+                "wipe the table (from the chair)",
+                "eden:wipe",
+                Some("e_5f346b62"),
+                Done,
+            ),
+            (
+                "turn off the kitchen pendant",
+                "eden:switch_off",
+                Some("e_2149a57f"),
+                Done,
+            ),
+        ],
+    ),
+    (
+        "classroom",
+        "42.0,3.0",
+        &[
+            (
+                "sit on a classroom chair",
+                "eden:sit",
+                Some("e_4da5c47c"),
+                Done,
+            ),
+            (
+                "take the lectern (from the chair)",
+                "eden:take_the_lectern",
+                Some("e_1b9fc3f4"),
+                Done,
+            ),
+            ("step down", "eden:step_down", Some("e_1b9fc3f4"), Done),
+            (
+                "attend the lecture",
+                "eden:attend",
+                Some("e_1b9fc3f4"),
+                Done,
+            ),
+            (
+                "open the lockers (from the lecture)",
+                "eden:open",
+                Some("e_2a871461"),
+                Done,
+            ),
+            (
+                "take a book from the shelf",
+                "eden:take",
+                Some("e_61af968e"),
+                Done,
+            ),
+            (
+                "work at the teacher's desk",
+                "eden:work",
+                Some("e_dd6b5ce1"),
+                Gap("out-of-reach of its keys from where its walk ends"),
+            ),
+            (
+                "turn off the teacher's computer",
+                "eden:switch_off",
+                Some("e_dd6b5ce1"),
+                Gap("out-of-reach of its power button from where its walk ends"),
+            ),
+            (
+                "turn off the screen",
+                "eden:switch_off",
+                Some("e_ad42afe6"),
+                Done,
+            ),
+        ],
+    ),
+    (
+        "library",
+        "74.0,-1.0",
+        &[
+            ("sit in an armchair", "eden:sit", Some("e_1f3666fe"), Done),
+            (
+                "turn off the desk lamp (from the armchair)",
+                "eden:switch_off",
+                Some("e_e608452b"),
+                Done,
+            ),
+            ("write at the desk", "eden:write", Some("e_0f7fb44b"), Done),
+            (
+                "take a book from the pile",
+                "eden:take",
+                Some("e_e27ed1a2"),
+                Done,
+            ),
+            (
+                "turn on the floor lamp (off)",
+                "eden:switch_on",
+                Some("e_19f5a481"),
+                Done,
+            ),
+            (
+                "work at the library's office desk",
+                "eden:work",
+                Some("e_d7e49dd3"),
+                Done,
+            ),
+        ],
+    ),
+    (
+        "cafe",
+        "96.5,25.0",
+        &[
+            (
+                "drink a cup of coffee",
+                "eden:sip",
+                Some("e_2bdee40b"),
+                Gap("only its holder sips"),
+            ),
+            (
+                "put out the candle",
+                "eden:put_out",
+                Some("e_63d14e62"),
+                Done,
+            ),
+            ("take the kettle", "eden:take", Some("e_d77094d8"), Done),
+            ("sit on a stool", "eden:sit", Some("e_daded5b3"), Done),
+            (
+                "sit on the cafe sofa (from the stool)",
+                "eden:sit",
+                Some("e_16ce6ce0"),
+                Done,
+            ),
+        ],
+    ),
+    (
+        "study",
+        "-113.0,60.0",
+        &[
+            (
+                "sit at the piano (from the door)",
+                "eden:sit",
+                Some("e_cdc5a1d6"),
+                Gap("a bare sit on a piano"),
+            ),
+            ("play the piano", "eden:play", Some("e_cdc5a1d6"), Done),
+            ("stop playing", "eden:stop", Some("e_cdc5a1d6"), Done),
+            (
+                "sit on the study sofa",
+                "eden:sit",
+                Some("e_209f9f2f"),
+                Done,
+            ),
+        ],
+    ),
+    (
+        "lake cabin",
+        "-117.0,-62.0",
+        &[
+            (
+                "warm up by the hearth",
+                "eden:warm",
+                Some("e_6b5e5d37"),
+                Done,
+            ),
+            ("open the chest", "eden:open", Some("e_56cf53c5"), Done),
+            ("close the chest", "eden:close", Some("e_56cf53c5"), Done),
+        ],
+    ),
+    (
+        "suburb house upstairs",
+        "178.8,39.2",
+        &[
+            ("sit on the toilet", "eden:sit", Some("e_d427d095"), Done),
+            (
+                "flush the toilet (from the seat)",
+                "eden:flush",
+                Some("e_d427d095"),
+                Done,
+            ),
+            (
+                "wash hands at the basin",
+                "eden:turn_on",
+                Some("e_03c0fd0a"),
+                Done,
+            ),
+            ("fill the bath", "eden:fill", Some("e_e7f2407a"), Done),
+            ("lie in the bath", "eden:lie", Some("e_e7f2407a"), Done),
+            (
+                "open the wardrobe (from the bath)",
+                "eden:open",
+                Some("e_032cfe40"),
+                Done,
+            ),
+            ("take a garment", "eden:take", Some("e_032cfe40"), Done),
+            ("lie on the bed", "eden:lie", Some("e_a9988e06"), Done),
+            (
+                "sit on the bed",
+                "eden:sit",
+                Some("e_a9988e06"),
+                Gap("its places are for lying"),
+            ),
+        ],
+    ),
+    (
+        "pub",
+        "298.0,-14.0",
+        &[
+            ("throw darts", "eden:throw", Some("e_a13b47f5"), Done),
+            ("play the arcade", "eden:play", Some("e_263477b5"), Done),
+            ("play pool", "eden:play", Some("e_6de8bcd1"), Done),
+        ],
+    ),
+];
+
+/// Eden's indoor things do what a person asks (Eden audit, 26 Nov): each building of [`INDOOR`] is seeded and served
+/// on its own, one Soul born outside it, and its asks sent in order; each answer is printed as a row
+/// `INDOOR <building> | <ask> | <verb> | <answer> | <wanted>`. Every ask wanted done ends done, every ask wanted
+/// refused is refused by its name; a known gap is printed only. `INDOOR_ONLY=<words>` runs the buildings whose name
+/// holds them. Needs facts exported with Eden's map (`export.ts --map content/worlds/eden/map.json`), as live Eden's
+/// things name their entries.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn indoor_things_do_what_a_person_asks() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let only = std::env::var("INDOOR_ONLY").ok();
+    let mut failed = Vec::new();
+    for (i, (building, at, asks)) in INDOOR.iter().enumerate() {
+        if only.as_deref().is_some_and(|o| !building.contains(o)) {
+            continue;
+        }
+        let (served, mut soul, dir) = serve(&facts, at, &format!("indoor{i}"), lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+        for (ask, verb, thing, want) in asks.iter() {
+            let target = thing.map(|t| im.nodes[t]);
+            let answer = soul.act_within(verb, target, BTreeMap::new(), 240_000_000);
+            println!("INDOOR {building} | {ask} | {verb} | {answer:?} | {want:?}");
+            let ok = match want {
+                Done => answer.is_ok(),
+                Refused(name) => answer.as_ref().is_err_and(|e| e == name),
+                Gap(why) => {
+                    println!("INDOOR gap: {ask}: {why}");
+                    true
+                }
+            };
+            if !ok {
+                failed.push(format!(
+                    "{building}: {ask} ({verb}) {answer:?}, wanted {want:?}"
+                ));
+            }
+        }
+        drop(served);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Each `eden:book` the world's log creates, in order: its node, its parent (a body's hand for a take, a table for a
+/// placed copy) and its fields.
+fn books_made(dir: &Path) -> Vec<(Id, Id, BTreeMap<u64, Value>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if let Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node,
+                        kind,
+                        pose,
+                        fields,
+                        ..
+                    } = c.change
+                        && replica::world_model::plain(kind.as_str()) == "eden:book"
+                    {
+                        out.push((node, pose.frame.node, fields));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The public words (key 27) a whole sync of the world in `dir` gets beside its records, by reference: asked on the
+/// world's own socket as the gateway asks (R5b's frames: the place's hash, then every record it reaches, 64 to a
+/// request), with no actor.
+fn served_words(dir: &Path) -> BTreeMap<Id, Vec<u8>> {
+    use replica::sync::{self, Copy, wire};
+    let mut s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    let mut words = BTreeMap::new();
+    let mut ask = |m: BTreeMap<u64, Value>| -> BTreeMap<u64, Value> {
+        let bytes = encode(&Value::Map(m)).unwrap();
+        s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&bytes).unwrap();
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).unwrap();
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut frame).unwrap();
+        let Value::Map(a) = decode(&frame).unwrap().value else {
+            panic!("a sync answer")
+        };
+        if let Some(Value::Array(pairs)) = a.get(&worldd::views::names::PUBLIC_WORDS) {
+            for p in pairs {
+                if let Value::Array(p) = p
+                    && let [r, Value::Bytes(w)] = p.as_slice()
+                {
+                    words.insert(replica::effects::read_id(r).unwrap(), w.clone());
+                }
+            }
+        }
+        a
+    };
+    let mut copy = Copy::default();
+    let a = ask(BTreeMap::from([
+        (wire::ASK, Value::Uint(1)),
+        (wire::IDS, Value::Array(vec![])),
+    ]));
+    let (ids, hashes) = sync::read_hashes(&a).expect("hashes");
+    let mut d = copy.compare(&ids, hashes);
+    for n in 2.. {
+        let asked = copy.ask(&mut d, wire::RECORDS_MOST);
+        if asked.is_empty() {
+            break;
+        }
+        let hs = asked.iter().cloned().map(Value::Bytes).collect();
+        let a = ask(BTreeMap::from([
+            (wire::ASK, Value::Uint(n)),
+            (wire::RECORDS, Value::Array(hs)),
+        ]));
+        copy.take(&mut d, &asked, sync::read_records(&a).expect("records"))
+            .expect("the records match their hashes");
+    }
+    copy.finish(d).expect("the sync finishes");
+    words
+}
+
+/// #4837: books carry their titles and first pages as world facts, on Eden as it is served, seeded with its stock
+/// (`seed --stock content/worlds/eden/stock.json`). Souls born by the library's door each walk to a different shelf
+/// (bookcases and bookshelves) and take a book. Each book made holds, as its title and first page (eden:book's fields
+/// 29 and 30), references to one row of `content/library/books.json`: the row at the top of that shelf's pile, the
+/// same as `worldd::stock` works out from the same facts and files again here (drawn by nothing: the same world gives
+/// the same book). At least three different books are taken. The one book placed on its own (commons-reading-book)
+/// carries its row from the world's start. Every reference's words, as the world serves them beside the record, are
+/// that row's title and first page, read here from the library file itself.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn books_carry_their_titles_and_first_pages_from_their_shelves() {
+    use replica::rules::json::Value as Json;
+    let facts = facts_path();
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let stock_file = format!("{root}/content/worlds/eden/stock.json");
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let mut kinds = Vec::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut kinds);
+    let data = worldd::stock::Data::load(Path::new(&stock_file)).expect("the stock file");
+    let facts_json = replica::rules::json::parse(&text).unwrap();
+    let want = worldd::stock::World::of(&data, &facts_json, &im.nodes, &im.tree, &kinds)
+        .expect("the stock");
+    assert!(want.notes.is_empty(), "{:?}", want.notes);
+    println!(
+        "stock: {} containers stocked, {} placed copies",
+        want.stocks.len(),
+        want.placed.len()
+    );
+    // The library's own rows: a reference's row, title and first page.
+    let rows = data.libraries["books"]
+        .get("books")
+        .and_then(Json::arr)
+        .unwrap()
+        .to_vec();
+    let row_of = |fields: &BTreeMap<u64, Value>| -> Option<(usize, String, String)> {
+        let at = |n: u64| replica::audience::reference(fields.get(&n)?);
+        let (t, p) = (at(29)?, at(30)?);
+        let i =
+            (0..rows.len()).find(|&i| worldd::stock::reference("books", "title", i) == Some(t))?;
+        assert_eq!(
+            worldd::stock::reference("books", "first_page", i),
+            Some(p),
+            "the title and the first page are one row's"
+        );
+        let words = |c: &str| rows[i].get(c).and_then(Json::str).unwrap().to_owned();
+        assert_eq!(want.words.get(&t), Some(&words("title").into_bytes()));
+        assert_eq!(want.words.get(&p), Some(&words("first_page").into_bytes()));
+        Some((i, words("title"), words("first_page")))
+    };
+
+    let shelves = w10_things(
+        &facts,
+        (74.0, -1.0),
+        &[("core-bookcase@1", 3), ("core-bookshelf@1", 3)],
+    );
+    let (served, _first, dir, _) = serve_seeded(
+        &facts,
+        &format!("{root}/content/kinds"),
+        &["--stock", &stock_file],
+        "74.0,-1.0",
+        "books",
+        lineage,
+    );
+    // Its first record, the import: the placed book carries its row from the start.
+    let placed = facts_json
+        .get("things")
+        .and_then(Json::arr)
+        .unwrap()
+        .iter()
+        .find(|t| t.get("name").and_then(Json::str) == Some("commons-reading-book"))
+        .and_then(|t| im.nodes.get(t.get("id")?.str()?))
+        .copied()
+        .expect("the commons' book");
+    let made = books_made(&dir);
+    let (_, _, start) = made
+        .iter()
+        .find(|(n, ..)| *n == placed)
+        .expect("the commons' book is imported");
+    let carried = want
+        .placed
+        .get(&placed)
+        .expect("the commons' book carries a row");
+    for (n, v) in carried {
+        assert_eq!(start.get(n), Some(v), "field {n} of the commons' book");
+    }
+    let (_, title, page) = row_of(start).expect("the commons' book has a title and a first page");
+    println!("BOOK commons-reading-book: \"{title}\": {page}");
+
+    let mut known: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+    let souls: Vec<(Client, Option<Id>)> = (0..shelves.len())
+        .map(|i| {
+            let soul = join(&dir, 2 + i as u64, lineage);
+            soul.0
+                .set_read_timeout(Some(Duration::from_secs(600)))
+                .unwrap();
+            let now: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+            let body = now.difference(&known).next().copied();
+            known = now;
+            (soul, body)
+        })
+        .collect();
+    let threads: Vec<_> = souls
+        .into_iter()
+        .zip(&shelves)
+        .map(|((mut soul, body), (def, id, _))| {
+            let (shelf, def, id) = (im.nodes[id.as_str()], *def, id.clone());
+            std::thread::spawn(move || {
+                let walked =
+                    soul.act_within("eden:walk", Some(shelf), BTreeMap::new(), 300_000_000);
+                let took = soul.act_within("eden:take", Some(shelf), BTreeMap::new(), 300_000_000);
+                (def, id, shelf, body, walked, took)
+            })
+        })
+        .collect();
+    let answers: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    let made = books_made(&dir);
+    // The world's words as a client's sync gets them (the gateway's path): beside each record that holds a reference.
+    std::thread::sleep(worldd::SEAL_EVERY * 2);
+    let words = served_words(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let served_as = |fields: &BTreeMap<u64, Value>, n: u64, want: &str| {
+        let r = replica::audience::reference(fields.get(&n).expect("the field")).unwrap();
+        assert_eq!(
+            words
+                .get(&r)
+                .map(|w| String::from_utf8_lossy(w).into_owned()),
+            Some(want.to_owned()),
+            "field {n}'s words, served beside its record"
+        );
+    };
+    let (_, title, page) = row_of(start).unwrap();
+    served_as(start, 29, &title);
+    served_as(start, 30, &page);
+    let mut titles = std::collections::BTreeSet::new();
+    for (def, id, shelf, body, walked, took) in answers {
+        println!("TAKE {def} {id}: walk {walked:?}; take {took:?}");
+        if took.is_err() {
+            continue;
+        }
+        let body = body.expect("the Soul's body");
+        let (_, _, fields) = made
+            .iter()
+            .find(|(_, held, _)| *held == body)
+            .expect("a book in the body's hand");
+        let expected = want
+            .stocks
+            .get(&shelf)
+            .expect("a stocked shelf")
+            .carried(None);
+        assert_eq!(
+            fields.get(&29),
+            expected.get(&29),
+            "{id}: the top of its pile's title"
+        );
+        assert_eq!(fields.get(&30), expected.get(&30), "{id}: its first page");
+        let (row, title, page) = row_of(fields).expect("a title and a first page");
+        println!("BOOK {def} {id}: row {row} \"{title}\": {page}");
+        served_as(fields, 29, &title);
+        served_as(fields, 30, &page);
+        titles.insert(title);
+    }
+    assert!(
+        titles.len() >= 3,
+        "three different books from three shelves, got {titles:?}"
+    );
+}
+
 /// One ask of the outdoor audit: what a person's agent asks of a thing on Eden's open ground.
 struct Ask {
     /// The kind, as the audit's table names it.
@@ -6447,4 +7075,139 @@ fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
         }
     }
     out
+}
+
+/// The quad's fountain, at (-12, -97) m, in the middle of Eden's arrival (`place-region-campus-quad`).
+const QUAD_FOUNTAIN: &str = "e_ce79121a";
+
+/// Each body's places in the world's log in `dir`, in order, by the body's id: the node it stood on and its position
+/// in that node's frame, µm.
+fn body_places(dir: &Path) -> BTreeMap<Id, Vec<(Id, replica::pose::Vec3)>> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::<Id, Vec<_>>::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                out.entry(id)
+                    .or_default()
+                    .push((pose.frame.node, pose.position));
+            }
+        }
+    }
+    out
+}
+
+/// W9 (#4085) on a served Eden: the import's one-way check walked no way back to the quad within 600 s from the floors
+/// of two old-town buildings, the bell tower (`e_1277cee2`) and the south arcade's first shop (`e_47f02c93`), and from
+/// seats in the shop. Here Souls born at the quad walk there the normal way (a walk to the floor, a walk to the seat,
+/// which ends at its stand point), and from there to the quad's fountain, all at once: each walk's answer, its time
+/// and where the body ends (from the world's log) are printed. None is stuck: each walk is answered with a receipt
+/// within the act's expiry, the walk in ends on the floor it was sent to (a seat's: the floor under it), and the walk
+/// back ends on the open ground by the fountain.
+// A real process on the real clock: the answers' seconds are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let names: BTreeMap<Id, String> = im.nodes.iter().map(|(k, v)| (*v, k.clone())).collect();
+    let name_of = |n: Id| names.get(&n).cloned().unwrap_or_else(|| format!("{n:?}"));
+    let (ground, fountain) = (im.nodes["ground"], im.nodes[QUAD_FOUNTAIN]);
+    // The bell tower's second floor up, the shop's two floors, the shop's sofa (upstairs) and its bench (downstairs),
+    // each with the floor the walk in ends on.
+    let targets = [
+        ("e_1277cee2/floor-2", "e_1277cee2/floor-2"),
+        ("e_47f02c93/floor-0", "e_47f02c93/floor-0"),
+        ("e_47f02c93/floor-1", "e_47f02c93/floor-1"),
+        ("e_c4e5895b", "e_47f02c93/floor-1"),
+        ("e_b26197b0", "e_47f02c93/floor-0"),
+    ];
+    let lineage = im.nodes["world"].scope();
+    let (served, first, dir, _) = serve_lines(&facts, "-12.0,-92.0", "w9", lineage);
+    // One Soul a target, each joined in turn so its body is known by the rows it adds.
+    let (mut first, mut souls, mut known) = (Some(first), Vec::new(), Vec::<Id>::new());
+    for (k, (target, floor)) in targets.iter().enumerate() {
+        let soul = match first.take() {
+            Some(soul) => soul,
+            None => join(&dir, k as u64 + 1, lineage),
+        };
+        let body = *body_places(&dir)
+            .keys()
+            .find(|b| !known.contains(b))
+            .expect("the new body");
+        known.push(body);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(660)))
+            .unwrap();
+        souls.push((*target, im.nodes[*floor], body, soul));
+    }
+    // A walk answered within the act's expiry (600 s): its answer and its seconds. None within the socket's wait (the
+    // read times out) is named so, and the other walks go on.
+    let walked = |soul: &mut Client, to: Id| {
+        let t0 = std::time::Instant::now();
+        let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            soul.act_within("eden:walk", Some(to), BTreeMap::new(), 600_000_000)
+        }))
+        .unwrap_or_else(|_| Err("no answer within 660 s".into()));
+        (a, t0.elapsed().as_secs_f64())
+    };
+    let ends = std::thread::scope(|s| {
+        let runs: Vec<_> = souls
+            .into_iter()
+            .map(|(target, floor, body, mut soul)| {
+                let (walked, dir) = (&walked, &dir);
+                let node = im.nodes[target];
+                s.spawn(move || {
+                    let there = walked(&mut soul, node);
+                    let at = *body_places(dir)[&body].last().unwrap();
+                    let back = there.0.is_ok().then(|| walked(&mut soul, fountain));
+                    (target, floor, body, (there, at), back)
+                })
+            })
+            .collect();
+        runs.into_iter()
+            .map(|r| r.join().expect("a walk answered"))
+            .collect::<Vec<_>>()
+    });
+    let rows = body_places(&dir);
+    let m = |v: i64| v as f64 / 1e6;
+    let mut failed = Vec::new();
+    for (target, floor, body, (there, (on, at)), back) in ends {
+        let r = &rows[&body];
+        let (end_on, end_at) = *r.last().unwrap();
+        println!(
+            "W9 Eden walk to {target}: {:?} in {:.1} s, ends on {} at ({:.2}, {:.2}, {:.2}) m; back to the quad \
+             fountain: {:?}, ends on {} at ({:.2}, {:.2}) m; {} records",
+            there.0,
+            there.1,
+            name_of(on),
+            m(at.x),
+            m(at.y),
+            m(at.z),
+            back.as_ref().map(|(a, s)| format!("{a:?} in {s:.1} s")),
+            name_of(end_on),
+            m(end_at.x),
+            m(end_at.z),
+            r.len()
+        );
+        let gap = ((m(end_at.x) + 12.0).powi(2) + (m(end_at.z) + 97.0).powi(2)).sqrt();
+        match back {
+            Some((Ok(_), _)) if on == floor && end_on == ground && gap <= 10.0 => {}
+            _ => failed.push(format!(
+                "{target}: there {:?} on {} (sent to {}), back {back:?}, ends on {} {gap:.1} m from the fountain",
+                there.0,
+                name_of(on),
+                name_of(floor),
+                name_of(end_on)
+            )),
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

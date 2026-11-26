@@ -56,7 +56,8 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    (`/var/lib/souls/worlds`) only if its bytes hash to the manifest's, and `worldd schemas` must run there first (a
    binary built against a newer system library than the machine's does not start: `release.will-not-start`). The
    release's record (manifest, tools, `release.sh`) is `/var/lib/souls/releases/<sha>/`, with `world-aside` among its
-   tools and, under `reseed/`, Eden's reseed, its undo and the kinds at the commit. It prints the staged files'
+   tools and, under `reseed/`, Eden's reseed, its undo, the kinds at the commit and Eden's stock with its libraries
+   (`reseed/stock`: `stock.json`, `library/`; the reseed seeds with them, #4837). It prints the staged files'
    hashes against the manifest's. A dry run stops here: builds by hash are inert until a pin names one.
    - **Reseed (input `reseed`).** When this build cannot read Eden's store (`header-mismatch`), `reseed=fresh` starts
      Eden fresh on it before the move ([cutover.md](cutover.md#a-fresh-eden-on-a-new-build-0132)): `release.sh reseed
@@ -110,8 +111,14 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    state may no longer fit is refused by name and nothing of that world is staged: a state field gone or retyped, an
    enum value gone, an int's range narrowed, a slot gone, renumbered or admitting less, a role gone, another owner, a
    world that would not build or would leave a pinned revision with no definition (`entries.<name>`). A fork keeps its
-   entries (its boot pins them); an entry only the release has is not added (the world's header does not pin it: a
-   reseed adds it); an entry only the world has is kept. A later `rollback-v2.yml` moves code only: the release's
+   entries (its boot pins them), so a world made from a template gets no new Soul Action yet; an entry only the world
+   has is kept. An entry only the release has is added to every other world (#4954), so a new Soul Action reaches it
+   with the release, no reseed: `entries plan` lists each as `add <kind>`, and the world's next start defines its
+   kinds in the world's history at its first tick (`kinds defined: ...`, each a `souls:kind` node naming the pin; the
+   entry stays in the world's entries), as a creator's kinds are, since the header a world's log names never changes;
+   its log before them replays unchanged. A kind the header pins by another revision is not one of these: it is paired
+   as before or stays unmade. The library's names are every world's: a world's own entry of the same name in its own
+   namespace overrides one, which is then not added. A later `rollback-v2.yml` moves code only: the release's
    entries stay, the world's earlier ones are in `entries.before` for a hand put-back while the world is stopped.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's

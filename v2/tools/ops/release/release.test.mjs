@@ -80,6 +80,9 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   const rel = join(data, 'releases', sha);
   assert.match(check.stdout, new RegExp(`world-aside +the release's own, ${rel}/bin/world-aside`));
   assert.match(check.stdout, new RegExp(`kind entries +${rel}/reseed/kinds \\(\\d+ entries\\)`));
+  // #4837: Eden's stock and its libraries go with the release, as a world folder keeps them, and the reseed seeds with them
+  assert.match(check.stdout, new RegExp(`stock +${rel}/reseed/stock/stock\\.json`));
+  for (const f of ['stock.json', 'library/books.json', 'library/garments.json']) assert.ok(existsSync(join(rel, 'reseed/stock', f)), f);
   assert.match(check.stdout, /3 of the world's objects at their keys/);
   assert.match(check.stdout, /check only; nothing changed/);
   // a fresh reseed refuses while a reseed to this build is not undone, and names the label to resume

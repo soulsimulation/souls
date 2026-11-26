@@ -719,12 +719,20 @@ pub struct Config {
     /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
     /// its settings keeps them. `None`: a world without settings has no sky.
     pub sky: Option<daylight::Config>,
+    /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`), by
+    /// pin: written at this start's first tick as definitions in the world's history ([`Clock::put_kinds`]), so things
+    /// and activities of them are made and every copy applies them.
+    pub define: Definitions,
     /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The world's stock (#4837, [`crate::stock`]): its stocked containers, which a take from one reads, and its
+    /// libraries' words by reference, served beside the records that hold them as public words are.
+    pub stocks: Arc<sim::forms::Stocks>,
+    pub library_words: Arc<BTreeMap<Id, Vec<u8>>>,
     /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
     pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
@@ -833,6 +841,9 @@ pub struct Synced {
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
 pub type Offer = Box<dyn FnMut(u64, Vec<u8>) + Send>;
+/// Kinds a start defines in the world's history (#4954, [`Config::define`]), by pin.
+pub type Definitions = Vec<Name>;
+
 /// See [`Config::follow`].
 pub type Follow = Box<dyn FnOnce(Durable) -> Offer + Send>;
 
@@ -862,9 +873,12 @@ impl Config {
             planner_wait: None,
             planned: BTreeMap::new(),
             sky: None,
+            define: Vec::new(),
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            stocks: Arc::default(),
+            library_words: Arc::default(),
             closed: Default::default(),
             follow: None,
             rate: None,
@@ -1178,6 +1192,8 @@ struct Clock {
     put_off: BTreeMap<Id, u64>,
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
+    /// The kinds this start defines at its first tick ([`Config::define`]), and the minter of their nodes' ids.
+    define: Option<(Definitions, Minter)>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
@@ -4043,6 +4059,79 @@ impl Clock {
         self.write_own(effects, "the clock's mapping");
     }
 
+    /// Step 1 for the kinds the release added (#4954, [`Config::define`]): at this start's first tick, each its world
+    /// neither pins in its header nor defines yet is defined, as a creator's kind is (#3697): a `souls:kind` node at the
+    /// zone's root, for everyone, its name the pin, all in one entry of the world's own. The record is left empty: the
+    /// world's rules for the kind come from its entries, which keep the entry, and a copy needs only the name, so the
+    /// checkpoints and the stream's snapshots do not carry each entry's bytes. The world's log before it is unchanged,
+    /// and every copy (a replay, the public stream, a fork) learns the kinds from the entry. When the world refuses the
+    /// one entry, each kind is written in an entry of its own, and each refused one is said by name and stays refused
+    /// per act (`kind-not-in-header`), as before.
+    fn put_kinds(&mut self, now: Micros) {
+        let Some((define, mut mint)) = self.define.take() else {
+            return;
+        };
+        let tree = self.replica.tree();
+        let Some(root) = tree.node(tree.root()).map(|n| n.id()) else {
+            return;
+        };
+        let header = self.replica.header();
+        let mut creates = Vec::new();
+        let mut names = Vec::new();
+        for pin in define {
+            if header.kinds.contains(&pin) || replica::kinds::defined::defines(tree, &pin) {
+                continue;
+            }
+            let Ok(node) = mint.mint() else {
+                eprintln!("worldd: the kinds added were not defined: no id left");
+                return;
+            };
+            names.push(pin.as_str().to_owned());
+            creates.push(Change::Create {
+                node,
+                kind: Name::new(&replica::kinds::defined::kind().0).expect("souls:kind's name"),
+                pose: Pose {
+                    frame: Frame {
+                        node: root,
+                        slot: None,
+                    },
+                    position: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    support: Support::None,
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::from([
+                    (replica::kinds::defined::NAME, Value::Text(pin)),
+                    (replica::kinds::defined::ENTRY, Value::Bytes(Vec::new())),
+                ]),
+            });
+        }
+        if creates.is_empty() {
+            return;
+        }
+        let effect = |creates: Vec<Change>| Effect {
+            envelope: Clock::own(root, now),
+            body: Body::Changes(recs_of(creates)),
+            events: None,
+            rest: Rest::new(),
+        };
+        if self.try_own(vec![effect(creates.clone())]).is_ok() {
+            println!("kinds defined: {} [{}]", names.len(), names.join(", "));
+            return;
+        }
+        let mut written = Vec::new();
+        for (create, name) in creates.into_iter().zip(names) {
+            match self.try_own(vec![effect(vec![create])]) {
+                Ok(()) => written.push(name),
+                Err(r) => eprintln!(
+                    "worldd: the kind added {name} was not defined ({}: {}): it is refused per act",
+                    r.name, r.detail
+                ),
+            }
+        }
+        println!("kinds defined: {} [{}]", written.len(), written.join(", "));
+    }
+
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
     /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
     /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
@@ -4909,6 +4998,8 @@ impl Clock {
         // in this tick, each at its due time (E6, #3369).
         self.put_clock(now);
         self.fire_sky(now);
+        // 1. The kinds the release added since the world's header, defined at this start's first tick (#4954).
+        self.put_kinds(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
         at[3] = mark();
@@ -5115,6 +5206,8 @@ impl Clock {
         self.faults += slice.faults.len() as u64;
         at[8] = mark();
         if let Some(m) = &self.measures {
+            // The Souls embodied now, for `health.json` (the home page's count, 26 Nov): off the tick's phases.
+            m.souls(self.life.as_ref().map(|l| l.life.embodied().count()));
             let mut phases = [0; measures::NPHASES];
             for (i, p) in phases.iter_mut().enumerate() {
                 if let (Some(a), Some(b)) = (at[i], at[i + 1]) {
@@ -5857,6 +5950,8 @@ pub fn start<S: Storage + 'static>(
         Scope(s)
     };
     let (forms_scope, engine_scope) = (scope("forms"), scope("engine"));
+    // The nodes of the kinds this start defines (#4954, [`Clock::put_kinds`]).
+    let kinds_scope = scope("kinds");
     let life = cfg.join.take().map(|j| {
         let entry = j.entry.0;
         Lives {
@@ -5967,6 +6062,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&cfg.library_words),
         Arc::clone(&text),
         std::mem::take(&mut cfg.closed),
     )
@@ -6000,6 +6096,7 @@ pub fn start<S: Storage + 'static>(
         })
         .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
+    let define = Some((std::mem::take(&mut cfg.define), Minter::new(kinds_scope)));
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let hatches = std::mem::take(&mut cfg.hatches);
@@ -6051,6 +6148,7 @@ pub fn start<S: Storage + 'static>(
         walkers,
         forms: {
             let mut acts = Acts::new(kinds, library, header, forms_scope);
+            acts.stocks(Arc::clone(&cfg.stocks));
             // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
             let _ = acts.hatches(&hatches);
             acts
@@ -6082,6 +6180,7 @@ pub fn start<S: Storage + 'static>(
         tick: last.unwrap_or(-1),
         measures: clock_measures,
         sky,
+        define,
         tick_us,
         text,
         put_off: BTreeMap::new(),

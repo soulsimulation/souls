@@ -12,7 +12,8 @@
 #                                                      R17 #2818), each served file a `served` line of the manifest;
 #                                                      directoryd, origin.tar (install.sh origin) and units.tar (their
 #                                                      two unit files) are the directory and the viewers' origin;
-#                                                      reseed/ holds Eden's reseed, its undo and content/kinds
+#                                                      reseed/ holds Eden's reseed, its undo, content/kinds and
+#                                                      Eden's stock with its libraries (reseed/stock, #4837)
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
 #   RELEASE_TARGET=<ssh target> bash release.sh remote stage <bundle>
@@ -33,7 +34,7 @@
 #   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
 #                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
 #                                  at its commit) by this release's `worldd entries`, every world when none is named:
-#                                  plan lists per world which entries change and which change is refused and why,
+#                                  plan lists per world which entries change or are added, and which is refused and why,
 #                                  changing nothing; stage writes them as <world>/entries.next, never entries/ itself.
 #                                  A refused world, a fork (its boot pins its entries) and a world with none keep theirs
 #   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
@@ -72,7 +73,8 @@ SERVICES=${RELEASE_SERVICES-directory origin}
 # assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves; store-copy is
 # store-switch.sh's copy tool (v2/docs/runbook/store-switch.md), carried so the host need not build it.
 TOOLS=(deploy gateway-upgrade world-aside assets-check store-copy)
-# A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
+# A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit) and its
+# stock (reseed/stock: content/worlds/eden/stock.json and content/library/, #4837).
 RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
 die() {
@@ -159,6 +161,10 @@ bundle() {
   mkdir -p "$out/reseed"
   for t in "${RESEED[@]}"; do install -m 755 "$(dirname "$0")/../cutover/$t" "$out/reseed/$t"; done
   cp -R "$(dirname "$0")/../../../../content/kinds" "$out/reseed/kinds"
+  # Eden's stock and the libraries it draws (#4837), as a world folder keeps them: reseed-eden.sh seeds with them.
+  mkdir -p "$out/reseed/stock/library"
+  cp "$(dirname "$0")/../../../../content/worlds/eden/stock.json" "$out/reseed/stock/stock.json"
+  cp "$(dirname "$0")/../../../../content/library/"*.json "$out/reseed/stock/library/"
   for a in "${ARTIFACTS[@]}"; do
     lines+=("$(printf '{"name":"%s","hash":"%s","bytes":%s}' "$a" "$(hash "$out/artifacts/$a")" "$(wc -c < "$out/artifacts/$a" | tr -d ' ')")")
   done

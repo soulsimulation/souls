@@ -308,6 +308,8 @@ pub(crate) struct Cx<'a> {
     pub reserved: &'a [Id],
     /// The effect's instant, world time (C24: a timed field settles to it, a timer counts from it).
     pub now: Micros,
+    /// The world's stocked containers (#4837): a make of a stock's kind at one carries its pile's top row.
+    pub stocks: &'a super::Stocks,
 }
 
 fn set(node: Id, field: u64, to: i64, by: i64) -> Entry {
@@ -528,6 +530,15 @@ impl Cx<'_> {
                     Place::Slot(s) => self.free_slot(self.node, *s)?,
                 };
                 let node = mint(m)?;
+                let mut fields = made_fields(self.view.tree, kind);
+                // A stock's take (#4837): the made thing carries the row at the top of the container's pile.
+                if let Some(s) = self
+                    .stocks
+                    .get(&self.node)
+                    .filter(|s| s.kind == plain(kind.as_str()))
+                {
+                    fields.extend(s.carried(self.view.amount(self.node, s.count)));
+                }
                 Ok(vec![(
                     frame.node,
                     Audience::Everyone,
@@ -542,7 +553,7 @@ impl Cx<'_> {
                                 support: Support::Slot,
                             },
                             audience: Audience::Everyone,
-                            fields: made_fields(self.view.tree, kind),
+                            fields,
                         },
                         rest: Rest::new(),
                     }]),

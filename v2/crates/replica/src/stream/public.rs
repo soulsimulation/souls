@@ -676,16 +676,31 @@ impl Plan {
 
 /// Every node `validate` walks the frames of (live, opaque and in public flights), each with its parent, and the
 /// children of each (#4192): what a delta that moves nodes to new frames is checked against without the whole state.
+/// With them, the kinds the state's definitions name ([`defined_kinds`], #4954): a delta played in place never makes,
+/// changes or takes out a definition, so they hold while the frames are kept.
 #[derive(Default)]
 struct Frames {
     parent: BTreeMap<Id, Option<Id>>,
     children: BTreeMap<Id, BTreeSet<Id>>,
+    defined: BTreeSet<String>,
 }
 
 impl Frames {
-    fn of(state: &Value) -> R<Frames> {
+    fn of(state: &Value, zone: Id) -> R<Frames> {
         let m = map(state)?;
         let mut f = Frames::default();
+        // The root's live children that are definitions, read whole: few, as `validate` reads them.
+        let mut live = Vec::new();
+        for row in arr(field(m, 2)?)? {
+            let r = arr(row)?;
+            if r.len() == 2 && map(&r[1])?.get(&2).map(read_id).transpose()? == Some(zone) {
+                let n = NodeState::read(&r[1])?;
+                if crate::kinds::defined::is_definition(n.kind.as_str()) {
+                    live.push(n);
+                }
+            }
+        }
+        f.defined = defined_kinds(zone, live.iter());
         let mut add = |rows: &Value| -> R<()> {
             for row in arr(rows)? {
                 let r = arr(row)?;
@@ -784,8 +799,9 @@ impl Frames {
 /// public and owned by a live node; and rows of key 6, timers set, changed or cleared, each owned by a node of the
 /// state. A row of a node not in the state is a node made (T-late): checked as `validate` checks a node, its id in no
 /// other row, its frame walked as a moved node's. A row of key 2 with no value is a live node gone (a Soul's body
-/// retired, a thing removed): one no node, opaque or flying, has as its frame, that is not a definition, the root or of
-/// a kind the header does not pin, that owns no link and no timer left, and never in a delta that also makes nodes.
+/// retired, a thing removed): one no node, opaque or flying, has as its frame, that is not a definition or the root,
+/// that owns no link and no timer left, and never in a delta that also makes nodes. Every node row's kind is pinned by
+/// the header or by a definition in the state (#4954: the group gestures a release adds are pinned so).
 /// No flight changes, so the whole-state checks read nothing that changes but these rows. Its plan; none when the delta
 /// is any other, or when it is unsure: the whole path then decides. (Before a node gone was played in place, every part
 /// that took one out cloned and checked the whole state: about 100 ms a part on Eden's 10,000 nodes, so a viewer
@@ -810,6 +826,22 @@ fn in_place(
     let mut ids = BTreeSet::new();
     let mut moved = BTreeMap::new();
     let mut removed: Vec<(usize, Id, Value)> = Vec::new();
+    // The kinds the state's definitions name (#4954: a Soul Action the release added is one), from the frames' cache,
+    // read only when a row's kind is one the header does not pin: a row of such a kind plays in place as any other.
+    let mut defined: Option<BTreeSet<String>> = None;
+    let mut kinds = |kind: &Name| -> R<BTreeSet<String>> {
+        if pinned(header, &BTreeSet::new(), kind) {
+            return Ok(BTreeSet::new());
+        }
+        if defined.is_none() {
+            let mut f = frames.borrow_mut();
+            if f.is_none() {
+                *f = Some(Frames::of(state, header.zone)?);
+            }
+            defined = f.as_ref().map(|f| f.defined.clone());
+        }
+        Ok(defined.clone().unwrap_or_default())
+    };
     for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
         let r = arr(row)?;
         if !(1..=2).contains(&r.len()) {
@@ -819,7 +851,6 @@ fn in_place(
         if !ids.insert(id) {
             return Ok(None);
         }
-        let none = BTreeSet::new();
         if r.len() == 1 {
             // A node gone: a live one, not the root, a definition or of a kind the header does not pin.
             let Ok(i) = row_position(rows, id)? else {
@@ -827,7 +858,7 @@ fn in_place(
             };
             let old = NodeState::read(&arr(&rows[i])?[1])?;
             if id == header.zone
-                || !pinned(header, &none, &old.kind)
+                || !pinned(header, &kinds(&old.kind)?, &old.kind)
                 || crate::kinds::defined::is_definition(old.kind.as_str())
             {
                 return Ok(None);
@@ -846,8 +877,9 @@ fn in_place(
             // any made before it.
             Err(at) => {
                 let new = NodeState::read(&r[1])?;
+                let defined = kinds(&new.kind)?;
                 if id == header.zone
-                    || !pinned(header, &none, &new.kind)
+                    || !pinned(header, &defined, &new.kind)
                     || crate::kinds::defined::is_definition(new.kind.as_str())
                     || added.last().is_some_and(|(_, last, _)| *last >= id)
                     || row_index(arr(field(m, 8)?)?, id)?.is_some()
@@ -859,7 +891,7 @@ fn in_place(
                 {
                     return Ok(None);
                 }
-                validate_node(header, &none, id, &new)?;
+                validate_node(header, &defined, id, &new)?;
                 moved.insert(id, new.parent);
                 added.push((at, id, Value::Array(vec![id.to_value(), r[1].clone()])));
                 continue;
@@ -869,9 +901,11 @@ fn in_place(
             NodeState::read(&arr(&rows[i])?[1])?,
             NodeState::read(&r[1])?,
         );
-        // A kind the header does not pin, or a definition, is checked against the whole state (#3697).
+        // A kind neither the header nor a definition in the state pins, or a definition, is checked against the whole
+        // state (#3697).
+        let defined = kinds(&new.kind)?;
         if id == header.zone
-            || !pinned(header, &none, &new.kind)
+            || !pinned(header, &defined, &new.kind)
             || crate::kinds::defined::is_definition(old.kind.as_str())
             || crate::kinds::defined::is_definition(new.kind.as_str())
         {
@@ -880,7 +914,7 @@ fn in_place(
         if old.parent != new.parent || old.slot != new.slot {
             moved.insert(id, new.parent);
         }
-        validate_node(header, &none, id, &new)?;
+        validate_node(header, &defined, id, &new)?;
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
     }
     let made: BTreeSet<Id> = added.iter().map(|(_, id, _)| *id).collect();
@@ -898,7 +932,7 @@ fn in_place(
     if !gone.is_empty() {
         let mut f = frames.borrow_mut();
         if f.is_none() {
-            *f = Some(Frames::of(state)?);
+            *f = Some(Frames::of(state, header.zone)?);
         }
         let f = f.as_ref().expect("built");
         if gone
@@ -919,7 +953,7 @@ fn in_place(
     if !moved.is_empty() {
         let mut f = frames.borrow_mut();
         if f.is_none() {
-            *f = Some(Frames::of(state)?);
+            *f = Some(Frames::of(state, header.zone)?);
         }
         if !f.as_ref().is_some_and(|f| f.allow(&moved)) {
             return Ok(None);
@@ -2201,6 +2235,47 @@ mod gone_in_place_tests {
         assert_eq!(s, new, "the whole path's state");
         plan.swap(&mut s);
         assert_eq!(s, old, "swapped back, the state before");
+    }
+
+    /// #4954: a node made of a kind a definition in the state pins, not the header (a group gesture a release added),
+    /// plays in place to the whole path's state; on a state with no such definition it is left to the whole path.
+    #[test]
+    fn a_node_of_a_kind_the_state_defines_is_played_in_place() {
+        use crate::kinds::defined::{ENTRY, NAME, kind};
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let pin = Name::new(&format!("eden:wave@1220{}", "ab".repeat(32))).unwrap();
+        let mut before = world(&header);
+        let mut definition = before.nodes[&id(1)].clone();
+        definition.kind = Name::new(&kind().0).unwrap();
+        definition.fields = BTreeMap::from([
+            (NAME, Value::Text(pin.clone())),
+            (ENTRY, Value::Bytes(Vec::new())),
+        ]);
+        before.nodes.insert(id(8), definition);
+        let mut after = before.clone();
+        after.next += 1;
+        let mut made = before.nodes[&id(1)].clone();
+        made.kind = pin;
+        after.nodes.insert(id(7), made);
+        let delta = delta_of(&header, &before, &after);
+        let (old, new) = (
+            project(&header, &before).unwrap(),
+            project(&header, &after).unwrap(),
+        );
+        let mut plan = in_place(&header, &old, &delta, &std::cell::RefCell::new(None))
+            .unwrap()
+            .expect("played in place");
+        let mut s = old.clone();
+        plan.swap(&mut s);
+        assert_eq!(s, new, "the whole path's state");
+        before.nodes.remove(&id(8));
+        let bare = project(&header, &before).unwrap();
+        assert!(
+            in_place(&header, &bare, &delta, &std::cell::RefCell::new(None))
+                .unwrap()
+                .is_none(),
+            "no definition: the whole path"
+        );
     }
 
     /// Two nodes gone: in id order they play in place to the whole path's state; with their rows reversed they are

@@ -1,0 +1,38 @@
+# stream.soul.game (#4159): a world's live stream for the CDN. The page reads its stream here when the cutover binding
+# names this origin (`v2StreamOrigin`, tools/world-launcher/cutover.mjs; apps/web stream-cdn.ts), so viewers' reads end
+# at Cloudflare's nearest edge and only its misses reach this host. Installed as /etc/caddy/sites/stream-soul-game.caddy,
+# beside soul-game.caddy; the record is proxied and one cache rule makes `stream.soul.game` eligible for cache, respecting
+# the origin's headers (docs/operations/cdn.md, "The stream hostname").
+#
+# - /s/* goes to the viewers' origin (7320) exactly as soul.game's /s/* does: the same files and the same answers. The
+#   origin's Cache-Control decides what an edge keeps: a part, a baseline or a bundle header for a year (immutable), the
+#   pointer for one second, a 404 or a query string never (no-store).
+# - Every answer allows any page to read it (`Access-Control-Allow-Origin: *`, no credentials): the stream is public,
+#   and one header for everyone keeps one cached copy for everyone. A preflight (a Range read on a baseline, from a
+#   browser that does not count `bytes=0-15` as a simple header) gets its answer here, never from the origin.
+# - No answer sets a cookie. Anything outside /s/* is a 404 that no one keeps: this name serves the stream and nothing else.
+https://stream.soul.game {
+	header {
+		Access-Control-Allow-Origin "*"
+		X-Robots-Tag "noindex, nofollow"
+		-Set-Cookie
+	}
+	@preflight method OPTIONS
+	handle @preflight {
+		header Access-Control-Allow-Methods "GET, HEAD"
+		header Access-Control-Allow-Headers "range"
+		header Access-Control-Max-Age "86400"
+		header Cache-Control "no-store"
+		respond 204
+	}
+	handle_path /s/* {
+		header X-Souls-System v2
+		reverse_proxy localhost:7320 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		header Cache-Control "no-store"
+		respond "not here: this name serves only /s/" 404
+	}
+}

@@ -8,16 +8,21 @@
 //! `worldd entries plan|stage --dir <world folder> --kinds <the release's content/kinds>`
 //!
 //! - An entry of the world whose kind the release has, repaired as the seed repairs it against the world's own facts,
-//!   is changed when its text differs. One the release lacks is the world's own and is kept; one only the release has
-//!   is not added (the world's header does not pin it: a reseed adds it). A fork keeps its entries: its `boot` pins
-//!   them (`served-fork-support-mismatch` otherwise).
+//!   is changed when its text differs. One the release lacks is the world's own and is kept. One only the release has
+//!   is added (#4954), as `<namespace>.<name>.json` as a seed writes it: the release's library is every world's, so a
+//!   new Soul Action reaches a running world with the release, no reseed. The world's header is fixed for its life, so
+//!   its next start defines the added kinds in its history, as a creator's kinds are (`serve::added_kinds`, the
+//!   engine's first tick), and its log before them replays unchanged. The library's names are the shared names (its
+//!   namespace, `eden:` today, is in every pin, role and link of every world, so it is not renamed; a Soul is offered
+//!   an action by its plain name): a world's own entry of the same name in its own namespace overrides one, which is
+//!   then not added. A fork keeps its entries: its `boot` pins them (`served-fork-support-mismatch` otherwise).
 //! - A change is refused, by name, where the world's state may no longer fit it: a state field gone
 //!   (`entries.state-removed`), given another number or type (`entries.state-retyped`), an enum value gone
 //!   (`entries.state-value-removed`), an int's range narrowed (`entries.state-narrowed`), a slot gone, renumbered or
 //!   admitting less (`entries.slot-removed`, `entries.slot-renumbered`, `entries.slot-narrowed`), a role gone
 //!   (`entries.role-removed`) or another owner (`entries.owner-changed`); and where the world, built from its facts
 //!   with the new entries under its own header (as a start builds it, [`crate::serve`]'s `adopt`), would not build
-//!   (`entries.build-refused`) or would leave a revision it pins of a changed kind with no definition
+//!   (`entries.build-refused`) or would leave a revision it pins of a changed or added kind with no definition
 //!   (`entries.kind-unpaired`). A world that keeps no header (seeded before K16) is refused `entries.header-missing`:
 //!   its start would rebuild the header and refuse the log.
 //! - One refusal and nothing of that world is staged. `plan` changes nothing. `stage` writes the world's whole
@@ -26,7 +31,7 @@
 //!   in between the pin and the restart (`supervisor::deploy::swap_entries`), so the build that reads the new entries
 //!   is the one that was checked with them. With nothing to change it removes a stale `entries.next`. Every line
 //!   printed is the log: `entries: <world>: change <kind> <old>..<new>`, with the entry's SHA-256 (first 12 hex)
-//!   before and after, or `refused: entries.<name>: <world>: <kind>: <why>`.
+//!   before and after, `entries: <world>: add <kind> <new>`, or `refused: entries.<name>: <world>: <kind>: <why>`.
 //!
 //! Exits 0 when the world has changes (staged) or nothing to change, 3 when refused, 1 on an error.
 
@@ -60,8 +65,10 @@ pub(crate) struct Plan {
     pub unchanged: usize,
     /// The world's own entries, which the release has no entry of.
     pub own: Vec<String>,
-    /// The release's entries of kinds the world has none of.
-    pub added: Vec<String>,
+    /// The release's entries of kinds the world has none of, each with the release's entry: added.
+    pub added: Vec<(String, Json)>,
+    /// The release's entries a world's own entry of the same name (in its own namespace) overrides: not added.
+    pub overridden: Vec<String>,
     /// `entries.<name>: <kind>: <why>` each.
     pub refused: Vec<String>,
     /// Why nothing was looked at: a fork, or no entries.
@@ -299,12 +306,17 @@ pub(crate) fn plan(dir: &Path, kinds: &Path) -> R<Plan> {
             }
         }
     }
-    p.added = release
-        .keys()
-        .filter(|k| !world.contains_key(*k))
-        .cloned()
-        .collect();
-    if p.changes.is_empty() || !p.refused.is_empty() {
+    // A name without its namespace: a world's own entry of one overrides the library's.
+    let bare = |k: &str| k.split_once(':').map_or(k, |(_, n)| n).to_owned();
+    let own: Vec<String> = p.own.iter().map(|k| bare(k)).collect();
+    for (kind, entry) in release.iter().filter(|(k, _)| !world.contains_key(*k)) {
+        if own.contains(&bare(kind)) {
+            p.overridden.push(kind.clone());
+        } else {
+            p.added.push((kind.clone(), entry.clone()));
+        }
+    }
+    if (p.changes.is_empty() && p.added.is_empty()) || !p.refused.is_empty() {
         return Ok(p);
     }
     // The engine's own word: the world built from its facts with the new entries, as its next start builds it, under
@@ -329,6 +341,7 @@ pub(crate) fn plan(dir: &Path, kinds: &Path) -> R<Plan> {
             *entry = c.new.clone();
         }
     }
+    candidate.extend(p.added.iter().cloned());
     let mut built = match serve::build_with(None, &facts, &candidate) {
         Ok(b) => b,
         Err(e) => {
@@ -341,18 +354,24 @@ pub(crate) fn plan(dir: &Path, kinds: &Path) -> R<Plan> {
     let unknown = serve::adopt(&mut built, header, &serve::owners(dir));
     for pin in unknown {
         let name = plain(&pin);
-        if let Some(c) = p
+        if let Some(kind) = p
             .changes
             .iter()
-            .find(|c| name == c.kind || name == format!("{}_activity", c.kind))
+            .map(|c| &c.kind)
+            .chain(p.added.iter().map(|(k, _)| k))
+            .find(|k| name == k.as_str() || name == format!("{k}_activity"))
         {
             p.refused.push(format!(
-                "entries.kind-unpaired: {}: the world's {pin} would have no definition",
-                c.kind
+                "entries.kind-unpaired: {kind}: the world's {pin} would have no definition"
             ));
         }
     }
     Ok(p)
+}
+
+/// An added entry's file in the world's entries, as a seed names it: `<namespace>.<name>.json`.
+fn added_file(kind: &str) -> String {
+    format!("{}.json", kind.replace(':', "."))
 }
 
 /// Copies the folder `from` to `to`, each folder and file with its mode and owned by `uid`:`gid` (as root, the
@@ -386,6 +405,14 @@ fn stage(dir: &Path, p: &Plan) -> R<PathBuf> {
         let at = building.join(c.path.strip_prefix(&live).map_err(|e| e.to_string())?);
         // Over the copy: its mode and owner stay the world's file's.
         std::fs::write(&at, c.new.to_json()).map_err(io(&at))?;
+        std::fs::File::open(&at)
+            .and_then(|f| f.sync_all())
+            .map_err(io(&at))?;
+    }
+    for (kind, entry) in &p.added {
+        let at = building.join(added_file(kind));
+        std::fs::write(&at, entry.to_json()).map_err(io(&at))?;
+        let _ = std::os::unix::fs::chown(&at, Some(meta.uid()), Some(meta.gid()));
         std::fs::File::open(&at)
             .and_then(|f| f.sync_all())
             .map_err(io(&at))?;
@@ -446,11 +473,17 @@ pub fn run(args: &[String]) -> i32 {
             p.own.join(" ")
         );
     }
-    if !p.added.is_empty() {
+    for (kind, entry) in &p.added {
         println!(
-            "entries: {world}: {} in the release the world has no entry of, not added (a reseed adds them): {}",
-            p.added.len(),
-            p.added.join(" ")
+            "entries: {world}: add {kind} {} ({})",
+            rev(entry),
+            added_file(kind)
+        );
+    }
+    if !p.overridden.is_empty() {
+        println!(
+            "entries: {world}: the world's own entry of the same name overrides, not added: {}",
+            p.overridden.join(" ")
         );
     }
     if !p.refused.is_empty() {
@@ -459,16 +492,18 @@ pub fn run(args: &[String]) -> i32 {
             println!("refused: {name}: {world}: {why}");
         }
         println!(
-            "entries: {world}: refused, nothing changed ({} would change, {} unchanged)",
+            "entries: {world}: refused, nothing changed ({} would change, {} would be added, {} unchanged)",
             p.changes.len(),
+            p.added.len(),
             p.unchanged
         );
         return 3;
     }
-    if act == "plan" || p.changes.is_empty() {
+    if act == "plan" || (p.changes.is_empty() && p.added.is_empty()) {
         println!(
-            "entries: {world}: {} would change, {} unchanged ({})",
+            "entries: {world}: {} would change, {} would be added, {} unchanged ({})",
             p.changes.len(),
+            p.added.len(),
             p.unchanged,
             if act == "plan" {
                 "plan: nothing changed"
@@ -481,8 +516,10 @@ pub fn run(args: &[String]) -> i32 {
     match stage(dir, &p) {
         Ok(next) => {
             println!(
-                "entries: {world}: {} staged, {} unchanged, in {} (the deploy swaps them in at its restart)",
+                "entries: {world}: {} changed and {} added staged, {} unchanged, in {} (the deploy swaps them in at \
+                 its restart)",
                 p.changes.len(),
+                p.added.len(),
                 p.unchanged,
                 next.file_name()
                     .and_then(|n| n.to_str())

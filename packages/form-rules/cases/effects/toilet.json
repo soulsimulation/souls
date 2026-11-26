@@ -137,6 +137,96 @@
      }
     }
    ]
+  },
+  {
+   "name": "toilet_sit_then_taken",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:toilet"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sit",
+      "args": {
+       "seat": "seat"
+      }
+     },
+     "receipt": "rc1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "seat"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sat_down",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "actor": "b2",
+     "act": {
+      "this": "t1",
+      "form": "sit",
+      "args": {
+       "seat": "seat"
+      }
+     },
+     "receipt": "rc2",
+     "expect": {
+      "verdict": "no",
+      "reason": "slot_taken",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:toilet",
+     "slots": {
+      "seat": [
+       "b1"
+      ]
+     }
+    }
+   }
   }
  ]
 }

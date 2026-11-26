@@ -64,6 +64,16 @@ pub(crate) fn ask_of(bytes: &[u8]) -> Option<BTreeMap<u64, Value>> {
     }
 }
 
+/// The public words of text reference `r` a sync answer carries beside its record: a library row's, the world's own
+/// content (#4837, [`crate::stock`]), else the text store's for everyone (#3703).
+pub(crate) fn public_words(
+    library: &BTreeMap<Id, Vec<u8>>,
+    text: &sim::text::Store,
+    r: Id,
+) -> Option<Vec<u8>> {
+    library.get(&r).cloned().or_else(|| text.read(r, &[]).ok())
+}
+
 /// Starts the sync thread on `copy`, sealed, and the records its seal gave; answers carry the version `(lineage,
 /// zone, epoch)` at the copy's sequence. It ends once every sender is dropped.
 pub(crate) fn start(
@@ -71,6 +81,7 @@ pub(crate) fn start(
     mut kept: Records,
     (lineage, zone, epoch): (Scope, Id, u64),
     public_names: Arc<PublicNames>,
+    library_words: Arc<BTreeMap<Id, Vec<u8>>>,
     text: Arc<sim::text::Store>,
     closed: Closed,
 ) -> std::io::Result<Sender<ToSync>> {
@@ -177,7 +188,7 @@ pub(crate) fn start(
                     a.insert(wire::ASK, n);
                     names::attach(&mut a, &public_names);
                     // #3703: the public words of the text references these records hold.
-                    names::attach_words(&mut a, &|r| text.read(r, &[]).ok());
+                    names::attach_words(&mut a, &|r| public_words(&library_words, &text, r));
                     if let Ok(frame) = encode(&Value::Map(a)) {
                         let _ = reply.send(frame);
                     }
@@ -346,5 +357,62 @@ mod tests {
                 "the creator's copy holds the building's children"
             );
         }
+    }
+
+    /// #4837: a records answer carries a library row's words beside the record that references them, and the text
+    /// store's public words as before; a reference neither holds gets none.
+    #[test]
+    fn a_records_answer_carries_library_words_beside_their_record() {
+        let text = crate::words::in_memory(Scope([3; 16])).unwrap();
+        let said = text
+            .write(
+                b"a Soul's sign",
+                replica::world_model::Audience::Everyone,
+                Id::new(Scope([4; 16]), 1).unwrap(),
+            )
+            .unwrap();
+        let title = crate::stock::reference("books", "title", 0).unwrap();
+        let unknown = crate::stock::reference("books", "title", 1).unwrap();
+        let library = BTreeMap::from([(title, b"How the Library Began".to_vec())]);
+        let at = |r: Id| {
+            Value::Map(BTreeMap::from([(
+                replica::audience::REFERENCE,
+                r.to_value(),
+            )]))
+        };
+        let record = encode(&Value::Map(BTreeMap::from([
+            (5, Value::Map(BTreeMap::from([(1, Value::Uint(1))]))),
+            (
+                6,
+                Value::Map(BTreeMap::from([
+                    (29, at(title)),
+                    (30, at(said)),
+                    (31, at(unknown)),
+                ])),
+            ),
+        ])))
+        .unwrap();
+        let mut a = BTreeMap::from([(wire::RECORDS, Value::Array(vec![Value::Bytes(record)]))]);
+        names::attach_words(&mut a, &|r| public_words(&library, &text, r));
+        let Some(Value::Array(pairs)) = a.get(&names::PUBLIC_WORDS) else {
+            panic!("public words beside the record: {a:?}")
+        };
+        let got: BTreeMap<Id, Vec<u8>> = pairs
+            .iter()
+            .filter_map(|p| match p {
+                Value::Array(p) => match p.as_slice() {
+                    [r, Value::Bytes(w)] => Some((replica::effects::read_id(r).ok()?, w.clone())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            got,
+            BTreeMap::from([
+                (title, b"How the Library Began".to_vec()),
+                (said, b"a Soul's sign".to_vec())
+            ])
+        );
     }
 }
