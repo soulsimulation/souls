@@ -1456,14 +1456,14 @@ fn a_recover_with_nothing_of_one_leaf_moves_the_other_and_the_caddy_blends_again
 
     let mut b = Bench::new(1, 2, &[0, 950]);
     let entry = b.entry.clone();
-    let (pitcher, cup) = (id(100), id(101));
+    let (pitcher, mug) = (id(100), id(101));
     start(
         &mut b,
         &entry,
         id(2),
         pitcher,
         "pour_by",
-        cup,
+        mug,
         &[("n", Arg::Int(30))],
         1,
     )
@@ -1478,7 +1478,7 @@ fn a_recover_with_nothing_of_one_leaf_moves_the_other_and_the_caddy_blends_again
         last_sets(&b),
         vec![
             (pitcher, AMOUNT, Value::Uint(0), Some(0)),
-            (cup, AMOUNT, Value::Uint(950), Some(0))
+            (mug, AMOUNT, Value::Uint(950), Some(0))
         ]
     );
 }
@@ -1539,7 +1539,7 @@ fn a_debit_and_a_refused_make_in_one_form_write_nothing() {
 fn a_transfer_between_things_by_a_count_argument_moves_that_number() {
     let mut b = Bench::new(1, 2, &[400, 950]);
     let entry = b.entry.clone();
-    let (pitcher, cup) = (id(100), id(101));
+    let (pitcher, mug) = (id(100), id(101));
     let mut n = 0;
     let mut pour = |b: &mut Bench, by: i64| {
         n += 1;
@@ -1549,7 +1549,7 @@ fn a_transfer_between_things_by_a_count_argument_moves_that_number() {
             id(2),
             pitcher,
             "pour_by",
-            cup,
+            mug,
             &[("n", Arg::Int(by))],
             n,
         )
@@ -1566,14 +1566,14 @@ fn a_transfer_between_things_by_a_count_argument_moves_that_number() {
             .as_str()
             .to_owned()
     };
-    let amounts = |b: &Bench| (b.things()[&pitcher], b.things()[&cup]);
+    let amounts = |b: &Bench| (b.things()[&pitcher], b.things()[&mug]);
     assert_eq!(pour(&mut b, 30), "done");
     assert_eq!(amounts(&b), (370, 980));
     assert_eq!(
         last_sets(&b),
         vec![
             (pitcher, AMOUNT, Value::Uint(370), Some(-30)),
-            (cup, AMOUNT, Value::Uint(980), Some(30))
+            (mug, AMOUNT, Value::Uint(980), Some(30))
         ]
     );
     assert_eq!(pour(&mut b, 0), "done");
