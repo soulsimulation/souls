@@ -6,11 +6,10 @@ const key = (id: IdValue) => `${Array.from(id[0], x => x.toString(16).padStart(2
 const text = (v: unknown) => v instanceof Uint8Array ? new TextDecoder().decode(v) : v;
 
 /** Native MoveRecord fields, including field9's authoritative end. Both start and release are form-move events. */
-type ReleasedMove = MoveRec & { ended?: { at: number; how: string } };
-export function moveRec(m: Map<number, unknown>, run?: unknown): ReleasedMove {
+export function moveRec(m: Map<number, unknown>, run?: unknown): MoveRec {
   const ends = (m.get(8) as unknown[]).map(num), name = text(m.get(2)), start = num(m.get(7));
   if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
-  const rec: ReleasedMove = { ...(run === undefined ? {} : { run: typeof run === 'number' || typeof run === 'bigint' ? String(run) : key(run as IdValue) }),
+  const rec: MoveRec = { ...(run === undefined ? {} : { run: typeof run === 'number' || typeof run === 'bigint' ? String(run) : key(run as IdValue) }),
     body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
   if (m.has(9)) {
     const e = m.get(9);

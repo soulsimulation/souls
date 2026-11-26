@@ -93,7 +93,9 @@ export type Private = { conversation: string; members: string[] };
 
 /** A run's move as it started (`souls:form-move`, #3741): the body, B2's record (times world µs) and the thing it acts
  * on; and a run's ending (`souls:form-ended`): the body, when and how. The page draws gestures from these alone. */
-export type MoveRec = { body: string; name: string; start: number; ends: number[]; target: string | null; run?: string };
+export type MoveRec = { body: string; name: string; start: number; ends: number[]; target: string | null; run?: string;
+  /** The move's authoritative field9 release, when present; time is world µs. */
+  ended?: { at: number; how: string } };
 export type RunEndRec = { body: string; at: number; how: string; run?: string };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
