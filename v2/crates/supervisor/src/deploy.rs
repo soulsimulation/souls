@@ -89,15 +89,46 @@ pub const REHEARSAL_ENV: [&str; 8] = [
     "RUST_BACKTRACE",
 ];
 
-/// What `worldd serve` reads from a world's folder besides its log: copied into a rehearsal's scratch folder.
-const FOLDER: [&str; 6] = [
+/// What `worldd serve` reads from a world's folder besides its log and checkpoints: copied into a rehearsal's scratch
+/// folder. A fork's `boot` pins its support (its facts, entries, kinds and its `bodies.json` when it has one) and
+/// `serve` refuses a fork without it; every world reads its body catalogue and the code hatches its entries name.
+const FOLDER: [&str; 9] = [
     "world.json",
     "facts.json",
     "header",
     "header.kinds",
     "moves.json",
     "entries",
+    "boot",
+    "bodies.json",
+    "hatches",
 ];
+
+/// Whether a world's folder is a fork's: one made from a template or another world (`worldd fork --template`, which
+/// writes `"fork": true` in its `world.json`). A fork starts from its checkpoint, not from an import's part.
+fn is_fork(state: &Path) -> bool {
+    std::fs::read_to_string(state.join("world.json")).is_ok_and(|t| {
+        t.split_whitespace()
+            .collect::<String>()
+            .contains("\"fork\":true")
+    })
+}
+
+/// A world's checkpoints (`checkpoints/ckpt-<record, 20 digits>`), by the log record each was taken at, oldest first.
+fn checkpoints(state: &Path) -> Vec<(u64, PathBuf)> {
+    let mut out: Vec<(u64, PathBuf)> = std::fs::read_dir(state.join("checkpoints"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let n = name.strip_prefix("ckpt-").filter(|n| n.len() == 20)?;
+            Some((n.parse().ok()?, e.path()))
+        })
+        .collect();
+    out.sort();
+    out
+}
 
 /// A release's library entries for a world (`worldd entries stage`): `<state>/entries.next`, the world's whole
 /// `entries/` with the release's changes. When it is there, the rehearsal runs on it instead of the world's own, and
@@ -819,7 +850,8 @@ impl Drop for Killed {
 
 /// Runs `build` as `worldd serve` on a scratch copy of the world's folder `state` (into `scratch`, which it empties):
 /// its log as it stood `window` records before its end, then the intents those last records took, in order, then the
-/// probe. The folder's checkpoints are not copied: the build replays the copied log from its start.
+/// probe. An imported world's checkpoints are not copied: the build replays the copied log from its start, the
+/// import's part. A fork's are, those its copied log reaches: a fork starts from its checkpoint.
 pub fn rehearse(
     build: &Path,
     state: &Path,
@@ -834,11 +866,22 @@ pub fn rehearse(
     let found = recover(&bytes).map_err(|e| format!("rehearsal.log-unread: {e}"))?;
     let epoch = found.header.map_or(1, |h| h.epoch);
     // A served world's first record is its import's part, the world from empty (C1): always copied.
-    let keep = found
+    let mut keep = found
         .records
         .len()
         .saturating_sub(window)
         .max(found.records.len().min(1));
+    // A fork's first record follows its checkpoint (K6), and `serve` starts a fork from its checkpoint or refuses it
+    // (`served-fork-checkpoint-missing`): the copy takes the checkpoints its copied log reaches. Only the last two are
+    // kept, so a fork whose oldest is later than the window's start has its copy start there.
+    let forked = if is_fork(state) {
+        checkpoints(state)
+    } else {
+        Vec::new()
+    };
+    if let Some(&(oldest, _)) = forked.first() {
+        keep = keep.max(usize::try_from(oldest).map_or(keep, |n| n.min(found.records.len())));
+    }
     // The recorded intents, one group per tick that took them, fed a tick at a time as they first arrived.
     let mut fed: Vec<Vec<Vec<u8>>> = Vec::new();
     for r in &found.records[keep..] {
@@ -882,6 +925,12 @@ pub fn rehearse(
             copy_tree(&state.join(name), &scratch.join(name))
                 .map_err(|e| format!("rehearsal.scratch: {name}: {e}"))?;
         }
+    }
+    for (_, ckpt) in forked.iter().filter(|(n, _)| *n <= keep as u64) {
+        let to = scratch.join("checkpoints");
+        std::fs::create_dir_all(&to)
+            .and_then(|()| std::fs::copy(ckpt, to.join(ckpt.file_name().unwrap_or_default())))
+            .map_err(|e| format!("rehearsal.scratch: {}: {e}", ckpt.display()))?;
     }
     // The release's entries, when it staged some: the new build is rehearsed with what its restart will read.
     if state.join(ENTRIES_NEXT).is_dir() {
