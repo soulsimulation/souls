@@ -78,6 +78,20 @@ test('edits are numbered by the clock, never below the last, so the creator\'s a
   assert.equal(dec(sent.at(-1)!).get(5), 9_000, 'later: the clock again');
 });
 
+test('a sequence the creator\'s agent has out at that moment (the gateway\'s intent.seq-in-use, #5006) is sent once more under the next', async () => {
+  const { s, sent } = signedIn();
+  const press = s.edit({ undo: 'undo' });
+  // The gateway's own refusal: no version, on this socket alone.
+  s.frame(encode(new Map<number, unknown>([[2, new Map<number, unknown>([[2, 100], [3, 2], [4, 'intent.seq-in-use']])]])));
+  assert.equal(dec(sent.at(-1)!).get(5), 101, 'sent again under the next sequence');
+  s.frame(answer(101, 1, 4));
+  assert.equal((await press).t, 'receipt');
+  const twice = s.edit({ undo: 'redo' });
+  s.frame(answer(102, 2, 4, 'intent.seq-in-use'));
+  s.frame(answer(103, 2, 4, 'intent.seq-in-use'));
+  assert.equal((await twice as { reason: string }).reason, 'intent.seq-in-use', 'once only');
+});
+
 test('a socket that closes answers every waiting press creator.closed, in plain words, instead of leaving it Sending for ever (the edit may have been made)', async () => {
   const { s } = signedIn();
   const a = s.edit({ undo: 'undo' }), b = s.edit({ ops: [{ op: 'remove', node: WORLD }] });

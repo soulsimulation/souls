@@ -134,8 +134,10 @@
 //   off when the other one went comes back by itself and never takes the Soul from a live one.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
-//   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
-//   build (`wire*`).
+//   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered for
+//   10 s) is let go at once, and acts wait for the next sign-in (#4980). A `wait` under way is told when a signed-in
+//   socket is lost (`{"kind":"disconnected","say":..}`) and when the next is current (`{"kind":"reconnected",
+//   "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -352,6 +354,7 @@ const joinsOf = new Set(); // own join sequences: only a successful receipt requ
 let ws = null, signedIn = false, attempt = 0, refusals = 0, stopping = false, since = Date.now(), signedInAt = 0;
 let replacedAt = null; // when another client of this Soul took it, while this daemon waits for its next command
 let retryTimer = null, gaveUpAt = -Infinity; // the next sign-in (or ask whether the Soul is free); a sign-in given up
+let lostAt = null; // #4977: when a signed-in socket was lost, until the next is current
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked) {
@@ -417,6 +420,12 @@ async function sendBulk(bytes, sequence) {
 function current() {
   if (!signedIn) signedInAt = Date.now();
   signedIn = true;
+  // #4977: a `wait` under way is told the connection is back, and how long it was gone.
+  if (lostAt !== null) {
+    const gap = Date.now() - lostAt;
+    lostAt = null;
+    note({ kind: 'reconnected', gap_ms: gap, say: `The client is connected to the world again after ${Math.round(gap / 100) / 10} s; acts held meanwhile go now.` });
+  }
   attempt = refusals = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
@@ -789,6 +798,11 @@ function connect() {
     // Signed in, this socket held the Soul and a newer client took it. Not signed in, it asked only if free and a live
     // client holds it; unless its agent asked meanwhile (`takeBack`): then it falls through, and the Soul is taken.
     const held = step === 'stream';
+    // #4977: a `wait` under way is told at once that the connection is gone, once a gap (replaced says so itself).
+    if (held && lostAt === null) {
+      lostAt = Date.now();
+      if (code !== REPLACED) note({ kind: 'disconnected', say: 'The client lost its connection to the world and is reconnecting; acts are held until it is back.' });
+    }
     if (code === REPLACED && (held || replacedAt !== null)) {
       cutWhy = 'replaced';
       if (held) {
@@ -2495,7 +2509,10 @@ async function carry(req) {
   const heldBy = (crew) => all.find((r) => r.parent === crew && !r.soul)?.id ?? null;
   // A crew's front and back and where they stand: a carry into a slot lines up on the slot's axis nearest their line.
   const crewEnds = (crew) => { const ids = ends(crew), p = ids.map((b) => (b ? at(b) : null)); return p.every(Boolean) ? { ids, at: p.map((x) => [x.pos[0], x.pos[2]]) } : null; };
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, seated, heldBy, served: activitiesServed(home, seat.world) });
+  // A loading spot (carry/spot.mjs): the crew's ends and size, and the things on the open ground that may fill a bay.
+  const crewSize = (crew) => rows.get(crew)?.members?.length;
+  const loose = () => all.filter((r) => r.parent === ground && !r.soul && !isCrew(r.kind) && !/:(place|humanoid|body)$/.test(String(r.kind ?? '').split('@')[0])).map((r) => r.id);
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, crewSize, loose, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   // `--go <time>`: sent at the moment the crew's leader named, so every carrier sets off together. Carriers that set off
   // a second apart (each its own command, on a busy machine) drift past the world's 1 m stretch and the carry breaks off.
@@ -2513,7 +2530,7 @@ async function carry(req) {
   const walked = intents.find((i) => /:walk$/.test(i.verb));
   // What to do next, plainly; the command drops it when the step is refused.
   const next = nextStep(req, { load: rows.get(req.load ?? req.part)?.name ?? null });
-  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(late > 50 ? { late_ms: late } : {}), ...(next ? { next } : {}) }, null, { now: true });
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(late > 50 ? { late_ms: late } : {}), ...(next ? { next } : {}), ...(intents.bay ? { bay: intents.bay } : {}) }, null, { now: true });
 }
 
 /**

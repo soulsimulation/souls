@@ -3212,6 +3212,681 @@
       ]
     },
     {
+      "note": "the loading spot (0.135, holy grail): a marked pad of four bays on the open ground east of the rack yard and four heavy loads in a row west of it, which crews carry there (content/kinds/construction: mars:loading_spot, mars:pallet_crates, mars:generator, mars:timber_bundle; content/worlds/mars/map.json names each copy's kind)",
+      "group": "loading",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-loading-spot",
+            "version": 1,
+            "description": "A marked concrete pad of four bays where crews set heavy loads down.",
+            "tags": [
+              "build",
+              "loading",
+              "yard",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.02,
+                      0.0
+                    ],
+                    "size": [
+                      9.8,
+                      0.04,
+                      5.8
+                    ],
+                    "tint": "pad"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -4.8,
+                      0.045,
+                      0.0
+                    ],
+                    "size": [
+                      0.1,
+                      0.01,
+                      5.6
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -2.4,
+                      0.045,
+                      0.0
+                    ],
+                    "size": [
+                      0.1,
+                      0.01,
+                      5.6
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.045,
+                      0.0
+                    ],
+                    "size": [
+                      0.1,
+                      0.01,
+                      5.6
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      2.4,
+                      0.045,
+                      0.0
+                    ],
+                    "size": [
+                      0.1,
+                      0.01,
+                      5.6
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      4.8,
+                      0.045,
+                      0.0
+                    ],
+                    "size": [
+                      0.1,
+                      0.01,
+                      5.6
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.045,
+                      2.85
+                    ],
+                    "size": [
+                      9.7,
+                      0.01,
+                      0.1
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.045,
+                      -2.85
+                    ],
+                    "size": [
+                      9.7,
+                      0.01,
+                      0.1
+                    ],
+                    "tint": "line"
+                  }
+                ],
+                "round": 0.0
+              }
+            },
+            "params": {
+              "pad": {
+                "type": "color",
+                "default": "#8e8a83",
+                "doc": "pad colour"
+              },
+              "line": {
+                "type": "color",
+                "default": "#f2c230",
+                "doc": "line colour"
+              }
+            },
+            "size": {
+              "box": [
+                9.8,
+                0.05,
+                5.8
+              ]
+            },
+            "palette": {
+              "pad": "#8e8a83",
+              "line": "#f2c230"
+            },
+            "slots": [
+              {
+                "id": "bay_1",
+                "kind": "socket",
+                "p": [
+                  3.6,
+                  0.0,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "bay_2",
+                "kind": "socket",
+                "p": [
+                  1.2,
+                  0.0,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "bay_3",
+                "kind": "socket",
+                "p": [
+                  -1.2,
+                  0.0,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "bay_4",
+                "kind": "socket",
+                "p": [
+                  -3.6,
+                  0.0,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              }
+            ],
+            "layer": "decor"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-pallet-crates",
+            "version": 1,
+            "description": "A pallet stacked with crates; two people carry it.",
+            "tags": [
+              "build",
+              "load",
+              "pallet",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.07,
+                      0.0
+                    ],
+                    "size": [
+                      1.0,
+                      0.14,
+                      1.2
+                    ],
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.245,
+                      0.365,
+                      -0.295
+                    ],
+                    "size": [
+                      0.47,
+                      0.45,
+                      0.57
+                    ],
+                    "tint": "crate"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.245,
+                      0.365,
+                      -0.295
+                    ],
+                    "size": [
+                      0.47,
+                      0.45,
+                      0.57
+                    ],
+                    "tint": "crate"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.245,
+                      0.365,
+                      0.295
+                    ],
+                    "size": [
+                      0.47,
+                      0.45,
+                      0.57
+                    ],
+                    "tint": "crate"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.245,
+                      0.365,
+                      0.295
+                    ],
+                    "size": [
+                      0.47,
+                      0.45,
+                      0.57
+                    ],
+                    "tint": "crate"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.82,
+                      -0.295
+                    ],
+                    "size": [
+                      0.94,
+                      0.45,
+                      0.57
+                    ],
+                    "tint": "crate"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.82,
+                      0.295
+                    ],
+                    "size": [
+                      0.94,
+                      0.45,
+                      0.57
+                    ],
+                    "tint": "band"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "wood": {
+                "type": "color",
+                "default": "#b08a5a",
+                "doc": "wood colour"
+              },
+              "crate": {
+                "type": "color",
+                "default": "#c9a26b",
+                "doc": "crate colour"
+              },
+              "band": {
+                "type": "color",
+                "default": "#5b4630",
+                "doc": "band colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.0,
+                1.1,
+                1.2
+              ]
+            },
+            "palette": {
+              "wood": "#b08a5a",
+              "crate": "#c9a26b",
+              "band": "#5b4630"
+            },
+            "layer": "decor"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-generator",
+            "version": 1,
+            "description": "A diesel generator on its skid; four people carry it.",
+            "tags": [
+              "build",
+              "load",
+              "generator",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.06,
+                      0.0
+                    ],
+                    "size": [
+                      1.0,
+                      0.12,
+                      2.0
+                    ],
+                    "tint": "skid"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.545,
+                      -0.1
+                    ],
+                    "size": [
+                      0.9,
+                      0.85,
+                      1.6
+                    ],
+                    "tint": "body"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.65,
+                      0.8
+                    ],
+                    "size": [
+                      0.7,
+                      0.6,
+                      0.3
+                    ],
+                    "tint": "panel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.3,
+                      1.03,
+                      -0.6
+                    ],
+                    "size": [
+                      0.12,
+                      0.14,
+                      0.12
+                    ],
+                    "tint": "pipe"
+                  }
+                ],
+                "round": 0.02
+              }
+            },
+            "params": {
+              "skid": {
+                "type": "color",
+                "default": "#3b3d40",
+                "doc": "skid colour"
+              },
+              "body": {
+                "type": "color",
+                "default": "#e0b02a",
+                "doc": "body colour"
+              },
+              "panel": {
+                "type": "color",
+                "default": "#2f3a44",
+                "doc": "panel colour"
+              },
+              "pipe": {
+                "type": "color",
+                "default": "#6d6f73",
+                "doc": "pipe colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.0,
+                1.1,
+                2.0
+              ]
+            },
+            "palette": {
+              "skid": "#3b3d40",
+              "body": "#e0b02a",
+              "panel": "#2f3a44",
+              "pipe": "#6d6f73"
+            },
+            "layer": "decor"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-timber-bundle",
+            "version": 1,
+            "description": "A strapped 4.8 m bundle of timbers; four to six people carry it.",
+            "tags": [
+              "build",
+              "load",
+              "timber",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.23,
+                      0.115,
+                      0.0
+                    ],
+                    "size": [
+                      0.22,
+                      0.22,
+                      4.8
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.115,
+                      0.0
+                    ],
+                    "size": [
+                      0.22,
+                      0.22,
+                      4.8
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.23,
+                      0.115,
+                      0.0
+                    ],
+                    "size": [
+                      0.22,
+                      0.22,
+                      4.8
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.115,
+                      0.345,
+                      0.0
+                    ],
+                    "size": [
+                      0.22,
+                      0.22,
+                      4.8
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.115,
+                      0.345,
+                      0.0
+                    ],
+                    "size": [
+                      0.22,
+                      0.22,
+                      4.8
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.24,
+                      -1.5
+                    ],
+                    "size": [
+                      0.72,
+                      0.48,
+                      0.06
+                    ],
+                    "tint": "strap"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.24,
+                      1.5
+                    ],
+                    "size": [
+                      0.72,
+                      0.48,
+                      0.06
+                    ],
+                    "tint": "strap"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "timber": {
+                "type": "color",
+                "default": "#c8935a",
+                "doc": "timber colour"
+              },
+              "strap": {
+                "type": "color",
+                "default": "#2d6fb3",
+                "doc": "strap colour"
+              }
+            },
+            "size": {
+              "box": [
+                0.7,
+                0.5,
+                4.8
+              ]
+            },
+            "palette": {
+              "timber": "#c8935a",
+              "strap": "#2d6fb3"
+            },
+            "layer": "decor"
+          }
+        },
+        {
+          "op": "place",
+          "def": "mars-loading-spot@1",
+          "name": "loading-spot",
+          "p": [
+            24,
+            24
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-pallet-crates@1",
+          "name": "pallet-crates-1",
+          "p": [
+            16.4,
+            24
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-generator@1",
+          "name": "generator",
+          "p": [
+            14,
+            24
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-timber-bundle@1",
+          "name": "timber-bundle",
+          "p": [
+            11.6,
+            24
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-pallet-crates@1",
+          "name": "pallet-crates-2",
+          "p": [
+            9.2,
+            24
+          ]
+        }
+      ]
+    },
+    {
       "note": "the shade yard: the parts of a timber shade (two bents standing, two rails and a shade cloth lying) beside its marked site, east of the rack yard; a crew of four to six builds it (content/kinds/carpentry; content/worlds/mars/map.json names each copy's kind)",
       "group": "shade",
       "ops": [

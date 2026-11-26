@@ -674,6 +674,7 @@ fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
                 out: &[],
             },
             limits: &limits,
+            defs: &Default::default(),
             header: Some(&w.header),
             body: room,
             soul: room,
