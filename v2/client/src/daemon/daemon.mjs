@@ -782,8 +782,9 @@ function connect() {
         note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command, or by itself once the other has gone' });
       }
       // A sign-in of its own given up just before may have reached the gateway after its successor and taken the Soul
-      // from it, then gone: it asks again soon, still only if free.
-      const again = free || Date.now() - gaveUpAt > 10_000 ? REPLACED_RETRY_MS : wait;
+      // from it (or held it against this ask), then gone: it asks again soon, still only if free.
+      const soon = Date.now() - gaveUpAt <= 10_000, again = soon ? wait : REPLACED_RETRY_MS;
+      if (soon) attempt++;
       if (free) log(`another client of this Soul still holds it; asking again in ${again} ms`);
       retryTimer = setTimeout(() => { if (replacedAt !== null && !ws && !stopping) connect(); }, again);
       return;
