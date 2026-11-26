@@ -290,7 +290,8 @@ The release owner configures `/etc/souls/placement.json` before activating the p
 hash and trusted catalogue, directory/origin addresses and reserved gateway port range. The installed helper requires
 the fixed route metadata `/var/lib/souls/routes/worlds.json` and route output `/var/lib/souls-routes`. Installation
 never overwrites this operator configuration. The existing route service owns its launcher/public-origin settings.
-When upgrading its build, update that pin to the verified installed binary. The inbox is root:souls 0770; the fixed
+Each release then moves that pin with the library's `worldd` and `ops/` and republishes the catalogue's templates on its
+own build ([release.md](../release.md), New world). The inbox is root:souls 0770; the fixed
 parent, private status/authority files and attempts stay root-owned. The directory can write only the inbox there.
 Atomic token and retirement-notice replacement also needs the directory service's sandbox to permit writes to
 the fixed placed-world subtree `/var/lib/souls/worlds/worlds`, owned by the existing Souls account. This is subtree
