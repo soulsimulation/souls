@@ -1798,7 +1798,10 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
                                     900_000_000,
                                 );
                                 let secs = t.elapsed().as_secs_f64();
-                                println!("walked from the {from}: {} {r:?} in {secs:.0} s", soul.1);
+                                println!(
+                                    "walked from the {from}: Soul {} {r:?} in {secs:.0} s",
+                                    soul.1.counter()
+                                );
                                 (soul.1, r, secs)
                             })
                         })

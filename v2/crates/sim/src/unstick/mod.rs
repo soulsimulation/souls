@@ -363,7 +363,7 @@ impl Ladder {
     }
 
     /// `who`'s walk, for the order the ladder keeps, was given new legs from where it stands (a served world's planner
-    /// answered its reroute): it walks them from the first, and keeps its least distance to its leg's end, as a reroute
+    /// answered its reroute): it walks them from the first, and keeps its least way left to its leg's end, as a reroute
     /// does (#3168).
     pub fn routed(&mut self, runner: &Runner, who: Id, legs: Vec<Leg>) {
         let Some(w) = self.walkers.get_mut(&who) else {
@@ -380,6 +380,7 @@ impl Ladder {
             if old.is_none_or(|l| l.to != first.to) {
                 c.best = len(body.pose.position, first.to);
                 c.mark = c.best;
+                c.long = (c.best, runner.now);
             }
         }
     }
@@ -854,6 +855,7 @@ impl Ladder {
                     if w.legs[0].to != leg.to {
                         c.best = len(body.pose.position, w.legs[0].to);
                         c.mark = c.best;
+                        c.long = (c.best, now);
                     }
                 }
             }
