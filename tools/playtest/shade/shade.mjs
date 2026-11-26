@@ -83,7 +83,9 @@ async function seatRail(r, bodies, ids, rail, slot, stop, a, b, crew = null) {
 }
 
 /** The cloth by a crew of four or six: the first at its back, the second at its front, the rest beside it. Taken from
- *  where it lies (`take`) or off the rails (`unseat`), carried through the points `to` in turn, put `into`. */
+ *  where it lies (`take`) or off the rails (`unseat`), carried through the points `to` in turn, put `into`. The first
+ *  offered the crew, so it is the carry's front: its `carry to` alone walks the whole crew, each keeping its place
+ *  (PR #5005), and the cloth goes in square, never turned onto a post. */
 async function cloth(r, bodies, ids, who, how, to, into) {
   const [a, b, ...sides] = who;
   await Promise.all([
@@ -93,7 +95,7 @@ async function cloth(r, bodies, ids, who, how, to, into) {
   ]);
   const crew = await crewOf(r, bodies, a, [b, ...sides]);
   await r.run(a, 'part', how, crew, ids.cloth);
-  for (const leg of to) await Promise.all(who.map((s) => r.run(s, 'carry', 'to', crew, xz(leg))));
+  for (const leg of to) await r.run(a, 'carry', 'to', crew, xz(leg));
   await r.run(a, 'part', 'put', crew, ...into);
   await Promise.all(who.map((s) => r.run(s, 'carry', 'leave', crew)));
 }

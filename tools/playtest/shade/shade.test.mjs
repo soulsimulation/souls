@@ -47,8 +47,10 @@ test('four and six keep the shade order: both bents, then both rails, then the c
     const put = (slot) => at((w) => w[1] === 'part' && w[2] === 'put' && w[5] === slot);
     assert.ok(Math.max(put('bent_a'), put('bent_b')) < Math.min(put('rail_l'), put('rail_r')), `${n}: rails after both bents`);
     assert.ok(Math.max(put('rail_l'), put('rail_r')) < put('cloth'), `${n}: the cloth after both rails`);
-    const clothCrew = said.filter((w) => w[1] === 'carry' && w[2] === 'to' && /^14\.6,15$/.test(w.slice(4).join(' ')));
+    const clothCrew = said.filter((w) => w[1] === 'carry' && w[2] === 'grip' && w[3] === 'cloth');
     assert.equal(new Set(clothCrew.map((w) => w[0])).size, n, `${n}: all ${n} carry the cloth`);
+    const walked = said.filter((w) => w[1] === 'carry' && w[2] === 'to' && /^14\.6,15$/.test(w.slice(4).join(' ')));
+    assert.deepEqual(walked.map((w) => w[0]), ['ada'], `${n}: only the front's carry to walks the cloth's crew`);
     assert.equal(new Set(said.map((w) => w[0])).size, n, `${n}: every Soul sends its own commands`);
   }
 });
