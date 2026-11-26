@@ -19,6 +19,11 @@
 //           It goes 6 m south of the template's own yard (`AT_LIVE`), which that world still holds as plain things. A
 //           live-placed stand is walked over as a seeded one is (no walk box), so a frame carried back comes down into
 //           it and its `part put` is not refused `part.not-held`.
+//           With --crew 6 six Souls build two bays side by side in a run, from a yard the creator places live (two
+//           stands of two frames, eight beams, the two bays, and a 6.1 m frame): each bay's frames by two, its four
+//           beams (low, then high) by three, a front, a back and a side beside the middle grip; then all six carry the
+//           6.1 m frame together, one at each of its six grips (`buildTwoBays`).
+//             node tools/playtest/rack-bay/rack-bay.mjs local --crew 6 [--record 900]
 //   stage   the creator's `souls-god.mjs` lines that place the same yard live in a staged world (printed, not run):
 //             node tools/playtest/rack-bay/rack-bay.mjs stage
 //   run     the steps against four Souls already paired and standing in a world (soul.game's staged test world):
@@ -26,6 +31,7 @@
 //           The folder is where `node souls.mjs` runs for them (its `.souls/`). Ids come from Ada's own `query find`.
 //   print   the steps as the shell lines a person types, one Soul each, crews and ids as names to fill in.
 //
+// A frame that stands is carried by its posts: its front and back at its own x, beside its edges (`carry grip`).
 // The steps (`buildAndTakeDown`): Ada and Bo carry frame 1 from the stand into the bay's upright_a, Bo holding it; Ada
 // and Cy frame 2 into upright_b, Cy holding it; the change of crew: Di takes frame 1 over from Bo; Ada and Bo seat both
 // low beams; everyone lets go and the bay stands unheld. Take-down: hold crews on the frames, Bo and Di lift each beam
@@ -52,6 +58,20 @@ export const CAMERA = { position: [0, 6, 31], target: [0, 1, 20.5], fov: 50 };
 /** The title the creator gives the frame it places live; the Souls name it only by this. */
 export const SPARE = 'spare frame';
 const LABELS = ['ada', 'bo', 'cy', 'di'];
+/** Six Souls' yard (--crew 6), south of the template's own: two stands of two frames, eight beams lying along z in two
+ *  rows, two bays beside each other in a run (the second's first frame 0.7 m from the first's last), and the 6.1 m
+ *  frame, standing, which all six carry `tall.to`. Metres. */
+export const AT6 = {
+  stands: [[-6, 26], [-6, 30]],
+  beams: [-3.6, -2.8, -2, -1.2].flatMap((x) => [[x, 26]]).concat([-3.6, -2.8, -2, -1.2].map((x) => [x, 30])),
+  bays: [[6, 26], [6, 29.6]],
+  tall: { at: [-2, 35], to: [5, 35] },
+};
+/** The camera for six: farther back and higher, both bays and the 6.1 m frame in view. */
+export const CAMERA6 = { position: [0, 11, 46], target: [0, 1, 29], fov: 50 };
+const SIX = ['ada', 'bo', 'cy', 'di', 'ed', 'fy'];
+/** Where a beam's carriers stand from its middle (m): outside the bay's frames, which stand at its slots' ends. */
+const BEAM_FROM = '1.8';
 const GOD = join(REPO_ROOT, 'v2/client/src/creator/souls-god.mjs');
 
 /** The template's facts with its own rack yard, exported with the Mars map. Nothing is added. → the facts' path */
@@ -70,6 +90,21 @@ export function stageBatch(ground, at = AT_LIVE) {
     ...at.beams.map((p, k) => ({ op: 'place', name: 4 + k, kind: 'mars:rack_beam', in: ground, at: [m(p[0]), 0, m(p[1])], title: `rack beam ${k + 1}` })),
     { op: 'place', name: 6, kind: 'mars:rack_bay', in: ground, at: [m(at.bay[0]), 0, m(at.bay[1])], title: 'rack bay' },
   ];
+}
+
+/** Six Souls' yard as one creator edit: the stands with their frames, the beams, the two bays, the 6.1 m frame. */
+export function stageBatch6(ground, at = AT6) {
+  const ops = [];
+  let n = 0;
+  at.stands.forEach((p, k) => {
+    const stand = ++n;
+    ops.push({ op: 'place', name: stand, kind: 'mars:frame_stand', in: ground, at: [p[0], 0, p[1]], title: `frame stand ${k + 1}` });
+    for (const slot of [1, 2]) ops.push({ op: 'place', name: ++n, kind: 'mars:rack_upright', in: stand, slot, title: `rack frame ${2 * k + slot}` });
+  });
+  at.beams.forEach((p, k) => ops.push({ op: 'place', name: ++n, kind: 'mars:rack_beam', in: ground, at: [p[0], 0, p[1]], title: `rack beam ${k + 1}` }));
+  at.bays.forEach((p, k) => ops.push({ op: 'place', name: ++n, kind: 'mars:rack_bay', in: ground, at: [p[0], 0, p[1]], title: `rack bay ${k + 1}` }));
+  ops.push({ op: 'place', name: ++n, kind: 'mars:rack_upright_6m', in: ground, at: [at.tall.at[0], 0, at.tall.at[1]], title: 'tall frame' });
+  return ops;
 }
 
 /** The creator's lines that place the same yard live (printed for a staged world on soul.game). */
@@ -107,7 +142,7 @@ export async function pairCreator({ world, worldDir, dir }) {
 }
 
 /** The yard placed live by the creator in one edit, as `stageLines` prints it. → {ok, steps, bay, stand: their describes} */
-export async function stageLive(god, log = () => {}, at = AT_LIVE) {
+export async function stageLive(god, log = () => {}, at = AT_LIVE, batch = stageBatch) {
   const steps = [];
   const go = async (...words) => {
     const a = await god(...words);
@@ -117,7 +152,7 @@ export async function stageLive(god, log = () => {}, at = AT_LIVE) {
     return a;
   };
   try {
-    await go('batch', JSON.stringify(stageBatch(await groundOf(god), at)));
+    await go('batch', JSON.stringify(batch(await groundOf(god), at)));
     let nodes = [];
     for (let i = 0; i < 40 && !nodes.some((n) => n.kind === 'mars:rack_bay'); i++) { nodes = (await god('describe')).nodes ?? []; await new Promise((r) => setTimeout(r, 250)); }
     const id = (k) => nodes.find((n) => n.kind === k)?.id;
@@ -206,8 +241,9 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
   await both(['ada', 'carry', 'to', crewB, bay, 'upright_b'], ['cy', 'carry', 'to', crewB, bay, 'upright_b']);
   await run('ada', 'part', 'put', crewB, bay, 'upright_b');
   await run('ada', 'carry', 'leave', crewB);
-  // The change of crew on frame 1, standing in its slot: Di takes Bo's place.
-  await both(['di', 'carry', 'grip', fa, 'right'], ['ada', 'carry', 'grip', fa, 'left']);
+  // The change of crew on frame 1, standing in its slot: Di takes Bo's place, from its other side (Bo, its carry's
+  // front, stands by its + post; Ada, a step away at frame 2, joins the new crew only to hand it over).
+  await run('di', 'carry', 'grip', fa, 'left');
   const crewA2 = await crew('di', 'ada', fa);
   await run('ada', 'carry', 'leave', crewA2);
   await run('bo', 'carry', 'leave', crewA);
@@ -225,11 +261,12 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
   await both(['ada', 'carry', 'leave', crewC], ['bo', 'carry', 'leave', crewC]);
   const built = Date.now();
 
-  // Take-down. Hold crews on the frames: Cy holds frame 1, Ada frame 2.
-  await both(['cy', 'carry', 'grip', fa, 'right'], ['di', 'carry', 'grip', fa, 'left']);
+  // Take-down. Hold crews on the frames: Cy holds frame 1, Ada frame 2, each 2 m off its post, clear of the carriers
+  // who take it out by its posts.
+  await both(['cy', 'carry', 'grip', fa, 'right', '--from', '2'], ['di', 'carry', 'grip', fa, 'left', '--from', '2']);
   const holdA = await crew('cy', 'di', fa);
   await run('di', 'carry', 'leave', holdA);
-  await both(['ada', 'carry', 'grip', fb, 'right'], ['bo', 'carry', 'grip', fb, 'left']);
+  await both(['ada', 'carry', 'grip', fb, 'right', '--from', '2'], ['bo', 'carry', 'grip', fb, 'left', '--from', '2']);
   const holdB = await crew('ada', 'bo', fb);
   await run('bo', 'carry', 'leave', holdB);
   // Bo and Di lift the beams out, the right one first, and lay each where it lay.
@@ -251,6 +288,75 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
     await run('bo', 'part', 'put', out, stand, slot);
     await both(['bo', 'carry', 'leave', out], ['di', 'carry', 'leave', out]);
   }
+  return { built };
+}
+
+/** Six Souls' ids by the titles the creator gave (`stageBatch6`), as Ada's copy names them. */
+export async function findIds6(seat) {
+  const a = await seat.cli('query', JSON.stringify([{ find: 'rack' }, { find: 'stand' }, { find: 'tall' }]));
+  const found = (a.answers ?? []).flatMap((x) => x.found ?? []);
+  const named = (want) => { const f = found.find((x) => x.name === want && /^mars:/.test(x.kind ?? '')); if (!f) throw new Error(`Ada's copy finds no "${want}" (found: ${found.map((x) => x.name).join(', ')})`); return f.id; };
+  return {
+    bays: [1, 2].map((k) => ({ bay: named(`rack bay ${k}`), fa: named(`rack frame ${2 * k - 1}`), fb: named(`rack frame ${2 * k}`), beams: [1, 2, 3, 4].map((b) => named(`rack beam ${4 * (k - 1) + b}`)) })),
+    tall: named('tall frame'),
+  };
+}
+
+/**
+ * Six Souls build two bays beside each other, each Soul by its own commands, then all six carry the 6.1 m frame. Each
+ * bay: its first frame by two into upright_a, the front holding it; its second by two into upright_b, the front holding
+ * it; its four beams by three (a front, a back, and a side beside the beam's middle grip), the low ones and then the
+ * high ones, each pair right then left so none is carried past one seated at its height; then the holders let go and
+ * the bay stands. The 6.1 m frame: its front, its back and four sides each at a grip, offered by the front to the
+ * other five, lifted, carried `to` and set down.
+ */
+export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = AT6.tall.to) {
+  const all = (...steps) => Promise.all(steps.map((s) => run(...s)));
+  const crew = async (a, others, on = null) => {
+    const { crew: c } = await run(a, 'carry', 'offer', ...others.map((o) => bodies[o]), ...(on ? ['--on', on] : []));
+    for (const o of others) await run(o, 'carry', 'accept', c);   // in order: the back, then each side
+    return c;
+  };
+  const frame = async (f, back, front, bay, slot) => {
+    await both([back, 'carry', 'grip', f, 'back'], [front, 'carry', 'grip', f, 'front']);
+    const c = await crew(front, [back]);
+    await run(front, 'part', 'take', c, f);
+    await both([back, 'carry', 'to', c, bay, slot], [front, 'carry', 'to', c, bay, slot]);
+    await run(front, 'part', 'put', c, bay, slot);
+    await run(back, 'carry', 'leave', c);   // the front holds it standing in its slot
+    return c;
+  };
+  const teams = [
+    { a: ['ada', 'bo'], b: ['cy', 'di'], beams: ['ada', 'cy', 'ed'] },
+    { a: ['ed', 'fy'], b: ['bo', 'di'], beams: ['ada', 'cy', 'ed'] },
+  ];
+  const built = [];
+  for (const [k, { bay, fa, fb, beams }] of bays.entries()) {
+    const t = teams[k];
+    const holdA = await frame(fa, t.a[0], t.a[1], bay, 'upright_a');
+    const holdB = await frame(fb, t.b[0], t.b[1], bay, 'upright_b');
+    const [front, back, side] = t.beams;
+    const c = await crew(front, [back, side]);
+    for (const [beam, slot] of [[beams[0], 'beam_low_r'], [beams[1], 'beam_low_l'], [beams[2], 'beam_high_r'], [beams[3], 'beam_high_l']]) {
+      await all([back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']);
+      await run(front, 'part', 'take', c, beam);
+      await all([back, 'carry', 'to', c, bay, slot], [front, 'carry', 'to', c, bay, slot], [side, 'carry', 'to', c, bay, slot]);
+      await run(front, 'part', 'put', c, bay, slot);
+    }
+    await all([front, 'carry', 'leave', c], [back, 'carry', 'leave', c], [side, 'carry', 'leave', c]);
+    await run(t.a[1], 'carry', 'leave', holdA);
+    await run(t.b[1], 'carry', 'leave', holdB);
+    built.push(Date.now());
+  }
+  // The 6.1 m frame by all six, one at each grip: Ada in front, Bo at the back, the others beside its grips between.
+  const ends = ['ada', 'bo'], sides = ['cy', 'di', 'ed', 'fy'];
+  await all(['ada', 'carry', 'grip', tall, 'front'], ['bo', 'carry', 'grip', tall, 'back'], ...sides.map((s, k) => [s, 'carry', 'grip', tall, 'side', String(k + 1)]));
+  const c = await crew('ada', ['bo', ...sides]);
+  await run('ada', 'carry', 'lift', c, tall);
+  const where = `${to[0]},${to[1]}`;
+  await all(...[...ends, ...sides].map((s) => [s, 'carry', 'to', c, where]));
+  await run('bo', 'carry', 'set-down', c);
+  await all(...[...ends, ...sides].map((s) => [s, 'carry', 'leave', c]));
   return { built };
 }
 
@@ -304,7 +410,8 @@ async function main() {
   if (mode !== 'local') { console.error('usage: rack-bay.mjs local [--template t] [--dir d] [--record s] | stage | print | run --folder f --souls ada=..,bo=..,cy=..,di=..'); process.exit(2); }
   const { startOldPage } = await import('../arena/new-engine/old-page.mjs');
   const template = opt('template', TEMPLATE), record = Number(opt('record', 0));
-  const live = opt('stage', 'template') === 'live', at = live ? AT_LIVE : AT;
+  const six = opt('crew', '4') === '6';
+  const live = six || opt('stage', 'template') === 'live', at = live ? AT_LIVE : AT;
   const world = await startOldPage({ template, dir: join(dir, 'world'), facts: live ? null : templateFacts({ template, out: dir }), history: false, marsWeb: opt('mars-web', undefined), log });
   out.page = world.page; out.template = template; out.stage = live ? 'live' : 'facts';
   const seats = {}, bodies = {};
@@ -312,17 +419,23 @@ async function main() {
   try {
     god = await pairCreator({ world: world.world, worldDir: join(dir, 'world', 'world'), dir });
     if (live) {
-      out.staged = await stageLive(god, log, at); save();
+      out.staged = six ? await stageLive(god, log, AT6, stageBatch6) : await stageLive(god, log, at); save();
       if (!out.staged.ok) { log(`staging stopped: ${JSON.stringify(out.staged.failed)}`); return; }
     }
-    for (const l of LABELS) {
+    for (const l of six ? SIX : LABELS) {
       seats[l] = await pairSeat({ world: world.world, dir: join(dir, 'seats'), label: l, name: l[0].toUpperCase() + l.slice(1) });
       bodies[l] = (await seats[l].join()).body;
       log(`${l}: body ${bodies[l]}`);
     }
-    out.ids = await findIds(seats.ada); out.bodies = bodies; out.before = await partsWhere(seats.ada, out.ids); save();
+    out.ids = six ? await findIds6(seats.ada) : await findIds(seats.ada); out.bodies = bodies;
+    if (!six) out.before = await partsWhere(seats.ada, out.ids);
+    save();
     log(`page ${world.page}`);
-    const play = async () => {
+    const play = six ? async () => {
+      const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
+      try { const v = await buildTwoBays(r, bodies, out.ids); out.builtAtS = v.built.map((b) => (b - t0) / 1000); out.ok = true; } catch (e) { out.ok = false; out.failed = e.message; }
+      out.ms = Date.now() - t0; save();
+    } : async () => {
       const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
       try { const v = await buildAndTakeDown(r, bodies, out.ids, at.beams.map((b) => b.join(','))); out.builtAtS = (v.built - t0) / 1000; out.ok = true; } catch (e) { out.ok = false; out.failed = e.message; }
       out.ms = Date.now() - t0; save();
@@ -335,13 +448,15 @@ async function main() {
       const { capture } = await import('../../launch-video/capture.mjs');
       const { cameraShot } = await import('../../launch-video/scene.mjs');
       let done = null;
-      out.clip = { file: join(dir, 'rack-bay.mp4'), camera: CAMERA };
-      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: CAMERA }, record, 16 / 9), log, onPlay: () => { done = play(); } });
+      const camera = six ? CAMERA6 : CAMERA;
+      out.clip = { file: join(dir, 'rack-bay.mp4'), camera };
+      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: camera }, record, 16 / 9), log, onPlay: () => { done = play(); } });
       await done;
     } else await play();
-    out.after = await partsWhere(seats.ada, out.ids); save();
+    if (!six) out.after = await partsWhere(seats.ada, out.ids);
+    save();
     log(out.ok ? `done: ${out.steps.length} commands, 0 refused, ${(out.ms / 1000).toFixed(0)} s` : `stopped: ${out.failed}`);
-    log(out.spare?.ok ? `spare frame: ${out.spare.steps.length} commands by its title, 0 refused` : `spare frame stopped: ${out.spare?.failed}`);
+    if (!six) log(out.spare?.ok ? `spare frame: ${out.spare.steps.length} commands by its title, 0 refused` : `spare frame stopped: ${out.spare?.failed}`);
   } finally {
     // every daemon this run started ends with it, the creator's too
     for (const s of Object.values(seats)) await s.stop();
