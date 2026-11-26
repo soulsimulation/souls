@@ -6,7 +6,7 @@ import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { PEOPLE, templateNameFor } from '../../../../mars/viewer/app/engine-view/people-light.ts';
 import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
-import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, lookBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
+import { bodySlotsOf, bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, lookBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
 import { lookBody } from '../humanoid/look.ts';
 import { PROPS, carriedProp, carrySide } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
 
@@ -210,4 +210,32 @@ test('every prop the page hands the old renderer is one it draws; a held book is
   assert.equal(carriedProp('cup', 'idle'), 'cup');
   assert.equal(carrySide('plate'), 'left');
   assert.equal(carrySide('tome'), 'right');
+});
+
+const entryNode = (kind: string, entry: unknown) => node('entry.1', 'souls:kind', null, [0, 0, 0], { defines: kind, entry: new TextEncoder().encode(JSON.stringify(entry)) });
+
+test('declared standing slots retain their actual platform root; physical role slots are not seats', () => {
+  const kind = 'example:platform@1', entry = { owner: 'thing', roles: { speaker: {} }, slots: { item: { admits: 'thing', at_mm: [0, 0, 0] }, podium: { admits: 'body', at_mm: [100, 100, -350] } } };
+  assert.deepEqual(bodySlotsOf(entry), [{ row: [2, 100, 100, -350, 0, 1], posture: 'stand' }]);
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  // No field-13 coordinates: as with the lecture, the entry must supply its declared place. Body precedes definition.
+  b.receive({ t: 'snapshot', s: { nodes: [world, node('lectern.1', kind, world.id, [2_000_000, 0, 0]), { ...body, parent: 'lectern.1', slot: 2, pos: [0, 0, 0] }, entryNode(kind, entry)], removed: [] } } as never);
+  for (let n = 0; n < 10; n++) b.receive(part(n));
+  const standing = on(b, .5);
+  assert.equal(standing.activity, 'idle');
+  assert.equal(standing.state.seatHeight, undefined);
+  assert.deepEqual(standing.p, [2.1, .1, -.35], 'the entry slot is a transform, not a cosmetic body offset');
+});
+
+test('declared sit and lie take precedence over kind names and preserve recorded slot coordinates', () => {
+  for (const [posture, kind, activity] of [['sit', 'example:bed', 'sit'], ['lie', 'example:chair', 'lie']] as const) {
+    const b = new V2Bridge({ rulesVersion: 'test/1' });
+    const entry = { owner: 'thing', slots: { place: { admits: 'body', posture, at_mm: [100, 200, 300] } } };
+    b.receive({ t: 'snapshot', s: { nodes: [world, entryNode(kind, entry), node('place.1', kind, world.id, [2_000_000, 0, 0], { slots: [[1, 0, 450, 0, 90000, 1]] }), { ...body, parent: 'place.1', slot: 1, pos: [0, 0, 0] }], removed: [] } } as never);
+    for (let n = 0; n < 10; n++) b.receive(part(n));
+    const resting = on(b, .5);
+    assert.equal(resting.activity, activity);
+    assert.equal(resting.state.seatHeight, .45);
+    assert.deepEqual(resting.p, [2, 0, 0], 'recorded coordinates take precedence over entry defaults');
+  }
 });
