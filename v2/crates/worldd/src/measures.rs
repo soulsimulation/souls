@@ -495,38 +495,54 @@ pub static STREAM: Stream = Stream(Mutex::new(String::new()));
 /// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
 pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
 
-/// The stream's clean-up of old generations from the store (#3833, #4954; `stream_cleanup` in `health.json`): the
-/// reads and deletes waiting (`waiting`), those of them waiting to be tried again after a refusal (`retrying`), and
-/// the objects deleted and the refusals since the start. One per process, written by the clean-up's own thread; absent
-/// until it first runs.
+/// The stream's clean-up of old generations from the store (#3833, #4954; `stream_cleanup` in `health.json`): the old
+/// generations not read yet (`generations`, each standing for its objects, about a thousand), the deletes in line
+/// (`waiting`), those of them waiting to be tried again after a refusal (`retrying`), the objects deleted and the
+/// refusals since the start, and the generations not held for it (`dropped`; a restart finds them again). One per
+/// process, written by the clean-up's own thread each second, whether or not it may delete; absent until it first runs.
 pub struct Cleanup {
     on: std::sync::atomic::AtomicBool,
+    generations: AtomicU64,
     waiting: AtomicU64,
     retrying: AtomicU64,
     deleted: AtomicU64,
     refused: AtomicU64,
+    dropped: AtomicU64,
 }
 
 /// This process's stream clean-up.
 pub static CLEANUP: Cleanup = Cleanup {
     on: std::sync::atomic::AtomicBool::new(false),
+    generations: AtomicU64::new(0),
     waiting: AtomicU64::new(0),
     retrying: AtomicU64::new(0),
     deleted: AtomicU64::new(0),
     refused: AtomicU64::new(0),
+    dropped: AtomicU64::new(0),
 };
 
 impl Cleanup {
-    /// How the clean-up stands after a pass.
-    pub fn set(&self, waiting: u64, retrying: u64, deleted: u64, refused: u64) {
+    /// How the clean-up stands now.
+    pub fn set(
+        &self,
+        generations: u64,
+        waiting: u64,
+        retrying: u64,
+        deleted: u64,
+        refused: u64,
+        dropped: u64,
+    ) {
+        self.generations.store(generations, Ordering::Relaxed);
         self.waiting.store(waiting, Ordering::Relaxed);
         self.retrying.store(retrying, Ordering::Relaxed);
         self.deleted.store(deleted, Ordering::Relaxed);
         self.refused.store(refused, Ordering::Relaxed);
+        self.dropped.store(dropped, Ordering::Relaxed);
         self.on.store(true, Ordering::Relaxed);
     }
 
-    /// `,"stream_cleanup":{"waiting":n,"retrying":n,"deleted":n,"refused":n}`, or nothing before it runs.
+    /// `,"stream_cleanup":{"generations":n,"waiting":n,"retrying":n,"deleted":n,"refused":n,"dropped":n}`, or nothing
+    /// before it runs.
     fn json(&self, o: &mut String) {
         if !self.on.load(Ordering::Relaxed) {
             return;
@@ -534,11 +550,13 @@ impl Cleanup {
         let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
         let _ = write!(
             o,
-            ",\"stream_cleanup\":{{\"waiting\":{},\"retrying\":{},\"deleted\":{},\"refused\":{}}}",
+            ",\"stream_cleanup\":{{\"generations\":{},\"waiting\":{},\"retrying\":{},\"deleted\":{},\"refused\":{},\"dropped\":{}}}",
+            l(&self.generations),
             l(&self.waiting),
             l(&self.retrying),
             l(&self.deleted),
-            l(&self.refused)
+            l(&self.refused),
+            l(&self.dropped)
         );
     }
 }

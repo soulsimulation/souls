@@ -56,12 +56,16 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   read from the store, and what it reads is kept. Do not delete `stream-backup/` on a running machine. A stop
   (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
 - **Old stream pieces left in the store** (#4954). Generations before the previous one are deleted from the store 10
-  minutes after they close, by their own thread (`stream-cleanup`, its own store client), and only while
-  `stream_backup` is current. A refused delete is tried again after 1, 2, 4 … s, then every 60 s, for ever, while the
-  rest go on; the journal says `worldd: the stream's clean-up was refused, viewers unaffected: <fault>; …`.
-  `health.json` has `"stream_cleanup":{"waiting":n,"retrying":n,"deleted":n,"refused":n}`. A `waiting` that only
-  grows means the store refuses every delete; nothing else waits on it. Before 0.139 one refused delete switched the
-  clean-up off until the world restarted.
+  minutes after they close, by their own thread (`stream-cleanup`, its own store client), and only once the store
+  holds the current chain's head (a backup pass begun after the last rollover has finished current), so never while
+  `stream_backup` is behind or fenced. A refused delete is tried again after 1, 2, 4 … s, then every 60 s, for ever,
+  while the rest go on; a generation's record goes after its objects. The journal says
+  `worldd: the stream's clean-up was refused, viewers unaffected: <fault>; …`. `health.json` has
+  `"stream_cleanup":{"generations":n,"waiting":n,"retrying":n,"deleted":n,"refused":n,"dropped":n}`: generations not
+  read yet (about a thousand objects each), deletes in line, those retrying, and generations past the 64 held, which
+  the next restart finds again. A `waiting` that only grows means the store refuses every delete; `generations` that
+  only grows means the backup is not current. Nothing else waits on either. Before 0.139 one refused delete switched
+  the clean-up off until the world restarted.
 - **A store that stalls after the archive opens.** A running history archiver never stops on a store that does not
   answer: the write (or read) it is on is tried again after 1, 2, 4 … s, then every 60 s, until the store answers,
   and the parts that come meanwhile wait in order: up to 64 MiB of them in memory, the rest in the log on the disk,
