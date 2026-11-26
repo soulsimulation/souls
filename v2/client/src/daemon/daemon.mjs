@@ -123,6 +123,10 @@
 //   acts are checked (R8) and sent with no model turn; a wake goes through R13's budget. A change entry fires on R9's
 //   events (the `event` op, and what this Soul hears). Each occurrence is marked on disk with its sequence before
 //   it is sent. What was missed while the daemon was off is listed once, in the next answer, as `missed`.
+// - **Another client of this Soul** signing in takes the Soul (the last device wins): the gateway closes this socket
+//   as `agent.replaced` (4001), and this daemon does not sign in again by itself, so two clients do not take the Soul
+//   from each other several times a second. Its answers say so (`gap.why` `replaced`, `status`'s `replaced`), a `wait`
+//   is woken by a `replaced` event, and its agent's next command other than a wait or a status signs it in again.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
@@ -183,6 +187,8 @@ import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair
 import { activityTry, answerParts, readableDetail } from './refusal.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
+// gatewayd's `REPLACED`: another client of this Soul signed in, and this socket was let go.
+const REPLACED = 4001;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
 // stay connecting for good, firing neither open nor close (seen with Node 22's WebSocket).
 const SIGN_IN_WITHIN = 5000;
@@ -337,6 +343,7 @@ const joinsOf = new Set(); // own join sequences: only a successful receipt requ
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
+let replacedAt = null; // when another client of this Soul took it, while this daemon waits for its next command
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked) {
@@ -552,7 +559,7 @@ function startSync(sock, kind) {
 /** The sync's next answer is due within SYNC_WITHIN. */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
-  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
+  syncing.timer = setTimeout(() => sock.giveUp('sync: no answer; reconnecting'), SYNC_WITHIN);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -657,6 +664,15 @@ function connect() {
     closed(1006);
     try { sock.close(); } catch { /* a socket still connecting may refuse to close; it is ignored from here */ }
   }, SIGN_IN_WITHIN);
+  // Given up by this daemon (a sync with no answer, a sync it refused): let go at once, as a close is, and then closed.
+  // Over a dead network the close itself never completes until the network is back (60 s stalled: 45 s), and until
+  // `closed` the daemon said it was connected and wrote each act into the closing socket, which sent nothing: never
+  // answered, and nothing said so. Let go, an act waits for the next sign-in and goes then.
+  sock.giveUp = (why) => {
+    log(why);
+    closed(1006);
+    try { sock.close(); } catch { /* ignored from here */ }
+  };
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
@@ -732,7 +748,7 @@ function connect() {
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
-      if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
+      if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.giveUp('sync refused; reconnecting'); }
     }
   };
   sock.onclose = (ev) => closed(ev.code);
@@ -752,6 +768,13 @@ function connect() {
     }
     if (stopping) return;
     counts.drops++;
+    if (code === REPLACED) {
+      replacedAt = Date.now();
+      cutWhy = 'replaced';
+      log('another client of this Soul signed in (the last to connect wins); signing in again at the next command');
+      note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command' });
+      return;
+    }
     const most = Math.min(WAIT_MOST, WAIT_FIRST * 2 ** Math.min(attempt, 10));
     const wait = Math.round(most / 2 + Math.random() * most / 2);
     attempt++;
@@ -1561,14 +1584,24 @@ async function worldBatch(req) {
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
+/** Another client of this Soul took it (`REPLACED`): this one's agent asked for something, so it signs in again. */
+function takeBack() {
+  if (replacedAt === null || ws || stopping) return;
+  replacedAt = null;
+  attempt = 0;
+  log('a command came: signing in again (this client takes the Soul back)');
+  connect();
+}
+
 async function answer(req, conn = null) {
+  if (req.key !== undefined && !['wait', 'status', 'pending', 'listen'].includes(req.op)) takeBack();
   if (req.key !== undefined) {
     if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
     if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); takeBack(); }
   switch (req.op) {
     case 'pending': {
       // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
@@ -1632,6 +1665,7 @@ async function answer(req, conn = null) {
       return {
         clock, worldUs: worldNow(clock),
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
+        ...(replacedAt !== null ? { replaced: { at: new Date(replacedAt).toISOString(), say: 'Another client of this Soul connected (the last to connect wins). This one signs in again at its next command.' } } : {}),
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],

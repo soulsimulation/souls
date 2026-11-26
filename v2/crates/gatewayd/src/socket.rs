@@ -423,8 +423,15 @@ async fn serve(
                     ok = send(&mut socket, frame).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
-                // Another socket signed in for this grant, or this one fell too far behind.
-                None => break,
+                // Another socket signed in for this grant: it is told so, by name, and its client does not sign
+                // in again at once. Or this one fell too far behind, and it may resume.
+                None => {
+                    if gw.replaced(grant, attached.session) {
+                        let close = CloseFrame { code: crate::REPLACED, reason: "agent.replaced".into() };
+                        let _ = socket.send(Message::Close(Some(close))).await;
+                    }
+                    break;
+                }
             },
             item = async {
                 match view.as_mut() {

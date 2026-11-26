@@ -142,6 +142,11 @@ type Watchers = BTreeMap<u64, (Vec<Vec<u8>>, mpsc::Sender<String>)>;
 /// after a random wait, resumes by cursor and sends again every intent it has no answer for.
 pub const RESTART: u16 = 1012;
 
+/// The close code a socket gets when another signs in for its grant (the last device wins): 4001, with the reason
+/// `agent.replaced`. Its client does not sign in again by itself, so two clients of one Soul do not take it from each
+/// other several times a second; it signs in again when its own agent next asks it for something.
+pub const REPLACED: u16 = 4001;
+
 #[derive(Default)]
 struct Hub {
     next_session: u64,
@@ -256,6 +261,15 @@ impl Gateway {
             replay,
             mail: mail_rx,
         }
+    }
+
+    /// Whether another socket has signed in for `grant` since the one signed in as `session` (the last device wins).
+    pub fn replaced(&self, grant: Grant, session: u64) -> bool {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        hub.grants
+            .get(&grant.key())
+            .and_then(|h| h.session.as_ref())
+            .is_some_and(|(s, _)| *s != session)
     }
 
     /// Lets a socket go, unless another has signed in for the grant since. With none signed in for it after, the

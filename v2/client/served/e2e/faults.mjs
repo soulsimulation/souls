@@ -182,7 +182,7 @@ async function soulOf(w, k, name, { home: from } = {}) {
   s.pull = async () => {
     const r = await s.req({ op: 'events', since: s.n }, 5000).catch(() => null);
     if (!r?.events) return;
-    for (const e of r.events) { s.log.push({ ...e, t: Date.now() }); s.n = Math.max(s.n, e.n); }
+    for (const e of r.events) if (e.n > s.n) { s.log.push({ ...e, t: Date.now() }); s.n = e.n; } // two pulls at once take each event once
   };
   s.answers = (seq) => s.log.filter((e) => e.kind === 'answer' && e.sequence === seq);
   s.final = (seq) => s.answers(seq).filter((e) => e.answer !== 3);
