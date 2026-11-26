@@ -20,9 +20,9 @@ use replica::time::Micros;
 use sim::host::Runner;
 use sim::links::Doors;
 use sim::mover::Body;
-use sim::walk::World as _;
+use sim::spots::Target;
 use sim::walk::town::Town;
-use skills::route::{Leg, Route};
+use skills::route::Route;
 use std::collections::BTreeMap;
 
 /// The walker's tick and pace (today's walking body).
@@ -145,24 +145,14 @@ fn piece_points(t: &Town, node: Id) -> Vec<Vec3> {
 }
 
 /// How one walk ended: done, or why not.
-fn walk(r: &mut Runner, t: &mut Town, body: Body, node: Id, goal: Vec3, new: bool) -> Result<(), String> {
-    let legs = t
-        .plan(&body, node, goal)
-        .map_err(|e| format!("refused {}", e.name))?;
-    let legs = legs
-        .into_iter()
-        .map(|l| Leg {
-            to: l.to,
-            link: l.link,
-        })
-        .collect();
-    let skill = Box::new(Route::new(legs, SPEED, TICK));
-    if new {
-        r.add(humanoid(), body, skill)
-    } else {
-        r.start(body.id, skill)
+/// As the served world sends a walk (N9): the body asks a standing spot by the target and walks there once granted.
+fn walk(r: &mut Runner, t: &mut Town, body: Body, target: Target, order: Id) -> Result<(), String> {
+    if r.controller.body(body.id).is_none() {
+        r.add_body(humanoid(), body)
+            .map_err(|e| format!("refused {}", e.name))?;
     }
-    .map_err(|e| format!("refused {}", e.name))?;
+    r.send(body.id, Box::new(Route::sent(SPEED, TICK)), target, order)
+        .map_err(|e| format!("refused {}", e.name))?;
     for _ in 0..WAIT / TICK {
         r.tick(t).map_err(|e| format!("the tick refused {}", e.name))?;
         match r.ended.get(&body.id) {
@@ -245,7 +235,8 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             .place(who, Frame { node: ground, slot: None }, arrival, Quat::IDENTITY)
             .map_err(|e| format!("the arrival point: {}: {}", e.name, e.detail))?;
         let mut r = Runner::new(TICK);
-        if let Err(why) = walk(&mut r, &mut t, start, node, at, true) {
+        let order = |n: u64| Id::new(Scope([0xed; 16]), 2 * k as u64 + n).ok_or("an order's id");
+        if let Err(why) = walk(&mut r, &mut t, start, Target::new(node, at), order(1)?) {
             out.unreached.push(OneWay {
                 name: label,
                 why: format!("the walk in: {why}"),
@@ -253,7 +244,7 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             continue;
         }
         let there = *r.controller.body(who).ok_or("the walker's body")?;
-        if let Err(why) = walk(&mut r, &mut t, there, ground, arrival, false) {
+        if let Err(why) = walk(&mut r, &mut t, there, Target::new(ground, arrival), order(2)?) {
             out.one_way.push(OneWay {
                 name: label,
                 why: format!("the walk back to the arrival point: {why}"),
