@@ -1522,7 +1522,6 @@ dependencies = [
  "sim",
  "skills",
  "supervisor",
- "templates",
  "testworld",
  "tokio",
  "tokio-tungstenite",

@@ -66,6 +66,8 @@ step ops-release node --test tools/ops/release/release.test.mjs
 }
 ops_health() {
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
+# A template published from a seed forks with the same build's worldd (the catalogue New world creates from; 0.142).
+step templates-publish bash -c 'cargo build -p worldd -p templates --locked --quiet && node --test tools/templates/publish.test.mjs'
 }
 small_node2() {
 # Imported Souls approved again per day (X15, #3322): counts only, no Soul or account id.
