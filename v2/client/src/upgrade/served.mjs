@@ -47,10 +47,10 @@ export function siteOf(url) {
   return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
 }
 
-async function get(site, path) {
+async function get(site, path, within = 30_000) {
   let r;
   try {
-    r = await fetch(`${site}${path}`, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
+    r = await fetch(`${site}${path}`, { redirect: 'manual', signal: AbortSignal.timeout(within) });
   } catch (e) {
     throw new Refused('upgrade.unreachable', `${path}: ${e.cause?.code ?? e.message}`);
   }
@@ -61,9 +61,9 @@ async function get(site, path) {
 }
 
 /** What the site serves: its `soulClient`. */
-export async function servedBy(site) {
+export async function servedBy(site, within) {
   let c;
-  try { c = JSON.parse(await get(site, '/v1/config')).soulClient; } catch (e) {
+  try { c = JSON.parse(await get(site, '/v1/config', within)).soulClient; } catch (e) {
     if (e instanceof Refused) throw e;
     throw new Refused('upgrade.not-a-world', '/v1/config is not JSON');
   }
@@ -225,6 +225,32 @@ export async function upgradeBundle({ home, version }) {
   }
   const now = install(home, site, c, await fetchChecked(site, c));
   return { upgraded: { from: have, to: now.client }, kept: now.previousClient ?? null, handedOver: await handOver(home) };
+}
+
+// 26 Nov: an agent starting a session learns its client is behind and asks its owner before `upgrade`. `status` and
+// `look` ask the home's site what it serves (souls.mjs), not the platform feed, which is read every 6 h.
+export const CHECK_EVERY_MS = 10 * 60_000, CHECK_WITHIN_MS = 1500;
+const CHECKED = '.client-check.json', X_Y_Z = /^\d+\.\d+\.\d+$/;
+
+/**
+ * `{from, to}` when the home's site serves a newer client than the one in use, the one `upgrade` would install; else
+ * null. The site's answer, or that it gave none, is kept in `.client-check.json` for 10 minutes, so a session costs one
+ * small request; a check that fails, or takes longer than `within`, says nothing.
+ */
+export async function clientUpdate({ home, version, now = Date.now(), within = CHECK_WITHIN_MS }) {
+  const cfg = readConfig(home), site = siteOfHome(cfg), have = cfg.client ?? version;
+  if (!site || !X_Y_Z.test(have ?? '')) return null;
+  let kept = null;
+  try { kept = JSON.parse(readFileSync(join(home, CHECKED), 'utf8')); } catch { /* not checked yet */ }
+  let served = kept?.site === site && now >= kept.at && now - kept.at < CHECK_EVERY_MS ? kept.served : undefined;
+  if (served === undefined) {
+    served = await servedBy(site, within).then((c) => (Array.isArray(c.files) && c.skill && X_Y_Z.test(c.version) ? c.version : null), () => null);
+    try {
+      writeFileSync(join(home, `${CHECKED}.${process.pid}.tmp`), JSON.stringify({ site, at: now, served }) + '\n', { mode: 0o600 });
+      renameSync(join(home, `${CHECKED}.${process.pid}.tmp`), join(home, CHECKED));
+    } catch { /* asked again next time */ }
+  }
+  return X_Y_Z.test(served ?? '') && newer(served, have) && served !== cfg.skippedClient ? { from: have, to: served } : null;
 }
 
 /**
