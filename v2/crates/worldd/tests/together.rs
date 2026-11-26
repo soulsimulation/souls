@@ -144,6 +144,15 @@ fn follow() -> ActivityKind {
     k
 }
 
+/// A conversation: two members and no moves, as content's.
+fn talk() -> ActivityKind {
+    let mut k = touch(TALK, 60_000_000, "souls:none");
+    for r in &mut k.roles {
+        r.mv = None;
+    }
+    k
+}
+
 /// Dancing together (0.134 T3).
 const DANCE: &str = "test:dance";
 /// A hug and a high-five, as the handshake: each ends with its moves.
@@ -689,7 +698,7 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             hold_at(),
             dance_at(),
             dance_near(),
-            touch(TALK, 60_000_000, "souls:none"),
+            talk(),
             content_touch(W_HANDSHAKE, "handshake", "souls:handshake"),
             content_touch(W_HUG, "hug", "souls:hug"),
             content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
