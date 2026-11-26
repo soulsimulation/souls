@@ -1118,6 +1118,9 @@ struct Clock {
     /// Each carrier keeping its place from its crew's front (moving-group rule 3), by (carry, carrier): the
     /// `souls:follow` order kept for it, by intent.
     carry_follows: BTreeMap<(Id, Id), Id>,
+    /// Carriers that walked their own way during their front's walk, by (the front's walk, carrier): each keeps its
+    /// own legs until the front walks again, so it stays where its own walk ended (a scripted crew's place).
+    carry_own: BTreeSet<(Id, Id)>,
     /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
     /// world opened: one whose hold a restart ended is cancelled.
     besides_checked: bool,
@@ -4678,8 +4681,9 @@ impl Clock {
     /// order, keeping the place it stood at from the front when the order began (parameter 4, `[x, z]` µm on the
     /// plan); the crew moves as one and does not turn. A carrier's own act ends its order (B2: it claims the legs),
     /// and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
-    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it takes a place
-    /// again where it stands. An order is cancelled when its carrier is no longer in the carry, or the carry is over.
+    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it stays where
+    /// it chose (a scripted crew's carrier arriving first is not dragged on past its place); it takes a place again at
+    /// the front's next walk. An order is cancelled when its carrier is no longer in the carry, or the carry is over.
     /// A carry that broke off (`souls:partner-left`, `souls:carriers-apart`, `souls:carry-blocked`) stops its front's
     /// walk too, ended by that reason: the whole group stops with one reason. Written in the tick, with the rest.
     fn keep_carry_orders(&mut self, now: Micros) {
@@ -4690,6 +4694,7 @@ impl Clock {
         let running = e.carry_follows();
         let leading = e.leading();
         if running.is_empty() && self.carry_follows.is_empty() && over.is_empty() {
+            self.carry_own.clear();
             return;
         }
         let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.0, r.2)).collect();
@@ -4712,6 +4717,12 @@ impl Clock {
         // its carrier is still in the carry.
         self.carry_follows
             .retain(|(_, f), order| b.orders.open(*f).is_some_and(|o| o.intent == *order));
+        // Walking its own way lasts as long as the front's walk it began during.
+        self.carry_own.retain(|(walk, _)| {
+            leading
+                .iter()
+                .any(|l| l.1 == *walk && b.moving(l.0) == Some(*walk))
+        });
         let basis = Version {
             lineage: self.lineage,
             zone: self.zone,
@@ -4723,9 +4734,17 @@ impl Clock {
             if self.carry_follows.contains_key(&(a, walker)) {
                 continue;
             }
-            let walk = leading.iter().find(|l| l.0 == front).map(|l| l.1);
-            let going = walk.is_some() && b.moving(front) == walk;
-            if !going || b.moving(walker).is_some() || b.orders.open(walker).is_some() {
+            let Some(walk) = leading.iter().find(|l| l.0 == front).map(|l| l.1) else {
+                continue;
+            };
+            if b.moving(front) != Some(walk) {
+                continue;
+            }
+            if b.moving(walker).is_some() {
+                self.carry_own.insert((walk, walker));
+                continue;
+            }
+            if self.carry_own.contains(&(walk, walker)) || b.orders.open(walker).is_some() {
                 continue;
             }
             let (Some((on, f)), Some((own, w))) = (b.pose(front), b.pose(walker)) else {
@@ -6179,6 +6198,7 @@ pub fn start<S: Storage + 'static>(
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
         carry_follows: BTreeMap::new(),
+        carry_own: BTreeSet::new(),
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,

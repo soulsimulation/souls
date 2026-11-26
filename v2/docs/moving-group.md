@@ -82,7 +82,8 @@ moves as the front walks and does not turn, so the load arrives where the front'
 lifted. So one walk moves the crew: separate agents need not set off within the 0.7 s a 1 m stretch allows. A
 carrier's own act takes its legs back (B2) and it walks its own way, still in the carry, as before (a late carrier's
 own `carry to` does not fight the group; to turn a load square into a slot, every carrier sends the same one); once its
-own walk ends while the front's still goes, it takes a place again where it stands. The leave rule is the carry's: a
+own walk ends while the front's still goes, it stays where it chose (a scripted crew's carrier that arrives first is
+not dragged on past its place) and takes a place again at the front's next walk. The leave rule is the carry's: a
 side's leave with the load's crew left closes up, its order cancelled; a carry that breaks off (`souls:partner-left`,
 `souls:carriers-apart`, `souls:carry-blocked`) stops the front's walk with that reason and cancels the walkers' orders,
 so the whole group stops with one reason. A restart sets the load down (C3) and cancels the orders.

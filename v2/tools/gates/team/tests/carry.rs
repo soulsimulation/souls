@@ -1270,7 +1270,9 @@ async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
         .expect("lifted");
     drop(b);
     walk_on(&mut a, &store, 6 * M).await;
-    a.answer().await.expect("the front walks on, its partner with it");
+    a.answer()
+        .await
+        .expect("the front walks on, its partner with it");
     assert_eq!(
         Logged::read(&store).set_downs(),
         vec!["souls:partner-left"],
@@ -1630,7 +1632,11 @@ async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
         -3 * M
     };
     crew[3]
-        .send("eden:walk", Some(g), point(Vec3::new(at[3].x, 0, at[3].z + away)))
+        .send(
+            "eden:walk",
+            Some(g),
+            point(Vec3::new(at[3].x, 0, at[3].z + away)),
+        )
         .await;
     assert_eq!(
         crew[0].answer().await,
