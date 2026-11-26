@@ -73,6 +73,7 @@ export async function performParty({ seats, jukebox, record = () => {}, pause = 
   }
   await spoken(operator, guests[0], 'Welcome! Would you like to dance?', 'wave');
   await spoken(guests[0], operator, 'Yes, let us dance together!', 'nod');
+  await walk(operator, jukebox);
   await act(operator, 'switch_on', jukebox);
   // Return to the guests through the supported walk-to-body form before offering the dance.
   await walk(operator, guests[0].body);
