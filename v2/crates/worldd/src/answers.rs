@@ -719,6 +719,10 @@ pub struct Config {
     /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
     /// its settings keeps them. `None`: a world without settings has no sky.
     pub sky: Option<daylight::Config>,
+    /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`),
+    /// each its pin and its entry's bytes: written at this start's first tick as definitions in the world's history
+    /// ([`Clock::put_kinds`]), so things and activities of them are made and every copy applies them.
+    pub define: Vec<(Name, Vec<u8>)>,
     /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
@@ -866,6 +870,7 @@ impl Config {
             planner_wait: None,
             planned: BTreeMap::new(),
             sky: None,
+            define: Vec::new(),
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
@@ -1184,6 +1189,8 @@ struct Clock {
     put_off: BTreeMap<Id, u64>,
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
+    /// The kinds this start defines at its first tick ([`Config::define`]), and the minter of their nodes' ids.
+    define: Option<(Vec<(Name, Vec<u8>)>, Minter)>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
@@ -4049,6 +4056,68 @@ impl Clock {
         self.write_own(effects, "the clock's mapping");
     }
 
+    /// Step 1 for the kinds the release added (#4954, [`Config::define`]): at this start's first tick, each its world
+    /// neither pins in its header nor defines yet is defined, as a creator's kind is (#3697): a `souls:kind` node at the
+    /// zone's root, for everyone, its name the pin and its record the entry's bytes, all in one entry of the world's own.
+    /// The world's log before it is unchanged, and every copy (a replay, the public stream, a fork) learns the kinds from
+    /// the entry. A refused entry is said and writes nothing: the kinds are then refused per act, as before.
+    fn put_kinds(&mut self, now: Micros) {
+        let Some((define, mut mint)) = self.define.take() else {
+            return;
+        };
+        let tree = self.replica.tree();
+        let Some(root) = tree.node(tree.root()).map(|n| n.id()) else {
+            return;
+        };
+        let header = self.replica.header();
+        let mut creates = Vec::new();
+        let mut names = Vec::new();
+        for (pin, bytes) in define {
+            if header.kinds.contains(&pin) || replica::kinds::defined::defines(tree, &pin) {
+                continue;
+            }
+            let Ok(node) = mint.mint() else {
+                eprintln!("worldd: the kinds added were not defined: no id left");
+                return;
+            };
+            names.push(pin.as_str().to_owned());
+            creates.push(Change::Create {
+                node,
+                kind: Name::new(&replica::kinds::defined::kind().0).expect("souls:kind's name"),
+                pose: Pose {
+                    frame: Frame {
+                        node: root,
+                        slot: None,
+                    },
+                    position: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    support: Support::None,
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::from([
+                    (replica::kinds::defined::NAME, Value::Text(pin)),
+                    (replica::kinds::defined::ENTRY, Value::Bytes(bytes)),
+                ]),
+            });
+        }
+        if creates.is_empty() {
+            return;
+        }
+        let effect = Effect {
+            envelope: Clock::own(root, now),
+            body: Body::Changes(recs_of(creates)),
+            events: None,
+            rest: Rest::new(),
+        };
+        match self.try_own(vec![effect]) {
+            Ok(()) => println!("kinds defined: {} [{}]", names.len(), names.join(", ")),
+            Err(r) => eprintln!(
+                "worldd: the kinds added were not defined ({}: {}): each is refused per act",
+                r.name, r.detail
+            ),
+        }
+    }
+
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
     /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
     /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
@@ -4915,6 +4984,8 @@ impl Clock {
         // in this tick, each at its due time (E6, #3369).
         self.put_clock(now);
         self.fire_sky(now);
+        // 1. The kinds the release added since the world's header, defined at this start's first tick (#4954).
+        self.put_kinds(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
         at[3] = mark();
@@ -6009,6 +6080,7 @@ pub fn start<S: Storage + 'static>(
         })
         .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
+    let define = Some((std::mem::take(&mut cfg.define), Minter::new(scope("kinds"))));
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let hatches = std::mem::take(&mut cfg.hatches);
@@ -6092,6 +6164,7 @@ pub fn start<S: Storage + 'static>(
         tick: last.unwrap_or(-1),
         measures: clock_measures,
         sky,
+        define,
         tick_us,
         text,
         put_off: BTreeMap::new(),

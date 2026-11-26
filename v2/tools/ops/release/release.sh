@@ -34,7 +34,7 @@
 #   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
 #                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
 #                                  at its commit) by this release's `worldd entries`, every world when none is named:
-#                                  plan lists per world which entries change and which change is refused and why,
+#                                  plan lists per world which entries change or are added, and which is refused and why,
 #                                  changing nothing; stage writes them as <world>/entries.next, never entries/ itself.
 #                                  A refused world, a fork (its boot pins its entries) and a world with none keep theirs
 #   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
