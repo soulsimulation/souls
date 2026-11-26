@@ -25,7 +25,7 @@ test('an early departure that ends everyone’s dance fails before a success rep
       if (words[0] === 'say') return { ok: true, sequence: 1, to: { sequence: 2 } };
       if (words[0] === 'events') return { events: [{ kind: 'heard', words: calls.findLast((row) => row[1] === 'say')?.[2] }] };
       if (words[0] === 'inspect') return { state: { on: 0 } };
-      if (words[0] === 'look') return { ok: true, doing: calls.some((row) => row[1] === 'together' && row[2] === 'leave') ? [] : ['you are in dance-together with the group (started)'] };
+      if (words[0] === 'look') return { ok: true, in: calls.some((row) => row[1] === 'together' && row[2] === 'leave') ? [] : ['you are in dance-together with the group (started)'] };
       return receipt();
     },
   }));

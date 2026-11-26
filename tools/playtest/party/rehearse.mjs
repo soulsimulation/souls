@@ -85,7 +85,7 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   completed(await command(operator, 'together', 'offer', 'dance-together', ...guests.map((seat) => seat.body)), 'offer dance');
   for (const guest of guests) completed(await command(guest, 'together', 'accept', 'dance-together'), 'accept dance');
   const together = await command(operator, 'look');
-  assert((together.doing ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the dance starts through its real offer');
+  assert((together.in ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the dance starts through its real offer');
   await pause(6500);
   const leaving = guests.at(-1);
   await leave(leaving);
@@ -93,7 +93,7 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   await pause(850);
   await body(leaving, 'wave');
   const remaining = await command(operator, 'look');
-  assert((remaining.doing ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the other four keep dancing after one leaves');
+  assert((remaining.in ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the other four keep dancing after one leaves');
   await pause(2500);
   for (const guest of guests.slice(0, -1)) await leave(guest);
   await leave(operator);
@@ -105,7 +105,7 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   }
   await body(operator, 'nod');
   const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
-  assert(final.every((look) => !(look.doing ?? []).some((line) => line.includes('dance-together'))), 'all members leave the dance');
+  assert(final.every((look) => !(look.in ?? []).some((line) => line.includes('dance-together'))), 'all members leave the dance');
   return { people: seats.length, jukebox: mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false };
 }
 
