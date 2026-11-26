@@ -510,11 +510,8 @@ async fn serve(
             code: crate::BEHIND,
             reason: crate::AGENT_BEHIND.into(),
         };
-        let _ = tokio::time::timeout(
-            VIEW_BEHIND_GRACE,
-            socket.send(Message::Close(Some(close))),
-        )
-        .await;
+        let _ =
+            tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
     }
 }
 

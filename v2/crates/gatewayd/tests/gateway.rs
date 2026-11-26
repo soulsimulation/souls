@@ -737,7 +737,11 @@ async fn a_socket_let_go_for_a_full_queue_is_closed_as_behind_and_resumes_each_f
         deliver(s);
     }
     assert!(
-        r.lines.lock().unwrap().iter().any(|l| l.contains("agent.behind")),
+        r.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("agent.behind")),
         "let go for its full queue"
     );
     // Told at once, by name: at most a frame or two that its task had in hand before the close.
@@ -778,9 +782,17 @@ async fn a_socket_let_go_for_a_full_queue_is_closed_as_behind_and_resumes_each_f
     for _ in applied + 1..=last {
         replay.push(frame_sequence(&soon(&mut ws).await).unwrap());
     }
-    assert_eq!(replay, (applied + 1..=last).collect::<Vec<_>>(), "each once");
+    assert_eq!(
+        replay,
+        (applied + 1..=last).collect::<Vec<_>>(),
+        "each once"
+    );
     deliver(last + 1);
-    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(last + 1), "none twice");
+    assert_eq!(
+        frame_sequence(&soon(&mut ws).await),
+        Some(last + 1),
+        "none twice"
+    );
 }
 
 fn tmp(name: &str) -> PathBuf {
