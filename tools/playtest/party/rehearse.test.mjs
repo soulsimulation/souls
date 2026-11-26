@@ -25,7 +25,7 @@ test('an early departure that ends everyone’s dance fails before a success rep
       if (words[0] === 'say') return { ok: true, sequence: 1, to: { sequence: 2 } };
       if (words[0] === 'events') return { events: [{ kind: 'heard', words: calls.findLast((row) => row[1] === 'say')?.[2] }] };
       if (words[0] === 'inspect') return { state: { on: 0 } };
-      if (words[0] === 'look') return { ok: true, in: calls.some((row) => row[1] === 'together' && row[2] === 'leave') ? [] : ['you are in dance-together with the group (started)'] };
+      if (words[0] === 'look') return { ok: true, in: !calls.some((row) => row[1] === 'together' && row[2] === 'offer') || calls.some((row) => row[1] === 'together' && row[2] === 'leave') ? [] : ['you are in dance-together with the group (started)'] };
       return receipt();
     },
   }));
@@ -41,4 +41,17 @@ test('an early departure that ends everyone’s dance fails before a success rep
     return receipt();
   }}));
   await assert.rejects(performParty({seats,jukebox:'jukebox',mode:'silent',pause:async()=>{}}),/remain off/);
+});
+
+ test('the party refuses to stack an offer behind an existing activity', async () => {
+  const calls=[],seats=Array.from({length:5},(_,i)=>({label:String(i),body:`body-${i}`,cli:async(...words)=>{
+    calls.push(words);
+    if(words[0]==='say') return {ok:true,sequence:1,to:{sequence:2}};
+    if(words[0]==='events') return {events:[{kind:'heard',words:i===1?'Welcome! Would you like to dance?':'Yes, let us dance together!'}]};
+    if(words[0]==='inspect') return {state:{on:0}};
+    if(words[0]==='look') return {ok:true,in:['you are in another activity (started)']};
+    return receipt();
+  }}));
+  await assert.rejects(performParty({seats,jukebox:'jukebox',mode:'silent',pause:async()=>{}}),/every member free/);
+  assert(!calls.some(words=>words[0]==='together'&&words[1]==='offer'));
 });

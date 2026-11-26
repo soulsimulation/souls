@@ -82,11 +82,16 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
     const music = await command(operator, 'inspect', jukebox);
     assert(music.state?.on === false || music.state?.on === 0, 'silent mode requires the jukebox to remain off');
   }
+  for (const seat of seats) {
+    const before = await command(seat, 'look');
+    assert(!(before.in ?? []).length, 'the party needs every member free before its offer');
+  }
   completed(await command(operator, 'together', 'offer', 'dance-together', ...guests.map((seat) => seat.body)), 'offer dance');
   for (const guest of guests) completed(await command(guest, 'together', 'accept', 'dance-together'), 'accept dance');
   const together = await command(operator, 'look');
   assert((together.in ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the dance starts through its real offer');
-  await pause(6500);
+  // Allow the last member to finish its ordinary approach before showing several shared cycles.
+  await pause(12000);
   const leaving = guests.at(-1);
   await leave(leaving);
   // A leave releases a move at its phase boundary. Keep that visible rather than cutting to the next action.
