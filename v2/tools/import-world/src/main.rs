@@ -59,7 +59,13 @@ fn json(w: &World) -> String {
             let ones: Vec<String> = o
                 .one_way
                 .iter()
-                .map(|t| format!("{{\"name\": \"{}\", \"why\": \"{}\"}}", esc(&t.name), esc(&t.why)))
+                .map(|t| {
+                    format!(
+                        "{{\"name\": \"{}\", \"why\": \"{}\"}}",
+                        esc(&t.name),
+                        esc(&t.why)
+                    )
+                })
                 .collect();
             format!(
                 "{{\"targets\": {}, \"unreached\": {}, \"oneWay\": [{}]}}",
@@ -102,7 +108,9 @@ fn main() {
     let files: Vec<&String> = args
         .iter()
         .enumerate()
-        .filter(|(i, a)| !a.starts_with("--") && (*i == 0 || !valued.contains(&args[i - 1].as_str())))
+        .filter(|(i, a)| {
+            !a.starts_with("--") && (*i == 0 || !valued.contains(&args[i - 1].as_str()))
+        })
         .map(|(_, a)| a)
         .collect();
     if files.is_empty() {
@@ -121,9 +129,9 @@ fn main() {
     // The walks are asked for (a plain validation walks nothing). Seats' stand points come from the entries: a folder
     // that does not read is named, and nothing is walked.
     let opts = args.iter().any(|a| a == "--ways").then(|| {
-        let dir = value("--entries").cloned().unwrap_or_else(|| {
-            format!("{}/../../../content/kinds", env!("CARGO_MANIFEST_DIR"))
-        });
+        let dir = value("--entries")
+            .cloned()
+            .unwrap_or_else(|| format!("{}/../../../content/kinds", env!("CARGO_MANIFEST_DIR")));
         let mut entries = Vec::new();
         if let Err(e) = ways::entries(std::path::Path::new(&dir), &mut entries) {
             eprintln!("import-world: --ways reads seats from --entries <dir>: {dir}: {e}");

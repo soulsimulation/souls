@@ -6779,7 +6779,9 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
             .find(|b| !known.contains(b))
             .expect("the new body");
         known.push(body);
-        soul.0.set_read_timeout(Some(Duration::from_secs(660))).unwrap();
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(660)))
+            .unwrap();
         souls.push((*target, body, soul));
     }
     // A walk answered within the act's expiry (600 s): its answer and its seconds. None within the socket's wait (the

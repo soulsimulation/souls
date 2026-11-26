@@ -290,7 +290,10 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         t.surfaces[&ground]
             .place(
                 Id::new(Scope([0xee; 16]), 1).expect("an id"),
-                Frame { node: ground, slot: None },
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
                 Vec3::new(x, 0, z),
                 Quat::IDENTITY,
             )
@@ -322,12 +325,28 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
     for (k, (label, node, at)) in targets.into_iter().enumerate() {
         let who = Id::new(Scope([0xee; 16]), k as u64 + 1).ok_or("a walker's id")?;
         let start = t.surfaces[&ground]
-            .place(who, Frame { node: ground, slot: None }, arrival, Quat::IDENTITY)
+            .place(
+                who,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                arrival,
+                Quat::IDENTITY,
+            )
             .map_err(|e| format!("the arrival point: {}: {}", e.name, e.detail))?;
         let mut w = Walker::new();
         let order = |n: u64| Id::new(Scope([0xed; 16]), 2 * k as u64 + n).ok_or("an order's id");
         let (p, ticks) = (&mut planner, &mut out.ticks);
-        if let Err(why) = walk(&mut w, &mut t, p, start, Target::new(node, at), order(1)?, ticks) {
+        if let Err(why) = walk(
+            &mut w,
+            &mut t,
+            p,
+            start,
+            Target::new(node, at),
+            order(1)?,
+            ticks,
+        ) {
             out.unreached.push(OneWay {
                 name: label,
                 why: format!("the walk in: {why}"),
@@ -342,7 +361,10 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         if on != node || piece.is_some_and(|q| piece_at(&t, node, there.pose.position) != Some(q)) {
             out.unreached.push(OneWay {
                 name: label,
-                why: format!("the walk in ended done on {}, not on the target's piece", name(on)),
+                why: format!(
+                    "the walk in ended done on {}, not on the target's piece",
+                    name(on)
+                ),
             });
             continue;
         }

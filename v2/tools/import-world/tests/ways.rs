@@ -83,8 +83,16 @@ fn edens_old_town_floors_and_sofa_are_walked_back_from_as_the_served_world_walks
     let facts = std::env::var("EDEN_FACTS")
         .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
     let mut entries = Vec::new();
-    ways::entries(std::path::Path::new(&format!("{root}/content/kinds")), &mut entries).unwrap();
-    let only = ["floor e_1277cee2/floor-2", "floor e_47f02c93/floor-1", "seat e_c4e5895b"];
+    ways::entries(
+        std::path::Path::new(&format!("{root}/content/kinds")),
+        &mut entries,
+    )
+    .unwrap();
+    let only = [
+        "floor e_1277cee2/floor-2",
+        "floor e_47f02c93/floor-1",
+        "seat e_c4e5895b",
+    ];
     let w = ways::ways(
         &std::fs::read_to_string(&facts).expect("the Eden facts file"),
         &Opts {
