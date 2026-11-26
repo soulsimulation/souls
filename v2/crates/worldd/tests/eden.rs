@@ -4754,8 +4754,10 @@ fn births(dir: &Path) -> Vec<(Id, replica::pose::Pose)> {
 
 /// A Soul's first moment on Eden: a world that names its arrival place (`worldd arrival`, `world.json`'s `arrival`)
 /// has its joining Souls born round that place, not at its entry. Eden names the campus quad
-/// (`place-region-campus-quad`, its fountain at (-12, -97) m): two fresh joins land within 8 m of the fountain, on the
-/// open ground, at least two body radii apart, each facing the fountain (its +x within a degree of the way to it).
+/// (`place-region-campus-quad`, its fountain at (-12, -97) m): four fresh joins at once (the 0.137 trial had three
+/// born on one spot) land within 8 m of the fountain, on the open ground, at least two body radii apart, each facing
+/// the fountain (its +x within a degree of the way to it), and each then walks to the fountain: none starts unable to
+/// walk.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
@@ -4826,10 +4828,17 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
             .any(|l| l.contains("Souls arrive at place-region-campus-quad (-12.000,-97.000 m)")),
         "serve names the arrival place: {lines:?}"
     );
-    let _a = join(&dir, 1, lineage);
-    let _b = join(&dir, 2, lineage);
+    let mut souls: Vec<Client> = std::thread::scope(|s| {
+        let joins: Vec<_> = (1..=4)
+            .map(|n| {
+                let dir = &dir;
+                s.spawn(move || join(dir, n, lineage))
+            })
+            .collect();
+        joins.into_iter().map(|j| j.join().unwrap()).collect()
+    });
     let born = births(&dir);
-    assert_eq!(born.len(), 2, "two bodies born");
+    assert_eq!(born.len(), 4, "four bodies born");
     let fountain = (-12_000_000i64, -97_000_000i64);
     for (body, pose) in &born {
         let p = pose.position;
@@ -4860,11 +4869,24 @@ fn a_fresh_join_on_eden_arrives_at_the_campus_quad_facing_its_fountain() {
         );
         assert!(dot * 100_000 >= len * 99_985, "faces the fountain");
     }
-    let (a, b) = (born[0].1.position, born[1].1.position);
-    let apart =
-        ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()) as f64 / 1e6;
-    println!("the two births {apart:.2} m apart");
-    assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
+    for (i, (_, a)) in born.iter().enumerate() {
+        for (_, b) in &born[i + 1..] {
+            let (a, b) = (a.position, b.position);
+            let apart = ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt())
+                as f64
+                / 1e6;
+            println!("two births {apart:.2} m apart");
+            assert!(apart >= 0.6, "two births {apart:.2} m apart: they overlap");
+        }
+    }
+    let basin = im.nodes["e_ce79121a"];
+    for s in &mut souls {
+        s.0.set_read_timeout(Some(Duration::from_secs(120)))
+            .unwrap();
+        let walked = s.act("eden:walk", Some(basin), BTreeMap::new());
+        println!("{:?} walks to the fountain: {walked:?}", s.1);
+        walked.expect("a Soul born in the burst walks to the fountain");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5272,4 +5294,67 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The 0.137 trial on Eden: a Soul by a tree stump (`street-stump-1`, e_7219ed40) walks to it, sits on it, rises and
+/// walks on at once to the quad fountain; then four Souls walk to the fountain in turn while those before stand at it.
+/// Every walk is done, none refused `spot-none-free`, and the four stand round the basin at least two body radii
+/// apart. (A body left a little inside an obstacle's cut was refused every walk; see `spots::Ground::start`.)
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn souls_walk_on_from_a_stump_and_four_walk_to_the_quad_fountain() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let (stump, fountain) = (im.nodes["e_7219ed40"], im.nodes["e_ce79121a"]);
+    let (served, mut soul, dir) = serve(&facts, "13.0,-35.0", "stumpwalk", lineage);
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let to = soul.act("eden:walk", Some(stump), BTreeMap::new());
+    let sit = soul.act("eden:sit", Some(stump), BTreeMap::new());
+    let rise = soul.act("eden:rise", None, BTreeMap::new());
+    let on = soul.act("eden:walk", Some(fountain), BTreeMap::new());
+    println!("stump: walk {to:?}, sit {sit:?}, rise {rise:?}, walk on {on:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    to.expect("walked to the stump");
+    sit.expect("sat");
+    rise.expect("rose");
+    on.expect("walked on from beside the stump");
+
+    let (served, first, dir) = serve(&facts, "-12.0,-88.0", "fountain4", lineage);
+    let mut souls = vec![first];
+    for n in 2..=4 {
+        souls.push(join(&dir, n, lineage));
+    }
+    let mut ended = Vec::new();
+    for s in &mut souls {
+        s.0.set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+        ended.push(s.act("eden:walk", Some(fountain), BTreeMap::new()));
+    }
+    let at: Vec<(f64, f64)> = last_places(&dir)
+        .values()
+        .map(|&(_, _, x, z)| (x, z))
+        .collect();
+    println!("fountain: {ended:?} at {at:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for e in &ended {
+        assert!(e.is_ok(), "every walk to the fountain is done: {ended:?}");
+    }
+    assert_eq!(at.len(), 4);
+    for (i, p) in at.iter().enumerate() {
+        assert!(
+            (p.0 + 12.0).hypot(p.1 + 97.0) <= 6.0,
+            "at the fountain: {p:?}"
+        );
+        for q in &at[i + 1..] {
+            assert!(
+                (p.0 - q.0).hypot(p.1 - q.1) >= 0.56,
+                "two body radii apart: {p:?} {q:?}"
+            );
+        }
+    }
 }
