@@ -20,7 +20,34 @@ export function lookTarget(self:IdleSoul,others:readonly IdleSoul[],range=6,limi
   let a=Math.atan2(dz,dx)-self.yaw;a=Math.atan2(Math.sin(a),Math.cos(a));if(Math.abs(a)>limit+.6)continue;best=d;ang=Math.max(-limit,Math.min(limit,a));}
  return ang;
 }
+/** Page FPS: the frame's Souls on a square grid of `cell` metres, so a search within `cell` metres of a point reads the
+ *  3×3 cells around it instead of every Soul (each head's nearest-Soul search was O(n²) a frame: 250,000 distance checks
+ *  with 500 Souls). `around` gives the candidates in the souls' own order, so lookTarget picks exactly as over every Soul. */
+export class SoulGrid{
+ private cells=new Map<number,number[]>();private used:number[][]=[];private idx:number[]=[];private out:IdleSoul[]=[];private souls:readonly IdleSoul[]=[];
+ readonly cell:number;
+ constructor(cell=6){this.cell=cell;}
+ private key(ix:number,iz:number){return (ix+32768)*65536+(iz+32768);}
+ build(souls:readonly IdleSoul[]){
+  for(const a of this.used)a.length=0;this.used.length=0;this.souls=souls;
+  for(let i=0;i<souls.length;i++){const p=souls[i].p,k=this.key(Math.floor(p[0]/this.cell),Math.floor(p[2]/this.cell));let a=this.cells.get(k);if(!a){a=[];this.cells.set(k,a);}if(!a.length)this.used.push(a);a.push(i);}
+  if(this.cells.size>4*this.used.length+64)for(const [k,a] of this.cells)if(!a.length)this.cells.delete(k);   // cells the crowd left
+ }
+ /** The Souls in the 3×3 cells around p, in their order in the last build (the array is reused by the next call). */
+ around(p:readonly number[]):readonly IdleSoul[]{
+  const ix=Math.floor(p[0]/this.cell),iz=Math.floor(p[2]/this.cell),idx=this.idx;idx.length=0;
+  for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){const a=this.cells.get(this.key(ix+dx,iz+dz));if(a)for(let j=0;j<a.length;j++)idx.push(a[j]);}
+  idx.sort((a,b)=>a-b);const out=this.out;out.length=idx.length;for(let j=0;j<idx.length;j++)out[j]=this.souls[idx[j]];
+  return out;
+ }
+}
+/** lookTarget's range, metres: the grid's cell. */
+const LOOK_RANGE=6;
 export class WorldIdleLife{
+ /** `grid: false` searches every Soul for each head, as before (the page's `?idleGrid=0`, an A/B switch). */
+ private readonly o:{grid?:boolean};
+ constructor(o:{grid?:boolean}={}){this.o=o;}
+ private grid=new SoulGrid(LOOK_RANGE);
  private bones=new WeakMap<THREE.Object3D,Bones>();
  private look=new Map<string,number>();
  private bodyLook=new Map<string,number>();
@@ -32,7 +59,8 @@ export class WorldIdleLife{
  private keep(o:THREE.Object3D){this.saved.push({o,q:o.quaternion.clone()});}
  /** Call once per frame after people are posed and before renderer.render. */
  apply(souls:readonly IdleSoul[],seconds:number,dt:number,reducedMotion=false){
-  const k=1-Math.exp(-3*Math.max(0,Math.min(.1,dt)));
+  const k=1-Math.exp(-3*Math.max(0,Math.min(.1,dt))),grid=this.o.grid!==false;
+  if(grid)this.grid.build(souls);
   for(const s of souls){if(!s.root||s.offscreen)continue;const b=this.find(s.root),ph=phaseOf(s.id),rigid=RIGID.test(s.activity),amp=reducedMotion?.4:1;
    // Breathing: everyone, always (gentle torso pitch, ~4.5 s, per-Soul phase).
    if(b.torso){this.keep(b.torso);this.axis.set(-Math.sin(s.yaw),0,Math.cos(s.yaw));turn(b.torso,this.axis,.018*amp*Math.sin(seconds*2*Math.PI/(4.2+ph)+ph*6.28));}
@@ -48,7 +76,7 @@ export class WorldIdleLife{
    // Weight shift while standing/sitting: slow hips roll about the facing axis.
    const hipsBone=b.hips??b.abdomen;if(hipsBone&&!/sit/.test(s.activity)){this.keep(hipsBone);this.axis.set(Math.cos(s.yaw),0,Math.sin(s.yaw));turn(hipsBone,this.axis,.035*amp*Math.sin(seconds*2*Math.PI/(9+ph*4)+ph*3.1));}
    // Head: ease toward the nearest Soul; small idle glances otherwise; nods while speaking.
-   if(b.head){this.keep(b.head);const want=lookTarget(looking,souls)+(.12*Math.sin(seconds*.37+ph*9)),cur=this.look.get(s.id)??0,next=cur+(want-cur)*k;this.look.set(s.id,next);
+   if(b.head){this.keep(b.head);const want=lookTarget(looking,grid?this.grid.around(s.p):souls,LOOK_RANGE)+(.12*Math.sin(seconds*.37+ph*9)),cur=this.look.get(s.id)??0,next=cur+(want-cur)*k;this.look.set(s.id,next);
     turn(b.head,UP,-next*.8);if(b.torso){turn(b.torso,UP,-next*.2);}
     if(s.speaking){this.axis.set(-Math.sin(s.yaw),0,Math.cos(s.yaw));turn(b.head,this.axis,.07*amp*Math.sin(seconds*5.3+ph*4));if(b.torso)turn(b.torso,UP,.05*amp*Math.sin(seconds*1.7+ph));}}
   }
