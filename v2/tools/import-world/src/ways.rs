@@ -2,8 +2,9 @@
 //! back from (Mimos on the Mars campus, W8 #4084: a walk in was receipted, every walk out refused `souls:no-way`).
 //!
 //! Each is walked, not looked up: a body stands at the arrival point on the open ground, and the walker the served
-//! world runs (the town's legs, N7's walk through the host, the controller carrying it across each link) walks it to
-//! the target; once there, it walks back to the arrival point. A target the walk in reaches but the walk back does not
+//! world runs (sent to a standing spot by the target as N9 sends it, its legs from the town, N7's walk through the
+//! host, the controller carrying it across each link) walks it to the target; once there, it walks back to the
+//! arrival point. A target the walk in reaches but the walk back does not
 //! (refused, ended short, or with no answer after [`WAIT`] of the world's time) is one-way, named with why. A floor is
 //! walked to at a point of each of its pieces (the middle of the piece's largest triangle), a seat to its stand point
 //! (its entry's, cleared of its own thing's solids as `worldd seed` clears it), carried onto the floor under it.
