@@ -121,6 +121,7 @@ fn diagnose() {
     let mut culprits: BTreeMap<String, usize> = BTreeMap::new();
     let mut classes: BTreeMap<&'static str, usize> = BTreeMap::new();
     let mut shown = 0;
+    let mut on: BTreeMap<Id, Vec<(usize, usize, sim::links::Building)>> = BTreeMap::new();
     let want = [
         "kitchen-counter in cliff-house-15",
         "storeroom-shelf-2 in int-bakery",
@@ -153,7 +154,7 @@ fn diagnose() {
             .handle(id)
             .and_then(|h| tree.node(h))
             .and_then(|n| kinds_by.get(import_eden::entry_name(n.kind().as_str(), n.fields())));
-        let on = entry.is_some_and(walkable);
+        let onto = entry.is_some_and(walkable);
         let shape = entry
             .and_then(footprint)
             .and_then(|(corners, _)| {
@@ -167,7 +168,7 @@ fn diagnose() {
             continue;
         };
         let foot = town.with_ground(|_, g| {
-            within_footprint(g, Target::new(floor, middle), &ring, on, reach, Some((ground, from)))
+            within_footprint(g, Target::new(floor, middle), &ring, onto, reach, Some((ground, from)))
                 .is_some_and(|p| g.walk(ground, from, floor, p).is_some())
         });
         if foot {
@@ -210,11 +211,24 @@ fn diagnose() {
                 });
                 *cls.entry(c.0).or_default() += 1;
                 if let Some(s) = c.1 {
-                    for (bi, bb) in buildings.iter().enumerate() {
-                        for (li, l) in bb.links.iter().enumerate() {
-                            let mut one = bb.clone();
-                            one.links = vec![l.clone()];
-                            if in_passage_but(std::slice::from_ref(&one), &[], ground, floor, s, None) {
+                    let here = on.entry(floor).or_insert_with(|| {
+                        let mut v = Vec::new();
+                        for (bi, bb) in buildings.iter().enumerate() {
+                            for (li, l) in bb.links.iter().enumerate() {
+                                if l.ends.iter().flatten().any(|e| e.floor == floor) {
+                                    let mut one = bb.clone();
+                                    one.links = vec![l.clone()];
+                                    v.push((bi, li, one));
+                                }
+                            }
+                        }
+                        v
+                    });
+                    for (bi, li, one) in here.iter() {
+                        let (bi, li) = (*bi, *li);
+                        let l = &one.links[0];
+                        {
+                            if in_passage_but(std::slice::from_ref(one), &[], ground, floor, s, None) {
                                 let by_end = l
                                     .ends
                                     .iter()
@@ -246,7 +260,7 @@ fn diagnose() {
         }
         if shown < 12 || want.contains(&label.as_str()) {
             shown += 1;
-            println!("== {label} ({def}) floor {} middle {} on={on}", field(tree, floor, import_eden::F_ORIGIN), mm(middle));
+            println!("== {label} ({def}) floor {} middle {} on={onto}", field(tree, floor, import_eden::F_ORIGIN), mm(middle));
             println!("   ring {:?}", ring.iter().map(|c| mm(*c)).collect::<Vec<_>>());
             println!("   classes {cls:?}");
             for (k, v) in &why {
