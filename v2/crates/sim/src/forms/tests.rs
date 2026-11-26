@@ -2945,18 +2945,14 @@ fn i4575_e14_a_whole_thing_form_at_a_lecture_is_refused_while_it_is_attended() {
             Step::Wait(500_000),
         ]
     };
+    // The finish, as a form that does something at the lecture (a hand step there): a bare wait holds nothing.
+    let finish_steps = || vec![Step::Hand, Step::Wait(300_000)];
     let limits = Limits::default();
     b.steps(ada, lecture, attend(left), intent(ada, 0), limits)
         .expect("Ada's attend starts");
     assert_eq!(b.forms.holder(lecture), Some(ada));
     let finish = b
-        .steps(
-            bea,
-            lecture,
-            vec![Step::Wait(300_000)],
-            intent(bea, 0),
-            limits,
-        )
+        .steps(bea, lecture, finish_steps(), intent(bea, 0), limits)
         .expect_err("refused");
     println!(
         "#4575 E14 finish while attended: {}: {}",
@@ -2973,13 +2969,7 @@ fn i4575_e14_a_whole_thing_form_at_a_lecture_is_refused_while_it_is_attended() {
         b.forms.ended
     );
     assert_eq!(b.forms.holder(lecture), None, "nothing held after");
-    let later = b.steps(
-        bea,
-        lecture,
-        vec![Step::Wait(300_000)],
-        intent(bea, 2),
-        limits,
-    );
+    let later = b.steps(bea, lecture, finish_steps(), intent(bea, 2), limits);
     assert!(matches!(later, Ok(Asked::Started(_))), "{later:?}");
 }
 
