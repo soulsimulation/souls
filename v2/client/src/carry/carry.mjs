@@ -7,9 +7,11 @@
 //   carry offer <body id> [<body id> ...] [--on <thing id>]   a crew (the carry entry's activity, this Soul in front),
 //                                     offered to those bodies on the open ground, or on a part to hold it where it stands
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
-//   carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walks to that end of a load (its grip's place,
-//                                     from its entry; 2.2 m off a part that stands), beside it along its own x (1.2 m),
-//                                     or to the n-th side carrier's place, beside a grip between its ends
+//   carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walks to that end of a load (its
+//                                     grip's place, from its entry; 2.2 m off a part that stands), beside it along its
+//                                     own x (1.2 m), or to the n-th side carrier's place, beside a grip between its
+//                                     ends; front or back --out <m>: that far off its line, away from the middle of what
+//                                     it is seated in (an unseated part comes down at its carriers' middle: outside)
 //   carry grip <load> left|right <n>  beside its n-th grip between its ends, from its back: a side carrier's (spot.mjs)
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
 //   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
@@ -44,7 +46,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] [--out <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -112,9 +114,11 @@ export function turn(q, v) {
  * along its own x, `from` (default 1.2 m), right at +. `side<n>` is the n-th side carrier's place
  * (`sim::activity::carry::Load::side_places`): beside its n-th grip between its ends, counted from the back, along the
  * line its front and back stand on, half its width and REACH off that line, the first on its + side, then alternating;
- * null when it has no such grip. `from` in µm; `at`: the thing's place in the world ({pos, rot}).
+ * null when it has no such grip. `from` in µm; `at`: the thing's place in the world ({pos, rot}). `away`, for front or
+ * back: `{ by, from }`, the spot moved `by` µm across the line, on the side away from the point `from` (µm on the plan:
+ * the middle of what the thing is seated in), so a part unseated to its carriers' middle comes down outside its bay.
  */
-export function gripSpot(at, load, end, from = null) {
+export function gripSpot(at, load, end, from = null, away = null) {
   const rot = at.rot ?? [ONE, 0, 0, 0], sign = end === 'front' || end === 'right' ? 1 : -1;
   const mid = turn(rot, load?.middle ?? [0, 0, 0]).map((c, k) => c + at.pos[k]);
   const unit = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
@@ -135,7 +139,11 @@ export function gripSpot(at, load, end, from = null) {
     return [mid[0] + x[0] * d, mid[2] + x[1] * d];
   }
   const d = from != null ? from * sign : lies ? load.places[end === 'front' ? 1 : 0] : STANDING_FROM * sign;
-  return [mid[0] + line[0] * d, mid[2] + line[1] * d];
+  const p = [mid[0] + line[0] * d, mid[2] + line[1] * d];
+  if (!away) return p;
+  // Across the line, the side its middle lies from `away.from` (both ends the same side).
+  const n = [-line[1], line[0]], s = Math.sign((mid[0] - away.from[0]) * n[0] + (mid[2] - away.from[1]) * n[1]) || 1;
+  return [p[0] + n[0] * away.by * s, p[1] + n[1] * away.by * s];
 }
 
 /** A turn about +y by `mdeg` millidegrees, as a quaternion [w, x, y, z]. */
@@ -219,7 +227,8 @@ const heading = (w, h) => {
 /**
  * The intents a `carry` or `part` request sends, in order, or a refusal by name. `ctx`: `ns` (the world's form
  * namespace), `ground` (the open ground's id), `kinds` (the held entries), `me` (this Soul's body id), `placeOf(id)`
- * (a node's place in the world, {pos, rot} µm, or null), `kindOf(id)` (a node's entry kind), and `crewMiddle(crew)`
+ * (a node's place in the world, {pos, rot} µm, or null), `kindOf(id)` (a node's entry kind), `parentOf(id)` (the node
+ * it is in, for `grip --out`), and `crewMiddle(crew)`
  * (where a crew's load is now, µm on the plan, or null).
  */
 export function carryIntents(req, ctx) {
@@ -268,7 +277,13 @@ export function carryIntents(req, ctx) {
         const s = /^[1-4]$/.test(String(req.n)) ? sideSpot(at, loadOf(kinds[kindOf(req.thing)]), req.end, Number(req.n)) : null;
         return s ? [walk(ns, ground, s)] : no('carry-grip-unknown', `${req.thing} has no grip ${req.n} between its ends (count from its back, 1 to ${loadOf(kinds[kindOf(req.thing)])?.inner.length ?? 0})`);
       }
-      const load = loadOf(kinds[kindOf(req.thing)]), spot = gripSpot(at, load, req.end, from === null ? null : from * M);
+      // --out: off the line, outside what the part is seated in (a rail lifted off its posts comes down clear of them).
+      const out = req.out === undefined ? null : Number(req.out);
+      if (out !== null && !(out > 0 && out < 5 && (req.end === 'front' || req.end === 'back'))) return no('carry-usage', 'front|back --out <metres, 0 to 5>');
+      const bay = out === null ? null : ctx.parentOf?.(req.thing), bayAt = bay && bay !== ground ? placeOf(bay) : null;
+      if (out !== null && !bayAt) return no('carry-out-unseated', `${req.thing} is not seated in anything here: --out stands outside what a part is seated in`);
+      const away = bayAt ? { by: out * M, from: [bayAt.pos[0], bayAt.pos[2]] } : null;
+      const load = loadOf(kinds[kindOf(req.thing)]), spot = gripSpot(at, load, req.end, from === null ? null : from * M, away);
       // A side stands at a grip between the ends: a load with fewer such grips takes fewer (sim's carry-crew-too-large).
       const inner = load?.inner?.length ?? 0;
       if (!spot) return no('carry-grip-unknown', `${req.thing} has ${inner} grip${inner === 1 ? '' : 's'} between its ends, so no ${req.end.replace('side', 'side ')}: a crew of ${2 + inner} at most carries it`);
