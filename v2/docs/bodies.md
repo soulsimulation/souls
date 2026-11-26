@@ -153,7 +153,9 @@ target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every o
 stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Within 20 m distance alone is
 checked; a wall between does not block an aim. Beyond it, up to `SIGHT` (60 m, the client's sight), an aim at a thing
 the body sees is made from afar (#5063): the geometry's `Reach::seen` says so (worldd: both on the open ground, or the
-thing on the body's own storey of the same building), and the act's end says `from afar`. A thing inside a building
+thing on the body's own storey of the same building), and the act's `souls:act-ended` carries its words in field 8
+(`look: from afar, 30000 mm to <id>, reach 20000 mm`), which the client gives as `from_afar` on the act's receipt (and
+`act --wait`'s answer). A thing inside a building
 seen from outside it (or the reverse), on another storey or past 60 m is refused `out-of-reach`, its words adding `not
 in sight` or `sight 60000 mm`; one in a closed container is refused without its distance or its name (#4339). On the
 open ground a building standing between the two is not checked yet. A form's move toward its thing turns the standing
