@@ -431,10 +431,25 @@ async fn b7c_queue_from_behind_two_chairs_takes_the_seat_by_the_supported_route(
         assert!(queued.is_ok(), "queue accepted: {queued:?}");
     }
     for (i, head) in bodies.iter().enumerate() {
-        let what = format!("head {i} seated by its take");
-        in_log(&dir, 60, &what, |es| {
-            (takes(es).contains(head) && seated(es, *head, chair)).then_some(())
-        });
+        // Within 60 s, or the head's inputs say how it stood (B7b: straight at the rear chairs, and no take).
+        let end = Instant::now() + Duration::from_secs(60);
+        while !{
+            let es = effects(&dir);
+            takes(&es).contains(head) && seated(&es, *head, chair)
+        } {
+            if Instant::now() > end {
+                let es = effects(&dir);
+                let moved = inputs(&es, *head);
+                let n = moved.len();
+                panic!(
+                    "head {i} not seated by its take within 60 s; takes {:?}; its last order inputs (vx, vz µm/s) of \
+                     {n}: {:?}",
+                    takes(&es),
+                    &moved[n.saturating_sub(8)..]
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
         let es = effects(&dir);
         assert_eq!(takes(&es), bodies[..=i], "FIFO, one take each");
         let ended: Vec<_> = order_events(&es, "souls:order-ended")
@@ -458,9 +473,17 @@ async fn b7c_queue_from_behind_two_chairs_takes_the_seat_by_the_supported_route(
             );
         }
         if i + 1 < bodies.len() {
-            s[i].act("eden:rise", None, BTreeMap::new())
-                .await
-                .expect("rose");
+            // The sit's own phases end before a rise is admitted (`not-seated` until then).
+            let end = Instant::now() + Duration::from_secs(20);
+            loop {
+                match s[i].act("eden:rise", None, BTreeMap::new()).await {
+                    Ok(_) => break,
+                    Err(r) if r == "not-seated" && Instant::now() < end => {
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                    Err(r) => panic!("head {i} rises: {r}"),
+                }
+            }
             let away = BTreeMap::from([(
                 1,
                 Value::Array(vec![
@@ -469,9 +492,18 @@ async fn b7c_queue_from_behind_two_chairs_takes_the_seat_by_the_supported_route(
                     int(7_000_000),
                 ]),
             )]);
-            s[i].act("eden:walk", Some(ground), away)
-                .await
-                .expect("walked away");
+            // Out of the way of the next in line, once the rise lets it walk.
+            let end = Instant::now() + Duration::from_secs(20);
+            loop {
+                match s[i].act("eden:walk", Some(ground), away.clone()).await {
+                    Ok(_) => break,
+                    Err(r) if Instant::now() < end => {
+                        println!("head {i} walk away: {r}; again");
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                    Err(r) => panic!("head {i} walks away: {r}"),
+                }
+            }
         }
     }
     let es = effects(&dir);
