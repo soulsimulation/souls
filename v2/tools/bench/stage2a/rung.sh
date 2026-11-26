@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One rung of stage 2a's ladder (#4154): Eden with N test Souls under `worldd serve`, its gatewayd and the viewers'
 # origin (tools/origin/origin.mjs) over the world's public stream, driven by the driver with the real Soul Actions mix
-# (loads.mjs `mix-<n>-<even|uneven>-<every4|burst>`), act wait read to the public stream (--stream), on Linux.
+# (loads.mjs `mix-<n>-<even|uneven>-<rate>`, a rate of its RATES), act wait read to the public stream (--stream), on Linux.
 #
-#   v2/tools/bench/stage2a/rung.sh <n> <even|uneven> <every4|burst> <world cpus|all> [seconds] [out folder]
+#   v2/tools/bench/stage2a/rung.sh <n> <even|uneven> <every4|burst|gene17|gene42> <world cpus|all> [seconds] [out folder]
 #
 # <world cpus> (taskset's list, e.g. 16-23) holds every world process (worldd, gatewayd, the origin); `all` leaves
 # them on every core. The driver runs on DRIVER_CPUS (default 40-47), apart from them. Needs: the release worldd,
