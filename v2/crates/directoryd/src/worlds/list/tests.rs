@@ -745,3 +745,59 @@ fn n_g8_the_creator_sets_the_welcome_visitors_are_shown() {
     w.set_welcome("mine", person(1), "").expect("cleared");
     assert_eq!(w.welcome_of("mine").expect("read"), None);
 }
+
+/// Rule 9 (26 Nov): each row's `souls` is what its world's `health.json` on this machine says, read again once
+/// [`SOULS_EVERY`] seconds have passed; a world with no file here, or no folder set, lists `souls: null`.
+#[test]
+fn the_souls_in_each_world_come_from_its_health_file() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let mut w = worlds(&store, &gets, forks);
+    w.create(&ask("k1", "busy", "Ann"), person(1), 0, 10 * DAY)
+        .expect("made");
+    w.create(&ask("k2", "never-started", "Bo"), person(2), 0, 10 * DAY)
+        .expect("made");
+    let row = |w: &Worlds<Counted<'_>>, name: &str| {
+        w.list().expect("a list")["worlds"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|r| r["name"] == name)
+            .cloned()
+            .expect("listed")
+    };
+    assert_eq!(row(&w, "busy")["souls"], Json::Null, "no folder set: none");
+    let root = std::env::temp_dir().join(format!("directoryd-souls-{}", std::process::id()));
+    let busy = row(&w, "busy");
+    let folder = folder_of(&busy).expect("a folder name");
+    assert!(
+        folder.starts_with(busy["lineage"].as_str().expect("a lineage")),
+        "{folder}"
+    );
+    std::fs::create_dir_all(root.join(&folder)).expect("a world folder");
+    let health = |n: u64| {
+        std::fs::write(
+            root.join(&folder).join("health.json"),
+            format!("{{\"at_unix_ms\":1,\"written\":3,\"souls\":{n}}}\n"),
+        )
+        .expect("written")
+    };
+    health(4);
+    w.souls_root = Some(root.clone());
+    assert_eq!(row(&w, "busy")["souls"], 4);
+    assert_eq!(
+        row(&w, "never-started")["souls"],
+        Json::Null,
+        "no file: none"
+    );
+    // Read again only once SOULS_EVERY has passed.
+    health(5);
+    let t = crate::accounts::serve::now() + 1;
+    let at = |now| w.souls_of(std::slice::from_ref(&folder), now)[&folder];
+    assert_eq!(at(t), Some(4), "within {SOULS_EVERY} s: the count read before");
+    assert_eq!(at(t + SOULS_EVERY), Some(5));
+    let _ = std::fs::remove_dir_all(root);
+}

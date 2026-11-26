@@ -22,6 +22,11 @@
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 //! 8. **The welcome** (#3702), set by the creator ([`Worlds::set_welcome`]): words a visitor is shown on arrival, one
 //!    field of the row, `welcome`, so the list carries it and a Soul's pairing answer names it.
+//! 9. **The Souls in it now** (26 Nov), `souls` on each row: what the world's `health.json` on this machine says
+//!    (worldd's count of the Souls embodied there, written every 2 s), under [`SOULS_ROOT_ENV`]'s folder of world
+//!    folders. The files are read at most every [`SOULS_EVERY`] seconds, outside the directory's lock, so the list
+//!    still asks no world anything. A world with no such file here (on another machine, never started, or the
+//!    variable unset) lists `souls: null`. The home page's card shows it.
 
 pub mod archive;
 pub mod handoff;
@@ -54,6 +59,11 @@ pub const PICTURE_BYTES: u64 = 131_072;
 pub const PICTURE_SIDE: u64 = 1280;
 /// The most characters a world's welcome may have (#3702).
 pub const WELCOME_MOST: usize = 500;
+/// The folder that holds this machine's world folders (`<lineage hex>-<zone scope hex>-<counter>`), whose
+/// `health.json` gives each listed world's Souls (rule 9); unset, the list gives none.
+pub const SOULS_ROOT_ENV: &str = "DIRECTORYD_WORLDS_ROOT";
+/// How old, in seconds, the Souls the list gives may be (rule 9).
+pub const SOULS_EVERY: u64 = 30;
 
 /// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
 /// bytes as a `data:` URL, or the refusal's name.
@@ -222,6 +232,22 @@ pub struct Worlds<S: Store> {
     pub templates: BTreeMap<String, Template>,
     pub limits: Limits,
     starter: Starter,
+    /// Rule 9: the folder of this machine's world folders, and the counts read from it: when (seconds) and by folder.
+    pub souls_root: Option<PathBuf>,
+    souls_read: Mutex<(u64, BTreeMap<String, Option<u64>>)>,
+}
+
+/// A world's folder name from its row: `<lineage hex>-<zone scope hex>-<zone counter>` (`worldd serve`'s).
+fn folder_of(row: &Json) -> Option<String> {
+    let lineage = row.get("lineage")?.as_str()?;
+    let (scope, counter) = row.get("zone")?.as_str()?.split_once(':')?;
+    Some(format!("{lineage}-{scope}-{counter}"))
+}
+
+/// The Souls a world's `health.json` says are embodied in it (rule 9), if it says.
+fn souls_in(root: &Path, folder: &str) -> Option<u64> {
+    let text = std::fs::read(root.join(folder).join("health.json")).ok()?;
+    serde_json::from_slice::<Json>(&text).ok()?.get("souls")?.as_u64()
 }
 
 fn row_creator(row: &Json) -> Option<&str> {
@@ -241,7 +267,27 @@ impl<S: Store> Worlds<S> {
             templates,
             limits: Limits::default(),
             starter,
+            souls_root: None,
+            souls_read: Mutex::new((0, BTreeMap::new())),
         }
+    }
+
+    /// Rule 9: each folder's Souls, read again once [`SOULS_EVERY`] seconds have passed since the last read (a folder
+    /// not read before is read now).
+    fn souls_of(&self, folders: &[String], now: u64) -> BTreeMap<String, Option<u64>> {
+        let Some(root) = &self.souls_root else {
+            return BTreeMap::new();
+        };
+        let mut read = self.souls_read.lock().unwrap_or_else(|e| e.into_inner());
+        if now.saturating_sub(read.0) >= SOULS_EVERY {
+            *read = (now, BTreeMap::new());
+        }
+        for f in folders {
+            if !read.1.contains_key(f) {
+                read.1.insert(f.clone(), souls_in(root, f));
+            }
+        }
+        folders.iter().map(|f| (f.clone(), read.1.get(f).copied().flatten())).collect()
     }
 
     /// Every world's lineage (hex) and creator (a principal's text), unlisted ones too: whom a world's prayers go to
@@ -302,6 +348,14 @@ impl<S: Store> Worlds<S> {
             if row.get("picture").is_none() {
                 row["picture"] = Json::Null;
             }
+        }
+        drop(inner);
+        // Rule 9: the Souls in each world now, read outside the directory's lock.
+        let folders: Vec<String> = rows.iter().filter_map(folder_of).collect();
+        let souls = self.souls_of(&folders, crate::accounts::serve::now());
+        for row in &mut rows {
+            let n = folder_of(row).and_then(|f| souls.get(&f).copied().flatten());
+            row["souls"] = json!(n);
         }
         Ok(json!({"worlds": rows, "templates": self.templates.keys().collect::<Vec<_>>()}))
     }
@@ -727,11 +781,13 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
             name: "machine-name",
             detail: machine.to_owned(),
         })?;
-        Ok(Worlds::new(
+        let mut worlds = Worlds::new(
             Directory::new(store, machine),
             found,
             placement::starter(var("DIRECTORYD_PLACEMENT", "placement")),
-        ))
+        );
+        worlds.souls_root = std::env::var_os(SOULS_ROOT_ENV).map(PathBuf::from);
+        Ok(worlds)
     };
     Some(run())
 }
