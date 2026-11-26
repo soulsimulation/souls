@@ -57,14 +57,16 @@ fn the_open_hall_is_walked_there_and_back_and_the_sealed_one_is_named() {
     )
     .expect("walked");
     println!(
-        "{} targets, {} s of walking; one-way {:?}; not reached {:?}",
+        "{} targets, {} s of walking; one-way {:?}; reached elsewhere {:?}; not reached {:?}",
         w.targets,
         w.ticks / 20,
         w.one_way,
+        w.elsewhere,
         w.unreached
     );
     assert_eq!(w.targets, 2, "one point on each hall's floor");
     assert!(w.one_way.is_empty(), "{:?}", w.one_way);
+    assert!(w.elsewhere.is_empty(), "{:?}", w.elsewhere);
     let names: Vec<&str> = w.unreached.iter().map(|u| u.name.as_str()).collect();
     assert_eq!(names, ["floor e_sealed/floor-0"], "{:?}", w.unreached);
     // The open hall was walked into and out of: some seconds of walking, there and back.
@@ -103,14 +105,17 @@ fn edens_old_town_floors_and_sofa_are_walked_back_from_as_the_served_world_walks
     )
     .expect("walked");
     println!(
-        "{} targets, {} s of walking; one-way {:?}; not reached {:?}",
+        "{} targets, {} s of walking; one-way {:?}; reached elsewhere {:?}; not reached {:?}",
         w.targets,
         w.ticks / 20,
         w.one_way,
+        w.elsewhere,
         w.unreached
     );
-    // The tower's floor, the shop floor's four pieces and the sofa's three stand points.
+    // The tower's floor, the shop floor's four pieces and the sofa's three stand points: each walk in ends on its
+    // target's piece, and each walk back comes back.
     assert_eq!(w.targets, 8, "{:?}", w.unreached);
     assert!(w.unreached.is_empty(), "{:?}", w.unreached);
+    assert!(w.elsewhere.is_empty(), "{:?}", w.elsewhere);
     assert!(w.one_way.is_empty(), "{:?}", w.one_way);
 }

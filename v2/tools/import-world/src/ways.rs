@@ -6,10 +6,17 @@
 //! carrying it across each link) walks it to the target; once there, it walks back to the arrival point. Each tick is
 //! stepped as `worldd` steps its bodies: the place, legs and lines from the planner a tick after they are asked for
 //! (K18b, here in lockstep), and the never-stuck ladder climbed after the tick (0.133 N1: routed again at 3 s without
-//! progress, ..., ended `goal-unreachable` at 15 s). A target the walk in reaches but the walk back does not
-//! (refused, ended short, or with no answer after [`WAIT`] of the world's time) is one-way, named with why. A floor is
-//! walked to at a point of each of its pieces (the middle of the piece's largest triangle), a seat to its stand point
-//! (its entry's, cleared of its own thing's solids as `worldd seed` clears it), carried onto the floor under it.
+//! progress, ..., ended `goal-unreachable` at 15 s). Wherever a walk in ends done (on the target's piece, or on
+//! another piece or node a standing spot was granted on: reached elsewhere), the body walks back from there; a walk
+//! back that is refused, ends short, or has no answer after [`WAIT`] of the world's time makes the target one-way,
+//! named with why. A floor is walked to at a point of each of its pieces (the middle of the piece's largest triangle),
+//! a seat to its stand point (its entry's, cleared of its own thing's solids as `worldd seed` clears it), carried onto
+//! the floor under it.
+//!
+//! Limits: the walk is in lockstep and the world idle (one walker, the planner answering each tick's wants by the
+//! next). `worldd` runs its planner free (`worldd::answers`), so a late route answer counts against the ladder's 3 s
+//! and 15 s there; and a tick the runner refuses ends the walk here, where `worldd::bodies` goes on to the next tick.
+//! "0 one-way" is the answer of this idle, lockstep world, not of a busy served one.
 
 use import_eden::Import;
 use replica::bodies::{Class, Family, Resource};
@@ -68,6 +75,11 @@ pub struct Ways {
     /// Of those, the ones a walk from the arrival point did not reach (refused or ended short), with why: not
     /// counted among the one-way.
     pub unreached: Vec<OneWay>,
+    /// Of those, the ones whose walk in ended done on another piece or node than the target's (a standing spot
+    /// granted across a wall, in another room, on the ground): where, and whether the walk back from there came back
+    /// (`back: ok`) or not (`back: one-way`, also counted in [`Ways::one_way`]).
+    pub elsewhere: Vec<OneWay>,
+    /// The targets a walk in ended done at (on the target's piece or elsewhere) and no walk back left.
     pub one_way: Vec<OneWay>,
     /// The ticks walked, every walk's together (each [`TICK`] of the world's time).
     pub ticks: u64,
@@ -133,14 +145,15 @@ fn humanoid() -> Family {
     }
 }
 
-/// A point of each piece of `node`'s surface worth standing on: the middle of its largest triangle, µm.
-fn piece_points(t: &Town, node: Id) -> Vec<Vec3> {
+/// A point of each piece of `node`'s surface worth standing on, with the piece's number: the middle of its largest
+/// triangle, µm.
+fn piece_points(t: &Town, node: Id) -> Vec<(u32, Vec3)> {
     let Some(s) = t.surfaces.get(&node) else {
         return Vec::new();
     };
-    s.pieces()
-        .iter()
-        .filter_map(|pc| {
+    (0_u32..)
+        .zip(s.pieces())
+        .filter_map(|(q, pc)| {
             let v = |k: u32| pc.vertices[k as usize].map(|c| i128::from(c) * 1000);
             let area = |t: &[u32; 3]| {
                 let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
@@ -150,7 +163,7 @@ fn piece_points(t: &Town, node: Id) -> Vec<Vec3> {
             let big = pc.triangles.iter().max_by_key(|t| area(t))?;
             let (a, b, c) = (v(big[0]), v(big[1]), v(big[2]));
             let mid = |k: usize| i64::try_from((a[k] + b[k] + c[k]) / 3).ok();
-            (total >= SMALLEST).then_some(Vec3::new(mid(0)?, mid(1)?, mid(2)?))
+            (total >= SMALLEST).then_some((q, Vec3::new(mid(0)?, mid(1)?, mid(2)?)))
         })
         .collect()
 }
@@ -248,8 +261,15 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
     // The planner over its own copy of the town, as the served world's (K18b).
     let mut planner = Planner::new(t.copy()?);
 
-    // Each target: its name, its node and the point on it (µm, the node's frame).
-    let mut targets: Vec<(String, Id, Vec3)> = Vec::new();
+    // The piece of `node`'s surface that holds `p` in plan, as the mover places a body there; `None` off it.
+    let piece_at = |t: &Town, node: Id, p: Vec3| {
+        let s = t.surfaces.get(&node)?;
+        let who = Id::new(Scope([0xee; 16]), 1)?;
+        let b = s.place(who, Frame { node, slot: None }, p, Quat::IDENTITY);
+        b.ok().map(|b| b.piece)
+    };
+    // Each target: its name, its node, the point on it (µm, the node's frame) and the piece of it a walk ends on.
+    let mut targets: Vec<(String, Id, Vec3, Option<u32>)> = Vec::new();
     let floors: Vec<Id> = t
         .buildings
         .iter()
@@ -258,13 +278,13 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
     for f in floors {
         let points = piece_points(&t, f);
         let n = points.len();
-        for (k, p) in points.into_iter().enumerate() {
+        for (k, (q, p)) in points.into_iter().enumerate() {
             let piece = if n > 1 {
                 format!(" piece {}", k + 1)
             } else {
                 String::new()
             };
-            targets.push((format!("floor {}{piece}", name(f)), f, p));
+            targets.push((format!("floor {}{piece}", name(f)), f, p, Some(q)));
         }
     }
     // A seat whose stand point is over no floor is no place to walk to: named, not walked.
@@ -272,7 +292,7 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
     for s in &slots {
         let label = format!("seat {} slot {} stand point", name(s.thing), s.slot);
         match t.view().on_floor(s.thing, s.stand) {
-            Some((node, at, _)) => targets.push((label, node, at)),
+            Some((node, at, _)) => targets.push((label, node, at, piece_at(&t, node, at))),
             None => floorless.push(OneWay {
                 name: label,
                 why: "no floor under its stand point".into(),
@@ -280,7 +300,7 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         }
     }
     if !opts.only.is_empty() {
-        targets.retain(|(l, _, _)| opts.only.iter().any(|o| l.contains(o.as_str())));
+        targets.retain(|(l, ..)| opts.only.iter().any(|o| l.contains(o.as_str())));
         floorless.retain(|u| opts.only.iter().any(|o| u.name.contains(o.as_str())));
     }
 
@@ -315,14 +335,7 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         unreached: floorless,
         ..Ways::default()
     };
-    // The piece of `node`'s surface that holds `p`, as the mover places a body there; `None` off it.
-    let piece_at = |t: &Town, node: Id, p: Vec3| {
-        let s = t.surfaces.get(&node)?;
-        let who = Id::new(Scope([0xee; 16]), 1)?;
-        let b = s.place(who, Frame { node, slot: None }, p, Quat::IDENTITY);
-        b.ok().map(|b| b.piece)
-    };
-    for (k, (label, node, at)) in targets.into_iter().enumerate() {
+    for (k, (label, node, at, piece)) in targets.into_iter().enumerate() {
         let who = Id::new(Scope([0xee; 16]), k as u64 + 1).ok_or("a walker's id")?;
         let start = t.surfaces[&ground]
             .place(
@@ -354,20 +367,17 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             continue;
         }
         let there = *w.r.controller.body(who).ok_or("the walker's body")?;
-        // A walk in that ends done ends on the target's piece: a standing spot granted on another piece (across a
-        // wall, in another room) did not reach it.
+        // A walk in that ends done on the target's piece (the mover's own placing) reached it; one that ends done on
+        // a standing spot granted on another piece (across a wall, in another room) or node reached elsewhere. A Soul
+        // is receipted there too, so the walk back is walked from wherever the body ended.
         let on = there.pose.frame.node;
-        let piece = piece_at(&t, node, at);
-        if on != node || piece.is_some_and(|q| piece_at(&t, node, there.pose.position) != Some(q)) {
-            out.unreached.push(OneWay {
-                name: label,
-                why: format!(
-                    "the walk in ended done on {}, not on the target's piece",
-                    name(on)
-                ),
-            });
-            continue;
-        }
+        let elsewhere = (on != node || piece.is_some_and(|q| there.piece != q)).then(|| {
+            format!(
+                "reached elsewhere: the walk in ended done on {}{}",
+                name(on),
+                if on == node { ", another piece" } else { "" }
+            )
+        });
         let to = Target::new(ground, arrival);
         let (p, ticks) = (&mut planner, &mut out.ticks);
         let back = walk(&mut w, &mut t, p, there, to, order(2)?, ticks).and_then(|()| {
@@ -383,11 +393,22 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
                 )),
             }
         });
-        if let Err(why) = back {
-            out.one_way.push(OneWay {
+        let back = back.map_err(|why| format!("the walk back to the arrival point: {why}"));
+        match (elsewhere, back) {
+            (None, Ok(())) => {}
+            (None, Err(why)) => out.one_way.push(OneWay { name: label, why }),
+            (Some(e), Ok(())) => out.elsewhere.push(OneWay {
                 name: label,
-                why: format!("the walk back to the arrival point: {why}"),
-            });
+                why: format!("{e}; back: ok"),
+            }),
+            (Some(e), Err(why)) => {
+                let why = format!("{e}; back: one-way: {why}");
+                out.elsewhere.push(OneWay {
+                    name: label.clone(),
+                    why: why.clone(),
+                });
+                out.one_way.push(OneWay { name: label, why });
+            }
         }
     }
     Ok(out)

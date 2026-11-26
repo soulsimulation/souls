@@ -6745,7 +6745,8 @@ fn body_places(dir: &Path) -> BTreeMap<Id, Vec<(Id, replica::pose::Vec3)>> {
 /// seats in the shop. Here Souls born at the quad walk there the normal way (a walk to the floor, a walk to the seat,
 /// which ends at its stand point), and from there to the quad's fountain, all at once: each walk's answer, its time
 /// and where the body ends (from the world's log) are printed. None is stuck: each walk is answered with a receipt
-/// within the act's expiry, and the walk back ends on the open ground by the fountain.
+/// within the act's expiry, the walk in ends on the floor it was sent to (a seat's: the floor under it), and the walk
+/// back ends on the open ground by the fountain.
 // A real process on the real clock: the answers' seconds are real time.
 #[allow(clippy::disallowed_methods)]
 #[test]
@@ -6757,19 +6758,20 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
     let names: BTreeMap<Id, String> = im.nodes.iter().map(|(k, v)| (*v, k.clone())).collect();
     let name_of = |n: Id| names.get(&n).cloned().unwrap_or_else(|| format!("{n:?}"));
     let (ground, fountain) = (im.nodes["ground"], im.nodes[QUAD_FOUNTAIN]);
-    // The bell tower's second floor up, the shop's two floors, the shop's sofa (upstairs) and its bench (downstairs).
+    // The bell tower's second floor up, the shop's two floors, the shop's sofa (upstairs) and its bench (downstairs),
+    // each with the floor the walk in ends on.
     let targets = [
-        "e_1277cee2/floor-2",
-        "e_47f02c93/floor-0",
-        "e_47f02c93/floor-1",
-        "e_c4e5895b",
-        "e_b26197b0",
+        ("e_1277cee2/floor-2", "e_1277cee2/floor-2"),
+        ("e_47f02c93/floor-0", "e_47f02c93/floor-0"),
+        ("e_47f02c93/floor-1", "e_47f02c93/floor-1"),
+        ("e_c4e5895b", "e_47f02c93/floor-1"),
+        ("e_b26197b0", "e_47f02c93/floor-0"),
     ];
     let lineage = im.nodes["world"].scope();
     let (served, first, dir, _) = serve_lines(&facts, "-12.0,-92.0", "w9", lineage);
     // One Soul a target, each joined in turn so its body is known by the rows it adds.
     let (mut first, mut souls, mut known) = (Some(first), Vec::new(), Vec::<Id>::new());
-    for (k, target) in targets.iter().enumerate() {
+    for (k, (target, floor)) in targets.iter().enumerate() {
         let soul = match first.take() {
             Some(soul) => soul,
             None => join(&dir, k as u64 + 1, lineage),
@@ -6782,7 +6784,7 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
         soul.0
             .set_read_timeout(Some(Duration::from_secs(660)))
             .unwrap();
-        souls.push((*target, body, soul));
+        souls.push((*target, im.nodes[*floor], body, soul));
     }
     // A walk answered within the act's expiry (600 s): its answer and its seconds. None within the socket's wait (the
     // read times out) is named so, and the other walks go on.
@@ -6797,14 +6799,14 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
     let ends = std::thread::scope(|s| {
         let runs: Vec<_> = souls
             .into_iter()
-            .map(|(target, body, mut soul)| {
+            .map(|(target, floor, body, mut soul)| {
                 let (walked, dir) = (&walked, &dir);
                 let node = im.nodes[target];
                 s.spawn(move || {
                     let there = walked(&mut soul, node);
                     let at = *body_places(dir)[&body].last().unwrap();
                     let back = there.0.is_ok().then(|| walked(&mut soul, fountain));
-                    (target, body, (there, at), back)
+                    (target, floor, body, (there, at), back)
                 })
             })
             .collect();
@@ -6815,7 +6817,7 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
     let rows = body_places(&dir);
     let m = |v: i64| v as f64 / 1e6;
     let mut failed = Vec::new();
-    for (target, body, (there, (on, at)), back) in ends {
+    for (target, floor, body, (there, (on, at)), back) in ends {
         let r = &rows[&body];
         let (end_on, end_at) = *r.last().unwrap();
         println!(
@@ -6835,10 +6837,12 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
         );
         let gap = ((m(end_at.x) + 12.0).powi(2) + (m(end_at.z) + 97.0).powi(2)).sqrt();
         match back {
-            Some((Ok(_), _)) if end_on == ground && gap <= 10.0 => {}
+            Some((Ok(_), _)) if on == floor && end_on == ground && gap <= 10.0 => {}
             _ => failed.push(format!(
-                "{target}: there {:?}, back {back:?}, ends on {} {gap:.1} m from the fountain",
+                "{target}: there {:?} on {} (sent to {}), back {back:?}, ends on {} {gap:.1} m from the fountain",
                 there.0,
+                name_of(on),
+                name_of(floor),
                 name_of(end_on)
             )),
         }

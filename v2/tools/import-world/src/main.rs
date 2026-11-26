@@ -56,22 +56,24 @@ fn json(w: &World) -> String {
         None => "null".to_owned(),
         Some(Err(e)) => format!("{{\"error\": \"{}\"}}", esc(e)),
         Some(Ok(o)) => {
-            let ones: Vec<String> = o
-                .one_way
-                .iter()
-                .map(|t| {
-                    format!(
-                        "{{\"name\": \"{}\", \"why\": \"{}\"}}",
-                        esc(&t.name),
-                        esc(&t.why)
-                    )
-                })
-                .collect();
+            let list = |l: &[ways::OneWay]| {
+                l.iter()
+                    .map(|t| {
+                        format!(
+                            "{{\"name\": \"{}\", \"why\": \"{}\"}}",
+                            esc(&t.name),
+                            esc(&t.why)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
             format!(
-                "{{\"targets\": {}, \"unreached\": {}, \"oneWay\": [{}]}}",
+                "{{\"targets\": {}, \"unreached\": {}, \"elsewhere\": [{}], \"oneWay\": [{}]}}",
                 o.targets,
                 o.unreached.len(),
-                ones.join(", ")
+                list(&o.elsewhere),
+                list(&o.one_way)
             )
         }
     };
@@ -213,17 +215,31 @@ fn main() {
             None => {}
             Some(Err(e)) => println!("\none-way floors and seats: not walked: {e}"),
             Some(Ok(o)) => {
+                let back_ok = o
+                    .elsewhere
+                    .iter()
+                    .filter(|t| t.why.ends_with("back: ok"))
+                    .count();
                 println!(
-                    "\none-way floors and seats ({}; {} walked to from the arrival point [{}, {}] mm, {} not reached; \
-                     {} s of walking):\n",
+                    "\none-way floors and seats ({}; {} walked to from the arrival point [{}, {}] mm, {} reached \
+                     elsewhere, {} not reached; {} s of walking):\n",
                     o.one_way.len(),
                     o.targets,
                     o.arrival[0],
                     o.arrival[1],
+                    o.elsewhere.len(),
                     o.unreached.len(),
                     o.ticks / 20
                 );
                 for t in &o.one_way {
+                    println!("- {}: {}", t.name, t.why);
+                }
+                println!(
+                    "\nreached elsewhere ({}; back: ok {back_ok}, one-way {}):\n",
+                    o.elsewhere.len(),
+                    o.elsewhere.len() - back_ok
+                );
+                for t in &o.elsewhere {
                     println!("- {}: {}", t.name, t.why);
                 }
                 println!("\nnot reached ({}):\n", o.unreached.len());
