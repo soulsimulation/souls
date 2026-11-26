@@ -373,3 +373,27 @@ test('entries: plan lists each world\'s changes and changes nothing; the move st
   assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'new\n', 'the deploy took them');
   assert.equal(read(worlds, 'up/entries.before/eden.humanoid.json'), 'old\n', 'the world\'s own kept beside them');
 });
+
+test('rollback refuses a build from before #4954 for a world on a store generation, and takes back every other world', () => {
+  const m = join(dir, 'rollback'), data = join(m, 'data'), root = join(data, 'worlds'), log = join(m, 'log');
+  const [from, to, toOld] = ['f', '7', '0'].map((c) => `1220${c.repeat(64)}`);
+  const [fresh, kept] = ['c', 'd'].map((c) => `${c.repeat(32)}-${c.repeat(32)}-0`);
+  // The release that brought <from>, its deploy a stand-in that logs; <to> reads store generations, <toOld> does not.
+  exe(join(data, 'releases', sha, 'bin/deploy'), `echo "deploy $*" >> ${log}`);
+  writeFileSync(join(data, 'releases', sha, 'manifest.json'),
+    `{"commit":"${sha}","version":"0.135.1","files":[]}\n{"name":"worldd","hash":"${from}","path":"bin/worldd"}\n`);
+  exe(join(root, 'builds', to, 'worldd'), '# generation-bad: ');
+  exe(join(root, 'builds', toOld, 'worldd'), '# a build from before #4954');
+  for (const w of [fresh, kept]) mkdirSync(join(root, 'worlds', w), { recursive: true });
+  writeFileSync(join(root, 'worlds', fresh, 'generation'), '20261125T010000Z\n');
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: root, RELEASE_ETC: join(m, 'etc') };
+
+  const old = run(['rollback', toOld, from, fresh, kept], env);
+  assert.equal(old.status, 3, old.stdout + old.stderr);
+  assert.match(old.stdout, new RegExp(`refused: rollback\\.generation: ${fresh} is on store generation g/20261125T010000Z/, which 1220000000000000… cannot read`));
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${kept} ${toOld} --from ${from}`], 'only the world on no generation');
+  rmSync(log);
+  const ok = run(['rollback', to, from, fresh], env);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${fresh} ${to} --from ${from}`]);
+});

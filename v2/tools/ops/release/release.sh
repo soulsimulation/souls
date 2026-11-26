@@ -49,7 +49,8 @@
 #                                  --mailbox-key` in each gateway-<world>.env), apply changes it; check sends one
 #                                  owner's message for a grant no Soul holds through each world's gateway and wants it
 #                                  accepted. move applies before the gateways restart and checks after the directory
-#   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
+#   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>, and a world on
+#                                  a store generation (#4954) unless <to> reads it
 #   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
 #                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
 #   reseed-undo <label> check|run  undoes that reseed, with the undo the release it moved to carried
@@ -541,7 +542,8 @@ move() {
   for s in $SERVICES; do
     case $s in
       directory)
-        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1)
+        # `|| true`: under pipefail a missing directory.args would end the move here, silently (#4954).
+        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1 || true)
         service "$rel" directory souls-directory.service directoryd 401 \
           -X POST "${RELEASE_DIRECTORY_URL:-http://${l:-127.0.0.1:7310}}/v1/account/session"
         ;;
@@ -666,6 +668,13 @@ rollback() {
   directory_env
   for w in "$@"; do
     echo "rollback: $w to ${to:0:16}… from ${from:0:16}…"
+    # A world on a store generation (a rebuild's, #4954) runs only a build that reads it: one from before would claim
+    # the old world's record, take its shipping over and stop on a restart gap at every start.
+    if [ -f "$WORLDS_ROOT/worlds/$w/generation" ] && ! grep -qa 'generation-bad: ' "$WORLDS_ROOT/builds/$to/worldd"; then
+      echo "refused: rollback.generation: $w is on store generation g/$(tr -d '[:space:]' < "$WORLDS_ROOT/worlds/$w/generation")/, which ${to:0:16}… cannot read (a build from before #4954)"
+      status=3
+      continue
+    fi
     if "$rel/bin/deploy" rollback "$w" "$to" --from "$from"; then
       rm -f "$rel/moved/$w"
     else

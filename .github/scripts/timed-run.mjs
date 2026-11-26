@@ -83,7 +83,10 @@ export const ARG_ALLOW = {
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
   clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
   // #2554: the page with many Souls, in a real browser on the runner's GPU (tools/test-harness/page-souls.mjs)
-  page: { '--souls': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 4), '--shape': (v) => v === 'event' || v === 'uniform', '--warm-sec': int(1, 120), '--measure-sec': int(5, 300), '--settle-sec': int(1, 600), '--profile-sec': int(1, 60), '--short': FLAG },
+  // page FPS: --tiers, --cameras, --profile-at, --trace-sec, and --ab (named variants, each a page query of plain key=value pairs)
+  page: { '--souls': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 4), '--shape': (v) => v === 'event' || v === 'uniform', '--warm-sec': int(1, 120), '--measure-sec': int(5, 300), '--settle-sec': int(1, 600), '--profile-sec': int(1, 60), '--short': FLAG,
+    '--tiers': list(/^(desktop|phone)$/, 2), '--cameras': list(/^(broadcast|free)$/, 2), '--profile-at': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 4), '--trace-sec': int(1, 30),
+    '--ab': (v) => /^[a-z][a-z0-9]{0,15}=([A-Za-z][A-Za-z0-9]{0,23}=[A-Za-z0-9.]{0,12}(&[A-Za-z][A-Za-z0-9]{0,23}=[A-Za-z0-9.]{0,12}){0,3})?(;[a-z][a-z0-9]{0,15}=([A-Za-z][A-Za-z0-9]{0,23}=[A-Za-z0-9.]{0,12}(&[A-Za-z][A-Za-z0-9]{0,23}=[A-Za-z0-9.]{0,12}){0,3})?){1,3}$/.test(v) },
 };
 
 /** v2-bench: the bench crate's manifest in the ref, and what may follow `--`: plain tokens only, never shell syntax. */
@@ -319,7 +322,7 @@ export const PUBLISH = {
   counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
   clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
-  page: ['page/results.json', 'page/REPORT.md', 'page/*.png', 'page/world.log', 'page.log'],
+  page: ['page/results.json', 'page/REPORT.md', 'page/*.png', 'page/*.cpuprofile', 'page/world.log', 'page.log'],
   'v2-bench': ['v2-bench-prep.log', 'v2-bench-build.log', ...[1, 2, 3].map((k) => `v2-bench-r${k}.log`)],
 };
 /** Media a timed run publishes byte for byte (never scrubbed as text). */

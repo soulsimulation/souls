@@ -34,10 +34,11 @@ for u in "$@"; do case $act in is-active) cat "$S/$u" 2>/dev/null || echo inacti
 // place its folder's store generation names (#4954): live/<world>/record, or g/<label>/live/<world>/record.
 const place = `g=$(cat ${root}/worlds/$2/generation 2>/dev/null); if [ -n "$g" ]; then P=${bucket}/g/$g/live/$2; else P=${bucket}/live/$2; fi`;
 exe(join(lib, 'supervisor'), `case $1 in hash) if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)" ;;
-pin) ${place}; mkdir -p "$P"; echo "$3" > "$P/record"; echo "$2" >> ${state}/pins ;;
+pin) [ -f ${state}/pinfail ] && exit 1; ${place}; mkdir -p "$P"; echo "$3" > "$P/record"; echo "$2" >> ${state}/pins ;;
 generation) ${place}; cat ${root}/worlds/$2/generation 2>/dev/null || echo none ;; *) exit 2 ;; esac`);
-// (a release's deploy and worldd from #4954 on carry 'generation-bad: ', the refusal of a bad generation file)
-exe(join(rel, 'bin/deploy'), `# generation-bad: \n${place}; cat "$P/record"`);
+// (a release's deploy and worldd from #4954 on carry 'generation-bad: ', the refusal of a bad generation file; a world
+// with no record is refused as the real deploy refuses it)
+exe(join(rel, 'bin/deploy'), `# generation-bad: \n${place}; [ -f "$P/record" ] || { echo "deploy: pin.missing: record-missing: $P/record" >&2; exit 2; }; cat "$P/record"`);
 // world-aside, for a reseed before #4954 only: here it must never run.
 exe(join(rel, 'bin/world-aside'), `echo "world-aside ran: $*" >> ${state}/aside.log; exit 1`);
 // worldd seed: a fresh folder from the facts, named for the world, with the arguments it was given.
@@ -158,4 +159,31 @@ test('an undo of a label with no receipt says so (a probe that finds nothing no 
   const none = run('reseed-eden-undo.sh', ['20990101T000000Z', 'check']);
   assert.equal(none.status, 1, none.stdout + none.stderr);
   assert.match(none.stderr, /no reseed receipt for 20990101T000000Z/);
+});
+
+test('a run whose pin failed says resume, and the resume pins the fresh world\'s own record', () => {
+  // The store refuses every pin: the run stops at step 6 with the fresh folder in place and no record on its generation.
+  // (`sleep` stands in so the reseed's tries again take no time.)
+  const fast = join(dir, 'fast');
+  exe(join(fast, 'sleep'), 'exit 0');
+  const quick = { PATH: `${fast}:${env.PATH}` };
+  writeFileSync(join(state, 'pinfail'), '');
+  const stopped = run('reseed-world.sh', [world, sha, 'run'], { ...quick, RESEED_STAMP: '20261125T010000Z' });
+  assert.equal(stopped.status, 1, stopped.stdout + stopped.stderr);
+  assert.match(stopped.stderr, /the pin refused; resume: bash .*reseed-world\.sh \S+ b{40} resume 20261125T010000Z check/);
+  assert.equal(readFileSync(join(folder, 'generation'), 'utf8'), '20261125T010000Z\n', 'the fresh folder is in place');
+  assert.ok(!existsSync(join(bucket, `g/20261125T010000Z/live/${world}/record`)), 'with no record yet');
+  rmSync(join(state, 'pinfail'));
+
+  // The resume it names reads the missing record as not pinned, and runs the pin again.
+  const check = run('reseed-world.sh', [world, sha, 'resume', '20261125T010000Z', 'check'], quick);
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  assert.match(check.stdout, /pinned now +none \(no record on g\/20261125T010000Z\/ yet: step 6 pins it\)/);
+  assert.match(check.stdout, /3-5 fresh seed in place on g\/20261125T010000Z\/: yes/);
+  const resumed = run('reseed-world.sh', [world, sha, 'resume', '20261125T010000Z', 'run'], quick);
+  assert.equal(resumed.status, 0, resumed.stdout + resumed.stderr);
+  assert.match(resumed.stdout, /4-5\. the fresh seed: already in place/);
+  assert.equal(readFileSync(join(bucket, `g/20261125T010000Z/live/${world}/record`), 'utf8').trim(), built, 'pinned in its own record');
+  assert.equal(readFileSync(join(bucket, 'live', world, 'record'), 'utf8').trim(), built, 'the old record as it was');
+  assert.equal(unit('worldd'), 'active', 'the world was running, and runs again');
 });

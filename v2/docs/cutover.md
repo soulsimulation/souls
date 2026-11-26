@@ -257,8 +257,11 @@ object of the world aside first (`world-aside`, about 36,500 for Eden), which to
 down; an undo of such a reseed (its receipt says `bucket=moved`) still moves them back. The check refuses unless the
 installed supervisor (`install-v2`) and the release's `worldd` and `deploy` read the `generation` file. Limits: Back in
 time on the fresh world starts at the reseed (the old world's history stays whole where it was and returns with the
-undo), and a world on a fresh generation must not be rolled back to a build before #4954, which would read the old
-world's record. Run `save-wipe.sh` before it and `switch-eden.sh` after release-v2.
+undo), and a world on a fresh generation never runs a build from before #4954, which would claim the old world's
+record and stop on a restart gap at every start: `release.sh rollback` refuses such a build for it
+(`rollback.generation`) and the launcher refuses to start it (`build.mismatch`). A run that stopped at its pin says
+`resume <label>`, and the resume pins the fresh record. Run `save-wipe.sh` before it and `switch-eden.sh` after
+release-v2.
 
 Any other moved world starts fresh from its own kept facts the same way, by hand, with `bash
 v2/tools/ops/cutover/reseed-world.sh <world> <sha> check`, then `run` (0.133; `<world>` is its folder's name under

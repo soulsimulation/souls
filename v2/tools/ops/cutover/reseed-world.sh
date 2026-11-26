@@ -15,8 +15,9 @@
 #     world again if it was running.
 # The release's build may be the one the world is pinned to already: that is the case for an importer fix that
 # shipped with it. The installed supervisor and the release's worldd and deploy must read the `generation` file (the
-# check refuses otherwise), and the world must not be rolled back to a build before #4954. Back in time on the fresh
-# world starts at the reseed; the old world's history stays whole where it was and comes back with the undo.
+# check refuses otherwise); release.sh rollback and the launcher refuse a build before #4954 for the fresh world. Back
+# in time on the fresh world starts at the reseed; the old world's history stays whole where it was and comes back with
+# the undo.
 # Undo: reseed-eden-undo.sh <time> (it reads the world from the reseed's receipt; printed at the end).
 #
 #   bash reseed-world.sh <world> <sha> check                  reads and prints every value; changes nothing
@@ -52,7 +53,7 @@ patient() {
   "$@"
 }
 usage() {
-  sed -n 2,30p "$0"
+  sed -n 2,31p "$0"
   exit 2
 }
 RESUME=''
@@ -112,7 +113,20 @@ done
 # refusal says why (#4954).
 KINDS=$({ grep -rl '"format": *"souls-entry/1"' "$ENTRIES" 2> /dev/null || true; } | wc -l | tr -d ' ')
 [ "$KINDS" -gt 0 ] || die "no kind entries under $ENTRIES"
-PINNED=$(patient "$REL/bin/deploy" pinned "$WORLD") || die "the world's pin could not be read"
+# The world's pin. A run that stopped at its pin (step 6) left the fresh folder in place, naming this reseed's store
+# generation, with no record there yet: resuming it, that record's absence is "not pinned" (step 6 runs again), not a
+# refusal. Any other failure is tried again, then refuses.
+pinned() {
+  local err
+  { err=$("$REL/bin/deploy" pinned "$WORLD" 2>&1 >&3 3>&-); } 3>&1 && return 0
+  if [ -n "$RESUME" ] && [ "$(cat "$OLD_DIR/generation" 2> /dev/null)" = "$RESUME" ] && [[ $err == *"pin.missing: record-missing:"* ]]; then
+    echo none
+    return 0
+  fi
+  echo "$err" >&2
+  return 1
+}
+PINNED=$(patient pinned) || die "the world's pin could not be read"
 
 if [ -n "$RESUME" ]; then
   STAMP=$RESUME
@@ -177,7 +191,7 @@ fi
 echo "reseed-world: world            $WORLD"
 echo "reseed-world: label            $STAMP$([ -n "$RESUME" ] && echo ' (resuming)')"
 echo "reseed-world: its folder       $([ "$done2" = yes ] && echo "aside at $ASIDE_DIR" || echo "$OLD_DIR ($(du -sh "$OLD_DIR" | cut -f1)), moves to $ASIDE_DIR")"
-echo "reseed-world: pinned now       $PINNED"
+echo "reseed-world: pinned now       $PINNED$([ "$PINNED" != none ] || echo " (no record on g/$STAMP/ yet: step 6 pins it)")"
 echo "reseed-world: the old build    $OLD"
 echo "reseed-world: the release      $VERSION at $SHA, its worldd $NEW$([ "$OLD" = "$NEW" ] && echo ' (the build it is on)')"
 echo "reseed-world: store            $STORE_WHAT"

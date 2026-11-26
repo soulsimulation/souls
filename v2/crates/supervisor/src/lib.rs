@@ -144,6 +144,19 @@ pub fn generation(folder: &Path) -> Result<Option<String>, String> {
     }
 }
 
+/// The start of [`generation`]'s refusal of a bad file, which every build that reads a store generation carries in its
+/// bytes. A build without it (from before #4954) ignores the file: on a rebuilt world it would claim the old world's
+/// record and stop on a restart gap at every start. The launcher ([`reads_generation`]), `release.sh rollback` and the
+/// reseed's check look for it, so the refusal keeps this text.
+pub const GENERATION_MARK: &str = "generation-bad: ";
+
+/// Whether a build's `worldd` bytes read a store generation: they carry [`GENERATION_MARK`].
+pub fn reads_generation(build: &[u8]) -> bool {
+    build
+        .windows(GENERATION_MARK.len())
+        .any(|w| w == GENERATION_MARK.as_bytes())
+}
+
 /// The world's folder on this machine, `$WORLDS_ROOT/worlds/<world>`.
 pub fn world_folder(root: &Path, world: &World) -> PathBuf {
     root.join("worlds").join(world.name())
@@ -202,6 +215,21 @@ pub fn pin<S: Store>(store: S, root: &Path, world: &World) -> Result<(Vec<u8>, F
         }
         Err(r) => Err(format!("pin.missing: {}: {}", r.name, r.detail)),
     }
+}
+
+/// The world's pinned build ([`pin`]) from its own record, where its folder's store generation places it (#4954), as
+/// its launcher reads it. A folder whose `generation` cannot be read refuses.
+pub fn world_pin<S: Store>(
+    store: S,
+    root: &Path,
+    world: &World,
+) -> Result<(Vec<u8>, From), String> {
+    let label = generation(&world_folder(root, world))?;
+    pin(
+        bucket::Generation::new(store, *world, label.as_deref()),
+        root,
+        world,
+    )
 }
 
 /// Pins `build` for `world` in the store (W8's `set_build`).
@@ -317,7 +345,13 @@ mod tests {
         fresh
             .put(&part, b"new part", When::Absent)
             .expect("a part of its own");
-        assert_eq!(pin(&fresh, &dir, &w).map(|p| p.0), Ok(new));
+        assert_eq!(pin(&fresh, &dir, &w).map(|p| p.0), Ok(new.clone()));
+        // A reader handed the directory's store as it is (`archive-state`) reads the fresh record, and caches it for
+        // the fresh generation only.
+        assert_eq!(world_pin(&store, &dir, &w).map(|p| p.0), Ok(new.clone()));
+        let cache = dir.join(format!("cache/{}@20261126T120000Z", w.name()));
+        let cached = std::fs::read(cache).expect("cached");
+        assert_eq!(WorldRecord::read(&cached).expect("a record").build, new);
         assert_eq!(
             fresh.list(&format!("part/{l}/{z}/")).expect("listed"),
             vec![part.clone()]
@@ -342,13 +376,14 @@ mod tests {
         // The undo: the folder without the file is the old world's place again, its pin with it.
         std::fs::remove_file(folder.join(GENERATION_FILE)).expect("removed");
         let back = Generation::new(&store, w, generation(&folder).expect("read").as_deref());
-        assert_eq!(pin(&back, &dir, &w).map(|p| p.0), Ok(old));
+        assert_eq!(pin(&back, &dir, &w).map(|p| p.0), Ok(old.clone()));
+        assert_eq!(world_pin(&store, &dir, &w).map(|p| p.0), Ok(old));
         std::fs::write(folder.join(GENERATION_FILE), "../x").expect("written");
-        assert!(
-            generation(&folder)
-                .unwrap_err()
-                .starts_with("generation-bad")
-        );
+        let bad = generation(&folder).unwrap_err();
+        assert!(bad.starts_with(GENERATION_MARK), "{bad}");
+        // A build that reads a generation carries the refusal's text; one from before #4954 does not.
+        assert!(reads_generation(format!("\0elf {bad} \0").as_bytes()));
+        assert!(!reads_generation(b"\0elf generation-unreadable: \0"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
