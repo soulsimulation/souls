@@ -22,6 +22,7 @@ export const LABELS = ['cook', 'server', 'diner'];
 export const CAMERA = { eye: [7, 5, 9], at: [0, 0.8, 1.5] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const execute = promisify(execFile);
+const TABLE_PHYSICAL = JSON.parse(readFileSync(join(REPO_ROOT, 'packages/world-compiler/src/core-kit/furniture.json'), 'utf8')).find((d) => d.name === 'core-table');
 
 /** Existing entry shapes, state defaults and declared slots; the scene adds no action or changed kind meaning. */
 export function sceneOf(entries) {
@@ -32,6 +33,12 @@ export function sceneOf(entries) {
     def.slots = Object.entries(entry.slots ?? {}).map(([id, s]) => ({ id, kind: s.admits === 'body' ? 'seat' : 'shelf',
       p: s.at_mm.map((x) => x / 1000), yaw: (s.yaw_mdeg ?? 0) * Math.PI / 180000,
       accepts: {}, capacity: s.most, ...(s.admits === 'body' ? { height: s.at_mm[1] / 1000 } : {}) }));
+    // The gallery shape omits physical surface metadata: retain the canonical table's existing top slot/components.
+    // This adds no collider and does not repair the observed body/tabletop intersection.
+    if (entry.kind === 'eden:table') {
+      def.components = structuredClone(TABLE_PHYSICAL.components);
+      def.slots.push(...structuredClone(TABLE_PHYSICAL.slots).filter((s) => !def.slots.some((own) => own.id === s.id)));
+    }
     return { entry, def, ref: `${def.name}@1`, i };
   });
   const [pot, bowl, sink, table, chair] = definitions;

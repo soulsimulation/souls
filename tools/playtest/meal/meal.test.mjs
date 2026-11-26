@@ -67,3 +67,13 @@ test('already arrived Souls are not joined a second time', async () => {
   assert.equal(calls.filter(w => w[0] === 'status').length, 3);
   assert(!calls.some(w => w.includes('life:join')));
 });
+
+test('the meal table preserves canonical physical surface metadata without adding collision geometry', () => {
+  const canonical = JSON.parse(readFileSync(resolve('packages/world-compiler/src/core-kit/furniture.json'), 'utf8')).find((d) => d.name === 'core-table');
+  const table = sceneOf(entries).template.batches[0].ops.find((o) => o.def?.name === 'meal-table').def;
+  assert.deepEqual(table.slots, canonical.slots);
+  assert.deepEqual(table.components, canonical.components);
+  assert.equal(table.slots[0].kind, 'surface');
+  assert.deepEqual(table.slots[0].p, [0, 0.75, 0]);
+  assert(!table.make.args.shapes.some((s) => s.collide === true));
+});
