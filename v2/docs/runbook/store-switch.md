@@ -88,8 +88,9 @@ new engine's objects there only after Gene's yes, once the new bucket has run a 
 ## Keys left behind, and each world's stream chain
 
 `SWITCH_SKIP` names key prefixes, space-separated and each ending in `/`, under each setting's own prefix. Every copy
-of the move leaves those keys in the old store: store-copy's `--skip`, counted on its result line as `N skipped
-under ...`. `plan` says what is left behind.
+of the move leaves those keys in the old store, and the same under every store generation (`g/<label>/<prefix>`, a
+rebuilt world's): store-copy's `--skip`, counted on its result line as `N skipped under ...`. `plan` says what is left
+behind.
 
 - **`aside/`** holds world sets put aside by reseeds (`world-aside`). Only an operator undoing a past reseed reads it.
 - **`stream-recovery/`** holds each world's public stream chain, its head and immutable objects. A world reads it from
