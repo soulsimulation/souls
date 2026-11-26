@@ -216,7 +216,12 @@ pub fn publish_facts(
     let texts = support_entries(&files)?;
     let entries = texts
         .iter()
-        .map(|(k, t)| Ok((k.clone(), json::parse(t).map_err(|e| format!("{k}: {e:?}"))?)))
+        .map(|(k, t)| {
+            Ok((
+                k.clone(),
+                json::parse(t).map_err(|e| format!("{k}: {e:?}"))?,
+            ))
+        })
         .collect::<Result<Vec<_>, String>>()?;
     // The punts, courses and entry kinds a world seeded from the same facts and entries starts with.
     let prepared = worldd::courses::facts(facts, &entries, |_| {})?;
