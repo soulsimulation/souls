@@ -38,14 +38,55 @@ const ROOMLIKE = /:(room|floor|ground|place)$/;
 /** My body's row: by its id, else the row a join made for my Soul (`soul`, C30), as a daemon names itself by its Soul. */
 export const bodyOf = (rows, me) => (me ? rows.get(me) ?? [...rows.values()].find((r) => r.soul === me) ?? null : null);
 
+/** How far a room's doorway reaches past its outline, mm: a body standing in its wall's doorway is at that room. */
+export const DOORWAY_MM = 1000;
+/** How far `[x, z]` (mm) lies outside polygon `poly` ([[x, z] mm, ...]): 0 inside it. */
+function outside(poly, [x, z]) {
+  let inside = false, d = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j], dx = xj - xi, dz = zj - zi, l = dx * dx + dz * dz;
+    if ((zi > z) !== (zj > z) && x < (dx * (z - zi)) / dz + xi) inside = !inside;
+    const t = l ? Math.max(0, Math.min(1, ((x - xi) * dx + (z - zi) * dz) / l)) : 0;
+    d = Math.min(d, Math.hypot(x - xi - t * dx, z - zi - t * dz));
+  }
+  return inside ? 0 : d;
+}
+/** `v` in the frame of a node posed at `pos` turned by `rot` ([w, x, y, z], any scale): the inverse of its pose. */
+function into(pos = [0, 0, 0], rot = [1, 0, 0, 0], v) {
+  const n = Math.hypot(...rot) || 1, [w, x, y, z] = [rot[0] / n, -rot[1] / n, -rot[2] / n, -rot[3] / n];
+  const p = [v[0] - pos[0], v[1] - pos[1], v[2] - pos[2]];
+  const t = [2 * (y * p[2] - z * p[1]), 2 * (z * p[0] - x * p[2]), 2 * (x * p[1] - y * p[0])];
+  return [p[0] + w * t[0] + y * t[2] - z * t[1], p[1] + w * t[1] + z * t[0] - x * t[2], p[2] + w * t[2] + x * t[1] - y * t[0]];
+}
+/**
+ * First-day round 2: a standing body's node is its floor's, never its room's (the world's frame is the floor). The
+ * floor's room it stands in, by the rooms' outlines (`copy.mjs`), else the one whose doorway it stands in (within
+ * DOORWAY_MM of its outline); null on a floor with no rooms, or outside them all (a landing, a balcony).
+ */
+function roomOnFloor(rows, floor, body) {
+  if (!body.pos) return null;
+  let best = null;
+  for (const r of rows.values()) {
+    if (r.parent !== floor.id || !/:room$/.test(r.kind) || !r.outline) continue;
+    const [x, , z] = into(r.pos, r.rot, body.pos), d = outside(r.outline, [x / 1000, z / 1000]);
+    if (d <= DOORWAY_MM && (!best || d < best.d)) best = { r, d };
+  }
+  return best?.r ?? null;
+}
+
 /**
  * Where my body is (D7): the thing that holds it when that is not a room (`seat`: a chair, a bed, a boat) and the room
- * around it, the nearest room-like node above the body; null when the copy does not hold the body.
+ * around it, the nearest room-like node above the body (standing on a floor, the floor's room it stands in:
+ * `roomOnFloor`, with `floor`); null when the copy does not hold the body.
  */
 export function whereOf(rows, me) {
   const body = bodyOf(rows, me);
   const parent = body?.parent ? rows.get(body.parent) : null;
   if (!parent) return null;
+  if (/:floor$/.test(parent.kind)) {
+    const room = roomOnFloor(rows, parent, body);
+    if (room) return { body, room, floor: parent };
+  }
   if (ROOMLIKE.test(parent.kind)) return { body, room: parent };
   let room = parent;
   for (let n = 0; room && !ROOMLIKE.test(room.kind) && n < 16; n++) room = room.parent ? rows.get(room.parent) : null;
@@ -110,7 +151,9 @@ export function brief(rows, { me, changes = [], heard = [], doing = [], souls = 
   const at = whereOf(rows, me), room = roomOf(rows, me), mine = at?.body.id ?? me;
   const said = heard.length ? { heard: heardBlock(heard) } : {};
   if (!room) return { room: null, note: 'The copy holds nothing yet.', ...said, age: ageText(ageMs), changed: changedBlock(changes) };
-  const inRoom = [...rows.values()].filter((r) => r.parent === room.id && r.id !== mine && r.id !== at?.seat?.id);
+  // Standing on a floor, the room's things and what else stands on the floor in that room (other bodies, a thing set down).
+  const floor = at?.floor, inFloor = (r) => r.parent === floor.id && !/:room$/.test(r.kind) && roomOnFloor(rows, floor, r) === room;
+  const inRoom = [...rows.values()].filter((r) => (r.parent === room.id || (floor && inFloor(r))) && r.id !== mine && r.id !== at?.seat?.id);
   const bodies = inRoom.filter((r) => BODY.test(r.kind)).length;
   // Nearest first where the copy places them (a world's open ground holds thousands: what is near is what matters),
   // then by name; with no distances, by name alone.
