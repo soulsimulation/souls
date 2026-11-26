@@ -267,7 +267,7 @@ impl World {
             });
             js.push((link, *other));
         }
-        self.write(part, changes)?;
+        self.write(self.site, changes)?;
         self.joints.insert(part, js);
         Ok(())
     }
@@ -284,7 +284,7 @@ impl World {
         }];
         let act = self.id();
         changes.extend(self.hold_changes(bent, act, crew));
-        self.write(bent, changes)?;
+        self.write(self.site, changes)?;
         Ok(())
     }
 
