@@ -45,7 +45,8 @@ function launch(home, soul, pkg, ready) {
     detached: true,
     cwd: rt.dir,
     stdio: ['ignore', out, out, ...(ready ? ['pipe'] : [])],
-    env: { PATH: process.env.PATH ?? '' },
+    // SOULS_REPLACED_RETRY_MS: a test's shorter wait between a replaced daemon's asks whether the Soul is free.
+    env: { PATH: process.env.PATH ?? '', ...(process.env.SOULS_REPLACED_RETRY_MS ? { SOULS_REPLACED_RETRY_MS: process.env.SOULS_REPLACED_RETRY_MS } : {}) },
   });
   child.unref();
   return child;

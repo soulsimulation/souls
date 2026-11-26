@@ -476,13 +476,13 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     println!("rise: {rose:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    // `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor; <moved> stand
-    // points moved to clear ground`
+    // `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor; <bare> on
+    // things with no slots of their own; <beyond> past a thing's own slots; <moved> stand points moved to clear ground`
     let n: Vec<usize> = seats
         .split(|c: char| !c.is_ascii_digit())
         .filter_map(|w| w.parse().ok())
         .collect();
-    let [registered, on, declared, left, moved] = n[..] else {
+    let [registered, on, declared, left, _bare, _beyond, moved] = n[..] else {
         panic!("{seats}")
     };
     println!(
@@ -7232,4 +7232,139 @@ fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
         }
     }
     out
+}
+
+/// The quad's fountain, at (-12, -97) m, in the middle of Eden's arrival (`place-region-campus-quad`).
+const QUAD_FOUNTAIN: &str = "e_ce79121a";
+
+/// Each body's places in the world's log in `dir`, in order, by the body's id: the node it stood on and its position
+/// in that node's frame, µm.
+fn body_places(dir: &Path) -> BTreeMap<Id, Vec<(Id, replica::pose::Vec3)>> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::<Id, Vec<_>>::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                out.entry(id)
+                    .or_default()
+                    .push((pose.frame.node, pose.position));
+            }
+        }
+    }
+    out
+}
+
+/// W9 (#4085) on a served Eden: the import's one-way check walked no way back to the quad within 600 s from the floors
+/// of two old-town buildings, the bell tower (`e_1277cee2`) and the south arcade's first shop (`e_47f02c93`), and from
+/// seats in the shop. Here Souls born at the quad walk there the normal way (a walk to the floor, a walk to the seat,
+/// which ends at its stand point), and from there to the quad's fountain, all at once: each walk's answer, its time
+/// and where the body ends (from the world's log) are printed. None is stuck: each walk is answered with a receipt
+/// within the act's expiry, the walk in ends on the floor it was sent to (a seat's: the floor under it), and the walk
+/// back ends on the open ground by the fountain.
+// A real process on the real clock: the answers' seconds are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let names: BTreeMap<Id, String> = im.nodes.iter().map(|(k, v)| (*v, k.clone())).collect();
+    let name_of = |n: Id| names.get(&n).cloned().unwrap_or_else(|| format!("{n:?}"));
+    let (ground, fountain) = (im.nodes["ground"], im.nodes[QUAD_FOUNTAIN]);
+    // The bell tower's second floor up, the shop's two floors, the shop's sofa (upstairs) and its bench (downstairs),
+    // each with the floor the walk in ends on.
+    let targets = [
+        ("e_1277cee2/floor-2", "e_1277cee2/floor-2"),
+        ("e_47f02c93/floor-0", "e_47f02c93/floor-0"),
+        ("e_47f02c93/floor-1", "e_47f02c93/floor-1"),
+        ("e_c4e5895b", "e_47f02c93/floor-1"),
+        ("e_b26197b0", "e_47f02c93/floor-0"),
+    ];
+    let lineage = im.nodes["world"].scope();
+    let (served, first, dir, _) = serve_lines(&facts, "-12.0,-92.0", "w9", lineage);
+    // One Soul a target, each joined in turn so its body is known by the rows it adds.
+    let (mut first, mut souls, mut known) = (Some(first), Vec::new(), Vec::<Id>::new());
+    for (k, (target, floor)) in targets.iter().enumerate() {
+        let soul = match first.take() {
+            Some(soul) => soul,
+            None => join(&dir, k as u64 + 1, lineage),
+        };
+        let body = *body_places(&dir)
+            .keys()
+            .find(|b| !known.contains(b))
+            .expect("the new body");
+        known.push(body);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(660)))
+            .unwrap();
+        souls.push((*target, im.nodes[*floor], body, soul));
+    }
+    // A walk answered within the act's expiry (600 s): its answer and its seconds. None within the socket's wait (the
+    // read times out) is named so, and the other walks go on.
+    let walked = |soul: &mut Client, to: Id| {
+        let t0 = std::time::Instant::now();
+        let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            soul.act_within("eden:walk", Some(to), BTreeMap::new(), 600_000_000)
+        }))
+        .unwrap_or_else(|_| Err("no answer within 660 s".into()));
+        (a, t0.elapsed().as_secs_f64())
+    };
+    let ends = std::thread::scope(|s| {
+        let runs: Vec<_> = souls
+            .into_iter()
+            .map(|(target, floor, body, mut soul)| {
+                let (walked, dir) = (&walked, &dir);
+                let node = im.nodes[target];
+                s.spawn(move || {
+                    let there = walked(&mut soul, node);
+                    let at = *body_places(dir)[&body].last().unwrap();
+                    let back = there.0.is_ok().then(|| walked(&mut soul, fountain));
+                    (target, floor, body, (there, at), back)
+                })
+            })
+            .collect();
+        runs.into_iter()
+            .map(|r| r.join().expect("a walk answered"))
+            .collect::<Vec<_>>()
+    });
+    let rows = body_places(&dir);
+    let m = |v: i64| v as f64 / 1e6;
+    let mut failed = Vec::new();
+    for (target, floor, body, (there, (on, at)), back) in ends {
+        let r = &rows[&body];
+        let (end_on, end_at) = *r.last().unwrap();
+        println!(
+            "W9 Eden walk to {target}: {:?} in {:.1} s, ends on {} at ({:.2}, {:.2}, {:.2}) m; back to the quad \
+             fountain: {:?}, ends on {} at ({:.2}, {:.2}) m; {} records",
+            there.0,
+            there.1,
+            name_of(on),
+            m(at.x),
+            m(at.y),
+            m(at.z),
+            back.as_ref().map(|(a, s)| format!("{a:?} in {s:.1} s")),
+            name_of(end_on),
+            m(end_at.x),
+            m(end_at.z),
+            r.len()
+        );
+        let gap = ((m(end_at.x) + 12.0).powi(2) + (m(end_at.z) + 97.0).powi(2)).sqrt();
+        match back {
+            Some((Ok(_), _)) if on == floor && end_on == ground && gap <= 10.0 => {}
+            _ => failed.push(format!(
+                "{target}: there {:?} on {} (sent to {}), back {back:?}, ends on {} {gap:.1} m from the fountain",
+                there.0,
+                name_of(on),
+                name_of(floor),
+                name_of(end_on)
+            )),
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

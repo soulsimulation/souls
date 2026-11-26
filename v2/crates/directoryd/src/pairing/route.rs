@@ -10,7 +10,8 @@
 //!   `{refused, device?}` or, once, `{token, grant}`, with `former` for a former Soul's request.
 //! - `POST /v1/pair/waiting` `{world}`, signed in → `{waiting: [{code, device, label, soul, age, former, name}]}`: the world's
 //!   Soul requests still pending, asked from this request's address in the last ten minutes (kept in memory only), so
-//!   the world page the owner has open shows the card (first day, 25 Nov).
+//!   the world page the owner has open shows the card (first day, 25 Nov). A creator's request is listed, its grant as
+//!   `soul`, only to the account holding that grant (#5006).
 //! - `GET /pair` → the approval card. It shows and changes nothing until the signed-in owner acts in it.
 //! - `POST /v1/pair/show` and `POST /v1/pair/approve` `{code, confirm: true}`, signed in: W1's session token as
 //!   `Authorization: Bearer`, or on a test world W1's test person as `test_person`. An approval records the Soul, and
@@ -225,16 +226,20 @@ pub fn route(
         // asked from the same address, so the card comes up there; the owner matches the code before approving.
         ("POST", "/v1/pair/waiting") => {
             let b = body();
-            if let Err(e) = signed_in(app, bearer, &b) {
-                return Some(refuse(401, e));
-            }
+            let account = match signed_in(app, bearer, &b) {
+                Ok(a) => a,
+                Err(e) => return Some(refuse(401, e)),
+            };
             let Some(world) = text(&b, "world").filter(|w| super::souls::is_world(w)) else {
                 return Some(refuse(400, "world"));
             };
             let Some(ip) = from else {
                 return Some(json(200, json!({"waiting": []}), "waiting"));
             };
-            match p.waiting(&world, ip, now()) {
+            // #5006 row 3: the world's creator sees its agent's creator request too (its grant as `soul`).
+            let held = app.store.grants(&account).unwrap_or_default();
+            let holds = |g: &str| held.iter().any(|(h, _)| h == g);
+            match p.waiting(&world, ip, now(), holds) {
                 Ok(list) => json(
                     200,
                     json!({"waiting": list.into_iter().map(|(code, device, label, soul, age, former, name)| json!({

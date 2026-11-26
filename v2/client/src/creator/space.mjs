@@ -1,21 +1,27 @@
-// A creator's space reads (#3699 follow-on, today's `eden-god where`, `clear` and `free`), on Engine v2: read from the
-// world the page draws on this machine (the public stream, in the headless browser `shoot` uses), so no world is asked
-// and no edit is made. World metres, x east and z south, in plan.
+// A creator's space reads (#3699 follow-on, today's `eden-god where`, `clear` and `free`), on Engine v2. By default they
+// read the creator's own copy of the world (the daemon's `space` answer: every node's pose and shape), so no browser is
+// needed, no world is asked and no edit is made (#5006 finding 5); `--page <url>` reads the world the page draws on this
+// machine instead (the public stream, in the headless browser `shoot` uses). World metres, x east and z south, in plan.
 //
 //   where <x,z|name|id>                   the room and the areas it is in, and the nearest things
 //   clear <x,z|name|id> --size WxD         whether a W x D footprint there is free of things and buildings, and what is in it
 //   free WxD --near <x,z|name|id>          the nearest such footprint that is free, searched outward to FREE_M
 //
-// What fills ground is a thing's footprint (its solids, at any height) or a building's room outline; a thing the page
-// draws with no solids counts as a disc of THING_M. Areas (a plaza, a quarter) hold ground and never fill it. Not here:
-// the ground's height, slope and water (the page's terrain is not read), and `reach` (no route planner on the client).
+// What fills ground is a thing's footprint (its solids, at any height) or a building's room outline; a thing with no
+// solids counts as a disc of THING_M. Areas (a plaza, a quarter) hold ground and never fill it, nor do roads and paths.
+// Not here: the ground's height, slope and water (the terrain is not read), and `reach` (no route planner on the client).
+//
+// `look` with no picture (no browser here, or a page that draws nothing) answers in words from the same copy
+// (`lookInWords`): what the name is, where it stands, what is in it and what is around it, with ids and metres.
 
-import { join } from 'node:path';
-import { findPlaywright, globalNodeModules, pageOf, withWorld } from '../shoot/shoot.mjs';
+import { join, resolve } from 'node:path';
+import { findPlaywright, globalNodeModules, inWords, pageOf, parseShoot, shoot, withWorld } from '../shoot/shoot.mjs';
 
 export const USAGE = 'where <x,z|name|id>  |  clear <x,z|name|id> --size WxD  |  free WxD --near <x,z|name|id>  [--page <url>]';
 /** How far around the point things are gathered, m; how far `free` searches, m; its step, m; a solid-less thing, m. */
 export const GATHER_M = 80, FREE_M = 60, STEP_M = 1, THING_M = 0.5;
+/** The most things a words-`look` lists as in the named one. */
+export const HOLDS_MOST = 24;
 const NEAREST = 6;
 
 const fail = (code, detail) => Object.assign(new Error(detail), { code });
@@ -91,6 +97,123 @@ export function gatherSpace([asked, reach]) {
   return { t, point, named, fills, rooms, areas, things };
 }
 
+// --- The creator's copy (#5006 finding 5), pure ---------------------------------------------------------------------
+
+/** Kinds that stand for no ground of their own: the world, its ground and floors, a room's openings. */
+const NOT_THINGS = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:window', 'eden:doorway', 'eden:calendar_entry']);
+const plainKind = (k) => String(k).split('@')[0];
+const UNIT = 2 ** 30;
+const qmul = ([a0, a1, a2, a3], [b0, b1, b2, b3]) => [
+  a0 * b0 - a1 * b1 - a2 * b2 - a3 * b3, a0 * b1 + a1 * b0 + a2 * b3 - a3 * b2,
+  a0 * b2 - a1 * b3 + a2 * b0 + a3 * b1, a0 * b3 + a1 * b2 - a2 * b1 + a3 * b0,
+];
+/** `v` turned by the unit quaternion `[w, x, y, z]` (replica `Quat::rotate`). */
+const qrot = ([w, x, y, z], [vx, vy, vz]) => [
+  (w * w + x * x - y * y - z * z) * vx + 2 * (x * y - w * z) * vy + 2 * (x * z + w * y) * vz,
+  2 * (x * y + w * z) * vx + (w * w - x * x + y * y - z * z) * vy + 2 * (y * z - w * x) * vz,
+  2 * (x * z - w * y) * vx + 2 * (y * z + w * x) * vy + (w * w - x * x - y * y + z * z) * vz,
+];
+const unit = (q) => { const n = Math.hypot(...q) || 1; return q.map((c) => c / n); };
+/** A turn of `mdeg` millidegrees about +y (replica `Quat::from_yaw_mdeg`). */
+const yawQ = (mdeg) => { const h = ((Number(mdeg) || 0) / 1000) * (Math.PI / 360); return [Math.cos(h), 0, Math.sin(h), 0]; };
+const then = (f, p, q) => ({ p: f.p.map((c, i) => c + qrot(f.q, p)[i]), q: unit(qmul(f.q, q)) });
+const ROOT = { p: [0, 0, 0], q: [1, 0, 0, 0] };
+
+/**
+ * The plan of the creator's copy: `nodes` is the daemon's `space` answer (each node's name, kind, parent, pose µm in
+ * its parent, and its shape fields, mm in its own frame). Each node's frame in the world is its parent's, then its
+ * slot's point and turn in the parent (field 13), then its own pose, as replica `select` composes them (`to_root`).
+ */
+export function copySpace(nodes) {
+  const byId = new Map(nodes.map((n) => [String(n.id), n])), frames = new Map(), under = new Map();
+  for (const n of nodes) if (n.parent != null) under.set(String(n.parent), [...(under.get(String(n.parent)) ?? []), n]);
+  const frame = (id, k = 0) => {
+    if (frames.has(id)) return frames.get(id);
+    const n = byId.get(id);
+    if (!n || n.parent == null || k > 64) return ROOT;
+    let f = frame(String(n.parent), k + 1);
+    const row = n.slot !== undefined ? byId.get(String(n.parent))?.slots?.find((r) => Number(r[0]) === n.slot) : null;
+    if (row) f = then(f, [row[1] / 1000, row[2] / 1000, row[3] / 1000], yawQ(row[4]));
+    if (Array.isArray(n.pos)) f = then(f, n.pos.map((c) => c / 1e6), unit((n.rot ?? [UNIT, 0, 0, 0]).map((c) => c / UNIT)));
+    frames.set(id, f);
+    return f;
+  };
+  const inWorld = (id, [x, y, z]) => { const f = frame(id), q = qrot(f.q, [x, y, z]); return [f.p[0] + q[0], f.p[2] + q[2]]; };
+  const outlineOf = (n) => (n.outline?.length >= 3 ? n.outline.map(([x, z]) => inWorld(String(n.id), [x / 1000, 0, z / 1000])) : null);
+  const soulOf = (n) => !!n.soul || plainKind(n.kind) === 'souls:body';
+  // A thing on the ground: not the world's frame, not a Soul's own record (souls:kind, a conversation), not an
+  // activity, not a road or path (field 16) and not an area (field 11).
+  const thing = (n) => {
+    const kind = plainKind(n.kind);
+    return !NOT_THINGS.has(kind) && kind !== 'eden:room' && !/_activity$/.test(kind) && (!kind.startsWith('souls:') || soulOf(n)) && !n.line && !n.outline;
+  };
+  const centre = (n) => { const o = outlineOf(n); return o ? [o.reduce((s, p) => s + p[0], 0) / o.length, o.reduce((s, p) => s + p[1], 0) / o.length] : inWorld(String(n.id), [0, 0, 0]); };
+  /** A node by id (`.n` or `-n`), else by its name or an alias (any case), else the one name holding the words. */
+  const find = (asked) => {
+    const want = String(asked).trim(), low = want.toLowerCase();
+    const hit = byId.get(want) ?? byId.get(want.replace(/\.(\d+)$/, '-$1'));
+    if (hit) return hit;
+    const exact = nodes.filter((n) => String(n.name ?? '').toLowerCase() === low || (n.aliases ?? []).some((a) => a.toLowerCase() === low));
+    const part = exact.length ? exact : nodes.filter((n) => String(n.name ?? '').toLowerCase().includes(low));
+    if (part.length > 1) {
+      const e = fail('name-ambiguous', `${part.length} things are called "${want}": give one of their ids`);
+      e.choices = part.slice(0, 8).map((n) => ({ id: n.id, name: n.name }));
+      throw e;
+    }
+    return part[0] ?? null;
+  };
+  return {
+    /** The point `asked` names and what fills or holds ground within `reach` m of it: `gatherSpace`'s answer. */
+    gather(asked, reach) {
+      let point = null, named = null;
+      const xz = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(asked);
+      if (xz) point = [+xz[1], +xz[2]];
+      else {
+        const n = find(asked);
+        if (!n) return { code: 'nothing-by-that-name' };
+        point = centre(n), named = { id: n.id, name: n.name, kind: n.kind };
+      }
+      const near = ([x, z]) => Math.hypot(x - point[0], z - point[1]) <= reach;
+      const fills = [], rooms = [], areas = [], things = [];
+      for (const n of nodes) {
+        const id = String(n.id), kind = plainKind(n.kind), outline = outlineOf(n);
+        if (outline) (kind === 'eden:room' ? rooms : areas).push({ id, name: n.name, outline });
+        if (!thing(n)) continue;
+        const p = inWorld(id, [0, 0, 0]), soul = soulOf(n);
+        if (near(p)) things.push({ id, name: n.name, p, ...(soul ? { soul: true } : {}) });
+        if (soul) continue;
+        if (n.solids?.length) {
+          const mm = 1e-3 * ((n.scale ?? 1_000_000) / 1_000_000);
+          for (const [cx, cz, hx, hz, yaw] of n.solids) {
+            const c = inWorld(id, [cx * mm, 0, cz * mm]);
+            if (!near(c) && Math.hypot(hx, hz) * mm < reach) continue;
+            const a = ((Number(yaw) || 0) / 1000) * (Math.PI / 180), co = Math.cos(a), si = Math.sin(a);
+            fills.push({ id, name: n.name, poly: [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, k]) => {
+              const x = u * hx * mm, z = k * hz * mm;
+              return inWorld(id, [cx * mm + x * co + z * si, 0, cz * mm - x * si + z * co]);
+            }) });
+          }
+        } else if (near(p)) fills.push({ id, name: n.name, disc: p });
+      }
+      return { t: null, point, named, fills, rooms, areas, things };
+    },
+    /** What is in `id` (at any depth, through floors and rooms), nearest its centre first: the first `most`. */
+    holds(id, most = HOLDS_MOST) {
+      const from = centre(byId.get(String(id))), out = [];
+      for (const todo = [String(id)]; todo.length;) {
+        for (const c of under.get(todo.pop()) ?? []) {
+          todo.push(String(c.id));
+          if (!thing(c) && plainKind(c.kind) !== 'eden:room') continue;
+          const p = centre(c), up = byId.get(String(c.parent));
+          out.push({ id: c.id, name: c.name, kind: plainKind(c.kind), at: p.map(r1), distance: r1(Math.hypot(p[0] - from[0], p[1] - from[1])), ...(String(c.parent) !== String(id) ? { in: up.name } : {}), ...(soulOf(c) ? { soul: true } : {}) });
+        }
+      }
+      out.sort((a, b) => a.distance - b.distance || String(a.name).localeCompare(String(b.name)));
+      return { shown: out.slice(0, most), ...(out.length > most ? { more: out.length - most } : {}) };
+    },
+  };
+}
+
 // --- Plan geometry, pure ------------------------------------------------------------------------------------------
 
 export function inside(poly, [x, z]) {
@@ -162,15 +285,70 @@ export function freeOf(input, sz, most = FREE_M) {
   return best ? { near: input.point.map(r1), size: sz, at: best.p.map(r1), distance: r1(best.d) } : { near: input.point.map(r1), size: sz, at: null, within: most };
 }
 
-/** `souls-god where|clear|free …`: read from the page drawn on this machine. */
-export async function runSpace(verb, args, { home, env = {}, cwd = process.cwd(), pw } = {}) {
+/** The answer of `verb` on `input` (a gather's). */
+const answerOf = (verb, o, input) => (verb === 'where' ? whereOf(input) : verb === 'clear' ? clearOf(input, o.size) : freeOf(input, o.size));
+const reachOf = (verb) => (verb === 'free' ? GATHER_M + FREE_M : GATHER_M);
+
+/** The creator's copy as `copySpace` reads it, from the daemon (`ask`); throws the daemon's refusal. */
+async function copyOf(ask) {
+  const d = await ask({ op: 'space' });
+  if (d.ok === false) throw Object.assign(new Error(d.detail ?? d.code), { code: d.code, ...(d.choices ? { choices: d.choices } : {}) });
+  return { space: copySpace(d.nodes ?? []), at: d.at };
+}
+
+/**
+ * `souls-god where|clear|free …`: read from the creator's copy (`ask` reaches the daemon), with no browser; with
+ * `--page`, or with no creator here, from the page drawn on this machine.
+ */
+export async function runSpace(verb, args, { home, env = {}, cwd = process.cwd(), pw, ask = null } = {}) {
   const o = parseSpace(verb, args);
+  if (ask && !o.page) {
+    const { space, at } = await copyOf(ask), input = space.gather(o.at, reachOf(verb));
+    if (input.code) throw fail(input.code, `nothing called "${o.at}" in the world; give x,z or an id describe lists`);
+    return { ok: true, ...answerOf(verb, o, input), from: 'copy', version: at };
+  }
   const page = pageOf(o, home, env);
   const roots = [env.SOULS_PLAYWRIGHT, cwd, home];
   return withWorld({ address: page, profile: join(home, 'cache', 'shoot-browser'), size: [640, 360], pw: pw !== undefined ? pw : findPlaywright([...roots, globalNodeModules()]) }, async (p) => {
-    const input = await p.evaluate(gatherSpace, [o.at, verb === 'free' ? GATHER_M + FREE_M : GATHER_M]);
+    const input = await p.evaluate(gatherSpace, [o.at, reachOf(verb)]);
     if (input.code) throw fail(input.code, `nothing called "${o.at}" in the page; give x,z or an id describe lists`);
-    const out = verb === 'where' ? whereOf(input) : verb === 'clear' ? clearOf(input, o.size) : freeOf(input, o.size);
-    return { ok: true, ...out, t: input.t };
+    return { ok: true, ...answerOf(verb, o, input), t: input.t };
   });
+}
+
+/** Why a picture was not taken, for which `look` answers in words: no browser, no page, one that did not load or drew nothing. */
+export const WORDS_FOR = new Set(['no-browser', 'which-page', 'page-not-a-url', 'page-not-reachable', 'page-not-drawing']);
+
+/** `look` in words from the creator's copy: what the name is, where it stands, what is in it and what is around it. */
+export async function lookInWords(o, why, ask) {
+  const { space, at } = await copyOf(ask), input = space.gather(o.name, GATHER_M);
+  if (input.code) throw fail(input.code, `nothing called "${o.name}" in the world; give x,z, or a name or id describe lists`);
+  const w = whereOf(input);
+  return {
+    ok: true, picture: null, why, name: o.name,
+    words: {
+      ...(input.named ? { of: { id: input.named.id, name: input.named.name, kind: plainKind(input.named.kind) } } : {}),
+      at: w.at, room: w.room, areas: w.areas,
+      ...(input.named ? { holds: space.holds(input.named.id) } : {}),
+      nearest: w.nearest,
+    },
+    frame: 'metres; x east, z south', version: at,
+  };
+}
+
+/**
+ * `souls-god look …`: a picture drawn here from the public stream (`shoot`), else, for a creator (`ask` reaches the
+ * daemon), the same thing in words from the copy, saying why there is no picture. With no creator here it answers
+ * as `shoot` does.
+ */
+export async function runLook(args, { home, env = {}, cwd = process.cwd(), ask = null, pw } = {}) {
+  const o = parseShoot(args);
+  try {
+    const page = pageOf(o, home, env);
+    return await shoot(o, { page, out: resolve(cwd, o.out), profile: join(home, 'cache', 'shoot-browser'), roots: [env.SOULS_PLAYWRIGHT, cwd, home], ...(pw !== undefined ? { pw } : {}) });
+  } catch (e) {
+    if (!WORDS_FOR.has(e.code)) throw e;
+    if (!ask) { if (e.code !== 'no-browser') throw e; return inWords(o, e.message, null); }
+    return lookInWords(o, `${e.code}: ${e.message}`, ask);
+  }
 }

@@ -7,28 +7,28 @@
 # reaches it only through a fresh seed. It:
 #   - stops the world and its gateway;
 #   - MOVES the world's folder to /var/lib/souls/worlds/aside/ (renamed, nothing deleted);
-#   - MOVES this world's objects in the directory's bucket (its record, checkpoints, shipped log parts, stream recovery
-#     and history; only this world's keys) under aside/<time>/ in the same bucket. Each object is copied, read back and
-#     compared (length and SHA-256) before any original is deleted, and no original is deleted until every copy checks.
-#     Nothing else in the bucket is touched: not accounts, not Souls, not other worlds;
 #   - seeds a fresh world from the same facts with the release's build (its creator, entry point, bodies and stock
-#     kept), puts it where the old one was, pins that build and starts the gateway, and the world again if it was
-#     running.
+#     kept) on a fresh STORE GENERATION (#4954): its folder's `generation` file names <time>, so its own objects in the
+#     directory's bucket go under g/<time>/. Nothing in the bucket moves or is written for the old world: its objects
+#     stay at their keys, which the old folder, set aside, still names;
+#   - puts the fresh folder where the old one was, pins that build in its own record and starts the gateway, and the
+#     world again if it was running.
 # The release's build may be the one the world is pinned to already: that is the case for an importer fix that
-# shipped with it.
+# shipped with it. The installed supervisor and the release's worldd and deploy must read the `generation` file (the
+# check refuses otherwise); release.sh rollback and the launcher refuse a build before #4954 for the fresh world. Back
+# in time on the fresh world starts at the reseed; the old world's history stays whole where it was and comes back with
+# the undo.
 # Undo: reseed-eden-undo.sh <time> (it reads the world from the reseed's receipt; printed at the end).
 #
 #   bash reseed-world.sh <world> <sha> check                  reads and prints every value; changes nothing
 #   bash reseed-world.sh <world> <sha> run                    the check, then the steps above
 #   bash reseed-world.sh <world> <sha> resume <time> check    for a run that stopped: which steps are done
-#   bash reseed-world.sh <world> <sha> resume <time> run      the steps not yet done, in order (a copy already made in
-#                                                             the bucket with the same bytes counts as made; one with
-#                                                             other bytes refuses)
+#   bash reseed-world.sh <world> <sha> resume <time> run      the steps not yet done, in order
 #
 # <world> is the world's name, its folder under /var/lib/souls/worlds/worlds/ (<32 hex>-<32 hex>-<n>). <sha> is the
 # release's full commit: its build is the worldd its staged manifest names (/var/lib/souls/releases/<sha>/
-# manifest.json; a release-v2 dry run stages it), with its own world-aside in bin/ and its kinds in reseed/kinds. Root
-# on the production host. RESEED_* stand in for the host's folders in a test (reseed-world.test.mjs).
+# manifest.json; a release-v2 dry run stages it), with its kinds in reseed/kinds. Root on the production host.
+# RESEED_* stand in for the host's folders in a test (reseed-world.test.mjs).
 set -euo pipefail
 
 DATA=${RESEED_DATA:-/var/lib/souls}
@@ -100,19 +100,40 @@ VERSION=$(sed -n 's/^{"commit":"[0-9a-f]\{40\}","version":"\([0-9.]*\)".*/\1/p' 
 [ -n "$NEW" ] || die "no worldd in $REL/manifest.json"
 NEW_WORLDD=$ROOT/builds/$NEW/worldd
 [ -x "$NEW_WORLDD" ] && [ "$("$LIB/supervisor" hash "$NEW_WORLDD")" = "$NEW" ] || die "$NEW_WORLDD is missing or not $NEW"
-# The release's own world-aside and kinds (a release staged from 0.133 on carries both).
-TOOL=${RESEED_TOOL:-$REL/bin/world-aside}
+# The release's own kinds (a release staged from 0.133 on carries them).
 ENTRIES=${RESEED_ENTRIES:-$REL/reseed/kinds}
-[ -x "$TOOL" ] || die "world-aside is not at $TOOL (a release staged before 0.133 carries none)"
-KINDS=$(grep -rl '"format": *"souls-entry/1"' "$ENTRIES" 2> /dev/null | wc -l | tr -d ' ')
+# A fresh world's own objects go under its store generation (#4954): every program that reads its record must read the
+# folder's `generation` file. The installed launcher says its world's generation; the release's worldd and deploy carry
+# the refusal a bad file gets (a build before #4954 has neither, and would read the old world's record).
+"$LIB/supervisor" generation "$WORLD" > /dev/null 2>&1 || die "the installed supervisor ($LIB/supervisor) reads no store generation (#4954): install-v2 from a commit that carries it, then reseed"
+for b in "$NEW_WORLDD" "$REL/bin/deploy"; do
+  grep -qa 'generation-bad: ' "$b" || die "$b reads no store generation (#4954): reseed with a release that carries it"
+done
+# `|| true` in a probe: under pipefail one that finds nothing (or a seed that fails) would end the script before its
+# refusal says why (#4954).
+KINDS=$({ grep -rl '"format": *"souls-entry/1"' "$ENTRIES" 2> /dev/null || true; } | wc -l | tr -d ' ')
 [ "$KINDS" -gt 0 ] || die "no kind entries under $ENTRIES"
-PINNED=$(patient "$REL/bin/deploy" pinned "$WORLD") || die "the world's pin could not be read"
+# The world's pin. A run that stopped at its pin (step 6) left the fresh folder in place, naming this reseed's store
+# generation, with no record there yet: resuming it, that record's absence is "not pinned" (step 6 runs again), not a
+# refusal. Any other failure is tried again, then refuses.
+pinned() {
+  local err
+  { err=$("$REL/bin/deploy" pinned "$WORLD" 2>&1 >&3 3>&-); } 3>&1 && return 0
+  if [ -n "$RESUME" ] && [ "$(cat "$OLD_DIR/generation" 2> /dev/null)" = "$RESUME" ] && [[ $err == *"pin.missing: record-missing:"* ]]; then
+    echo none
+    return 0
+  fi
+  echo "$err" >&2
+  return 1
+}
+PINNED=$(patient pinned) || die "the world's pin could not be read"
 
 if [ -n "$RESUME" ]; then
   STAMP=$RESUME
   RECEIPT=$ROOT/aside/$WORLD-$STAMP.reseed
   [ -f "$RECEIPT" ] || die "no reseed $STAMP of $WORLD to resume ($RECEIPT)"
   ! grep -q '^undone=' "$RECEIPT" || die "reseed $STAMP was undone: start a fresh reseed instead"
+  grep -qx "store=g/$STAMP/" "$RECEIPT" || die "reseed $STAMP moved its store objects aside (a reseed before #4954): finish or undo it with the release it ran with"
   OLD=$(sed -n 's/^old=//p' "$RECEIPT")
   [ "$(sed -n 's/^new=//p' "$RECEIPT")" = "$NEW" ] || die "reseed $STAMP was for another build"
   RUNNING=$(sed -n 's/^running=//p' "$RECEIPT")
@@ -152,18 +173,16 @@ BODIES=''
 STOCK=''
 [ -f "$SRC_DIR/stock.json" ] && STOCK=stock.json
 if [ -n "${DIRECTORY_STORE_URL:-}${DIRECTORY_STORE_ENDPOINT:-}" ]; then STORE_WHAT="the directory's bucket (DIRECTORY_STORE_*)"; else STORE_WHAT="the folder $ROOT/directory"; fi
-count() { "$TOOL" "$WORLD" "$@" --dry-run | sed -n 's/^dry run: \([0-9]*\) objects.*/\1/p'; }
-IN_PLACE=$(count --label "$STAMP")
-COPIED=0
-[ -z "$RESUME" ] || COPIED=$(count --back "$STAMP")
+# The old world's store generation: the old folder's file (aside once step 2 ran), none for the keys as they are.
+OLD_GEN=none
+[ ! -f "$SRC_DIR/generation" ] || OLD_GEN=$(tr -d '[:space:]' < "$SRC_DIR/generation")
 
 # Which steps are done (a fresh run: none).
-done1=no done2=no done3=no done5=no
+done1=no done2=no done5=no
 if [ -n "$RESUME" ]; then
   [ "$(systemctl is-active "worldd@$WORLD" || true)" != active ] && done1=yes
   [ -d "$ASIDE_DIR" ] && done2=yes
-  if grep -qx 'bucket=moved' "$RECEIPT" || { [ "$IN_PLACE" = 0 ] && [ "$COPIED" -gt 0 ]; }; then done3=yes; fi
-  [ "$done2" = yes ] && [ -f "$OLD_DIR/world.json" ] && done5=yes
+  [ "$done2" = yes ] && [ -f "$OLD_DIR/world.json" ] && [ "$(cat "$OLD_DIR/generation" 2> /dev/null)" = "$STAMP" ] && done5=yes
 else
   [ ! -e "$ASIDE_DIR" ] && [ ! -e "$SEED_DIR" ] && [ ! -e "$RECEIPT" ] || die "$ASIDE_DIR, $SEED_DIR or $RECEIPT exists: resume it instead"
   [ -d "$OLD_DIR" ] || die "no world folder at $OLD_DIR"
@@ -172,11 +191,10 @@ fi
 echo "reseed-world: world            $WORLD"
 echo "reseed-world: label            $STAMP$([ -n "$RESUME" ] && echo ' (resuming)')"
 echo "reseed-world: its folder       $([ "$done2" = yes ] && echo "aside at $ASIDE_DIR" || echo "$OLD_DIR ($(du -sh "$OLD_DIR" | cut -f1)), moves to $ASIDE_DIR")"
-echo "reseed-world: pinned now       $PINNED"
+echo "reseed-world: pinned now       $PINNED$([ "$PINNED" != none ] || echo " (no record on g/$STAMP/ yet: step 6 pins it)")"
 echo "reseed-world: the old build    $OLD"
 echo "reseed-world: the release      $VERSION at $SHA, its worldd $NEW$([ "$OLD" = "$NEW" ] && echo ' (the build it is on)')"
 echo "reseed-world: store            $STORE_WHAT"
-echo "reseed-world: world-aside      $TOOL"
 echo "reseed-world: facts            $SRC_DIR/facts.json, sha256 $(sha256 "$SRC_DIR/facts.json")"
 echo "reseed-world: kind entries     $ENTRIES ($KINDS entries)"
 # whether it has one, not its account id: this line may reach a public log
@@ -186,9 +204,9 @@ echo "reseed-world: arrival place    ${ARRIVAL:-none (the entry point)}"
 echo "reseed-world: bodies           ${BODIES:-none}"
 echo "reseed-world: stock            $([ -n "$STOCK" ] && echo "the world's own (stock.json, library/)" || echo none)"
 echo "reseed-world: units            worldd@ $(systemctl is-active "worldd@$WORLD" || true), souls-gateway@ $(systemctl is-active "souls-gateway@$WORLD" || true); at the end the gateway starts$([ "$RUNNING" = yes ] && echo ', and the world (it was running)')"
-echo "reseed-world: bucket           $IN_PLACE of the world's objects at their keys; $COPIED already copied under aside/$STAMP/"
+echo "reseed-world: generation       the fresh world's objects under g/$STAMP/; the old world's ($([ "$OLD_GEN" = none ] && echo 'at their keys' || echo "under g/$OLD_GEN/")) stay where they are: none moves"
 if [ -n "$RESUME" ]; then
-  echo "reseed-world: steps done       1 stop: $done1; 2 folder aside: $done2; 3 bucket aside: $done3; 4-5 fresh seed in place: $done5; 6 pin and 7 start: at the end"
+  echo "reseed-world: steps done       1 stop: $done1; 2 folder aside: $done2; 3-5 fresh seed in place on g/$STAMP/: $done5; 6 pin and 7 start: at the end"
 fi
 [ "$ACT" = run ] || {
   echo "reseed-world: check only; nothing changed"
@@ -197,17 +215,13 @@ fi
 
 echo "reseed-world: 1. stop the world and its gateway"
 mkdir -p "$ROOT/aside"
-[ -f "$RECEIPT" ] || printf 'world=%s\nold=%s\nnew=%s\nlabel=%s\nrunning=%s\n' "$WORLD" "$OLD" "$NEW" "$STAMP" "$RUNNING" > "$RECEIPT"
+[ -f "$RECEIPT" ] || printf 'world=%s\nold=%s\nnew=%s\nlabel=%s\nrunning=%s\nstore=g/%s/\n' "$WORLD" "$OLD" "$NEW" "$STAMP" "$RUNNING" "$STAMP" > "$RECEIPT"
 systemctl stop "souls-gateway@$WORLD" "worldd@$WORLD"
 if [ "$done2" = yes ]; then echo "reseed-world: 2. the folder: already aside"; else
   echo "reseed-world: 2. the folder aside: $ASIDE_DIR"
   mv "$OLD_DIR" "$ASIDE_DIR"
 fi
-if [ "$done3" = yes ]; then echo "reseed-world: 3. the bucket objects: already aside"; else
-  echo "reseed-world: 3. the bucket objects aside: aside/$STAMP/"
-  "$TOOL" "$WORLD" --label "$STAMP" || die "the bucket move refused (no original deleted); resume: bash $0 $WORLD $SHA resume $STAMP check"
-fi
-grep -qx 'bucket=moved' "$RECEIPT" || echo 'bucket=moved' >> "$RECEIPT"
+echo "reseed-world: 3. the store: nothing moves; the fresh world's own objects go under g/$STAMP/"
 if [ "$done5" = yes ]; then echo "reseed-world: 4-5. the fresh seed: already in place"; else
   echo "reseed-world: 4. a fresh seed with the release's build"
   if [ -e "$SEED_DIR" ]; then mv "$SEED_DIR" "$SEED_DIR.stopped-$(date -u +%Y%m%dT%H%M%SZ)"; fi
@@ -216,9 +230,10 @@ if [ "$done5" = yes ]; then echo "reseed-world: 4-5. the fresh seed: already in 
   if [ -n "$ARRIVAL" ]; then args+=(--arrival "$ARRIVAL"); fi
   if [ -n "$BODIES" ]; then args+=(--bodies "$ASIDE_DIR/bodies.json"); fi
   if [ -n "$STOCK" ]; then args+=(--stock "$ASIDE_DIR/stock.json"); fi
-  SEEDED=$("$NEW_WORLDD" "${args[@]}" | sed -n 's/^seeded //p')
+  SEEDED=$({ "$NEW_WORLDD" "${args[@]}" || true; } | sed -n 's/^seeded //p')
   [ "$SEEDED" = "$WORLD" ] || die "the seed is '$SEEDED', not $WORLD (left at $SEED_DIR); undo: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check"
-  echo "reseed-world: 5. the fresh folder in place"
+  echo "reseed-world: 5. the fresh folder in place, on store generation g/$STAMP/"
+  echo "$STAMP" > "$SEED_DIR/generation"
   mv "$SEED_DIR" "$OLD_DIR"
   mkdir -p "$OLD_DIR/views" "$OLD_DIR/history" "$OLD_DIR/receipts"
   if [ -z "${RESEED_DATA:-}" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$OLD_DIR"; fi
