@@ -196,6 +196,10 @@ pub struct Engine {
     held: BTreeMap<Id, Vec<Act>>,
     /// Held acts whose track has ended, to be run again.
     rerun: Vec<Act>,
+    /// Each crew's set-down on its way down, by the carry: its intent, answered when the load rests (#5067).
+    answering: BTreeMap<Id, Id>,
+    /// Set-downs whose load rests (or whose carry is gone), to be answered with their receipts.
+    answered: Vec<Id>,
 }
 
 /// A lifted carry's front walking (moving-group rule 3): its body, its walk, and where that walk turns the crew: the
@@ -566,12 +570,21 @@ impl Engine {
             broke: BTreeMap::new(),
             held: BTreeMap::new(),
             rerun: Vec::new(),
+            answering: BTreeMap::new(),
+            answered: Vec::new(),
         }
     }
 
     /// Whether act `id` waits for its way (a lift, [`WayAsk`]): it is answered when the way comes back.
     pub fn waits(&self, id: Id) -> bool {
-        self.waiting.contains_key(&id) || self.held.values().flatten().any(|a| a.id == id)
+        self.waiting.contains_key(&id)
+            || self.held.values().flatten().any(|a| a.id == id)
+            || self.answering.values().any(|i| *i == id)
+    }
+
+    /// The crews' set-downs whose load has come to rest since the last call (#5067), by intent: each answered now.
+    pub fn answered(&mut self) -> Vec<Id> {
+        std::mem::take(&mut self.answered)
     }
 
     /// The acts held while a carry's node was on a lift's or a set-down's track that has ended since the last call
@@ -585,11 +598,12 @@ impl Engine {
         self.held.entry(activity).or_default().push(a.clone());
     }
 
-    /// Carry `activity`'s track has ended, or the carry is gone: its held acts run again.
+    /// Carry `activity`'s track has ended, or the carry is gone: its held acts run again, and its set-down is answered.
     fn unhold(&mut self, activity: Id) {
         if let Some(acts) = self.held.remove(&activity) {
             self.rerun.extend(acts);
         }
+        self.answered.extend(self.answering.remove(&activity));
     }
 
     /// The lifts waiting for their ways, by intent.
@@ -1312,6 +1326,8 @@ impl Engine {
                     // A set-down's track straight down to rest, said at once; the load leaves the slot at its end.
                     let times = carry.set_down(&tree, now, ground, f, k, Some(by), transfer)?;
                     let board = carry.board;
+                    // Answered when the load rests.
+                    self.answering.insert(activity, a.id);
                     self.activities.next = tree.next();
                     let w = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
                     self.activities.carry_track(
