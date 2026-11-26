@@ -4109,7 +4109,7 @@ fn removes_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
     let (rows, rows_whole) = removes_run(true);
     let (whole, whole_whole) = removes_run(false);
     assert!(rows == whole, "the cuts by rows differ from the whole cuts");
-    assert_eq!(whole_whole, 8, "every reference cut is whole");
+    assert_eq!(whole_whole, 7, "every reference cut is whole");
     assert_eq!(rows_whole, 0, "a remove is a cut by rows");
 }
 
@@ -4243,17 +4243,20 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
         ],
         vec![remove(27, fresh)],
     ];
-    let mut whole = 0;
+    // The whole cuts of the cuts that take nothing out are not counted: the first, and the one that links to an id
+    // that is no node yet (a cut whole, as before).
+    let mut other_cuts = 0;
     for (i, effects) in log.into_iter().enumerate() {
         let bytes = w3e_packet(&h, effects);
         actual.apply_bytes(&bytes).unwrap();
         out.push(i as u64, &bytes).unwrap();
+        let before = out.whole_cuts;
         // The part that makes `brief` is cut with the one that takes it out.
         if i != 4 {
             out.flush().unwrap();
         }
-        if i == 0 {
-            whole = out.whole_cuts;
+        if i == 0 || i == 7 {
+            other_cuts += out.whole_cuts - before;
         }
     }
     // The reader holds the source's public state.
@@ -4267,7 +4270,7 @@ fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
         all.extend(bytes);
     }
     all.extend(wire(out.public_player().state().clone()).unwrap());
-    (all, out.whole_cuts - whole)
+    (all, out.whole_cuts - other_cuts)
 }
 
 /// #2731 (0.133 S4): before a still world exits to sleep, its writer writes what is open and leaves a pointer that
