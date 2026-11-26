@@ -1325,6 +1325,23 @@ impl Reach for Sight<'_> {
 }
 
 pub use sim::reach::{AT_ARG, AT_SELF};
+
+/// Whether `form` of `entry` (as [`targets`] binds it: a move at its thing argument is `at` [`AT_ARG`]) has a move
+/// step made toward a thing argument (`"toward": {"arg": ..}`): its body faces that thing as the move begins.
+fn moves_toward(entry: &Json, form: &str) -> bool {
+    entry
+        .get("forms")
+        .and_then(|f| f.get(form))
+        .and_then(|f| f.get("steps"))
+        .and_then(Json::arr)
+        .unwrap_or(&[])
+        .iter()
+        .any(|s| {
+            s.get("step").and_then(Json::str) == Some("move")
+                && s.get("at").is_none_or(|a| a.str() == Some(AT_ARG))
+                && s.get("toward").and_then(|t| t.get("arg")).is_some()
+        })
+}
 use sim::reach::{obj_mut, targets};
 
 /// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
@@ -2730,6 +2747,15 @@ impl Acts {
                 Some(t) => self.toward.insert(body, t),
                 None => self.toward.remove(&body),
             };
+            // A move made toward its thing argument (`bow_to toward=<Soul>`, `point toward=`) is made facing it: the
+            // body turns to it first, as a walk's end turns it (trial of 25 Nov: a bow to a Soul faced away from it). Only
+            // a new act turns it: one the forms hold already is its run or its receipt.
+            if let (Some(t), Some(b)) = (thing, bodies.as_deref_mut())
+                && !self.forms.known(intent.id)
+                && moves_toward(&entry, form)
+            {
+                b.face_to(tree, body, t);
+            }
             // F3's reservation is a link from the body: until bodies are nodes of the tree, a form reserves nothing.
             if tree.handle(body).is_none() {
                 self.forms.shared(*node);

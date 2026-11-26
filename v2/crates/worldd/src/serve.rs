@@ -3839,7 +3839,27 @@ fn serve(args: &[String]) -> R<()> {
     }
     let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     let runs = worldd::places::runs(&town, &kinds, &places);
-    let trips = worldd::places::ride_trips(&town, &kinds, &places);
+    let mut trips = worldd::places::ride_trips(&town, &kinds, &places);
+    // A ride that flies a loop from its stop and has no course in the tree (a world seeded before its rides flew: Eden's
+    // launch balloon on soul.game) is given its course at the first tick, and its trips end at home as a seeded one's.
+    let given = worldd::places::rides_given(&town, &kinds);
+    for (thing, _) in &given {
+        let node = town.tree.handle(*thing).and_then(|h| town.tree.node(h));
+        let ends = node
+            .and_then(|n| {
+                let name = import_eden::entry_name(n.kind().as_str(), n.fields());
+                kinds.iter().find(|(k, _)| k == name)
+            })
+            .map(|(_, e)| sim::courses::rides::trip_ends(e))
+            .unwrap_or_default();
+        if !ends.is_empty() && places.iter().any(|p| p.thing == *thing) {
+            trips.push((*thing, ends));
+        }
+        println!(
+            "ride given its course at the first tick: {}",
+            replica::world_model::show(*thing)
+        );
+    }
     stamp("places to sit placed");
     for (thing, r) in &runs {
         // As a balloon's loop is printed (`with_rides`): where a client's own timetable can be checked.
@@ -4033,6 +4053,9 @@ fn serve(args: &[String]) -> R<()> {
             // A balloon's trip ends when it is home again: what its start form set goes back.
             for (thing, ends) in &trips {
                 b.slots.trip_ends(*thing, ends.clone());
+            }
+            for (thing, course) in &given {
+                b.slots.give_course(*thing, course.clone());
             }
             b
         });
@@ -4581,8 +4604,8 @@ mod tests {
                 assert_eq!(
                     s,
                     vec![
-                        (Vec3::new(-225_000, 0, 0), 0),
-                        (Vec3::new(225_000, 0, 0), 0)
+                        (Vec3::new(-290_000, 0, 0), 0),
+                        (Vec3::new(290_000, 0, 0), 0)
                     ]
                 );
             }

@@ -30,6 +30,16 @@ export const OFFER_EVENTS = { 'souls:offer': 'invited', 'souls:offer-declined': 
 
 const ID = /^[0-9a-f]{32}-\d+$/;
 const WORDS_MOST = 1000;
+/** The ground's kind: the node that takes every activity as a child (`worldd serve`'s build). */
+const GROUND = 'eden:ground';
+
+/** The node an offer (a conversation, a touch, a give) goes under: the open ground in the copy, which admits every
+ *  activity, else the node this Soul's body stands under. Never the seat or the bed it is in: a bench admits no
+ *  conversation (`child-not-admitted`), and two seated Souls still talk. `rows` the copy's rows, `me` this Soul. */
+export function offerPlace(rows, me) {
+  const all = [...(rows?.values?.() ?? rows ?? [])];
+  return all.find((r) => String(r.kind ?? '').split('@')[0] === GROUND)?.id ?? all.find((r) => r.id === me || r.soul === me)?.parent ?? null;
+}
 const no = (code, detail) => ({ code, detail });
 
 /**

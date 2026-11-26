@@ -356,3 +356,73 @@ fn c5_three_roles_are_offered_only_when_several_take_the_third() {
         ["test:first", "test:second", "test:side", "test:side"]
     );
 }
+
+/// Trial of 25 Nov: two Souls talking (a started conversation holds both) offered and accepted a follow, and it never
+/// started (`body-in-activity`), lapsing with no reason. A conversation claims one voice: a pair offered and accepted
+/// by two who talk starts at the accept, a third Soul's pair with one of them too; the conversation goes on through
+/// both and after the pair is left, and a second conversation is still refused while the first holds the body.
+#[test]
+fn e26_two_souls_talking_start_another_activity_and_go_on_talking() {
+    let mut w = world(3, 0x9c);
+    let (b0, b1, b2) = (w.bodies[0], w.bodies[1], w.bodies[2]);
+    w.acts = super::Activities::new(
+        w.acts.header.clone(),
+        w.acts.rules.clone(),
+        w.tree.to_state().next,
+        vec![super::pair(), super::talk()],
+    );
+    // The two talk: a conversation, started.
+    let ask = w.ask(0, 1_000);
+    let talk = w
+        .acts
+        .propose(&mut w.tree, &mut w.mint, ask, &n(super::TALK), w.root)
+        .expect("proposed");
+    for (who, role) in [(0, "souls:opener"), (1, "souls:member")] {
+        let ask = w.ask(who, 1_000);
+        let body = w.bodies[who];
+        w.acts
+            .join(&mut w.tree, &mut w.mint, ask, body, talk, &n(role), 1)
+            .expect("joined");
+    }
+    let ask = w.ask(0, 1_000);
+    w.acts
+        .start(&mut w.tree, &mut w.c, ask, talk)
+        .expect("talking");
+    assert_eq!(w.acts.holder(b0), Some(talk));
+
+    // While talking, one offers the other a pair (a follow, a hug, a dance), and it starts at the accept.
+    let offer = w.offer(0, BTreeSet::from([b1]), 2_000);
+    let pair = w.accept(1, offer, 3_000).expect("accepted");
+    assert!(w.acts.started(pair), "started while both talk");
+    assert_eq!(w.acts.holder(b1), Some(pair), "the pair holds it");
+
+    // A conversation is still one at a time: a second one with the third Soul is refused while the first holds b1.
+    let ask = w.ask(2, 4_000);
+    let other = w
+        .acts
+        .propose(&mut w.tree, &mut w.mint, ask, &n(super::TALK), w.root)
+        .expect("proposed");
+    for (who, role) in [(2, "souls:opener"), (1, "souls:member")] {
+        let ask = w.ask(who, 4_000);
+        let body = w.bodies[who];
+        w.acts
+            .join(&mut w.tree, &mut w.mint, ask, body, other, &n(role), 1)
+            .expect("joined");
+    }
+    let ask = w.ask(2, 4_000);
+    let r = w
+        .acts
+        .start(&mut w.tree, &mut w.c, ask, other)
+        .expect_err("b1 talks already");
+    assert_eq!(r.name, "body-in-activity");
+    assert!(w.free(b2), "nothing claimed for the refused one");
+
+    // The pair left, both still talk.
+    w.leave(1, pair, 5_000);
+    w.leave(0, pair, 5_000);
+    w.run(10_000_000);
+    assert_eq!(w.acts.holder(b0), Some(talk), "still talking");
+    assert_eq!(w.acts.holder(b1), Some(talk), "still talking");
+    assert!(w.acts.started(talk));
+    println!("e26: a pair started at the accept between two who talk; the talk went on after it");
+}

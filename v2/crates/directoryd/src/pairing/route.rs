@@ -21,7 +21,8 @@
 //!   `description`, `picture` (a `data:` URL) and `retire_asked`. Signed in: `POST /v1/account/souls/profile`
 //!   `{soul, name?, description?}`, `POST /v1/account/souls/picture` `{soul, picture: <base64url>}` and
 //!   `POST /v1/account/souls/retire` `{soul, confirm: true}`. The agent asks a retire with
-//!   `POST /v1/pair/retire` `{token}`, which changes nothing until the owner's retire. The agent sets its Soul's profile
+//!   `POST /v1/pair/retire` `{token}`, which changes nothing until the owner's retire or keep
+//!   (`POST /v1/account/souls/keep` `{soul}`, signed in, which clears the ask). The agent sets its Soul's profile
 //!   with `POST /v1/pair/profile` `{token, name?, description?, picture?}` (`picture: null` clears it), answered with
 //!   the Soul's row, its picture as its format (#3707).
 //!
@@ -371,7 +372,8 @@ pub fn route(
             | "/v1/account/souls/revoke"
             | "/v1/account/souls/profile"
             | "/v1/account/souls/picture"
-            | "/v1/account/souls/retire",
+            | "/v1/account/souls/retire"
+            | "/v1/account/souls/keep",
         ) => {
             let b = body();
             let account = match signed_in(app, bearer, &b) {
@@ -394,6 +396,7 @@ pub fn route(
             };
             let done = match path {
                 "/v1/account/souls/revoke" => p.revoke(&account, &soul).map_err(str::to_string),
+                "/v1/account/souls/keep" => p.keep(&account, &soul).map_err(str::to_string),
                 "/v1/account/souls/profile" => p
                     .set_profile(
                         &account,

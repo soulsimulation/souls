@@ -172,9 +172,9 @@ import { checkedFurnish, furnishOps } from '../creator/furnish.mjs';
 import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs';
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
-import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
+import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
-import { activitiesIn, activityNamed, touchOf } from '../together/together.mjs';
+import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
 import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -2024,7 +2024,9 @@ async function answer(req, conn = null) {
  * R1b: for an act the world refused, one other offer of the thing or place it named first (`thingOf`'s offers, from
  * this machine's kind entries) that would work: the first the form rules pass on the copy (`yes`), else the first they
  * cannot judge here (`unknown`, a move such as a sit); never one they refuse, one needing arguments it has no default
- * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
+ * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none. A refusal no other
+ * offer can answer gives the refused act again, with what to do first: `not_held` (pick it up), `resource-held` (rise),
+ * `thing-reserved` (wait until it is free) and `place-taken` (send it with no place named).
  */
 function suggestionFor(r) {
   const target = String(r.target ?? '').split(' ')[0];
@@ -2044,6 +2046,11 @@ function suggestionFor(r) {
     const slots = on && on.id !== target ? Object.values(heldKinds()[on.entry ?? on.kind]?.slots ?? {}) : [];
     if (slots.some((x) => x?.admits === 'body')) return { act: `${NS}:rise`, name: 'rise', checked: 'unknown', then: again, why: `${body.name} is in ${on.name}` };
   }
+  // A thing another Soul's act holds is held for every offer of it (a balloon's `board` is refused as its `ride` is):
+  // the same act once it is free, never another offer refused the same way. A seat named that is taken: the same act
+  // with no seat named, and the world gives the first free one.
+  if (r.answers.at(-1)?.reason === 'thing-reserved') return { act: again, name: verb, checked: 'unknown', why: 'held by another Soul\'s act: wait until it is free, then send it again' };
+  if (r.answers.at(-1)?.reason === 'place-taken') return { act: again, name: verb, checked: 'unknown', why: 'that place is taken: send it with no place named and the world gives a free one' };
   const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
   const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
   const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));
@@ -2212,8 +2219,9 @@ function converse(req) {
         .map((r) => ({ id: r.id, ...(state.conversations[r.id]?.private ? { private: true } : {}) })),
     }));
   }
-  // The node this Soul's body stands under: the body is the Soul's own node, or (C3's joins) one linked to it.
-  const place = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  // The open ground, which takes the conversation as a child, else the node this Soul's body stands under (never
+  // the seat it sits on: two Souls on a bench still talk).
+  const place = offerPlace(rowsOf(copy), ME);
   const intents = converseIntents(req, { ns: NS, place, privateOf: (id) => Boolean(state.conversations[id]?.private) });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   if (req.private && req.conversation) state.conversations[req.conversation] = { private: true };
@@ -2231,11 +2239,11 @@ async function give(req) {
   await ageAfter();
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); await ageAfter(); }
   const rows = [...rowsOf(copy).values()], kinds = heldKinds(), served = activitiesServed(home, seat.world), list = activitiesIn(served);
-  const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  const place = offerPlace(rows, ME);
   // 0.135: the activities this world serves, as it serves them, by the words `together offer` takes.
   if (req.do === 'kinds') {
     if (!served) return closing({ ok: false, code: 'together-not-served', detail: 'this world has served no list of its activities yet: `status`, then try again once the daemon has signed in' }, null, { now: true });
-    return closing({ ok: true, activities: list.map(({ word, card, most, near_m: near, at }) => ({ word, ...(card ? { card } : {}), asks: most, near: near === null ? 'any distance' : `within ${near} m`, where: at ? `at a ${at.replace(/^.*:/, '').replace(/_/g, ' ')} (${at})` : 'anywhere' })) }, null, { now: true });
+    return closing({ ok: true, activities: kindsListed(served) }, null, { now: true });
   }
   // The nearest thing of a kind in the copy, where an activity played at it is offered.
   const poses = posesOf(copy), at = placer(rowsOf(copy), (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);
