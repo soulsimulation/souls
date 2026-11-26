@@ -5753,39 +5753,72 @@ fn production_eden_gets_the_rim_seats_by_its_entries_upgrade_and_one_creator_edi
     first
         .act(JOIN, None, BTreeMap::new())
         .expect("born by the entry");
-    let mut god = Client(connect(), creator, 0, lineage);
-    let edit = Intent {
-        actor: Actor::Creator(creator),
-        verb: name(replica::edit::wire::VERB),
-        target: None,
-        parameters: replica::edit::wire::parameters(&[replica::edit::Op::Set {
-            node: replica::edit::Ref::Node(fountain),
-            field: import_eden::F_SLOTS,
-            to: Value::Array(rim.clone()),
-        }]),
-        sequence: 1,
-        basis: Version {
-            lineage,
-            zone: Id::new(lineage, 0).unwrap(),
-            epoch: 1,
-            sequence: 0,
+    // The creator's edit, planned against version `planned`: its answer's kind (1 done, 2 refused), its reason and the
+    // world's version it names (as `souls-god.mjs` plans an edit on its copy of the world).
+    let mut god = connect();
+    let mut edit = |sequence: u64, planned: u64| {
+        let i = Intent {
+            actor: Actor::Creator(creator),
+            verb: name(replica::edit::wire::VERB),
+            target: None,
+            parameters: replica::edit::wire::parameters(&[replica::edit::Op::Set {
+                node: replica::edit::Ref::Node(fountain),
+                field: import_eden::F_SLOTS,
+                to: Value::Array(rim.clone()),
+            }]),
+            sequence,
+            basis: Version {
+                lineage,
+                zone: Id::new(lineage, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        god.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        god.write_all(&bytes).unwrap();
+        loop {
+            let mut len = [0u8; 4];
+            god.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            god.read_exact(&mut frame).unwrap();
+            let Value::Map(m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let (Some(Value::Map(a)), Some(Value::Array(v))) = (m.get(&2), m.get(&1)) else {
+                panic!("an answer with a version")
+            };
+            let kind = match a.get(&3) {
+                Some(Value::Uint(k)) => *k,
+                other => panic!("a kind: {other:?}"),
+            };
+            if kind == 3 {
+                continue;
+            }
+            let reason = match a.get(&4) {
+                Some(Value::Text(t)) => t.as_str().to_owned(),
+                _ => String::new(),
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a version")
+            };
+            return (kind, reason, *version);
         }
-        .to_value(),
-        expiry: answers::now() + 120_000_000,
-        resources: Vec::new(),
-        fallbacks: Vec::new(),
-        replaces: None,
-        body: None,
-        reflex: false,
     };
-    let bytes = encode(&edit.to_value()).unwrap();
-    god.0
-        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
-        .unwrap();
-    god.0.write_all(&bytes).unwrap();
-    let edited = god.answer("souls:edit");
+    // Planned on nothing, it is refused stale and names the world's version; planned on that version, it commits.
+    let (kind, reason, version) = edit(1, 0);
+    println!("planned on version 0: kind {kind} {reason:?}; the world is at {version}");
+    let edited = edit(2, version);
     println!("the creator's edit of the fountain's rows: {edited:?}");
-    edited.expect("the creator's edit commits");
+    assert_eq!(edited.0, 1, "the creator's edit commits: {edited:?}");
     three_sit_on_the_rim(served, first, &dir, fountain, lineage, &rim);
     let _ = std::fs::remove_dir_all(&scratch);
 }
