@@ -205,7 +205,11 @@ fn refuse(
     let frame = encode(&Value::Map([(1, now), (2, answer.to_value())].into())).unwrap_or_default();
     // One line in the receipts file, as for a refusal sent at once.
     gw.record(&grant.key(), Outcome::Refusal);
-    gw.deliver(grant.key(), at, frame);
+    let a = crate::Answering {
+        sequence,
+        ends: true,
+    };
+    gw.deliver(grant.key(), a, at, frame);
     None
 }
 
@@ -401,7 +405,7 @@ async fn serve(
                         if !crate::creator::permits(&gw,actor,authority) {
                             let _=send(&mut socket,control(token::REFUSED)).await;break;
                         }
-                        crate::mailbox::on_text(&gw, grant, t.as_str());
+                        crate::mailbox::on_text(&gw, grant, attached.session, t.as_str());
                         continue;
                     }
                     _ => break,
@@ -421,7 +425,7 @@ async fn serve(
                     let _ = send(&mut socket, control(token::REFUSED)).await;
                     break;
                 }
-                if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
+                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
                 }
@@ -440,8 +444,8 @@ async fn serve(
                     ok = send(&mut socket, frame).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
-                // Another socket signed in for this grant: it is told so, by name, and its client does not sign
-                // in again at once. Or this one fell too far behind, and it may resume.
+                // Another socket signed in for this grant (a Soul's: the last device wins): it is told so, by name,
+                // and its client does not sign in again at once. Or this one fell too far behind, and it may resume.
                 None => {
                     if gw.replaced(grant, attached.session) {
                         let close = CloseFrame { code: crate::REPLACED, reason: "agent.replaced".into() };
@@ -649,12 +653,13 @@ async fn stopped(closing: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
-/// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept
-/// (always a refusal).
+/// Reads an intent from the socket signed in as `session` and hands it to the world; the gateway's own answer to send
+/// now, if it gives one not kept (always a refusal).
 fn take_intent(
     gw: &Gateway,
     actor: Actor,
     grant: Grant,
+    session: u64,
     bytes: Vec<u8>,
     received: u64,
 ) -> Option<Vec<u8>> {
@@ -667,7 +672,7 @@ fn take_intent(
             .into_iter()
             .filter(|(k, _)| *k == wire::IDS || *k == wire::RECORDS)
             .collect();
-        return match gw.link.ask(grant.key(), n.clone(), ask) {
+        return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
             Sent::Restarting => Some(sync_refused(n, RESTARTING)),
         };
@@ -694,6 +699,16 @@ fn take_intent(
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
+    // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket; a sequence
+    // another of them sent, out or lately answered, is refused here, on this socket, and never sent.
+    if !gw.sending(grant, sequence, session) {
+        return Some(refused(
+            actor,
+            sequence,
+            crate::SEQUENCE_IN_USE,
+            gw.link.now(),
+        ));
+    }
     match gw
         .link
         .submit(grant.key(), actor, intent.sequence, bytes, received, left)
@@ -703,7 +718,13 @@ fn take_intent(
             gw.sent_intent(&grant.key(), sequence, verb.as_str());
             None
         }
-        Sent::Restarting => refuse(gw, grant, actor, intent.sequence, RESTARTING),
+        Sent::Restarting => {
+            let own = refuse(gw, grant, actor, sequence, RESTARTING);
+            if own.is_some() {
+                gw.unsent(grant, sequence);
+            }
+            own
+        }
     }
 }
 
