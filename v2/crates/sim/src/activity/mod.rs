@@ -1188,6 +1188,25 @@ impl Activities {
             .collect()
     }
 
+    /// The two members of each activity of two started since [`Activities::begin_moves`] last ran whose roles say
+    /// nowhere to stand (a conversation, a follow, a touch with no places): the world turns each to face the other as
+    /// it begins (trial of 25 Nov: two Souls talking faced different ways). Members given places face as their stands
+    /// say (0.135 G3).
+    pub fn facing_pairs(&self) -> Vec<[Id; 2]> {
+        self.begun
+            .iter()
+            .filter_map(|a| self.live.get(a))
+            .filter(|l| {
+                let kind = &self.kinds[&l.kind];
+                kind.follows.is_none() && kind.roles.iter().all(|r| r.stands.is_empty())
+            })
+            .filter_map(|l| match l.node.members.as_slice() {
+                [a, b] => Some([a.body, b.body]),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The started activities whose moves go on the beat (0.134 T3).
     fn dancing(&self) -> Vec<Id> {
         self.live

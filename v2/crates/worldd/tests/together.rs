@@ -2187,3 +2187,26 @@ fn trial_a_far_member_is_refused_a_dance_until_it_walks_over() {
     assert_eq!(members, [soul(1), soul(2)].into_iter().collect(), "both dance");
     run.stop();
 }
+
+/// Trial of 25 Nov: partners in a paired activity faced different ways. Two who begin an activity of two whose roles
+/// say nowhere to stand (a conversation, a handshake here) turn to face each other: Soul 1 faces Soul 2, 0.6 m west
+/// of it, and Soul 2 faces Soul 1.
+#[test]
+fn trial_partners_of_two_face_each_other_as_it_begins() {
+    let run = serve("face-each-other");
+    let mut c: Vec<Client> = (1..=2).map(|n| run.client(n)).collect();
+    let shake = run.created(&c[0].offer(HANDSHAKE, 2).expect("offered"));
+    c[1].act("activity:accept", Some(shake), &[])
+        .expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let ((p1, q1), (p2, q2)) = (run.last(1), run.last(2));
+    let cos = |q: Quat, from: Vec3, to: Vec3| {
+        let (f, d) = (ahead(q), (to.x - from.x, to.z - from.z));
+        let len = ((i128::from(d.0).pow(2) + i128::from(d.1).pow(2)).isqrt()) as f64;
+        (i128::from(f.0) * i128::from(d.0) + i128::from(f.1) * i128::from(d.1)) as f64 / (len * 1e6)
+    };
+    let (c1, c2) = (cos(q1, p1, p2), cos(q2, p2, p1));
+    println!("trial: Soul 1 faces Soul 2 at cos {c1:.3}, Soul 2 faces Soul 1 at cos {c2:.3}");
+    assert!(c1 > 0.95 && c2 > 0.95, "face to face: {c1:.3} {c2:.3}");
+    run.stop();
+}

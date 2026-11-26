@@ -387,6 +387,39 @@ fn apart(f: Vec3, k: Vec3) -> i64 {
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
 }
 
+/// Turns `a` and `b`, each standing on the same floor, to face each other: the facing of its legs, set by a driver
+/// of them as a walk's end sets it (`Bodies::turn_to`). One seated, on another floor, within
+/// [`sim::controller::FACE_NEAR`] of the other or with its legs held keeps its facing.
+fn face_each_other(c: &mut Controller, a: Id, b: Id) {
+    use replica::bodies::{Class, SkillShape, Want};
+    let at = |c: &Controller, x: Id| {
+        c.body(x)
+            .filter(|m| m.pose.frame.slot.is_none())
+            .map(|m| (sim::index::place_of(m).0, m.pose.position))
+    };
+    let (Some((na, pa)), Some((nb, pb))) = (at(c, a), at(c, b)) else {
+        return;
+    };
+    if na != nb {
+        return;
+    }
+    let turn = SkillShape {
+        name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: Vec::new(),
+        cancelled_by: Vec::new(),
+    };
+    for (body, from, to) in [(a, pa, pb), (b, pb, pa)] {
+        let Some(facing) = sim::controller::facing_toward(from, to) else {
+            continue;
+        };
+        if let Ok(d) = c.claim(body, &turn) {
+            let _ = c.set(body, d, sim::controller::Part::Facing(facing));
+            let _ = c.release(body, d);
+        }
+    }
+}
+
 /// Where the controller has a body: the node it stands on and its position there.
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
@@ -501,6 +534,11 @@ impl Engine {
         let bodies = self.activities.beginning();
         if bodies.is_empty() {
             return;
+        }
+        // Two who begin a conversation (or any activity of two with no places) turn to face each other, each standing
+        // on one floor, as a walk's end turns a body to what it came to (trial of 25 Nov).
+        for [a, b] in self.activities.facing_pairs() {
+            face_each_other(c, a, b);
         }
         let feet = Feet::of(c, tree, &self.entries, bodies);
         for (body, r) in self.activities.begin_moves(

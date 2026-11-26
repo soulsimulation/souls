@@ -1414,6 +1414,27 @@ impl Bodies {
         self.turn_to(body, at, to);
     }
 
+    /// `body`, standing, turns to face `target` (another Soul's body, or a thing of `live`, the tree it acts in) as a
+    /// walk's end turns it ([`Self::face`]): a form's move made toward it (`bow_to toward=<Soul>`) begins facing it. A
+    /// seated or lying body keeps its facing, and so does one within [`sim::controller::FACE_NEAR`] of it.
+    pub(crate) fn face_to(&mut self, live: &replica::tree::Tree, body: Id, target: Id) {
+        let standing = self
+            .runner
+            .controller
+            .body(body)
+            .is_some_and(|m| m.pose.frame.slot.is_none());
+        let Some((frame, at)) = self.pose(body).filter(|_| standing && target != body) else {
+            return;
+        };
+        let to = match self.pose(target) {
+            Some((f, p)) if f == frame => Some(p),
+            _ => self
+                .toward(target, frame)
+                .or_else(|| select::origin_in(live, target, frame).ok()),
+        };
+        self.turn_to(body, at, to);
+    }
+
     /// Where `target`, a thing or another Soul's body, is in `frame`'s axes, on the level: its origin, or the thing it
     /// sits in when it is seated or lying ([`Bodies::face`]).
     fn toward(&self, target: Id, frame: Id) -> Option<Vec3> {
