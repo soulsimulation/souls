@@ -7166,6 +7166,57 @@ fn a_walk_to_the_harbour_from_the_park_ends_in_the_harbour() {
     assert!(gap(park) > 0, "out of the park");
 }
 
+/// First-day round 2 review (#5027): a walk to a water place that holds a bridge far along it still ends at the place's
+/// edge, not on the bridge. The west river's region and its river (`place-region-west-river`,
+/// `place-region-west-river-river`, their middles on the water) both hold the stone bridge's area (its middle on the
+/// deck), 200 m south of a Soul by the fishing hamlet at (-200, 150) m; each walk ends `done` near the edge it comes
+/// to, 6 m and 24 m west, as before the harbour's change, which walked it to the bridge.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_walk_to_the_river_ends_at_its_edge_not_on_its_bridge() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let ground = im.nodes["ground"];
+    let bridge = im.nodes[&facts_id(&text, "place-region-west-river-stone-bridge")];
+    let names = ["place-region-west-river", "place-region-west-river-river"];
+    let (served, first, dir) = serve(&facts, "-200.0,150.0", "riverbridge", lineage);
+    let mut walked = Vec::new();
+    for (k, mut soul) in std::iter::once(first)
+        .chain((2..=names.len() as u64).map(|n| join(&dir, n, lineage)))
+        .enumerate()
+    {
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(400)))
+            .unwrap();
+        let place = im.nodes[&facts_id(&text, names[k])];
+        let r = soul.act_within("eden:walk", Some(place), BTreeMap::new(), 300_000_000);
+        walked.push((names[k], place, r));
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    let ends: Vec<_> = last_poses(&dir).into_values().collect();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(ends.len(), names.len());
+    for ((name, place, r), end) in walked.iter().zip(&ends) {
+        let at = end.position;
+        let gap = |p| replica::select::gap(&im.tree, p, ground, at).unwrap();
+        println!(
+            "to {name}: {r:?}, ends at ({:.1}, {:.1}) m on {:?}, {:.1} m from it, {:.1} m from the bridge",
+            at.x as f64 / 1e6,
+            at.z as f64 / 1e6,
+            end.frame.node,
+            gap(*place) as f64 / 1e6,
+            gap(bridge) as f64 / 1e6
+        );
+        assert!(r.is_ok(), "{name}: {r:?}");
+        assert_eq!(end.frame.node, ground, "{name}: on the open ground");
+        assert!(gap(*place) <= 5_000_000, "{name}: at its edge");
+        assert!(gap(bridge) >= 100_000_000, "{name}: not on the bridge");
+    }
+}
+
 /// Each body's last logged pose in the world's log in `dir`, by body id.
 fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
     let bytes = std::fs::read(dir.join("log")).unwrap();
