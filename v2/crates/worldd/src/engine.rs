@@ -1068,8 +1068,8 @@ impl Engine {
                     let until = self.asm.as_ref().and_then(|s| {
                         s.tracks(now)
                             .into_iter()
-                            .find(|t| t.0 == activity)
-                            .map(|t| t.2)
+                            .find(|t| t.activity == activity)
+                            .map(|t| t.until)
                     });
                     let word = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
                     if let Err(r) = regrip(
@@ -1859,7 +1859,7 @@ impl Engine {
                 .map(|s| {
                     s.tracks(now)
                         .into_iter()
-                        .map(|(a, node, _, back, holding)| (a, node, back, holding.to_vec()))
+                        .map(|t| (t.activity, t.node, t.back, t.holding.to_vec()))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -1955,8 +1955,8 @@ impl Engine {
                     let until = asm
                         .tracks(now)
                         .into_iter()
-                        .find(|t| t.0 == activity)
-                        .map(|t| t.2);
+                        .find(|t| t.activity == activity)
+                        .map(|t| t.until);
                     let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
                     if let Err(r) = regrip(
                         &mut self.activities,

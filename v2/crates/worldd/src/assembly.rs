@@ -237,6 +237,17 @@ pub fn out_of_reach(carriers: &[Carrier], node: (Vec3, Quat)) -> R<()> {
     Ok(())
 }
 
+/// A crew's node on its set-in track or its way back (#5067 item 3, [`Assembly::tracks`]): its crew, where the node is
+/// on its ground (µm), when the track ends, whether it is the way back, and the carriers held to their reach on it.
+#[derive(Clone, Copy, Debug)]
+pub struct OnTrack<'a> {
+    pub activity: Id,
+    pub node: (Vec3, Quat),
+    pub until: Micros,
+    pub back: bool,
+    pub holding: &'a [Id],
+}
+
 /// The conjugate of a unit quaternion: its inverse turn.
 fn conj(q: Quat) -> R<Quat> {
     let [w, x, y, z] = q.parts();
@@ -591,22 +602,21 @@ impl Assembly {
         Ok(effects)
     }
 
-    /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3), on its ground, µm, with
-    /// when that track ends, whether it is the way back, and the carriers held to their reach on it.
-    pub fn tracks(&self, now: Micros) -> Vec<(Id, (Vec3, Quat), Micros, bool, &[Id])> {
+    /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3).
+    pub fn tracks(&self, now: Micros) -> Vec<OnTrack<'_>> {
         let at = |p: Vec3, v: Vec3, dt: Micros| {
             let m = |a: i64, v: i64| a + (i128::from(v) * i128::from(dt) / 1_000_000) as i64;
             Vec3::new(m(p.x, v.x), m(p.y, v.y), m(p.z, v.z))
         };
         let going = self.setting.iter().map(|(a, s)| {
             let dt = now.clamp(s.t0, s.due) - s.t0;
-            (
-                *a,
-                (at(s.start.0, s.velocity, dt), s.start.1),
-                s.due,
-                false,
-                s.holding.as_slice(),
-            )
+            OnTrack {
+                activity: *a,
+                node: (at(s.start.0, s.velocity, dt), s.start.1),
+                until: s.due,
+                back: false,
+                holding: &s.holding,
+            }
         });
         let back = self.returning.iter().map(|(a, (s, end, track))| {
             // It gets to where its set-in started at `end`: back from there by the time left.
@@ -615,13 +625,13 @@ impl Assembly {
                 _ => Vec3::ZERO,
             };
             let left = -(end.saturating_sub(now).max(0));
-            (
-                *a,
-                (at(s.start.0, v, left), s.end.1),
-                *end,
-                true,
-                s.holding.as_slice(),
-            )
+            OnTrack {
+                activity: *a,
+                node: (at(s.start.0, v, left), s.end.1),
+                until: *end,
+                back: true,
+                holding: &s.holding,
+            }
         });
         going.chain(back).collect()
     }
@@ -646,8 +656,8 @@ impl Assembly {
         let here = self
             .tracks(now)
             .into_iter()
-            .find(|t| t.0 == activity && t.3)?
-            .1;
+            .find(|t| t.activity == activity && t.back)?
+            .node;
         let (s, _, track) = self.returning.remove(&activity)?;
         match self.hand_off(
             tree,
