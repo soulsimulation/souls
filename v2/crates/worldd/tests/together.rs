@@ -2358,8 +2358,9 @@ fn a_standing_group_faces_its_middle_as_it_begins_and_as_each_joins() {
     let run = serve("group-middle");
     let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
     let group = run.created(&offer_to_three(&mut c[0], GROUP));
-    for k in 1..4 {
-        c[k].act("activity:accept", Some(group), &[])
+    for (k, member) in c.iter_mut().enumerate().skip(1) {
+        member
+            .act("activity:accept", Some(group), &[])
             .expect("accepted");
         std::thread::sleep(Duration::from_millis(500));
         let poses: Vec<(Vec3, Quat)> = (1..=k as u64 + 1).map(|n| run.last(n)).collect();
@@ -2389,8 +2390,9 @@ fn a_member_left_where_it_stands_faces_its_groups_middle() {
     let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
     let group = run.created(&offer_to_three(&mut c[0], GROUP_AT));
     let middle = Vec3::new((at(1).x + at(2).x) / 2, 0, at(1).z);
-    for k in 1..4 {
-        c[k].act("activity:accept", Some(group), &[])
+    for member in c.iter_mut().skip(1) {
+        member
+            .act("activity:accept", Some(group), &[])
             .expect("accepted");
         std::thread::sleep(Duration::from_millis(300));
     }
