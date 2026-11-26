@@ -1,7 +1,7 @@
 //! W9 (#4085): the import walks each floor from the arrival point and back, and names what it cannot. A hall with a
 //! doorway to the open ground is walked to and from; a hall with none is named, not reached.
 
-use import_world::ways::{Opts, ways};
+use import_world::ways::{self, Opts};
 
 /// A hall 6 m wide at `x` mm, its floor at the ground's height; with a 1 m doorway in its south wall when `door`.
 fn hall(id: &str, x: i64, door: bool) -> String {
@@ -47,11 +47,12 @@ fn world() -> String {
 
 #[test]
 fn the_open_hall_is_walked_there_and_back_and_the_sealed_one_is_named() {
-    let w = ways(
+    let w = ways::ways(
         &world(),
         &Opts {
             arrival: [0, 8000],
             entries: Vec::new(),
+            only: Vec::new(),
         },
     )
     .expect("walked");
@@ -68,4 +69,40 @@ fn the_open_hall_is_walked_there_and_back_and_the_sealed_one_is_named() {
     assert_eq!(names, ["floor e_sealed/floor-0"], "{:?}", w.unreached);
     // The open hall was walked into and out of: some seconds of walking, there and back.
     assert!(w.ticks > 100, "{} ticks", w.ticks);
+}
+
+/// On Eden the walk back from the old town's bell tower (`e_1277cee2`, its second floor up), the south arcade's first
+/// shop (`e_47f02c93`, its upper floor) and the shop's sofa (`e_c4e5895b`) to the quad stops by the pergola court at
+/// about (98, 52) m, and the never-stuck ladder's reroute (3 s without progress) sets it going again, as the served
+/// world's does. Walked without the ladder, each of these had no answer after 600 s; walked as the served world walks
+/// them, each comes back.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file (EDEN_FACTS, v2/tools/import-eden/README.md)"]
+fn edens_old_town_floors_and_sofa_are_walked_back_from_as_the_served_world_walks() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let mut entries = Vec::new();
+    ways::entries(std::path::Path::new(&format!("{root}/content/kinds")), &mut entries).unwrap();
+    let only = ["floor e_1277cee2/floor-2", "floor e_47f02c93/floor-1", "seat e_c4e5895b"];
+    let w = ways::ways(
+        &std::fs::read_to_string(&facts).expect("the Eden facts file"),
+        &Opts {
+            arrival: [-12_000, -97_000],
+            entries,
+            only: only.map(String::from).to_vec(),
+        },
+    )
+    .expect("walked");
+    println!(
+        "{} targets, {} s of walking; one-way {:?}; not reached {:?}",
+        w.targets,
+        w.ticks / 20,
+        w.one_way,
+        w.unreached
+    );
+    // The tower's floor, the shop floor's four pieces and the sofa's three stand points.
+    assert_eq!(w.targets, 8, "{:?}", w.unreached);
+    assert!(w.unreached.is_empty(), "{:?}", w.unreached);
+    assert!(w.one_way.is_empty(), "{:?}", w.one_way);
 }

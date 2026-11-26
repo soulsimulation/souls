@@ -34,13 +34,15 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   The differences are against the backup itself: a thing row with no node, a count unlike today's bake, a loader note,
   or an upload no thing names (kept by hash). A backup that does not export is a row that is not clean, with the reason.
 
-- **One-way floors and seats** (W9, #4085). Each floor's pieces and each seat's stand point (its entry's, from
-  `--entries <dir>`, default `content/kinds`) is walked to from the arrival point on the open ground (`--arrival <x
-  m>,<z m>`, default 0,0; the nearest open ground within 20 m) and back, by the walker the served world runs (sent to a
-  standing spot, legs from the town, through the host). One the walk in reaches and the walk back does not (refused,
-  ended short, or no answer in 600 s of the world's time) is counted in the row's `one-way (walked)` column and named
-  with why; what the walk in does not reach is listed apart. `--no-ways` skips it. Measured on Saturn (26 Nov): the
-  Mars template from `-6,-30` 0 one-way of 101 in 2 s; Eden 2026 from the quad 20 of 3209 in 17 min.
+- **One-way floors and seats** (W9, #4085), with `--ways` (a plain validation walks nothing). Each floor's pieces and
+  each seat's stand point (its entry's, from `--entries <dir>`, default the checkout's `content/kinds`; an installed
+  binary needs the flag, and names a folder that does not read) is walked to from the arrival point on the open ground
+  (`--arrival <x m>,<z m>`, default 0,0; the nearest open ground within 20 m) and back, as the served world walks: sent
+  to a standing spot, the place, legs and lines from the planner a tick later, the never-stuck ladder climbed after
+  each tick. One the walk in reaches (ending on the target's piece) and the walk back does not (refused, ended short,
+  or no answer in 600 s of the world's time) is counted in the row's `one-way (walked)` column and named with why;
+  what the walk in does not reach is listed apart. Measured on Saturn (26 Nov): the Mars template from `-6,-30` 0
+  one-way of 101 in 2 s; Eden 2026 from the quad: EDEN_RESULT.
 
 A world whose own backup is not at hand imports from its template's kept outputs on the asset CDN (#4281); the
 template builder that ran today's server code (`template-world.ts`) was removed with v1 (0.134 D3).

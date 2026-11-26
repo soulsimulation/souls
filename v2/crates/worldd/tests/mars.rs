@@ -468,7 +468,11 @@ fn w12_a_walk_to_each_dining_hall_seat_ends_with_an_answer() {
             .find(|b| !known.contains(b))
             .expect("the new body");
         let t0 = std::time::Instant::now();
-        let answer = soul.walk(im.nodes[*seat]);
+        // No answer within the wait (the read times out): named, and the next seat walked.
+        let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            soul.walk(im.nodes[*seat])
+        }))
+        .unwrap_or_else(|_| Err("no answer within 120 s".into()));
         let secs = t0.elapsed().as_secs_f64();
         let rows = body_rows(&dir);
         let r = &rows[&body];

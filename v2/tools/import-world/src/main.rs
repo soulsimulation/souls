@@ -1,7 +1,8 @@
-//! `import-world <facts.json>… [--json] [--arrival <x m>,<z m>] [--entries <dir>] [--no-ways]`: one row per world,
-//! then each world's differences, things with no Soul Actions entry and one-way floors and seats (W9, #4085: walked
-//! from the arrival point, default 0,0; seats' stand points from the entries, default the repository's
-//! `content/kinds`). The one command that exports a backup and calls this is `node v2/tools/import-world/import-world.ts`.
+//! `import-world <facts.json>… [--json] [--ways [--arrival <x m>,<z m>] [--entries <dir>]]`: one row per world, then
+//! each world's differences and things with no Soul Actions entry. With `--ways`, also its one-way floors and seats
+//! (W9, #4085: walked from the arrival point, default 0,0; seats' stand points from the entries, default the
+//! repository's `content/kinds`, which an installed binary has not: give `--entries`). The one command that exports a
+//! backup and calls this is `node v2/tools/import-world/import-world.ts`.
 
 use import_world::ways::{self, Opts};
 use import_world::{World, row_with};
@@ -106,7 +107,7 @@ fn main() {
         .collect();
     if files.is_empty() {
         eprintln!(
-            "usage: import-world <facts.json>… [--json] [--arrival <x m>,<z m>] [--entries <dir>] [--no-ways]"
+            "usage: import-world <facts.json>… [--json] [--ways [--arrival <x m>,<z m>] [--entries <dir>]]"
         );
         std::process::exit(2);
     }
@@ -117,14 +118,22 @@ fn main() {
         let (x, z) = a.split_once(',').expect("--arrival <x m>,<z m>");
         [m(x), m(z)]
     });
-    let opts = (!args.iter().any(|a| a == "--no-ways")).then(|| {
+    // The walks are asked for (a plain validation walks nothing). Seats' stand points come from the entries: a folder
+    // that does not read is named, and nothing is walked.
+    let opts = args.iter().any(|a| a == "--ways").then(|| {
         let dir = value("--entries").cloned().unwrap_or_else(|| {
             format!("{}/../../../content/kinds", env!("CARGO_MANIFEST_DIR"))
         });
         let mut entries = Vec::new();
-        ways::entries(std::path::Path::new(&dir), &mut entries)
-            .unwrap_or_else(|e| panic!("--entries {dir}: {e}"));
-        Opts { arrival, entries }
+        if let Err(e) = ways::entries(std::path::Path::new(&dir), &mut entries) {
+            eprintln!("import-world: --ways reads seats from --entries <dir>: {dir}: {e}");
+            std::process::exit(2);
+        }
+        Opts {
+            arrival,
+            entries,
+            only: Vec::new(),
+        }
     });
     let worlds: Vec<World> = files
         .iter()

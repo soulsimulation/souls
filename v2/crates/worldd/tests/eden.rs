@@ -6782,10 +6782,14 @@ fn w9_souls_on_old_town_floors_and_seats_walk_back_to_the_quad_fountain() {
         soul.0.set_read_timeout(Some(Duration::from_secs(660))).unwrap();
         souls.push((*target, body, soul));
     }
-    // A walk answered within the act's expiry (600 s): its answer and its seconds.
+    // A walk answered within the act's expiry (600 s): its answer and its seconds. None within the socket's wait (the
+    // read times out) is named so, and the other walks go on.
     let walked = |soul: &mut Client, to: Id| {
         let t0 = std::time::Instant::now();
-        let a = soul.act_within("eden:walk", Some(to), BTreeMap::new(), 600_000_000);
+        let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            soul.act_within("eden:walk", Some(to), BTreeMap::new(), 600_000_000)
+        }))
+        .unwrap_or_else(|_| Err("no answer within 660 s".into()));
         (a, t0.elapsed().as_secs_f64())
     };
     let ends = std::thread::scope(|s| {

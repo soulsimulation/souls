@@ -2,9 +2,11 @@
 //! back from (Mimos on the Mars campus, W8 #4084: a walk in was receipted, every walk out refused `souls:no-way`).
 //!
 //! Each is walked, not looked up: a body stands at the arrival point on the open ground, and the walker the served
-//! world runs (sent to a standing spot by the target as N9 sends it, its legs from the town, N7's walk through the
-//! host, the controller carrying it across each link) walks it to the target; once there, it walks back to the
-//! arrival point. A target the walk in reaches but the walk back does not
+//! world runs (sent to a standing spot by the target as N9 sends it, N7's walk through the host, the controller
+//! carrying it across each link) walks it to the target; once there, it walks back to the arrival point. Each tick is
+//! stepped as `worldd` steps its bodies: the place, legs and lines from the planner a tick after they are asked for
+//! (K18b, here in lockstep), and the never-stuck ladder climbed after the tick (0.133 N1: routed again at 3 s without
+//! progress, ..., ended `goal-unreachable` at 15 s). A target the walk in reaches but the walk back does not
 //! (refused, ended short, or with no answer after [`WAIT`] of the world's time) is one-way, named with why. A floor is
 //! walked to at a point of each of its pieces (the middle of the piece's largest triangle), a seat to its stand point
 //! (its entry's, cleared of its own thing's solids as `worldd seed` clears it), carried onto the floor under it.
@@ -18,10 +20,12 @@ use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::pose::{Frame, Quat, Vec3};
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
-use sim::host::Runner;
+use sim::host::{Batches, Planned, Runner};
 use sim::links::Doors;
 use sim::mover::Body;
+use sim::planner::Planner;
 use sim::spots::Target;
+use sim::unstick::Ladder;
 use sim::walk::town::Town;
 use skills::route::Route;
 use std::collections::BTreeMap;
@@ -43,6 +47,8 @@ pub struct Opts {
     pub arrival: [i64; 2],
     /// Every Soul Actions entry, `(kind, entry)`, as `worldd seed --entries` reads them; empty: no seats are walked.
     pub entries: Vec<(String, Json)>,
+    /// Only the targets whose name holds one of these (`floor e_1277cee2/floor-2`, `seat e_c4e5895b`); empty: all.
+    pub only: Vec<String>,
 }
 
 /// One target the walk in reaches and no walk leaves: its name and why.
@@ -149,16 +155,68 @@ fn piece_points(t: &Town, node: Id) -> Vec<Vec3> {
         .collect()
 }
 
+/// One walker's bodies as `worldd` steps them (`worldd::bodies`): its runner, the never-stuck ladder over it, and
+/// the planner's answers to the last tick's wants, with the batches sent and taken (in lockstep: one each tick).
+struct Walker {
+    r: Runner,
+    ladder: Ladder,
+    planned: Planned,
+    batches: u64,
+}
+
+impl Walker {
+    fn new() -> Walker {
+        Walker {
+            r: Runner::new(TICK),
+            ladder: Ladder::served(),
+            planned: Planned::default(),
+            batches: 0,
+        }
+    }
+
+    /// One tick, as `worldd::bodies` steps one: the ladder keeps each walk the planner placed (`worldd::unstick`),
+    /// the runner ticks with the planner's answers, the ladder's rungs are climbed, and the planner answers this
+    /// tick's wants for the next.
+    fn tick(&mut self, t: &mut Town, p: &mut Planner) -> Result<(), String> {
+        let mut planned = std::mem::take(&mut self.planned);
+        planned.batches = Some(Batches {
+            taken: self.batches,
+            next: self.batches,
+        });
+        for (who, (order, placed)) in &planned.places {
+            let Ok((place, legs, _)) = placed else {
+                continue;
+            };
+            if self.ladder.order(*who) == Some(*order) {
+                // Placed again for the same order: the ladder's reroute asked for it.
+                self.ladder.routed(&self.r, *who, legs.clone());
+            } else if self.r.asks.contains_key(who) {
+                self.ladder
+                    .add(*who, *order, SPEED, place.node, place.at, legs.clone());
+            }
+        }
+        let (wants, ticked) = self.r.tick_planned(t, &planned);
+        ticked.map_err(|e| format!("the tick refused {}", e.name))?;
+        self.ladder.after(&mut self.r, t);
+        self.ladder.forget_ended(&self.r);
+        self.planned = p.answer(&wants);
+        self.batches += 1;
+        Ok(())
+    }
+}
+
 /// How one walk ended: done, or why not.
 /// As the served world sends a walk (N9): the body asks a standing spot by the target and walks there once granted.
 fn walk(
-    r: &mut Runner,
+    w: &mut Walker,
     t: &mut Town,
+    p: &mut Planner,
     body: Body,
     target: Target,
     order: Id,
     ticks: &mut u64,
 ) -> Result<(), String> {
+    let r = &mut w.r;
     if r.controller.body(body.id).is_none() {
         r.add_body(humanoid(), body)
             .map_err(|e| format!("refused {}", e.name))?;
@@ -167,8 +225,8 @@ fn walk(
         .map_err(|e| format!("refused {}", e.name))?;
     for _ in 0..WAIT / TICK {
         *ticks += 1;
-        r.tick(t).map_err(|e| format!("the tick refused {}", e.name))?;
-        match r.ended.get(&body.id) {
+        w.tick(t, p)?;
+        match w.r.ended.get(&body.id) {
             Some((_, Progress::Done)) => return Ok(()),
             Some((_, Progress::Failed(n))) => return Err(format!("ended {}", n.as_str())),
             _ => {}
@@ -187,6 +245,8 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
     let (slots, _) = import_eden::body_slots(&im.tree, &entries);
     let mut t = town_of(im)?;
     let ground = t.ground;
+    // The planner over its own copy of the town, as the served world's (K18b).
+    let mut planner = Planner::new(t.copy()?);
 
     // Each target: its name, its node and the point on it (µm, the node's frame).
     let mut targets: Vec<(String, Id, Vec3)> = Vec::new();
@@ -207,12 +267,21 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             targets.push((format!("floor {}{piece}", name(f)), f, p));
         }
     }
+    // A seat whose stand point is over no floor is no place to walk to: named, not walked.
+    let mut floorless = Vec::new();
     for s in &slots {
         let label = format!("seat {} slot {} stand point", name(s.thing), s.slot);
         match t.view().on_floor(s.thing, s.stand) {
             Some((node, at, _)) => targets.push((label, node, at)),
-            None => targets.push((label, ground, Vec3::ZERO)),
+            None => floorless.push(OneWay {
+                name: label,
+                why: "no floor under its stand point".into(),
+            }),
         }
+    }
+    if !opts.only.is_empty() {
+        targets.retain(|(l, _, _)| opts.only.iter().any(|o| l.contains(o.as_str())));
+        floorless.retain(|u| opts.only.iter().any(|o| u.name.contains(o.as_str())));
     }
 
     // The arrival point, or the nearest point of the open ground by it a body stands on (on a 0.5 m grid, within
@@ -238,30 +307,50 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         .map(|(_, dx, dz)| Vec3::new(ax + dx, 0, az + dz))
         .ok_or("the arrival point: no open ground within 20 m")?;
     let mut out = Ways {
-        targets: targets.len(),
+        targets: targets.len() + floorless.len(),
         arrival: [arrival.x / 1000, arrival.z / 1000],
+        unreached: floorless,
         ..Ways::default()
+    };
+    // The piece of `node`'s surface that holds `p`, as the mover places a body there; `None` off it.
+    let piece_at = |t: &Town, node: Id, p: Vec3| {
+        let s = t.surfaces.get(&node)?;
+        let who = Id::new(Scope([0xee; 16]), 1)?;
+        let b = s.place(who, Frame { node, slot: None }, p, Quat::IDENTITY);
+        b.ok().map(|b| b.piece)
     };
     for (k, (label, node, at)) in targets.into_iter().enumerate() {
         let who = Id::new(Scope([0xee; 16]), k as u64 + 1).ok_or("a walker's id")?;
         let start = t.surfaces[&ground]
             .place(who, Frame { node: ground, slot: None }, arrival, Quat::IDENTITY)
             .map_err(|e| format!("the arrival point: {}: {}", e.name, e.detail))?;
-        let mut r = Runner::new(TICK);
+        let mut w = Walker::new();
         let order = |n: u64| Id::new(Scope([0xed; 16]), 2 * k as u64 + n).ok_or("an order's id");
-        let ticks = &mut out.ticks;
-        if let Err(why) = walk(&mut r, &mut t, start, Target::new(node, at), order(1)?, ticks) {
+        let (p, ticks) = (&mut planner, &mut out.ticks);
+        if let Err(why) = walk(&mut w, &mut t, p, start, Target::new(node, at), order(1)?, ticks) {
             out.unreached.push(OneWay {
                 name: label,
                 why: format!("the walk in: {why}"),
             });
             continue;
         }
-        let there = *r.controller.body(who).ok_or("the walker's body")?;
+        let there = *w.r.controller.body(who).ok_or("the walker's body")?;
+        // A walk in that ends done ends on the target's piece: a standing spot granted on another piece (across a
+        // wall, in another room) did not reach it.
+        let on = there.pose.frame.node;
+        let piece = piece_at(&t, node, at);
+        if on != node || piece.is_some_and(|q| piece_at(&t, node, there.pose.position) != Some(q)) {
+            out.unreached.push(OneWay {
+                name: label,
+                why: format!("the walk in ended done on {}, not on the target's piece", name(on)),
+            });
+            continue;
+        }
         let to = Target::new(ground, arrival);
-        let back = walk(&mut r, &mut t, there, to, order(2)?, &mut out.ticks).and_then(|()| {
+        let (p, ticks) = (&mut planner, &mut out.ticks);
+        let back = walk(&mut w, &mut t, p, there, to, order(2)?, ticks).and_then(|()| {
             // A walk that ends done ends by the arrival point, on the open ground.
-            let b = r.controller.body(who).ok_or("the walker's body")?;
+            let b = w.r.controller.body(who).ok_or("the walker's body")?;
             let (dx, dz) = (b.pose.position.x - arrival.x, b.pose.position.z - arrival.z);
             let off = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt() / 1000;
             match (b.pose.frame.node == ground, off <= NEAR) {
