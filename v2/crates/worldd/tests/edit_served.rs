@@ -7056,10 +7056,11 @@ fn eden_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
 }
 
 /// What the public stream spends on parts that touch a kind the release added (#4954 review): Eden after the upgrade,
-/// its two Souls offering, accepting and leaving the group gesture `SOULS_GESTURES` times (default 100), each part
-/// touching the gesture's node, a kind its header does not pin. Run with `STREAM_PROFILE=1` (and `--release`); prints
-/// the stream writer's profile lines (`public-stream profile:` with its whole cuts and its stages' time). Needs the Eden
-/// facts file (`EDEN_FACTS`).
+/// its two Souls offering, accepting and leaving the group gesture `SOULS_GESTURES` times (default 40), each part
+/// touching the gesture's node, a kind its header does not pin, `SOULS_GESTURE_PAUSE_MS` (default 400) after each act so
+/// the writer cuts each on its own. Run with `STREAM_PROFILE=1` (and `--release`); prints the stream writer's profile
+/// lines (`public-stream profile:` with its whole cuts and its stages' time) and their sums. Needs the Eden facts file
+/// (`EDEN_FACTS`).
 #[test]
 #[ignore = "a measurement: needs the generated Eden facts file (EDEN_FACTS) and STREAM_PROFILE=1"]
 fn eden_gesture_parts_on_the_public_stream() {
@@ -7069,7 +7070,13 @@ fn eden_gesture_parts_on_the_public_stream() {
     let times: u64 = std::env::var("SOULS_GESTURES")
         .ok()
         .and_then(|n| n.parse().ok())
-        .unwrap_or(100);
+        .unwrap_or(40);
+    let pause = Duration::from_millis(
+        std::env::var("SOULS_GESTURE_PAUSE_MS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(400),
+    );
     let d = scratch("added-eden-stream");
     let (old, release) = library_before_the_gestures(&d);
     let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
@@ -7123,6 +7130,7 @@ fn eden_gesture_parts_on_the_public_stream() {
             ]),
         );
         assert_eq!(offered.kind, 1, "offered: {offered:?}");
+        std::thread::sleep(pause);
         let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
         let accepted = intent_on(
             &mut souls,
@@ -7134,6 +7142,7 @@ fn eden_gesture_parts_on_the_public_stream() {
             BTreeMap::new(),
         );
         assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        std::thread::sleep(pause);
         seq += 1;
         leave(&mut souls, seq, gesture);
     }
@@ -7143,13 +7152,29 @@ fn eden_gesture_parts_on_the_public_stream() {
     );
     // The writer says its profile every 10 s of its own work: wait for the window the last gesture ends in.
     let end = Instant::now() + Duration::from_secs(30);
+    let (mut parts, mut whole, mut staged) = (0u64, 0u64, 0u64);
+    let after = |l: &str, key: &str| -> u64 {
+        l.split_once(key)
+            .and_then(|(_, r)| r.split(|c: char| !c.is_ascii_digit()).next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    };
     while let Some(left) = end.checked_duration_since(Instant::now()) {
         match s.lines.recv_timeout(left) {
-            Ok(l) if l.starts_with("public-stream profile: ") => println!("{l}"),
+            Ok(l) if l.starts_with("public-stream profile: ") => {
+                println!("{l}");
+                parts += after(&l, " parts ");
+                whole += after(&l, " whole-cuts ");
+                staged += after(&l, " staged ");
+            }
             Ok(_) => {}
             Err(_) => break,
         }
     }
+    println!(
+        "public stream: {parts} parts, {whole} cut whole, {staged} ms staged ({} ms a part)",
+        staged.checked_div(parts).unwrap_or(0)
+    );
 }
 
 /// [`a_gesture_added_by_the_upgrade_starts`] on an older Mars world's facts, its library before the group gestures.
