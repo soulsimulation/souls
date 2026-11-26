@@ -16,7 +16,7 @@ const sha=b=>createHash('sha256').update(b).digest('hex');
 const {chromium}=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('@playwright/test');
 const artifactManifest=JSON.parse(readFileSync(process.env.CARRY_ARTIFACT_MANIFEST??join(root,'.local/carry-contact-5127/artifacts-private.json'),'utf8'));
 const seats={},out={source:artifactManifest.source,started:new Date().toISOString(),steps:[],resources:{operator:process.pid},pageErrors:[]};
-let world,browser,crew,page;
+let world,browser,crew,page,reviewedSetup='setup-original.png';
 const cli=async(who,...words)=>{const at=Date.now(),answer=await seats[who].cli(...words);out.steps.push({at,who,words,answer});save('run-private.json',out);if(answer.ok!==true)throw Error(`${who} ${words.join(' ')}: ${JSON.stringify(answer)}`);return answer;};
 try {
  world=await startOldPage({template:'worlds/templates/mars-camp.json',facts:templateFacts({out:dir}),dir:join(dir,'world'),history:false,marsWeb:process.env.MARS_WEB_DIR,pkg:process.env.SOULS_REPLICA_PKG,log:console.error});
@@ -48,7 +48,8 @@ try {
     if(c.type==='key'&&typeof c.key==='string'&&Number.isFinite(c.ms)&&c.ms>=0&&c.ms<=3000){await page.keyboard.down(c.key);await sleep(c.ms);await page.keyboard.up(c.key);}
     else if(c.type==='button'&&typeof c.name==='string')await page.getByRole('button',{name:c.name,exact:true}).click();
     else if(c.type!=='shot')throw Error('Unknown real-input review command');
-    await page.screenshot({path:join(dir,`setup-review-${String(c.id).replace(/[^a-zA-Z0-9-]/g,'')}.png`)});
+    reviewedSetup=`setup-review-${String(c.id).replace(/[^a-zA-Z0-9-]/g,'')}.png`;
+    await page.screenshot({path:join(dir,reviewedSetup)});
    }
   }
   await sleep(100);
@@ -61,10 +62,22 @@ try {
  await page.evaluate(contactTools,{kitURL,binding,entry,source:out.source});
  await cli('ada','carry','lift',crew,'pallet-crates-1');
  await sleep(1500);await page.evaluate(()=>{window.__carryContactObserver.active=true;});await sleep(3000);
- await page.screenshot({path:join(dir,'lift-original.png')});out.measuredCanvas={setup:'setup-original.png',lift:'lift-original.png',samePage:true};out.observer=await page.evaluate(()=>{const o=window.__carryContactObserver;o.stop();const{stop,...data}=o;return data;});save('observer-private.json',out.observer);save('loaded-js-private.json',loaded);
+ await page.screenshot({path:join(dir,'lift-original.png')});out.measuredCanvas={setup:reviewedSetup,lift:'lift-original.png',samePage:true};out.observer=await page.evaluate(()=>{const o=window.__carryContactObserver;o.stop();const{stop,...data}=o;return data;});save('observer-private.json',out.observer);save('loaded-js-private.json',loaded);
  out.after=await cli('ada','query',JSON.stringify([{find:'pallet-crates-1'}]));console.log(`MEASURED ${JSON.stringify(out.observer.counts)}`);
 } catch(error){out.error=String(error.stack??error);console.error(out.error);process.exitCode=1;}
 finally {
  if(crew){for(const words of [['set-down',crew],['leave',crew]])try{await cli('ada','carry',...words);}catch(e){out.cleanupErrors??=[];out.cleanupErrors.push(String(e));}try{await cli('bo','carry','leave',crew);}catch(e){out.cleanupErrors??=[];out.cleanupErrors.push(String(e));}}
- await browser?.close();for(const [who,seat]of Object.entries(seats))out[`${who}Stopped`]=await seat.stop();await world?.stop();out.finished=new Date().toISOString();out.stopped=true;save('run-private.json',out);
+ out.cleanup={};
+ const cleanup=async(name,fn)=>{
+  try { const result=await fn();out.cleanup[name]={ok:result.ok===true,result};if(!result.ok)out.cleanupErrors=[...(out.cleanupErrors??[]),`${name}: stop unconfirmed`]; }
+  catch(error){out.cleanup[name]={ok:false,error:String(error)};out.cleanupErrors=[...(out.cleanupErrors??[]),`${name}: ${String(error)}`];}
+ };
+ if(browser)await cleanup('browser',async()=>{await browser.close();return{ok:!browser.isConnected()};});
+ for(const[who,seat]of Object.entries(seats))await cleanup(`client-${who}`,async()=>{const answer=await seat.stop();return{ok:answer?.ok===true,answer};});
+ if(world)await cleanup('world',async()=>{
+  await world.stop();let alive=false;
+  try{process.kill(-world.world.pid,0);alive=true;}catch(error){if(error.code!=='ESRCH')throw error;}
+  return{ok:!alive,nativeProcessGroupGone:!alive};
+ });
+ out.finished=new Date().toISOString();out.stopped=Object.values(out.cleanup).every(x=>x.ok)&&!(out.cleanupErrors?.length);save('run-private.json',out);
 }
