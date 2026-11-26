@@ -3,11 +3,15 @@
 //! out to the nearest legal point.
 //!
 //! - **Time without progress.** Each second in which a walker comes at least a quarter of its free speed's worth
-//!   nearer its leg's end than it has ever been is progress and takes the second off its time without progress (to
-//!   no less than none); any other second adds itself. A new leg starts the clock again, and so does, while it waits for a link taken in turns
+//!   nearer than it has ever been, by its way left (through the corner its line aims at, to its leg's end) or to the
+//!   corner it aims at, is progress and takes the second off its time without progress (to no less than none); any
+//!   other second adds itself. A walker going round a block at full speed, its route heading away from its leg's end,
+//!   comes nearer its corner; one held against a thing or a crowd comes nearer neither. A new leg starts the clock
+//!   again, and so does, while it waits for a link taken in turns
 //!   (N8), that link's owner letting someone in or turning it (the queue moves). The rungs go by this time, so a
-//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them. A new route
-//!   to the same leg's end (the reroute rung) keeps its least distance to it, so one going to and fro climbs too.
+//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them: coming nearer a
+//!   corner counts only while its least way left has shrunk by [`GAIN`] within [`LONG`] (the backstop). A new route
+//!   to the same leg's end (the reroute rung) keeps its least way left, so one going to and fro climbs too.
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
 //!   again once from where it stands; at 5 s each still body in its way (within [`NEAR`] of it, or within [`ROOM`]
 //!   of the far end of the link it waits for) that has no order to stay there is sent `make-way`, and the world steps
@@ -73,6 +77,11 @@ pub const SHOULDER: Micros = 9_000_000;
 /// Then its order ends by name. The design's 20 s is a bound; 15 s ends a jam that starts within 5 s of a walk's
 /// start inside 20 s of it.
 pub const END: Micros = 15_000_000;
+/// The backstop: a walker coming nearer its corner counts as progress only while its least way left has shrunk by
+/// [`GAIN`] within this, µs (the stall watch's, `crate::walk::stall::LONG`).
+pub const LONG: Micros = crate::walk::stall::LONG;
+/// What the least way left must shrink by to keep the backstop off, µm (`crate::walk::stall::GAIN`).
+pub const GAIN: i64 = crate::walk::stall::GAIN;
 /// A still body this near a walker is in its way, µm: the walk's push range (`skills::route::RANGE`).
 pub const NEAR: i64 = 1_200_000;
 /// A still body stepped aside stands at least this far across the walker's line, µm: two standard bodies' radii and
@@ -282,17 +291,23 @@ pub struct Record {
     pub rung: Rung,
 }
 
-/// A walker's progress: its leg, the least distance to that leg's end, the time without progress (µs) and the rungs
-/// climbed.
+/// A walker's progress: its leg, the least way left to that leg's end (through the corner its line aims at), the
+/// time without progress (µs) and the rungs climbed.
 #[derive(Clone, Copy)]
 struct Clock {
     leg: usize,
     best: i64,
-    /// The least distance at the last second's mark, and when that was.
+    /// The least way left at the last second's mark, and when that was.
     mark: i64,
     at: Micros,
     idle: Micros,
     rung: u8,
+    /// The corner aimed at (x and z µm), the least distance to it while aimed at, and that at the last mark.
+    aim: [i64; 2],
+    near: i64,
+    near_mark: i64,
+    /// The least way left when it last shrank by [`GAIN`], and when (the backstop).
+    long: (i64, Micros),
 }
 
 /// A walker as the ladder knows it: its order, free speed, goal (node and point, µm) and legs, the leg it walks, and
@@ -671,14 +686,30 @@ impl Ladder {
                 continue;
             };
             let (order, speed, wleg) = (w.order, w.speed, w.leg);
-            let gap = len(body.pose.position, leg.to);
+            let p = body.pose.position;
+            let gap = len(p, leg.to);
+            // The corner its line aims at on the way to this leg's end, else the leg's end: the way left goes through
+            // it. A route round a block heads away from the leg's end, and a walker going round it at full speed
+            // comes no nearer that end for a while (#4914's long walks to a landform, round the vineyard).
+            let end = [leg.to.x, leg.to.z];
+            let aim = town
+                .next_corner_toward(who)
+                .filter(|&(n, _, to)| n == node_of(&body) && to == Some(end))
+                .map_or(end, |(_, c, _)| c);
+            let corner = Vec3::new(aim[0], leg.to.y, aim[1]);
+            let near = len(p, corner);
+            let left = near.saturating_add(len(corner, leg.to));
             let fresh = Clock {
                 leg: wleg,
-                best: gap,
-                mark: gap,
+                best: left,
+                mark: left,
                 at: now,
                 idle: 0,
                 rung: 0,
+                aim,
+                near,
+                near_mark: near,
+                long: (left, now),
             };
             let c = self.clocks.entry(who).or_insert(fresh);
             // A new leg, or a queue that moved, starts the clock again.
@@ -692,17 +723,30 @@ impl Ladder {
                 }
                 continue;
             }
-            // Each second: coming a quarter of free speed's worth nearer the leg's end than ever is progress, and
-            // takes the second off the time without it; any other second adds itself.
-            c.best = c.best.min(gap);
+            // Each second: coming a quarter of free speed's worth nearer than ever, by the way left through the corner
+            // aimed at or to that corner while it aims at it, is progress, and takes the second off the time without
+            // it; any other second adds itself. A new corner is measured from where the walker stands when it turns
+            // to it. The backstop: coming nearer a corner counts only while the least way left has shrunk by [`GAIN`]
+            // within [`LONG`], so a walker circling a block or going to and fro between corners still climbs.
+            c.best = c.best.min(left);
+            if c.best + GAIN <= c.long.0 {
+                c.long = (c.best, now);
+            }
+            if aim == c.aim {
+                c.near = c.near.min(near);
+            } else {
+                (c.aim, c.near, c.near_mark) = (aim, near, near);
+            }
             if now - c.at >= SECOND {
                 let span = now - c.at;
-                if c.best + speed * span / 4_000_000 <= c.mark {
+                let q = speed * span / 4_000_000;
+                let toward = c.near + q <= c.near_mark && now - c.long.1 < LONG;
+                if c.best + q <= c.mark || toward {
                     c.idle = (c.idle - span).max(0);
                 } else {
                     c.idle += span;
                 }
-                (c.mark, c.at) = (c.best, now);
+                (c.mark, c.near_mark, c.at) = (c.best, c.near, now);
                 if c.idle == 0 {
                     c.rung = 0;
                     if let Some(f) = runner.fields.get_mut(&who) {
