@@ -20,12 +20,13 @@ import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
 import { historyBase, setV2History, V2History } from './history.ts';
+import { streamReadUrl } from './stream-cdn.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
 // The inline config as the page arrived with it: the app takes (deletes) window.__simConfig at its first config read
 // (inline-config.ts), before this hook's effect reads v2Replica, v2History and v2Bodies, so it is kept at load.
-const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown } }).__simConfig;
+const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown; v2StreamOrigin?: unknown } }).__simConfig;
 
 export function v2Stream(): string | null {
   const v = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Stream?: unknown } }).__simConfig?.v2Stream;
@@ -102,7 +103,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (past) setV2History(new V2History(past, () => makeHistoryReader(replica), frame, hour));
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
-      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))));
+      // #4159: the live stream from the CDN when the launcher names it (stream-cdn.ts), else from this page's origin
+      bridge.start(streamReadUrl(stream, PAGE_CONFIG, location.search), () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
