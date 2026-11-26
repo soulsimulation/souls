@@ -7006,11 +7006,23 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
                 (k.z - f.z) / 1000
             );
         }
-        let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+        // Its last 0.3 m the back closes by two thirds a second: square on the slot's line within 5 s.
+        let t0 = std::time::Instant::now();
+        let across = loop {
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            if (f.x - k.x).abs() < 50_000 || t0.elapsed() > Duration::from_secs(5) {
+                break k.x - f.x;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        println!(
+            "crew of {n}: the back {} mm across from the front, on the slot's line",
+            across / 1000
+        );
         assert!(
-            (f.x - k.x).abs() < 100_000,
+            across.abs() < 50_000,
             "square on the slot's line: the back {} mm across from the front",
-            (k.x - f.x) / 1000
+            across / 1000
         );
         let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         println!(
