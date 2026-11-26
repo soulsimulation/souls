@@ -797,7 +797,8 @@ mod from_entry {
             }
         );
         assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
-        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four, at its four grips.
+        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four to six, one at each of its six grips (a
+        // crew of six: its front, its back and four sides).
         let tall = Load::of(&entry("rack_upright_6m.json")).expect("the 6.1 m upright");
         assert_eq!(
             tall,
@@ -805,12 +806,17 @@ mod from_entry {
                 half_length: 3_048_000,
                 half_width: 609_500,
                 grips: [-2_748_000, 2_748_000],
-                inner: [Some(-916_000), Some(916_000), None, None],
+                inner: [
+                    Some(-1_649_000),
+                    Some(-550_000),
+                    Some(550_000),
+                    Some(1_649_000)
+                ],
                 crew: 4,
                 ..tall
             }
         );
-        assert_eq!(tall.most(), 4);
+        assert_eq!(tall.most(), 6);
     }
 
     /// 0.135 C4: held in the carry's slot, each load's long axis runs along the carry's +x, from the back carrier to

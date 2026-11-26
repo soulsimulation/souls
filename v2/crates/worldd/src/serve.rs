@@ -4189,6 +4189,11 @@ fn serve(args: &[String]) -> R<()> {
     let backup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
         .map_err(refusal)?
         .for_world();
+    // ... and its clean-up of old generations, on another thread with another client (#4954): a slow delete holds
+    // back no put.
+    let cleanup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
+        .map_err(refusal)?
+        .for_world();
     // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
     // store moved to another bucket is learned again rather than fenced on.
     let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
@@ -4400,6 +4405,7 @@ fn serve(args: &[String]) -> R<()> {
                 measures::BACKUP.backup(&view_out::BackupState::Current);
                 writer.back_up(
                     backup_store,
+                    cleanup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
                 )?;
                 // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the

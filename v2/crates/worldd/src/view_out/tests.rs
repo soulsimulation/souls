@@ -4764,7 +4764,7 @@ fn a_store_move_backs_the_whole_chain_up_to_the_new_store() {
     actual.apply_bytes(&first).unwrap();
     out.push(0, &first).unwrap();
     out.flush().unwrap();
-    out.back_up(old, Box::new(|_| {})).unwrap();
+    out.back_up(old, old, Box::new(|_| {})).unwrap();
     assert!(
         out.drainer().unwrap().drain(Duration::from_secs(20)),
         "the old store holds the spool's head"
@@ -4785,7 +4785,7 @@ fn a_store_move_backs_the_whole_chain_up_to_the_new_store() {
         Some((spool.clone(), "new-store".to_owned())),
     )
     .unwrap();
-    moved.back_up(new, Box::new(|_| {})).unwrap();
+    moved.back_up(new, new, Box::new(|_| {})).unwrap();
     assert!(
         moved.drainer().unwrap().drain(Duration::from_secs(20)),
         "the new store holds the spool's head"

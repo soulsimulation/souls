@@ -54,6 +54,9 @@ const clip=(text:string)=>text.length>160?text.slice(0,157).trimEnd()+'…':text
 /** Paint (or clear) the pop-up and the small speaking dot in one Soul's speech bubble (`label`, the element at its
  * head). Cheap when nothing changed; one style read. `distance` is the camera distance in metres (unknown = near);
  * `shown`, whether the Soul is drawn on screen (default: `label` itself is displayed). */
+/** Page FPS: whether a Soul's speech bubble shows anything (a pop-up or a speaking dot not hidden). An empty bubble draws
+ *  nothing, so the page leaves it out of the CSS2D pass until paintSpeakingDot gives it something to show. */
+export function bubbleShows(label:Element):boolean{for(const c of label.children)if(!(c as HTMLElement).hidden)return true;return false;}
 export function paintSpeakingDot(label:HTMLElement,soulId:string,enabled:boolean,now=performance.now(),distance?:number,shown?:boolean){
  let dot=label.querySelector<HTMLElement>(':scope > [data-speaking-dot]'),pop=label.querySelector<HTMLElement>(':scope > [data-speech-popup]');
  const s=enabled?speakingNow.get(soulId):undefined,age=s?now-s.since:Infinity;
