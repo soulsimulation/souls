@@ -8,3 +8,5 @@ description = "Each world's built content brought over from a backup of its data
 [dependencies]
 import-eden = { path = "../import-eden" }
 replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }
+skills = { path = "../../crates/skills" }

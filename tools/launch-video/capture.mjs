@@ -69,7 +69,9 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
       await page.waitForFunction(worldArrived, null, { timeout: 180_000 });
       await page.waitForFunction(() => !!window.__edenSound, null, { timeout: 60_000 });
       await page.mouse.click(width / 2, height / 2); // a real gesture: unlocks the page's sound
-      await setEffects(page, true); await setMusic(page, music);
+      // the sound as asked, where the page lets it be set: a page too busy to take the click (a loaded machine) is
+      // recorded as it is, not lost
+      try { await setEffects(page, true); await setMusic(page, music); } catch (e) { log(`audio left as it is: ${String(e.message ?? e).split('\n')[0]}`); }
       // the top bar takes some of the page: grow the window until the canvas itself is the asked size
       const drawn = await page.evaluate(() => { const c = document.querySelector('canvas[aria-label="Live 3D view of the world"]'); return c ? [c.clientWidth, c.clientHeight] : null; });
       if (drawn && (drawn[0] !== width || drawn[1] !== height)) await page.setViewportSize({ width: width + (width - drawn[0]), height: height + (height - drawn[1]) });

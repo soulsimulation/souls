@@ -155,6 +155,16 @@ pub const SEQUENCE_IN_USE: &str = "intent.seq-in-use";
 /// answers per actor to answer a repeat with (`sim::commit::acts::KEPT`).
 pub const ENDED: usize = 16;
 
+/// The close code a socket gets when another signs in for its grant (the last device wins): 4001, with the reason
+/// `agent.replaced`. Its client does not take the Soul back by itself, so two clients of one Soul do not take it from
+/// each other several times a second: it signs in again when its own agent next asks it for something, and meanwhile
+/// asks now and then only if the Soul is free ([`FREE`]). A sign-in that asks so while a live socket holds the grant
+/// is closed with the same code and the reason `agent.held`.
+pub const REPLACED: u16 = 4001;
+
+/// The query a sign-in that must not take the Soul from a live socket carries on its URL (`?free=1`).
+pub const FREE: &str = "free=1";
+
 #[derive(Default)]
 struct Hub {
     next_session: u64,
@@ -309,9 +319,30 @@ impl Gateway {
         seen: usize,
         who: Arc<Who>,
     ) -> Attached {
+        self.attach_if(grant, cursor, seen, who, false)
+            .unwrap_or_else(|| unreachable!("a sign-in that may take the grant is always attached"))
+    }
+
+    /// As [`Gateway::attach`], but with `free` only while no live socket holds `grant`: `None` when one does, and it
+    /// is left as it is. Checked and signed in under one lock, so two at once never both take it.
+    pub fn attach_if(
+        &self,
+        grant: Grant,
+        cursor: Option<&Value>,
+        seen: usize,
+        who: Arc<Who>,
+        free: bool,
+    ) -> Option<Attached> {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let held = hub
+            .grants
+            .get(&grant.key())
+            .is_some_and(|h| h.sessions.values().any(|l| !l.frames.is_closed()));
+        if free && held {
+            return None;
+        }
         let (tx, rx) = mpsc::channel(OUTBOUND);
         let (mail_tx, mail_rx) = mpsc::channel(OUTBOUND);
-        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         hub.next_session += 1;
         let session = hub.next_session;
         let held = hub.grants.entry(grant.key()).or_default();
@@ -336,13 +367,25 @@ impl Gateway {
                 _ => (resume::CANNOT_RESUME, Vec::new()),
             },
         };
-        Attached {
+        Some(Attached {
             session,
             frames: rx,
             outcome,
             replay,
             mail: mail_rx,
-        }
+        })
+    }
+
+    /// Whether another socket has signed in for `grant` since the one signed in as `session` (the last device wins).
+    /// Never on a creator's grant ([`shared`]): its sockets are not replaced, so one let go for a full queue while
+    /// another is open (the page beside its agent) is not told `agent.replaced`.
+    pub fn replaced(&self, grant: Grant, session: u64) -> bool {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        !shared(grant)
+            && hub
+                .grants
+                .get(&grant.key())
+                .is_some_and(|h| h.sessions.keys().any(|s| *s > session))
     }
 
     /// Lets a socket go (if it was not let go already). With none signed in for the grant after, the view sockets

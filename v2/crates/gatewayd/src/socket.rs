@@ -11,7 +11,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::http::header::CACHE_CONTROL;
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::{HeaderMap, HeaderValue, Uri};
 use axum::response::Response;
 use axum::routing::{get, post};
 use replica::effects::Actor;
@@ -104,6 +104,7 @@ pub fn router(gw: Arc<Gateway>) -> Router {
 async fn upgrade(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
+    uri: Uri,
     State(gw): State<Arc<Gateway>>,
 ) -> Response {
     // Read into a token at once: its text is never formatted (token.rs).
@@ -127,6 +128,10 @@ async fn upgrade(
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
+    // A client another took the Soul from asks only if it is free (`?free=1`): it never takes it from a live socket.
+    let free = uri
+        .query()
+        .is_some_and(|q| q.split('&').any(|p| p == crate::FREE));
     let mut res = ws
         .read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
@@ -140,6 +145,7 @@ async fn upgrade(
                 header_token,
                 (header_cursor, header_seen),
                 client,
+                free,
             )
             .await;
         });
@@ -305,6 +311,7 @@ async fn serve(
     header_token: Option<Presented>,
     header_from: ResumeFrom,
     client: Option<String>,
+    free: bool,
 ) {
     // 1. The first frame each way (T10 rule 12): the client's, then the gateway's for its world.
     let Ok(Some(first)) = tokio::time::timeout(SIGN_IN_WITHIN, next_binary(&mut socket)).await
@@ -360,8 +367,18 @@ async fn serve(
         client.as_deref(),
     ));
 
-    // 3. The outcome, and the kept frames after the cursor.
-    let mut attached = gw.attach(grant, cursor.as_ref(), seen.unwrap_or(1), who.clone());
+    // 3. The outcome, and the kept frames after the cursor. A sign-in that asked only if the Soul is free, while a live
+    // socket holds it, is closed as `agent.held` and the holder left as it is.
+    let Some(mut attached) =
+        gw.attach_if(grant, cursor.as_ref(), seen.unwrap_or(1), who.clone(), free)
+    else {
+        let close = CloseFrame {
+            code: crate::REPLACED,
+            reason: "agent.held".into(),
+        };
+        let _ = socket.send(Message::Close(Some(close))).await;
+        return;
+    };
     let mut ok = send(&mut socket, control(attached.outcome)).await;
     for frame in std::mem::take(&mut attached.replay) {
         ok = ok && send(&mut socket, times::finish(frame)).await;
@@ -427,9 +444,15 @@ async fn serve(
                     ok = send(&mut socket, frame).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
-                // Another socket signed in for this grant (a Soul's: the last device wins), or this one fell too far
-                // behind.
-                None => break,
+                // Another socket signed in for this grant (a Soul's: the last device wins): it is told so, by name,
+                // and its client does not sign in again at once. Or this one fell too far behind, and it may resume.
+                None => {
+                    if gw.replaced(grant, attached.session) {
+                        let close = CloseFrame { code: crate::REPLACED, reason: "agent.replaced".into() };
+                        let _ = socket.send(Message::Close(Some(close))).await;
+                    }
+                    break;
+                }
             },
             item = async {
                 match view.as_mut() {
