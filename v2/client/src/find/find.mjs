@@ -80,32 +80,28 @@ function indexOf(rows, kinds) {
   x.rows = rows;
   return x;
 }
+const FIELDS = ['name', 'id', 'alias', 'kind', 'what'];
 function add(x, row, kinds) {
   const k = row.entry ?? row.kind;
   if (kinds && !x.kindWords.has(k)) x.kindWords.set(k, kindWordsOf(kinds[k]));
   const own = wordsOf(row), kw = x.kindWords.get(k), w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
-  const all = [...new Set([...w.name, ...w.id, ...w.alias, ...w.kind, ...w.what])];
-  x.of.set(row, { w, all });
-  for (const word of all) {
-    put(x.byStem, stem(word), row);
-    put(x.words, word, row);
-  }
+  x.of.set(row, { w });
+  for (const f of FIELDS) for (const word of w[f]) { put(x.byStem, stem(word), row); put(x.words, word, row); }
 }
 function drop(x, row) {
   const at = x.of.get(row);
   if (!at) return;
   x.of.delete(row);
-  for (const word of at.all) {
-    take(x.byStem, stem(word), row);
-    take(x.words, word, row);
-  }
+  for (const f of FIELDS) for (const word of at.w[f]) { take(x.byStem, stem(word), row); take(x.words, word, row); }
 }
-const put = (m, k, row) => { let s = m.get(k); if (!s) m.set(k, (s = new Set())); s.add(row); };
-const take = (m, k, row) => { const s = m.get(k); if (s && s.delete(row) && !s.size) m.delete(k); };
+// A word most rows hold once is kept as that row alone, and as a set once a second row holds it.
+const put = (m, k, row) => { const s = m.get(k); if (s === undefined) m.set(k, row); else if (s instanceof Set) s.add(row); else if (s !== row) m.set(k, new Set([s, row])); };
+const take = (m, k, row) => { const s = m.get(k); if (s === row) m.delete(k); else if (s instanceof Set && s.delete(row) && !s.size) m.delete(k); };
+const each = (s) => (s === undefined ? [] : s instanceof Set ? s : [s]);
 /** The rows a word can hit (`hit`): those holding a word of its stem, or, for a word of four letters or more, a word it begins. */
 function rowsHit(x, q, into) {
-  for (const row of x.byStem.get(stem(q)) ?? []) into.add(row);
-  if (q.length >= 4) for (const [word, rs] of x.words) if (word.startsWith(q)) for (const row of rs) into.add(row);
+  for (const row of each(x.byStem.get(stem(q)))) into.add(row);
+  if (q.length >= 4) for (const [word, rs] of x.words) if (word.startsWith(q)) for (const row of each(rs)) into.add(row);
 }
 
 /** The rows the words find, best first (then nearest, then by name), at most `limit`, and how many more there were.
