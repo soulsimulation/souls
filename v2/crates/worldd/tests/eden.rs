@@ -4722,3 +4722,116 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+#[test]
+#[ignore = "probe"]
+fn zz_probe_stump_and_fountain() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let (stump, fountain, fire) = (im.nodes["e_7219ed40"], im.nodes["e_ce79121a"], im.nodes["e_14db400b"]);
+    // Stump: walk to it, sit, rise, walk on.
+    let (served, mut soul, dir) = serve(&facts, "13.0,-35.0", "probestump", lineage);
+    soul.0.set_read_timeout(Some(Duration::from_secs(300))).unwrap();
+    let w = soul.act("eden:walk", Some(stump), BTreeMap::new());
+    println!("PROBE walk stump {w:?} at {:?}", end_pose(&dir));
+    let w2 = soul.act("eden:walk", Some(fire), BTreeMap::new());
+    println!("PROBE then walk fire {w2:?} at {:?}", end_pose(&dir));
+    let w3 = soul.act("eden:walk", Some(stump), BTreeMap::new());
+    let s = soul.act("eden:sit", Some(stump), BTreeMap::new());
+    let r = soul.act("eden:rise", None, BTreeMap::new());
+    std::thread::sleep(Duration::from_secs(3));
+    println!("PROBE walk {w3:?} sit {s:?} rise {r:?} at {:?}", end_pose(&dir));
+    let w4 = soul.act("eden:walk", Some(fire), BTreeMap::new());
+    println!("PROBE after rise walk fire {w4:?} at {:?}", end_pose(&dir));
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    // Fountain: four Souls walk to it in turn.
+    let (served, first, dir) = serve(&facts, "-12.0,-88.0", "probefount", lineage);
+    let mut souls = vec![first];
+    for n in 2..=4 {
+        souls.push(join(&dir, n, lineage));
+    }
+    for (i, s) in souls.iter_mut().enumerate() {
+        s.0.set_read_timeout(Some(Duration::from_secs(300))).unwrap();
+        let w = s.act("eden:walk", Some(fountain), BTreeMap::new());
+        println!("PROBE soul {i} walk fountain {w:?}");
+    }
+    println!("PROBE frames {:?}", track(&dir).iter().rev().take(4).collect::<Vec<_>>());
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The last activity of kind `kind` created in the log.
+fn created_of(dir: &Path, kind: &str) -> Option<Id> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = None;
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let replica::effects::Change::Create { node, kind: k, .. } = &c.change
+                        && k.as_str() == kind
+                    {
+                        out = Some(*node);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+#[ignore = "probe"]
+fn zz_probe_hand_in_hand_past_a_stump() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let (fountain, ground) = (im.nodes["e_ce79121a"], im.nodes["ground"]);
+    let um = |v: f64| {
+        let v = (v * 1e6) as i64;
+        if v < 0 { Value::Nint((-v - 1) as u64) } else { Value::Uint(v as u64) }
+    };
+    let point = |x: f64, z: f64| BTreeMap::from([(1, Value::Array(vec![um(x), um(0.0), um(z)]))]);
+    for (k, dx) in [-0.6f64, -0.3, 0.0, 0.3, 0.6].into_iter().enumerate() {
+        let (served, mut a, dir) = serve(&facts, "13.0,-33.0", &format!("probehand{k}"), lineage);
+        let mut b = join(&dir, 2, lineage);
+        a.0.set_read_timeout(Some(Duration::from_secs(300))).unwrap();
+        b.0.set_read_timeout(Some(Duration::from_secs(300))).unwrap();
+        // Stand side by side at the start.
+        let s1 = a.act("eden:walk", Some(ground), point(13.0 + dx, -33.0));
+        let s2 = b.act("eden:walk", Some(ground), point(13.0 + dx + 0.8, -33.0));
+        let offer = a.act(
+            "activity:offer",
+            Some(ground),
+            BTreeMap::from([
+                (1, Value::Text(name("eden:hold_hands"))),
+                (2, Value::Text(name("eden:one"))),
+                (3, Value::Array(vec![b.1.to_value()])),
+            ]),
+        );
+        std::thread::sleep(Duration::from_secs(1));
+        let held = created_of(&dir, "eden:hold_hands");
+        let acc = b.act("activity:accept", held, BTreeMap::new());
+        std::thread::sleep(Duration::from_secs(3));
+        // A leads past the stump (13, -37.7).
+        let lead = a.act("eden:walk", Some(ground), point(13.0 + dx, -42.0));
+        std::thread::sleep(Duration::from_secs(3));
+        let places = last_places(&dir);
+        let near: Vec<String> = places
+            .values()
+            .map(|(_, _, x, z)| format!("({x:.3},{z:.3}) {:.3} m from the stump", (x - 13.0).hypot(z + 37.7)))
+            .collect();
+        let wb = b.act_within("eden:walk", Some(fountain), BTreeMap::new(), 20_000_000);
+        let wa = a.act_within("eden:walk", Some(fountain), BTreeMap::new(), 20_000_000);
+        println!(
+            "PROBE dx {dx}: start {s1:?} {s2:?} offer {offer:?} held {held:?} accept {acc:?} lead {lead:?} at {near:?}; then B walk {wb:?}, A walk {wa:?}"
+        );
+        drop(served);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
