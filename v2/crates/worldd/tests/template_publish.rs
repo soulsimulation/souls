@@ -1,13 +1,34 @@
 //! A template published from a seed's public support (`templates::publish_facts`, installed as `publish-template`) is
 //! one this build's `worldd fork --template` accepts: its sealed header's kind pins are the seed's boot pins. The world
-//! is N2's test world with its rack yard, whose kinds join parts, so their pins follow their entries (0.135): published
-//! from the facts alone, those pins differed and the fork was refused `template-pins-mismatch` (0.142, mars-camp).
+//! is a rack bay and an upright (import-eden's joining fixture), kinds whose entries join parts, so their pins follow
+//! their entries (0.135): published from the facts alone, those pins differed and the fork was refused
+//! `template-pins-mismatch` (0.142, the Mars camp's rack, shade and loading yards).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use replica::ids::Scope;
 use replica::rules::json;
+
+/// A rack bay and an upright standing on the ground: no slots in the facts.
+const FACTS: &str = r#"{
+  "format": "souls/import-eden/1",
+  "kinds": [
+    {"ref": "t-bay@1", "hash": "aa", "name": "mars:rack_bay", "form": "point"},
+    {"ref": "t-upright@1", "hash": "bb", "name": "mars:rack_upright", "form": "point"}
+  ],
+  "things": [
+    {"id": "e_bay", "def": "t-bay@1", "ref": "t-bay@1", "parent": null, "pose": [0, 0, 0, 0],
+     "world": [0, 0, 0, 0], "scale_ppm": 1000000},
+    {"id": "e_upright", "def": "t-upright@1", "ref": "t-upright@1", "parent": null, "pose": [3000, 0, 0, 0],
+     "world": [3000, 0, 0, 0], "scale_ppm": 1000000}
+  ],
+  "doors": [],
+  "places": [],
+  "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
+  "bake": {"things": 2},
+  "byRef": {"t-bay@1": 1, "t-upright@1": 1}
+}"#;
 
 fn scratch(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("{tag}-{}", std::process::id()));
@@ -45,9 +66,9 @@ fn worldd(args: &[&str], paths: &[(&str, &Path)]) -> std::process::Output {
 #[test]
 fn a_template_published_from_a_seed_forks_with_the_seeds_pins() {
     let d = scratch("tpl-publish");
-    let facts = testworld::generate(1, 0).unwrap().text;
+    let facts = FACTS;
     let path = d.join("facts.json");
-    std::fs::write(&path, &facts).unwrap();
+    std::fs::write(&path, facts).unwrap();
     let support = d.join("support");
     let seeded = worldd(
         &["seed", "--souls", "0", "--at", "0,0"],
@@ -67,16 +88,16 @@ fn a_template_published_from_a_seed_forks_with_the_seeds_pins() {
     let (_, files) = templates::support(&support, facts.as_bytes()).expect("the seed's support");
     let kept = templates::support_entries(&files).unwrap();
     let names = |im: import_eden::Import| im.rules.kinds.into_keys().collect::<Vec<_>>();
-    let bare = names(import_eden::load(&facts).unwrap());
-    let joined = names(import_eden::load_with(&facts, &kept).unwrap());
+    let bare = names(import_eden::load(facts).unwrap());
+    let joined = names(import_eden::load_with(facts, &kept).unwrap());
     assert!(
         joined.iter().any(|k| !bare.contains(k)),
-        "the yard has a kind whose entry joins parts"
+        "the bay and the upright are kinds whose entries join parts"
     );
 
     let out = d.join("out");
     let t = templates::publish_facts(
-        &facts,
+        facts,
         &out,
         "yard",
         Some(&support),
@@ -92,7 +113,7 @@ fn a_template_published_from_a_seed_forks_with_the_seeds_pins() {
     }
     assert!(out.join("yard.source").is_dir());
     let again = templates::publish_facts(
-        &facts,
+        facts,
         &out,
         "yard",
         Some(&support),
