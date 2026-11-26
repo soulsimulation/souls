@@ -1493,5 +1493,5 @@ fn a_make_at_a_stocked_container_carries_the_top_row_of_its_pile() {
         "drawn by nothing"
     );
     assert!(made(id(101), "t:book").is_empty(), "no stock there");
-    assert!(made(id(100), "t:cup").is_empty(), "not the stock's kind");
+    assert!(made(id(100), "t:mug").is_empty(), "not the stock's kind");
 }
