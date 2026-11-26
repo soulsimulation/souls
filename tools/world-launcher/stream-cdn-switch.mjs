@@ -7,6 +7,7 @@
 // Prints the world's entry after the change. Refuses a slug the binding does not name.
 import { chownSync, copyFileSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { cutoverFence } from './cutover.mjs';
+import { isMain } from '../lib/is-main.mjs';
 
 export const STREAM_CDN = 'https://stream.soul.game';
 
@@ -25,7 +26,7 @@ export function switched(binding, slug, on) {
   return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) { // production runs it through /srv/sim-worlds/production, a link to the live release
   const argv = process.argv.slice(2), i = argv.indexOf('--binding');
   const file = i < 0 ? '/etc/souls/cutover-binding.json' : argv.splice(i, 2)[1];
   const [slug, mode] = argv;

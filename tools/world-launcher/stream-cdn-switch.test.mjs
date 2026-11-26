@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { STREAM_CDN, switched } from './stream-cdn-switch.mjs';
 
@@ -32,5 +32,9 @@ test('the command: the file rewritten whole with its mode, the old one kept besi
     assert.equal(JSON.parse(run('off')).v2StreamOrigin, undefined);
     assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), two);
     assert.equal(readdirSync(dir).filter((n) => n.includes('.bak.')).length >= 1, true);
+    // started through a link, as production's /srv/sim-worlds/production is: it still runs
+    const link = join(dir, 'linked-switch.mjs');
+    symlinkSync(new URL('./stream-cdn-switch.mjs', import.meta.url).pathname, link);
+    assert.equal(JSON.parse(execFileSync(process.execPath, [link, '--binding', file, 'eden', 'on'], { encoding: 'utf8' })).v2StreamOrigin, STREAM_CDN);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
