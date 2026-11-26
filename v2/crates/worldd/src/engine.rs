@@ -128,6 +128,10 @@ pub struct Act {
     pub params: BTreeMap<u64, Value>,
 }
 
+/// A take waiting for its commit (0.135 A2): the crew's ground, its node's place and turn, its carriers' span, and
+/// each side carrier's place at the part (C5).
+type Taking = (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>);
+
 /// The engine's systems, with their own due list, moves and minter.
 pub struct Engine {
     header: Header,
@@ -153,7 +157,7 @@ pub struct Engine {
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
-    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat, i64)>,
+    taking: BTreeMap<Id, Taking>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -882,8 +886,10 @@ impl Engine {
                 if !members.iter().any(|m| m.body == a.body) {
                     return Err(refusal("not-a-member", show(a.body)));
                 }
+                // A crew of any size the carry takes (0.135 C5): its first two are its front and back, its sides
+                // walk beside the part.
                 let (front, back) = match members {
-                    [f, b] => (f.body, b.body),
+                    [f, b, ..] => (f.body, b.body),
                     _ => {
                         return Err(refusal(
                             "crew.size",
@@ -955,8 +961,15 @@ impl Engine {
                         a.verb == Verb::Unseat,
                         slots.reach_of(front).min(slots.reach_of(back)),
                     )?;
+                    // A crew's sides (0.135 C5) carry beside the part from where they stand at the take.
+                    let sides = members[2..]
+                        .iter()
+                        .map(|m| {
+                            stands(c, m.body).map(|(_, at)| (m.body, Carry::place_of(f, k, at)))
+                        })
+                        .collect::<R<Vec<_>>>()?;
                     self.taking
-                        .insert(activity, (ground, at, turn, apart(f, k)));
+                        .insert(activity, (ground, at, turn, apart(f, k), sides));
                 }
             }
             Verb::Lift | Verb::SetDown => {
@@ -992,7 +1005,12 @@ impl Engine {
                 // where they stand: a set-down never waits on a side whose body is gone.
                 let side_bodies: Vec<Id> = members[2..].iter().map(|m| m.body).collect();
                 if !self.activities.started(activity) {
-                    return Err(refusal("activity-not-started", show(activity)));
+                    // Never without its reason: a member held by another activity, say, or no accept yet.
+                    let why = self.activities.unstarted_why(activity).unwrap_or_default();
+                    return Err(refusal(
+                        "activity-not-started",
+                        format!("{}: {why}", show(activity)),
+                    ));
                 }
                 let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
                 let transfer = self
@@ -1596,7 +1614,7 @@ impl Engine {
                 carry.load = l;
             }
             let middle = match self.activities.members(activity) {
-                Some([f, k]) => match (stands(c, f.body), stands(c, k.body)) {
+                Some([f, k, ..]) => match (stands(c, f.body), stands(c, k.body)) {
                     (Ok((_, f)), Ok((_, k))) => Some([(f.x + k.x) / 2, (f.z + k.z) / 2]),
                     _ => None,
                 },
@@ -2558,7 +2576,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let Some((ground, at, turn, span)) = taking else {
+        let Some((ground, at, turn, span, sides)) = taking else {
             return;
         };
         let part = self
@@ -2598,6 +2616,7 @@ impl Engine {
                 carry.track.push((now, at, turn));
                 // Its carriers' span at the take: a carry they let drift apart breaks off (0.135 C3).
                 carry.span = span;
+                carry.sides = sides;
                 if let Some(l) = self.held_load(live, part) {
                     carry.load = l;
                 }

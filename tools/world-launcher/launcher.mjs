@@ -445,17 +445,20 @@ export async function openLauncher(cfg = {}) {
       if (w.god !== !!s.hasOwner || w.entities !== s.entities || (souls !== null && w.souls !== souls) || zone.timeZone) registry.update(w.slug, { god: !!s.hasOwner, entities: s.entities, seq: s.seq, ...(souls !== null ? { souls } : {}), ...zone });
     } catch { /* busy; keep the cached numbers */ }
   }
+  /** The Souls the world list shows: the old process's last count. A world the new engine runs has no old process, so
+   *  that count is stale (an old-engine figure); none is shown rather than a wrong one (26 Nov). */
+  const soulsOf = (w) => (moved(w) || w.routeOnly ? null : stats.get(w.slug)?.souls ?? w.souls ?? null);
   const describe = (w) => {
     const st = pool.status(w.slug), s = stats.get(w.slug), t = templateList({ all: true }).find((x) => x.id === w.template);
     // two worlds with the same shown name are told apart by their slug (the address people see), e.g. "Mars · my-mars-2"
     const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name));
-    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0, ...(moved(w) ? { status: 'running', state: 'running', engine: 'new' } : {}) };   // #2233 A3: state; status kept for old readers; D2b: a moved world is live on the new engine, as a world with no old twin
+    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: soulsOf(w), timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0, ...(moved(w) ? { status: 'running', state: 'running', engine: 'new' } : {}) };   // #2233 A3: state; status kept for old readers; D2b: a moved world is live on the new engine, as a world with no old twin
   };
   async function worldsJson() {
     // D2: the directory names the worlds with no old twin; the list waits for it only until it has answered once
     const asked = cutover?.routeOnly().length ? directoryWorlds() : null;
     await Promise.all([...registry.worlds.map(refreshStats), directory.at ? null : asked]);
-    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds([...registry.worlds, ...routeOnlyWorlds()], (w) => stats.get(w.slug)?.souls ?? w.souls).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
+    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds([...registry.worlds, ...routeOnlyWorlds()], soulsOf).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
   /** A world the site admin marked not claimable, while it still has no god: nobody may claim it or mint for it. */

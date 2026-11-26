@@ -5,6 +5,7 @@
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
 //   souls.mjs look | here                     the brief: my room, cards outward, what changed, the age
+//   (status, look and here add `update: {from, to}` when the home's site serves a newer client: upgrade/served.mjs)
 //   souls.mjs look set <preset | params file> puts a humanoid look on your default body (`life:look`, G3): a preset
 //                                             (casual, punk, woman) or a core/humanoid@2 params JSON file; prints
 //                                             the receipt
@@ -147,6 +148,7 @@ import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
+import { clientUpdate } from '../upgrade/served.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -754,6 +756,8 @@ if (isMain(import.meta.url)) {
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: ADDS.has(process.argv[2]), named: homeNamed });
     newsHome = home;
     if (process.argv[2] !== 'news') fetchNewsLater(home);
+    // A session's first commands say when the home's site serves a newer client: asked beside the daemon, kept 10 min.
+    const updating = ['status', 'look'].includes(req?.op) ? clientUpdate({ home }).catch(() => null) : null;
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
@@ -795,6 +799,8 @@ if (isMain(import.meta.url)) {
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
+      const update = await updating;
+      if (update && answer && typeof answer === 'object') answer.update = update;
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
       if (req.op === 'pending' && !req.list) {
         if (answer.ok !== true) throw Object.assign(new Error(answer.detail ?? 'pending failed'), { code: answer.code });

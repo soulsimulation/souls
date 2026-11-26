@@ -235,9 +235,22 @@ pub const OFF_GROUND: &str = "edit.off-ground";
 /// Refuses, by [`OFF_GROUND`], a part that leaves a thing past the open ground `ground`'s extent
 /// ([`crate::ground::open::off_ground`]), before any ground is cut for it: the walkers' maps are cut over the whole
 /// extent, so a thing 100 km off would have the edit's check cut squares for minutes and every edit after it wait.
+/// A thing no walker meets (a loose beam, placed or moved) is held to it too, by its origin: placed in millimetres
+/// where metres were meant, it would stand 24 km off, past anyone's reach.
 fn on_ground(copy: &Replica, ground: Id, part: &Part) -> Result<(), Refused> {
     let before = copy.tree();
-    let changed = crate::ground::changed(before, part);
+    let mut changed = crate::ground::changed(before, part);
+    for e in &part.effects {
+        if let Body::Changes(cs) = &e.body {
+            for c in cs {
+                if let Change::Create { node, .. } | Change::Reparent { node, .. } = &c.change
+                    && !changed.contains(node)
+                {
+                    changed.push(*node);
+                }
+            }
+        }
+    }
     if changed.is_empty() {
         return Ok(());
     }
