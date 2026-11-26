@@ -1421,33 +1421,35 @@ impl Forms {
                 _ => true,
             });
         }
-        // A body seated or lying in a seat of another thing, asked to do a form here that walks (the lamp across the
-        // room, asked from the sofa), first rises from that seat, as a person gets up to go: its legs are the seat's, so
-        // the walk was refused `resource-held` (Eden indoor audit). Not from a thing that moves (a ride, a boat): its
-        // seats are left by its own forms. Only once settled in the seat: a sit or rise still under way is waited for,
-        // and the act opened again after it decides then. A form with its own rise before its first walk keeps it, and
-        // a bare take's approach the runner skips for a thing within reach (a cup by the chair) is no walk.
+        // A body held by a seat, a bed or a standing slot of another thing, asked to do a form here that walks (the
+        // lamp across the room asked from the sofa, Eden indoor audit; a seated Soul's `take` of a book stack, trial
+        // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
+        // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
+        // moves (a ride, a boat): its seats are left by its own forms. Only once settled in the slot: a sit or rise
+        // still under way is waited for, and the act opened again after it decides then. A form with a rise, a sit or a
+        // settle of its own keeps its steps (a sit at a seat walks there by itself), and a walk the runner would skip
+        // (an approach to a hand step's thing already within reach, a cup by the chair, #4086) needs no rise, so that
+        // take is made from the seat.
         let held_in = w.places.as_ref().and_then(|p| {
             p.slots
                 .held_by(body)
                 .filter(|s| *s != node && p.slots.settled(body) && !p.slots.moves(*s))
         });
-        let walks = steps.iter().enumerate().any(|(i, s)| match s {
-            Step::WalkTo { approach: true, .. }
-                if matches!(steps.get(i + 1), Some(Step::Hand))
-                    && w.geometry.within_reach(body, node) == Some(true) =>
-            {
-                false
-            }
-            Step::WalkTo { .. } => true,
-            _ => false,
-        });
-        let own_rise = steps
-            .iter()
-            .take_while(|s| !matches!(s, Step::WalkTo { .. }))
-            .any(|s| matches!(s, Step::Rise));
-        let risen = node != body && held_in.is_some() && walks && !own_rise;
-        if risen {
+        let rises_elsewhere = node != body
+            && !in_its_slot
+            && held_in.is_some()
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. } | Step::Settle { .. }))
+            && steps.iter().enumerate().any(|(k, s)| match s {
+                Step::WalkTo { approach, .. } => {
+                    !(*approach
+                        && matches!(steps.get(k + 1), Some(Step::Hand))
+                        && w.geometry.within_reach(body, node) == Some(true))
+                }
+                _ => false,
+            });
+        if rises_elsewhere {
             steps.insert(0, Step::Rise);
         }
         // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
@@ -1458,7 +1460,7 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
-        let rises_first = (in_its_slot && !stays) || risen;
+        let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
             if let form_runner::Effect::Unlink { ty, .. } = e {

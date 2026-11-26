@@ -1828,6 +1828,59 @@ fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
     );
 }
 
+/// Trial 0.137: a seated body asked a form at another thing (a book stack's `take`, 3 m off) rises first by itself,
+/// out of its seat by the rise move, and then walks: never refused `resource-held` by its seat's hold on its legs.
+#[test]
+fn trial_0137_a_seated_bodys_form_at_another_thing_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    let books = b.mint.mint().expect("id");
+    let at = Vec3::new(stand.x + 3_000_000, stand.y, stand.z);
+    b.snap.things.insert(books, (at, BTreeMap::new()));
+    let walk = Step::WalkTo {
+        point: Name::new("books").expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        books,
+        vec![walk, Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    let held = b.slots.as_ref().and_then(|s| s.held_by(body));
+    println!(
+        "trial 0.137: seated, a walk to another thing ended {}, body in {held:?}",
+        e.how.as_str()
+    );
+    assert_eq!(e.how.as_str(), "done", "not resource-held");
+    assert_eq!(held, None, "out of its place");
+    let p = b.c.body(body).expect("a body").pose;
+    assert!(
+        matches!(p.support, replica::pose::Support::Surface { .. }),
+        "on its feet"
+    );
+}
+
 /// Review of the rise-first change: a bare take of a thing already within reach of the seat (a cup by the chair) is
 /// done from the seat, its approach skipped by the runner, so no rise is added: the body is still seated after it.
 #[test]
@@ -2592,7 +2645,8 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
     b.until_moving(body, 1);
     let sent = b.now;
     let take = bind(&entry, &form).expect("binds");
-    let span = super::span(&take, &limits);
+    // Asked while its seat still holds the body, the take is given a rise first (trial 0.137), done at once standing.
+    let span = super::span(&[&[Step::Rise][..], &take[..]].concat(), &limits);
     let Asked::Started(new) = b
         .steps(body, thing, take, intent(body, 1), limits)
         .expect("accepted")
