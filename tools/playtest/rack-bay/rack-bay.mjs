@@ -31,7 +31,6 @@
 //           The folder is where `node souls.mjs` runs for them (its `.souls/`). Ids come from Ada's own `query find`.
 //   print   the steps as the shell lines a person types, one Soul each, crews and ids as names to fill in.
 //
-// A frame that stands is carried by its posts: its front and back at its own x, beside its edges (`carry grip`).
 // The steps (`buildAndTakeDown`): Ada and Bo carry frame 1 from the stand into the bay's upright_a, Bo holding it; Ada
 // and Cy frame 2 into upright_b, Cy holding it; the change of crew: Di takes frame 1 over from Bo; Ada and Bo seat both
 // low beams; everyone lets go and the bay stands unheld. Take-down: hold crews on the frames, Bo and Di lift each beam
@@ -241,9 +240,8 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
   await both(['ada', 'carry', 'to', crewB, bay, 'upright_b'], ['cy', 'carry', 'to', crewB, bay, 'upright_b']);
   await run('ada', 'part', 'put', crewB, bay, 'upright_b');
   await run('ada', 'carry', 'leave', crewB);
-  // The change of crew on frame 1, standing in its slot: Di takes Bo's place, from its other side (Bo, its carry's
-  // front, stands by its + post; Ada, a step away at frame 2, joins the new crew only to hand it over).
-  await run('di', 'carry', 'grip', fa, 'left');
+  // The change of crew on frame 1, standing in its slot: Di takes Bo's place.
+  await both(['di', 'carry', 'grip', fa, 'right'], ['ada', 'carry', 'grip', fa, 'left']);
   const crewA2 = await crew('di', 'ada', fa);
   await run('ada', 'carry', 'leave', crewA2);
   await run('bo', 'carry', 'leave', crewA);
@@ -261,12 +259,11 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
   await both(['ada', 'carry', 'leave', crewC], ['bo', 'carry', 'leave', crewC]);
   const built = Date.now();
 
-  // Take-down. Hold crews on the frames: Cy holds frame 1, Ada frame 2, each 2 m off its post, clear of the carriers
-  // who take it out by its posts.
-  await both(['cy', 'carry', 'grip', fa, 'right', '--from', '2'], ['di', 'carry', 'grip', fa, 'left', '--from', '2']);
+  // Take-down. Hold crews on the frames: Cy holds frame 1, Ada frame 2.
+  await both(['cy', 'carry', 'grip', fa, 'right'], ['di', 'carry', 'grip', fa, 'left']);
   const holdA = await crew('cy', 'di', fa);
   await run('di', 'carry', 'leave', holdA);
-  await both(['ada', 'carry', 'grip', fb, 'right', '--from', '2'], ['bo', 'carry', 'grip', fb, 'left', '--from', '2']);
+  await both(['ada', 'carry', 'grip', fb, 'right'], ['bo', 'carry', 'grip', fb, 'left']);
   const holdB = await crew('ada', 'bo', fb);
   await run('bo', 'carry', 'leave', holdB);
   // Bo and Di lift the beams out, the right one first, and lay each where it lay.
@@ -351,7 +348,7 @@ export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = A
   }
   // The 6.1 m frame by all six, one at each grip: Ada in front, Bo at the back, the others beside its grips between.
   const ends = ['ada', 'bo'], sides = ['cy', 'di', 'ed', 'fy'];
-  await all(['ada', 'carry', 'grip', tall, 'front'], ['bo', 'carry', 'grip', tall, 'back'], ...sides.map((s, k) => [s, 'carry', 'grip', tall, 'side', String(k + 1)]));
+  await all(['ada', 'carry', 'grip', tall, 'front', '--from', '3.1'], ['bo', 'carry', 'grip', tall, 'back', '--from', '3.1'], ...sides.map((s, k) => [s, 'carry', 'grip', tall, 'side', String(k + 1)]));
   const c = await crew('ada', ['bo', ...sides]);
   await run('ada', 'carry', 'lift', c, tall);
   const where = `${to[0]},${to[1]}`;
