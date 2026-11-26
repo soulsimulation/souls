@@ -122,6 +122,19 @@ fn dance_at() -> ActivityKind {
     k
 }
 
+/// [`dance`] whose roles say how near its middle members stand: 1 m.
+fn dance_near() -> ActivityKind {
+    let mut k = ActivityKind {
+        most: 8,
+        beat: true,
+        ..touch(DANCE_NEAR, 60_000_000, "souls:dance")
+    };
+    for r in &mut k.roles {
+        r.within = Some(1_000_000);
+    }
+    k
+}
+
 fn follow() -> ActivityKind {
     let mut k = touch(FOLLOW, 60_000_000, "souls:none");
     for r in &mut k.roles {
@@ -141,6 +154,9 @@ const FOLLOW: &str = "test:follow";
 /// Holding hands and a dance whose roles say where members stand (0.135 G3).
 const HOLD_AT: &str = "test:hold_at";
 const DANCE_AT: &str = "test:dance_at";
+/// A dance whose members stand within 1 m of its middle, as content's (`within_mm`): one who accepts from farther than
+/// 2 m of the asker is refused (trial of 25 Nov).
+const DANCE_NEAR: &str = "test:dance_near";
 /// Content's handshake, hug, high-five and holding hands, standing where their entries place them (0.134 item 5).
 const W_HANDSHAKE: &str = "test:w_handshake";
 const W_HUG: &str = "test:w_hug";
@@ -184,6 +200,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         (NOD, pinned(NOD, 17)),
         (WAVE, pinned(WAVE, 18)),
         (INTRO, pinned(INTRO, 19)),
+        (DANCE_NEAR, pinned(DANCE_NEAR, 20)),
     ]
 }
 
@@ -416,6 +433,7 @@ fn tree_rules() -> TreeRules {
                         NOD,
                         WAVE,
                         INTRO,
+                        DANCE_NEAR,
                     ],
                 ),
             ),
@@ -437,6 +455,7 @@ fn tree_rules() -> TreeRules {
             (full(NOD), k("activity", &[])),
             (full(WAVE), k("activity", &[])),
             (full(INTRO), k("activity", &[])),
+            (full(DANCE_NEAR), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -664,6 +683,7 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             follow(),
             hold_at(),
             dance_at(),
+            dance_near(),
             content_touch(W_HANDSHAKE, "handshake", "souls:handshake"),
             content_touch(W_HUG, "hug", "souls:hug"),
             content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
@@ -737,6 +757,7 @@ impl Run {
                             NOD,
                             WAVE,
                             INTRO,
+                            DANCE_NEAR,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
@@ -2140,5 +2161,29 @@ fn greetings_play_each_members_aimed_move_once_then_end() {
             "{kind}: it ends after the moves' last phase ({last} µs): {left:?}"
         );
     }
+    run.stop();
+}
+
+/// Trial of 25 Nov: a dance accepted by a Soul 80 m off, playing the piano, counted it as dancing where it stood. An
+/// accept from farther than twice its role's `within` of the asker (2.6 m here, the role 1 m from the middle) is refused
+/// `together.too-far` and nothing starts; one from 0.6 m is accepted and both dance.
+#[test]
+fn trial_a_far_member_is_refused_a_dance_until_it_walks_over() {
+    let run = serve("dance-far");
+    let mut c: Vec<Client> = (1..=3).map(|n| run.client(n)).collect();
+    let far = run.created(&c[0].offer(DANCE_NEAR, 3).expect("offered"));
+    let r = c[2]
+        .act("activity:accept", Some(far), &[])
+        .expect_err("2.6 m off");
+    println!("trial: from 2.6 m: {r}");
+    assert!(r.contains("together.too-far"), "{r}");
+    assert!(run.starts(far).is_empty(), "nobody dances");
+    c[0].act("activity:leave", Some(far), &[]).expect("withdrawn");
+    let near = run.created(&c[0].offer(DANCE_NEAR, 2).expect("offered"));
+    c[1].act("activity:accept", Some(near), &[])
+        .expect("from 0.6 m");
+    std::thread::sleep(Duration::from_millis(2_500));
+    let members: BTreeSet<Id> = run.starts(near).iter().map(|s| s.0).collect();
+    assert_eq!(members, [soul(1), soul(2)].into_iter().collect(), "both dance");
     run.stop();
 }

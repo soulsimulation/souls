@@ -681,7 +681,38 @@ impl Engine {
                 // 0.134 T1: a touch starts only where its moves reach, read from the places the two will take when
                 // it starts (0.135 G3), so two who walked up to each other touch: each steps to its place no farther
                 // than the move reaches, and two farther apart are refused here, before anyone moves.
-                // A dance (T3) touches nobody: its moves are at each member's own body.
+                // A dance (T3) touches nobody: its moves are at each member's own body. But its members take their
+                // places together, within their role's `within` of the places' middle (0.135 G3), and one farther off
+                // is left where it is: one who accepts from farther than twice that from the asker, or from another
+                // floor (a seat), would be counted dancing while it stood 80 m off at a piano (trial of 25 Nov). It is
+                // refused here, before anyone moves; it walks over and accepts again.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| k.beat)
+                    && let Some(within) = e
+                        .offered_roles(offer)
+                        .and_then(|[_, other]| kind.role(other))
+                        .and_then(|r| r.within)
+                {
+                    let at = |b: Id| c.body(b).map(sim::index::place_of);
+                    let apart = match (at(asker), at(a.body)) {
+                        (Some((n0, p0)), Some((n1, p1))) if n0 == n1 => {
+                            let (dx, dz) = (i128::from(p1[0] - p0[0]), i128::from(p1[1] - p0[1]));
+                            Some((dx * dx + dz * dz).isqrt())
+                        }
+                        _ => None,
+                    };
+                    let most = i128::from(within) * 2;
+                    if apart.is_none_or(|d| d > most) {
+                        return Err(refusal(
+                            "together.too-far",
+                            format!(
+                                "{}: {} from {}, its places are within {most} µm of each other: stand and walk over first",
+                                plain(kind.name.as_str()),
+                                apart.map_or("not on one floor".into(), |d| format!("{d} µm")),
+                                show(asker),
+                            ),
+                        ));
+                    }
+                }
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let mut feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
                     let pair = [asker, a.body];
