@@ -1224,6 +1224,7 @@ fn e5_transfer(at: usize, form: &str, args: &[(&str, u64)]) -> Result<Vec<E5Set>
         node: id(100 + at as u64),
         reserved: &reserved,
         now: 0,
+        stocks: &crate::forms::Stocks::new(),
     }
     .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
     .map_err(|r| r.name)?;
@@ -1295,6 +1296,7 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amoun
         node: linen,
         reserved: &reserved,
         now: 0,
+        stocks: &crate::forms::Stocks::new(),
     }
     .entries(&mut Minter::new(Scope([0xe5; 16])), &effects[0])
     .expect("the transfer is not refused");
@@ -1405,4 +1407,91 @@ fn e5_a_transfer_of_a_field_the_acting_kind_does_not_declare_moves_between_its_a
             (id(102), 2, Value::Uint(10), Some(10))
         ])
     );
+}
+
+/// #4837: a make of a stock's kind at a stocked container carries the row at the top of its pile (the container's
+/// count field never written: its pile's start), into the made thing's fields; the same make at a container with no
+/// stock, or of another kind, carries nothing. Twice over the same tree, the same fields: nothing is drawn.
+#[test]
+fn a_make_at_a_stocked_container_carries_the_top_row_of_its_pile() {
+    use std::sync::Arc;
+    let world = "{1: [], 2: {}, 3: [{1: 1, 2: \"e5:ground\"}, {1: 100, 2: \"e5:linen\", 3: 1}, \
+                 {1: 101, 2: \"e5:linen\", 3: 1}], 4: []}";
+    let linen_k = {
+        let mut v = parse(E5_KINDS[0]).expect("JSON");
+        if let json::Value::Obj(o) = &mut v {
+            o.retain(|(k, _)| k != "forms");
+        }
+        entry_to_kind(&v.to_json()).expect("numbered")
+    };
+    let kinds_diag = format!(
+        "{{1: \"e5:ground\", 2: \"place\", 11: [\"thing\"]}}\n{}",
+        linen_k.trim()
+    );
+    let (tree, _) = Tree::load(
+        &parse_world(&parse_kinds(&kinds_diag).expect("kinds"), world).expect("a world"),
+    )
+    .expect("loads");
+    let row = |r: u64| BTreeMap::from([(29, Value::Uint(r)), (30, Value::Uint(100 + r))]);
+    let stocks = crate::forms::Stocks::from([(
+        id(100),
+        crate::forms::Stocked {
+            kind: "t:book".into(),
+            count: 2,
+            start: 3,
+            offset: 4,
+            pool: Arc::new((0..10).map(row).collect()),
+        },
+    )]);
+    let limits = super::amounts::Limits::default();
+    let made = |node: Id, kind: &str| {
+        let reserved: Vec<Id> = Vec::new();
+        let out = super::amounts::Cx {
+            view: View {
+                tree: &tree,
+                out: &[],
+            },
+            limits: &limits,
+            header: None,
+            body: id(2),
+            soul: id(2),
+            hands: &[1],
+            node,
+            reserved: &reserved,
+            now: 0,
+            stocks: &stocks,
+        }
+        .entries(
+            &mut Minter::new(Scope([0x48; 16])),
+            &skills::form_runner::Effect::Make {
+                kind: replica::encode::Name::new(kind).expect("a name"),
+                into: skills::form_runner::Place::Hand,
+            },
+        )
+        .expect("made");
+        out.into_iter()
+            .flat_map(|(_, _, body)| match body {
+                Body::Changes(cs) => cs,
+                _ => Vec::new(),
+            })
+            .find_map(|c| match c.change {
+                Change::Create { fields, .. } => Some(fields),
+                _ => None,
+            })
+            .expect("a create")
+    };
+    // The pile's start is 3: its top is row 3 - 1 of the pile, the pool's row 4 + 2.
+    assert_eq!(made(id(100), "t:book"), row(6));
+    assert_eq!(
+        made(id(100), "t:book@1220ab"),
+        row(6),
+        "pinned, the same kind"
+    );
+    assert_eq!(
+        made(id(100), "t:book"),
+        made(id(100), "t:book"),
+        "drawn by nothing"
+    );
+    assert!(made(id(101), "t:book").is_empty(), "no stock there");
+    assert!(made(id(100), "t:mug").is_empty(), "not the stock's kind");
 }
