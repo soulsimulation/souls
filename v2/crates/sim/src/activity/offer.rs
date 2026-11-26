@@ -531,7 +531,7 @@ impl Activities {
             .collect();
         let driver = match l.node.state {
             State::Started => {
-                if let Some(other) = self.holding.get(&body) {
+                if let Some(other) = self.holds_of(&o.kind).get(&body) {
                     return refuse(
                         "body-in-activity",
                         format!("{} is held by {}", show(body), show(*other)),
@@ -580,7 +580,7 @@ impl Activities {
             l.node = node;
             if let Some(d) = driver {
                 l.drivers.insert(body, d);
-                self.holding.insert(body, offer);
+                self.hold(&o.kind, body, offer);
             }
         }
         // 0.135 G3: one who joins a started activity takes its place too.

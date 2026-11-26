@@ -363,33 +363,39 @@ async function accountPost(place: MailboxPlace, path: string, body: Record<strin
     body: JSON.stringify(name ? { ...body, test_person: name } : body), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
 }
 
-/** The signed-in POST `retireByDirectory` sends: its status and JSON body (null when no one is signed in). */
+/** The signed-in POST `byDirectory` sends: its status and JSON body (null when no one is signed in). */
 export type AccountCall = (path: string, body: Record<string, unknown>) => Promise<{ status: number; body: unknown } | null>;
-/** 0.137: retires for good the person's Soul `soulId` (the page's id) on a world the new engine runs. The old route
- *  (`DELETE /v1/souls/:id`) is the old process's, which a moved world answers 409 `world.new-engine`: the directory
- *  retires it instead (route.rs `/v1/account/souls/retire`, signed in, `confirm: true`), which takes its token from
- *  the gateway and tells the world, whose body leaves by K10's one path (worldd directory.rs). Its grant is found in
- *  the person's own list; a Soul not on it is not retired. */
-export async function retireByDirectory(soulId: string, call: AccountCall, soulIdOf: (grant: string) => string): Promise<boolean> {
+/** What the owner's Soul card does through the directory on a world the new engine runs (route.rs, signed in):
+ *  `retire` it for good (`confirm: true`), `revoke` its agent (Disconnect) or `keep` it (clears its agent's ask). */
+export type DirectoryAct = 'retire' | 'revoke' | 'keep';
+/** 0.137: does `act` for the person's Soul `soulId` (the page's id) on a world the new engine runs. The old routes
+ *  (`DELETE /v1/souls/:id`, `/v1/souls/:id/revoke`) are the old process's, which a moved world answers 409
+ *  `world.new-engine`: the directory does it instead (`/v1/account/souls/<act>`). A retire takes its token from the
+ *  gateway and tells the world, whose body leaves by K10's one path (worldd directory.rs); a revoke takes only its
+ *  token; a keep clears its agent's ask, so the agent's `retire wait` hears the owner kept it. Its grant is found in
+ *  the person's own list; a Soul not on it is left alone. */
+export async function byDirectory(act: DirectoryAct, soulId: string, call: AccountCall, soulIdOf: (grant: string) => string): Promise<boolean> {
   const listed = await call('/v1/account/souls', {});
   const rows = (listed?.body as { souls?: unknown } | null)?.souls;
   const grant = Array.isArray(rows) ? rows.find((r) => r && typeof r.soul === 'string' && soulIdOf(r.soul) === soulId)?.soul as string | undefined : undefined;
   if (listed?.status !== 200 || !grant) return false;
-  const done = await call('/v1/account/souls/retire', { soul: grant, confirm: true });
+  const done = await call(`/v1/account/souls/${act}`, act === 'retire' ? { soul: grant, confirm: true } : { soul: grant });
   return done?.status === 200 && (done.body as { ok?: unknown } | null)?.ok === true;
 }
-/** `retireByDirectory` from this page, or null on an old-engine world. A retire tells the navbar's list to ask again. */
-export function v2Retire(): ((soulId: string) => Promise<boolean>) | null {
+export const retireByDirectory = (soulId: string, call: AccountCall, soulIdOf: (grant: string) => string) => byDirectory('retire', soulId, call, soulIdOf);
+/** `byDirectory(act)` from this page, or null on an old-engine world. Each tells the navbar's list to ask again. */
+export function v2Act(act: DirectoryAct): ((soulId: string) => Promise<boolean>) | null {
   const place = typeof window !== 'undefined' && PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
   if (!place) return null;
   return async (soulId) => {
     const { soulIdOf } = await import('./bridge.ts');
     const call: AccountCall = async (path, body) => { const r = await accountPost(place, path, body); return r ? { status: r.status, body: await r.json().catch(() => null) } : null; };
-    const ok = await retireByDirectory(soulId, call, soulIdOf);
+    const ok = await byDirectory(act, soulId, call, soulIdOf);
     if (ok) window.dispatchEvent(new Event(OWNED_CHANGED_EVENT));
     return ok;
   };
 }
+export const v2Retire = () => v2Act('retire');
 
 /** First day (25 Nov): the signed-in person's Souls on this v2 world, named, whether or not their body is here yet (the
  *  navbar's "your Souls"); asked again when this page approves one. Empty on an old-engine world or signed out. */

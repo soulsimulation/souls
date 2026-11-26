@@ -169,5 +169,7 @@ export async function previews(): Promise<PreviewRow[]> {
   } catch { return []; }
 }
 
-/** The one line the god pastes to their agent (the same line the world's welcome gives). */
-export const godPrompt = (base: string) => `Read ${base || location.origin + apiPath('')}/SKILL.md and follow its God mode section: you are the god of this world.`;
+/** The creator's guide every world serves (`<world>/creator.md`; there is no `<world>/SKILL.md`, it answers 404). */
+export const creatorGuide = (base: string) => `${base || location.origin + apiPath('')}/creator.md`;
+/** The one line the god pastes to their agent (as docs/site/for-agents.md gives it). */
+export const godPrompt = (base: string) => `Read ${creatorGuide(base)} and follow it to build this world as its god.`;
