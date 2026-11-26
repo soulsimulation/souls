@@ -77,9 +77,10 @@ export async function atomic(path, value, mode = 0o640) {
 }
 export async function command(program, args, env = process.env) {
   const child = spawn(program, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.resume(); child.stderr.resume();
+  // The last 600 bytes of its error output go into the refusal, so the journal says why a placement stopped.
+  child.stdout.resume(); let tail = ''; child.stderr.on('data', chunk => { tail = (tail + chunk).slice(-600); });
   const timer = setTimeout(() => child.kill('SIGTERM'), 240_000);
-  try { await new Promise((yes, no) => { child.once('error', no); child.once('exit', code => code === 0 ? yes() : no(Error('placement-command-failed'))); }); }
+  try { await new Promise((yes, no) => { child.once('error', no); child.once('exit', code => code === 0 ? yes() : no(Error(`placement-command-failed: ${program.split('/').pop()} ${args.slice(0, 2).join(' ')} | ${tail.replace(/\s+/g, ' ')}`))); }); }
   finally { clearTimeout(timer); }
 }
 const pause = ms => new Promise(yes => setTimeout(yes, ms));
@@ -273,7 +274,7 @@ export async function drain(config) {
       if (!(await lstat(kept)).isFile() || !REQUEST.test(request)) fail('placement-request-invalid');
       const { archiveRequest } = await import('./archive-world.mjs');
       if (!await archiveRequest(config, request)) await placeRequest(config, request);
-    } catch { console.error('placement: request refused; retained identity-bound status and world data'); }
+    } catch (error) { console.error(`placement: request refused (${error?.message ?? error}); retained identity-bound status and world data`); }
   }
 }
 

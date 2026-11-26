@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir } from 'node:
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { placeRequest, drain, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed } from './place-created-world.mjs';
+import { placeRequest, drain, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed, command } from './place-created-world.mjs';
 
 // Canonical T0 fixture data, independent of the initializer's decoder. Actual native proof uses Rust's real records.
 const cbor = value => {
@@ -215,8 +215,21 @@ test('as its own entry, a drain imports the archive path, refuses a request it c
     const run = spawnSync(process.execPath,['--import',preload,join(import.meta.dirname,'place-created-world.mjs')],{encoding:'utf8',timeout:60_000});
     assert.notEqual(run.status,13,`unsettled top-level await: ${run.stderr}`);
     assert.doesNotMatch(run.stderr,/unsettled top-level await/i);
-    assert.match(run.stderr,/placement: request refused/,'the drain reached the request and refused it');
+    assert.match(run.stderr,/placement: request refused \(\S[^)]*\)/,'the drain reached the request and refused it, naming why');
     assert.deepEqual(await readdir(join(placement,'requests')),[],'the inbox is drained');
     assert.equal((await readdir(join(placement,'attempts'))).length,1,'the request is kept aside');
   } finally { await rm(dir,{recursive:true,force:true}); }
+});
+
+// Every refusal used to read only "request refused" (Mars Lab's first create, 26 Nov): a failing command now names
+// itself and the last 600 bytes of its error output, and the drain logs that reason.
+test('a failing placement command names itself and the end of its error output', async () => {
+  await assert.rejects(command('/bin/sh',['-c',"printf '%0700d' 0 >&2; echo ' mkdir: Permission denied' >&2; exit 3"]),(error) => {
+    const [head, tail] = error.message.split(' | ');
+    assert.equal(head,"placement-command-failed: sh -c printf '%0700d' 0 >&2; echo ' mkdir: Permission denied' >&2; exit 3");
+    assert.match(tail,/^0+ mkdir: Permission denied $/);
+    assert.ok(tail.length <= 600,`${tail.length} bytes`);
+    return true;
+  });
+  await command('/bin/sh',['-c','echo fine >&2']);
 });
