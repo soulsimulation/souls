@@ -7,10 +7,12 @@ import {deflateSync} from 'node:zlib';
 import {createRig} from '../../../../mars/viewer/app/engine-view/people.ts';
 import type {HumanoidKit} from './compose.ts';
 import {resolveLook} from './look.ts';
+import {portraitTint} from '../SoulAvatars.ts';
 
 export const PORTRAIT_SIZE = 256;
 // A change to framing or light here must bump AUTO_PORTRAIT_STYLE (apps/server/src/portrait/auto-portraits.ts) so stored portraits redraw.
-const BG_TOP = [0.86, 0.84, 0.78], BG_BOTTOM = [0.68, 0.66, 0.6]; // linear
+// The background is the Soul's own pale tint (portraitTint, the same one the page's avatars use), a little darker at the foot.
+const linear = (hex: string) => [0, 2, 4].map(i => { const c = parseInt(hex.slice(1 + i, 3 + i), 16) / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
 const KEY = new THREE.Vector3(0.75, 0.55, -0.35).normalize(), FILL = new THREE.Vector3(0.6, 0.1, 0.8).normalize();
 
 const srgb = (v: number) => { const c = Math.min(1, Math.max(0, v)); return Math.round(255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055)); };
@@ -65,17 +67,19 @@ function trianglesOf(mesh: THREE.SkinnedMesh, out: Tri[], camera: THREE.Vector3,
 }
 
 /** A straight-on head-and-shoulders portrait of the look as an 8-bit RGB PNG (PORTRAIT_SIZE square). */
-export async function humanoidPortraitPNG(kit: HumanoidKit, params: unknown, size = PORTRAIT_SIZE, view: 'portrait' | 'full' | 'side' = 'portrait'): Promise<Uint8Array> {
+/** `soulId` picks the background tint (portraitTint); without one the background is the first tint. */
+export async function humanoidPortraitPNG(kit: HumanoidKit, params: unknown, size = PORTRAIT_SIZE, view: 'portrait' | 'full' | 'side' = 'portrait', soulId = ''): Promise<Uint8Array> {
   const look = resolveLook(params), template = await kit.template(look), rig = createRig(template);
   rig.mixer.update(0.01); rig.holder.updateMatrixWorld(true);
   const meshes: THREE.SkinnedMesh[] = []; rig.model.traverse(o => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh); });
   const headBone = rig.model.getObjectByName('Head'); if (!headBone) throw Error('portrait: rig has no Head bone');
   // The body faces +x (createRig). Frame from the skull, not from hair or hats (a mohawk or a tall hat may be cropped,
   // as in a real portrait): ks = the rig's world scale (neck→head joint is 0.0767 m in kit space), the skull top 0.24 m and
-  // the eyes 0.11 m above the head joint (kit landmarks), the eye line ~37 % from the top so a round avatar crop keeps the face.
+  // the eyes 0.11 m above the head joint (kit landmarks). #5039: head and the top of the shoulders, 0.44 m tall, the skull
+  // top 0.06 m under the frame's top, so the head fills ~60 % of it and the eyes sit just above a round crop's middle.
   const neckBone = rig.model.getObjectByName('Neck'), hp = headBone.getWorldPosition(new THREE.Vector3());
   const ks = (neckBone ? Math.max(0.5, Math.min(2, (hp.y - neckBone.getWorldPosition(new THREE.Vector3()).y) / 0.07673)) : 1) * look.headSize;
-  const span = 0.62 * ks, skull = hp.y + 0.24 * ks, cy = skull + 0.16 * span - span / 2, cz = hp.z;
+  const span = 0.44 * ks, skull = hp.y + 0.24 * ks, cy = skull + 0.06 * ks - span / 2, cz = hp.z;
   const pattern = (meshes[0]?.material as THREE.Material | undefined)?.userData.humanoid.pattern.value as number ?? 0, tris: Tri[] = [];
   const fov = 16 * Math.PI / 180, tanH = Math.tan(fov / 2);
   // 'full' and 'side' (whole body, for checking outfits and body shape) frame 2.1 m around the body's middle
@@ -84,7 +88,8 @@ export async function humanoidPortraitPNG(kit: HumanoidKit, params: unknown, siz
   const cam = view === 'side' ? new THREE.Vector3(hp.x, viewY, cz + dist) : new THREE.Vector3(hp.x + dist, viewY, cz);
   for (const mesh of meshes) trianglesOf(mesh, tris, cam, pattern);
   const S = size * 2, depth = new Float32Array(S * S).fill(Infinity), rgb = new Float32Array(S * S * 3);
-  for (let y = 0; y < S; y++) { const f = y / (S - 1); for (let x = 0; x < S; x++) for (let k = 0; k < 3; k++) rgb[(y * S + x) * 3 + k] = BG_TOP[k] * (1 - f) + BG_BOTTOM[k] * f; }
+  const bg = linear(portraitTint(soulId));
+  for (let y = 0; y < S; y++) { const f = 1 - 0.18 * y / (S - 1); for (let x = 0; x < S; x++) for (let k = 0; k < 3; k++) rgb[(y * S + x) * 3 + k] = bg[k] * f; }
   const sx = new Float64Array(3), sy = new Float64Array(3), sz = new Float64Array(3);
   for (const t of tris) {
     let behind = false;

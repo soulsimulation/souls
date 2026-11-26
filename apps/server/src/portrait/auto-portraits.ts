@@ -13,7 +13,7 @@ import {LOOK_MODEL} from '../../../web/src/humanoid/look.ts';
 import type {WorldHost} from '../world.ts';
 
 /** Bumped when the renderer's framing or light changes (apps/web/src/humanoid/portrait.ts), so portraits are redrawn. */
-export const AUTO_PORTRAIT_STYLE='portrait-cpu/1';
+export const AUTO_PORTRAIT_STYLE='portrait-cpu/2';
 const WORKER=fileURLToPath(new URL('./render-worker.mjs',import.meta.url));
 const KIT=fileURLToPath(new URL('../../../../mars/viewer/public/modular/humanoid/kit.json',import.meta.url));
 export type AutoPortraitPhoto={hash:string;mime:'image/png';width:number;height:number;bytes:number};
@@ -69,7 +69,7 @@ export class AutoPortraits{
    while(this.queue.size){
     const [soulId,j]=this.queue.entries().next().value as [string,Job];this.queue.delete(soulId);
     let r:{ok:boolean;png?:string;error?:string};
-    try{r=await this.render(j.look);}catch(e){r={ok:false,error:e instanceof Error?e.message:String(e)};}
+    try{r=await this.render(soulId,j.look);}catch(e){r={ok:false,error:e instanceof Error?e.message:String(e)};}
     if(this.disposed||!this.host.db.db.isOpen)return;
     const now=this.job(soulId);if(!now||now.key!==j.key){if(now)this.queue.set(soulId,now);continue;} // the look changed meanwhile
     if(!r.ok||!r.png){this.failed.set(soulId,j.key);console.warn('[portrait] render failed',soulId,(r.error??'').slice(0,200));continue;}
@@ -97,13 +97,13 @@ export class AutoPortraits{
   });
   this.ready.catch(()=>{});return this.ready;
  }
- private async render(look:unknown){
+ private async render(soulId:string,look:unknown){
   if(this.idle)clearTimeout(this.idle);
   if(!this.child||!this.ready)await this.start();else await this.ready;
   const id='p'+(++this.seq);
   return new Promise<{ok:boolean;png?:string;error?:string}>(resolve=>{
    const t=setTimeout(()=>{this.pending.delete(id);resolve({ok:false,error:'render timeout'});},30000);t.unref();
-   this.pending.set(id,r=>{clearTimeout(t);resolve(r);});this.child!.stdin.write(JSON.stringify({id,look})+'\n');
+   this.pending.set(id,r=>{clearTimeout(t);resolve(r);});this.child!.stdin.write(JSON.stringify({id,soulId,look})+'\n');
   });
  }
  dispose(){this.disposed=true;if(this.timer)clearInterval(this.timer);if(this.first)clearTimeout(this.first);if(this.idle)clearTimeout(this.idle);this.queue.clear();this.stopWorker();}
