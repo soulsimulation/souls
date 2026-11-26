@@ -67,6 +67,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
+| 24 | `building` | A building kind's rooms, as a template's building of it has them at its def's defaults (written by `v2/tools/import-eden/export/buildings.ts`, never by hand): its walls (`solids`), `slots`, `floors`, `rooms` (each name a key of the text table), `openings` (doorways and windows), `stairs` and `doors`, in its frame, mm and millidegrees. A place of the kind gets them in the same edit (`worldd`'s `with_buildings`, #5006) |
 
 A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
 thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
