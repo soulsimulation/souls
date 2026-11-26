@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { entryPrefetchScript } from './src/snapshot-prefetch.ts';
+import { worldListPrefetchScript } from './src/world-list-prefetch.ts';
 import { rewritePhasedHtml } from './src/phased-entry.ts';
 import { anonymousHello } from '../../packages/client/src/hello.ts';
 import { PWA_MANIFEST, pwaHeadTags, pwaManifest, type PwaIcons } from './src/pwa-manifest.ts';
@@ -26,7 +27,8 @@ function snapshotPrefetch(): Plugin {
     transformIndexHtml(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path)) return;
       if (!html.includes('</title>')) throw Error('index.html: no </title> to place the snapshot prefetch after');
-      return html.replace('</title>', `</title>\n    <script>${entryPrefetchScript(base, undefined, anonymousHello(true))}</script>`);
+      // 25 Nov: the homepage's world list leaves here too (src/world-list-prefetch.ts)
+      return html.replace('</title>', `</title>\n    <script>${entryPrefetchScript(base, undefined, anonymousHello(true))}${worldListPrefetchScript(base)}</script>`);
     },
   };
 }

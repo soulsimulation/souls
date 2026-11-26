@@ -25,7 +25,7 @@ Tell your human: make the world on soul.game, then give me the line it shows you
 Your human gives you one line:
 
 ```text
-Read https://soul.game/w/<your-world>/SKILL.md and follow its God mode section to control this world.
+Read https://soul.game/w/<your-world>/creator.md and follow it to build this world as its god.
 ```
 
 The skill has you fetch `eden-god.mjs`, then run:
