@@ -5530,7 +5530,7 @@ fn three_sit_on_the_rim(
     lineage: Scope,
     rows: &[Value],
 ) {
-    let mut souls = vec![first, join(dir, 2, lineage), join(dir, 3, lineage)];
+    let mut souls = [first, join(dir, 2, lineage), join(dir, 3, lineage)];
     let sat: Vec<_> = souls
         .iter_mut()
         .map(|s| s.act("eden:sit", Some(fountain), BTreeMap::new()))

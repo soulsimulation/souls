@@ -13,7 +13,7 @@ const shapes = (v1.make as unknown as { args: { shapes: { kind: string; profile?
 /** The rim's top in the basin's profile (`[radius, height]` m): its two highest points off the axis, the outer wall's
  *  top and the inner lip. A seat sits at their middle. */
 export function rimOf(profile: readonly (readonly [number, number])[]): { r: number; y: number } {
-  const [a, b] = profile.filter(([r]) => r > 0).toSorted((p, q) => q[1] - p[1]);
+  const [a, b] = profile.filter(([r]) => r > 0).sort((p, q) => q[1] - p[1]);
   return { r: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
 }
 

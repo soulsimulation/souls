@@ -9,7 +9,7 @@ import { WorldModel } from '../../model.ts';
 test('fountain@2 seats six on its rim at the rim\'s height, facing out; @1 keeps its bytes', () => {
   const library = coreLibrary(), old = library.get('core/fountain@1')!, next = library.get('core/fountain@2')!;
   const v1 = civic.find((d) => d.name === 'core-fountain')!;
-  assert.deepEqual(old.slots.map((s) => s.id), v1.slots.map((s) => s.id), '@1 unchanged');
+  assert.deepEqual(old.slots.map((s) => s.id), (v1.slots ?? []).map((s) => s.id), '@1 unchanged');
   assert.equal(old.hash, '840a6f717bc7d33a0f114a4e9af6f24a8ab656b9fc094ae5820219c65cd25402', '@1 keeps its bytes');
   const m = new WorldModel({ constants: { ground: 'land' }, seed: 'fountain' }); m.library = library;
   assert.equal(next.hash, m.defineDef(FOUNTAIN_2, 'core', 0).hash);
