@@ -304,7 +304,9 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             d => d,
         };
         let building_name = name_of(b);
-        if moved || (kind.starts_with("core-floor-lamp") && TOWERS.contains(&building_name.as_str())) {
+        if moved
+            || (kind.starts_with("core-floor-lamp") && TOWERS.contains(&building_name.as_str()))
+        {
             fixed_4083.push((format!("{} in {building_name}", name_of(id)), foot, walk));
         }
         if moved {
@@ -440,7 +442,10 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         shut.len()
     );
     assert_eq!(open.len(), 34 + 35, "Eden's tower lamps and terrace things");
-    assert!(lost_4083.is_empty(), "every tower lamp and terrace thing is reached");
+    assert!(
+        lost_4083.is_empty(),
+        "every tower lamp and terrace thing is reached"
+    );
 
     // A target the walk does not reach answers at once: no route search per place round it (#4072's review: about
     // 1 s per call before, on the planner thread every walker waits on).
