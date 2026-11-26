@@ -921,6 +921,14 @@ fn first_day_the_world_page_lists_pending_requests_from_its_address() {
     let approve = json!({"test_person": "Ada", "code": asked["code"], "confirm": true}).to_string();
     let (s4, _, _) = request(&addr, "POST", "/v1/pair/approve", None, &approve);
     assert_eq!(s4, 200);
+    // first day, 26 Nov: the owner's list (the navbar, the Soul card) has the asked-for name at once
+    let mine = json!({"test_person": "Ada"}).to_string();
+    let (s5, _, souls) = request(&addr, "POST", "/v1/account/souls", None, &mine);
+    assert_eq!(
+        (s5, &souls["souls"][0]["name"]),
+        (200, &json!("Fern")),
+        "{souls}"
+    );
     let (_, _, after) = request(&addr, "POST", "/v1/pair/waiting", None, &waiting);
     assert_eq!(
         after["waiting"],
