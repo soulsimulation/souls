@@ -397,3 +397,46 @@ test('rollback refuses a build from before #4954 for a world on a store generati
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${fresh} ${to} --from ${from}`]);
 });
+
+test('move: a world whose rehearsal fails keeps its build and the other worlds move; the canary\'s, or any later failure, stops the move', () => {
+  const m = join(dir, 'kept'), data = join(m, 'data'), root = join(data, 'worlds'), rel = join(data, 'releases', sha);
+  const log = join(m, 'log');
+  const hash = (c) => `1220${c.repeat(64)}`;
+  mkdirSync(join(rel, 'moved'), { recursive: true });
+  writeFileSync(join(rel, 'manifest.json'), `{"commit":"${sha}","version":"0.143.1","files":[]}\n`
+    + ['worldd', 'gatewayd', 'page.tar', 'client.tar'].map((n, i) => `{"name":"${n}","hash":"${hash(String(i + 1))}","bytes":1}\n`).join(''));
+  // Stand-in deploy: as `deploy` ends (its last line), by the world's FAIL_<world> setting: a failed rehearsal, a
+  // rollback after a canary fault, or kept.
+  exe(join(rel, 'bin/deploy'), [
+    `echo "$1" >> ${log}`,
+    'case $(eval echo "\\${FAIL_$1:-}") in',
+    '  rehearsal) echo "  120466 ms  rehearsal failed: rehearsal.no-start: x"; echo "NotDeployed { why: \\"rehearsal.no-start: the build did not serve the scratch copy\\" }"; exit 1 ;;',
+    '  canary) echo "RolledBack { fault: \\"canary.unanswered\\" }"; exit 1 ;;',
+    'esac',
+    'echo Kept',
+  ].join('\n'));
+  for (const w of ['a', 'b', 'c']) mkdirSync(join(root, 'worlds', w), { recursive: true });
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: root, RELEASE_ETC: join(m, 'etc'), RELEASE_LIB: join(m, 'lib') };
+  const deployed = () => { const l = readFileSync(log, 'utf8').trim().split('\n'); rmSync(log); return l; };
+  const moved = (w) => existsSync(join(rel, 'moved', w));
+
+  // The canary's failed rehearsal stops the move: no other world is deployed.
+  const canary = run(['move', sha, 'a'], { ...env, FAIL_a: 'rehearsal' });
+  assert.equal(canary.status, 3, canary.stdout + canary.stderr);
+  assert.match(canary.stdout, /refused: release\.deploy-failed: a \(worlds after it keep their build/);
+  assert.deepEqual(deployed(), ['a']);
+
+  // b's rehearsal fails: it keeps its build and is named, c moves, and nothing after the worlds moves.
+  const kept = run(['move', sha, 'a'], { ...env, FAIL_b: 'rehearsal' });
+  assert.equal(kept.status, 3, kept.stdout + kept.stderr);
+  assert.match(kept.stdout, /move: b keeps its build: its rehearsal failed; the other worlds move/);
+  assert.match(kept.stdout, /refused: release\.deploy-failed: b kept their build \(rehearsal failed\); every other world moved$/m);
+  assert.deepEqual(deployed(), ['a', 'b', 'c']);
+  assert.deepEqual(['a', 'b', 'c', 'gateway'].map(moved), [true, false, true, false]);
+
+  // A fault after b's pin (rolled back) stops the move as before; a rerun deploys only b.
+  const fault = run(['move', sha, 'a'], { ...env, FAIL_b: 'canary' });
+  assert.equal(fault.status, 3, fault.stdout + fault.stderr);
+  assert.match(fault.stdout, /refused: release\.deploy-failed: b \(worlds after it keep their build/);
+  assert.deepEqual(deployed(), ['b']);
+});

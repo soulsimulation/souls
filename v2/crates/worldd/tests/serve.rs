@@ -3224,8 +3224,8 @@ fn rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over() {
 /// `worldd fork --template`), and a fork is served from its `boot` and its checkpoint, never from an import's part. The
 /// deploy's scratch copy carried neither, so the new build exited at start (`<scratch>: No such file or directory`),
 /// the rehearsal refused `rehearsal.no-start` and the release stopped there. Here such a world, served once, is
-/// rehearsed as a release's deploy rehearses it (its last 200 records, the operator probe) and served again, as the
-/// deploy's restart serves it.
+/// rehearsed as a release's deploy rehearses it (its last 200 records) and served again, as the deploy's restart
+/// serves it.
 #[test]
 fn a_world_made_from_a_template_is_rehearsed_and_served_again_as_a_deploy_moves_it() {
     let d = scratch("fk");
@@ -3314,8 +3314,9 @@ fn a_world_made_from_a_template_is_rehearsed_and_served_again_as_a_deploy_moves_
         answer_within: Duration::from_secs(5),
         every: Duration::from_millis(50),
     };
-    let mut probe =
-        supervisor::deploy::Probe::operator(&d.join("w.probe")).expect("the operator probe");
+    // The root-sync probe: a release's operator probe is born at the world's entry, and this world's one ground tile
+    // has no surface there (`birth-off-surface`).
+    let mut probe = supervisor::deploy::Probe::Ask(0);
     let r = supervisor::deploy::rehearse(
         Path::new(env!("CARGO_BIN_EXE_worldd")),
         &dir,

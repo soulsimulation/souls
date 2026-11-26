@@ -84,7 +84,10 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    Then `mailbox check`: one owner's message, for a grant no Soul holds (nothing reads it; it expires unread), sent
    through each world's gateway with a view token minted from the install's view key, must be accepted; any refusal
    (`no-mailbox`, `not-taken`, unreachable) stops the release with `release.mailbox-unreachable`.
-   A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
+   A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. The one exception
+   is a world other than the canary whose rehearsal failed (`NotDeployed { why: "rehearsal.…" }`: never pinned or
+   restarted): it keeps its build, is named, and the other worlds move; the move then stops with
+   `release.deploy-failed: <worlds> kept their build` before the gateway, and a rerun deploys only those. Each world's probe
    enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
    so a release never drives a user's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
