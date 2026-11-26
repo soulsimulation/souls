@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Corrects rack-bay test placement to metres and refreshes both carriers' copies before they name a newly placed frame.
+Refreshes both rack-bay test carriers' copies before either names a newly placed frame.
