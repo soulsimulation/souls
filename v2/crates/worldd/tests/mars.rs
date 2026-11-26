@@ -401,3 +401,98 @@ fn w10_a_walk_and_a_take_100_m_away_cross_the_ground_between() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The kitchen, its raised floor (530 mm up, the working kitchen and the dining hall) reached by an outside stair, and
+/// the dining hall's four bus seats, today's ids on the Mars template (W12, #4088).
+const KITCHEN: &str = "e_2333a04e";
+const BUS_SEATS: [&str; 4] = ["e_59043a4e", "e_3d52ac7f", "e_3e97414e", "e_f18eedd0"];
+
+/// W12 (#4088): on the served Mars template a walk to a seat in the dining hall had no answer within 120 s in the
+/// rehearsal of 22 Nov. Here a Soul born at the rehearsal's birth point walks to each bus seat of the dining hall; each
+/// walk's answer, its time and the body's place at each end (from the world's log) are printed. Each answers within
+/// 120 s, and a walk receipted ends on the raised floor.
+// A real process on the real clock: the answers' seconds are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+#[ignore = "needs the Mars template's facts file and a built worldd (see the module doc)"]
+fn w12_a_walk_to_each_dining_hall_seat_ends_with_an_answer() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("MARS_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/mars-two.facts.json"));
+    let im = import_eden::load(&std::fs::read_to_string(&facts).expect("the Mars facts file"))
+        .expect("Mars loads");
+    let raised = im.nodes[&format!("{KITCHEN}/floor-1")];
+    let dir = std::env::temp_dir().join(format!("mars-w12-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(&dir)
+        .args(["--entries", &format!("{root}/content/kinds")])
+        .args(["--souls", "0", "--at", "-6.0,-30.0"])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let mut child = Command::new(worldd)
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+    let mut failed = Vec::new();
+    for (n, seat) in BUS_SEATS.iter().enumerate() {
+        let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+        // The rehearsal's wait: no answer within it fails here (the read times out).
+        s.set_read_timeout(Some(Duration::from_secs(120))).unwrap();
+        let mut soul = Client(
+            s,
+            Id::new(Scope([0xc1; 16]), n as u64 + 1).unwrap(),
+            0,
+            im.nodes["world"].scope(),
+        );
+        let known: Vec<Id> = body_rows(&dir).into_keys().collect();
+        soul.act(JOIN, None).expect("born by the entry");
+        let body = *body_rows(&dir)
+            .keys()
+            .find(|b| !known.contains(b))
+            .expect("the new body");
+        let t0 = std::time::Instant::now();
+        // No answer within the wait (the read times out): named, and the next seat walked.
+        let answer =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| soul.walk(im.nodes[*seat])))
+                .unwrap_or_else(|_| Err("no answer within 120 s".into()));
+        let secs = t0.elapsed().as_secs_f64();
+        let rows = body_rows(&dir);
+        let r = &rows[&body];
+        let ((on0, from), (on1, to)) = (r[0], *r.last().unwrap());
+        println!(
+            "W12 Mars walk to the dining hall's {seat}: {answer:?} in {secs:.1} s; body from {} (on the ground: {}) \
+             to {} (on the raised floor: {}), {} records",
+            metres(from),
+            on0 == im.nodes["ground"],
+            metres(to),
+            on1 == raised,
+            r.len()
+        );
+        if secs >= 120.0 || (answer.is_ok() && on1 != raised) {
+            failed.push(format!(
+                "{seat}: {answer:?} in {secs:.1} s, on the raised floor: {}",
+                on1 == raised
+            ));
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failed.is_empty(), "{failed:#?}");
+}

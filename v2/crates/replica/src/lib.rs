@@ -6,6 +6,7 @@
 
 pub mod activity;
 pub mod apply;
+pub mod arrival;
 pub mod audience;
 pub mod bodies;
 pub mod directory;

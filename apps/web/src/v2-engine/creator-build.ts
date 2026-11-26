@@ -5,11 +5,12 @@
 // answer rules: build safety refuses an edit onto a Soul, and the panel shows the refusal's name.
 import { entityId } from './creator-kinds.ts';
 import { placedOf } from './world-state.ts';
-import type { Op, Spot, Turn } from './creator-socket.ts';
+import type { Asked, IdValue, Op, Spot, Turn } from './creator-socket.ts';
 
 /** A node as the stream reader keeps it (v2/web/src/source/source.ts NodeRec), the fields read here. */
 export type BuildNode = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
-  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; outline?: number[][]; tiles?: unknown[] };
+  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; outline?: number[][]; tiles?: unknown[];
+  placeName?: string | null };
 type Nodes = ReadonlyMap<string, BuildNode>;
 
 let nodesOf: (() => Nodes) | null = null;
@@ -101,6 +102,55 @@ export const removeOp = (id: string): Op => ({ op: 'remove', node: id });
 export function thingOf(nodes: Nodes, entity: string): string | null {
   for (const n of nodes.values()) if (isThing(n) && (n.origin === entity || entityId(n.id) === entity)) return n.id;
   return null;
+}
+
+/** Where new Souls arrive, on the world's root (`replica::arrival::F_ARRIVAL`, #5006): a place's id, or [] for none. */
+export const ARRIVAL = 92;
+
+/** A place Souls can arrive at: an area on the open ground (its outline, mm in the world's frame). */
+export const isPlace = (nodes: Nodes, n: BuildNode) => !!n.parent && !!n.outline?.length && /:ground$/.test(plain(nodes.get(n.parent)?.kind ?? ''));
+
+/** The middle of the box round a place's outline, metres: where new Souls named to it arrive. */
+export function placeMiddle(n: BuildNode): [number, number] | null {
+  const o = n.outline; if (!o?.length) return null;
+  const xs = o.map((p) => p[0]!), zs = o.map((p) => p[1]!);
+  return [(Math.min(...xs) + Math.max(...xs)) / 2000, (Math.min(...zs) + Math.max(...zs)) / 2000];
+}
+
+/** The smallest place whose outline holds `at` ([x, z] metres), or null. */
+export function placeUnder(nodes: Nodes, at: [number, number]): string | null {
+  const [x, z] = [at[0] * 1000, at[1] * 1000];
+  let best: string | null = null, size = Infinity;
+  for (const n of nodes.values()) {
+    if (!isPlace(nodes, n)) continue;
+    const o = n.outline!;
+    let inside = false;
+    for (let i = 0, j = o.length - 1; i < o.length; j = i++) {
+      const [xi, zi] = o[i]!, [xj, zj] = o[j]!;
+      if ((zi! > z) !== (zj! > z) && x < ((xj! - xi!) * (z - zi!)) / (zj! - zi!) + xi!) inside = !inside;
+    }
+    if (!inside) continue;
+    const xs = o.map((p) => p[0]!), zs = o.map((p) => p[1]!);
+    const s = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...zs) - Math.min(...zs));
+    if (s < size) (best = n.id), (size = s);
+  }
+  return best;
+}
+
+/** An id from the stream's text `<scope hex>.<counter>`, as an edit writes it (creator-socket.ts `idOf`). */
+const idValue = (text: string): IdValue => {
+  const [scope = '', counter = '0'] = text.split(/[.-]/);
+  return [Uint8Array.from(scope.match(/../g) ?? [], (x) => parseInt(x, 16)), Number(counter)];
+};
+
+/** The set that has new Souls arrive at place `id`, on the world's root; or why not. */
+export function arrivalSet(nodes: Nodes, id: string): Asked | { why: string } {
+  const n = nodes.get(id);
+  if (!n || !isPlace(nodes, n)) return { why: 'That is not a place on the open ground.' };
+  let root: string | null = null;
+  for (const m of nodes.values()) if (m.parent === null) { root = m.id; break; }
+  if (!root) return { why: 'The world is not loaded yet.' };
+  return { sets: [{ node: root, field: ARRIVAL, value: idValue(id) }] };
 }
 
 /** The thing standing nearest `at` ([x, z] metres), within `radius`, or null. */

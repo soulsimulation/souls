@@ -15,9 +15,11 @@
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
 //! - **Seating parts** (0.135 A2, [`crate::assembly`]): `part:take`, `part:unseat` and `part:put`, the target the crew's
-//!   activity (its two members, the first in front). Take and unseat: 1 the part. Seat: 1 the node it goes in, 2 its
+//!   activity (its members, the first in front). Take and unseat: 1 the part, by at least its kind's carry crew and no
+//!   more than its grips take (`carry-crew-too-small`, `carry-crew-too-large`). Seat: 1 the node it goes in, 2 its
 //!   slot, or 3 a point `[x, y, z]` µm in that node's frame, 4 the parts it joins (ids; by default a bearing part
-//!   joins the bay's standing parts). Their commits go through the walkers' maps, so they are answered then.
+//!   joins the bay's standing parts, a resting one its bearing parts). Their commits go through the walkers' maps, so
+//!   they are answered then.
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
@@ -174,6 +176,12 @@ pub struct Engine {
     found: BTreeMap<Id, (WayAsk, Way)>,
     /// The world's entries by kind ([`Engine::with_loads`]): a seat's slots, which a touch reaches a seated body at.
     entries: Json,
+    /// Each lifted carry whose front has walked (`v2/docs/moving-group.md` rule 3): its front, which leads, and the
+    /// front's latest walk. While the carry lasts its other carriers keep their places from the front, by follow
+    /// orders `crate::answers` keeps ([`Engine::carry_follows`]).
+    led: BTreeMap<Id, (Id, Id)>,
+    /// Why each led carry broke off (its load set down by the world), until [`Engine::led_over`] reads it.
+    broke: BTreeMap<Id, &'static str>,
 }
 
 /// The kind of thing an activity of `kind` is played at (its entry's own, `<entry>_activity`), when its entry in
@@ -479,6 +487,8 @@ impl Engine {
             waiting: BTreeMap::new(),
             found: BTreeMap::new(),
             entries: Json::Null,
+            led: BTreeMap::new(),
+            broke: BTreeMap::new(),
         }
     }
 
@@ -948,6 +958,31 @@ impl Engine {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
                     let part = param_id(&a.params, 1, "take-needs-a-part")?;
+                    // A part is taken by as many as carry it (0.135 C6: its `carry_crew`, else its hold crew) and by no
+                    // more than its grips take (C5): a shade cloth by four to six. Refused before anyone moves.
+                    if let Some(load) = tree
+                        .handle(part)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| self.loads.get(plain(n.kind().as_str())).copied())
+                    {
+                        let n = members.len();
+                        if (n as u64) < load.crew {
+                            return Err(refusal(
+                                "carry-crew-too-small",
+                                format!("{n} taking {}; it takes {}", show(part), load.crew),
+                            ));
+                        }
+                        if n > load.most() {
+                            return Err(refusal(
+                                "carry-crew-too-large",
+                                format!(
+                                    "{n} taking {}; its grips take {}",
+                                    show(part),
+                                    load.most()
+                                ),
+                            ));
+                        }
+                    }
                     let (at, turn) = asm.take(
                         &mut tree,
                         &self.activities,
@@ -1219,6 +1254,14 @@ impl Engine {
             "souls:partner-left",
             Some(by),
         )?;
+        // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
+        if self
+            .led
+            .get(&activity)
+            .is_some_and(|(front, _)| *front != body)
+        {
+            self.broke.insert(activity, "souls:partner-left");
+        }
         if let Some(s) = self.asm.as_mut() {
             s.ended(activity);
         }
@@ -1474,6 +1517,9 @@ impl Engine {
                     ) {
                         // A crew's part set down is no longer its own (0.135 A2).
                         Ok(()) => {
+                            if self.led.contains_key(&a) {
+                                self.broke.insert(a, why);
+                            }
                             if let Some(s) = self.asm.as_mut() {
                                 s.ended(a);
                             }
@@ -1536,6 +1582,9 @@ impl Engine {
                 ) {
                     // A crew's part set down is no longer its own (0.135 A2).
                     Ok(()) => {
+                        if self.led.contains_key(&a) {
+                            self.broke.insert(a, "souls:carry-blocked");
+                        }
                         if let Some(s) = self.asm.as_mut() {
                             s.ended(a);
                         }
@@ -2680,6 +2729,11 @@ impl Engine {
         now: Micros,
         walk: bool,
     ) {
+        // Carrying together (moving-group rule 3): the walk of a lifted carry's front leads its crew.
+        if walk && let Some(a) = self.front_of(body) {
+            self.led.insert(a, (body, intent));
+            return;
+        }
         if walk && self.activities.lead(&self.moves, body) {
             return;
         }
@@ -2747,6 +2801,66 @@ impl Engine {
     /// of a place beside the leader (R1, hand in hand).
     pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
+    }
+
+    /// The lifted carry whose front is `body`, if any: the first member of a carry being sampled.
+    fn front_of(&self, body: Id) -> Option<Id> {
+        self.carries.keys().copied().find(|a| {
+            self.activities
+                .members(*a)
+                .and_then(|m| m.first())
+                .is_some_and(|m| m.body == body)
+        })
+    }
+
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): every carrier of a lifted carry whose front has walked,
+    /// but the front, that keeps a place from it: its activity, the front's body, the walker's body and Soul.
+    pub fn carry_follows(&self) -> Vec<(Id, Id, Id, Id)> {
+        let mut out = Vec::new();
+        for (a, (front, _)) in &self.led {
+            if !self.carries.contains_key(a) {
+                continue;
+            }
+            for m in self.activities.members(*a).unwrap_or(&[]) {
+                if m.body != *front {
+                    out.push((*a, *front, m.body, m.soul));
+                }
+            }
+        }
+        out
+    }
+
+    /// The front's latest walk in each led carry, by its body: a carrier that is not walking keeps its place from the
+    /// front while the front's walk goes ([`Engine::carry_follows`]).
+    pub fn leading(&self) -> Vec<(Id, Id)> {
+        self.led
+            .iter()
+            .filter(|(a, _)| self.carries.contains_key(a))
+            .map(|(_, l)| *l)
+            .collect()
+    }
+
+    /// The led carries that are over (set down, put, or broken off) since the last call, forgotten here: for each that
+    /// broke off, its front's body, its walk and why (`souls:partner-left`, `souls:carriers-apart`,
+    /// `souls:carry-blocked`), so the whole group stops with that one reason.
+    pub fn led_over(&mut self) -> Vec<(Id, Id, &'static str)> {
+        let over: Vec<Id> = self
+            .led
+            .keys()
+            .filter(|a| !self.carries.contains_key(a))
+            .copied()
+            .collect();
+        let mut out = Vec::new();
+        for a in over {
+            let Some((front, walk)) = self.led.remove(&a) else {
+                continue;
+            };
+            if let Some(why) = self.broke.remove(&a) {
+                out.push((front, walk, why));
+            }
+        }
+        self.broke.retain(|a, _| self.led.contains_key(a));
+        out
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

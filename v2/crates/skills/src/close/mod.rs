@@ -24,6 +24,10 @@
 //!   90° from the last), the side is taken again from where the follower stands, and a way to the place that would
 //!   pass within [`KEEP_APART`] of the leader goes round it: the follower never walks through the leader.
 //!
+//!   Or a place **at** a fixed offset from the leader on the plan (carrying together, moving-group rule 3): the
+//!   follower's place in a group that moves as its leader walks and does not turn, such as a carry's crew whose front
+//!   walks. The place is a target, as beside, and a place not kept ends the same way ([`LOST_PLACE`]).
+//!
 //! Circle, go near and follow end only when replaced (another skill claims the legs; they are `cancelled_by`
 //! locomotion), cancelled (the body releases them) or expired (`until`, world time). None of them ever picks a new
 //! target: the target is the one the agent ordered, held for the input's life. A target that is gone, or in another
@@ -369,6 +373,8 @@ pub struct Follow {
     side: i64,
     /// Beside: ticks in a row farther than [`LET_GO`] from its place.
     far: u32,
+    /// A place at this offset from the leader on the plan (x, z), µm, instead of its trail: carrying together.
+    pub at: Option<[i64; 2]>,
 }
 
 impl Follow {
@@ -387,7 +393,45 @@ impl Follow {
             heading: None,
             side: 0,
             far: 0,
+            at: None,
         }
+    }
+
+    /// Follows `leader` keeping a place `offset` from it on the plan (x, z, µm), until `until`: a walker in a group
+    /// that moves as its leader walks, without turning (carrying together, `v2/docs/moving-group.md` rule 3).
+    pub fn at(leader: Id, offset: [i64; 2], until: Option<Micros>) -> Follow {
+        Follow {
+            at: Some(offset),
+            ..Follow::new(leader, (0, 0), until)
+        }
+    }
+
+    /// One step toward the place `offset` from the leader at `them`: at the leader's pace plus the gap closed in a
+    /// second and a half, at most the leader's gait, as beside.
+    fn step_at(
+        &mut self,
+        host: &mut dyn Host,
+        me: Vec3,
+        them: Vec3,
+        pace: i64,
+        offset: [i64; 2],
+    ) -> Progress {
+        let place = Vec3::new(
+            them.x.saturating_add(offset[0]),
+            me.y,
+            them.z.saturating_add(offset[1]),
+        );
+        let gap = apart(me, place);
+        if self.lost(host, gap > LET_GO) {
+            return Progress::Failed(name(LOST_PLACE));
+        }
+        let speed = if gap <= THERE && pace == 0 {
+            0
+        } else {
+            (pace + gap * 2 / 3).clamp(0, pace.clamp(FAST, FASTEST))
+        };
+        go(host, along(place.x - me.x, place.z - me.z, speed));
+        Progress::Going
     }
 
     /// Follows `leader` keeping a place `width` µm beside it (0.135 R1), until `until`.
@@ -526,7 +570,7 @@ impl Skill for Follow {
         let Some(them) = locate(host, Target::Node(self.leader), parent) else {
             go(host, Vec3::ZERO);
             // Beside (0.135 R1): a leader gone from sight (through a door, onto a deck) is a place not kept.
-            if self.beside.is_some() && self.lost(host, true) {
+            if (self.beside.is_some() || self.at.is_some()) && self.lost(host, true) {
                 return Progress::Failed(name(LOST_PLACE));
             }
             return Progress::Going;
@@ -540,6 +584,9 @@ impl Skill for Follow {
             _ => 0,
         };
         self.seen = Some((them, now));
+        if let Some(offset) = self.at {
+            return self.step_at(host, me, them, pace, offset);
+        }
         if let Some(width) = self.beside {
             return self.step_beside(host, me, them, pace, width);
         }

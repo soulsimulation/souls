@@ -892,3 +892,65 @@ fn a2_5_overflow_points_are_released_on_retarget_and_kept_across_a_ground_change
         Entry::Release { who, why: "spot-left", .. } if *who == asks[1].who
     )));
 }
+
+/// A cottage's kitchen west of a doorway (#5003's Eden audit): its table, chairs and counter leave no standing west of
+/// x = -1 m. The doorway's passage runs from x = -1 m to 1 m: its mouth on the kitchen's side (x up to -0.3 m), the
+/// doorway itself east of that. East of x = 1 m is the living room; with `room`, also a strip of kitchen floor at
+/// z from 1.2 m to 1.6 m, clear of the doorway. Every walk is straight.
+struct Kitchen {
+    room: bool,
+}
+
+impl Ground for Kitchen {
+    fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        let strip = self.room && (1_200_000..=1_600_000).contains(&p.z);
+        (p.x > -1_000_000 || strip).then_some((p, p))
+    }
+    fn passage(&self, _: Id, p: Vec3) -> bool {
+        p.x > -1_000_000 && p.x < 1_000_000
+    }
+    fn mouth(&self, n: Id, p: Vec3) -> bool {
+        self.passage(n, p) && p.x <= -300_000
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        Some(flat(a, b))
+    }
+}
+
+#[test]
+fn a_thing_whose_room_has_floor_only_by_its_doorway_is_acted_at_from_the_doorways_mouth() {
+    let mut g = Kitchen { room: false };
+    // A bowl on the table, 1.2 m west of the doorway's mouth.
+    let t = target(-1_500_000);
+    let ring = box_ring(150_000, 150_000).map(|c| Vec3::new(c.x - 1_500_000, 0, c.z));
+    let from = Some((node(), Vec3::new(5_000_000, 0, 0)));
+    for p in [
+        within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place by the outline"),
+        within(&mut g, t, REACH, from).expect("a place by the middle"),
+    ] {
+        assert!(g.mouth(node(), p), "at the doorway's mouth: {p:?}");
+        assert!(p.x <= -300_000, "never in the doorway itself: {p:?}");
+        assert!(to_outline(p, &ring) <= REACH, "within reach: {p:?}");
+    }
+    // A mouth is a walker's only: with no asker, by the gap alone, none.
+    assert_eq!(within_footprint(&mut g, t, &ring, false, REACH, None), None);
+    assert_eq!(within(&mut g, t, REACH, None), None);
+    // Floor clear of the doorway within reach is taken first, though the mouth is nearer the asker.
+    let mut g = Kitchen { room: true };
+    let p = within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place");
+    assert!(!g.passage(node(), p), "clear of the doorway: {p:?}");
+    // The spot tables never give a mouth: a plain walk there is granted a place clear of every passage.
+    let mut g = Kitchen { room: false };
+    let mut spots = Spots::new();
+    let ask = Ask {
+        who: node(),
+        order: node(),
+        node: node(),
+        from: Vec3::new(5_000_000, 0, 0),
+        target: t,
+        carried: false,
+    };
+    spots.write(&mut g, &[ask], 0).unwrap();
+    let granted = spots.of(node(), &t).expect("answered").expect("granted");
+    assert!(!g.passage(node(), granted), "{granted:?}");
+}

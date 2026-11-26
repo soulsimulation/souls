@@ -525,3 +525,21 @@ test('D2b: the child pool refuses a moved world: ensure answers new-engine, and 
     await pool.closeAll();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('#4159: a binding naming the stream CDN gives the routed page v2StreamOrigin; a malformed one refuses the binding', () => {
+  const dir = mkdtempSync(new URL('stream-cdn-', scratch).pathname);
+  try {
+    const routesFile = join(dir, 'worlds.json');
+    writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { stream: '/s/eden/', canonical: true } } }));
+    const valid = { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir: join(dir, 'client') };
+    for (const bad of ['http://stream.soul.game', 'https://stream.soul.game/', 'https://stream.soul.game/s/', '//stream.soul.game', 'https://', 'stream.soul.game', 'https://Stream.soul.game', 7])
+      assert.throws(() => cutoverFence({ binding: { ...valid, v2StreamOrigin: bad } }), /cutover.binding-invalid/, String(bad));
+    const w = { slug: 'eden' };
+    assert.equal(cutoverFence({ binding: valid }).v2Fields(w).v2StreamOrigin, undefined, 'none named: the page reads its own origin');
+    const named = cutoverFence({ binding: { ...valid, v2StreamOrigin: 'https://stream.soul.game' } });
+    assert.equal(named.v2Stream(w), '/s/eden/', 'the stream path is unchanged');
+    assert.equal(named.v2Fields(w).v2StreamOrigin, 'https://stream.soul.game');
+    assert.match(withV2Stream('<script>window.__simConfig={"worldKey":"eden"}</script>', named.v2Stream(w), named.v2Fields(w)), /"v2StreamOrigin":"https:\/\/stream\.soul\.game"/, 'written into the page');
+    assert.equal(named.v2Fields({ slug: 'other' }), null, 'another world is never given it');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

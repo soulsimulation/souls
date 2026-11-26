@@ -800,3 +800,47 @@ fn r1_a_follower_beside_that_cannot_keep_its_place_lets_go() {
         "within 6 s of the leader setting off: {t} µs"
     );
 }
+
+/// Carrying together (moving-group rule 3): a carrier keeps its place at a fixed offset from its crew's front, 2.7 m
+/// behind and 0.6 m to its side, as the front walks 5 s east (sideways to the load, as a crew carries a load into a
+/// bay beside it), then 5 s north, then stops. It never turns with the front's heading: a second after each start its
+/// place is within 0.15 m, it never moves more than a run's tick, it is never more than 1 m from its place (the world's
+/// stretch before a carry breaks off), and it stands within 50 mm of its place two seconds after the front stops.
+#[test]
+fn a_carrier_keeps_its_place_from_the_front_without_turning() {
+    let off = [-2_700_000, 600_000];
+    let mut f = Follow::at(id(2), off, None);
+    let start = Vec3::new(0, 0, 10_000_000);
+    let mut h = fake(Vec3::new(start.x + off[0], 0, start.z + off[1]), start);
+    let (mut settled, mut most, mut far) = (0_i64, 0_i64, 0_i64);
+    for n in 0..240u32 {
+        let t = i64::from(n) * TICK;
+        let d = (SPEED * t / 1_000_000).min(14_000_000);
+        h.leader = Vec3::new(
+            start.x + d.min(7_000_000),
+            0,
+            start.z + (d - 7_000_000).max(0),
+        );
+        let was = h.me;
+        assert_eq!(f.step(&mut h), Progress::Going);
+        h.now += TICK;
+        most = most.max(apart(was, h.me));
+        let place = Vec3::new(h.leader.x + off[0], 0, h.leader.z + off[1]);
+        far = far.max(apart(h.me, place));
+        if (1_000_000..5_000_000).contains(&t) || (6_000_000..10_000_000).contains(&t) {
+            settled = settled.max(apart(h.me, place));
+        }
+    }
+    let place = Vec3::new(h.leader.x + off[0], 0, h.leader.z + off[1]);
+    println!(
+        "a carrier's place: within {} mm walking, at most {} mm a tick, at most {} mm from it ever; {} mm at the end",
+        settled / 1000,
+        most / 1000,
+        far / 1000,
+        apart(h.me, place) / 1000
+    );
+    assert!(settled <= 150_000, "kept its place: {settled} µm");
+    assert!(most <= 200_000, "walked: {most} µm in a tick");
+    assert!(far < 1_000_000, "never stretched a carry: {far} µm");
+    assert!(apart(h.me, place) <= 50_000, "stands at its place");
+}

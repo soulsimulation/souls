@@ -147,7 +147,13 @@ test('multiple batches read the reachable copy once, then only their expected re
   const helper = publicNameHydration(copy, () => ++number, () => sock);
   assert.deepEqual(await helper.hydrate(sock, performance.now() + 1000), { ok: true });
   assert.equal(requests, 3);
-  assert.equal(reads, 2 * records.length);
+  // The rows read once, then the bytes of the records still missing a name, then each answer's: the copy is not walked
+  // again for each batch.
+  assert.equal(reads, 3 * records.length);
+  reads = 0;
+  assert.deepEqual(await helper.hydrate(sock, performance.now() + 1000), { ok: true });
+  assert.equal(requests, 3, 'every name known: nothing asked again');
+  assert.equal(reads, 0, 'and no record read again');
 });
 
 test('synchronous validation past the original deadline cannot report a fresh success', async (t) => {

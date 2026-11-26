@@ -186,3 +186,50 @@ test('trial 0.137: on open ground of thousands, the brief names what is near the
   assert.ok(!NO_COORDINATES.test(JSON.stringify(b)), 'no coordinates');
   assert.equal(brief(rows, { me: 'soul-1', holding: [] }).holding, 'nothing', 'empty hands said plainly');
 });
+
+test('group work: the Souls near are named nearest first (25 m, five at most), the work near is shown, and the brief stays under 2,000 bytes', () => {
+  const souls = [{ name: 'Bo', m: 2 }, { name: 'Cy', m: 6.04 }, { name: 'Di', m: 30 }];
+  const work = ['Ada offers you a place in a carry crew near rack frame 1 (c1): carry accept Ada'];
+  const b = brief(hall(1000, 3), { me: 'me', souls, work });
+  assert.deepEqual(b.souls_near, ['Bo (2 m)', 'Cy (6 m)']);
+  assert.deepEqual(b.work, work);
+  assert.ok(bytes(b) < BRIEF_MOST, `${bytes(b)} bytes`);
+  const none = brief(hall(3, 0), { me: 'me' });
+  assert.equal(none.souls_near, undefined);
+  assert.equal(none.work, undefined);
+});
+
+// First-day round 2 (0.139): a standing body's node is its floor's, never its room's. At the fish market's door,
+// `look` named only "Shop" (the floor's one room), not what is in it.
+test('a Soul standing on a building\'s floor sees the room it stands in, or whose doorway it stands in, and what is in it', async () => {
+  const { metresFrom } = await import('../daemon/reads.mjs');
+  // As the served Eden copy held it: the fish market on the ground, its floor at its origin, the Shop room on the
+  // floor with its outline in its own frame (mm), its things in the room; the Soul on the floor in the front doorway.
+  const shop = { id: 'shop', name: 'Shop', kind: 'eden:room', parent: 'f', path: ['ground 1', 'region-harbour-fish-market', 'floor 5730'], children: 3, pos: [0, 100_000, 0] };
+  Object.defineProperty(shop, 'outline', { value: [[-6780, -2780], [6780, -2780], [6780, 2780], [-6780, 2780]] });
+  const at = ['ground 1', 'region-harbour-fish-market', 'floor 5730', 'Shop'];
+  const rows = byId([
+    { id: 'g', name: 'ground 1', kind: 'eden:ground', parent: null, path: [], children: 2 },
+    { id: 'fm', name: 'region-harbour-fish-market', kind: 'eden:hall', parent: 'g', path: ['ground 1'], children: 1, pos: [20_500_000, 0, 132_000_000] },
+    { id: 'f', name: 'floor 5730', kind: 'eden:floor', parent: 'fm', path: ['ground 1', 'region-harbour-fish-market'], children: 3, pos: [0, 0, 0] },
+    shop,
+    { id: 'counter', name: 'shop-counter', kind: 'eden:workbench', parent: 'shop', path: at, children: 0, pos: [0, 0, -937_000] },
+    { id: 'shelf', name: 'shop-shelf-2', kind: 'eden:bookshelf', parent: 'shop', path: at, children: 0, pos: [6_580_000, 0, -457_000] },
+    { id: 'bench', name: 'shop-bench', kind: 'eden:bench_seat', parent: 'shop', path: at, children: 0, pos: [3_633_000, 0, 1_034_000] },
+    { id: 'me', name: 'Marlow', kind: 'souls:body', soul: 'soul-1', parent: 'f', path: ['ground 1', 'region-harbour-fish-market', 'floor 5730'], children: 0, pos: [0, 100_000, 2_890_000] },
+    { id: 'bo', name: 'Bo', kind: 'souls:body', soul: 'soul-2', parent: 'f', path: ['ground 1', 'region-harbour-fish-market', 'floor 5730'], children: 0, pos: [-3_000_000, 100_000, 0] },
+  ]);
+  const look = (r) => brief(r, { me: 'soul-1', metres: metresFrom(r, 'me', { placed: true }) });
+  const b = look(rows);
+  assert.equal(b.room.name, 'Shop', 'in the Shop\'s doorway: the Shop, not the floor');
+  assert.deepEqual(b.here.map((h) => h.split(' (')[0]), ['shop-counter', 'shop-bench', 'shop-shelf-2'], 'what is in it, nearest first');
+  assert.match(b.here[0], /^shop-counter \(counter, 3\.8 m\)$/);
+  assert.equal(b.bodies, 1, 'Bo stands on the floor in the Shop');
+  // In the middle of the room, the same; well outside its outline (a landing, a balcony), the floor as before.
+  const inside = new Map(rows), away = new Map(rows);
+  inside.set('me', { ...rows.get('me'), pos: [500_000, 100_000, 400_000] });
+  away.set('me', { ...rows.get('me'), pos: [0, 100_000, 6_000_000] });
+  assert.equal(look(inside).room.name, 'Shop');
+  assert.equal(look(away).room.name, 'floor 5730');
+  assert.deepEqual(look(away).here.map((h) => h.split(' (')[0]), ['Shop']);
+});

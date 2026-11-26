@@ -26,6 +26,7 @@ back to the engine.
 | Never below the ground; what may block a view (the roots a shot checks its sightline against) | `apps/web/src/WorldCameraGround.ts`, `apps/web/src/WorldCameraRenderRoots.ts` |
 | Framing a place or a named location (Explore) | `apps/web/src/WorldPlaceCamera.ts`, `framePlace` and `frameLocation` in `LiveWorld.tsx` |
 | The first framing on arrival | `apps/web/src/viewer-arrival.ts` |
+| A picture an agent asks for (a Soul's `shoot`, a creator's `look`): the camera on a named Soul, place or thing of a v2 world, on a `?shot=1` page | `apps/web/src/v2-engine/capture.ts` (`v2.capture`, as `v2/client/src/shoot/shoot.mjs` reads it), installed in `LiveWorld.tsx` through its `shotCamera` pin |
 
 ## What the page owns
 

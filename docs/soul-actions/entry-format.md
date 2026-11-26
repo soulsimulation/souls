@@ -67,6 +67,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
+| 24 | `building` | A building kind's rooms, as a template's building of it has them at its def's defaults (written by `v2/tools/import-eden/export/buildings.ts`, never by hand): its walls (`solids`), `slots`, `floors`, `rooms` (each name a key of the text table), `openings` (doorways and windows), `stairs` and `doors`, in its frame, mm and millidegrees. A place of the kind gets them in the same edit (`worldd`'s `with_buildings`, #5006) |
 
 A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
 thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
@@ -298,7 +299,9 @@ an optional `yaw_mdeg`. A `joint` point is where a part joins another (Engine v2
 [#3338](https://github.com/soulsimulation/souls/issues/3338)): it names its `connector` kind and the kind it `mates`
 with (a rack beam's `beam_end` mates with an upright's `beam_seat`); no other point names either. The joint itself is a
 link (section 4), never a parent: a beam seated between two uprights is a child of its bay
-(`content/kinds/construction/`).
+(`content/kinds/construction/`). The kind that declares the joining link bears on the kind it names, which stands; a
+kind whose link names a kind that itself bears rests on it, a tier up, and needs as many of those held up as the link's
+`most` (a shade cloth on its two rails, `content/kinds/carpentry/`).
 A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
 may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
 declares its bounds.
