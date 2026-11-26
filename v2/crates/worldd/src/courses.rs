@@ -1,7 +1,8 @@
 //! The facts as a start uses them (S5): the punts on the water, the rides' and boats' courses and a kind for each
 //! entry kind ([`facts`]). Every world built from facts runs it (`worldd seed`, `worldd serve`, `worldd fork --template`'s
 //! check), and so does a template published from facts (`templates`, `publish-template`), so a world forked from the
-//! template starts with the same punts and courses as one seeded from the same facts and entries.
+//! template starts with the same punts and courses as one seeded from the same facts and entries. A change to what it
+//! gives needs a bump of `serve`'s `COURSES_FORMAT`, so no world reads a kept answer of the old code (S5).
 
 use std::collections::BTreeMap;
 
