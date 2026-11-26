@@ -109,7 +109,8 @@ on the same page, never "could not be loaded"), Back again, From the start, Link
 Broadcast menu, the sound switch, Explore, its places, following a Soul from
 Explore, New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
 failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
-only exception and is empty. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
+only exception and is empty. A world whose `load` step fails has nothing to click: its remaining steps are not run and
+are reported as `skipped-after-load-failure`, which fails the world as a failed step does. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
 401, `/mars-assets/static-manifest.json` is 200. It only clicks: it never submits a form or signs in, so run it against
 production any time:
 
@@ -120,7 +121,9 @@ node tools/test-harness/e2e-controls/controls.mjs --slugs eden --origin https://
 
 It writes `<out>/<slug>/verdict.json`, one screenshot per step and `<out>/summary.json` (default out
 `.local/e2e-controls/<time>`), and exits 1 on any failure. Playwright comes from `mars/viewer` (`SHIP_PLAYWRIGHT_FROM`
-points elsewhere). In a release it is the `controls` job of `release.yml`, after the activation and the engine move,
+points elsewhere; `SHIP_GPU=<label>` launches with that hardware GL renderer). In a release it is the `controls` job of
+`release.yml`, on a `souls-timed` runner's GPU as the eyes job (a hardware renderer or nothing: on a hosted runner's
+SwiftShader the page draws at about 2 fps and the walk never finished), after the activation and the engine move,
 and `publish` needs it: a failure publishes nothing and the summary gives the rollback. `eyes_only=true` runs it alone
 against the live site.
 

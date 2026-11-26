@@ -188,6 +188,32 @@ struct Waiting {
     stance: Option<Stance>,
 }
 
+/// The skill that turns a body where it stands: it takes all its legs for the turn and gives them back.
+fn face_skill() -> SkillShape {
+    SkillShape {
+        name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: Vec::new(),
+        cancelled_by: Vec::new(),
+    }
+}
+
+/// Turns `body` to `facing` where it stands, only when the turn takes its legs from nothing: a walk, a follow, a body
+/// settled on the ground or any other driver of its legs keeps them, and the body keeps its facing (review of #4925:
+/// the turn as two begin to talk ended the follow one of them was in). For a turn as an activity begins or a form
+/// starts; a walk's end turns with [`Bodies::face`].
+pub(crate) fn turn_free(c: &mut sim::controller::Controller, body: Id, facing: Quat) {
+    let turn = face_skill();
+    let free = c
+        .claims(body)
+        .and_then(|k| k.plan(Driver::MAX, &turn).ok())
+        .is_some_and(|s| s.cancelled.is_empty());
+    if free && let Ok(d) = c.claim(body, &turn) {
+        let _ = c.set(body, d, Part::Facing(facing));
+        let _ = c.release(body, d);
+    }
+}
+
 /// The world's bodies: a town, the runner of skills over it with the one controller, and the moves and seats.
 pub struct Bodies {
     pub runner: Runner,
@@ -1477,6 +1503,30 @@ impl Bodies {
         self.turn_to(body, at, to);
     }
 
+    /// `body`, standing, turns to face `target` (another Soul's body, or a thing of `live`, the tree it acts in) as a
+    /// walk's end turns it ([`Self::face`]): a form's move made toward it (`bow_to toward=<Soul>`) begins facing it. A
+    /// seated or lying body keeps its facing, and so does one within [`sim::controller::FACE_NEAR`] of it or one whose
+    /// legs something else drives ([`turn_free`]).
+    pub(crate) fn face_to(&mut self, live: &replica::tree::Tree, body: Id, target: Id) {
+        let standing = self
+            .runner
+            .controller
+            .body(body)
+            .is_some_and(|m| m.pose.frame.slot.is_none());
+        let Some((frame, at)) = self.pose(body).filter(|_| standing && target != body) else {
+            return;
+        };
+        let to = match self.pose(target) {
+            Some((f, p)) if f == frame => Some(p),
+            _ => self
+                .toward(target, frame)
+                .or_else(|| select::origin_in(live, target, frame).ok()),
+        };
+        if let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) {
+            turn_free(&mut self.runner.controller, body, facing);
+        }
+    }
+
     /// Where `target`, a thing or another Soul's body, is in `frame`'s axes, on the level: its origin, or the thing it
     /// sits in when it is seated or lying ([`Bodies::face`]).
     fn toward(&self, target: Id, frame: Id) -> Option<Vec3> {
@@ -1499,13 +1549,7 @@ impl Bodies {
             return;
         };
         let c = &mut self.runner.controller;
-        let turn = SkillShape {
-            name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
-            claims: vec![Want::All(Class::Locomotion)],
-            blocks: Vec::new(),
-            cancelled_by: Vec::new(),
-        };
-        if let Ok(d) = c.claim(body, &turn) {
+        if let Ok(d) = c.claim(body, &face_skill()) {
             let _ = c.set(body, d, Part::Facing(facing));
             let _ = c.release(body, d);
         }

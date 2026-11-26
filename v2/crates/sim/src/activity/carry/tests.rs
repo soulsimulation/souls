@@ -898,6 +898,35 @@ mod from_entry {
         );
     }
 
+    /// A frame taken standing from its stand is held upright, not laid flat: set down where a carry breaks off, its
+    /// posts' feet rest on the floor. Before, it kept the flat rest (half its thickness) under its middle, and sank
+    /// 1.18 m, half its height, into the ground. Held as its entry turns it, the rest is as before.
+    #[test]
+    fn a_load_held_standing_is_set_down_on_its_feet() {
+        use replica::pose::{Quat, Vec3};
+        let load = Load::of(&entry("rack_upright.json")).unwrap();
+        let c = Vec3::new(5 * M, 0, -3 * M);
+        let facing = Quat::from_yaw_mdeg(-90_000).unwrap();
+        let standing = load.held_turned(Quat::IDENTITY).unwrap();
+        let (p, o) = standing.resting(c, facing).unwrap();
+        assert_eq!(
+            p.y,
+            c.y,
+            "its feet on the floor, not {} µm under it",
+            c.y - p.y
+        );
+        assert_eq!(o.rotate(Vec3::new(0, M, 0)).unwrap().y, M, "still standing");
+        let flat = load.held_turned(load.turn).unwrap();
+        assert_eq!(
+            flat.rest, load.rest,
+            "laid flat as its entry turns it: rest unchanged"
+        );
+        assert_eq!(
+            flat.resting(c, facing).unwrap(),
+            load.resting(c, facing).unwrap()
+        );
+    }
+
     /// Two walls with a 0.9 m passage between them, across a straight way east: the upright (1.22 m wide) is refused
     /// before the lift (`carry-unproven` since 0.135 R2: no way that turns it is found within the search's small
     /// budget) and the beam (0.1 m) is not; a crew of one and a carrier off its grip are refused by name.

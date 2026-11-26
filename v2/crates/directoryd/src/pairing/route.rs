@@ -1,6 +1,6 @@
 //! Pairing over HTTP (W2). Bodies are JSON both ways; the card is the one HTML page.
 //!
-//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?}`, or a
+//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?, name?}`, or a
 //!   creator's `{secret_hash, device, label, creator, scope: "creator", force?}` (G7) →
 //!   `{code, link, interval}`. No sign-in: the daemon asks. A Soul of today's client (R18) is asked for as
 //!   `{…, former: "s_…", world, scope: "soul"}` in place of `soul` or `new`: the owner's approval pairs the Soul X11
@@ -8,7 +8,7 @@
 //!   refuses any other `unknown-soul`.
 //! - `POST /v1/pair/poll` `{secret}` → `{pending: "authorization_pending" | "slow_down", interval?}`,
 //!   `{refused, device?}` or, once, `{token, grant}`, with `former` for a former Soul's request.
-//! - `POST /v1/pair/waiting` `{world}`, signed in → `{waiting: [{code, device, label, soul, age, former}]}`: the world's
+//! - `POST /v1/pair/waiting` `{world}`, signed in → `{waiting: [{code, device, label, soul, age, former, name}]}`: the world's
 //!   Soul requests still pending, asked from this request's address in the last ten minutes (kept in memory only), so
 //!   the world page the owner has open shows the card (first day, 25 Nov).
 //! - `GET /pair` → the approval card. It shows and changes nothing until the signed-in owner acts in it.
@@ -21,7 +21,8 @@
 //!   `description`, `picture` (a `data:` URL) and `retire_asked`. Signed in: `POST /v1/account/souls/profile`
 //!   `{soul, name?, description?}`, `POST /v1/account/souls/picture` `{soul, picture: <base64url>}` and
 //!   `POST /v1/account/souls/retire` `{soul, confirm: true}`. The agent asks a retire with
-//!   `POST /v1/pair/retire` `{token}`, which changes nothing until the owner's retire. The agent sets its Soul's profile
+//!   `POST /v1/pair/retire` `{token}`, which changes nothing until the owner's retire or keep
+//!   (`POST /v1/account/souls/keep` `{soul}`, signed in, which clears the ask). The agent sets its Soul's profile
 //!   with `POST /v1/pair/profile` `{token, name?, description?, picture?}` (`picture: null` clears it), answered with
 //!   the Soul's row, its picture as its format (#3707).
 //!
@@ -167,7 +168,11 @@ pub fn route(
                 Ok(a) => match world
                     .map_or(Ok(()), |w| p.ask_world(&a.code, &w))
                     .and_then(|()| former.map_or(Ok(()), |f| p.ask_former(&a.code, &f)))
-                {
+                    // trial of 0.137: a new Soul's asked-for name, for the approval card to show
+                    .and_then(|()| match text(&b, "name") {
+                        Some(n) if new => p.ask_name(&a.code, &n),
+                        _ => Ok(()),
+                    }) {
                     // Refused by its own name: an unplaced world is the caller's (400), the store's is ours (500).
                     Err(e) => refuse(if e == "store" { 500 } else { 400 }, e),
                     Ok(()) => {
@@ -232,8 +237,9 @@ pub fn route(
             match p.waiting(&world, ip, now()) {
                 Ok(list) => json(
                     200,
-                    json!({"waiting": list.into_iter().map(|(code, device, label, soul, age, former)| json!({
+                    json!({"waiting": list.into_iter().map(|(code, device, label, soul, age, former, name)| json!({
                         "code": code, "device": device, "label": label, "soul": soul, "age": age, "former": former,
+                        "name": name,
                     })).collect::<Vec<_>>()}),
                     "waiting",
                 ),
@@ -256,7 +262,7 @@ pub fn route(
                         200,
                         json!({"device": c.device, "label": c.label, "soul": c.soul, "code": c.code,
                                "age": c.age, "scope": c.scope, "force": c.force, "connected": c.connected,
-                               "former": c.former}),
+                               "former": c.former, "name": c.name}),
                         note,
                     ),
                     Err(e @ "code-guesses") => refuse(429, e),
@@ -366,7 +372,8 @@ pub fn route(
             | "/v1/account/souls/revoke"
             | "/v1/account/souls/profile"
             | "/v1/account/souls/picture"
-            | "/v1/account/souls/retire",
+            | "/v1/account/souls/retire"
+            | "/v1/account/souls/keep",
         ) => {
             let b = body();
             let account = match signed_in(app, bearer, &b) {
@@ -389,6 +396,7 @@ pub fn route(
             };
             let done = match path {
                 "/v1/account/souls/revoke" => p.revoke(&account, &soul).map_err(str::to_string),
+                "/v1/account/souls/keep" => p.keep(&account, &soul).map_err(str::to_string),
                 "/v1/account/souls/profile" => p
                     .set_profile(
                         &account,

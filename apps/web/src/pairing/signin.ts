@@ -94,7 +94,7 @@ export type PageEnv = {
  * Loads the provider's script and signs in from it. Resolves to the provider's session when signed in; when signed
  * out, opens the provider's sign-in (back to this page after) and resolves to null; null too without a provider.
  */
-export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<BrowserSession | null> {
+export async function providerSession(cfg: SignInConfig, env: PageEnv, silent = false): Promise<BrowserSession | null> {
   const origin = new URL(env.href).origin;
   const script = providerScript(cfg, origin);
   if (!script) return null;
@@ -133,6 +133,8 @@ export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<
       },
     };
   }
+  // `silent` (the card's first look, trial of 0.137): signed out, nothing opens; the Sign in button stays.
+  if (silent) return null;
   // Signed out: the provider's sign-in, back to this page. A satellite leaves for the primary's, as today's site does.
   if (sat) env.navigate(clerk.buildSignInUrl({ signInForceRedirectUrl: env.href, signUpForceRedirectUrl: env.href }));
   else clerk.openSignIn({ forceRedirectUrl: env.href, signUpForceRedirectUrl: env.href });
@@ -155,7 +157,7 @@ export async function signInConfig(post: typeof fetch = fetch): Promise<SignInCo
 }
 
 /** The existing provider session, or explicit local test sign-in; never a copied or persisted raw token. */
-export async function browserSession(testName?: string, env?: PageEnv, post: typeof fetch = fetch): Promise<BrowserSession | null> {
+export async function browserSession(testName?: string, env?: PageEnv, post: typeof fetch = fetch, silent = false): Promise<BrowserSession | null> {
   const page = env ?? { document, href: location.href, global: globalThis as PageEnv['global'], navigate: (u: string) => location.assign(u) };
   let cfg: SignInConfig;
   try { cfg = await signInConfig(post); }
@@ -164,7 +166,7 @@ export async function browserSession(testName?: string, env?: PageEnv, post: typ
     throw e;
   }
   // A configured provider never falls back to a test identity when signed out or unavailable.
-  return providerSession(cfg, page);
+  return providerSession(cfg, page, silent);
 }
 
 /** Fresh provider bearer on every call; local account test names retain the directory's existing body shape. */

@@ -370,3 +370,42 @@ fn a_walk_to_a_bounded_thing_ends_by_its_outline_and_on_a_walkable_one() {
     assert_eq!(to_outline(at, &mat_ring()), 0, "on the mat: {at:?}");
     run.stop();
 }
+
+/// The body's last logged pose on the ground.
+fn last_pose(run: &Run, body: Id) -> replica::pose::Pose {
+    run.log()
+        .iter()
+        .rev()
+        .find_map(|p| match p.rest.get(&answers::BODIES) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .rev()
+                .filter_map(worldd::bodies::read_row)
+                .find(|(b, _, _)| *b == body)
+                .map(|(_, pose, _)| pose),
+            _ => None,
+        })
+        .expect("the body's row")
+}
+
+/// Trial of 25 Nov: `bow_to toward=<Soul>` bowed facing away from it. A move made toward its thing argument begins
+/// facing it: born facing east (+x), a bow toward the bench 6 m west turns the body west first.
+#[test]
+fn a_bow_toward_a_thing_is_made_facing_it() {
+    let (run, mut a) = serve_base("bow");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = body_of(&run, ada()).expect("born");
+    let r = a.act("eden:bow_to", Some(body), thing("toward", bench()));
+    println!("bow_to bench: {r:?}");
+    assert!(!r.expect("accepted and done").is_empty());
+    let p = last_pose(&run, body);
+    let ahead = p.orientation.rotate(Vec3::new(1 << 20, 0, 0)).unwrap();
+    let to = (bench_at().x - p.position.x, bench_at().z - p.position.z);
+    let len = ((i128::from(to.0).pow(2) + i128::from(to.1).pow(2)).isqrt()) as f64;
+    let dot = (i128::from(ahead.x) * i128::from(to.0) + i128::from(ahead.z) * i128::from(to.1))
+        as f64
+        / (len * f64::from(1 << 20));
+    println!("  facing {ahead:?}, toward the bench {to:?}: cos {dot:.3}");
+    assert!(dot > 0.95, "it faces the bench: cos {dot:.3}");
+    run.stop();
+}
