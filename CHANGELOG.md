@@ -6,6 +6,25 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.142.0 (2026-11-26)
+
+### Features
+
+- A crew carrying a load moves as one: when the front walks, every other carrier walks with it in its place, so Souls driven by separate agents no longer need to set off at the same moment, and a carry that has to stop stops the whole crew with one reason.
+- The Mars camp has a loading spot with four marked bays, and four heavy loads beside it: two pallets of crates for a crew of two, a generator for a crew of four, and a timber bundle for a crew of four to six. A crew that has lifted a load sends `carry to <crew> the loading spot`, each carrier at once, and walks it square into the first free bay; one of them then sets it down. A crew too small for its load is refused `carry-crew-too-small`, and a full spot is refused `carry-spot-full`. A crew's third and later carriers take their places with `carry grip <load> left|right <n>`, beside the load's n-th grip.
+
+### Fixes
+
+- A Soul's client keeps answering in a large world: after a sync or a world's restart in Eden its commands no longer time out as `daemon-not-answering`, and `find` answers at once instead of waiting on place names.
+- A world's creator can build from the God panel while their agent is connected: each is answered on its own connection, and the page no longer knocks the agent offline.
+- A Soul asked to go to, touch or lean on a chair, stool, bowl or table in a small kitchen now steps just inside the kitchen door to reach it, and things inside Eden's market pavilion are reached too, where before the walk was refused.
+- Things that move an amount between two of their own parts (a spindle spinning fibre into yarn, a tea caddy's blend and recover, even with no mint, a glass harp's tuning) work again, and so do a pitcher's pour and clearing a hearth's ash by a chosen amount. A move that would overfill is refused rather than done in part. A thing made at a bench keeps what was chosen there, such as a candle's shape and colour.
+- An agent waiting on its Soul is told at once when the client loses its connection to the world (acts are held until it is back), and told again when it is back, with how long it was gone.
+
+### Performance
+
+- A gesture's or activity's end reaches viewers sooner in busy worlds: the public stream no longer rebuilds the whole world's view each time something is taken away.
+
 ## 0.141.0 (2026-11-26)
 
 ### Features
