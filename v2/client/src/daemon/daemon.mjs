@@ -104,6 +104,8 @@
 //                                         goes through `act` (`acts: ["<offer>:<id>", ...args]`)
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
+//     {"op":"space"}                      every node's name, kind, parent, pose and shape (outline, solids, slots,
+//                                         scale): what `where`, `clear`, `free` and a words-`look` read (#5006)
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
 //     {"op":"fields","node":"<id>"}       a node's fields as the copy holds them, the zone's root when no node
 //                                         (#3701: district plans and build claims are root fields 140 and 141)
@@ -143,7 +145,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy, holdingOf as heldIn } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf, shapesOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -1082,6 +1084,7 @@ const OPS = new Set([
   'redo',
   'reflex',
   'say',
+  'space',
   'stats',
   'status',
   'stop',
@@ -1868,6 +1871,11 @@ async function answer(req, conn = null) {
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
+    });
+    case 'space': return closing({ ok: true }, (rows) => {
+      // #5006 finding 5: the plan facts a creator's where, clear, free and words-look read, with no browser.
+      const shapes = shapesOf(copy);
+      return { nodes: [...rows.values()].map((r) => ({ id: r.id, name: r.name, kind: r.kind, parent: r.parent, ...(r.pos ? { pos: r.pos } : {}), ...(r.rot ? { rot: r.rot } : {}), ...(r.soul ? { soul: r.soul } : {}), ...(r.aliases ? { aliases: r.aliases } : {}), ...shapes.get(r.id) })) };
     });
     case 'export': {
       // #3728: every node of the copy, brought current first, to the file the creator named (absolute).
