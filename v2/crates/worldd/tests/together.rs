@@ -812,6 +812,8 @@ impl Run {
                             INTRO,
                             DANCE_NEAR,
                             TALK,
+                            GROUP,
+                            GROUP_AT,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
