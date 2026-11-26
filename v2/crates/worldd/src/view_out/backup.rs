@@ -1526,8 +1526,12 @@ mod tests {
                     after_put: Box::new(|_: &str| {}),
                 },
             );
-            while !cleanup.due.is_empty() {
+            // The first pass takes the generation handed over; it is caught up when nothing is left in line.
+            loop {
                 assert_eq!(cleanup.pass(Instant::now()).1, None);
+                if cleanup.due.is_empty() {
+                    break;
+                }
             }
             assert_eq!(
                 cleanup.deleted, 3,
