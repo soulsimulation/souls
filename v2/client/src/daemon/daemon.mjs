@@ -123,6 +123,13 @@
 //   acts are checked (R8) and sent with no model turn; a wake goes through R13's budget. A change entry fires on R9's
 //   events (the `event` op, and what this Soul hears). Each occurrence is marked on disk with its sequence before
 //   it is sent. What was missed while the daemon was off is listed once, in the next answer, as `missed`.
+// - **Another client of this Soul** signing in takes the Soul (the last device wins): the gateway closes this socket
+//   as `agent.replaced` (4001), and this daemon does not take it back by itself, so two clients do not take the Soul
+//   from each other several times a second. Its answers say so (`gap.why` `replaced`, `status`'s `replaced`), a `wait`
+//   is woken by a `replaced` event, and its agent's next command (not a wait, a read, a status or a stop) signs it in
+//   again. Meanwhile it asks every REPLACED_RETRY_MS (5 min) whether the Soul is free (`?free=1`): the gateway closes
+//   that sign-in as `agent.held` while a live socket holds the Soul, and signs it in once none does, so a client left
+//   off when the other one went comes back by itself and never takes the Soul from a live one.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
@@ -183,6 +190,10 @@ import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair
 import { activityTry, answerParts, readableDetail } from './refusal.mjs';
 import { reconnectWait } from './reconnect.mjs';
 
+// gatewayd's `REPLACED`: another client of this Soul signed in, and this socket was let go; or, asked only if free, a
+// live socket holds the Soul. While replaced, the daemon asks whether the Soul is free this often.
+const REPLACED = 4001;
+const REPLACED_RETRY_MS = Number(process.env.SOULS_REPLACED_RETRY_MS) || 5 * 60_000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
 // stay connecting for good, firing neither open nor close (seen with Node 22's WebSocket).
 const SIGN_IN_WITHIN = 5000;
@@ -337,6 +348,8 @@ const joinsOf = new Set(); // own join sequences: only a successful receipt requ
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, refusals = 0, stopping = false, since = Date.now(), signedInAt = 0;
+let replacedAt = null; // when another client of this Soul took it, while this daemon waits for its next command
+let retryTimer = null, gaveUpAt = -Infinity; // the next sign-in (or ask whether the Soul is free); a sign-in given up
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked) {
@@ -647,13 +660,19 @@ function refreshKinds() {
 }
 
 function connect() {
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  if (stopping) return; // a retry due while the daemon stops opens nothing
   counts.connects++;
   let step = 'hello', ended = false;
-  const sock = new WebSocket(seat.gateway);
+  // Replaced, it asks only if the Soul is free: it never takes the Soul from another client's live socket.
+  const free = replacedAt !== null;
+  const sock = new WebSocket(free ? withFree(seat.gateway) : seat.gateway);
   sock.binaryType = 'arraybuffer';
   ws = sock;
   const deadline = setTimeout(() => {
     log(`not signed in within ${SIGN_IN_WITHIN} ms (at ${step}, state ${sock.readyState}); giving it up`);
+    if (step === 'outcome') gaveUpAt = Date.now(); // its sign-in went: the gateway may still take it, after a successor
     closed(1006);
     try { sock.close(); } catch { /* a socket still connecting may refuse to close; it is ignored from here */ }
   }, SIGN_IN_WITHIN);
@@ -676,6 +695,7 @@ function connect() {
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
         refusals = 0;
+        if (replacedAt !== null) { replacedAt = null; log('the Soul was free again: this client holds it'); }
         owed = ownOwed = 0; // versions named on an earlier socket may be another epoch's
         again = 0;
         refreshKinds();
@@ -755,9 +775,27 @@ function connect() {
     counts.drops++;
     // A refused sign-in waits minutes, not seconds: the same token is refused until its owner pairs again.
     const wait = reconnectWait(attempt, refusals);
+    // Signed in, this socket held the Soul and a newer client took it. Not signed in, it asked only if free and a live
+    // client holds it; unless its agent asked meanwhile (`takeBack`): then it falls through, and the Soul is taken.
+    const held = step === 'stream';
+    if (code === REPLACED && (held || replacedAt !== null)) {
+      cutWhy = 'replaced';
+      if (held) {
+        replacedAt = Date.now();
+        log('another client of this Soul signed in (the last to connect wins); signing in again at the next command, or once it is free');
+        note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command, or by itself once the other has gone' });
+      }
+      // A sign-in of its own given up just before may have reached the gateway after its successor and taken the Soul
+      // from it (or held it against this ask), then gone: it asks again soon, still only if free.
+      const soon = Date.now() - gaveUpAt <= 10_000, again = soon ? wait : REPLACED_RETRY_MS;
+      if (soon) attempt++;
+      if (!held) log(`another client of this Soul still holds it; asking again in ${again} ms`);
+      retryTimer = setTimeout(() => { if (replacedAt !== null && !ws && !stopping) connect(); }, again);
+      return;
+    }
     attempt++;
     log(`socket closed (${code}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
-    setTimeout(connect, wait);
+    retryTimer = setTimeout(connect, wait);
   }
   sock.onerror = () => { /* onclose follows */ };
 }
@@ -1589,7 +1627,27 @@ async function worldBatch(req) {
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
+/** What does not take the Soul back from another client: waiting, reading what came, the daemon's own state, stopping. */
+const PASSIVE = new Set(['wait', 'status', 'pending', 'listen', 'read', 'events', 'stats', 'trace', 'receipt', 'stop']);
+/** Another client of this Soul took it (`REPLACED`): this one's agent asked for something, so it signs in again. */
+function takeBack() {
+  if (replacedAt === null || stopping) return;
+  replacedAt = null;
+  attempt = 0;
+  cutWhy = 'not-connected';
+  log('a command came: signing in again (this client takes the Soul back)');
+  if (!ws) connect(); // at once, not at a retry's time; an ask whether it is free, out now, takes it if held (`closed`)
+}
+
+/** The gateway's address, asking only if the Soul is free (gatewayd's `FREE`). */
+function withFree(gateway) {
+  const u = new URL(gateway);
+  u.searchParams.set('free', '1');
+  return u.href;
+}
+
 async function answer(req, conn = null) {
+  if (req.key !== undefined && !PASSIVE.has(req.op)) takeBack();
   if (req.key !== undefined) {
     if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
     if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
@@ -1597,6 +1655,7 @@ async function answer(req, conn = null) {
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
   if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
+  if (!PASSIVE.has(req.op)) takeBack();
   switch (req.op) {
     case 'pending': {
       // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
@@ -1660,6 +1719,7 @@ async function answer(req, conn = null) {
       return {
         clock, worldUs: worldNow(clock),
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
+        ...(replacedAt !== null ? { replaced: { at: new Date(replacedAt).toISOString(), say: `Another client of this Soul connected (the last to connect wins). This one signs in again at its next command, or by itself once the other has gone (it checks every ${Math.round(REPLACED_RETRY_MS / 60_000) || 1} min).` } } : {}),
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
