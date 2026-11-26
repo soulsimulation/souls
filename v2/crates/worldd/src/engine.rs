@@ -389,9 +389,9 @@ fn apart(f: Vec3, k: Vec3) -> i64 {
 
 /// Turns `a` and `b`, each standing on the same floor, to face each other: the facing of its legs, set by a driver
 /// of them as a walk's end sets it (`Bodies::turn_to`). One seated, on another floor, within
-/// [`sim::controller::FACE_NEAR`] of the other or with its legs held keeps its facing.
+/// [`sim::controller::FACE_NEAR`] of the other or whose legs something else drives (a walk, a follow, settled on the
+/// ground: [`crate::bodies::turn_free`]) keeps its facing.
 fn face_each_other(c: &mut Controller, a: Id, b: Id) {
-    use replica::bodies::{Class, SkillShape, Want};
     let at = |c: &Controller, x: Id| {
         c.body(x)
             .filter(|m| m.pose.frame.slot.is_none())
@@ -403,19 +403,9 @@ fn face_each_other(c: &mut Controller, a: Id, b: Id) {
     if na != nb {
         return;
     }
-    let turn = SkillShape {
-        name: Name::new("souls:face").unwrap_or_else(|| unreachable!("a name")),
-        claims: vec![Want::All(Class::Locomotion)],
-        blocks: Vec::new(),
-        cancelled_by: Vec::new(),
-    };
     for (body, from, to) in [(a, pa, pb), (b, pb, pa)] {
-        let Some(facing) = sim::controller::facing_toward(from, to) else {
-            continue;
-        };
-        if let Ok(d) = c.claim(body, &turn) {
-            let _ = c.set(body, d, sim::controller::Part::Facing(facing));
-            let _ = c.release(body, d);
+        if let Some(facing) = sim::controller::facing_toward(from, to) {
+            crate::bodies::turn_free(c, body, facing);
         }
     }
 }

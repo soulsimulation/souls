@@ -2737,8 +2737,10 @@ impl Acts {
                 None => self.toward.remove(&body),
             };
             // A move made toward its thing argument (`bow_to toward=<Soul>`, `point toward=`) is made facing it: the
-            // body turns to it first, as a walk's end turns it (trial of 25 Nov: a bow to a Soul faced away from it).
+            // body turns to it first, as a walk's end turns it (trial of 25 Nov: a bow to a Soul faced away from it). Only
+            // a new act turns it: one the forms hold already is its run or its receipt.
             if let (Some(t), Some(b)) = (thing, bodies.as_deref_mut())
+                && !self.forms.known(intent.id)
                 && moves_toward(&entry, form)
             {
                 b.face_to(tree, body, t);
