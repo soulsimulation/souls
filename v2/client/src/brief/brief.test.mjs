@@ -140,3 +140,25 @@ test('D12: a Soul lying in a bed names its bed and the bedroom around it, not th
   assert.deepEqual(b.here, ['bedside lamp'], 'what is in the room, not my bed');
   assert.deepEqual(heldBy(rows, 'soul-3', { verbs: ['eden:lie'], target: 'bed' }), { rank: 0, verb: 'eden:lie', id: 'bed', name: 'bedroom-2-bed', fallback: false });
 });
+
+test('trial 0.137: on open ground of thousands, the brief names what is near the body first, with ids and metres, and what it does and holds', () => {
+  // Alphabetically the ground starts with alpine chalets far away; the bench and the book stack are beside me.
+  const rows = byId([
+    { id: 'g', name: 'ground 1', kind: 'eden:ground', parent: null, path: [], children: 5000 },
+    { id: 'me', name: 'Moss', kind: 'souls:body', soul: 'soul-1', parent: 'g', path: ['ground 1'], children: 1, pos: [0, 0, 0] },
+    { id: 'cup', name: 'blue cup', kind: 'eden:cup', parent: 'me', path: ['ground 1', 'Moss'], children: 0 },
+    { id: 'bench', name: 'bench 4', kind: 'eden:bench', parent: 'g', path: ['ground 1'], children: 0, pos: [3_000_000, 0, 0] },
+    { id: 'books', name: 'book stack', kind: 'eden:book_stack', parent: 'g', path: ['ground 1'], children: 0, pos: [0, 0, 1_500_000] },
+    { id: 'zone', name: 'aardvark meadow', kind: 'eden:place', parent: 'g', path: ['ground 1'], children: 0 },
+  ]);
+  for (let i = 0; i < 5000; i++) rows.set(`a${i}`, { id: `a${i}`, name: `alpine chalet ${i}`, kind: 'eden:chalet', parent: 'g', path: ['ground 1'], children: 0, pos: [500_000_000 + i * 1_000_000, 0, 0] });
+  const metres = (r) => { const p = rows.get(r.id).pos; return p ? Math.hypot(...p) / 1e6 : undefined; };
+  const b = brief(rows, { me: 'soul-1', metres, now: 'standing', holding: [{ id: 'cup', name: 'blue cup', kind: 'eden:cup' }] });
+  assert.deepEqual(b.here.slice(0, 3), ['book stack (books, 1.5 m)', 'bench 4 (bench, 3 m)', 'alpine chalet 0 (a0, 500 m)']);
+  assert.ok(!b.here.includes('aardvark meadow'), 'unplaced rows come after every placed one');
+  assert.equal(b.doing, 'standing');
+  assert.deepEqual(b.holding, [{ id: 'cup', name: 'blue cup', kind: 'eden:cup' }]);
+  assert.ok(bytes(b) < BRIEF_MOST, `${bytes(b)} bytes`);
+  assert.ok(!NO_COORDINATES.test(JSON.stringify(b)), 'no coordinates');
+  assert.equal(brief(rows, { me: 'soul-1', holding: [] }).holding, 'nothing', 'empty hands said plainly');
+});

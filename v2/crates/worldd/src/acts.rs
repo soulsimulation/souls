@@ -126,13 +126,16 @@ pub(crate) struct Walk {
     planned: bool,
     /// Still bodies were stepped aside for it once (0.132 A2-3).
     made_way: bool,
+    /// Its gait's speed, µm a second (a walk's, a jog's, a run's): its deadline is the route at that speed.
+    speed: i64,
 }
 
-/// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
-/// (at least 5 s), plus 5 s per crossing or door. No total cap: a long walk that keeps moving ends done, never by the
-/// clock; C21's watch ends one that stalls, and the intent's expiry still bounds it.
-fn walk_span(length_mm: u64, links: usize) -> Micros {
-    let speed = i128::from(crate::bodies::WALK);
+/// A gateway walk's time once its route is planned: the route at its gait's `speed` (µm a second: a run is told less
+/// time than a walk for the same way, trial 0.137), plus half again for bends and yielding (at least 5 s), plus 5 s per
+/// crossing or door. No total cap: a long walk that keeps moving ends done, never by the clock; C21's watch ends one
+/// that stalls, and the intent's expiry still bounds it.
+fn walk_span(length_mm: u64, links: usize, speed: i64) -> Micros {
+    let speed = i128::from(speed.max(1));
     let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
     let travel = i64::try_from(travel).unwrap_or(i64::MAX);
     // Half the free walking time for bends and yielding, at least 5 s, plus 5 s per crossing/door.
@@ -149,12 +152,13 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
 }
 
 impl Walk {
-    pub(crate) fn new(body: Id, order: Id) -> Self {
+    pub(crate) fn new(body: Id, order: Id, speed: i64) -> Self {
         Self {
             body,
             order,
             planned: false,
             made_way: false,
+            speed,
         }
     }
 
@@ -178,7 +182,7 @@ impl Walk {
         if !self.planned
             && let Some(metrics) = b.runner.route_metrics(self.body, self.order)
         {
-            due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links)));
+            due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links, self.speed)));
             self.planned = true;
         }
         (due, false)
@@ -3038,14 +3042,24 @@ mod gateway_walk_tests {
 
     #[test]
     fn a_gateway_walks_route_time_includes_margin_and_links_with_no_ceiling() {
+        let walk = crate::bodies::WALK;
         // 10 s of walking, 5 s of margin, and the ladder's 15 s climb (0.133 N1).
-        assert_eq!(walk_span(14_000, 0), 30_000_000);
-        assert_eq!(walk_span(14_000, 2), 40_000_000);
-        assert!(walk_span(20_000, 0) > 14_000_000);
-        assert!(walk_span(70_000, 0) >= 75_000_000);
+        assert_eq!(walk_span(14_000, 0, walk), 30_000_000);
+        assert_eq!(walk_span(14_000, 2, walk), 40_000_000);
+        assert!(walk_span(20_000, 0, walk) > 14_000_000);
+        assert!(walk_span(70_000, 0, walk) >= 75_000_000);
         // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
-        assert!(walk_span(600_000, 0) > 600_000_000);
-        assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
+        assert!(walk_span(600_000, 0, walk) > 600_000_000);
+        assert_eq!(walk_span(u64::MAX, usize::MAX, walk), Micros::MAX);
+    }
+
+    #[test]
+    fn trial_0137_a_run_is_told_less_time_than_a_walk_for_the_same_way() {
+        // 140 m: 100 s walking, 50 s margin, 15 s ladder; at a run's 4 m/s, 35 s, 17.5 s and 15 s.
+        let span = |gait: Option<&str>| walk_span(140_000, 0, crate::bodies::speed(gait));
+        assert_eq!(span(None), 165_000_000);
+        assert_eq!(span(Some("run")), 67_500_000);
+        assert!(span(Some("jog")) < span(None) && span(Some("run")) < span(Some("jog")));
     }
 }
 

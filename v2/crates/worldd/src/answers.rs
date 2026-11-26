@@ -4689,11 +4689,20 @@ impl Clock {
             })
             .map(|(id, a)| (a.body, *id))
             .collect();
+        // Each walk's gait, so its deadline is its route at that gait's speed (trial 0.137).
+        let gaits: BTreeMap<Id, i64> = asks
+            .iter()
+            .filter_map(|(id, a)| match a.ask {
+                replica::move_check::Ask::Walk { gait, .. } => Some((*id, crate::bodies::speed(gait))),
+                _ => None,
+            })
+            .collect();
         let started = b.start(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
-                self.walks.insert(id, acts::Walk::new(body, id));
+                let speed = gaits.get(&id).copied().unwrap_or(crate::bodies::WALK);
+                self.walks.insert(id, acts::Walk::new(body, id, speed));
                 walked.push((body, id));
             }
         }
