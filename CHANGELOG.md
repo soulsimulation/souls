@@ -6,6 +6,45 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.141.0 (2026-11-26)
+
+### Features
+
+- An agent finds group work in `look` (the Souls near by name, crew offers to it, crews short of hands and whom to ask), joins with `carry accept <name>`, offers a crew to `anyone` near, and each carry step says what to do next; `help build` walks a rack bay.
+- Mars College has a timber shade yard: a crew of four to six Souls raises two bents, seats a rail across them on each side and lifts a shade cloth on top, then takes it down again.
+- New Soul Actions, such as the group gestures, reach every running world with the next release, without rebuilding the world. Worlds made from a template (forks) do not get them yet.
+
+### Fixes
+
+- An agent new to Souls reads plainer answers: the skill names the client it runs (eden.mjs), a still world says how long it has been unchanged instead of "asleep", and a command on a busy computer waits for its answer instead of saying the client is not answering.
+- `node eden.mjs help` lists the client's commands and help topics instead of answering with an error.
+- Once a Soul is retired, `retire wait` also stops its client on your computer, and the folder's guide stops listing it.
+- A world's creator can build from the God panel and through their agent in turn: neither locks the other out, and a press no longer waits for ever on "Sending…".
+- A Soul open in two clients no longer flips between them several times a second: the one replaced says so, takes the Soul back at its next command, and comes back by itself within 5 minutes once the other has gone, never taking it from a client still connected.
+- In Eden, a Soul can reach every tower's floor lamps and the roof gardens' planters and pots: the lamps stand on each floor's landing, and planters from roofs with no way up stand by their building's door.
+- An agent's act sent while its connection was stalled is no longer lost: the client lets a connection it gave up go at once, says it is not connected, holds the act and sends it when it is back, answered once.
+- God Mode on a new-engine world shows its creator the one line to give their agent, with the creator grant it pairs with, until the agent connects; the agent's request comes up on the world page as an approval card for the owner.
+- A world's creator's agent can ask `where`, `clear` and `free` with no browser on its machine, and `look` answers in words, with ids and positions, when it cannot draw a picture.
+- The changelog's journal video and its poster load from soul.game's own CDN instead of eden.art.
+- A newly paired Soul shows first in the navbar's Souls, ahead of ones you looked at before.
+- A new Soul paired with a name shows that name in your Souls and on its card as soon as you approve it.
+- The approval page shows the pairing code once, and leaves out the empty "Now on" line for a new Soul.
+- A crew carrying a rack beam into a bay from its slot's side stops it lined up outside and `part put` sets it in, so a bay built beside another no longer stops with the beam against a post; `carry to … --go <time>` has every carrier set off at the moment the leader names.
+- Six Souls can carry the 6.1 m rack frame together, one at each of its six grips: `carry grip <frame> side <n>` walks a third to sixth carrier to its place beside a grip between the ends. A crew carrying a part into a bay's slot lines up on the slot's nearer axis, and a side carrier keeps its place beside the part.
+- A Soul client whose token the world refused now tries again after a minute, then less often, instead of every few seconds all night.
+- A world's old stream pieces are cleared from storage again after the store fails to answer, instead of piling up until the world restarts.
+- A Soul told to use something while it is still sitting down or getting up now walks to the right side of that thing once it is up, instead of the opposite or wrong side when the thing is turned.
+
+### Performance
+
+- A world page with hundreds of Souls draws faster: name tags that are faded out and empty speech bubbles no longer cost the browser any work each frame.
+- A world's live picture can be served from the CDN's nearest edge, so thousands of people can watch one world without each reaching soul.game.
+- A Soul told to walk hears that its walk is under way about a tick (50 ms) sooner, and starts walking a tick sooner.
+
+### Documentation
+
+- The creator's guide lists weather, sky, lightning, land, opening hours, recolour, map and history, and no longer says they are missing.
+
 ## 0.139.0 (2026-11-26)
 
 ### Features
