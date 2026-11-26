@@ -44,7 +44,8 @@ pub const VIEW_BEHIND: &str = "view.behind";
 pub const VIEW_BEHIND_MOST: Duration = Duration::from_secs(10);
 /// How often a view socket is probed, once its last probe was answered.
 const VIEW_PROBE_EVERY: Duration = Duration::from_secs(2);
-/// How long a view socket that fell behind is given to take its reason and close frame before it is dropped.
+/// How long a view socket that fell behind, or an agent's let go for a full queue (`agent.behind`, #4979), is given to
+/// take its reason and close frame before it is dropped.
 const VIEW_BEHIND_GRACE: Duration = Duration::from_secs(1);
 /// The close code of a view socket that fell behind: 1013, Try Again Later. It rejoins as any new viewer does.
 const VIEW_BEHIND_CODE: u16 = 1013;
@@ -158,6 +159,17 @@ async fn upgrade(
 fn control(name: &str) -> Vec<u8> {
     let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
     encode(&Value::Map([(4, Value::Text(name))].into())).unwrap_or_default()
+}
+
+/// The sign-in's outcome, `{4: name}`, and on a Soul's grant whose intents were sent before, `5`: the newest sequence
+/// sent for it (#4978). A client that took the Soul from another numbers its next intent after it.
+fn outcome(name: &str, newest: u64) -> Vec<u8> {
+    let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
+    let mut m: BTreeMap<u64, Value> = [(4, Value::Text(name))].into();
+    if newest > 0 {
+        m.insert(5, Value::Uint(newest));
+    }
+    encode(&Value::Map(m)).unwrap_or_default()
 }
 
 /// An answer the gateway gives itself to bytes it could not read: `{2: answer}`, with no version, not kept.
@@ -282,6 +294,23 @@ async fn send_view(
     }
 }
 
+/// Sends on an agent's socket unless it is let go for a full queue meanwhile (#4979): then `false`, with `let_go` set.
+/// A send waiting on a slow reader is given up, so its close is not held behind the frames still queued.
+async fn send_agent(
+    socket: &mut WebSocket,
+    message: Message,
+    behind: &tokio::sync::Notify,
+    let_go: &mut bool,
+) -> bool {
+    tokio::select! {
+        sent = socket.send(message) => sent.is_ok(),
+        _ = behind.notified() => {
+            *let_go = true;
+            false
+        }
+    }
+}
+
 fn binary(frame: Vec<u8>) -> Message {
     Message::Binary(frame.into())
 }
@@ -379,17 +408,26 @@ async fn serve(
         let _ = socket.send(Message::Close(Some(close))).await;
         return;
     };
-    let mut ok = send(&mut socket, control(attached.outcome)).await;
+    let mut ok = send(&mut socket, outcome(attached.outcome, attached.newest)).await;
     for frame in std::mem::take(&mut attached.replay) {
         ok = ok && send(&mut socket, times::finish(frame)).await;
     }
 
     // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`). Until the
-    // gateway stops: then the socket closes with 1012 (O16).
+    // gateway stops: then the socket closes with 1012 (O16). Or until it is let go for a full queue, its stream's or
+    // its view items': then it closes with 1013 `agent.behind` at once, what is still queued not sent (#4979).
     let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
     let mut closing = gw.closing.subscribe();
+    // The newest sequence of an intent read from this socket (#4978): told when another takes the grant from it.
+    let mut read = 0;
+    let behind = attached.behind.clone();
+    let mut let_go = false;
     while ok {
         tokio::select! {
+            _ = behind.notified() => {
+                let_go = true;
+                break;
+            }
             _ = stopped(&mut closing) => {
                 let close = CloseFrame { code: crate::RESTART, reason: "gateway.restarting".into() };
                 let _ = socket.send(Message::Close(Some(close))).await;
@@ -417,7 +455,7 @@ async fn serve(
                     if let Some((n, _)) = view.take() {
                         gw.views.end(n);
                     }
-                    view = Some(gw.views.subscribe(request, &views::audiences(grant)));
+                    view = Some(gw.views.subscribe(request, &views::audiences(grant), Some(behind.clone())));
                     continue;
                 }
                 // A token revoked since sign-in (W9, #2827): its next intent is refused by name, and the socket ends.
@@ -425,14 +463,14 @@ async fn serve(
                     let _ = send(&mut socket, control(token::REFUSED)).await;
                     break;
                 }
-                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received) {
+                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
                     gw.receipts.write(&who, Outcome::Refusal);
-                    ok = send(&mut socket, answer).await;
+                    ok = send_agent(&mut socket, binary(answer), &behind, &mut let_go).await;
                 }
             }
             Some(mail) = attached.mail.recv() => {
                 if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                ok = socket.send(Message::Text(mail.into())).await.is_ok();
+                ok = send_agent(&mut socket, Message::Text(mail.into()), &behind, &mut let_go).await;
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => {
@@ -441,15 +479,20 @@ async fn serve(
                     if let Some(t) = &trace { t.at("socket-dequeue", "ready"); }
                     let frame = times::finish(frame);
                     if let Some(t) = &trace { t.final_frame(&frame); }
-                    ok = send(&mut socket, frame).await;
+                    ok = send_agent(&mut socket, binary(frame), &behind, &mut let_go).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
                 // Another socket signed in for this grant (a Soul's: the last device wins): it is told so, by name,
                 // and its client does not sign in again at once. Or this one fell too far behind, and it may resume.
                 None => {
                     if gw.replaced(grant, attached.session) {
-                        let close = CloseFrame { code: crate::REPLACED, reason: "agent.replaced".into() };
+                        // #4978: the newest intent it read from this socket; one its client sent later never reached
+                        // the world, and its client refuses it by name.
+                        let _ = socket.send(Message::Text(format!(r#"{{"replaced":{{"read":{read}}}}}"#).into())).await;
+                        let close = CloseFrame { code: crate::REPLACED, reason: crate::AGENT_REPLACED.into() };
                         let _ = socket.send(Message::Close(Some(close))).await;
+                    } else {
+                        let_go = true;
                     }
                     break;
                 }
@@ -462,10 +505,13 @@ async fn serve(
             } => match item {
                 Some(frame) => {
                     if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                    ok = send(&mut socket, frame).await;
+                    ok = send_agent(&mut socket, binary(frame), &behind, &mut let_go).await;
                 },
                 // Its view queue was full: let go, as a slow stream is.
-                None => break,
+                None => {
+                    let_go = true;
+                    break;
+                }
             },
         }
     }
@@ -473,6 +519,24 @@ async fn serve(
         gw.views.end(n);
     }
     gw.detach(grant, attached.session);
+    // #4979: its reason and close frame, if it can still take them; either way the socket is dropped. A client that
+    // fell behind on a slow link may take them only once its backlog is read: it learns by its own bound then. One
+    // replaced meanwhile by a newer sign-in is told that instead, so it does not take the Soul back at once.
+    if let_go {
+        let close = if gw.replaced(grant, attached.session) {
+            CloseFrame {
+                code: crate::REPLACED,
+                reason: "agent.replaced".into(),
+            }
+        } else {
+            CloseFrame {
+                code: crate::BEHIND,
+                reason: crate::AGENT_BEHIND.into(),
+            }
+        };
+        let _ =
+            tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
+    }
 }
 
 /// A page's view socket (V13b, #3407), signed in with a view token: it subscribes to views for the token's grants (its
@@ -555,7 +619,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     if let Some((n, _)) = sub.take() {
                         gw.views.end(n);
                     }
-                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view)));
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view), None));
                     asked = Some(request);
                     continue;
                 }
@@ -577,7 +641,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     && let (Some(request), Some((n, _))) = (&asked, sub.take())
                 {
                     gw.views.end(n);
-                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh)));
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh), None));
                 }
                 view = fresh;
                 authority = fresh_authority;
@@ -662,6 +726,7 @@ fn take_intent(
     session: u64,
     bytes: Vec<u8>,
     received: u64,
+    read: &mut u64,
 ) -> Option<Vec<u8>> {
     // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
     if let Ok(d) = decode(&bytes)
@@ -684,6 +749,7 @@ fn take_intent(
             return Some(own_answer(Answer::Unread { reason }));
         }
     };
+    *read = (*read).max(intent.sequence);
     if intent.actor != actor {
         return refuse(
             gw,
@@ -700,14 +766,19 @@ fn take_intent(
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
     // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket; a sequence
-    // another of them sent, out or lately answered, is refused here, on this socket, and never sent.
-    if !gw.sending(grant, sequence, session) {
-        return Some(refused(
-            actor,
-            sequence,
-            crate::SEQUENCE_IN_USE,
-            gw.link.now(),
-        ));
+    // another of them sent, out or lately answered, is refused here, on this socket, and never sent. #4978: on a
+    // Soul's, one sent after another socket took the grant, or under a sequence another intent went under.
+    let turn = if crate::shared(grant) {
+        if gw.sending(grant, sequence, session) {
+            Ok(())
+        } else {
+            Err(crate::SEQUENCE_IN_USE)
+        }
+    } else {
+        gw.holding(grant, sequence, session, crate::digest(&bytes))
+    };
+    if let Err(reason) = turn {
+        return Some(refused(actor, sequence, reason, gw.link.now()));
     }
     match gw
         .link

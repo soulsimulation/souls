@@ -947,7 +947,7 @@ fn on_outline(p: Vec3, bounds: Vec3, outline: &[[i64; 2]]) -> Option<Vec3> {
 }
 
 /// A whole number of the encoding as an `i64`.
-fn int_of(v: &replica::encode::Value) -> Option<i64> {
+pub(crate) fn int_of(v: &replica::encode::Value) -> Option<i64> {
     match v {
         replica::encode::Value::Uint(u) => i64::try_from(*u).ok(),
         replica::encode::Value::Nint(n) => i64::try_from(*n).ok().map(|n| -n - 1),
@@ -3055,13 +3055,13 @@ impl Acts {
     }
 
     /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
-    /// its walk.
+    /// its walk, or for a step the world refused, the refusal's words (a move out of reach: how far, what reach).
     pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
         std::mem::take(&mut self.forms.ended)
             .into_iter()
             .filter_map(|e| {
                 let why = self.blocked.remove(&e.body);
-                let why = why.filter(|_| e.how.as_str() == BLOCKED);
+                let why = why.filter(|_| e.how.as_str() == BLOCKED).or(e.why);
                 Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
             })
             .collect()

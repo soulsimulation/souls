@@ -26,8 +26,9 @@
 // Four (`buildFour`): Ada and Bo raise bent 1, Bo holding it; Ada and Cy bent 2, Cy holding it; Ada and Di seat both
 // rails; the holders let go and the frame stands; all four lift the cloth onto the rails. Six (`buildSix`): two crews
 // raise both bents at once, two crews seat both rails at once, all six lift the cloth. Take-down (`takeDown`): four
-// take the cloth off, a holder on each bent, the rails out, each bent carried back to where it stood. The transcript
-// is `<dir>/shade.json`.
+// take the cloth off, a holder on each bent, the rails out (each rail's crew stands outside its posts' line first, so
+// the rail comes down clear of the posts), each bent carried back to where it stood. The transcript is
+// `<dir>/shade.json`.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isMain } from '../../lib/is-main.mjs';
@@ -47,6 +48,8 @@ export const AT = {
   // its slot), so its four to six carriers stay in line past the posts
   clothIn: [[17.5, 15], [14.6, 15]],
 };
+/** How far outside its posts' line a rail's crew stands to unseat it, metres: as far as `AT.railIn` sets it in from. */
+export const RAIL_OUT = 0.9;
 /** The fixed camera on the yard for the clip, from the south. */
 export const CAMERA = { position: [14, 5.5, 25], target: [14, 1.2, 15], fov: 50 };
 export const LABELS = ['ada', 'bo', 'cy', 'di', 'eve', 'fay'];
@@ -83,7 +86,9 @@ async function seatRail(r, bodies, ids, rail, slot, stop, a, b, crew = null) {
 }
 
 /** The cloth by a crew of four or six: the first at its back, the second at its front, the rest beside it. Taken from
- *  where it lies (`take`) or off the rails (`unseat`), carried through the points `to` in turn, put `into`. */
+ *  where it lies (`take`) or off the rails (`unseat`), carried through the points `to` in turn, put `into`. The first
+ *  offered the crew, so it is the carry's front: its `carry to` alone walks the whole crew, each keeping its place
+ *  (PR #5005), and the cloth goes in square, never turned onto a post. */
 async function cloth(r, bodies, ids, who, how, to, into) {
   const [a, b, ...sides] = who;
   await Promise.all([
@@ -93,7 +98,7 @@ async function cloth(r, bodies, ids, who, how, to, into) {
   ]);
   const crew = await crewOf(r, bodies, a, [b, ...sides]);
   await r.run(a, 'part', how, crew, ids.cloth);
-  for (const leg of to) await Promise.all(who.map((s) => r.run(s, 'carry', 'to', crew, xz(leg))));
+  for (const leg of to) await r.run(a, 'carry', 'to', crew, xz(leg));
   await r.run(a, 'part', 'put', crew, ...into);
   await Promise.all(who.map((s) => r.run(s, 'carry', 'leave', crew)));
 }
@@ -127,7 +132,9 @@ export async function buildSix(r, bodies, ids) {
 }
 
 /** Take-down by four: the cloth off to where it lay, a holder on each bent, the rails out to where they lay, each bent
- *  carried back to where it stood. */
+ *  carried back to where it stood. A rail sits on its posts' line and is unseated to its carriers' middle: they stand
+ *  at its ends 0.9 m outside the frame (`--out`, where the build set it in from, `AT.railIn`), so it comes down clear
+ *  of the posts and goes straight out; on the posts' line it came down against one and its carry was stopped. */
 export async function takeDown(r, bodies, ids) {
   await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di'], 'unseat', [AT.clothIn[0], AT.cloth], [xz(AT.cloth)]);
   const holds = [];
@@ -139,7 +146,8 @@ export async function takeDown(r, bodies, ids) {
   }
   const crew = await crewOf(r, bodies, 'bo', ['di']);
   for (const k of [1, 0]) {
-    await r.both(['bo', 'carry', 'grip', ids.rails[k], 'back', '--from', '2.2'], ['di', 'carry', 'grip', ids.rails[k], 'front', '--from', '2.2']);
+    const out = ['--from', '2.2', '--out', String(RAIL_OUT)];
+    await r.both(['bo', 'carry', 'grip', ids.rails[k], 'back', ...out], ['di', 'carry', 'grip', ids.rails[k], 'front', ...out]);
     await r.run('bo', 'part', 'unseat', crew, ids.rails[k]);
     await r.both(['bo', 'carry', 'to', crew, xz(AT.rails[k])], ['di', 'carry', 'to', crew, xz(AT.rails[k])]);
     await r.run('bo', 'part', 'put', crew, xz(AT.rails[k]));

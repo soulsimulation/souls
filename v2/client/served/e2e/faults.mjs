@@ -49,7 +49,7 @@ function run(path, args, { ready, log } = {}) {
   procs.add(p);
   let out = '';
   const done = new Promise((ok, fail) => {
-    const take = (d) => { out += d; if (log) writeFileSync(log, d, { flag: 'a' }); const m = ready?.exec(out); if (m) ok({ p, m }); };
+    const take = (d) => { out += d; if (log) writeFileSync(log, String(d).replace(/^(?=.)/gm, () => `${new Date().toISOString()} `), { flag: 'a' }); const m = ready?.exec(out); if (m) ok({ p, m }); };
     p.stdout.on('data', take);
     p.stderr.on('data', take);
     p.on('exit', (c) => { procs.delete(p); ready ? fail(new Error(`${path} ended (${c}) before it was ready: ${out.slice(-1500)}`)) : ok({ p, out, code: c }); });

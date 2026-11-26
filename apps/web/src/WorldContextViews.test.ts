@@ -153,7 +153,7 @@ test('#2192: a reopened Explore reuses ready pictures without asking the server,
         assert.equal(await client.picture('context:e_a'), '/w/fixture/v1/world/context/thumb?ref=e_a');
         assert.equal(await client.picture('context:e_none'), null, 'a picture the server could not make is not asked for again');
         assert.equal(posts.length, 3, 'the second open asks for no views');
-        assert.match(client.locations[0].previewLabel ?? '', /Cutaway/, 'the photo label survives the reopen');
+        assert.deepEqual(client.locations.map(l => [l.label, 'previewLabel' in l]), [['A', false], ['Old', false]], '#5038: a card is named by its place, with no label about how its picture was made');
         revision = 2; await client.refresh();
         await client.picture('context:e_a');
         assert.equal(posts.length, 4, 'a new world revision asks again');

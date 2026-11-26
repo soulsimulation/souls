@@ -6,7 +6,8 @@
 //!   log. A birth names its Soul and its entry, nothing else: no account id reaches its effects (T8).
 //! - **The standing place** comes from [`Standing`]: a [`Ring`] of spots round each entry for now (N9 later), tried
 //!   nearest first. A spot is held while a body stands closer to it than two body radii (the spatial index walks use),
-//!   and a held spot is passed over, as is one the ground does not hold (#4216). When every entry spot is held the
+//!   and a held spot is passed over, as is one the ground does not hold (#4216) and one on ground sealed off from the
+//!   main ground ([`crate::mover::Floors::sealed`], #5006). When every entry spot is held the
 //!   birth takes the nearest free place on further rings ([`Standing::beyond`]); with none, it waits, named
 //!   [`NO_FREE_PLACE`] ([`Life::held_back`]), or [`OFF_SURFACE`] when no spot tried was held and the ground held none
 //!   of them. Two bodies are never born on one point. Each faces its entry's point ([`Standing::faces`]), so a body
@@ -383,9 +384,12 @@ impl Life {
                 continue;
             }
             let frame = Frame { node, slot: None };
-            // Placing reads no facing: the spot is accepted first, and the facing worked out once, for it alone.
+            // Placing reads no facing: the spot is accepted first, and the facing worked out once, for it alone. Never
+            // on ground sealed off from the main ground (#5006): a body born there could not walk away. Asked only of
+            // a spot the ground holds, so a spot off the ground costs no reach.
             if let Some(s) = surfaces.get(&node)
                 && let Ok(mut m) = s.place_built(body, frame, at, Quat::IDENTITY, build)
+                && !floors.sealed(node, at, build)
             {
                 if let Some(q) = standing
                     .faces(b.entry, i)

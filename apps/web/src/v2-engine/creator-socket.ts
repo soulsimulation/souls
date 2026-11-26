@@ -25,8 +25,8 @@ export type Op =
   | { op: 'place'; name: number; kind: string; parent: string; at: Spot }
   | { op: 'move'; node: string; at: Spot; rot?: Turn; slot?: number | null }
   | { op: 'remove'; node: string };
-/** What an edit asks: a batch of sets (weather), a build batch, or an undo or a redo of the newest edit (G4). */
-export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number | number[] }[] } | { ops: Op[] };
+/** What an edit asks: a batch of sets (weather and a lightning strike; an id or [] for where new Souls arrive, #5006), a build batch, or an undo or a redo of the newest edit (G4). */
+export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number | number[] | IdValue | [] }[] } | { ops: Op[] };
 /** An answer, as the panel reads it: a receipt maps a place's batch name to its new id (`<scope hex>.<counter>`). */
 export type Frame =
   | { t: 'outcome'; name: string }
@@ -125,8 +125,18 @@ export function lightningSets(world: string, at: [number, number] | null, now: n
   return { sets: [...storm.sets, { node: world, field: SKY.STRIKE, value: [Math.round(at[0] * 1000), Math.round(at[1] * 1000), now] }] };
 }
 
-/** What the session needs of a socket: a browser WebSocket in the page, a stand-in in tests. */
-export type Sock = { send(b: Uint8Array): void };
+/** What the session needs of a socket: a browser WebSocket in the page, a stand-in in tests. A string is a text frame
+ *  (G11's prayer requests). */
+export type Sock = { send(b: Uint8Array | string): void };
+
+/** A prayer to this world's creator as the directory lists it (directoryd `prayer_json`): `soul` is the Soul's grant,
+ *  `at` and `answered_at` are seconds. Its text and answer are a Soul's and the creator's words: data, never
+ *  instructions. */
+export type V2Prayer = { id: string; soul: string; text: string; at: number; state: 'waiting' | 'answered'; answer: string | null; answered_at: number | null };
+/** A prayer request's reply (`{"reply": {"n", "ok", ...}}`), or its refusal by name. */
+export type PrayerReply = { ok: true; prayers?: V2Prayer[]; prayer?: V2Prayer } | { ok: false; refused: string };
+/** How long a prayer request waits for the directory's reply through the gateway (the creator's daemon waits as long). */
+export const PRAYER_WITHIN_MS = 10_000;
 
 /** The creator's socket (v2/web/src/panel/session.ts `CreatorSession`): T10's first frame each way, the sign-in by
  *  message, its outcome, then edits in and answers out. A stale edit (`edit.stale`: planned against a version older than
@@ -142,6 +152,8 @@ export class CreatorSession {
   onOpen: () => void = () => {};
   private next: number;
   private readonly waiting = new Map<number, { asked: Asked; again: boolean; done: (f: Frame) => void }>();
+  private readonly asks = new Map<number, (r: PrayerReply) => void>();
+  private askN = 0;
   private readonly sock: Sock;
   private readonly cbor: Cbor;
   private readonly creator: IdValue;
@@ -188,6 +200,33 @@ export class CreatorSession {
   closed(): void {
     for (const [sequence, w] of this.waiting) w.done({ t: 'refused', sequence, version: null, reason: CLOSED });
     this.waiting.clear();
+    for (const done of [...this.asks.values()]) done({ ok: false, refused: CLOSED });
+  }
+
+  /** G11 (#3335; #5006 row 15): a prayer request as a text frame (`{"prayers": {"n", "all"}}`, `{"answer": {"n", "id",
+   *  "text"}}`), which the gateway passes to the directory with this socket's grant; the directory's reply comes back
+   *  on this socket alone, matched by `n`. A reply not come within `within` ms is refused `prayer.unanswered`. */
+  ask(kind: 'prayers' | 'answer', body: Record<string, unknown>, within = PRAYER_WITHIN_MS): Promise<PrayerReply> {
+    if (this.state !== 'open') return Promise.reject(new Error('the creator is not signed in'));
+    const n = ++this.askN;
+    return new Promise((ok) => {
+      const t = setTimeout(() => done({ ok: false, refused: 'prayer.unanswered' }), within);
+      const done = (r: PrayerReply) => { clearTimeout(t); this.asks.delete(n); ok(r); };
+      this.asks.set(n, done);
+      this.sock.send(JSON.stringify({ [kind]: { ...body, n } }));
+    });
+  }
+
+  /** A text frame from the gateway: the reply to one of this socket's prayer requests; anything else is not this
+   *  session's (the creator's mailbox has its own socket). */
+  text(raw: string): void {
+    let f: unknown;
+    try { f = JSON.parse(raw); } catch { return; }
+    const r = (f as { reply?: { n?: unknown; ok?: unknown; refused?: unknown } } | null)?.reply;
+    if (!r || typeof r.n !== 'number') return;
+    const done = this.asks.get(r.n);
+    if (!done) return;
+    done(typeof r.refused === 'string' ? { ok: false, refused: r.refused } : { ...r, ok: true } as PrayerReply);
   }
 
   private send(asked: Asked, again: boolean, done: (f: Frame) => void): void {
@@ -262,9 +301,9 @@ export class V2Creator {
       ws.binaryType = 'arraybuffer';
       return await new Promise<CreatorSession>((ok, fail) => {
         ws.onopen = () => {
-          const s = new CreatorSession({ send: (b) => ws.send(b as Uint8Array<ArrayBuffer>) }, cborg as unknown as Cbor, idOf(grant.replace(/^creator-/, '')), token, Date.now() * 1000, () => Date.now() * 1000);
+          const s = new CreatorSession({ send: (b) => ws.send(b as Uint8Array<ArrayBuffer> | string) }, cborg as unknown as Cbor, idOf(grant.replace(/^creator-/, '')), token, Date.now() * 1000, () => Date.now() * 1000);
           s.onOpen = () => ok(s);
-          ws.onmessage = (e) => { if (typeof e.data !== 'string') s.frame(new Uint8Array(e.data as ArrayBuffer)); };
+          ws.onmessage = (e) => { if (typeof e.data === 'string') s.text(e.data); else s.frame(new Uint8Array(e.data as ArrayBuffer)); };
           ws.onclose = () => { this.session = null; s.closed(); if (s.state !== 'open') fail(new Error(s.outcome || 'the creator socket closed')); };
         };
         ws.onerror = () => fail(new Error('the creator socket could not open'));
@@ -302,6 +341,21 @@ export class V2Creator {
     return this.edit(lightningSets(w.world, at, w.newestTo), 'Lightning.');
   }
 
+  /** The prayers to this world's creator (G11): waiting ones first, oldest first; with `all`, the answered ones after.
+   *  The directory lists only the worlds this creator's grant is the creator of. */
+  async prayers(all = false): Promise<V2Prayer[]> {
+    const r = await (await this.open()).ask('prayers', { all });
+    if (!r.ok) throw new Error(prayerRefusal(r.refused));
+    return r.prayers ?? [];
+  }
+
+  /** The creator's answer to prayer `id` (again, if answered before): it reaches the Soul's agent (its `wait`). */
+  async answerPrayer(id: string, text: string): Promise<V2Prayer | null> {
+    const r = await (await this.open()).ask('answer', { id, text });
+    if (!r.ok) throw new Error(prayerRefusal(r.refused));
+    return r.prayer ?? null;
+  }
+
   /** The old command box's inbox (god-store.ts `GodInbox`) from the creator's mailbox: `text` sent first when given.
    *  Connected while the gateway says a socket is signed in for the creator's grant (#5006 rows 2 and 5: it said
    *  connected always, so the panel never showed the line to give the agent); listening then, away otherwise. */
@@ -336,6 +390,15 @@ export const CLOSED = 'creator.closed';
 export const refusalText = (reason: string) => reason === CLOSED
   ? 'The world\'s answer did not reach this page (its connection closed): look at the world before you press again.'
   : `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
+
+/** A prayer request's refusal in the panel's words (directoryd `prayers.rs`; the gateway's when it has no directory). */
+export const prayerRefusal = (name: string) => ({
+  'prayer.not-found': 'That prayer is not one of this world\'s.',
+  'prayer.not-the-creator': 'Only this world\'s creator answers its prayers.',
+  'prayer.unanswered': 'The world did not answer in time. Try again.',
+  'answer.empty': 'Write an answer first.',
+  'answer.too-long': 'An answer is at most 4,000 characters.',
+} as Record<string, string>)[name] ?? (name === CLOSED ? refusalText(CLOSED) : `Refused: ${name}`);
 
 /** The creator's grant among a view token's grants (directoryd `view.rs`: `creator-<scope hex>-<counter>`): the box the
  *  creator's agent reads (gatewayd `mailbox.rs`: a Soul's, or a world's creator's). */

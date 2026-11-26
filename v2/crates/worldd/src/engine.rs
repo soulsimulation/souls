@@ -134,6 +134,10 @@ pub struct Act {
 /// each side carrier's place at the part (C5).
 type Taking = (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>);
 
+/// A carrying ground's fixed geometry and what it was read at (0.135 C7, [`Engine`]'s `fixed`): the walkers' ground
+/// versions, and the carries on it, each by its activity and when it began.
+type FixedRead = (sim::ground::Versions, Vec<(Id, Micros)>, Fixed);
+
 /// The engine's systems, with their own due list, moves and minter.
 pub struct Engine {
     header: Header,
@@ -166,8 +170,12 @@ pub struct Engine {
     riding: Vec<(Id, Id)>,
     /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
     retried: BTreeMap<Id, u8>,
-    /// Each carrying ground's fixed geometry, with the walkers' ground versions it was read at (0.135 C7).
-    fixed: BTreeMap<Id, (sim::ground::Versions, Fixed)>,
+    /// Each carrying ground's fixed geometry, with what it was read at (0.135 C7): the walkers' ground versions and the
+    /// carries on it then, each by its activity and when it began. A take, a lift or a set-down moves a load off or
+    /// onto its ground without changing a walker's map (`crate::assembly::Ready::town_part`), so the versions alone
+    /// would keep a part just taken where it stood, and a load just set down out of the geometry, until the next
+    /// seating (two crews taking two bents at once).
+    fixed: BTreeMap<Id, FixedRead>,
     /// The way searches lifts asked since the last call to [`Engine::ways_asked`], in order.
     asked: Vec<WayAsk>,
     /// Each lift waiting for its way, by intent: the act, run again when the way comes back ([`Engine::way_back`]).
@@ -176,7 +184,62 @@ pub struct Engine {
     found: BTreeMap<Id, (WayAsk, Way)>,
     /// The world's entries by kind ([`Engine::with_loads`]): a seat's slots, which a touch reaches a seated body at.
     entries: Json,
+    /// Each lifted carry whose front has walked (`v2/docs/moving-group.md` rule 3): its front, which leads, the
+    /// front's latest walk, and the turn that walk takes the crew through, if any. While the carry lasts its other
+    /// carriers keep their places from the front, by follow orders `crate::answers` keeps ([`Engine::carry_follows`]).
+    led: BTreeMap<Id, Led>,
+    /// Why each led carry broke off (its load set down by the world), until [`Engine::led_over`] reads it.
+    broke: BTreeMap<Id, &'static str>,
 }
+
+/// A lifted carry's front walking (moving-group rule 3): its body, its walk, and where that walk turns the crew: the
+/// walk's goal and the carry's heading there (x, z on its ground's plan, from its back toward its front), when the walk
+/// names one (walk parameter 3, the client's `carry to <bay> <slot>`) or goes to a pose of the carry's way (0.135 R2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Led {
+    pub front: Id,
+    pub walk: Id,
+    pub turn: Option<([i64; 2], [i64; 2])>,
+}
+
+/// A carrier keeping its place in a led carry (moving-group rule 3): the carry, its front, the carrier's body and
+/// Soul, its place in the carry's frame (`[along, across]` µm from the front, +along from the back toward the front,
+/// +across as [`Carry::place_of`] has it), the carry's heading now (from its last sample) and the front's walk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Keeps {
+    pub activity: Id,
+    pub front: Id,
+    pub walker: Id,
+    pub soul: Id,
+    pub place: [i64; 2],
+    pub heading: [i64; 2],
+    pub led: Led,
+}
+
+/// A place `[along, across]` in a carry's frame as an offset on the plan, the carry heading `h` (x, z, any length,
+/// not zero): along `h` and across it (`[-h.z, h.x]`), as [`Carry::place_of`] reads a place.
+pub fn on_plan(place: [i64; 2], h: [i64; 2]) -> [i64; 2] {
+    let (h0, h1) = (i128::from(h[0]), i128::from(h[1]));
+    let l = h0
+        .saturating_mul(h0)
+        .saturating_add(h1.saturating_mul(h1))
+        .isqrt()
+        .max(1);
+    let (a, c) = (i128::from(place[0]), i128::from(place[1]));
+    let v = |n: i128| i64::try_from(n / l).unwrap_or(0);
+    [
+        v(a.saturating_mul(h0).saturating_sub(c.saturating_mul(h1))),
+        v(a.saturating_mul(h1).saturating_add(c.saturating_mul(h0))),
+    ]
+}
+
+/// The most a walk's heading for its carry (parameter 3) may be on either axis, µm: a direction, read at any length
+/// up to this; one beyond is no heading.
+pub const HEADING_MOST: i64 = 1 << 40;
+
+/// How near a pose of a carry's way (0.135 R2) its front's walk must go to turn the crew to that pose, µm: half the
+/// way's lattice step.
+pub const WAY_POSE_NEAR: i64 = turn::STEP / 2;
 
 /// The kind of thing an activity of `kind` is played at (its entry's own, `<entry>_activity`), when its entry in
 /// `entries` plays it through forms; None for one played anywhere (a touch, a dance) or a kind of no entry.
@@ -481,6 +544,8 @@ impl Engine {
             waiting: BTreeMap::new(),
             found: BTreeMap::new(),
             entries: Json::Null,
+            led: BTreeMap::new(),
+            broke: BTreeMap::new(),
         }
     }
 
@@ -1246,6 +1311,10 @@ impl Engine {
             "souls:partner-left",
             Some(by),
         )?;
+        // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
+        if self.led.get(&activity).is_some_and(|l| l.front != body) {
+            self.broke.insert(activity, "souls:partner-left");
+        }
         if let Some(s) = self.asm.as_mut() {
             s.ended(activity);
         }
@@ -1501,6 +1570,9 @@ impl Engine {
                     ) {
                         // A crew's part set down is no longer its own (0.135 A2).
                         Ok(()) => {
+                            if self.led.contains_key(&a) {
+                                self.broke.insert(a, why);
+                            }
                             if let Some(s) = self.asm.as_mut() {
                                 s.ended(a);
                             }
@@ -1510,32 +1582,46 @@ impl Engine {
                 }
             }
             // 0.135 C7: every step is checked against its ground's fixed geometry, read again only when the walkers'
-            // ground has changed since (`versions`, G3's); a step into it stops the carry, its load set down where its
-            // last sample had it.
+            // ground has changed since (`versions`, G3's) or a carry on it has begun or ended (a load taken, lifted or
+            // set down, which no walker's map sees); each carry by its activity and when it began, as a crew's id
+            // outlives its carry (set down, then taking another part). A step into it stops the carry, its load set
+            // down where its last sample had it.
+            let mut on: BTreeMap<Id, Vec<(Id, Micros)>> = BTreeMap::new();
+            for (a, c) in &self.carries {
+                let began = c.track.first().map_or(0, |s| s.0);
+                on.entry(c.ground).or_default().push((*a, began));
+            }
+            let mut unread = BTreeMap::new();
+            for (ground, carries) in on {
+                let fresh = self
+                    .fixed
+                    .get(&ground)
+                    .is_some_and(|(v, c, _)| v == versions && *c == carries);
+                if fresh {
+                    continue;
+                }
+                match Fixed::of(tr, ground) {
+                    Ok(g) => {
+                        self.fixed.insert(ground, (versions.clone(), carries, g));
+                    }
+                    Err(e) => {
+                        self.fixed.remove(&ground);
+                        unread.insert(ground, e);
+                    }
+                }
+            }
             let mut blocked = Vec::new();
             for (activity, f, k) in step {
                 let Some(carry) = self.carries.get_mut(&activity) else {
                     continue;
                 };
-                let fresh = self
-                    .fixed
-                    .get(&carry.ground)
-                    .is_some_and(|(v, _)| v == versions);
-                if !fresh {
-                    match Fixed::of(tr, carry.ground) {
-                        Ok(g) => {
-                            self.fixed.insert(carry.ground, (versions.clone(), g));
-                        }
-                        Err(e) => {
-                            self.fixed.remove(&carry.ground);
-                            eprintln!("worldd: the carry {} stopped: {e}", show(activity));
-                            blocked.push(activity);
-                            continue;
-                        }
-                    }
+                if let Some(e) = unread.get(&carry.ground) {
+                    eprintln!("worldd: the carry {} stopped: {e}", show(activity));
+                    blocked.push(activity);
+                    continue;
                 }
                 let done = match self.fixed.get(&carry.ground) {
-                    Some((_, g)) => carry.step(tr, now, f, k, g),
+                    Some((_, _, g)) => carry.step(tr, now, f, k, g),
                     None => Err(refusal("carry-geometry", show(carry.ground))),
                 };
                 match done {
@@ -1563,6 +1649,9 @@ impl Engine {
                 ) {
                     // A crew's part set down is no longer its own (0.135 A2).
                     Ok(()) => {
+                        if self.led.contains_key(&a) {
+                            self.broke.insert(a, "souls:carry-blocked");
+                        }
                         if let Some(s) = self.asm.as_mut() {
                             s.ended(a);
                         }
@@ -2698,6 +2787,9 @@ impl Engine {
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     /// The walk of a hold's leader (0.135 R1: the first of the two to walk) leads instead: the other walks beside it.
     /// A sit or a lie (`walk` false) never leads: by either member, it lets go.
+    /// `goal`, for a walk: the node it goes to and its point there; `heading`, the walk's parameter 3 (moving-group
+    /// rule 3: a carry's heading at the goal, from its back toward its front).
+    #[allow(clippy::too_many_arguments)]
     pub fn walked(
         &mut self,
         live: &Tree,
@@ -2706,7 +2798,23 @@ impl Engine {
         intent: Id,
         now: Micros,
         walk: bool,
+        goal: Option<(Id, Vec3)>,
+        heading: Option<[i64; 2]>,
     ) {
+        // Carrying together (moving-group rule 3): the walk of a lifted carry's front leads its crew, turning it when
+        // the walk names the carry's heading at its goal or goes to a pose of the way the lift found.
+        if walk && let Some(a) = self.front_of(body) {
+            let turn = self.turn_of(a, goal, heading);
+            self.led.insert(
+                a,
+                Led {
+                    front: body,
+                    walk: intent,
+                    turn,
+                },
+            );
+            return;
+        }
         if walk && self.activities.lead(&self.moves, body) {
             return;
         }
@@ -2774,6 +2882,201 @@ impl Engine {
     /// of a place beside the leader (R1, hand in hand).
     pub fn following(&self) -> Vec<(Id, Id, Id, Id, Option<i64>)> {
         self.activities.following()
+    }
+
+    /// The lifted carry whose front is `body`, if any: the first member of a carry being sampled.
+    fn front_of(&self, body: Id) -> Option<Id> {
+        self.carries.keys().copied().find(|a| {
+            self.activities
+                .members(*a)
+                .and_then(|m| m.first())
+                .is_some_and(|m| m.body == body)
+        })
+    }
+
+    /// Each load being carried, where its carry's last sample has it, as walkers keep apart from it (moving-group rule
+    /// 3, [`sim::host::Carried`]): its outline as it is held, between its ends along the carry, at its carriers' feet,
+    /// moving at its last two samples' pace; seen by every walker but its own carriers.
+    pub fn carried_loads(&self) -> Vec<sim::host::Carried> {
+        let mut out = Vec::new();
+        for (a, carry) in &self.carries {
+            let (Ok(Some((f, b))), Ok((plan, _))) = (carry.ends(), carry.load.as_held()) else {
+                continue;
+            };
+            let Some(&(t1, c1, _)) = carry.track.last() else {
+                continue;
+            };
+            let d = [f[0] - b[0], f[1] - b[1]];
+            let l = (i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2)).isqrt();
+            if l == 0 {
+                continue;
+            }
+            let h = |v: i64| {
+                i64::try_from(i128::from(v) * i128::from(plan.half_length) / l).unwrap_or(0)
+            };
+            let mid = [(f[0] + b[0]) / 2, (f[1] + b[1]) / 2];
+            let ends = (
+                [mid[0] + h(d[0]), mid[1] + h(d[1])],
+                [mid[0] - h(d[0]), mid[1] - h(d[1])],
+            );
+            let velocity = match carry
+                .track
+                .len()
+                .checked_sub(2)
+                .and_then(|k| carry.track.get(k))
+            {
+                Some(&(t0, c0, _)) if t1 > t0 => {
+                    let v = |a: i64, b: i64| {
+                        i64::try_from(i128::from(b - a) * 1_000_000 / i128::from(t1 - t0))
+                            .unwrap_or(0)
+                    };
+                    Vec3::new(v(c0.x, c1.x), 0, v(c0.z, c1.z))
+                }
+                _ => Vec3::ZERO,
+            };
+            let carriers = self
+                .activities
+                .members(*a)
+                .unwrap_or(&[])
+                .iter()
+                .map(|m| m.body)
+                .collect();
+            out.push(sim::host::Carried::new(
+                carry.board,
+                carry.ground,
+                ends,
+                plan.half_width,
+                c1.y - sim::activity::carry::HEIGHT,
+                velocity,
+                carriers,
+            ));
+        }
+        out
+    }
+
+    /// Where carry `a`'s front walk to `goal` turns its crew (moving-group rule 3): the goal on its ground's plan and
+    /// the carry's heading there, `heading` when the walk names one (not zero), else the heading of a pose of the
+    /// carry's way (0.135 R2) whose front is within [`WAY_POSE_NEAR`] of the goal: of several, the one turned least from
+    /// the carry's heading now (the next pose of a way differs by one move). A named heading more than a quarter turn
+    /// from the carry's now is a quarter turn, on its side: a crew turns at most that much in one walk. None for a walk to another node, or one
+    /// that names no heading and goes to no pose of a way: the crew moves without turning.
+    fn turn_of(
+        &self,
+        a: Id,
+        goal: Option<(Id, Vec3)>,
+        heading: Option<[i64; 2]>,
+    ) -> Option<([i64; 2], [i64; 2])> {
+        let carry = self.carries.get(&a)?;
+        let (node, p) = goal?;
+        if node != carry.ground {
+            return None;
+        }
+        let at = [p.x, p.z];
+        let now = carry
+            .ends()
+            .ok()
+            .flatten()
+            .map(|(f, b)| [i128::from(f[0] - b[0]), i128::from(f[1] - b[1])])?;
+        if let Some(h) = heading.filter(|h| {
+            *h != [0, 0]
+                && h.iter()
+                    .all(|c| c.unsigned_abs() <= HEADING_MOST.unsigned_abs())
+        }) {
+            // At most a quarter turn a walk: a heading farther round is turned square across the load, on its side.
+            let (x, z) = (i128::from(h[0]), i128::from(h[1]));
+            if x * now[0] + z * now[1] < 0 {
+                let side = if now[0] * z - now[1] * x >= 0 { 1 } else { -1 };
+                let c = |v: i128| i64::try_from(v).unwrap_or(0);
+                return Some((at, [c(-now[1] * side), c(now[0] * side)]));
+            }
+            return Some((at, h));
+        }
+        let unit = |v: [i128; 2]| (v[0] * v[0] + v[1] * v[1]).isqrt().max(1);
+        carry
+            .way
+            .iter()
+            .filter(|(f, b)| {
+                f != b
+                    && (i128::from(f[0] - at[0]).pow(2) + i128::from(f[1] - at[1]).pow(2))
+                        <= i128::from(WAY_POSE_NEAR).pow(2)
+            })
+            .map(|(f, b)| [f[0] - b[0], f[1] - b[1]])
+            .max_by_key(|h| {
+                let v = [i128::from(h[0]), i128::from(h[1])];
+                (v[0] * now[0] + v[1] * now[1]) * 1_000_000 / (unit(v) * unit(now))
+            })
+            .map(|h| (at, h))
+    }
+
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): every carrier of a lifted carry whose front has walked,
+    /// but the front, that keeps a place from it ([`Keeps`]): the back `span` behind the front, each side at its place
+    /// from the carry's middle at the lift or take ([`Carry::sides`]); a member with no place is left out.
+    pub fn carry_follows(&self) -> Vec<Keeps> {
+        let mut out = Vec::new();
+        for (a, led) in &self.led {
+            let Some(carry) = self.carries.get(a) else {
+                continue;
+            };
+            let Ok(Some((f, b))) = carry.ends() else {
+                continue;
+            };
+            let heading = [f[0] - b[0], f[1] - b[1]];
+            if heading == [0, 0] {
+                continue;
+            }
+            for (k, m) in self
+                .activities
+                .members(*a)
+                .unwrap_or(&[])
+                .iter()
+                .enumerate()
+            {
+                let place = match k {
+                    0 => continue,
+                    1 => [-carry.span, 0],
+                    _ => match carry.sides.iter().find(|(s, _)| *s == m.body) {
+                        Some((_, [along, across])) => [along - carry.span / 2, *across],
+                        None => continue,
+                    },
+                };
+                if m.body == led.front {
+                    continue;
+                }
+                out.push(Keeps {
+                    activity: *a,
+                    front: led.front,
+                    walker: m.body,
+                    soul: m.soul,
+                    place,
+                    heading,
+                    led: *led,
+                });
+            }
+        }
+        out
+    }
+
+    /// The led carries that are over (set down, put, or broken off) since the last call, forgotten here: for each that
+    /// broke off, its front's body, its walk and why (`souls:partner-left`, `souls:carriers-apart`,
+    /// `souls:carry-blocked`), so the whole group stops with that one reason.
+    pub fn led_over(&mut self) -> Vec<(Id, Id, &'static str)> {
+        let over: Vec<Id> = self
+            .led
+            .keys()
+            .filter(|a| !self.carries.contains_key(a))
+            .copied()
+            .collect();
+        let mut out = Vec::new();
+        for a in over {
+            let Some(led) = self.led.remove(&a) else {
+                continue;
+            };
+            if let Some(why) = self.broke.remove(&a) {
+                out.push((led.front, led.walk, why));
+            }
+        }
+        self.broke.retain(|a, _| self.led.contains_key(a));
+        out
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

@@ -131,13 +131,22 @@
 //   is woken by a `replaced` event, and its agent's next command (not a wait, a read, a status or a stop) signs it in
 //   again. Meanwhile it asks every REPLACED_RETRY_MS (5 min) whether the Soul is free (`?free=1`): the gateway closes
 //   that sign-in as `agent.held` while a live socket holds the Soul, and signs it in once none does, so a client left
-//   off when the other one went comes back by itself and never takes the Soul from a live one.
+//   off when the other one went comes back by itself and never takes the Soul from a live one. The two share the
+//   world's one numbering of the Soul's intents (#4978): each sign-in's outcome names the newest sequence sent for the
+//   Soul, and one that took it from the other numbers after it (`numberAfter`); the other's answers, replayed on a
+//   resume, are not taken for its own. An act it held for a sign-in the other then took, or sent after the gateway
+//   last read its socket, is refused here as `agent.replaced`; one the gateway reads after is refused there.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
-//   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered for
-//   10 s) is let go at once, and acts wait for the next sign-in (#4980). A `wait` under way is told when a signed-in
-//   socket is lost (`{"kind":"disconnected","say":..}`) and when the next is current (`{"kind":"reconnected",
-//   "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by replica's WASM build (`wire*`).
+//   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered and
+//   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in
+//   (#4980). One whose frames still arrive while a sync's answer is late is behind, not gone: it stays, says
+//   `gap.why` `behind`, and its acts go on it (#4979: on a link slower than the world's speech, reconnecting only fell
+//   behind again). One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
+//   once, and answers say `gap.why` `behind` until its copy is current again (#4979). A `wait` under way is told when
+//   a signed-in socket is lost (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is
+//   current (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by
+//   replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -154,7 +163,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy, holdingOf as heldIn } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf, shapesOf } from '../brief/copy.mjs';
+import { changedBetween, decode, forgetTaken, posesOf, publicNames as toldNames, rowsOf, sequenceOf, shapesOf, takeRecords } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -168,8 +177,8 @@ import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
 import { BARE, bareAct } from '../check/bare.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
-import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
-import { folderStamp, keptOne } from '../check/kept.mjs';
+import { definedIn, kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
+import { folderStamp, keptKinds, keptOne } from '../check/kept.mjs';
 import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -197,6 +206,8 @@ import { reconnectWait } from './reconnect.mjs';
 // gatewayd's `REPLACED`: another client of this Soul signed in, and this socket was let go; or, asked only if free, a
 // live socket holds the Soul. While replaced, the daemon asks whether the Soul is free this often.
 const REPLACED = 4001;
+// The gateway let this socket go for a full queue (#4979): 1013 with the reason `agent.behind`. It signs in again at once.
+const BEHIND = 1013, AGENT_BEHIND = 'agent.behind';
 const REPLACED_RETRY_MS = Number(process.env.SOULS_REPLACED_RETRY_MS) || 5 * 60_000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
 // stay connecting for good, firing neither open nor close (seen with Node 22's WebSocket).
@@ -265,13 +276,20 @@ const unhex = (s) => new Uint8Array(Buffer.from(s, 'hex'));
 const scope = unhex(seat.grant.scope);
 
 // --- State on disk: the cursor and the sequences ------------------------------------------------------------------
-const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
+// #4978: `foreign`, the ranges of sequences another client of this Soul numbered (`[from, to]`, the newest last), whose
+// answers are not this client's; `alias`, an own intent sent under a later sequence than the one its agent was told.
+const state = { cursor: null, sequence: 0, unanswered: [], foreign: [], alias: {}, ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
+// #4978: a Soul's acts held when the daemon last stopped were never sent, and the other client may number into them.
+if (seat.grant.actor !== 'creator' && state.sent !== undefined && state.sequence > state.sent) {
+  state.foreign.push([state.sent + 1, state.sequence]);
+  state.sent = state.sequence;
+}
 const save = () => { if (ended) return; writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
-const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
+const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, foreign: 0, build: null };
 // Bounded transport diagnostics: item kinds only, never tokens, words or encoded frames.
 const viewKinds = [];
 let viewGrants = 0;
@@ -340,6 +358,11 @@ let stopped = 0; // acts stopped locally, for the trace
 // (and why) it has not been known current; null while it is.
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
+let laggingAt = null; // when the socket, frames still arriving, was found behind on a sync's answer (#4979)
+// A link found behind: until a whole sync is answered within SYNC_WITHIN again, a socket on it is given up only after
+// SLOW_QUIET with nothing received (#4979), not SYNC_WITHIN (#4980's bound on a link that kept up).
+let slowLink = false;
+const SLOW_QUIET = 60_000;
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
@@ -357,8 +380,12 @@ let retryTimer = null, gaveUpAt = -Infinity; // the next sign-in (or ask whether
 let lostAt = null; // #4977: when a signed-in socket was lost, until the next is current
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
-function send(bytes, sequence, ranked) {
+function send(bytes, sequence, ranked, world = sequence) {
   sentAt = performance.now();
+  // #4978: what went on this socket and is unanswered, for a replaced one's refusals; the newest handed to a socket.
+  ws.sent = (ws.sent ?? []).filter((x) => state.unanswered.includes(x.sequence));
+  ws.sent.push({ world, sequence });
+  state.sent = Math.max(state.sent ?? 0, world);
   // Written down before it goes, so neither a drop nor a restart sends it again.
   state.unanswered.push(sequence);
   save();
@@ -366,6 +393,60 @@ function send(bytes, sequence, ranked) {
   rankedOf.set(sequence, ranked);
   trace.write({ k: 'send', seq: sequence, ranked });
   ws.send(bytes);
+}
+
+// --- #4978: one numbering for every client of this Soul -----------------------------------------------------------
+// Two clients of one Soul (its token in two homes) take turns holding it, and the world numbers its intents once: a
+// second intent under a sequence it has seen is a repeat of the first, answered with the first's answer. The gateway
+// tells each sign-in the newest sequence sent for the Soul; a client that took it from another numbers after that.
+
+/** Whether `sequence` is one another client of this Soul numbered. */
+const foreign = (sequence) => state.foreign.some(([from, to]) => sequence >= from && sequence <= to);
+/** A sequence this client numbered and the world never took (refused before it, by name): the other client may take
+ *  it, so an answer under it is not this client's. */
+function lent(sequence) {
+  state.foreign.push([sequence, sequence]);
+  if (state.foreign.length > 64) state.foreign.shift();
+}
+
+/**
+ * Signed in, told the newest sequence sent for this Soul (by whichever client): if another client numbered past this
+ * one's, the range between is its, and the acts held for this sign-in go under sequences after it. Their agents keep
+ * the sequences they were told: the answers come under those.
+ */
+function numberAfter(newest) {
+  const own = state.sent ?? state.sequence - queued.length; // the newest this client handed to a socket
+  if (!Number.isSafeInteger(newest) || newest <= own) return;
+  state.foreign.push([own + 1, newest]);
+  if (state.foreign.length > 64) state.foreign.shift();
+  let next = newest;
+  for (const q of queued) {
+    next++;
+    if (q.world !== undefined) delete state.alias[String(q.world)]; // numbered after an earlier sign-in that dropped
+    q.bytes = q.build(next);
+    q.world = next;
+    state.alias[String(next)] = q.sequence;
+  }
+  state.sequence = next;
+  log(`another client of this Soul numbered up to ${newest}: this one's acts go on from ${newest + 1}`);
+  save();
+}
+
+/** An own intent that never reached the world (sent or to go under `world`), refused here by name, as the gateway's
+ *  refusal of it would be. */
+function refusedHere(sequence, reason, world) {
+  lent(world);
+  if (state.alias[world] !== undefined) delete state.alias[world];
+  const k = state.unanswered.indexOf(sequence);
+  if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
+  trace.write({ k: 'answer', seq: sequence, cause: causeOf(2, reason, rankedOf.get(sequence)), achieved: false });
+  rankedOf.delete(sequence); movesOf.delete(sequence); joinsOf.delete(sequence);
+  if (serving.has(sequence)) closeMail(serving.get(sequence), 'failed', reason);
+  save();
+  const answered = { kind: 'answer', sequence, version: null, answer: 2, reason };
+  note(answered);
+  keyAnswered(answered);
+  editsWaiting.get(sequence)?.(answered);
 }
 
 /** The agents' socket's frame limit (`replica` `intent_limits.txt`); a creator's larger edit goes by `sendBulk`. */
@@ -429,7 +510,7 @@ function current() {
   attempt = refusals = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
-  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
+  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked, q.world); }
   follow();
   scheduleWorld();
 }
@@ -483,10 +564,16 @@ function follow() {
 }
 
 /** R13: a text frame, the mailbox's: a message for this Soul, noted once. */
-function onText(text) {
+function onText(text, sock) {
   let f;
   try { f = JSON.parse(text); } catch { return; }
   if (onPrayerText(f)) return;
+  // #4978: another client took the Soul; the gateway read this socket's intents up to `read`. One sent after never
+  // reached the world: refused here by name, as the gateway refuses one it reads then.
+  if (Number.isSafeInteger(f.replaced?.read)) {
+    for (const x of sock.sent ?? []) if (x.world > f.replaced.read && state.unanswered.includes(x.sequence)) refusedHere(x.sequence, 'agent.replaced', x.world);
+    return;
+  }
   const m = f.mail;
   if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
   mail.set(m.id, m);
@@ -568,15 +655,36 @@ function closeMail(id, state, outcome) {
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
   syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
-  if (cutAt !== null) cutWhy = 'syncing';
+  forgetTaken(copy); // records an earlier sync took and never finished
+  if (cutAt !== null && cutWhy !== 'behind') cutWhy = 'syncing'; // #4979: behind says why until it is current
   awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
 }
 
-/** The sync's next answer is due within SYNC_WITHIN. */
+/**
+ * The sync's next answer is due within SYNC_WITHIN of the last frame the socket received, not of the ask (#4979): a
+ * socket whose frames keep arriving is alive, only behind (a link slower than what the world sends, the speech it
+ * hears included, which is never dropped), and says so (`gap.why` `behind`) instead of reconnecting in a loop, where
+ * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980).
+ */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
-  syncing.timer = setTimeout(() => sock.giveUp('sync: no answer; reconnecting'), SYNC_WITHIN);
+  const due = () => {
+    if (!syncing) return;
+    // On a link found slow a single frame can take longer than SYNC_WITHIN to arrive whole (a sync's records at 512
+    // B/s), so silence counts only past SLOW_QUIET there; a new socket on it would only start that backlog again.
+    const quiet = performance.now() - sock.heardAt, bound = slowLink ? SLOW_QUIET : SYNC_WITHIN;
+    if (quiet >= bound) { sock.giveUp('sync: no answer; reconnecting'); return; }
+    if (laggingAt === null) {
+      laggingAt = performance.now();
+      slowLink = true;
+      cutAt ??= laggingAt;
+      cutWhy = 'behind';
+      log('sync: no answer yet while frames still arrive; behind, not reconnecting');
+    }
+    syncing.timer = setTimeout(due, Math.min(bound - quiet, SYNC_WITHIN));
+  };
+  syncing.timer = setTimeout(due, SYNC_WITHIN);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -584,10 +692,10 @@ function syncAnswer(sock, n, refused, bytes) {
   if (!syncing || n !== syncing.n) return; // an answer to a request since given up
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
   if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); rememberPublicWords(copy, bytes); }
+  else { copy.onRecords(bytes); takeRecords(copy, bytes, syncing.asking); } // decoded a round at a time, not at its end
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
-  if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
+  if (next.length > 0) { syncing.step = 'records'; syncing.asking = next; awaitAnswer(sock); sock.send(next); return; }
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
   const t = performance.now();
@@ -595,6 +703,9 @@ function syncAnswer(sock, n, refused, bytes) {
   copyVersion = syncing.version;
   confirmedAt = t;
   cutAt = null;
+  if (laggingAt !== null) log(`caught up: the sync answered ${Math.round(t - laggingAt)} ms after it was found behind`);
+  else if (t - syncing.t0 < SYNC_WITHIN) slowLink = false; // a whole sync in time, never behind: the link keeps up
+  laggingAt = null;
   const { waiters } = syncing;
   syncing = null;
   hearing();
@@ -697,9 +808,11 @@ function connect() {
     try { sock.close(); } catch { /* ignored from here */ }
   };
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
+  sock.heardAt = performance.now();
   sock.onmessage = (m) => {
+    sock.heardAt = performance.now(); // progress: what keeps a socket alive while a sync's answer is behind (#4979)
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
-    if (typeof m.data === 'string') { onText(m.data); return; }
+    if (typeof m.data === 'string') { onText(m.data, sock); return; }
     const bytes = new Uint8Array(m.data);
     try {
       if (step === 'hello') {
@@ -708,7 +821,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
+      let { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); refusals++; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -716,6 +829,7 @@ function connect() {
         log(`signed in: ${a}`);
         refusals = 0;
         if (replacedAt !== null) { replacedAt = null; log('the Soul was free again: this client holds it'); }
+        numberAfter(decode(bytes).get(5));
         owed = ownOwed = 0; // versions named on an earlier socket may be another epoch's
         again = 0;
         refreshKinds();
@@ -734,6 +848,16 @@ function connect() {
       // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
       // gateway replays those at the cursor after the ones counted here, and none twice.
       if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
+      // #4978: an answer to another client of this Soul is not this one's; an own intent sent under a later sequence
+      // is answered under the one its agent was told.
+      if (a !== '-' && state.alias[a] === undefined && foreign(Number(a))) { counts.foreign++; save(); return; }
+      // Refused by the gateway before the world took it: the other client may number it.
+      if (a !== '-' && Number(c) === 2 && (d === 'agent.replaced' || d === 'intent.seq-in-use')) lent(Number(a));
+      if (a !== '-' && state.alias[a] !== undefined) {
+        const told = state.alias[a];
+        if (Number(c) !== 3) delete state.alias[a];
+        a = String(told);
+      }
       if (a !== '-') {
         const s = Number(a);
         const k = state.unanswered.indexOf(s);
@@ -776,18 +900,20 @@ function connect() {
       if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.giveUp('sync refused; reconnecting'); }
     }
   };
-  sock.onclose = (ev) => closed(ev.code);
+  sock.onclose = (ev) => closed(ev.code, ev.reason);
   /** This socket is done with, once: by its close, or given up first. */
-  function closed(code) {
+  function closed(code, reason = '') {
     if (ended) return;
     ended = true;
+    const behind = code === BEHIND && reason === AGENT_BEHIND;
     publicNames.cancel(sock);
     clearTimeout(sock.granting);
     clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
+      laggingAt = null;
       cutAt ??= performance.now();
-      cutWhy = 'not-connected';
+      cutWhy = behind ? 'behind' : 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
       for (const w of carried.splice(0)) w(false);
     }
@@ -801,12 +927,14 @@ function connect() {
     // #4977: a `wait` under way is told at once that the connection is gone, once a gap (replaced says so itself).
     if (held && lostAt === null) {
       lostAt = Date.now();
-      if (code !== REPLACED) note({ kind: 'disconnected', say: 'The client lost its connection to the world and is reconnecting; acts are held until it is back.' });
+      if (code !== REPLACED) note({ kind: 'disconnected', ...(behind ? { why: 'behind' } : {}), say: behind ? 'The client fell behind what the world sent it and is reconnecting at once; acts are held until it is back.' : 'The client lost its connection to the world and is reconnecting; acts are held until it is back.' });
     }
     if (code === REPLACED && (held || replacedAt !== null)) {
       cutWhy = 'replaced';
       if (held) {
         replacedAt = Date.now();
+        // #4978: an act held for the sign-in another client's took the Soul from is refused by name, not kept.
+        for (const q of queued.splice(0)) refusedHere(q.sequence, 'agent.replaced', q.world ?? q.sequence);
         log('another client of this Soul signed in (the last to connect wins); signing in again at the next command, or once it is free');
         note({ kind: 'replaced', detail: 'another client of this Soul connected; this one signs in again at its next command, or by itself once the other has gone' });
       }
@@ -819,7 +947,7 @@ function connect() {
       return;
     }
     attempt++;
-    log(`socket closed (${code}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
+    log(`socket closed (${code}${reason ? ` ${reason}` : ''}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
     retryTimer = setTimeout(connect, wait);
   }
   sock.onerror = () => { /* onclose follows */ };
@@ -1064,11 +1192,12 @@ async function ageAfter({ now = false } = {}) {
 /** The kind entries held in `<home>/kinds/` and the creator's own from the copy (#3697), the Soul's own body kind given
  *  its family's forms (E21, #2791). */
 function heldKinds() {
-  // Kept while the copy's roots and the folder's files are the same (G-late): a form act read them all each time.
+  // Kept while the copy's roots and the folder are the same (G-late): a form act read them all each time. A changed
+  // copy reads the folder's entries again only if the folder changed too (`keptKinds`).
   const dir = join(home, 'kinds'), stamp = folderStamp(dir);
   return kindsKept.get([copy.roots(), stamp], () => {
     const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
-    const kinds = kindsHeld(dir, copy, me?.kind);
+    const kinds = { ...definedIn(copy), ...folderKinds(dir, me?.kind) };
     // The same entries (the folder's files, the body's kind, and the creator kinds by their full names, which name their
     // bytes) give the same object back, so the state's memo of records holds across a changed copy.
     const sig = `${stamp}\n${me?.kind}\n${Object.keys(kinds).sort().join(' ')}`;
@@ -1077,7 +1206,7 @@ function heldKinds() {
   });
 }
 const kindsSame = { sig: null, kinds: null };
-const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {};
+const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {}, folderKinds = keptKinds();
 /** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same; when
  *  a sync changed the copy, only the records it changed are read again (`stateMemo`). */
 const heldState = (kinds) => stateKept.get([copy.roots(), kinds], () => stateOf(copy, kinds, ME, stateMemo));
@@ -1479,17 +1608,19 @@ const standsFromSeat = (candidates) => risesFromSeat(candidates, { rows: rowsOf(
  * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
  */
 function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false, replaces }) {
-  // Encoded first: an intent that does not encode throws by name and takes no sequence.
-  const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence + 1),
+  // Encoded first: an intent that does not encode throws by name and takes no sequence. Held, it may go under a later
+  // sequence than its agent is told (`numberAfter`).
+  const build = (sequence) => wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
     params ? JSON.stringify(params) : undefined, reflex, replaces === undefined ? undefined : BigInt(replaces));
+  const bytes = build(state.sequence + 1);
   state.sequence++;
   receiptSent(state.sequence, ranked, { target, replaces, words });
   if (!signedIn) save(); // signed in, send() writes it down once, before it goes
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
-  if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
+  if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length, build });
   return { sequence, sent };
 }
 
@@ -1754,6 +1885,7 @@ async function answer(req, conn = null) {
         body: [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? null,
         ...((arrive(), arrival()) ?? { in_world: seat.grant.actor !== 'creator' }),
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
+        beatLateMs: Math.max(beatLate.worst, beatLate.last),
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
@@ -1766,11 +1898,12 @@ async function answer(req, conn = null) {
       return b;
     });
     case 'find': {
-      const deadline = performance.now() + REFRESH_WITHIN, age = await ageAfter();
-      const hydrated = age.stale ? { ok: true } : await publicNames.hydrate(ws, deadline);
-      if (!hydrated.ok) { age.stale = true; age.gap = { ms: 0, why: hydrated.reason }; }
+      const age = await ageAfter();
+      // Names the copy holds no words for are asked for in the background, never waited on: the answer is what the copy
+      // knows now (waiting for them, every find past a world's restart answered stale, `public-names-timeout`, in 2 s+).
+      if (!age.stale && ws) publicNames.hydrate(ws, performance.now() + SYNC_WITHIN).catch((e) => log(`public names: ${String(e.message ?? e).slice(0, 160)}`));
       // Nearest first among equal matches, each with its metres from this Soul's body: anywhere in the world, no radius.
-      return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
+      return closing({ ok: true }, (rows) => find(rows, req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
         metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id, { placed: true }) ?? undefined, kinds: heldKinds() }), { age });
     }
     case 'wait': {
@@ -2511,7 +2644,12 @@ async function carry(req) {
   const heldBy = (crew) => all.find((r) => r.parent === crew && !r.soul)?.id ?? null;
   // A crew's front and back and where they stand: a carry into a slot lines up on the slot's axis nearest their line.
   const crewEnds = (crew) => { const ids = ends(crew), p = ids.map((b) => (b ? at(b) : null)); return p.every(Boolean) ? { ids, at: p.map((x) => [x.pos[0], x.pos[2]]) } : null; };
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, seated, heldBy, served: activitiesServed(home, seat.world) });
+  // A loading spot (carry/spot.mjs): the crew's ends and size, and the things on the open ground that may fill a bay.
+  const crewSize = (crew) => rows.get(crew)?.members?.length;
+  const loose = () => all.filter((r) => r.parent === ground && !r.soul && !isCrew(r.kind) && !/:(place|humanoid|body)$/.test(String(r.kind ?? '').split('@')[0])).map((r) => r.id);
+  // What a part is seated in (its parent): `carry grip <part> back --out <m>` stands outside it.
+  const parentOf = (id) => rows.get(id)?.parent ?? null;
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, parentOf, crewMiddle, crewEnds, crewSize, loose, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   // `--go <time>`: sent at the moment the crew's leader named, so every carrier sets off together. Carriers that set off
   // a second apart (each its own command, on a busy machine) drift past the world's 1 m stretch and the carry breaks off.
@@ -2529,7 +2667,7 @@ async function carry(req) {
   const walked = intents.find((i) => /:walk$/.test(i.verb));
   // What to do next, plainly; the command drops it when the step is refused.
   const next = nextStep(req, { load: rows.get(req.load ?? req.part)?.name ?? null });
-  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(late > 50 ? { late_ms: late } : {}), ...(next ? { next } : {}) }, null, { now: true });
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(late > 50 ? { late_ms: late } : {}), ...(next ? { next } : {}), ...(intents.bay ? { bay: intents.bay } : {}) }, null, { now: true });
 }
 
 /**
@@ -2692,8 +2830,17 @@ function idleCheck(now) {
   }
 }
 
+/** How late the beat came at worst, this minute and the last (`status`'s `beatLateMs`): how long the daemon's loop was
+ *  held by work that did not yield. A beat a second late or more is logged; past GAP_MS it is the machine asleep. */
+const beatLate = { worst: 0, last: 0, since: Date.now() };
+let beatAt = null;
 function beat() {
   const now = Date.now(), s = state.schedule;
+  const late = beatAt === null ? 0 : now - beatAt - BEAT_MS;
+  beatAt = now;
+  if (now - beatLate.since >= 60_000) Object.assign(beatLate, { last: beatLate.worst, worst: 0, since: now });
+  beatLate.worst = Math.max(beatLate.worst, late);
+  if (late >= 1000 && late <= GAP_MS) log(`busy: the beat came ${late} ms late`);
   idleCheck(now);
   // Nothing confirmed the copy or was sent for about CONFIRM_EVERY_MS (a sent intent's receipt brings its own follow).
   if (signedIn && !syncing && confirmedAt !== null && performance.now() - Math.max(confirmedAt, sentAt) > confirmAfter) { confirmAfter = confirmWait(); refresh(); }

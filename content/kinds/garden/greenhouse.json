@@ -144,7 +144,149 @@
     ],
     "shape": {"round":10,"shapes":[{"kind":"box","at":[0,50,0],"size":[6000,100,4000],"round":0,"tint":"pad"},{"kind":"box","at":[0,1300,-1990],"size":[6000,2400,20],"round":0,"tint":"glass"},{"kind":"box","at":[0,1300,1990],"size":[6000,2400,20],"round":0,"tint":"glass"},{"kind":"box","at":[-2990,1300,0],"size":[20,2400,4000],"round":0,"tint":"glass"},{"kind":"box","at":[2990,1300,0],"size":[20,2400,4000],"round":0,"tint":"glass"},{"kind":"box","at":[0,3050,-1000],"size":[6000,20,2300],"round":0,"tint":"glass","pitch":-30000},{"kind":"box","at":[0,3050,1000],"size":[6000,20,2300],"round":0,"tint":"glass","pitch":30000},{"kind":"box","at":[0,3620,0],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,2500,-2000],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,2500,2000],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,1200,2010],"size":[1000,2200,40],"round":0,"tint":"frame"},{"kind":"box","at":[1500,3250,700],"size":[1200,40,800],"round":0,"tint":"vent","pitch":30000,"role":"lid","pivot":[1500,3450,350]},{"kind":"box","at":[-1500,600,0],"size":[1000,900,3000],"round":0,"tint":"bench"},{"kind":"sphere","at":[-1500,1200,-800],"r":300,"segments":7,"tint":"leaf"},{"kind":"sphere","at":[-1500,1200,800],"r":300,"segments":7,"tint":"leaf"}],"palette":{"pad":"#9a9488","glass":"#cfe6ea","frame":"#e9eee9","vent":"#6f9aa3","bench":"#7a5a3a","leaf":"#4f8a3a"},"tags":["building","greenhouse","garden","glass"]}
   },
+  "building": {
+    "def": "core-greenhouse@3",
+    "solids": [
+      [-2472, -1890, 527, 110, 0, 0, 2600, 1, 0],
+      [0, -1890, 645, 110, 0, 0, 2600, 1, 0],
+      [2473, -1890, 527, 110, 0, 0, 2600, 1, 0],
+      [-1295, -1890, 650, 110, 0, 0, 650, 1, 0],
+      [-1295, -1890, 650, 110, 0, 2370, 2600, 1, 0],
+      [1295, -1890, 650, 110, 0, 0, 650, 1, 0],
+      [1295, -1890, 650, 110, 0, 2370, 2600, 1, 0],
+      [-1800, 1890, 1200, 110, 0, 0, 2600, 1, 0],
+      [1800, 1890, 1200, 110, 0, 0, 2600, 1, 0],
+      [0, 1890, 600, 110, 0, 2200, 2600, 1, 0],
+      [-2890, -1270, 620, 110, 270000, 0, 2600, 1, 0],
+      [-2890, 1270, 620, 110, 270000, 0, 2600, 1, 0],
+      [-2890, 0, 650, 110, 270000, 0, 650, 1, 0],
+      [-2890, 0, 650, 110, 270000, 2370, 2600, 1, 0],
+      [2890, -1270, 620, 110, 270000, 0, 2600, 1, 0],
+      [2890, 1270, 620, 110, 270000, 0, 2600, 1, 0],
+      [2890, 0, 650, 110, 270000, 0, 650, 1, 0],
+      [2890, 0, 650, 110, 270000, 2370, 2600, 1, 0]
+    ],
+    "slots": [
+      {"n": 2, "id": "ground", "kind": "floor", "at": [0, 100, 0], "yaw": 0, "capacity": 256},
+      {"n": 3, "id": "front", "kind": "stand", "at": [0, 0, 3090], "yaw": 179977, "capacity": 8},
+      {"n": 4, "id": "wall-n-1", "kind": "wall", "at": [0, 1700, -2020], "yaw": 180023, "capacity": 1},
+      {"n": 5, "id": "wall-s-1", "kind": "wall", "at": [-1500, 1700, 2020], "yaw": 0, "capacity": 1},
+      {"n": 6, "id": "opening-front-door", "kind": "wall", "at": [0, 100, 2020], "yaw": 0, "capacity": 1},
+      {"n": 7, "id": "opening-window-1", "kind": "wall", "at": [-1295, 650, -2020], "yaw": 180023, "capacity": 1},
+      {"n": 8, "id": "opening-window-2", "kind": "wall", "at": [1295, 650, -2020], "yaw": 180023, "capacity": 1},
+      {"n": 9, "id": "opening-window-3", "kind": "wall", "at": [-3020, 650, 0], "yaw": 269988, "capacity": 1},
+      {"n": 10, "id": "opening-window-4", "kind": "wall", "at": [3020, 650, 0], "yaw": 90012, "capacity": 1},
+      {"n": 11, "id": "facade-f0-n-1", "kind": "wall", "at": [0, 1300, -2020], "yaw": 180023, "capacity": 1},
+      {"n": 12, "id": "facade-f0-s-1", "kind": "wall", "at": [-950, 1300, 2020], "yaw": 0, "capacity": 1},
+      {"n": 13, "id": "facade-f0-w-1", "kind": "wall", "at": [-3020, 1300, 1000], "yaw": 269988, "capacity": 1},
+      {"n": 14, "id": "facade-f0-e-1", "kind": "wall", "at": [3020, 1300, 1000], "yaw": 90012, "capacity": 1},
+      {"n": 15, "id": "gable-w", "kind": "wall", "at": [-3020, 3755, 0], "yaw": 269988, "capacity": 1},
+      {"n": 16, "id": "gable-e", "kind": "wall", "at": [3020, 3755, 0], "yaw": 90012, "capacity": 1},
+      {"n": 17, "id": "ridge", "kind": "roof", "at": [0, 4137, 0], "yaw": 0, "capacity": 1}
+    ],
+    "floors": [
+      {
+        "level": 0,
+        "y": 100,
+        "polygon": [[-2780, -1780], [2780, -1780], [2780, 1780], [-2780, 1780]],
+        "tag": "greenhouse"
+      }
+    ],
+    "rooms": [
+      {
+        "id": "greenhouse",
+        "name": "room_greenhouse",
+        "floor": 0,
+        "pose": [0, 100, 0, 0],
+        "height": 2420,
+        "polygon": [[-2780, -1780], [2780, -1780], [2780, 1780], [-2780, 1780]]
+      }
+    ],
+    "openings": [
+      {
+        "id": "front-door",
+        "kind": "door",
+        "at": [0, 1890],
+        "yaw": 0,
+        "width": 1200,
+        "height": 2100,
+        "level": 0,
+        "from": "greenhouse",
+        "to": "outside",
+        "exterior": true,
+        "state": "open",
+        "inRoom": [0, 0, 1890, 0]
+      },
+      {
+        "id": "window-1",
+        "kind": "window",
+        "at": [-1295, -1890],
+        "yaw": 180023,
+        "width": 1300,
+        "height": 1720,
+        "sill": 550,
+        "level": 0,
+        "from": "greenhouse",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [-1295, 0, -1890, 180023]
+      },
+      {
+        "id": "window-2",
+        "kind": "window",
+        "at": [1295, -1890],
+        "yaw": 180023,
+        "width": 1300,
+        "height": 1720,
+        "sill": 550,
+        "level": 0,
+        "from": "greenhouse",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [1295, 0, -1890, 180023]
+      },
+      {
+        "id": "window-3",
+        "kind": "window",
+        "at": [-2890, 0],
+        "yaw": 269988,
+        "width": 1300,
+        "height": 1720,
+        "sill": 550,
+        "level": 0,
+        "from": "greenhouse",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [-2890, 0, 0, 269988]
+      },
+      {
+        "id": "window-4",
+        "kind": "window",
+        "at": [2890, 0],
+        "yaw": 90012,
+        "width": 1300,
+        "height": 1720,
+        "sill": 550,
+        "level": 0,
+        "from": "greenhouse",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [2890, 0, 0, 90012]
+      }
+    ],
+    "doors": [
+      {
+        "opening": "front-door",
+        "def": "core-door@2",
+        "pose": [0, 0, 1890, 0],
+        "solids": [[-566, 0, 20, 60, 0, 27, 2007, 0, 0], [566, 0, 20, 60, 0, 27, 2007, 0, 0]],
+        "params": "{\"sx\":1.01,\"sy\":0.9,\"frame\":\"#f2ead8\",\"leaf\":\"#3f6b5c\",\"trim\":\"#36594d\",\"glass\":\"#bcd9e0\",\"brass\":\"#b8913f\",\"sz\":1,\"vary\":0,\"condition\":\"new\",\"variant\":\"panel\"}",
+        "open": true
+      }
+    ]
+  },
   "text": {
+    "room_greenhouse": "Greenhouse",
     "card": "A glasshouse for plants: walk in, open the roof vent on a hot day.",
     "garden": "garden",
     "glasshouse": "glasshouse",

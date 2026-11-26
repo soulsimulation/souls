@@ -425,14 +425,16 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from'), go = flag('--go');
+    const on = flag('--on'), from = flag('--from'), out = flag('--out'), go = flag('--go');
     if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
     if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
-    else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(from !== undefined ? { from } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}), ...(out !== undefined ? { out } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
+    // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
+    else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does !== 'list') req.crew = a;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
@@ -723,20 +725,22 @@ async function schedule(home, named, { sub, args, until, missed }) {
 
 /** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
 export const CARRY_HELP = [
-  'carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it; side 1 to 4: beside a grip between its ends, a third to sixth carrier\'s place)',
+  'carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walk to that end of a load (left/right: beside a part, to hold it; side 1 to 4: beside a grip between its ends, a third to sixth carrier\'s place); front|back --out <m>: that far outside what the part is seated in, so it comes down there when unseated',
+  'carry grip <load> left|right <n>   a crew\'s third and later carrier: beside the load\'s n-th grip between its ends, from its back (the n-th to accept takes grip n)',
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once: the leader names the moment (UTC) and each sends it with --go, which sets off then. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
+  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place, and turns it square into a slot. A carrier who sends its own walk keeps to it (--go sets it off at that UTC moment) and stays where it ends until the front walks again. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
+  'carry to <crew id> the loading spot   the load goes into the spot\'s first free bay, square (the answer names it): the front\'s walks the whole crew; then one sends carry set-down',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
-  'part unseat <crew id> <part id>   take it out of its bay',
+  'part unseat <crew id> <part id>   take it out of its bay: it comes down at its carriers\' middle, so its front and back stand outside the bay first (carry grip <part> back --out 0.9), clear of its posts',
   'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
   'carry offer anyone   a crew offered to every Soul within 20 m (five at most, nearest first)',
   'carry accept [<name>]   join the crew that Soul offered you, or with no name the newest offer to you',
 ];
-const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. The carriers of a lifted load must walk together: if one walks and the other stays, the carry breaks off and the load is set down (`set-down` in `wait`, `why`). So the leader says the exact `carry to` and a moment ("on go"), and every carrier sends it then. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. When the front of a lifted load walks (its `carry to`), the rest of the crew walks with it, each keeping its place; into a slot or a loading spot\'s bay, the crew turns with it so the load goes in square. A carrier who sends its own walk keeps to it and stays where it ends until the front walks again. A carrier who walks elsewhere or leaves can break the carry off, and the load is set down (`set-down` in `wait`, `why`). A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it. A heavy load takes a crew: a pallet of crates two, a generator four, a timber bundle four to six; fewer are refused carry-crew-too-small.';
 
 /** `help build`: how a rack bay goes up, step by step, as a crew of Souls does it. */
 export const BUILD_HELP = [
@@ -748,7 +752,7 @@ export const BUILD_HELP = [
   'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
   'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
 ];
-const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; every carrier sends the same carry to at the same moment.';
+const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; the front\'s carry to walks the whole crew, into a slot square.';
 
 /**
  * A carry step's `next` (the daemon's `nextStep`), made true to how it ended: none for a refused step (its refusal
@@ -763,7 +767,7 @@ export async function nextOf(ask, req, answer) {
     const crew = (await ask({ op: 'carry', do: 'list' }, 15_000).catch(() => null))?.crews?.find((c) => c.id === (answer.crew ?? req.crew));
     if (crew && !crew.holds.length) {
       answer.carry = 'broke off';
-      answer.next = 'the crew holds nothing now: the carry broke off and the load was set down on the way (`wait` shows set-down and why; carriers-apart: not every carrier walked). Take it again, and every carrier sends the same carry to at the same moment';
+      answer.next = 'the crew holds nothing now: the carry broke off and the load was set down on the way (`wait` shows set-down and why; carriers-apart: a carrier fell more than 1 m from its place). Take it again; the front\'s carry to walks the whole crew';
     }
   }
   if (req.kind === 'part' && req.do === 'put' && /^[0-9a-f]{32}-\d+$/.test(String(req.into ?? ''))) {
@@ -772,11 +776,13 @@ export async function nextOf(ask, req, answer) {
   }
 }
 
-/** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
+/** 0.135 C: the crew an offer made, a crew in the copy that was not there before it and that this Soul fronts (two
+ *  Souls offering at once each see both new crews), or the only new one: `{crew}`, or a note. */
 export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   for (let i = 0; i < tries; i++) {
     const listed = await ask({ op: 'carry', do: 'list' }, DAEMON_PATIENCE_MS);
-    const made = (listed?.crews ?? []).find((c) => !before.includes(c.id));
+    const fresh = (listed?.crews ?? []).filter((c) => !before.includes(c.id));
+    const made = fresh.find((c) => (c.with ?? []).some((m) => m.name === 'you' && m.role === 'front')) ?? (fresh.length === 1 ? fresh[0] : null);
     if (made) return { crew: made.id };
     await sleep(200);
   }

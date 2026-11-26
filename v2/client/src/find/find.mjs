@@ -6,6 +6,7 @@
 // A word scores 5 in the name, 4 in the id or an alias, 2 in the kind, 1 in what the row says it is, and a row
 // missing any word scores nothing. The full name scores 100 more, a whole name standing in the words 50 more.
 
+const byName = new Intl.Collator('en', { numeric: true }).compare;
 const STOP = new Set(['the', 'a', 'an', 'to', 'into', 'onto', 'of', 'in', 'at', 'on', 'for', 'and', 'some', 'somewhere', 'place', 'go', 'walk', 'find', 'near', 'nearest', 'closest', 'me']);
 export const tokensOf = (s) => String(s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 export const stem = (w) => (w.length > 4 && w.endsWith('ies') ? w.slice(0, -3) + 'y' : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
@@ -55,22 +56,102 @@ export function placeName(path) {
   return (named.length ? named.slice(-3) : path.slice(-2)).reverse().join(', ');
 }
 
+/**
+ * The copy's rows by their words, for `find` on a Map of rows (`rowsOf`): each word's stem names the rows holding it
+ * in any field, so a find scores only the rows its words can hit, not every row (Eden's 9,588 scored at each find held
+ * the daemon's loop 0.1 to 0.4 s, 26 Nov 2026). A row's words count its kind's (`kindWordsOf`) as what it is. Kept per
+ * kind entries; a changed copy's Map is followed by its rows that changed (`rowsOf` gives the same row for a node
+ * that did not), so an index is built once, a slice a turn, and then changed by what a sync changed. A Map given is
+ * never changed after (`rowsOf` gives a new one).
+ */
+const INDEXES = new WeakMap(), NO_KINDS = {};
+/** Rows indexed in one turn of the loop while an index is first built: Eden's whole copy at once held it for 0.3 s on
+ *  a quiet machine and 1 s on a loaded one, right as its first sync ended. */
+export const INDEX_SLICE = 1000;
+/** The index of `rows`, or null while it is first built, a slice a turn (`find` then reads the rows one by one). */
+function indexOf(rows, kinds) {
+  const slot = kinds ?? NO_KINDS;
+  let x = INDEXES.get(slot);
+  if (x?.rows === rows) return x;
+  if (!x) {
+    INDEXES.set(slot, (x = { rows: null, byStem: new Map(), words: new Map(), of: new Map(), kindWords: new Map() }));
+    const list = [...rows.values()];
+    let i = 0;
+    const slice = () => {
+      for (const end = Math.min(list.length, i + INDEX_SLICE); i < end; i++) add(x, list[i], kinds);
+      if (i < list.length) setImmediate(slice);
+      else x.rows = rows;
+    };
+    if (list.length <= INDEX_SLICE) { slice(); return x; }
+    setImmediate(slice);
+    return null;
+  }
+  if (x.rows === null) return null; // still being built
+  const was = x.rows;
+  for (const [id, row] of rows) {
+    const old = was.get(id);
+    if (old === row) continue;
+    if (old) drop(x, old);
+    add(x, row, kinds);
+  }
+  for (const [id, old] of was) if (!rows.has(id)) drop(x, old);
+  x.rows = rows;
+  return x;
+}
+const FIELDS = ['name', 'id', 'alias', 'kind', 'what'];
+function add(x, row, kinds) {
+  const k = row.entry ?? row.kind;
+  if (kinds && !x.kindWords.has(k)) x.kindWords.set(k, kindWordsOf(kinds[k]));
+  const own = wordsOf(row), kw = x.kindWords.get(k), w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+  x.of.set(row, { w });
+  for (const f of FIELDS) for (const word of w[f]) { put(x.byStem, stem(word), row); put(x.words, word, row); }
+}
+function drop(x, row) {
+  const at = x.of.get(row);
+  if (!at) return;
+  x.of.delete(row);
+  for (const f of FIELDS) for (const word of at.w[f]) { take(x.byStem, stem(word), row); take(x.words, word, row); }
+}
+// A word most rows hold once is kept as that row alone, and as a set once a second row holds it.
+const put = (m, k, row) => { const s = m.get(k); if (s === undefined) m.set(k, row); else if (s instanceof Set) s.add(row); else if (s !== row) m.set(k, new Set([s, row])); };
+const take = (m, k, row) => { const s = m.get(k); if (s === row) m.delete(k); else if (s instanceof Set && s.delete(row) && !s.size) m.delete(k); };
+const each = (s) => (s === undefined ? [] : s instanceof Set ? s : [s]);
+/** The rows a word can hit (`hit`): those holding a word of its stem, or, for a word of four letters or more, a word it begins. */
+function rowsHit(x, q, into) {
+  for (const row of each(x.byStem.get(stem(q)))) into.add(row);
+  if (q.length >= 4) for (const [word, rs] of x.words) if (word.startsWith(q)) for (const row of each(rs)) into.add(row);
+}
+
 /** The rows the words find, best first (then nearest, then by name), at most `limit`, and how many more there were.
+ *  `rows` is the rows' list, or the copy's Map of rows by id (`rowsOf`), which is searched by its words (`indexOf`).
  *  `metres(row)`, when given, is how far the row is from the asker: each found row carries it (world-wide, no radius).
  *  `kinds`, the kind entries by kind, adds each kind's words (`kindWordsOf`). */
 export function find(rows, words, { limit = 8, within, metres, kinds } = {}) {
   const q = tokensOf(words), out = [], kindWords = new Map();
   if (!q.length) return { found: [], note: 'Say what to find.' };
-  for (const row of rows) {
+  // A row any word scores holds a word each of them hits, and a whole name standing in the words holds one of them:
+  // the rows no word hits score nothing, and are passed by without reading them.
+  let x = null, hits = null, list = rows;
+  if (rows instanceof Map) {
+    list = rows.values();
+    x = indexOf(rows, kinds);
+    if (x) { hits = new Set(); for (const w of q) rowsHit(x, w, hits); }
+  }
+  for (const row of list) {
+    if (hits && !hits.has(row)) continue;
     if (within && !within.has(row.id)) continue;
-    const k = row.entry ?? row.kind;
-    if (kinds && !kindWords.has(k)) kindWords.set(k, kindWordsOf(kinds[k]));
-    const own = wordsOf(row), kw = kindWords.get(k), w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+    let w = x?.of.get(row)?.w;
+    if (!w) {
+      const k = row.entry ?? row.kind;
+      if (kinds && !kindWords.has(k)) kindWords.set(k, kindWordsOf(kinds[k]));
+      const own = wordsOf(row), kw = kindWords.get(k);
+      w = kw?.length ? { ...own, what: [...own.what, ...kw] } : own;
+    }
     const full = w.name.join(' ') === q.join(' '), inside = nameIn(q, w.name);
     const s = full ? 100 + score(q, w) : inside ? 50 + inside : score(q, w);
     if (s) out.push({ s, row, m: metres?.(row) ?? Infinity });
   }
-  out.sort((a, b) => b.s - a.s || a.m - b.m || String(a.row.name).localeCompare(String(b.row.name), 'en', { numeric: true }));
+  out.sort((a, b) => b.s - a.s || a.m - b.m || byName(String(a.row.name), String(b.row.name)));
   const found = out.slice(0, limit).map(({ row, m }) => ({ id: row.id, name: row.name, kind: row.kind, ...(row.soul ? { soul: row.soul, parent: row.parent } : {}), ...(row.path?.length ? { in: placeName(row.path) } : {}), ...(Number.isFinite(m) ? { metres: Math.round(m) } : {}) }));
   return { found, ...(out.length > limit ? { more: out.length - limit } : {}) };
 }

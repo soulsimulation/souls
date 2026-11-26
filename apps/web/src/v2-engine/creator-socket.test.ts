@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, lightningSets, VERB } = await import('./creator-socket.ts');
+const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, prayerRefusal, refusalText, ticketOf, weatherSets, lightningSets, VERB } = await import('./creator-socket.ts');
+const { shownPrayer, soulIdOf } = await import('../god-ui/Prayers.tsx');
 const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
@@ -16,11 +17,11 @@ const answer = (sequence: number, kind: 1 | 2, n: number, reason?: string) => en
 
 /** A session signed in on a stand-in socket that keeps what the page sent. */
 function signedIn() {
-  const sent: Uint8Array[] = [];
-  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100);
+  const sent: Uint8Array[] = [], texts: string[] = [];
+  const s = new CreatorSession({ send: (b) => { if (typeof b === 'string') texts.push(b); else sent.push(b); } }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100);
   s.frame(encode(new Map([[1, 2]])));          // the gateway's first frame: the page signs in
   s.frame(encode(new Map([[4, 'stream.started']])));
-  return { s, sent };
+  return { s, sent, texts };
 }
 
 test('the session says hello, signs in with the exchanged token by message, and opens on the gateway\'s outcome', () => {
@@ -67,7 +68,7 @@ test('a refusal is answered by name; a stale weather is sent once more against t
 test('edits are numbered by the clock, never below the last, so the creator\'s agent (also by the clock) and the page never lock each other out', async () => {
   const sent: Uint8Array[] = [];
   let now = 5_000;
-  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
+  const s = new CreatorSession({ send: (b) => sent.push(b as Uint8Array) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
   s.frame(encode(new Map([[1, 2]]))); s.frame(encode(new Map([[4, 'stream.started']])));
   void s.edit({ undo: 'undo' });
   assert.equal(dec(sent.at(-1)!).get(5), 5_000, 'the clock, above the first');
@@ -176,4 +177,32 @@ test('#5006 row 13: Lightning is a storm for an hour and one strike where the ca
   assert.deepEqual(ops.map((o) => [o.get(1), o.get(3), o.get(4)]), [[3, 75, 'souls:storm'], [3, 76, 100], [3, 77, 90], [3, 78, 80],
     [3, 65, 5_000_000_000 + 3_600_000_000], [3, 69, [12_340, -8_000, 5_000_000_000]]], 'v2/client world.mjs KINDS.storm and strikeOps');
   assert.deepEqual(lightningSets(WORLD, null, 1), weatherSets(WORLD, 'storm', 1), 'no view yet: the storm alone');
+});
+
+test('#5006 row 15: the panel lists and answers prayers by text frames on the creator\'s socket, each reply matched by n; a refusal and a closed socket are named', async () => {
+  const { s, texts } = signedIn();
+  const SOUL = `soul-${SCOPE}-2`, p = { id: 'p_0a0b0c0d0e0f', soul: SOUL, text: 'let it rain', at: 1_800_000_000, state: 'waiting', answer: null, answered_at: null };
+  const listed = s.ask('prayers', { all: false });
+  assert.deepEqual(JSON.parse(texts.at(-1)!), { prayers: { all: false, n: 1 } }, 'the frame the gateway passes to the directory (gatewayd mailbox.rs PASSED)');
+  const answered = s.ask('answer', { id: p.id, text: 'it will' });
+  assert.deepEqual(JSON.parse(texts.at(-1)!), { answer: { id: p.id, text: 'it will', n: 2 } });
+  // replies come back in any order, each to its own request; anything else on the socket is not the session's
+  s.text(JSON.stringify({ reply: { n: 2, ok: true, prayer: { ...p, state: 'answered', answer: 'it will', answered_at: p.at + 5 } } }));
+  s.text(JSON.stringify({ mail: { id: 'm_1', text: 'not a reply' } }));
+  s.text('not json');
+  s.text(JSON.stringify({ reply: { n: 1, ok: true, prayers: [p] } }));
+  assert.deepEqual(await listed, { n: 1, ok: true, prayers: [p] });
+  assert.equal((await answered as { prayer: { answer: string } }).prayer.answer, 'it will');
+  const other = s.ask('answer', { id: 'p_ffffffffffff', text: 'no' });
+  s.text(JSON.stringify({ reply: { n: 3, ok: false, refused: 'prayer.not-found' } }));
+  assert.deepEqual(await other, { ok: false, refused: 'prayer.not-found' }, 'another world\'s prayer is not found for this creator');
+  assert.equal(prayerRefusal('prayer.not-found'), 'That prayer is not one of this world\'s.');
+  const late = s.ask('prayers', {}), slow = s.ask('prayers', {}, 5);
+  assert.deepEqual(await slow, { ok: false, refused: 'prayer.unanswered' }, 'no reply in time: named, never waiting for ever');
+  s.closed();
+  assert.deepEqual(await late, { ok: false, refused: CLOSED });
+  // the panel's row: the Soul named as the page names it (its page id from its grant), its time in ms
+  assert.equal(soulIdOf(SOUL), `s_${SCOPE}-2`);
+  assert.deepEqual(shownPrayer(p as never, (g) => (soulIdOf(g) === `s_${SCOPE}-2` ? 'Moss' : null)), { id: p.id, soul_name: 'Moss', text: 'let it rain', at: 1_800_000_000_000, answer: null, answered_at: null });
+  assert.equal(shownPrayer(p as never).soul_name, 'A Soul', 'a Soul the page does not know yet');
 });

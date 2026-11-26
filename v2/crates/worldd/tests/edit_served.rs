@@ -1406,6 +1406,394 @@ async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
     assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
 }
 
+/// A thing on the open ground at the origin whose solids are `boxes`, each `[cx, cz, hx, hz]` mm (its middle and half
+/// sizes), 2.5 m tall: a wall, a pen or a block.
+fn solids(w: &Seeded, boxes: &[[i64; 4]]) -> Op {
+    let mut op = wall(w, 0, 0);
+    if let Op::Place { fields, .. } = &mut op {
+        let boxes = boxes
+            .iter()
+            .map(|&[cx, cz, hx, hz]| {
+                Value::Array(
+                    [cx, cz, hx, hz, 0, 0, 2_500, 5, 0]
+                        .iter()
+                        .map(|&v| int(v))
+                        .collect(),
+                )
+            })
+            .collect();
+        fields.insert(import_eden::F_SOLIDS, Value::Array(boxes));
+    }
+    op
+}
+
+/// Each body born in the world's log, with its spot on the open ground (µm), in the order born.
+fn births(w: &Seeded) -> Vec<(Id, Vec3)> {
+    let bytes = std::fs::read(w.dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in replica::effects::Part::read(&r).unwrap().effects {
+            if let replica::effects::Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node, kind, pose, ..
+                    } = c.change
+                        && kind.as_str().contains("body")
+                    {
+                        out.push((node, pose.position));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #5006 (god-mode audit row 37): the creator names where new Souls arrive, on a served world, with no restart. Set to
+/// N2's build site, a joining Soul is born round its middle; an unknown place is refused `edit.arrival-unknown`; the
+/// first set is undone and redone; cleared, the next is born round the world's entry. A newcomer is always born where it
+/// can walk from: named the square and then walled in round its middle, a Soul is born at the entry, and naming it now
+/// is refused `edit.arrival-cut-off`; with no ground within 16 m of its middle, a Soul is born at the entry, and naming
+/// it is refused `edit.arrival-no-ground`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let im = import_eden::load(&text).unwrap();
+    let place = |id: &str| {
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes[id]).unwrap()).unwrap();
+        (
+            n.fields()[&import_eden::F_ORIGIN].clone(),
+            replica::arrival::middle(n.fields()).expect("the place has an outline"),
+        )
+    };
+    let ((origin, middle), (square_origin, square_middle)) = (place("site"), place("square.area"));
+    assert_eq!(square_middle, (0, 0), "the square is round the origin");
+    let d = scratch("arrival");
+    let w = seed(&d, &text, 4, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc3);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    // The build site and the square as the served world holds them (each node by the facts' id of it).
+    let (site, square) = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        let by = |origin: &Value| {
+            t.children(ground)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|&c| t.node(c))
+                .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(origin))
+                .expect("the served world holds the place")
+                .id()
+        };
+        (by(&origin), by(&square_origin))
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let nowhere = Id::new(Scope([9; 16]), 1).unwrap();
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, arrival(nowhere.to_value())),
+    )
+    .await;
+    println!("an arrival at no place: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN)
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, arrival(w.ground.to_value())),
+    )
+    .await;
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN),
+        "the open ground itself is not a place: {got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, got.version, arrival(site.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the build site is named: {got:?}");
+    // The first set added the root's field: its undo sets it back to none (the empty list), and the redo names it again.
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 4, got.version, &Asked::Undo),
+    )
+    .await
+    .0;
+    println!("undo of the first arrival: {got:?}");
+    assert_eq!(got.kind, 1, "the first arrival is undone: {got:?}");
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 5, got.version, &Asked::Redo),
+    )
+    .await
+    .0;
+    assert_eq!(got.kind, 1, "and redone: {got:?}");
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let near = |p: Vec3, (x, z): (i64, i64)| {
+        let (dx, dz) = (p.x - x, p.z - z);
+        (((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt()) / 1e6
+    };
+    // A Soul's first act births it (C3); its walk is to a spot near the build site, so it never walks far.
+    walk(
+        &mut souls,
+        &w,
+        w.souls[0],
+        1,
+        middle.0 * 1000 + 3 * M,
+        middle.1 * 1000,
+    );
+    let walked = socket_end(&mut souls);
+    assert_eq!(
+        walked.kind, 1,
+        "the first Soul is born and walks: {walked:?}"
+    );
+    let born = births(&w);
+    assert_eq!(born.len(), 1, "one body born");
+    let at_site = near(born[0].1, (middle.0 * 1000, middle.1 * 1000));
+    println!(
+        "born with the build site named: ({:.2}, {:.2}) m, {at_site:.2} m from its middle ({:.1}, {:.1}) m",
+        born[0].1.x as f64 / 1e6,
+        born[0].1.z as f64 / 1e6,
+        middle.0 as f64 / 1e3,
+        middle.1 as f64 / 1e3
+    );
+    assert!(at_site <= 9.0, "born round the build site: {at_site} m");
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            6,
+            walked.version,
+            arrival(Value::Array(Vec::new())),
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the arrival is cleared: {got:?}");
+    // Each next Soul is born at the entry, and walks a few metres from it.
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let off = near(born[n].1, (-40 * M, 30 * M));
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(1, 30, "once cleared").await;
+    // The square is named; then walled in round its middle (a pen 8 m across, no Soul in it).
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 7, version, arrival(square.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square is named: {got:?}");
+    let pen = solids(
+        &w,
+        &[
+            [0, 4_000, 4_200, 100],
+            [0, -4_000, 4_200, 100],
+            [4_000, 0, 100, 4_200],
+            [-4_000, 0, 100, 4_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 8, got.version, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let version = at_entry(2, 33, "with the square's middle walled in").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 9, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named once walled in: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
+    );
+    // The pen gives way to one solid 34 m across over the square's middle: no ground within 16 m of it.
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            10,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    let version = at_entry(3, 27, "with no ground round the square's middle").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 11, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named with no ground round its middle: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::NO_GROUND),
+        "{got:?}"
+    );
+}
+
+/// #5006 review: a host's arrival (`worldd arrival`) walled off from the world's entry never leaves the world unjoinable,
+/// and every reach is judged from the entry. The square is the host's arrival; a pen 34 m across round its middle shuts
+/// in every spot births try round it (16 m): the next Soul is born round the world's entry, and the creator naming the
+/// square is refused `edit.arrival-cut-off` (judged from the entry, not from the host's arrival inside the pen). The pen
+/// gives way to one solid over the square's middle, no ground within 16 m of it: the next Soul is born round the entry.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hosts_arrival_walled_off_from_the_entry_births_at_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let square_origin = {
+        let im = import_eden::load(&text).unwrap();
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes["square.area"]).unwrap()).unwrap();
+        n.fields()[&import_eden::F_ORIGIN].clone()
+    };
+    let d = scratch("arrival-host");
+    let w = seed(&d, &text, 2, (-40, 30));
+    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["arrival", "--dir"])
+        .arg(&w.dir)
+        .args(["--place", "square.area"])
+        .output()
+        .expect("worldd arrival runs");
+    assert!(
+        out.status.success(),
+        "arrival: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc4);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    println!("{}", s.line("worldd: Souls arrive at square.area", 60));
+    s.line("listening ", 60);
+    let square = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        t.children(ground)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&c| t.node(c))
+            .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(&square_origin))
+            .expect("the served world holds the square")
+            .id()
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let pen = solids(
+        &w,
+        &[
+            [0, 17_000, 17_200, 100],
+            [0, -17_000, 17_200, 100],
+            [17_000, 0, 100, 17_200],
+            [-17_000, 0, 100, 17_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let (dx, dz) = (born[n].1.x + 40 * M, born[n].1.z - 30 * M);
+        let off = ((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt() / 1e6;
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(0, 30, "with the host's arrival walled off").await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the creator names the square in the host's pen: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            3,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    at_entry(1, 33, "with no ground round the host's arrival").await;
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 /// The facts the G1f and K18d served tests build on, and the id of the chair whose kind and fields a creator copies:
@@ -1856,6 +2244,9 @@ async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refuse
 
 #[path = "edit_served/k18d.rs"]
 mod k18d;
+
+#[path = "edit_served/shade.rs"]
+mod shade;
 
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
@@ -5387,7 +5778,11 @@ fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
 async fn put_part(a: &mut GwSoul, c: Id, to: BTreeMap<u64, Value>) -> Got {
     for _ in 0..10 {
         let got = a.act("part:put", c, to.clone()).await;
-        if !(got.kind == 2 && matches!(got.reason.as_str(), "edit.body-stale" | "part.setting-in"))
+        if !(got.kind == 2
+            && matches!(
+                got.reason.as_str(),
+                "edit.body-stale" | "edit.stale" | "part.setting-in"
+            ))
         {
             return got;
         }
@@ -7399,4 +7794,258 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
         wave >= dance_end && wave - dance_end <= 200_000,
         "the dance ends where the wave begins: {dance_end} {wave}"
     );
+}
+
+/// Carrying together, turned with the front (moving-group rule 3): a crew seats a beam square in a bay's slot by its
+/// front's commands alone, as the client's `carry to <crew> <bay> <slot>` sends them from the front (a walk to its end
+/// of the slot's line, naming the load's heading there, parameter 3). On N2's test world with a bay at its build
+/// site, two crews first seat its frames (each walk sent by both, as A3's), one holder left on each. Then:
+///
+/// - **A crew of four** (a front, a back and two sides west of the beam; the beam's entry given two grips between its
+///   ends, so four may take it) takes beam 1, its length along z. Only the
+///   front's Soul walks: to a point west of the bay with the load turned 60 degrees, then to its end of `beam_low_l`'s
+///   line with the heading along it. Each time the other three walk with it by their own follow orders, turning with
+///   it, and stand at their places (within 0.3 m), the back and the front on the slot's line; the front seats the beam.
+/// - **A crew of two** does the same with beam 2 into `beam_high_l`, over the low beam now seated.
+///
+/// Each beam is in its slot afterwards, and no carry broke off on the way.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_two() {
+    const ALONG: i64 = 2_200_000;
+    let d = scratch("hgturn");
+    let (facts, slots) = yard_world(&d);
+    // The beam with four grips, two between its ends, so a crew of four takes it (0.135 C5: no more than its grips).
+    let p = d.join("entries").join("rack_beam.json");
+    let mut e = json::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    let json::Value::Obj(top) = &mut e else {
+        panic!("an entry")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("points", json::Value::Obj(points)) = (k.as_str(), v) {
+            points.retain(|(_, p)| p.get("role").and_then(json::Value::str) != Some("grip"));
+            for (n, z) in [-1_097, -400, 400, 1_097].iter().enumerate() {
+                points.push((
+                    format!("grip_{n}"),
+                    json::Value::Obj(vec![
+                        ("role".into(), json::Value::s("grip")),
+                        (
+                            "at_mm".into(),
+                            json::Value::Arr([0, 51, *z].map(num).to_vec()),
+                        ),
+                    ]),
+                ));
+            }
+        }
+    }
+    std::fs::write(&p, e.to_json()).unwrap();
+    let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let (bay, fa, fb) = (
+        im.nodes["site-bay"],
+        im.nodes["yard-frame-1"],
+        im.nodes["yard-frame-2"],
+    );
+    let beams = [im.nodes["yard-beam-1"], im.nodes["yard-beam-2"]];
+    let g = w.ground;
+    let actors: Vec<Actor> = w.souls.iter().map(|s| Actor::Soul(*s)).collect();
+    let (url, tokens) = gateway(&socket, &actors).await;
+    let mut souls = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
+    }
+    let crew_kind = pinned_activity(&w, "mars:carry_activity");
+    let to = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
+    let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
+    let in_slot = |node: Id, k: u64| BTreeMap::from([(1, node.to_value()), (2, Value::Uint(k))]);
+    let slot_of = |node: Id, k: u64| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        sim::ground::scene::slot_points(t, t.handle(node).unwrap(), t.handle(g).unwrap())
+            .unwrap()
+            .into_iter()
+            .find(|(n, _)| *n == k)
+            .unwrap()
+            .1
+    };
+    // Each Soul named walks to its point; every walk is answered.
+    let walk_all = async |souls: &mut [GwSoul], walks: &[(usize, Vec3)], what: &str| {
+        for (k, v) in walks {
+            souls[*k].send("eden:walk", g, to(*v)).await;
+        }
+        for (k, _) in walks {
+            let e = souls[*k].end().await;
+            assert_eq!(e.kind, 1, "{what}, Soul {}: {e:?}", k + 1);
+        }
+    };
+    // A crew of `members` on the ground: the first offers in front, the rest accept in turn (the back, then sides).
+    let crew = async |souls: &mut [GwSoul], members: &[usize]| {
+        let asked = members[1..]
+            .iter()
+            .map(|k| body_of(&w, w.souls[*k]).to_value())
+            .collect();
+        let got = souls[members[0]]
+            .act(
+                "activity:offer",
+                g,
+                BTreeMap::from([
+                    (1, crew_kind.clone()),
+                    (2, Value::Text(Name::new("mars:front").unwrap())),
+                    (3, Value::Array(asked)),
+                ]),
+            )
+            .await;
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let c = created_by(&w, &got.entries, "mars:carry_activity@");
+        for k in &members[1..] {
+            let got = souls[*k].act("activity:accept", c, BTreeMap::new()).await;
+            assert_eq!(got.kind, 1, "accepted: {got:?}");
+        }
+        c
+    };
+    // Waits until each body stands within 0.3 m of its place, at most 30 s.
+    let settle = async |places: &[(Id, Vec3)], what: &str| {
+        let t0 = std::time::Instant::now();
+        loop {
+            let off: Vec<i64> = places
+                .iter()
+                .map(|(b, p)| {
+                    let q = body_at(&w, *b);
+                    (i128::from(q.x - p.x).pow(2) + i128::from(q.z - p.z).pow(2)).isqrt() as i64
+                })
+                .collect();
+            if off.iter().all(|d| *d < 300_000) {
+                return t0.elapsed();
+            }
+            assert!(
+                t0.elapsed() < Duration::from_secs(30),
+                "{what}: not all at their places within 30 s, µm off {off:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    };
+
+    // The frames, each by a crew of two whose two walks are sent by both (A3's): Soul 1 lets go, the other holds.
+    let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - ALONG), v3(at.x, 0, at.z + ALONG));
+    for (frame, slot, other) in [(fa, "upright_a", 1), (fb, "upright_b", 2)] {
+        let (f0, f1) = frame_ends(where_is(&w, frame).2);
+        walk_all(&mut souls, &[(0, f0), (other, f1)], "to the frame").await;
+        let c = crew(&mut souls, &[0, other]).await;
+        let got = souls[0].act("part:take", c, part(frame)).await;
+        assert_eq!(got.kind, 1, "frame taken: {got:?}");
+        let (f0, f1) = frame_ends(slot_of(bay, slots[slot]));
+        walk_all(&mut souls, &[(0, f0), (other, f1)], "the frame to the bay").await;
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
+        let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
+        assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
+    }
+
+    // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
+    // (`[along, across]`, +along toward the front, +across to the west while the length runs along +z).
+    let sides = [[500_000, 800_000], [-500_000, 800_000]];
+    let at_frame = |mid: Vec3, h: [i64; 2], p: [i64; 2]| {
+        let o = worldd::engine::on_plan(p, h);
+        v3(mid.x + o[0], 0, mid.z + o[1])
+    };
+    let turned = [866_025, 500_000];
+    for (beam, slot, members) in [
+        (beams[0], "beam_low_l", vec![0, 3, 4, 5]),
+        (beams[1], "beam_high_l", vec![0, 3]),
+    ] {
+        let n = members.len();
+        let places = |mid: Vec3, h: [i64; 2]| {
+            let mut v = vec![at_frame(mid, h, [ALONG, 0]), at_frame(mid, h, [-ALONG, 0])];
+            v.extend(sides[..n - 2].iter().map(|p| at_frame(mid, h, *p)));
+            v
+        };
+        let start = where_is(&w, beam).2;
+        let walks: Vec<(usize, Vec3)> =
+            members.iter().copied().zip(places(start, [0, M])).collect();
+        walk_all(&mut souls, &walks, "to the beam").await;
+        let c = crew(&mut souls, &members).await;
+        let got = souls[0].act("part:take", c, part(beam)).await;
+        assert_eq!(got.kind, 1, "beam taken: {got:?}");
+        let crew_bodies: Vec<Id> = members.iter().map(|k| body_of(&w, w.souls[*k])).collect();
+        // Only the front walks from here, naming the load's heading at its goal.
+        let s = slot_of(bay, slots[slot]);
+        let staged = v3(s.x - 4_500_000, 0, s.z);
+        for (mid, h, what) in [
+            (staged, turned, "turned 60 degrees, west of the bay"),
+            (s, [0, M], "square on the slot's line"),
+        ] {
+            let want = places(mid, h);
+            let mut walk = to(want[0]);
+            walk.insert(3, Value::Array(vec![int(h[0]), int(h[1])]));
+            let got = souls[0].act("eden:walk", g, walk).await;
+            assert_eq!(got.kind, 1, "the front's walk, {what}: {got:?}");
+            let took = settle(
+                &crew_bodies
+                    .iter()
+                    .copied()
+                    .zip(want.iter().copied())
+                    .collect::<Vec<_>>(),
+                what,
+            )
+            .await;
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            println!(
+                "crew of {n}, {what}: all at their places {} ms after the front's walk; the back {} mm east and {} mm \
+                 south of the front",
+                took.as_millis(),
+                (k.x - f.x) / 1000,
+                (k.z - f.z) / 1000
+            );
+        }
+        // Its last 0.3 m the back closes by two thirds a second: square on the slot's line within 5 s.
+        let t0 = std::time::Instant::now();
+        let across = loop {
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            if (f.x - k.x).abs() < 50_000 || t0.elapsed() > Duration::from_secs(5) {
+                break k.x - f.x;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        println!(
+            "crew of {n}: the back {} mm across from the front, on the slot's line",
+            across / 1000
+        );
+        assert!(
+            across.abs() < 50_000,
+            "square on the slot's line: the back {} mm across from the front",
+            across / 1000
+        );
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        println!(
+            "crew of {n} seats beam {} in {slot}: {got:?}",
+            beam.counter()
+        );
+        assert_eq!(got.kind, 1, "beam seated in {slot}");
+        for k in &members {
+            let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
+            assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);
+        }
+        assert_eq!(
+            where_is(&w, beam).1,
+            Some(slots[slot]),
+            "the beam is in {slot}"
+        );
+        // The sides step off the next beam's way.
+        let off: Vec<(usize, Vec3)> = members[2..]
+            .iter()
+            .enumerate()
+            .map(|(j, k)| (*k, v3(s.x - 8 * M, 0, s.z - 6 * M - j as i64 * M)))
+            .collect();
+        walk_all(&mut souls, &off, "the sides step away").await;
+    }
+    let downs = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .count();
+    assert_eq!(downs, 0, "no carry broke off");
 }

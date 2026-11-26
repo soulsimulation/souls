@@ -18,6 +18,13 @@ export function arrivalOver(fallbackMs = 20_000): boolean {
   if (marked.has('card-done') || marked.has('first-live-frame')) return true;
   try { return performance.now() > fallbackMs; } catch { return true; }
 }
+/** Whether this page's first live frame is drawn (or `fallbackMs` passed, for pages that never draw one, e.g. a shot or a
+ *  stream that never answers). Work that would compete with the Live pill's own last steps (the entity layer's fill:
+ *  its terrain refinement and far things, ~3.7 s of a 4x phone's main thread) waits for this, not for the card. */
+export function liveOver(fallbackMs = 20_000): boolean {
+  if (marked.has('first-live-frame')) return true;
+  try { return performance.now() > fallbackMs; } catch { return true; }
+}
 
 /** ?shot readiness (R, 3.16 lookcheck): resolves once the arrival card has gone and its .25 s fade is over (card-done
  *  plus `fadeMs`), or after `timeoutMs`, or on abort. A picture is never taken through the card. */

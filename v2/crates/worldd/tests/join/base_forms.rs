@@ -9,6 +9,8 @@
 //!   origin.
 //! - #4072 follow-up: a walk to a thing whose entry gives bounds (a 6 m bench) ends by its outline, not at its middle;
 //!   a `touch` after one is in reach; a `go_to` on a walkable thing (a mat, its entry an area) ends on it.
+//! - #5019 follow-up: a `look_at` or a `point` at a thing beyond sight (20 m) is refused `out-of-reach`, its answer's
+//!   words saying how far it is and the reach.
 use super::*;
 
 const HUMANOID: &str = include_str!("../../../../../content/kinds/body/humanoid.json");
@@ -53,6 +55,14 @@ fn mat() -> Id {
 fn mat_at() -> Vec3 {
     let s = first_spot();
     Vec3::new(s.x + 2_000_000, 0, s.z + 6_000_000)
+}
+/// A thing with a card 26 m east of the first birth's spot: beyond a look's and a point's 20 m.
+fn far() -> Id {
+    id(24)
+}
+fn far_at() -> Vec3 {
+    let s = first_spot();
+    Vec3::new(s.x + 26_000_000, 0, s.z)
 }
 fn mat_ring() -> [Vec3; 4] {
     let (m, x, z) = (mat_at(), 1_500_000, 1_000_000);
@@ -151,6 +161,7 @@ fn base_world() -> Replica {
         ),
         create_with(4, bench(), bench_at(), entry_field("test:bench")),
         create_with(5, mat(), mat_at(), entry_field("test:mat")),
+        create_with(6, far(), far_at(), BTreeMap::new()),
     ];
     let part = encode(&Value::Map(BTreeMap::from([
         (1, Value::Bytes(header(ground()).hash().to_bytes())),
@@ -368,6 +379,42 @@ fn a_walk_to_a_bounded_thing_ends_by_its_outline_and_on_a_walkable_one() {
         to_outline(at, &mat_ring())
     );
     assert_eq!(to_outline(at, &mat_ring()), 0, "on the mat: {at:?}");
+    run.stop();
+}
+
+/// #5019 follow-up: a look or a point at a thing beyond sight is refused `out-of-reach`, and its answer says how far
+/// the thing is and the move's reach, so an agent (or a bench) can tell a far target from a reach measured wrong.
+#[test]
+fn a_look_or_point_beyond_sight_is_refused_with_how_far_and_the_reach() {
+    let (run, mut a) = serve_base("far");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = body_of(&run, ada()).expect("born");
+    let away = flat(last_at(&run, body), far_at());
+    for (form, arg) in [("look_at", "target"), ("point", "toward")] {
+        a.send(&format!("eden:{form}"), Some(body), thing(arg, far()));
+        let (_, r, why) = a.answer_why();
+        println!("{form} at {away} µm: {r:?}, {why:?}");
+        assert_eq!(r, Err("out-of-reach".to_owned()), "{form}");
+        let why = why.expect("the refusal's words");
+        let shown = replica::world_model::show(far());
+        assert!(
+            why.ends_with(&format!(" mm to {shown}, reach 20000 mm")),
+            "{form}: {why}"
+        );
+        let mm: i64 = why
+            .split(' ')
+            .nth(1)
+            .and_then(|n| n.parse().ok())
+            .expect("how far, mm");
+        // From the body's edge (its radius short of its feet), across x and z.
+        assert!(
+            mm > 20_000 && mm <= away / 1000 + 1,
+            "{form}: {mm} mm, {away} µm feet to feet"
+        );
+    }
+    // Within sight, the same look is done.
+    let near = a.act("eden:look_at", Some(body), thing("target", base()));
+    assert!(!near.expect("done").is_empty());
     run.stop();
 }
 

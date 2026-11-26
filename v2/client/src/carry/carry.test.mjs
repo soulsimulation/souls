@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
 import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
-import { nextOf } from '../cli/souls.mjs';
+import { newCrew, nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
 const ROOT = join(import.meta.dirname, '../../../../content/kinds');
@@ -73,6 +73,21 @@ test('a grip is the load\'s place from its entry; a standing part\'s 2.2 m along
   near(walk({ do: 'grip', thing: id(4), end: 'right' }), [1.2e6, 0, 5.85e6], 'beside the frame');
   assert.equal(send({ do: 'grip', thing: id(4), end: 'up' }).code, 'carry-usage');
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
+});
+
+test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
+  // The beam along z at (2, 6) as if seated in the bay at (12, 6): its ends 0.9 m off its line, on the side away from the
+  // bay (west), both ends the same side; unseated, it comes down at their middle, clear of the bay's posts.
+  const seated = { ...ctx, parentOf: (n) => (n === id(2) ? id(5) : rows.get(n)?.parent ?? null) };
+  const walk = (req) => carryIntents(req, seated)[0].params[1];
+  near(walk({ do: 'grip', thing: id(2), end: 'back', from: '2.2', out: '0.9' }), [1.1e6, 0, 3.8e6], 'its back, outside');
+  near(walk({ do: 'grip', thing: id(2), end: 'front', from: '2.2', out: '0.9' }), [1.1e6, 0, 8.2e6], 'its front, the same side');
+  near(gripSpot({ pos: [2e6, 0, 6e6] }, loadOf(kinds['mars:rack_beam']), 'back', 2_200_000, { by: 900_000, from: [-5e6, 6e6] }), [2.9e6, 3.8e6], 'away from a bay to its west: east');
+  const loose = carryIntents({ do: 'grip', thing: id(2), end: 'back', out: '0.9' }, { ...ctx, parentOf: (n) => rows.get(n)?.parent ?? null });
+  assert.equal(loose.code, 'carry-out-unseated', 'a part on the open ground is seated in nothing');
+  assert.equal(carryIntents({ do: 'grip', thing: id(2), end: 'right', out: '0.9' }, seated).code, 'carry-usage', 'front or back only');
+  assert.equal(carryIntents({ do: 'grip', thing: id(2), end: 'back', out: '9' }, seated).code, 'carry-usage', 'under 5 m');
+  assert.deepEqual(requestOf(['carry', 'grip', id(2), 'back', '--from', '2.2', '--out', '0.9']).req, { op: 'carry', do: 'grip', thing: id(2), end: 'back', from: '2.2', out: '0.9' });
 });
 
 test('a crew of six takes the 6.1 m frame at its six grips: front, back, and four sides beside the grips between', () => {
@@ -142,6 +157,14 @@ test('carry to walks this Soul so the load reaches the point or the slot, keepin
     [12e6, 0, 6e6 - 1_448_000 - Math.hypot(0.7e6, 2.35e6)], 'askew, into the slot');
   assert.equal(send({ do: 'to', crew: id(8), where: id(5), slot: 'roof' }).code, 'part-slot-unknown');
   assert.equal(carryIntents({ do: 'to', crew: id(8), where: '1,2' }, { ...ctx, crewMiddle: () => null }).code, 'carry-crew-unseen');
+});
+
+test('into a slot, the walk names the load\'s heading there, from its back toward this carrier\'s end: the front\'s turns the crew', () => {
+  // This Soul stands on the slot's -z side of the load's middle, so its end of the load goes in at -z.
+  assert.deepEqual(send({ do: 'to', crew: id(8), where: id(5), slot: 'upright_a' })[0].params[3], [0, -1e6]);
+  assert.deepEqual(carryIntents({ do: 'to', crew: id(8), where: id(5), slot: 'upright_a' }, { ...ctx, crewMiddle: () => [0.7e6, 0] })[0].params[3],
+    [0, 1e6], 'on the +z side');
+  assert.equal(send({ do: 'to', crew: id(8), where: '25,6' })[0].params[3], undefined, 'to a point: no turn');
 });
 
 test('a beam carried into a slot past a beam seated at the height it is carried is refused before anyone moves', () => {
@@ -291,8 +314,8 @@ test('each step says what comes next; a seated part says what is left of its bay
   const crew = id(8);
   assert.match(nextStep({ do: 'grip' }), /carry offer <name>.*carry accept/);
   assert.match(nextStep({ do: 'offer', crew }), new RegExp(`part take ${crew}`));
-  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*at the same moment/);
-  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes and when; every carrier sends the same carry to ${crew}`));
+  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*you walk with it, keeping your place/);
+  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes; the front sends carry to ${crew}`));
   assert.match(nextStep({ do: 'to', crew }), /part put/);
   assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a']) }), /1 of 6 slots filled; still to fill: upright_b: a rack upright/);
   assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a', 'upright_b', 'beam_high_l', 'beam_high_r', 'beam_low_l', 'beam_low_r']) }), /6 of 6 slots filled, so it is built/);
@@ -314,4 +337,18 @@ test('a refused step says no next; a part seated in a bay reads the bay as it st
   await nextOf(async (r) => { asked.push(r); return { ok: true, built: '6 of 6 slots filled' }; }, { op: 'carry', kind: 'part', do: 'put', crew: id(8), into: id(5), slot: 'beam_low_r' }, done);
   assert.deepEqual(asked, [{ op: 'inspect', this: id(5) }]);
   assert.match(done.next, /it is built/);
+});
+
+test('an offer names the crew this Soul fronts, when another Soul offered one at the same moment', async () => {
+  // Ada and Cy offer at once (the shade's two rail crews): Ada's copy holds both new crews, Cy's listed first.
+  const crews = [
+    { id: id(30), with: [{ name: 'Cy', role: 'front', body: id(31) }] },
+    { id: id(32), with: [{ name: 'you', role: 'front', body: id(6) }] },
+  ];
+  const ask = async () => ({ crews: [{ id: id(8), with: [] }, ...crews] });
+  assert.deepEqual(await newCrew(ask, [id(8)], { sleep: async () => {} }), { crew: id(32) }, 'the one this Soul fronts');
+  const one = async () => ({ crews: [{ id: id(33), with: [] }] });
+  assert.deepEqual(await newCrew(one, [], { sleep: async () => {} }), { crew: id(33) }, 'the only new crew');
+  const unsure = async () => ({ crews: crews.map((c) => ({ ...c, with: [] })) });
+  assert.equal((await newCrew(unsure, [], { tries: 2, sleep: async () => {} })).crew, null, 'two new crews, neither shown as this Soul\'s: no guess');
 });

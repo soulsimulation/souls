@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // W17: existing finite placement lifecycle only. Root authenticates the operator; the Souls child owns Store/data.
-import { isMain } from '../../../tools/lib/is-main.mjs';
+import { isMain } from './is-main.mjs';
 import { lstat, mkdir, unlink, readdir, chown } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';

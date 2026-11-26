@@ -44,7 +44,9 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 ## Orders, and what the engine never holds
 
 5. **The orders are a closed list of four:** ranked fallbacks (any act's field 9), a held stance (`souls:hold`, its
-   stance a parameter), follow (`souls:follow`, its target; a band behind it, or a place beside it, as parameters) and standing in a queue (`souls:queue`, its target, and
+   stance a parameter), follow (`souls:follow`, its target; a band behind it, a place beside it, or a place at an offset from it on the
+   plan, `[x, z]` µm, parameter 4, as a carry's crew keeps its places from its front, turning toward the offset at the
+   leader's goal as it nears it, `[goal x, goal z, x, z]`, parameter 5; a place at most 20 m away) and standing in a queue (`souls:queue`, its target, and
    the act taken at its head as a parameter: "queue for this seat and sit"). Each expires, can be cancelled, and is
    recorded as the agent's; an order is in the log, so it survives a restart.
 6. **Fallbacks are ranked and bounded:** at most 4, each another act `{2: verb, 3: target, 4: parameters, 8:
@@ -66,11 +68,13 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    now, 6: [node, ...], 7: operation, 8: detail}`, naming what changed since its basis (6 left out when empty), for an
    edit, the operation that failed by its place in the batch (7 left out when none), and the refusal's own words
    (8: UTF-8 bytes, at most 240, left out when it has none; `together.too-far`'s say how far apart and how far the
-   move reaches). A client acts on the reason; the detail is for reading. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
+   move reaches, and a form whose move is out of reach says how far its thing is and the move's reach, `look: 31200 mm
+   to <id>, reach 20000 mm`). A client acts on the reason; the detail is for reading. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's. A form's act is due by its run's start plus its steps' own time (its
-   walk, moves and pauses, C20), and a walk's by its planned route's time from when it is planned (C29). Either is
-   answered in progress in the tick its run starts or its route is planned, `{.., 3: 3, 4: intent id, 5: µs left}`
-   (W11, #4087: not at the deadline it got on arrival), and its receipt or refusal follows by its own deadline.
+   walk, moves and pauses, C20), a walk's by its planned route's time from when it is planned (C29), and a sit's, a
+   lie's or a rise's by a form's move step's time from when its move starts. Each is answered in progress in the tick
+   its run starts, its route is planned or its move starts, `{.., 3: 3, 4: intent id, 5: µs left}` (W11, #4087: not at
+   the deadline it got on arrival), and its receipt or refusal follows by its own deadline.
 9. **A move inside a joint activity is accepted, then resolved:** `{.., 3: 3, 4: intent id}`, then `{.., 3: 4, 4:
    outcome}`; a miss is an outcome, not a refusal. Its parameter may name one of the activity's next beats, at most
    about two seconds ahead (B8): a parameter of a move already accepted, not an order waiting on the world.

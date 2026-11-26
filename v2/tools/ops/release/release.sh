@@ -13,7 +13,8 @@
 #                                                      directoryd, origin.tar (install.sh origin) and units.tar (their
 #                                                      two unit files) are the directory and the viewers' origin;
 #                                                      reseed/ holds Eden's reseed, its undo, content/kinds and
-#                                                      Eden's stock with its libraries (reseed/stock, #4837)
+#                                                      Eden's stock with its libraries (reseed/stock, #4837); ops/
+#                                                      the placement scripts (install.sh ops), for `placement`
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
 #   RELEASE_TARGET=<ssh target> bash release.sh remote stage <bundle>
@@ -54,6 +55,16 @@
 #   reseed <sha> check|run [<label>]   Eden fresh on this release's build (reseed/reseed-eden.sh with this release's
 #                                  world-aside and kinds); with <label>, resumes that reseed. check changes nothing
 #   reseed-undo <label> check|run  undoes that reseed, with the undo the release it moved to carried
+#   placement <sha> check|run      New world on this release's build ($ETC/placement.json; with none, nothing to do):
+#                                  each template of the catalogue (a folder with a `template` file) seeded, published
+#                                  by the release's publish-template and dry-run forked by its worldd, in a folder
+#                                  beside the catalogue; check stops there and changes nothing. run then, with
+#                                  souls-place.path stopped (a placement in flight waited for) and the directory down
+#                                  when the catalogue it reads changes, renames into place the library's worldd and
+#                                  ops/ (the previous: .worldd.prev, .ops.prev), the pin (.placement.json.prev) and each
+#                                  template (templates/.aside/<name>), and starts them again; if a rename fails or the
+#                                  directory is then unhealthy, all of it goes back. A failure before the renames
+#                                  changes nothing: the previous templates stay
 #   news <sha> <version> <link> <date>   one release entry in $DATA/news.jsonl, keyed by its link; refuses
 #                                  `release.not-live` unless this release moved every world
 # A refusal prints `refused: <name>: <why>` and exits 3; it changes nothing it has not already done.
@@ -72,8 +83,9 @@ ARTIFACTS=(worldd gatewayd page.tar client.tar directoryd origin.tar units.tar)
 SERVICES=${RELEASE_SERVICES-directory origin}
 # What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
 # assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves; store-copy is
-# store-switch.sh's copy tool (v2/docs/runbook/store-switch.md), carried so the host need not build it.
-TOOLS=(deploy gateway-upgrade world-aside assets-check store-copy)
+# store-switch.sh's copy tool (v2/docs/runbook/store-switch.md), carried so the host need not build it; templates is
+# publish-template, which `placement` republishes the catalogue's templates with.
+TOOLS=(deploy gateway-upgrade world-aside assets-check store-copy templates)
 # A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit) and its
 # stock (reseed/stock: content/worlds/eden/stock.json and content/library/, #4837).
 RESEED=(reseed-eden.sh reseed-eden-undo.sh)
@@ -159,6 +171,7 @@ bundle() {
   rm -rf "$out/served"
   for t in "${TOOLS[@]}"; do install -m 755 "$bins/$t" "$out/bin/$t"; done
   install -m 755 "$0" "$out/release.sh"
+  bash "$(dirname "$0")/../install.sh" ops "$out/ops"
   mkdir -p "$out/reseed"
   for t in "${RESEED[@]}"; do install -m 755 "$(dirname "$0")/../cutover/$t" "$out/reseed/$t"; done
   cp -R "$(dirname "$0")/../../../../content/kinds" "$out/reseed/kinds"
@@ -221,8 +234,9 @@ stage() {
   install -m 644 "$from/manifest.json" "$rel/manifest.json"
   install -m 755 "$from/release.sh" "$rel/release.sh"
   for n in "${TOOLS[@]}"; do install -m 755 "$from/bin/$n" "$rel/bin/$n"; done
-  rm -rf "$rel/reseed"
+  rm -rf "$rel/reseed" "$rel/ops"
   cp -R "$from/reseed" "$rel/reseed"
+  cp -R "$from/ops" "$rel/ops"
   verify "$sha"
 }
 
@@ -534,7 +548,7 @@ move() {
   fi
   # Last, once the worlds and the gateway are on the release: the directory, then the viewers' origin. Each restart is
   # a blip of a second or two; the page tries again.
-  local s l
+  local s
   if [ -f "$rel/moved/directory" ] && grep -qw directory <<< "$changed"; then
     echo "move: souls-directory.service restarts for its mailbox key"
     systemctl restart souls-directory.service || true
@@ -542,10 +556,7 @@ move() {
   for s in $SERVICES; do
     case $s in
       directory)
-        # `|| true`: under pipefail a missing directory.args would end the move here, silently (#4954).
-        l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1 || true)
-        service "$rel" directory souls-directory.service directoryd 401 \
-          -X POST "${RELEASE_DIRECTORY_URL:-http://${l:-127.0.0.1:7310}}/v1/account/session"
+        service "$rel" directory souls-directory.service directoryd 401 -X POST "$(directory_url)/v1/account/session"
         ;;
       origin)
         service "$rel" origin souls-origin.service origin.tar 200 \
@@ -560,6 +571,14 @@ move() {
     echo "$seen"
   fi
   echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page, the served client$([ -z "$SERVICES" ] || echo ', the directory and the origin')"
+}
+
+# The directory's address, from directory.args' --listen. `|| true`: under pipefail a missing directory.args would end
+# the caller here, silently (#4954).
+directory_url() {
+  local l
+  l=$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ETC/directory.args" 2> /dev/null | head -1 || true)
+  echo "${RELEASE_DIRECTORY_URL:-http://${l:-127.0.0.1:7310}}"
 }
 
 # The first of these worlds' streams the origin serves (place-world.sh links /w/<world>/views), as its pointer's path;
@@ -710,6 +729,183 @@ reseed_undo() {
   RESEED_TOOL=${RESEED_TOOL:-$(dirname "$rel")/bin/world-aside} bash "$(dirname "$rel")/reseed/reseed-eden-undo.sh" "$label" "$act"
 }
 
+# New world (#5047, #5051). The placement initializer (souls-place.service) forks a template of the catalogue with the
+# library's worldd, which must hash to placement.json's `build`, and worldd forks only a template published on its own
+# build. So after each release's move: every template republished on its build and dry-run forked (check stops there),
+# then the library's worldd and ops/, the pin and the templates renamed into place, and the directory, which reads the
+# catalogue (each template's name, lineage and zone) only at its start, restarted when that changed.
+DRY_RUN_THROUGH=dddddddddddddddddddddddddddddddd:1
+SWAPPED=()
+conf() { node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]] ?? ""))' "$1" "$2"; }
+# PIN <placement.json> <build> <out>: the file with `build` set, written to <out> with the file's mode and owner.
+PIN='const fs = require("fs"), [file, build, out] = process.argv.slice(1), c = JSON.parse(fs.readFileSync(file, "utf8"));
+const st = fs.statSync(file); c.build = build; fs.writeFileSync(out, JSON.stringify(c) + "\n"); fs.chmodSync(out, st.mode & 0o777);
+if (process.getuid() === 0) fs.chownSync(out, st.uid, st.gid);'
+# The catalogue as the directory reads it at its start: each folder with a `template` file, dot-names too, by name and
+# that file's hash.
+catalogue() (
+  shopt -s dotglob nullglob
+  for t in "$1"/*/; do
+    if [ -f "$t/template" ]; then echo "$(basename "$t") $(hash "$t/template")"; fi
+  done
+)
+# swap <new> <live> <prev>: the previous <live> kept as <prev> (replacing an older one), then <new> renamed to <live>,
+# over a file in one rename, so it is never missing. Returns 1 at the first failure, with what it did recorded.
+swap() {
+  rm -rf "$3" || return 1
+  if [ -d "$2" ]; then
+    mv "$2" "$3" || return 1
+  elif [ -e "$2" ]; then
+    cp -p "$2" "$3" || return 1
+  fi
+  SWAPPED+=("$2" "$3")
+  mv -f "$1" "$2"
+}
+# Every swap undone, last first: each <prev> back as its <live>, or a <live> that had none removed.
+unswap() {
+  local i live prev
+  for ((i = ${#SWAPPED[@]} - 2; i >= 0; i -= 2)); do
+    live=${SWAPPED[i]} prev=${SWAPPED[i + 1]}
+    if [ -d "$prev" ]; then
+      rm -rf "$live" && mv "$prev" "$live" || true
+    elif [ -e "$prev" ]; then
+      mv -f "$prev" "$live" || true
+    else
+      rm -rf "$live"
+    fi
+  done
+  SWAPPED=()
+}
+# quiet <unit>: stopped when it runs, and started again by resume. resume: every unit quiet stopped, last first.
+STOPPED=()
+quiet() { systemctl is-active --quiet "$1" 2> /dev/null && systemctl stop "$1" && STOPPED+=("$1"); }
+resume() {
+  local i
+  for ((i = ${#STOPPED[@]} - 1; i >= 0; i--)); do systemctl start "${STOPPED[i]}" || true; done
+  STOPPED=()
+}
+# put <new> <live> <prev>: swap, or every rename back, every stopped unit started and the release stopped.
+put() { swap "$@" || {
+  unswap
+  resume
+  refuse "release.placement-swap: $2 not renamed into place; every rename is back"
+}; }
+
+# republish <name> <template> <work> <worldd> <publish-template>: the template seeded again from what it carries (its
+# facts, entries, moves, entry point and body catalogue), published as <work>/out/<name> and dry-run forked, all by
+# this release's programs.
+republish() {
+  local name=$1 src=$2 work=$3 w=$4 pub=$5 at=0,0 out opt=()
+  [ -f "$src/facts.json" ] || refuse "release.template-unreadable: $name has no facts.json"
+  [ ! -d "$src/hatches" ] || refuse "release.template-hatches: $name carries code hatches, which publish-template does not carry"
+  mkdir -p "$work/support"
+  if [ -f "$src/moves.json" ]; then cp "$src/moves.json" "$work/support/"; fi
+  if [ -d "$src/entries" ]; then opt+=(--entries "$src/entries"); fi
+  if [ -f "$src/bodies.json" ]; then opt+=(--bodies "$src/bodies.json"); fi
+  # entry.json is [x, z] in mm; seed takes metres and truncates, so half a millimetre outward keeps each exact
+  if [ -f "$src/entry.json" ]; then
+    at=$(node -e 'const [x, z] = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), m = (v) => (v + Math.sign(v) / 2) / 1000; process.stdout.write(`${m(x)},${m(z)}`)' "$src/entry.json") ||
+      refuse "release.template-unreadable: $name's entry.json"
+  fi
+  out=$("$w" seed --facts "$src/facts.json" --souls 0 --at "$at" --dir "$work/support" ${opt[@]+"${opt[@]}"} 2>&1) ||
+    refuse "release.template-seed: $name: $(tail -1 <<< "$out")"
+  if [ -f "$src/entry.json" ] && [ "$(tr -d ' \n' < "$src/entry.json")" != "$(tr -d ' \n' < "$work/support/entry.json")" ]; then
+    refuse "release.template-entry: $name's entry point would change"
+  fi
+  out=$("$pub" "$src/facts.json" "$work/out" --name "$name" --support "$work/support" 2>&1) ||
+    refuse "release.template-publish: $name: $(tail -1 <<< "$out")"
+  [ -f "$work/out/$name/template" ] || refuse "release.template-publish: $name: publish-template made no $name (one from before #5047 takes no --name)"
+  out=$("$w" fork --from "$work/out/$name/ckpt" --template "$work/out/$name" --to "$work/fork" --through "$DRY_RUN_THROUGH" 2>&1) ||
+    refuse "release.template-fork: $name: $(tail -1 <<< "$out")"
+  echo "placement: $name republished and dry-run forked: $(grep -m1 '^fork:' <<< "$out" || tail -1 <<< "$out")"
+}
+
+placement() {
+  local sha=${1:-} act=${2:-} cfg=$ETC/placement.json rel lib tpl pin h w next was now names t s dir= plan=()
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "placement <sha> check|run"
+  rel=$DATA/releases/$sha
+  [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
+  if [ ! -f "$cfg" ]; then
+    echo "placement: no $cfg: this machine makes no new worlds"
+    return 0
+  fi
+  if [ "$act" = run ] && [ -f "$rel/moved/placement" ]; then
+    echo "placement: already done by this release"
+    return 0
+  fi
+  [ -x "$rel/bin/templates" ] && [ -d "$rel/ops" ] || refuse "release.no-placement: release ${sha:0:12} carries no publish-template or ops/ (staged by an older release-v2)"
+  lib=$(conf "$cfg" library) tpl=$(conf "$cfg" templates) pin=$(conf "$cfg" build)
+  [ -n "$lib" ] && [ -n "$tpl" ] || refuse "release.placement-config: $cfg names no library or templates"
+  h=$(artifact "$rel/manifest.json" worldd) w=$WORLDS_ROOT/builds/$h/worldd
+  # Made beside the catalogue, never in it (the directory would list a stray folder there), on its disk: each swap
+  # below is a rename. Whatever is left of it, or of a new file not renamed into place, goes when this ends.
+  next=$(dirname "$tpl")/.templates.next
+  # shellcheck disable=SC2064 # these paths, now
+  trap "rm -rf '$next' '$lib/.worldd.new' '$lib/.ops.new' '$ETC/.placement.json.new'" EXIT
+  rm -rf "$next"
+  mkdir -p "$next"
+  was=$(catalogue "$tpl")
+  names=$(awk '{print $1}' <<< "$was" | paste -sd ' ' -)
+  echo "placement: ${sha:0:12}: worldd ${h:0:16}…, templates: ${names:-none}"
+  for t in $names; do
+    [[ $t != .* ]] || refuse "release.placement-stray: $tpl/$t is listed by the directory as a template no release can name: move it out"
+  done
+  for t in $names; do republish "$t" "$tpl/$t" "$next/$t" "$w" "$rel/bin/templates"; done
+  cmp -s "$w" "$lib/worldd" || plan+=("the library's worldd")
+  diff -rq "$rel/ops" "$lib/ops" > /dev/null 2>&1 || plan+=("its ops/")
+  [ "$pin" = "$h" ] || plan+=("the pin (was ${pin:0:16}…)")
+  for t in $names; do plan+=("$t"); done
+  if [ "$act" = check ]; then
+    echo "placement: run would rename into place: ${plan[*]:-nothing}; check only, nothing changed"
+    return 0
+  fi
+  # Everything made and checked first.
+  if ! cmp -s "$w" "$lib/worldd"; then install -m 755 "$w" "$lib/.worldd.new"; fi
+  if ! diff -rq "$rel/ops" "$lib/ops" > /dev/null 2>&1; then
+    rm -rf "$lib/.ops.new"
+    cp -R "$rel/ops" "$lib/.ops.new"
+    chmod -R u=rwX,go=rX "$lib/.ops.new"
+  fi
+  if [ "$pin" != "$h" ]; then node -e "$PIN" "$cfg" "$h" "$ETC/.placement.json.new"; fi
+  for t in $names; do chmod -R u=rwX,go=rX "$next/$t/out/$t"; done
+  now=$(for t in $names; do echo "$t $(hash "$next/$t/out/$t/template")"; done)
+  # Then the renames, back to back, with nothing creating: no placement starts, one already placing finishes (a template
+  # renamed under its fork would leave that world half made), and the directory, which takes a create under the lineage
+  # it read at its start, is down until it reads the new catalogue (a create under the old lineage is refused for good).
+  quiet souls-place.path || true
+  s=$((SECONDS + ${RELEASE_PLACE_WAIT_S:-300}))
+  while systemctl is-active --quiet souls-place.service 2> /dev/null; do
+    if [ "$SECONDS" -ge "$s" ]; then
+      resume
+      refuse "release.placement-busy: souls-place.service was still placing a world after ${RELEASE_PLACE_WAIT_S:-300} s; nothing renamed"
+    fi
+    sleep 1
+  done
+  if [ "$now" != "$was" ] && grep -qw directory <<< " $SERVICES " && quiet souls-directory.service; then dir=1; fi
+  [ ${#STOPPED[@]} = 0 ] || echo "placement: ${STOPPED[*]} stopped for the renames"
+  mkdir -p "$tpl/.aside"
+  if [ -f "$lib/.worldd.new" ]; then put "$lib/.worldd.new" "$lib/worldd" "$lib/.worldd.prev"; fi
+  if [ -d "$lib/.ops.new" ]; then put "$lib/.ops.new" "$lib/ops" "$lib/.ops.prev"; fi
+  if [ -f "$ETC/.placement.json.new" ]; then put "$ETC/.placement.json.new" "$cfg" "$ETC/.placement.json.prev"; fi
+  for t in $names; do put "$next/$t/out/$t" "$tpl/$t" "$tpl/.aside/$t"; done
+  resume
+  echo "placement: renamed into place: ${plan[*]:-nothing}"
+  if [ "$now" = "$was" ]; then
+    echo "placement: the catalogue the directory reads is unchanged: not restarted"
+  elif [ -z "$dir" ]; then
+    echo "placement: no directory runs here: none to restart"
+  elif ! s=$(answers 401 -X POST "$(directory_url)/v1/account/session"); then
+    echo "placement: souls-directory.service answered $s, not 401: the previous worldd, ops/, pin and templates go back"
+    unswap
+    systemctl restart souls-directory.service || true
+    refuse "release.placement-directory-unhealthy: souls-directory.service answered $s, not 401, on the republished catalogue; the previous one is back"
+  else
+    echo "placement: souls-directory.service reads the new catalogue and answers 401"
+  fi
+  touch "$rel/moved/placement"
+  echo "placement: new worlds are made on ${h:0:16}…"
+}
+
 news() {
   local sha=$1 version=$2 link=$3 date=$4 rel=$DATA/releases/$1 w f=$DATA/news.jsonl
   [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
@@ -787,10 +983,10 @@ main() {
   local cmd=${1:-}
   shift || true
   case $cmd in
-    checks | bundle | stage | verify | move | bodies | mailbox | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
+    checks | bundle | stage | verify | move | bodies | mailbox | rollback | reseed | placement | news | publish | remote) "$cmd" "$@" ;;
     reseed-undo) reseed_undo "$@" ;;
     entries) library "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|entries|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|entries|rollback|reseed|reseed-undo|placement|news (see the top of this file)" ;;
   esac
 }
 

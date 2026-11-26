@@ -213,7 +213,9 @@ slot) with the stance the request named. Postures are the controller's stance in
 `sit` or `rise` (`eden:sit`, as T10's fixtures) is taken like any act (I4), then committed at the next tick by what
 already moves bodies: a walk is N7's walk behind the host, sent to a point (`Runner::send`, N9), to a target's point
 (parameter 1, `[x, y, z]` µm) or a seat's stand point, at the gait parameter 2 names (`gait:walk`, `gait:jog` or
-`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks); a sit is B3's `Slots::commit`, one tick's sits together; a
+`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks), and for a lifted
+carry's front, the carry's heading at its goal (parameter 3, `[x, z]`: the crew turns with it, `moving-group.md`; read
+from no other walker); a sit is B3's `Slots::commit`, one tick's sits together; a
 rise is B3's `Slots::rise`. The checks are the moves' own, made as they start: claims, reach, the seat, the route.
 Bodies step in ticks caught up to world time. A move writes an entry when it starts and one when it ends, both caused
 by the intent, and is answered once, at its end: a receipt naming both when done, else a refusal naming how it ended
@@ -241,7 +243,7 @@ body at the thing it sits in. That point is fixed when the walk starts: a body t
 and `away_m` is measured from where it stands at the end. A walk to the world's root is refused `move.whole-world`.
 A walk to a place on the open ground (a child of the ground with an outline or a line and nothing built on it: a
 range, a sea, a lake, a wood, a square, a path) goes to its edge nearest the walker, worked out on the ground's frame
-from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself), else, where
+from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself). An area whose middle is not (a harbour round its water) is walked into by the nearest area within it whose middle is (its boardwalk), the same way, when that area lies within 20 m of the edge the walker comes to (a river's bridge 200 m along it does not). Else, where
 that cannot be stood on or the walker's part of the map does not reach it (a sea, a ridge), the first point a body may
 stand on that the walker may reach, stepping back toward the walker a metre at a time from 0.6 m outside the edge. A
 walker already within it, or with no such point nearer it, is there. It ends facing the nearest point of the place, or its middle when it stands on

@@ -161,7 +161,8 @@ echo "CREW=$CREW"
 node eden.mjs carry lift "$CREW" "$BEAM"
 ```
 
-Both walk it 8 m east at once (each carrier sends its own `carry to`; the point is metres, x east, z south):
+Both walk it 8 m east (here each carrier sends its own `carry to`; the front's alone would walk both, each keeping its
+place; the point is metres, x east, z south):
 
 ```sh
 P=$(echo "$TO" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [x,z]=JSON.parse(s);console.log(`${Math.round(x+8)},${Math.round(z)}`)})')

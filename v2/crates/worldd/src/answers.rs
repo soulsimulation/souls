@@ -89,7 +89,10 @@
 //! 6. the frozen copy is published (K8);
 //! 7. the answers thread waits for the tick's words to be on the disk, appends and syncs the records, then hands the
 //!    synced tick to the view tier (R3) and sends the answers;
-//! 8. the auditor checks a slice of the tree (K11).
+//! 8. the auditor checks a slice of the tree (K11), at most [`AUDIT_TIME`] of it; its faults are queued for the
+//!    auditor's own printer thread, which writes them to stderr (#3422): a blocked stderr never holds the clock on an
+//!    audit line, and a line the queue ([`AUDIT_LINES`]) has no room for is dropped, counted and said, never waited
+//!    for. Passes, cut slices and lines are in `health.json`'s `audit`.
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
@@ -126,7 +129,7 @@ use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::directory::Directory;
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
-use crate::measures::{self, Measures, Stamps};
+use crate::measures::{self, AUDIT, Measures, Stamps};
 use crate::syncs::{self, ToSync};
 use crate::views::Tier;
 use crate::words;
@@ -140,6 +143,7 @@ use replica::effects::{
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -150,7 +154,7 @@ use replica::sync::Records;
 use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
-use sim::audit::Auditor;
+use sim::audit::{Auditor, Fault};
 use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
@@ -160,7 +164,7 @@ use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::edit::safety::{Known, Who};
 use sim::frozen::Publisher;
-use sim::life::{Birth, Life, Ring};
+use sim::life::{Birth, Life, Ring, Standing};
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
 use sim::speech;
@@ -171,7 +175,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -442,6 +446,11 @@ impl Door {
             .is_ok()
     }
 }
+
+/// The most the auditor's slice takes of a tick (K21, #3422): it stops there and carries on next tick.
+pub const AUDIT_TIME: Duration = Duration::from_millis(2);
+/// The fault lines the auditor's printer queues (#3422): a line the queue has no room for is dropped and counted.
+pub const AUDIT_LINES: usize = 1024;
 
 /// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
 /// that refused a part; a loaded machine catches up well within it.
@@ -756,6 +765,9 @@ pub struct Config {
     /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
     /// ones [`Config::bodies`] makes.
     pub join: Option<Join>,
+    /// The world's entry as its town took it, on dry ground (`Town::entry`): the main ground is the part that holds it.
+    /// A creator's arrival place is judged from it when the set is made (#5006); none, never judged cut off.
+    pub main_entry: Option<(Id, Vec3)>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
     /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
@@ -814,6 +826,129 @@ pub fn notice_key(soul: Id) -> Vec<u8> {
 }
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
+
+/// The spots births try round `at`, by `entry`: rings 1 m apart from 1 m out, eight of them and then
+/// [`sim::life::FAR_RINGS`] further (16 m in all).
+fn birth_ring(entry: Id, at: (Id, Vec3)) -> Ring {
+    Ring {
+        entries: BTreeMap::from([(entry, at)]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    }
+}
+
+/// Rings tried one after another for a birth (#5006): the first ring's own spots are its tries, and every spot of the
+/// rings after it a further place, tried once those are.
+struct Rings<'a>(Vec<&'a Ring>);
+
+impl Standing for Rings<'_> {
+    fn spot(&self, entry: Id, i: u64) -> Option<(Id, Vec3)> {
+        let (r, j) = self.at(i)?;
+        r.spot(entry, j)
+    }
+    fn tries(&self) -> u64 {
+        self.0.first().map_or(0, |r| r.tries())
+    }
+    fn beyond(&self) -> u64 {
+        let all: u64 = self.0.iter().map(|r| r.tries() + r.beyond()).sum();
+        all - self.tries()
+    }
+    fn faces(&self, entry: Id, i: u64) -> Option<Vec3> {
+        let (r, j) = self.at(i)?;
+        r.faces(entry, j)
+    }
+}
+
+impl Rings<'_> {
+    /// The ring that holds the `i`-th spot, and the spot's index on it.
+    fn at(&self, mut i: u64) -> Option<(&Ring, u64)> {
+        for r in &self.0 {
+            let n = r.tries() + r.beyond();
+            if i < n {
+                return Some((r, i));
+            }
+            i -= n;
+        }
+        None
+    }
+}
+
+/// #5006: whether Souls born round a creator's arrival `place` could walk away, on `town` (the copy before the edit):
+/// refused [`replica::arrival::CUT_OFF`] when its middle is on ground no walk from `from` (the world's entry, as the
+/// served town took it: [`sim::walk::town::Town::entry`]) reaches, a walled pen; [`replica::arrival::NO_GROUND`] when
+/// no spot births try round it is ground a Soul can stand on that a walk from `from` reaches. With no entry known, no
+/// ground is cut off. `op` is the set's index in its batch.
+fn arrival_stands(
+    copy: &Replica,
+    town: &sim::walk::town::Town,
+    from: Option<(Id, Vec3)>,
+    (op, place): (usize, Id),
+) -> Result<(), Refused> {
+    let refused = |name: &'static str, detail: String| -> Result<(), Refused> {
+        Err(Refused {
+            op: Some(op),
+            name,
+            detail,
+        })
+    };
+    let shown = replica::world_model::show(place);
+    // A place the check took is one; with none here there is nothing to stand on to judge.
+    let Some((ground, at)) = replica::arrival::point_of(copy.tree(), place) else {
+        return Ok(());
+    };
+    let size = Size::Standard;
+    let cut_off = |node: Id, p: Vec3| from.is_some_and(|f| town.cut_off(f, node, p, size));
+    if cut_off(ground, at) {
+        return refused(
+            replica::arrival::CUT_OFF,
+            format!("the middle of {shown} is on ground no walk from the world's entry reaches"),
+        );
+    }
+    let ring = birth_ring(place, (ground, at));
+    let surfaces = town.surfaces_for(size);
+    let stands = (0..ring.tries() + ring.beyond())
+        .map_while(|i| ring.spot(place, i))
+        .any(|(node, p)| {
+            // As a birth asks: placed first, and only then whether its ground is cut off.
+            surfaces.and_then(|s| s.get(&node)).is_some_and(|s| {
+                s.place_built(
+                    place,
+                    Frame { node, slot: None },
+                    p,
+                    Quat::IDENTITY,
+                    Build::STANDARD,
+                )
+                .is_ok()
+            }) && !cut_off(node, p)
+        });
+    if !stands {
+        return refused(
+            replica::arrival::NO_GROUND,
+            format!(
+                "no ground a Soul can stand on and walk from within 16 m of the middle of {shown}"
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The last set of the world's arrival in `edit` that names a place, with its index in the batch (#5006): none when
+/// it sets none, or its last clears it.
+fn arrival_named(edit: &Edit) -> Option<(usize, Id)> {
+    let (i, place) = edit
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            edit::Op::Set { field, to, .. } if *field == replica::arrival::F_ARRIVAL => {
+                Some((i, replica::arrival::read(to).ok()?))
+            }
+            _ => None,
+        })
+        .next_back()?;
+    Some((i, place?))
+}
 
 /// The births and the intents waiting for them (C3).
 struct Lives {
@@ -884,6 +1019,7 @@ impl Config {
             rate: None,
             engine: None,
             join: None,
+            main_entry: None,
             wear: None,
             hatches: Vec::new(),
             halted: None,
@@ -1123,6 +1259,16 @@ struct Clock {
     walks: BTreeMap<Id, acts::Walk>,
     /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
     follows: BTreeMap<Id, (Id, Id)>,
+    /// Each carrier keeping its place from its crew's front (moving-group rule 3), by (carry, carrier): the
+    /// `souls:follow` order kept for it, by intent, the front's walk it was made for, and whether it turns.
+    carry_follows: BTreeMap<(Id, Id), (Id, Id, bool)>,
+    /// Each walk taken since the last tick that names a carry's heading at its goal (its parameter 3, moving-group
+    /// rule 3), by intent: read when it starts, if it leads a carry.
+    headings: BTreeMap<Id, [i64; 2]>,
+    /// Carriers that walked their own way during their front's walk, by (the front's walk, carrier): each keeps its
+    /// own legs until the front walks again, so it stays where its own walk ended (a scripted crew's place), and no
+    /// turn of that walk moves it.
+    carry_own: BTreeSet<(Id, Id)>,
     /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
     /// world opened: one whose hold a restart ended is cancelled.
     besides_checked: bool,
@@ -1176,6 +1322,8 @@ struct Clock {
     outstanding: usize,
     auditor: Auditor,
     audit: usize,
+    /// The auditor's faults, to the thread that prints them (#3422).
+    audit_out: SyncSender<Fault>,
     faults: u64,
     checkpoints: Option<Checkpoints>,
     /// Log records written, the input records included.
@@ -1225,6 +1373,8 @@ struct Clock {
 /// Dropped as the clock thread ends, for any reason: the checker is woken and refuses what it waits on.
 struct EditQueue {
     tx: Sender<(u64, CheckJob)>,
+    /// The most ids each building kind's place mints with its parts (#5006, `buildsafe::ids_most`): reserved at intake.
+    parts: BTreeMap<String, u64>,
     walkers: Arc<buildsafe::Moving>,
     /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
     offered: std::cell::Cell<u64>,
@@ -1410,23 +1560,35 @@ impl Heavens {
     }
 }
 
-/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds.
-fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, Refused> {
+/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
+/// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
+/// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
+fn reserve_edit(
+    edit: &Edit,
+    lineage: Scope,
+    next: &mut u64,
+    parts: u64,
+) -> Result<Minter, Refused> {
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
-    for op in &edit.ops {
-        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
-        if matches!(
-            op,
-            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
-        ) {
-            end.mint().map_err(|e| Refused {
-                op: None,
-                name: "edit.ids-exhausted",
-                detail: e.to_string(),
-            })?;
-            *next = end.next();
-        }
+    // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+    let own = edit
+        .ops
+        .iter()
+        .filter(|op| {
+            matches!(
+                op,
+                edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+            )
+        })
+        .count() as u64;
+    for _ in 0..own.saturating_add(parts) {
+        end.mint().map_err(|e| Refused {
+            op: None,
+            name: "edit.ids-exhausted",
+            detail: e.to_string(),
+        })?;
+        *next = end.next();
     }
     Ok(reserved)
 }
@@ -1575,7 +1737,8 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, with the
-/// answers of the tick in which a form's run or a gateway walk's route gets its deadline (W11, #4087).
+/// answers of the tick in which a form's run, a gateway walk's route or a gateway sit's, lie's or rise's move gets its
+/// deadline (W11, #4087).
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -2364,6 +2527,16 @@ impl Clock {
                 stamps,
             },
         );
+        // Moving-group rule 3: a walk's parameter 3, a carry's heading at its goal (`[x, z]`), kept until it starts.
+        if let (Taken::Move(_), Some(Value::Array(h))) = (&taken, intent.parameters.get(&3))
+            && let [Some(x), Some(z)] = [
+                h.first().and_then(acts::int_of),
+                h.get(1).and_then(acts::int_of),
+            ]
+            && h.len() == 2
+        {
+            self.headings.insert(id, [x, z]);
+        }
         match taken {
             // A move aimed at a described spot (E2) is resolved by a checker even with bodies, and bound at commit.
             Taken::Form(act) if self.bodies.is_none() || act.spot.is_some() => {
@@ -2380,7 +2553,14 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
-            Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
+            Taken::Edit(e) => match reserve_edit(
+                &e,
+                self.lineage,
+                &mut self.next_intent,
+                self.edits
+                    .as_ref()
+                    .map_or(0, |q| buildsafe::parts_ids(&e, &q.parts)),
+            ) {
                 Ok(reserved) => {
                     if let Some(tx) = &self.edits
                         && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
@@ -3405,24 +3585,47 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
-        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
-        let floor = (l.at.0 == b.town.ground)
+        // Every reach below is judged from one place, the town's own entry (`Town::entry`, on dry ground), as each spot
+        // a birth takes is (`Floors::sealed`).
+        let sealed =
+            |(node, at): (Id, Vec3)| sim::mover::Floors::sealed(&b.town, node, at, Build::STANDARD);
+        // The open ground round where the host puts Souls (`world.json`'s arrival, else its entry); then, when it holds
+        // no free place, the ground-level floor with a way out that holds that point (a world entered under a roof:
+        // verdelis-eden's dome). Both are passed over when the point is walled off from the entry (#5006).
+        let host = !sealed(l.at);
+        let floor = (host && l.at.0 == b.town.ground)
             .then(|| b.town.entry_floor(l.at.1))
-            .flatten()
-            .map(|e| Ring {
-                entries: BTreeMap::from([(l.entry, e)]),
-                radius: l.ring.radius,
-                gap: l.ring.gap,
-                rings: l.ring.rings,
-            });
-        let standing = sim::life::Then(&l.ring, floor.as_ref());
-        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
+            .flatten();
+        // Last, the town's entry itself, when it is neither of those: a host's arrival walled off from it, or with no
+        // ground round it, never keeps a world from being joined (#5006).
+        let main = b
+            .town
+            .entry()
+            .filter(|&e| e != l.at && Some(e) != floor)
+            .map(|e| birth_ring(l.entry, e));
+        let floor = floor.map(|e| birth_ring(l.entry, e));
+        // Before all of those, the place the world's creator names on its root (#5006, `replica::arrival`), read from
+        // the tree each tick a birth waits, so a new arrival holds from the next birth with no restart. Its rings are
+        // tried first and the others after them, so a place whose rings hold no free spot never keeps a birth waiting;
+        // a place whose middle no walk from the entry reaches (walled in since it was named) is passed over.
+        let arrival = replica::arrival::point(self.replica.tree())
+            .filter(|&(ground, at)| ground == l.at.0 && !sealed((ground, at)))
+            .map(|at| birth_ring(l.entry, at));
+        let standing = Rings(
+            arrival
+                .iter()
+                .chain(host.then_some(&l.ring))
+                .chain(&floor)
+                .chain(&main)
+                .collect(),
+        );
+        let build_of = |soul: Id| {
             self.birth_builds
                 .get(&soul)
                 .copied()
                 .unwrap_or(skills::wear::DEFAULT)
-        });
+        };
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &build_of);
         let mut taken = Vec::new();
         for x in &mut born {
             // The world's body kind, as its header pins it (K10 writes the plain name).
@@ -4249,6 +4452,11 @@ impl Clock {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
+        // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule
+        // 3), as the walkers' map learns a load's place only when it is set down or seated.
+        if let Some(e) = self.engine.as_ref() {
+            b.runner.carrying(e.carried_loads());
+        }
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
@@ -4587,11 +4795,15 @@ impl Clock {
     }
 
     /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
-    /// answer, a receipt when `done`.
+    /// answer, a receipt when `done`, else a refusal with `why` as its words (what blocked the walk; a move out of
+    /// reach: how far and the reach, #5019 follow-up), which only a blocked walk's entry carries too.
     fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        let noted = match &why {
+            Some(w) if how == acts::BLOCKED => format!("{how}: {w}"),
+            _ => how.clone(),
+        };
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -4602,7 +4814,13 @@ impl Clock {
                 names: BTreeMap::new(),
             });
         } else {
-            self.end(id, |c| c.refusal(actor, sequence, &how));
+            self.end(id, |c| {
+                let mut a = c.refusal(actor, sequence, &how);
+                if let Answer::Refused { detail, .. } = &mut a {
+                    *detail = why.as_deref().and_then(replica::intents::answer_detail);
+                }
+                a
+            });
         }
     }
 
@@ -4612,6 +4830,7 @@ impl Clock {
     /// expired, its leader gone) ends the follow for both. The orders' entries are written in the same tick.
     fn follow_orders(&mut self, now: Micros) {
         self.keep_follow_orders(now);
+        self.keep_carry_orders(now);
         // In this tick, with the follow's own entries: a stop between two ticks never finds an order without its
         // activity, or an activity without its order (0.135 G2, review R2).
         let orders = self
@@ -4661,12 +4880,14 @@ impl Clock {
                 b.orders
                     .opened()
                     .filter(|o| {
+                        // A carry does not outlast a restart either (its load is set down at the first tick), so
+                        // an order keeping a place at a crew's front goes the same way.
                         matches!(
                             o.what,
                             sim::orders::What::Follow {
                                 beside: Some(_),
                                 ..
-                            }
+                            } | sim::orders::What::Follow { at: Some(_), .. }
                         ) && !followers.contains(&o.body)
                     })
                     .cloned(),
@@ -4750,6 +4971,189 @@ impl Clock {
         }
     }
 
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): while a lifted carry's front walks, each other carrier
+    /// that is not moving on its own (no move of its own, no order of its own) walks with it by its own `souls:follow`
+    /// order, keeping its place in the carry's frame ([`engine::Keeps`]: the back its span behind the front, a side
+    /// where it stood at the lift) as an offset from the front on the plan (parameter 4, `[x, z]` µm). When the front's
+    /// walk turns the crew (its heading at the goal named, or a pose of the carry's way, [`engine::Led`]) the order
+    /// names the goal and the offset there too (parameter 5): the place swings with the front, so one walk turns the
+    /// load square. When that walk ends, wherever the front stood (a spot short of its goal), the order is replaced by
+    /// one that turns from the load's heading then to the turned one, its goal where the front stands, so the turn is
+    /// finished there (as a pivot, at the skill's swing pace). A carrier's own act ends its order (B2: it claims the
+    /// legs), and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
+    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it stays where it
+    /// chose (a scripted crew's carrier arriving first is not dragged on past its place), turned by none of that walk;
+    /// it takes a place again at the front's next walk, where the frame has it then, turned as the frame is. A new walk
+    /// of the front replaces the orders when it or the walk before turns the crew. An order is cancelled when its
+    /// carrier is no longer in the carry, or the carry is over. A carry that broke off (`souls:partner-left`,
+    /// `souls:carriers-apart`, `souls:carry-blocked`) stops its front's walk too, ended by that reason: the whole
+    /// group stops with one reason. Written in the tick, with the rest.
+    fn keep_carry_orders(&mut self, now: Micros) {
+        let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) else {
+            return;
+        };
+        let over = e.led_over();
+        let running = e.carry_follows();
+        if running.is_empty() && self.carry_follows.is_empty() && over.is_empty() {
+            self.carry_own.clear();
+            return;
+        }
+        let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.activity, r.walker)).collect();
+        let mut cancel: Vec<sim::orders::Order> = Vec::new();
+        let gone: Vec<(Id, Id)> = self
+            .carry_follows
+            .keys()
+            .filter(|k| !keep.contains(k))
+            .copied()
+            .collect();
+        for k in gone {
+            let Some((order, _, _)) = self.carry_follows.remove(&k) else {
+                continue;
+            };
+            if let Some(o) = b.orders.open(k.1).filter(|o| o.intent == order) {
+                cancel.push(o.clone());
+            }
+        }
+        // An order ended by itself (the carrier's own act took its legs, or it could not keep its place) is forgotten;
+        // its carrier is still in the carry.
+        self.carry_follows
+            .retain(|(_, f), (order, _, _)| b.orders.open(*f).is_some_and(|o| o.intent == *order));
+        // Walking its own way lasts as long as the front's walk it began during.
+        self.carry_own.retain(|(walk, _)| {
+            running
+                .iter()
+                .any(|k| k.led.walk == *walk && b.moving(k.front) == Some(*walk))
+        });
+        let basis = Version {
+            lineage: self.lineage,
+            zone: self.zone,
+            epoch: 1,
+            sequence: self.replica.version(),
+        }
+        .to_value();
+        let int = |n: i64| match u64::try_from(n) {
+            Ok(u) => Value::Uint(u),
+            Err(_) => Value::Nint(n.unsigned_abs() - 1),
+        };
+        for k in running {
+            let (a, walker, walk) = (k.activity, k.walker, k.led.walk);
+            let going = b.moving(k.front) == Some(walk);
+            // A carrier walking its own way during the front's walk keeps its own legs for the rest of that walk: no
+            // order, and no turn of that walk moves it; it rejoins at the front's next walk.
+            if going && b.moving(walker).is_some() {
+                self.carry_own.insert((walk, walker));
+                continue;
+            }
+            if self.carry_own.contains(&(walk, walker)) {
+                continue;
+            }
+            let (replaces, finish) = match self.carry_follows.get(&(a, walker)).copied() {
+                // The walk that turns the crew has ended, wherever the front stood (a spot short of its goal, say):
+                // the turn is finished there, each place its turned one.
+                Some((_, made_for, true)) if made_for == walk && !going => (true, true),
+                Some((_, made_for, _)) if made_for == walk => continue,
+                // The front's new walk: a turn either way takes the places again; a straight one keeps them.
+                Some((order, _, turned)) => {
+                    if !going || (!turned && k.led.turn.is_none()) {
+                        if going {
+                            self.carry_follows.insert((a, walker), (order, walk, false));
+                        }
+                        continue;
+                    }
+                    (true, false)
+                }
+                None => (false, false),
+            };
+            if (!going && !finish)
+                || b.moving(walker).is_some()
+                || (!replaces && b.orders.open(walker).is_some())
+            {
+                continue;
+            }
+            let (Some((on, here)), Some((own, _))) = (b.pose(k.front), b.pose(walker)) else {
+                continue;
+            };
+            if on != own {
+                continue;
+            }
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            // Finished where the front stands: from the load's heading now to the turned one, the front at its goal.
+            let at = engine::on_plan(k.place, k.heading);
+            let turn = match (finish, k.led.turn) {
+                (true, Some((_, h))) => Some(([here.x, here.z], h)),
+                (_, turn) => turn,
+            };
+            let mut parameters = BTreeMap::from([(4, Value::Array(vec![int(at[0]), int(at[1])]))]);
+            if let Some((goal, h)) = turn {
+                let end = engine::on_plan(k.place, h);
+                parameters.insert(
+                    5,
+                    Value::Array(vec![int(goal[0]), int(goal[1]), int(end[0]), int(end[1])]),
+                );
+            }
+            let order = Intent {
+                actor: Actor::Soul(k.soul),
+                verb: Name::new(skills::orders::FOLLOW).unwrap_or_else(|| unreachable!("a name")),
+                target: Some(Target::Node(k.front)),
+                parameters,
+                sequence: 0,
+                basis: basis.clone(),
+                expiry: now.saturating_add(sim::orders::LONGEST),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                // The order this carrier kept for the front's last walk, ended now (it is the Soul's at sequence 0).
+                replaces: replaces.then_some(0),
+                body: None,
+                reflex: false,
+            };
+            match crate::orders::accept(b, &order, walker, id, now) {
+                Ok(()) => {
+                    self.carry_follows
+                        .insert((a, walker), (id, walk, turn.is_some() && !finish));
+                }
+                Err(r) => eprintln!(
+                    "worldd: {}'s place in its carry was refused: {r}",
+                    replica::world_model::show(walker)
+                ),
+            }
+        }
+        for o in cancel {
+            let walker = o.body;
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            let cancel = Intent {
+                actor: o.actor,
+                verb: Name::new(replica::intents::CANCEL).unwrap_or_else(|| unreachable!("a name")),
+                target: None,
+                parameters: BTreeMap::new(),
+                sequence: o.sequence.saturating_add(1),
+                basis: basis.clone(),
+                expiry: now.saturating_add(60_000_000),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: Some(o.sequence),
+                body: None,
+                reflex: false,
+            };
+            let _ = crate::orders::accept(b, &cancel, walker, id, now);
+        }
+        // The front's walk stops where it is, ended by why its carry broke off.
+        let mut stopped = Vec::new();
+        for (_, walk, why) in over {
+            if self.open.contains_key(&walk) && b.cancel(walk) == Some(Cut::Stopped) {
+                stopped.push((walk, why));
+            }
+        }
+        for (walk, why) in stopped {
+            self.settle(walk, Err(why.to_owned()), now);
+        }
+    }
+
     /// Step 4 for moves (I4b): those taken since the last tick start, each refused by name or begun.
     fn start_moves(&mut self, now: Micros) {
         let Some(mut b) = self.bodies.take() else {
@@ -4758,10 +5162,12 @@ impl Clock {
         let mut asks = Vec::new();
         for (id, m) in std::mem::take(&mut self.moving) {
             let Some(o) = self.open.get(&id) else {
+                self.headings.remove(&id);
                 continue;
             };
             let (actor, sequence) = (o.actor, o.sequence);
             if expired(o.expiry, now) {
+                self.headings.remove(&id);
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
             } else {
                 asks.push((id, m));
@@ -4795,6 +5201,24 @@ impl Clock {
                     .map(|s| (*id, s))
             })
             .collect();
+        // Each walk's goal, its first ask's node and point (moving-group rule 3: where a carry's front turns its crew).
+        let goals: BTreeMap<Id, (Id, Vec3)> = asks
+            .iter()
+            .filter_map(|(id, a)| match a.ask {
+                replica::move_check::Ask::Walk {
+                    node,
+                    point: Some(p),
+                    ..
+                } => Some((*id, (node, p))),
+                _ => None,
+            })
+            .collect();
+        let mut headings = BTreeMap::new();
+        for (id, _) in &asks {
+            if let Some(h) = self.headings.remove(id) {
+                headings.insert(*id, h);
+            }
+        }
         let started = b.start_committed(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
@@ -4814,6 +5238,8 @@ impl Clock {
                     id,
                     now,
                     true,
+                    goals.get(&id).copied(),
+                    headings.get(&id).copied(),
                 );
             }
             for (body, id) in seated {
@@ -4825,6 +5251,8 @@ impl Clock {
                         id,
                         now,
                         false,
+                        None,
+                        None,
                     );
                 }
             }
@@ -4837,7 +5265,17 @@ impl Clock {
         }
         for (id, r) in started {
             match r {
-                Ok(()) => self.note(id, MOVE_STARTED, None, now),
+                Ok(()) => {
+                    self.note(id, MOVE_STARTED, None, now);
+                    // A sit, a lie or a rise under way is answered accepted now, as a walk is once its route is read
+                    // (W11): its first answer was its receipt at the move's end, about 0.93 s for a rise (#5019
+                    // follow-up). It is due as a form's step of the same move is (`sim::forms::span`).
+                    if self.bodies.as_ref().is_some_and(|b| b.placing(id)) {
+                        let span =
+                            sim::forms::span(&[skills::form_runner::Step::Rise], &acts::limits());
+                        self.run_started(id, now.saturating_add(span), now);
+                    }
+                }
                 Err(r) => {
                     if let Some(b) = self.bodies.as_mut() {
                         b.took(id);
@@ -5197,13 +5635,24 @@ impl Clock {
                 .and_then(|s| s.place_in(thing, slot))
                 .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX))
         };
+        // The slice stops at AUDIT_TIME, and its faults are printed on the auditor's own thread (#3422): one write to
+        // a loaded stderr blocked for 300 ms. The clock only queues a line, and drops and counts one with no room.
+        let until = Instant::now() + AUDIT_TIME;
+        let mut cut = false;
         let slice = self
             .auditor
-            .slice_most(self.replica.tree(), self.audit, &most);
-        for f in &slice.faults {
-            eprintln!("worldd: audit: {f:?}");
-        }
+            .slice_within(self.replica.tree(), self.audit, &most, &mut || {
+                cut = Instant::now() >= until;
+                cut
+            });
+        AUDIT.slice(cut, self.auditor.passes);
         self.faults += slice.faults.len() as u64;
+        for f in slice.faults {
+            match self.audit_out.try_send(f) {
+                Ok(()) => AUDIT.sent(),
+                Err(_) => AUDIT.dropped(),
+            }
+        }
         at[8] = mark();
         if let Some(m) = &self.measures {
             // The Souls embodied now, for `health.json` (the home page's count, 26 Nov): off the tick's phases.
@@ -5356,6 +5805,27 @@ fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
     eprintln!(
         "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
     );
+}
+
+/// The auditor's printer (#3422): each fault the clock queued, in the `worldd: audit: Fault { … }` form, and after
+/// any line the clock dropped while this thread was behind, how many. A blocked stderr holds this thread, and the
+/// process's stderr lock with it. A write that fails is passed over, so this thread outlives a closed stderr. A drop
+/// happens only while the queue is full, so a line read after it always says it.
+fn print_audit(faults: Receiver<Fault>) {
+    let mut said = 0;
+    for f in faults {
+        let _ = writeln!(std::io::stderr().lock(), "worldd: audit: {f:?}");
+        AUDIT.printed();
+        let dropped = AUDIT.drops();
+        if dropped > said {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "worldd: audit: {} fault lines dropped while the printer was behind ({dropped} in all, {AUDIT_LINES} queued at most)",
+                dropped - said
+            );
+            said = dropped;
+        }
+    }
 }
 
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
@@ -5956,12 +6426,7 @@ pub fn start<S: Storage + 'static>(
         let entry = j.entry.0;
         Lives {
             life: Life::new(scope("life"), j.per_tick),
-            ring: Ring {
-                entries: BTreeMap::from([(entry, j.entry)]),
-                radius: 1_000_000,
-                gap: 1_000_000,
-                rings: 8,
-            },
+            ring: birth_ring(entry, j.entry),
             entry,
             at: j.entry,
             family: j.family,
@@ -5999,6 +6464,7 @@ pub fn start<S: Storage + 'static>(
     let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
         .then(|| Arc::new(buildsafe::Moving::default()));
     let creator = cfg.creator.take();
+    let building_ids = buildsafe::ids_most(&rules.kinds);
     let edits = walkers
         .clone()
         .map(|m| {
@@ -6012,9 +6478,12 @@ pub fn start<S: Storage + 'static>(
                 rules.kinds.clone(),
                 // Lockstep waits for the bodies with no deadline (S10c); a free-running clock at most FRESH_WAIT.
                 (!cfg.lockstep).then_some(FRESH_WAIT),
+                // A world with births judges a creator's arrival place, from the town's entry (#5006).
+                life.as_ref().map(|_| cfg.main_entry),
             )
             .map(|tx| EditQueue {
                 tx,
+                parts: building_ids,
                 walkers: m,
                 offered: std::cell::Cell::new(0),
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
@@ -6039,6 +6508,11 @@ pub fn start<S: Storage + 'static>(
                 }
             }
         })
+        .map_err(io)?;
+    let (audit_out, audit_in) = sync_channel(AUDIT_LINES);
+    thread::Builder::new()
+        .name("audit".into())
+        .spawn(move || print_audit(audit_in))
         .map_err(io)?;
     let measures = cfg.measures.then(|| Arc::new(Measures::default()));
     if let (Some(m), Some(path)) = (&measures, cfg.health.take()) {
@@ -6130,6 +6604,9 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
+        carry_follows: BTreeMap::new(),
+        headings: BTreeMap::new(),
+        carry_own: BTreeSet::new(),
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
@@ -6172,6 +6649,7 @@ pub fn start<S: Storage + 'static>(
         outstanding: 0,
         auditor: Auditor::new(),
         audit: cfg.audit,
+        audit_out,
         faults: 0,
         checkpoints,
         records,
@@ -6553,6 +7031,9 @@ fn way_searcher(events: Sender<Event>) -> std::io::Result<Sender<engine::WayAsk>
 ///
 /// `fresh_wait` bounds its wait for the bodies at a job's tick: [`FRESH_WAIT`] on a free-running clock, none in
 /// lockstep (S10c).
+///
+/// With `arrive` (a world with births; in it, the town's entry when one is known), a set of the world's arrival naming a
+/// place Souls born at could not walk away from is refused by name (#5006, [`arrival_stands`]).
 #[allow(clippy::too_many_arguments)]
 fn edit_checker(
     mut world: Option<edit::World>,
@@ -6563,6 +7044,7 @@ fn edit_checker(
     events: Sender<Event>,
     entries: replica::rules::json::Value,
     fresh_wait: Option<Duration>,
+    arrive: Option<Option<(Id, Vec3)>>,
 ) -> R<Sender<(u64, CheckJob)>> {
     let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
@@ -6847,6 +7329,8 @@ fn edit_checker(
                     continue;
                 };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
+                // #5006: the place a set of the world's arrival names, judged once the check takes the edit.
+                let arriving = arrive.zip(arrival_named(&e));
                 // #3958: a panic in the check or the plan answers the edit by name and keeps the thread (and every
                 // edit after it) going, on a town built again.
                 let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -6863,8 +7347,11 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             let mut e = e;
-                            buildsafe::stand_as_kinds(&mut e, &entries, &structure);
-                            edit::check(e, &copy, world)
+                            buildsafe::with_buildings(&mut e, &entries, &world.kinds)
+                                .and_then(|parts| {
+                                    buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    edit::check(e, &copy, world)
+                                })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {
@@ -6875,7 +7362,12 @@ fn edit_checker(
                     };
                     checked
                         .and_then(|c| {
-                            let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                            let t = town.on(&copy, ground, false);
+                            // #5006: a creator's arrival place Souls born at could walk away from, judged on the town.
+                            if let (Some(t), Some((from, set))) = (t.as_deref(), arriving) {
+                                arrival_stands(&copy, t, from, set)?;
+                            }
+                            let known = t.map(|t| Known::of(t));
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
                             sim::edit::plan_classes(
                                 c,
@@ -7135,8 +7627,12 @@ mod tests {
             claim: None,
         };
         let mut next = 5;
-        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 0).unwrap();
         assert_eq!(next, 6, "the link's id is reserved");
+        // #5006: a placed building's parts, which the edit checker adds after intake, are reserved with it.
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 19).unwrap();
+        assert_eq!(next, 25, "the link's id and the parts' ids are reserved");
     }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
@@ -7962,6 +8458,7 @@ mod tests {
         let (tx, _rx) = channel();
         let queue = EditQueue {
             tx,
+            parts: BTreeMap::new(),
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),

@@ -26,6 +26,7 @@ back to the engine.
 | Never below the ground; what may block a view (the roots a shot checks its sightline against) | `apps/web/src/WorldCameraGround.ts`, `apps/web/src/WorldCameraRenderRoots.ts` |
 | Framing a place or a named location (Explore) | `apps/web/src/WorldPlaceCamera.ts`, `framePlace` and `frameLocation` in `LiveWorld.tsx` |
 | The first framing on arrival | `apps/web/src/viewer-arrival.ts` |
+| A picture an agent asks for (a Soul's `shoot`, a creator's `look`): the camera on a named Soul, place or thing of a v2 world, on a `?shot=1` page | `apps/web/src/v2-engine/capture.ts` (`v2.capture`, as `v2/client/src/shoot/shoot.mjs` reads it), installed in `LiveWorld.tsx` through its `shotCamera` pin |
 
 ## What the page owns
 
@@ -34,6 +35,7 @@ The page is everything round the picture. It decides *what* to look at; the came
 | Concern | Where |
 |---|---|
 | Which world's data feeds the picture: the old socket, or a v2 world's public stream | `apps/web/src/useSouls.ts` (the switch, line 46), `apps/web/src/v2-engine/use-v2-souls.ts` |
+| When a v2 world's stream starts loading | with the page's first phase (`apps/web/src/early-entry.ts` calls `v2-engine/early-stream.ts`): the reader's worker and `/v1/scene` leave then, and `use-v2-souls.ts` takes the worker with what it has read so far |
 | The list of Souls, and each Soul's id, name and take entity id | the `Souls` object `useSouls` returns (`conn.replica.souls`, filled for v2 at `use-v2-souls.ts` line 81) |
 | Selecting a Soul, and asking the camera to follow it | the card's Follow button (`apps/web/src/SoulCard.tsx`, `camera.follow`), Explore's search, `follow-soul-request.ts` (the Shell asks the viewer to follow a newly approved Soul) |
 | The commands the page may give the camera | `WorldViewerHandle` in `apps/web/src/WorldViewer.ts`: `setCameraMode`, `flyToSoul`, `selectSoul`, `canFollowSoul`, `framePlace`, `frameLocation` and the rest. These are presentation only. |
