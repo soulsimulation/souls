@@ -20,8 +20,8 @@
 //! ([`crate::bodies`]) instead of the checkers. At the next tick it starts, or is refused by name, and writes an entry
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
-//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, from the tick its route is planned, with no total cap and never beyond the
+//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at its gait's
+//! speed, plus a margin (never under the walking time) and crossings, from the tick its route is planned, with no total cap and never beyond the
 //! intent's expiry. Its deadline is written as C20's entry and it receives C20's one progress answer in that tick
 //! (W11, #4087). A walk that makes no progress is the never-stuck ladder's (0.133 N1, `crate::unstick`): routed again,
 //! still bodies stepped aside, a shoulder turn, then its order ended `goal-unreachable` at 15 s.
@@ -4689,11 +4689,29 @@ impl Clock {
             })
             .map(|(id, a)| (a.body, *id))
             .collect();
+        // Each walk's gait, so its deadline is its route at that gait's speed (trial 0.137): the slowest of its ask
+        // and its fallbacks, whichever of them starts.
+        let gaits: BTreeMap<Id, i64> = asks
+            .iter()
+            .filter_map(|(id, a)| {
+                std::iter::once(&a.ask)
+                    .chain(&a.fallbacks)
+                    .filter_map(|k| match k {
+                        replica::move_check::Ask::Walk { gait, .. } => {
+                            Some(crate::bodies::speed(*gait))
+                        }
+                        _ => None,
+                    })
+                    .min()
+                    .map(|s| (*id, s))
+            })
+            .collect();
         let started = b.start(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
-                self.walks.insert(id, acts::Walk::new(body, id));
+                let speed = gaits.get(&id).copied().unwrap_or(crate::bodies::WALK);
+                self.walks.insert(id, acts::Walk::new(body, id, speed));
                 walked.push((body, id));
             }
         }

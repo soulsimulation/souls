@@ -52,7 +52,7 @@ export function converseIntents(req, { ns, place, privateOf = () => false }) {
   const wordsOk = words !== undefined && words.trim() && [...words].length <= WORDS_MOST;
   switch (req.do) {
     case 'start': {
-      if (!ID.test(String(req.with ?? ''))) return no('converse-names-a-body', 'converse start <body id> "<text>"');
+      if (!ID.test(String(req.with ?? ''))) return no('converse-names-a-body', 'converse start <name or body id> "<text>"');
       if (!ID.test(String(place ?? ''))) return no('converse-no-place', 'this Soul stands nowhere in its copy yet: look first');
       if (words !== undefined && !wordsOk) return no('words-empty-or-long', `1 to ${WORDS_MOST} characters`);
       const offer = { verb: 'activity:offer', target: place, params: { 1: KIND, 2: OPENER, 3: [req.with] } };

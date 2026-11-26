@@ -36,14 +36,14 @@
 //   souls.mjs say --shout "<words>" | shout "<words>"   shouts them: public, heard farther than a say (C26)
 //   souls.mjs say --to <name|id> [--gesture <g>] "<words>"   says them to that Soul: turns to it, or plays the body's
 //                                             gesture <g> toward it; an unknown name or gesture sends nothing (C26)
-//   souls.mjs whisper <body id> "<words>"     says them to that one body alone
-//   souls.mjs converse start <body id> "<text>" [--private]   offers that body a conversation; the opening line goes
+//   souls.mjs whisper <name|body id> "<words>"   says them to that one Soul alone (a Soul by its name or id, any case)
+//   souls.mjs converse start <name|body id> "<text>" [--private]   offers that Soul a conversation; the opening line goes
 //                                             to it alone. Its accept or decline arrives in `wait` (E26)
 //   souls.mjs converse accept|decline|leave <conversation id>   joins, declines or leaves (a leave is always accepted)
 //   souls.mjs converse say <conversation id> "<text>" [--private]   a turn: out loud by default, members only with
 //                                             --private (remembered for that conversation)
 //   souls.mjs converse list                   the conversations in the copy
-//   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
+//   souls.mjs give <thing id> --to <name|body id>   offers that Soul a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
 //   souls.mjs together kinds                  the activities the world serves: each one's word, card, how many it asks,
 //                                             how near they stand and where it is played (anywhere, or at a thing)
