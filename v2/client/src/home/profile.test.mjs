@@ -149,3 +149,16 @@ test('A2: retire asks and the owner\'s click decides; revoke disconnects the age
   assert.equal((await souls(home, 'list', '--account')).souls.find((s) => s.id === second.grant).device, null);
   assert.equal((await souls(home, 'revoke', 'nobody')).code, 'not-yours');
 });
+
+test('A3: the owner\'s Keep on the card clears the agent\'s ask; `retire wait` hears the Soul was kept (0.137)', async () => {
+  const home = join(dir, 'a3');
+  const { soul, grant } = await paired(home);
+  assert.equal((await souls(home, 'retire', soul)).retire, 'asked');
+  assert.equal((await soulRetireWait(home, { within: 0 })).retire, 'pending');
+  assert.equal((await page('/v1/account/souls/keep', { soul: grant })).status, 200);
+  assert.equal((await mine()).find((s) => s.soul === grant).retire_asked, false);
+  const kept = await souls(home, 'retire', 'wait');
+  assert.deepEqual([kept.ok, kept.retire, kept.retired, kept.why], [true, 'kept', false, 'Your person kept it. Nothing changed.']);
+  assert.ok(json(join(home, 'credentials.json')).souls?.[soul], 'still paired here');
+  assert.equal((await souls(home, 'retire', 'wait')).code, 'no-retire', 'nothing left to wait for');
+});
