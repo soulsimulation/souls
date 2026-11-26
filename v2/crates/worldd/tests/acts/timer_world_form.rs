@@ -112,13 +112,20 @@ fn i3991_every_content_timer_names_a_form_that_binds() {
         let Ok(entry) = parse(&std::fs::read_to_string(&p).unwrap()) else {
             continue;
         };
-        let kind = entry.get("kind").and_then(Json::str).unwrap_or("?").to_owned();
+        let kind = entry
+            .get("kind")
+            .and_then(Json::str)
+            .unwrap_or("?")
+            .to_owned();
         for (_, f) in entry.get("forms").and_then(Json::obj).unwrap_or(&[]) {
             for e in f.get("effects").and_then(Json::arr).unwrap_or(&[]) {
                 if e.get("change").and_then(Json::str) != Some("timer") {
                     continue;
                 }
-                let form = e.get("form").and_then(Json::str).expect("a timer names its form");
+                let form = e
+                    .get("form")
+                    .and_then(Json::str)
+                    .expect("a timer names its form");
                 let steps = skills::form_runner::bind(&entry, form);
                 let effects = skills::form_runner::bind_effects(&entry, form);
                 assert!(steps.is_ok(), "{kind} {form}: {steps:?}");

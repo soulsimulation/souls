@@ -2976,7 +2976,10 @@ impl Acts {
                 .and_then(|h| tree.node(h))
                 .and_then(|n| entry_in(&self.kinds, tree, &n))
                 .is_some_and(|e| {
-                    let kind = e.get("kind").and_then(Json::str).and_then(|k| k.split_once(':'));
+                    let kind = e
+                        .get("kind")
+                        .and_then(Json::str)
+                        .and_then(|k| k.split_once(':'));
                     kind.map_or("souls", |(k, _)| k) == ns
                         && e.get("forms").and_then(|fs| fs.get(form)).is_some()
                 });
