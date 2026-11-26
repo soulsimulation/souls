@@ -3,6 +3,9 @@
 // world (v2/tools/import-world/src), from the repository root:
 //
 //   node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map <map.json>] [--assets <dir>] [--out <dir>] [--json]
+//     [--ways [--arrival <x m>,<z m>] [--entries <dir>]]
+//
+// `--ways` and its `--arrival` and `--entries` go to import-world as given: the one-way floors and seats (W9, #4085).
 //
 // The export runs under Node's permission model: it may read the content packages, the core asset index, the map and
 // the one backup file (and the asset store `--assets` names, read-only), write only its facts file, and has no network, no child processes and no workers. SQLite opens
@@ -27,10 +30,10 @@ export function exportArgv(backup: string, out: string, map: string, world = '',
 /** Exports each backup, then prints the rows. Returns the import-world process's exit status. */
 export function run(argv: string[]): number {
   const opt = (k: string, d: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1]! : d; };
-  const flags = new Set(['--world', '--map', '--out', '--assets']);
+  const flags = new Set(['--world', '--map', '--out', '--assets', '--arrival', '--entries']);
   const backups = argv.filter((a, i) => !a.startsWith('--') && !flags.has(argv[i - 1] ?? ''));
   const map = opt('--map', join(ROOT, 'content/worlds/eden/map.json')), outDir = resolve(opt('--out', join(ROOT, '.local/import-world/out'))), world = opt('--world', ''), assets = opt('--assets', '');
-  if (!backups.length) { console.error('usage: import-world.ts <backup.db>… [--world <id>] [--map <map.json>] [--assets <dir>] [--out <dir>] [--json]'); return 2; }
+  if (!backups.length) { console.error('usage: import-world.ts <backup.db>… [--world <id>] [--map <map.json>] [--assets <dir>] [--out <dir>] [--json] [--ways [--arrival <x m>,<z m>] [--entries <dir>]]'); return 2; }
   if (!existsSync(map)) console.error(`no map at ${map}: every thing is listed with no entry`);
   mkdirSync(outDir, { recursive: true });
   const facts = backups.map((b, i) => {
@@ -42,7 +45,8 @@ export function run(argv: string[]): number {
     }
     return out;
   });
-  const r = spawnSync('cargo', ['run', '-q', '--release', '--manifest-path', join(ROOT, 'v2/Cargo.toml'), '-p', 'import-world', '--', ...facts, ...(argv.includes('--json') ? ['--json'] : [])], { stdio: 'inherit' });
+  const ways = argv.includes('--ways') ? ['--ways', ...['--arrival', '--entries'].flatMap((k) => (argv.includes(k) ? [k, opt(k, '')] : []))] : [];
+  const r = spawnSync('cargo', ['run', '-q', '--release', '--manifest-path', join(ROOT, 'v2/Cargo.toml'), '-p', 'import-world', '--', ...facts, ...(argv.includes('--json') ? ['--json'] : []), ...ways], { stdio: 'inherit' });
   return r.status ?? 1;
 }
 

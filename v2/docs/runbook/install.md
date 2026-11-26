@@ -150,7 +150,9 @@ from `exportArgv` in `v2/tools/import-world/import-world.ts`: read access only t
 asset index, map and selected backup, and write access only to the fresh facts directory. No network, child-process
 or worker permission is granted. SQLite opens the backup read-only and immutable. Repeat these two steps for each
 backup (the validator also accepts several facts files). The convenience `import-world.ts` wrapper invokes
-`cargo run`; use the installed validator above on production.
+`cargo run`; use the installed validator above on production. It walks nothing unless asked: `--ways --entries
+<checkout>/content/kinds` also walks every floor and seat from the arrival point and back (minutes on a world of
+Eden's size; see `v2/tools/import-world/README.md`).
 
 ### An imported world in the directory
 

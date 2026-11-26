@@ -149,6 +149,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
 import { clientUpdate } from '../upgrade/served.mjs';
+import { goTime, nextStep } from '../carry/carry.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -424,14 +425,17 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from');
+    const on = flag('--on'), from = flag('--from'), go = flag('--go');
+    if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
     if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
-    else if (does === 'grip') Object.assign(req, { thing: a, end: b, ...(from !== undefined ? { from } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
-    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}) });
+    // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
+    else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
+    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does !== 'list') req.crew = a;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
   }
@@ -673,10 +677,15 @@ export async function runViews(args, shootOne) {
   return { ok: views.some((v) => v.ok !== false), views, source: 'drawn here from the public stream, as a visitor sees it' };
 }
 
-function help(home, named, topic) {
+/** `help <topic>`'s topics. */
+export const HELP_TOPICS = ['schedule-wake', 'safety', 'account', 'carry', 'build'];
+/** First day (26 Nov): `help` with no topic lists the commands, as a newcomer expects; it had answered an error. */
+export function help(home, named, topic) {
+  if (topic === undefined) return { ok: true, commands: [...new Set([...OPS, ...LOCAL, ...HOME_COMMANDS, 'shoot', 'view', 'views', 'map', 'upgrade'])].sort(), topics: HELP_TOPICS.map((t) => `help ${t}`), note: 'Each command is taught in the souls skill (.souls/bin/skill.md).' };
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic === 'carry') return { ok: true, commands: CARRY_HELP, note: CARRY_NOTE };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account | carry'), { code: 'help-topics' });
+  if (topic === 'build') return { ok: true, steps: BUILD_HELP, note: BUILD_NOTE };
+  if (topic !== 'schedule-wake') throw Object.assign(new Error(`help | ${HELP_TOPICS.map((t) => `help ${t}`).join(' | ')}`), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
@@ -716,18 +725,56 @@ async function schedule(home, named, { sub, args, until, missed }) {
 
 /** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
 export const CARRY_HELP = [
-  'carry grip <thing id> front|back|left|right [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it)',
+  'carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it; side 1 to 4: beside a grip between its ends, a third to sixth carrier\'s place)',
+  'carry grip <load> left|right <n>   a crew\'s third and later carrier: beside the load\'s n-th grip between its ends, from its back (the n-th to accept takes grip n)',
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once: the leader names the moment (UTC) and each sends it with --go, which sets off then. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
+  'carry to <crew id> the loading spot   every carrier at once: the load goes into the spot\'s first free bay (the answer names it); then one sends carry set-down',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
   'part unseat <crew id> <part id>   take it out of its bay',
   'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
+  'carry offer anyone   a crew offered to every Soul within 20 m (five at most, nearest first)',
+  'carry accept [<name>]   join the crew that Soul offered you, or with no name the newest offer to you',
 ];
-const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end first, then offer; wait for each step\'s answer before the next. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+const CARRY_NOTE = 'Points are metres, x east and z south. `look` shows `work`: offers to you and crews near that want hands, with whom to ask. Walk to your end first, then offer; wait for each step\'s answer before the next, and read its `next`. The carriers of a lifted load must walk together: if one walks and the other stays, the carry breaks off and the load is set down (`set-down` in `wait`, `why`). So the leader says the exact `carry to` and a moment ("on go"), and every carrier sends it then. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it. A heavy load takes a crew: a pallet of crates two, a generator four, a timber bundle four to six; fewer are refused carry-crew-too-small.';
+
+/** `help build`: how a rack bay goes up, step by step, as a crew of Souls does it. */
+export const BUILD_HELP = [
+  'find rack bay; inspect <bay id>   its slots, what fills each and what is left: upright_a and upright_b take a frame (rack upright), the four beam slots a rack beam',
+  'frames first: two carry a frame from its stand (carry grip <frame> back | front, carry offer, carry accept, part take <crew> <frame>, both carry to <crew> <bay id> upright_a, part put <crew> <bay id> upright_a)',
+  'a seated frame must stay held until beams join it: one of its crew stays (the other carry leave <crew>); a new holder takes over with carry grip <frame> left|right, carry offer <name> --on <frame>, and the old crew leaves',
+  'then the second frame into upright_b, held the same way',
+  'beams: two carry each (carry grip <beam> back --from 2.2 | front --from 2.2), part take, both carry to <crew> <bay id> beam_low_l, part put; then beam_low_r (high beams the same). Bring each beam from its slot\'s side of the bay (_l from the bay\'s -x, _r from its +x): it stops outside, lined up, and its put sets it in',
+  'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
+  'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
+];
+const BUILD_NOTE = 'Four Souls build one bay well: two carry, one holds a seated frame, one more takes over a hold. Say who does what before each carry; every carrier sends the same carry to at the same moment.';
+
+/**
+ * A carry step's `next` (the daemon's `nextStep`), made true to how it ended: none for a refused step (its refusal
+ * says what to do); for a part seated in a bay, the bay as it stands now (`inspect`'s slots: built, or what is left).
+ */
+export async function nextOf(ask, req, answer) {
+  if (!answer || typeof answer !== 'object') return;
+  if (answer.ok !== true || answer.stillRunning) { delete answer.next; return; }
+  if (req.do === 'offer' && answer.crew) answer.next = nextStep({ ...req, crew: answer.crew });
+  // A walk that ended while the crew holds nothing: the carry broke off on the way, and the load lies where it was.
+  if (req.do === 'to' && req.kind !== 'part') {
+    const crew = (await ask({ op: 'carry', do: 'list' }, 15_000).catch(() => null))?.crews?.find((c) => c.id === (answer.crew ?? req.crew));
+    if (crew && !crew.holds.length) {
+      answer.carry = 'broke off';
+      answer.next = 'the crew holds nothing now: the carry broke off and the load was set down on the way (`wait` shows set-down and why; carriers-apart: not every carrier walked). Take it again, and every carrier sends the same carry to at the same moment';
+    }
+  }
+  if (req.kind === 'part' && req.do === 'put' && /^[0-9a-f]{32}-\d+$/.test(String(req.into ?? ''))) {
+    const bay = await ask({ op: 'inspect', this: req.into }, 15_000).catch(() => null);
+    if (bay?.ok && bay.built) answer.next = nextStep(req, { bay });
+  }
+}
 
 /** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
 export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
@@ -802,6 +849,7 @@ if (isMain(import.meta.url)) {
       const answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
       // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
+      if (req.op === 'carry') await nextOf(ask, req, answer);
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, DAEMON_PATIENCE_MS);
       const update = await updating;

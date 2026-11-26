@@ -102,10 +102,10 @@ pub async fn run(gw: Arc<Gateway>) {
     }
 }
 
-/// A text frame from `grant`'s socket: a close, passed to the directory for that grant alone (the directory reads
-/// it, and ignores anything else). Once the directory closed the message, the close goes to the view sockets that
-/// watch that grant (W10) as the agent sent it.
-pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
+/// A text frame from `grant`'s socket signed in as `session`: a close, passed to the directory for that grant alone
+/// (the directory reads it, and ignores anything else). Once the directory closed the message, the close goes to the
+/// view sockets that watch that grant (W10) as the agent sent it; any other reply goes back to that socket alone.
+pub fn on_text(gw: &Arc<Gateway>, grant: Grant, session: u64, text: &str) {
     if text.len() > CLOSE_MOST {
         return;
     }
@@ -121,7 +121,7 @@ pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
             return;
         };
         match http(mb, "POST", &format!("/v1/mailbox/{path}"), &soul, &body).await {
-            Some(reply) if *path != "close" => gw.post_text(&grant.key(), reply),
+            Some(reply) if *path != "close" => gw.post_text(&grant.key(), session, reply),
             Some(reply) if reply.contains("\"closed\":true") => {
                 gw.tell_watchers(&grant.key(), body)
             }

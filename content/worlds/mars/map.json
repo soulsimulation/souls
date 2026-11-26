@@ -886,6 +886,62 @@
    "template": "worlds/templates/mars-camp.json (its rack yard), not mars-two",
    "kind": "mars:rack_bay",
    "forms": "own"
+  },
+  {
+   "def": "mars-loading-spot@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:loading_spot",
+   "forms": "own"
+  },
+  {
+   "def": "mars-pallet-crates@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:pallet_crates",
+   "forms": "own"
+  },
+  {
+   "def": "mars-generator@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:generator",
+   "forms": "own"
+  },
+  {
+   "def": "mars-timber-bundle@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:timber_bundle",
+   "forms": "own"
+  },
+  {
+   "def": "mars-shade-site@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:shade_site",
+   "forms": "own"
+  },
+  {
+   "def": "mars-timber-bent@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:timber_bent",
+   "forms": "own"
+  },
+  {
+   "def": "mars-timber-rail@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:timber_rail",
+   "forms": "own"
+  },
+  {
+   "def": "mars-shade-cloth@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:shade_cloth",
+   "forms": "own"
   }
  ]
 }

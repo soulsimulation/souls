@@ -814,6 +814,7 @@ impl Town {
             ground: *ground,
             passages,
             door: None,
+            mouths: true,
         };
         f(tree, &mut g)
     }
@@ -2351,8 +2352,12 @@ pub fn ground_boxes(buildings: &[Building], ground: Id) -> Vec<Option<[i64; 4]>>
 ///
 /// Two limits (#4072): on a building's own floor, a flight's line counts only where it lies from a step below `p`'s
 /// height to a body's height above it ([`level_part`]), so a landing over a stair's foot is no stair (the open
-/// ground's plan has no heights, so there the whole line counts). And a step's width lies along its edge, which its ends hold: its line
-/// counts only within half [`CLEAR`], so a porch front 9 m wide is no doorway 4.85 m deep through the wall behind it.
+/// ground's plan has no heights, so there the whole line counts). And a step's or a doorway's width lies along its
+/// edge, which its ends hold: a step's line counts only within half [`CLEAR`], so a porch front 9 m wide is no doorway
+/// 4.85 m deep through the wall behind it; a doorway's, between its ends, within half its widest end and half
+/// [`CLEAR`], and past them within half [`CLEAR`], so a market pavilion's open side 11.6 m wide is no doorway 6 m deep
+/// into the pavilion (#5003's Eden audit). A flight's width lies across its line, so a flight's line counts to its
+/// sides.
 pub fn in_passage(
     buildings: &[Building],
     boxes: &[Option<[i64; 4]>],
@@ -2382,7 +2387,7 @@ pub fn in_passage_but(
         }
         b.links
             .iter()
-            .any(|l| link_passage(b, l, ground, node, p, door))
+            .any(|l| link_passage(b, l, ground, node, p, door, false) != Lies::Clear)
     })
 }
 
@@ -2395,22 +2400,73 @@ pub fn in_passage_indexed(
     p: Vec3,
     door: Option<Id>,
 ) -> bool {
-    passages.on.get(&node).is_some_and(|links| {
-        links.iter().any(|&(bi, li)| {
-            let i = bi as usize;
-            if node == ground
-                && let Some(bx) = passages.boxes.get(i)
-                && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
-            {
-                return false;
-            }
-            let b = &buildings[i];
-            link_passage(b, &b.links[li as usize], ground, node, p, door)
-        })
-    })
+    passage_indexed(buildings, passages, ground, node, p, door, false) != Lies::Clear
 }
 
-/// Whether `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`).
+/// Whether `p` (µm, `node`'s frame), in a passage ([`in_passage_but`]), lies only at a doorway's mouth: within
+/// [`CLEAR`] of a doorway's end on `node`, on the room's side of that end (not between its ends), off every link's
+/// line and off every end but a doorway's (#5003's Eden audit). A cottage kitchen whose table, chairs and counter leave floor
+/// only by its doorway has every place there; a body walking to act at a thing for a moment may stand there when it
+/// reaches no place clear of every passage ([`crate::spots::within`]). The spot tables never give one.
+pub fn in_mouth_indexed(
+    buildings: &[Building],
+    passages: &Passages,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+) -> bool {
+    passage_indexed(buildings, passages, ground, node, p, door, true) == Lies::Mouth
+}
+
+/// How `p` lies in the passages of the links with an end on `node` ([`in_passage_indexed`]): the most of any link's
+/// ([`link_passage`]); with `mouths` false, a mouth is not told from the rest.
+fn passage_indexed(
+    buildings: &[Building],
+    passages: &Passages,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+    mouths: bool,
+) -> Lies {
+    let mut most = Lies::Clear;
+    for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
+        let i = bi as usize;
+        if node == ground
+            && let Some(bx) = passages.boxes.get(i)
+            && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
+        {
+            continue;
+        }
+        let b = &buildings[i];
+        most = most.max(link_passage(
+            b,
+            &b.links[li as usize],
+            ground,
+            node,
+            p,
+            door,
+            mouths,
+        ));
+        if most == Lies::In {
+            break;
+        }
+    }
+    most
+}
+
+/// How a point lies in one link's passage ([`link_passage`]): clear of it, only at its mouth (a doorway's, on the
+/// room's side of its end, [`in_mouth_indexed`]), or in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Lies {
+    Clear,
+    Mouth,
+    In,
+}
+
+/// How `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`). With `mouths`
+/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line.
 fn link_passage(
     b: &Building,
     l: &crate::links::Link,
@@ -2418,47 +2474,79 @@ fn link_passage(
     node: Id,
     p: Vec3,
     door: Option<Id>,
-) -> bool {
+    mouths: bool,
+) -> Lies {
     if door.is_some() && l.door == door {
-        return false;
+        return Lies::Clear;
     }
     // A step between two surfaces of one floor (a humped deck's quads, a few centimetres apart) is ground a body walks
     // and stands on, no doorway or stair (#1960).
     if l.kind == Kind::Step && l.nodes[0] == l.nodes[1] {
-        return false;
+        return Lies::Clear;
     }
+    let doorway = l.kind == Kind::Doorway;
     let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
-    let mut on = false;
+    let (mut on, mut at_end) = (false, false);
     for e in ends {
         on = true;
         if to_segment(p, e.a, e.b) < CLEAR {
-            return true;
+            if !(mouths && doorway) {
+                return Lies::In;
+            }
+            at_end = true;
         }
     }
     // The line is in the building's frame: read on the open ground or on the building's own floors (not on another
     // thing's floor a step or a flight lands on).
-    let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
-    let reach = if l.kind == Kind::Step {
-        CLEAR / 2
-    } else {
-        l.width / 2 + CLEAR / 2
+    let read = on && (node == ground || b.floors.contains_key(&node));
+    let framed = |s: Vec3| {
+        if node == ground {
+            b.place.point(s).unwrap_or(s)
+        } else {
+            s
+        }
     };
-    on && (node == ground || b.floors.contains_key(&node))
+    let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
+    // Whether `p` lies between a doorway's ends: along its line from its first point to its last, past neither.
+    let between = doorway
+        && read
+        && match (l.line.first(), l.line.last()) {
+            (Some(&a), Some(&c)) => {
+                let (a, c) = (framed(a), framed(c));
+                let (ex, ez) = (i128::from(c.x - a.x), i128::from(c.z - a.z));
+                let t = i128::from(p.x - a.x) * ex + i128::from(p.z - a.z) * ez;
+                t > 0 && t < ex * ex + ez * ez
+            }
+            _ => false,
+        };
+    // Between a doorway's ends its band is as wide as they are (the passage where it meets each floor), and half CLEAR;
+    // past them only half CLEAR, so an opening's width is no disc round its ends.
+    let reach = match l.kind {
+        Kind::Step => CLEAR / 2,
+        Kind::Doorway if between => {
+            let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
+            held.unwrap_or(0) + CLEAR / 2
+        }
+        Kind::Doorway => CLEAR / 2,
+        _ => l.width / 2 + CLEAR / 2,
+    };
+    let on_line = read
         && l.line.windows(2).any(|s| {
-            let (a, c) = if node == ground {
-                (
-                    b.place.point(s[0]).unwrap_or(s[0]),
-                    b.place.point(s[1]).unwrap_or(s[1]),
-                )
-            } else {
-                (s[0], s[1])
-            };
+            let (a, c) = (framed(s[0]), framed(s[1]));
             if flight && node != ground {
                 level_part(a, c, p.y).is_some_and(|(a, c)| to_segment(p, a, c) < reach)
             } else {
                 to_segment(p, a, c) < reach
             }
-        })
+        });
+    if on_line {
+        return Lies::In;
+    }
+    if !at_end {
+        return Lies::Clear;
+    }
+    // At a doorway's end, off its band: its mouth unless it lies between its ends, in the doorway itself.
+    if between { Lies::In } else { Lies::Mouth }
 }
 
 /// The part of a flight's line segment `a`–`c` (µm) a body standing at height `y` meets ([`in_passage_but`]): from a
@@ -2496,6 +2584,9 @@ struct Grounds<'a> {
     passages: &'a Passages,
     /// A door whose own doorway is not a passage here ([`in_passage_but`]).
     door: Option<Id>,
+    /// Whether a place at a doorway's mouth may be told ([`Ground::mouth`]); off, a form's walk tries only places clear
+    /// of every passage (the planner's first passes, [`View::stand_near_shape`]).
+    mouths: bool,
 }
 
 /// N5's map as the spot tables search it: the town's own (its searches keep their caches), or a view's shared map
@@ -2576,6 +2667,18 @@ impl Ground for Grounds<'_> {
             p,
             self.door,
         )
+    }
+
+    fn mouth(&self, node: Id, p: Vec3) -> bool {
+        self.mouths
+            && in_mouth_indexed(
+                self.buildings,
+                self.passages,
+                self.ground,
+                node,
+                p,
+                self.door,
+            )
     }
 
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
@@ -2686,6 +2789,7 @@ impl World for Town {
                 ground: *ground,
                 passages,
                 door: None,
+                mouths: false,
             },
         );
         for (&size, g) in classes {
@@ -2699,6 +2803,7 @@ impl World for Town {
                     ground: *ground,
                     passages: &g.passages,
                     door: None,
+                    mouths: false,
                 },
             );
         }
@@ -3102,12 +3207,14 @@ impl<'a> View<'a> {
         from: Option<&Body>,
         door: Option<Id>,
     ) -> Option<Vec3> {
-        self.stand_near_shape(node, at, None, reach, from, door)
+        self.stand_near_shape(node, at, None, reach, from, door, true)
     }
 
     /// [`View::stand_near_door`] for a thing whose footprint is `ring` (#4072: its corners in `node`'s frame, `at`
     /// its middle, and whether the walk ends on it): within `reach` of its outline, or on it
-    /// ([`crate::spots::within_footprint`]); with no ring, of `at`.
+    /// ([`crate::spots::within_footprint`]); with no ring, of `at`. With `mouths` false, only places clear of every
+    /// passage, never one at a doorway's mouth ([`crate::spots::Ground::mouth`]).
+    #[allow(clippy::too_many_arguments)]
     pub fn stand_near_shape(
         &self,
         node: Id,
@@ -3116,6 +3223,7 @@ impl<'a> View<'a> {
         reach: i64,
         from: Option<&Body>,
         door: Option<Id>,
+        mouths: bool,
     ) -> Option<Vec3> {
         let from = from.map(|b| (node_of(b), b.pose.position));
         let mut scratch = self.scratch.borrow_mut();
@@ -3129,6 +3237,7 @@ impl<'a> View<'a> {
             ground,
             passages: self.passages,
             door,
+            mouths,
         };
         match ring {
             Some((ring, on)) => {

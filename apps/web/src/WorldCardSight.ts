@@ -63,6 +63,9 @@ export function cardLook(s: CardSight): CardLook {
   return { opacity: (quiet ? CARD_SIGHT.quiet : CARD_SIGHT.other) * edge(s.distance, reach), emphasis: false };
 }
 
+/** A card whose eased opacity is below this takes no room and is not drawn (#2195; page FPS: not CSS2D-drawn either). */
+export const TAG_SHOWN_MIN = 0.04;
+
 /** Ease a shown opacity toward its target (about 0.2 s to most of the way), so cards fade rather than pop. */
 export function fadeCard(current: number, target: number, dtSec: number, tauSec = 0.1): number {
   if (!Number.isFinite(current)) return target;
