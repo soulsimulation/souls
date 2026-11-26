@@ -2,12 +2,15 @@
 // kind entries' files change, and reused while neither does.
 
 import { strict as assert } from 'node:assert';
-import fs, { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mock, test } from 'node:test';
-import { folderStamp, keptKinds, keptOne } from './kept.mjs';
+import { STILL_MS, folderStamp, keptKinds, keptOne } from './kept.mjs';
+
+/** The folder last changed long enough ago to be still. */
+const still = (dir) => { const t = new Date(Date.now() - 10 * STILL_MS); utimesSync(dir, t, t); };
 
 test('an unchanged copy reuses what was made; a changed copy, or other kinds, makes it again', () => {
   const kept = keptOne(), kinds = { a: {} };
@@ -28,6 +31,7 @@ test("the kind entries' folder stamp changes when a file is added, rewritten by 
     assert.equal(folderStamp(join(dir, 'none')), '');
     writeFileSync(join(dir, 'eden.bench.json'), '{"kind":"eden:bench"}');
     writeFileSync(join(dir, 'notes.txt'), 'not an entry');
+    still(dir);
     const one = folderStamp(dir);
     assert.equal(folderStamp(dir), one, 'unchanged: the same stamp');
     writeFileSync(join(dir, 'eden.cup.json'), '{}');
@@ -52,6 +56,7 @@ test("#5010 follow-up: the stamp is one look at the folder, and its entries are 
   syncBuiltinESMExports();
   try {
     for (let i = 0; i < 50; i++) writeFileSync(join(dir, `eden.k${i}.json`), JSON.stringify({ format: 'souls-entry/1', kind: `eden:k${i}` }));
+    still(dir);
     const kinds = keptKinds();
     const first = kinds(dir);
     assert.equal(Object.keys(first).length, 50);
@@ -63,6 +68,15 @@ test("#5010 follow-up: the stamp is one look at the folder, and its entries are 
     writeFileSync(join(dir, 'eden.more.json'), JSON.stringify({ format: 'souls-entry/1', kind: 'eden:more' }));
     assert.equal(Object.keys(kinds(dir)).length, 51, 'a new entry: read again');
     assert.equal(Object.keys(kinds(dir, 'eden:body')).length, 51, 'another body: read again');
+    // Within a second of a change, a second change may carry the same folder time: each file is looked at too.
+    writeFileSync(join(dir, 'eden.more.json.tmp'), JSON.stringify({ format: 'souls-entry/1', kind: 'eden:most' }));
+    const t = new Date();
+    utimesSync(dir, t, t);
+    const before = folderStamp(dir);
+    renameSync(join(dir, 'eden.more.json.tmp'), join(dir, 'eden.more.json'));
+    utimesSync(dir, t, t); // the folder's time as it was, as a coarse clock gives it
+    assert.notEqual(folderStamp(dir), before, 'a file renamed over within the second: seen');
+    assert.ok(kinds(dir)['eden:most'], 'and read');
   } finally {
     mock.restoreAll();
     syncBuiltinESMExports();
