@@ -1742,6 +1742,13 @@ impl Bodies {
         Ok(())
     }
 
+    /// Whether act `act`'s sit, lie or rise move is under way (#5019 follow-up: its act is answered accepted then).
+    pub fn placing(&self, act: Id) -> bool {
+        self.live
+            .values()
+            .any(|(id, l)| *id == act && matches!(l, Live::Place(_)))
+    }
+
     /// Steps the bodies to world time `now`, a tick at a time, firing each move's phase timers as they fall due.
     /// Returns the intents whose moves ended: done, or the reason by name.
     pub fn step(&mut self, now: Micros) -> Vec<(Id, Result<(), String>)> {

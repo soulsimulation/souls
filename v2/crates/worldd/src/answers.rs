@@ -4847,7 +4847,17 @@ impl Clock {
         }
         for (id, r) in started {
             match r {
-                Ok(()) => self.note(id, MOVE_STARTED, None, now),
+                Ok(()) => {
+                    self.note(id, MOVE_STARTED, None, now);
+                    // A sit, a lie or a rise under way is answered accepted now, as a walk is once its route is read
+                    // (W11): its first answer was its receipt at the move's end, about 0.93 s for a rise (#5019
+                    // follow-up). It is due as a form's step of the same move is (`sim::forms::span`).
+                    if self.bodies.as_ref().is_some_and(|b| b.placing(id)) {
+                        let span =
+                            sim::forms::span(&[skills::form_runner::Step::Rise], &acts::limits());
+                        self.run_started(id, now.saturating_add(span), now);
+                    }
+                }
                 Err(r) => {
                     if let Some(b) = self.bodies.as_mut() {
                         b.took(id);

@@ -370,6 +370,14 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     );
     c.send(4, "eden:rise", None);
     let rise = c.answer().expect("the rise is done");
+    // #5019 follow-up: the sit and the rise were each answered accepted as their move started, before their receipt
+    // (a rise's first answer was its receipt, 0.93 s after its send).
+    for s in [2, 4] {
+        assert!(
+            PROGRESSED.with(|p| p.borrow().iter().any(|(_, q)| *q == s)),
+            "act {s}: a progress answer before its receipt"
+        );
+    }
     // A walk replaced by the next one ends `claim-taken`; the next walks back to the start.
     c.send(5, "eden:walk", Some(thing()));
     c.send(6, "eden:sit", Some(thing()));
@@ -401,6 +409,11 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
         assert_eq!(
             (l.last().unwrap().1.as_str(), l.last().unwrap().2.as_deref()),
             (MOVE_ENDED, Some("done"))
+        );
+        // Each one's deadline is written as it is answered accepted, and its receipt names it.
+        assert!(
+            l.iter().any(|e| e.1 == answers::ACT_DEADLINE),
+            "{what}: its deadline entry"
         );
     }
     let end = |id: &Id| log[id].last().cloned().unwrap();
