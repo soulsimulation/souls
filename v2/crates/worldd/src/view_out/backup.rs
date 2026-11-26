@@ -290,6 +290,7 @@ pub(super) fn start<S: ObjectStore + Send + 'static, C: ObjectStore + Send + 'st
         spool.dir.clone(),
         Arc::clone(&spool.prunes),
         Arc::clone(&spool.live),
+        Arc::clone(&spool.progress),
     );
     std::thread::Builder::new()
         .name("stream-cleanup".into())
@@ -673,7 +674,6 @@ impl<S: ObjectStore> Worker<S> {
         self.confirmed = None;
         Ok(())
     }
-
 }
 
 /// What the clean-up has to do: an old generation's record to read (with the objects the chain then named, never
@@ -698,6 +698,10 @@ struct Cleanup<S> {
     dir: PathBuf,
     prunes: Prunes,
     live: Live,
+    /// The backup's: the clean-up deletes only while the store holds the spool's head, so never an object of the chain
+    /// the store's head names (a backup behind by more than the grace still names an old generation's) nor, fenced,
+    /// another writer's.
+    progress: Arc<Progress>,
     /// What waits its turn, oldest generation first.
     due: std::collections::VecDeque<Job>,
     /// What was refused, each with when it is tried again and the refusals in a row so far.
@@ -709,12 +713,19 @@ struct Cleanup<S> {
 }
 
 impl<S: ObjectStore> Cleanup<S> {
-    fn new(store: S, dir: PathBuf, prunes: Prunes, live: Live) -> Cleanup<S> {
+    fn new(
+        store: S,
+        dir: PathBuf,
+        prunes: Prunes,
+        live: Live,
+        progress: Arc<Progress>,
+    ) -> Cleanup<S> {
         Cleanup {
             store,
             dir,
             prunes,
             live,
+            progress,
             due: std::collections::VecDeque::new(),
             later: Vec::new(),
             deleted: 0,
@@ -728,7 +739,11 @@ impl<S: ObjectStore> Cleanup<S> {
         // Passes in a row that were refused and deleted nothing: the back-off's step.
         let mut stuck = 0usize;
         loop {
-            let (done, fault) = self.pass(Instant::now());
+            let (done, fault) = if self.progress.current.load(Ordering::Acquire) {
+                self.pass(Instant::now())
+            } else {
+                (0, None)
+            };
             self.gauge();
             let wait = match fault {
                 Some(fault) => {
@@ -744,7 +759,11 @@ impl<S: ObjectStore> Cleanup<S> {
                 None => {
                     stuck = 0;
                     // More waiting: on at once, at the store's pace; else when told, or a second on.
-                    if self.due.is_empty() { 1_000 } else { 0 }
+                    if done == 0 || self.due.is_empty() {
+                        1_000
+                    } else {
+                        0
+                    }
                 }
             };
             let gone = if wait == 0 {
@@ -1142,6 +1161,7 @@ mod tests {
             dir.clone(),
             Arc::clone(&spool.prunes),
             Arc::clone(&spool.live),
+            Arc::clone(&spool.progress),
         );
         let mut now = Instant::now();
         let (mut passes, mut refused_passes, mut deleted_after_refusal) = (0, 0, 0);
@@ -1166,7 +1186,11 @@ mod tests {
         );
         assert!(refused_passes > 10, "{refused_passes} refused passes");
         assert!(deleted_after_refusal > 100, "{deleted_after_refusal}");
-        assert_eq!(cleanup.deleted, 3 * 41, "every old object and record, once each");
+        assert_eq!(
+            cleanup.deleted,
+            3 * 41,
+            "every old object and record, once each"
+        );
         assert_eq!(cleanup.refused, refused_passes);
         assert_eq!(cleanup.kept_live, 2);
         let mut left = cleanup.store.store.list("").unwrap();
