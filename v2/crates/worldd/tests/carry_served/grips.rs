@@ -109,7 +109,7 @@ fn field(dir: &Path, activity: Id) -> Option<Holds> {
             } if *node == activity && *field == grips::F_GRIPS => Some(to.clone()),
             _ => None,
         })
-        .last()
+        .next_back()
         .and_then(|v| Holds::read(&v))
 }
 
