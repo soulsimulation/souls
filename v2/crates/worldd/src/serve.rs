@@ -19,6 +19,9 @@
 //! - `header`: the world's header (K16), as the seed built it: the one its log's parts name. Every start serves the
 //!   world under it, never under one rebuilt from the build's code ([`own_header`], [`adopt`]). `header.kinds`: the
 //!   owner of each kind it pins, `<full pin> <owner>` a line.
+//! - `stock.json` and `library/<name>.json` (#4837, `seed --stock`): what the world's containers hold and the libraries
+//!   their yields carry by reference (`worldd::stock`), read at each start: a take from a stocked shelf makes a book
+//!   with its title and first page. A world with none takes as before.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
@@ -342,6 +345,8 @@ pub(crate) struct Built {
     public_names: Arc<worldd::views::names::PublicNames>,
     /// The activity kinds the engine runs (C30): the conversation's, then the entries'.
     activities: Vec<ActivityKind>,
+    /// The world's stock (#4837): its stocked containers and its libraries' words, from its folder's `stock.json`.
+    stock: worldd::stock::World,
 }
 
 /// The conversation's kind (E26, #3329), as its fixture writes it.
@@ -1097,7 +1102,22 @@ fn thing_slots(
 }
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    build_with(COURSES_CACHE.get().map(PathBuf::as_path), facts, entries)
+    build_stocked(facts, entries, None)
+}
+
+/// [`build`] with the world's stock (#4837, `worldd::stock`): its containers' piles worked out from the facts, and
+/// each placed copy of a yielded kind given its row's fields in the import.
+fn build_stocked(
+    facts: &str,
+    entries: &[(String, Json)],
+    stock: Option<&worldd::stock::Data>,
+) -> R<Built> {
+    build_from(
+        COURSES_CACHE.get().map(PathBuf::as_path),
+        facts,
+        entries,
+        stock,
+    )
 }
 
 /// [`build`] with its facts' courses kept in `cache` (S5).
@@ -1105,6 +1125,15 @@ pub(crate) fn build_with(
     cache: Option<&Path>,
     facts: &str,
     entries: &[(String, Json)],
+) -> R<Built> {
+    build_from(cache, facts, entries, None)
+}
+
+fn build_from(
+    cache: Option<&Path>,
+    facts: &str,
+    entries: &[(String, Json)],
+    stock: Option<&worldd::stock::Data>,
 ) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
@@ -1122,6 +1151,30 @@ pub(crate) fn build_with(
         im => im?,
     };
     stamp("facts");
+    let stock = match stock {
+        Some(data) => {
+            let w =
+                worldd::stock::World::of(data, &json::parse(facts)?, &im.nodes, &im.tree, entries)?;
+            // A placed copy of a yielded kind carries its row from the world's start: in its import's create.
+            for e in &mut im.effects {
+                if let replica::effects::Body::Changes(cs) = &mut e.body {
+                    for c in cs {
+                        if let replica::effects::Change::Create { node, fields, .. } = &mut c.change
+                            && let Some(f) = w.placed.get(node)
+                        {
+                            fields.extend(f.clone());
+                        }
+                    }
+                }
+            }
+            for note in &w.notes {
+                println!("stock: left out: {note}");
+            }
+            stamp("stock");
+            w
+        }
+        None => worldd::stock::World::default(),
+    };
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
         println!(
             "punt: rowing-punt-{} is {}",
@@ -1224,6 +1277,7 @@ pub(crate) fn build_with(
         body_kind,
         public_names: Arc::new(im.texts),
         activities,
+        stock,
     })
 }
 
@@ -1675,7 +1729,7 @@ pub fn seed(args: &[String]) -> i32 {
 fn seed_in(args: &[String]) -> R<String> {
     let (Some(facts), Some(dir)) = (arg(args, "--facts"), arg(args, "--dir")) else {
         return Err("usage: worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] \
-                    [--at <x m>,<z m>] [--arrival <place>] [--creator <32 hex>-<n>]"
+                    [--at <x m>,<z m>] [--arrival <place>] [--creator <32 hex>-<n>] [--stock <stock.json>]"
             .into());
     };
     let dir = PathBuf::from(dir);
@@ -1719,7 +1773,11 @@ fn seed_in(args: &[String]) -> R<String> {
             println!("stand point: {line}");
         }
     }
-    let built = build(&text, &found)?;
+    // The world's stock and its libraries (#4837), kept in its folder: every start reads them.
+    let stock = arg(args, "--stock")
+        .map(|p| worldd::stock::Data::load(Path::new(p)))
+        .transpose()?;
+    let built = build_stocked(&text, &found, stock.as_ref())?;
     // The place Souls arrive at (`--arrival`), checked against the facts now: a seed never names one they lack.
     let arrival_field = match arg(args, "--arrival") {
         Some(place) => {
@@ -1730,6 +1788,14 @@ fn seed_in(args: &[String]) -> R<String> {
     };
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
+    if let Some(stock) = &stock {
+        stock.keep(&dir)?;
+        println!(
+            "stock: {} containers stocked, {} placed copies carry a row",
+            built.stock.stocks.len(),
+            built.stock.placed.len()
+        );
+    }
     if let Some(text) = catalogue_text {
         std::fs::write(dir.join("bodies.json"), text).map_err(io(&dir))?;
     }
@@ -3539,10 +3605,23 @@ fn serve(args: &[String]) -> R<()> {
     };
     let restoring = (meta.get("fork") != Some(&Json::Bool(true))).then(read_newest);
     let engine_restoring = Some(read_newest());
-    let built = build(
+    // The world's stock (#4837): one that does not read is said, and the world serves with none.
+    let stock = worldd::stock::Data::read(&dir).unwrap_or_else(|e| {
+        eprintln!("worldd: stock not read ({e}); a take carries nothing");
+        None
+    });
+    let built = build_stocked(
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
+        stock.as_ref(),
     )?;
+    if stock.is_some() {
+        println!(
+            "stock: {} containers stocked, {} library words",
+            built.stock.stocks.len(),
+            built.stock.words.len()
+        );
+    }
     // A Soul's body runs its family's forms (E21, #2791): a wave or a bow on its own body.
     replica::kinds::entry::family_forms(&mut kinds, plain(&built.body_kind));
     let stored_header = if meta.get("fork") == Some(&Json::Bool(true)) {
@@ -3870,6 +3949,8 @@ fn serve(args: &[String]) -> R<()> {
     imported_births(&dir, initial.header(), &catalogue, &mut born, &mut looks)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
+    cfg.stocks = Arc::clone(&built.stock.stocks);
+    cfg.library_words = Arc::clone(&built.stock.words);
     cfg.closed = closed_kinds.clone();
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
