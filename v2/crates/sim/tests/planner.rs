@@ -261,6 +261,7 @@ fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
             at: body.pose.position,
             waiting: None,
             crossing: None,
+            carried: false,
             staying: false,
             spot: Some((target, order)),
         }]),

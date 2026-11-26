@@ -1180,8 +1180,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// Re-pinned by #4795: a move refused as it starts is answered with its refusal's words (the second sit on the taken
 /// chair says who holds it), and the answer is logged (same 905 records, 2,342 motion samples); with only that detail
 /// left out (`settle_with(.., None, ..)`) the run writes the previous pin (85d9b198...), so it is the whole difference.
+/// Re-pinned by the arrival fix: a body is born facing its entry's point, not +x (same 905 records, 2,342 motion
+/// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
+/// difference.
 const PINNED_MOTION_HISTORY: &str =
-    "1dff64e9459142e66eaa2479b57cad0d11897c42f1f1497c03a04a92a6415ff2";
+    "aafd0a803ed6f47d528f15e74f0805bb90216f418974a78a7b066b420ed8e585";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

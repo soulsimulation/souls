@@ -9,7 +9,8 @@
 //!   and a held spot is passed over, as is one the ground does not hold (#4216). When every entry spot is held the
 //!   birth takes the nearest free place on further rings ([`Standing::beyond`]); with none, it waits, named
 //!   [`NO_FREE_PLACE`] ([`Life::held_back`]), or [`OFF_SURFACE`] when no spot tried was held and the ground held none
-//!   of them. Two bodies are never born on one point. A world answers a birth so named and withdraws it
+//!   of them. Two bodies are never born on one point. Each faces its entry's point ([`Standing::faces`]), so a body
+//!   arrives looking into the place it comes to, not at a wall. A world answers a birth so named and withdraws it
 //!   ([`Life::withdraw`]): a join is never left waiting with no answer (verdelis-eden, 24 Nov).
 //! - **Carried, never dropped.** Births are taken in the order asked, at most [`Life::per_tick`] a tick; the rest wait
 //!   for the next tick. Each born body says how long it waited. The budget is a count, not a reading of the clock: a
@@ -58,6 +59,11 @@ pub trait Standing {
     fn beyond(&self) -> u64 {
         0
     }
+    /// The point a body born at the `i`-th place by `entry` faces, in that place's frame: the place it arrives in, so
+    /// it looks into it, not at a wall. None keeps the frame's own facing.
+    fn faces(&self, _entry: Id, _i: u64) -> Option<Vec3> {
+        None
+    }
 }
 
 /// The places of `.0`, then, once every one of those is tried, those of `.1` for the same entry: births by an entry on
@@ -79,6 +85,14 @@ impl<A: Standing, B: Standing> Standing for Then<'_, A, B> {
     }
     fn beyond(&self) -> u64 {
         self.0.beyond() + self.1.map_or(0, |b| b.tries() + b.beyond())
+    }
+    fn faces(&self, entry: Id, i: u64) -> Option<Vec3> {
+        let n = self.0.tries() + self.0.beyond();
+        if i < n {
+            self.0.faces(entry, i)
+        } else {
+            self.1?.faces(entry, i - n)
+        }
     }
 }
 
@@ -170,6 +184,10 @@ impl Standing for Ring {
         (near..near + FAR_RINGS)
             .map(|r| 12 * self.per_sector(r))
             .sum()
+    }
+    /// Every spot faces its entry's point: a body born on the ring looks into the place it arrives at.
+    fn faces(&self, entry: Id, _i: u64) -> Option<Vec3> {
+        self.entries.get(&entry).map(|&(_, c)| c)
     }
 }
 
@@ -365,9 +383,16 @@ impl Life {
                 continue;
             }
             let frame = Frame { node, slot: None };
+            // Placing reads no facing: the spot is accepted first, and the facing worked out once, for it alone.
             if let Some(s) = surfaces.get(&node)
-                && let Ok(m) = s.place_built(body, frame, at, Quat::IDENTITY, build)
+                && let Ok(mut m) = s.place_built(body, frame, at, Quat::IDENTITY, build)
             {
+                if let Some(q) = standing
+                    .faces(b.entry, i)
+                    .and_then(|c| crate::controller::facing_toward(at, c))
+                {
+                    m.pose.orientation = q;
+                }
                 placed = Some(m);
                 break;
             }
