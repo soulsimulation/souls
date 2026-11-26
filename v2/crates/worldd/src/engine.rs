@@ -354,7 +354,10 @@ fn break_off(
     // #5067: its carriers let go of their grips.
     let by = (now, actor, cause);
     if let Err(r) = regrip(activities, tree, carry.activity, grips::RELEASED, None, by) {
-        eprintln!("worldd: the grips of {} were not let go: {r}", show(carry.activity));
+        eprintln!(
+            "worldd: the grips of {} were not let go: {r}",
+            show(carry.activity)
+        );
     }
     Ok(())
 }
@@ -1069,9 +1072,14 @@ impl Engine {
                             .map(|t| t.2)
                     });
                     let word = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
-                    if let Err(r) =
-                        regrip(&mut self.activities, &mut tree, activity, grips::SET_IN, until, word)
-                    {
+                    if let Err(r) = regrip(
+                        &mut self.activities,
+                        &mut tree,
+                        activity,
+                        grips::SET_IN,
+                        until,
+                        word,
+                    ) {
                         eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
                     }
                 } else {
@@ -1308,10 +1316,18 @@ impl Engine {
                     }
                     // #5067: its carriers let go of their grips.
                     let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
-                    if let Err(r) =
-                        regrip(&mut self.activities, &mut tree, activity, grips::RELEASED, None, by)
-                    {
-                        eprintln!("worldd: the grips of {} were not let go: {r}", show(activity));
+                    if let Err(r) = regrip(
+                        &mut self.activities,
+                        &mut tree,
+                        activity,
+                        grips::RELEASED,
+                        None,
+                        by,
+                    ) {
+                        eprintln!(
+                            "worldd: the grips of {} were not let go: {r}",
+                            show(activity)
+                        );
                     }
                     // A crew's part set down is no longer its own (0.135 A2).
                     if let Some(s) = self.asm.as_mut() {
@@ -1849,7 +1865,10 @@ impl Engine {
                     }
                     continue;
                 }
-                eprintln!("worldd: the crew {} stopped on its way back: {why}", show(activity));
+                eprintln!(
+                    "worldd: the crew {} stopped on its way back: {why}",
+                    show(activity)
+                );
                 let Some((s, effects, here)) =
                     self.asm.as_mut().and_then(|a| a.halt(tr, now, activity))
                 else {
@@ -1926,9 +1945,14 @@ impl Engine {
                         .find(|t| t.0 == activity)
                         .map(|t| t.2);
                     let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
-                    if let Err(r) =
-                        regrip(&mut self.activities, tree, activity, grips::RETURN, until, word)
-                    {
+                    if let Err(r) = regrip(
+                        &mut self.activities,
+                        tree,
+                        activity,
+                        grips::RETURN,
+                        until,
+                        word,
+                    ) {
                         eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
                     }
                 }
@@ -1993,8 +2017,14 @@ impl Engine {
             if near {
                 self.carries.insert(activity, carry);
                 let word = (now, Actor::Soul(s.by.1), Cause::Intent(s.by.0));
-                if let Err(r) = regrip(&mut self.activities, tree, activity, grips::CARRY, None, word)
-                {
+                if let Err(r) = regrip(
+                    &mut self.activities,
+                    tree,
+                    activity,
+                    grips::CARRY,
+                    None,
+                    word,
+                ) {
                     eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
                 }
                 continue;
@@ -2950,10 +2980,18 @@ impl Engine {
             if r.step == crate::assembly::Step::Seated && written {
                 self.set_sides.remove(&r.activity);
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
-                if let Err(e) =
-                    regrip(&mut self.activities, &mut tree, r.activity, grips::RELEASED, None, word)
-                {
-                    eprintln!("worldd: the grips of {} were not let go: {e}", show(r.activity));
+                if let Err(e) = regrip(
+                    &mut self.activities,
+                    &mut tree,
+                    r.activity,
+                    grips::RELEASED,
+                    None,
+                    word,
+                ) {
+                    eprintln!(
+                        "worldd: the grips of {} were not let go: {e}",
+                        show(r.activity)
+                    );
                 }
                 self.collect(Some((r.intent, r.soul)));
             }

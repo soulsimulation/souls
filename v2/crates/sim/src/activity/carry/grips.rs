@@ -259,7 +259,11 @@ pub fn assign(
     let unit = {
         let l = load.long;
         let m = l.x.abs().max(l.y.abs()).max(l.z.abs()).max(1);
-        Vec3::new(l.x * 1_000_000 / m, l.y * 1_000_000 / m, l.z * 1_000_000 / m)
+        Vec3::new(
+            l.x * 1_000_000 / m,
+            l.y * 1_000_000 / m,
+            l.z * 1_000_000 / m,
+        )
     };
     let dot = |a: Vec3, b: Vec3| {
         (i128::from(a.x) * i128::from(b.x)
@@ -376,8 +380,15 @@ mod tests {
         assert_eq!(names(&h), ["grip_l", "grip_r", "grip_mid"]);
         for hold in &h {
             let [a, b] = hold.hands;
-            // Its hands either side of its grip along the beam's length (its z), 0.4 m apart.
-            assert_eq!((a.x, a.y, b.x, b.y), (0, 51_000, 0, 51_000));
+            // Its hands either side of its grip along the beam's length (its z), 0.4 m apart: an end's at its grip, the
+            // side's on the beam's edge (it is 51 mm across).
+            let x = if hold.body == side { -25_500 } else { 0 };
+            assert_eq!(
+                (a.x, a.y, b.x, b.y),
+                (x, 51_000, x, 51_000),
+                "{}",
+                hold.grip
+            );
             assert_eq!((a.z - b.z).abs(), 2 * HAND_HALF, "{}", hold.grip);
             assert_eq!(a.z + b.z, 2 * hold.at.z);
         }
@@ -397,8 +408,11 @@ mod tests {
             let e = entry(family, kind);
             let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
             let places = load.side_places();
-            let sides: Vec<(Id, [i64; 2])> =
-                places.iter().enumerate().map(|(k, p)| (id(3 + k as u64), *p)).collect();
+            let sides: Vec<(Id, [i64; 2])> = places
+                .iter()
+                .enumerate()
+                .map(|(k, p)| (id(3 + k as u64), *p))
+                .collect();
             let held = load.held().unwrap();
             let h = assign(&g, &load, held, id(1), id(2), &sides).unwrap();
             assert_eq!(h.len(), 6, "{kind}");

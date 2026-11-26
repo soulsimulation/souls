@@ -872,6 +872,29 @@ impl Assembly {
 mod tests {
     use super::*;
 
+    /// #5067 item 3: a carrier whose grip a track would take beyond its reach, on the plan or above it, is named.
+    #[test]
+    fn a_carrier_out_of_reach_of_its_grip_is_named() {
+        let body = Id::new(replica::ids::Scope([1; 16]), 5).expect("an id");
+        let c = Carrier {
+            body,
+            feet: Vec3::ZERO,
+            reach: 2_060_000,
+            grip: Vec3::new(350_000, 0, 0),
+        };
+        let node = |x: i64, y: i64| (Vec3::new(x, y, 0), Quat::IDENTITY);
+        assert_eq!(out_of_reach(&[c], node(0, HEIGHT)), Ok(()));
+        assert_eq!(
+            out_of_reach(&[c], node(GRIP_REACH - 350_000, HEIGHT)),
+            Ok(())
+        );
+        for (x, y) in [(GRIP_REACH - 349_999, HEIGHT), (0, 2_060_001)] {
+            let r = out_of_reach(&[c], node(x, y)).expect_err("out of reach");
+            assert_eq!(r.name, "part.grip-out-of-reach");
+            assert!(r.detail.contains(&show(body)), "{}", r.detail);
+        }
+    }
+
     /// A take of a part above its carriers' standing reach is refused by name (the served test world has none that
     /// high: its frames stand on a low stand and its beams lie on the ground).
     #[test]
