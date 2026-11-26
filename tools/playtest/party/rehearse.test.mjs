@@ -18,16 +18,27 @@ test('the scene uses the existing jukebox shape and places it outside the dance 
   assert(placement.p[0] - entry.geometry.bounds_mm[0] / 2000 > 3);
 });
 
-test('an early departure that ends everyone’s dance fails before music-off or a success report', async () => {
+test('an early departure that ends everyone’s dance fails before a success report', async () => {
   const calls = [], seats = Array.from({ length: 5 }, (_, index) => ({ label: String(index), body: `body-${index}`,
     cli: async (...words) => {
       calls.push([index, ...words]);
       if (words[0] === 'say') return { ok: true, sequence: 1, to: { sequence: 2 } };
       if (words[0] === 'events') return { events: [{ kind: 'heard', words: calls.findLast((row) => row[1] === 'say')?.[2] }] };
+      if (words[0] === 'inspect') return { state: { on: false } };
       if (words[0] === 'look') return { ok: true, doing: calls.some((row) => row[1] === 'together' && row[2] === 'leave') ? [] : ['you are in dance-together with the group (started)'] };
       return receipt();
     },
   }));
-  await assert.rejects(performParty({ seats, floor: 'floor', jukebox: 'jukebox', pause: async () => {} }), /other four keep dancing/);
+  await assert.rejects(performParty({ seats, mode: 'silent', jukebox: 'jukebox', pause: async () => {} }), /other four keep dancing/);
   assert(!calls.some((row) => row[2]?.startsWith('switch_off:')));
+});
+
+ test('silent mode refuses a jukebox that is already on instead of claiming silence', async () => {
+  const seats = Array.from({length:5},(_,i)=>({label:String(i),body:`body-${i}`,cli:async(...words)=>{
+    if(words[0]==='say') return {ok:true,sequence:1,to:{sequence:2}};
+    if(words[0]==='events') return {events:[{kind:'heard',words:i===1?'Welcome! Would you like to dance?':'Yes, let us dance together!'}]};
+    if(words[0]==='inspect') return {state:{on:true}};
+    return receipt();
+  }}));
+  await assert.rejects(performParty({seats,jukebox:'jukebox',mode:'silent',pause:async()=>{}}),/remain off/);
 });

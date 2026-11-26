@@ -40,8 +40,9 @@ export function completed(answer, label) {
 }
 
 /** One member leaving must not end the other members' dance. The camera records this entire sequence. */
-export async function performParty({ seats, jukebox, record = () => {}, pause = sleep }) {
+export async function performParty({ seats, jukebox, mode = 'jukebox', record = () => {}, pause = sleep }) {
   assert.equal(seats.length, 5, 'the rehearsal uses five independent Souls');
+  assert(['silent', 'jukebox'].includes(mode), 'choose an explicit supported music mode');
   const [operator, ...guests] = seats;
   const command = async (seat, ...words) => {
     const answer = await seat.cli(...words);
@@ -73,10 +74,14 @@ export async function performParty({ seats, jukebox, record = () => {}, pause = 
   }
   await spoken(operator, guests[0], 'Welcome! Would you like to dance?', 'wave');
   await spoken(guests[0], operator, 'Yes, let us dance together!', 'nod');
-  await walk(operator, jukebox);
-  await act(operator, 'switch_on', jukebox);
-  // Return to the guests through the supported walk-to-body form before offering the dance.
-  await walk(operator, guests[0].body);
+  if (mode === 'jukebox') {
+    await walk(operator, jukebox);
+    await act(operator, 'switch_on', jukebox);
+    await walk(operator, guests[0].body);
+  } else {
+    const music = await command(operator, 'inspect', jukebox);
+    assert.equal(music.state?.on, false, 'silent mode requires the jukebox to remain off');
+  }
   completed(await command(operator, 'together', 'offer', 'dance-together', ...guests.map((seat) => seat.body)), 'offer dance');
   for (const guest of guests) completed(await command(guest, 'together', 'accept', 'dance-together'), 'accept dance');
   const together = await command(operator, 'look');
@@ -86,7 +91,6 @@ export async function performParty({ seats, jukebox, record = () => {}, pause = 
   await leave(leaving);
   // A leave releases a move at its phase boundary. Keep that visible rather than cutting to the next action.
   await pause(850);
-  await walk(leaving, jukebox);
   await body(leaving, 'wave');
   const remaining = await command(operator, 'look');
   assert((remaining.doing ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the other four keep dancing after one leaves');
@@ -94,12 +98,15 @@ export async function performParty({ seats, jukebox, record = () => {}, pause = 
   for (const guest of guests.slice(0, -1)) await leave(guest);
   await leave(operator);
   await pause(850);
-  await act(operator, 'switch_off', jukebox);
-  await walk(operator, guests[0].body);
+  if (mode === 'jukebox') await act(operator, 'switch_off', jukebox);
+  else {
+    const music = await command(operator, 'inspect', jukebox);
+    assert.equal(music.state?.on, false, 'silent mode must finish with the jukebox off');
+  }
   await body(operator, 'nod');
   const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
   assert(final.every((look) => !(look.doing ?? []).some((line) => line.includes('dance-together'))), 'all members leave the dance');
-  return { people: seats.length, jukebox: 'switched-on-and-off', dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false };
+  return { people: seats.length, jukebox: mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false };
 }
 
 async function pairServedSeat({ world, page, directory, index, record, register }) {
@@ -127,7 +134,7 @@ async function pairServedSeat({ world, page, directory, index, record, register 
   throw new Error('the paired Soul did not arrive');
 }
 
-export async function rehearse({ directory, startFile = null, onReady = () => {} }) {
+export async function rehearse({ directory, mode = 'jukebox', startFile = null, onReady = () => {} }) {
   directory = resolve(directory);
   assert(!existsSync(directory), 'use a fresh isolated output directory');
   assert(directory.startsWith(join(REPO_ROOT, '.local') + '/'), 'outputs belong in this checkout’s ignored .local/');
@@ -162,7 +169,7 @@ export async function rehearse({ directory, startFile = null, onReady = () => {}
       for (const until = Date.now() + 300000; !existsSync(startFile);) { assert(Date.now() < until, 'the recorder did not start'); await sleep(100); }
     }
     report.demonstrationStart = Date.now(); save();
-    report.result = await performParty({ seats, jukebox, record });
+    report.result = await performParty({ seats, jukebox, mode = 'jukebox', record });
     report.complete = true; report.demonstrationEnd = Date.now(); save();
     await sleep(2000);
     return report;
@@ -176,8 +183,8 @@ export async function rehearse({ directory, startFile = null, onReady = () => {}
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2), value = (flag) => args[args.indexOf(flag) + 1];
-  if (!args.includes('--dir')) throw new Error('usage: rehearse.mjs --dir .local/<fresh folder> [--start-file <recorder marker>]');
-  const result = await rehearse({ directory: value('--dir'), startFile: args.includes('--start-file') ? resolve(value('--start-file')) : null,
+  if (!args.includes('--dir')) throw new Error('usage: rehearse.mjs --dir .local/<fresh folder> [--silent] [--start-file <recorder marker>]');
+  const result = await rehearse({ directory: value('--dir'), mode: args.includes('--silent') ? 'silent' : 'jukebox', startFile: args.includes('--start-file') ? resolve(value('--start-file')) : null,
     onReady: ({ page }) => console.log(JSON.stringify({ ready: true, page })),
   });
   console.log(JSON.stringify({ complete: result.complete, result: result.result }));
