@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { REPO_ROOT } from '../../lib/paths.mjs';
 import { exportFacts } from '../arena/new-engine/world.mjs';
-import { AT, TEMPLATE, stageBatch, templateFacts } from './rack-bay.mjs';
+import { AT, TEMPLATE, SPARE, spareFrame, stageBatch, templateFacts } from './rack-bay.mjs';
 
 test('the template exports its yard in the construction kinds, frames in the stand, each named', () => {
   const dir = mkdtempSync(join(REPO_ROOT, '.local', 'rack-yard-'));
@@ -34,4 +34,20 @@ test('a staged yard names each thing by its title, never by a field of plain tex
   const ops = stageBatch('g-1');
   assert.deepEqual(ops.map((o) => o.title), ['frame stand', 'rack frame 1', 'rack frame 2', 'rack beam 1', 'rack beam 2', 'rack bay']);
   assert.ok(ops.every((o) => o.fields === undefined));
+});
+
+test('spareFrame sends signed fractional metre coordinates unchanged to the creator CLI', async () => {
+  const creatorCalls = [], soulCalls = [], at = { spare: [-3.275, 17.625] };
+  const god = async (...words) => {
+    creatorCalls.push(words);
+    if (words[0] === 'describe') return { ok: true, nodes: [{ id: 'ground-copy', kind: 'souls:ground' }] };
+    assert.deepEqual(words, ['place', 'mars:rack_upright', '--in', 'ground-copy', '--at', '-3.275,0,17.625', '--title', SPARE]);
+    return { ok: true };
+  };
+  const run = async (...words) => { soulCalls.push(words); return { ok: true, ...(words[1] === 'carry' && words[2] === 'offer' ? { crew: 'crew-copy' } : {}) }; };
+  const seats = { ada: { cli: async () => ({ answers: [{ found: [{ id: 'spare-copy', name: SPARE, kind: 'mars:rack_upright' }] }] }) } };
+  const result = await spareFrame(god, { run, both: async (...calls) => Promise.all(calls.map((c) => run(...c))) }, seats, { bo: 'bo-body-copy' }, at);
+  assert.equal(creatorCalls.length, 2);
+  assert.equal(result.seen[0].id, 'spare-copy');
+  assert(soulCalls.some((c) => c[1] === 'part' && c[2] === 'put' && c[4] === '-1.775,17.625'));
 });
