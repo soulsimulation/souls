@@ -336,6 +336,18 @@ const crewOf = ({ run }, bodies) => async (a, others, on = null) => {
   for (const o of others) await run(o, 'carry', 'accept', c);
   return c;
 };
+/**
+ * A take or unseat (`part <verb> <crew> <part>`) once its crew has gripped it: when the world refuses it
+ * `part.out-of-reach` (a carrier's walk to its grip ended short of it), the crew walks to its grips again (`grips`, run
+ * at once) and takes it once more, as an agent reading that refusal does.
+ */
+const takeAfter = ({ run, both }) => async (who, verb, c, part, grips) => {
+  try { return await run(who, 'part', verb, c, part); } catch (e) {
+    if (e.answer?.code !== 'part.out-of-reach') throw e;
+    await both(...grips);
+    return run(who, 'part', verb, c, part);
+  }
+};
 /** Who does what in each of the six's bays: its frames' carriers (back, front: the front holds it), and its beams'. */
 const TEAMS = [
   { a: ['ada', 'bo'], b: ['cy', 'di'], beams: ['ada', 'cy', 'ed'] },
@@ -353,10 +365,11 @@ const TEAMS = [
 export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = AT6.tall.to) {
   const all = both;
   const crew = crewOf({ run }, bodies);
+  const take = takeAfter({ run, both });
   const frame = async (f, back, front, bay, slot) => {
     await both([back, 'carry', 'grip', f, 'back'], [front, 'carry', 'grip', f, 'front']);
     const c = await crew(front, [back]);
-    await run(front, 'part', 'take', c, f);
+    await take(front, 'take', c, f, [[back, 'carry', 'grip', f, 'back'], [front, 'carry', 'grip', f, 'front']]);
     await both([back, 'carry', 'to', c, bay, slot], [front, 'carry', 'to', c, bay, slot]);
     await run(front, 'part', 'put', c, bay, slot);
     await run(back, 'carry', 'leave', c);   // the front holds it standing in its slot
@@ -371,8 +384,9 @@ export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = A
     const c = await crew(front, [back, side]);
     for (const k of [0, 2, 1, 3]) {   // low left, low right, high left, high right
       const [beam, slot] = [beams[k], BEAM_SLOTS[k]];
-      await all([back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']);
-      await run(front, 'part', 'take', c, beam);
+      const grips = [[back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']];
+      await all(...grips);
+      await take(front, 'take', c, beam, grips);
       await all([back, 'carry', 'to', c, bay, slot], [front, 'carry', 'to', c, bay, slot], [side, 'carry', 'to', c, bay, slot]);
       await run(front, 'part', 'put', c, bay, slot);
     }
@@ -401,7 +415,7 @@ export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = A
  */
 export async function takeDownTwoBays({ run, both }, bodies, { bays }, homes, stands) {
   const all = both;
-  const crew = crewOf({ run }, bodies);
+  const crew = crewOf({ run }, bodies), take = takeAfter({ run, both });
   const down = [];
   for (const k of [1, 0]) {
     const { bay, fa, fb, beams } = bays[k], t = TEAMS[k];
@@ -415,8 +429,9 @@ export async function takeDownTwoBays({ run, both }, bodies, { bays }, homes, st
     const [front, back, side] = t.beams, c = await crew(front, [back, side]);
     for (const j of [1, 3, 0, 2]) {   // high left, high right, low left, low right
       const beam = beams[j], home = homes[beam];
-      await all([back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']);
-      await run(front, 'part', 'unseat', c, beam);
+      const grips = [[back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']];
+      await all(...grips);
+      await take(front, 'unseat', c, beam, grips);
       await all([back, 'carry', 'to', c, home], [front, 'carry', 'to', c, home], [side, 'carry', 'to', c, home]);
       await run(front, 'part', 'put', c, home);
     }
@@ -426,7 +441,7 @@ export async function takeDownTwoBays({ run, both }, bodies, { bays }, homes, st
       await both([back2, 'carry', 'grip', f, 'back'], [front2, 'carry', 'grip', f, 'front']);
       const out = await crew(front2, [back2], f);
       await run(holder, 'carry', 'leave', h);
-      await run(front2, 'part', 'unseat', out, f);
+      await take(front2, 'unseat', out, f, [[back2, 'carry', 'grip', f, 'back'], [front2, 'carry', 'grip', f, 'front']]);
       await both([back2, 'carry', 'to', out, stand, slot], [front2, 'carry', 'to', out, stand, slot]);
       await run(front2, 'part', 'put', out, stand, slot);
       await both([back2, 'carry', 'leave', out], [front2, 'carry', 'leave', out]);
