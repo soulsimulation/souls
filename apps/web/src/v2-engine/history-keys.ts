@@ -13,6 +13,8 @@ export const headerKey = () => 'header';
 export const dayIndexKey = (day: number) => `bundles/${pad(day, 8)}/index`;
 /** V4's public event index of a world day, or of an hour of it the day names as split (#5006 row 14: the edit log). */
 export const eventsKey = (day: number, hour?: number) => `history/everyone/events/${pad(day, 8)}${hour === undefined ? '' : `/${pad(hour, 2)}`}`;
+/** V4's counts of a world day, a slot each ten minutes (#5006 row 14: the edit log reads only the hours they count edits in). */
+export const dayCountsKey = (day: number) => `history/everyone/counts/day/${pad(day, 8)}`;
 /** V4's counts of a world year (365 world days), a slot a day. */
 export const yearCountsKey = (year: number) => `history/everyone/counts/year/${pad(year, 4)}`;
 

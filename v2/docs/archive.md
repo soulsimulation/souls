@@ -132,7 +132,11 @@ a store path inside a value is a byte string, since text in v2 is always a name.
    `[2, creator]` (a principal id, never an account id) or `[3]` the world. No fields, so no text reference and no
    words. An effect for another audience, or whose node or actor is redacted, gives no row. It is split by hour: an
    hour of 1,000 events or more is an object of its own, and a day's object holds the rest and names those hours, so
-   a quiet world writes one object a day for it and a busy one an object an hour.
+   a quiet world writes one object a day for it and a busy one an object an hour. A creator's edit names what it did
+   (`sim::edit` `events_of`, #5006 row 14): `souls:placed` one a thing (its row's node the parent it was placed in),
+   `souls:moved`, `souls:changed` and `souls:removed`; an undo `souls:undone` and a redo `souls:redone`. With the actor
+   `[2, creator]` they are the rows God Mode's edit log reads (`apps/web/src/v2-engine/edit-log.ts`), only the days
+   and split hours whose counts (rule 10) count one of them.
 10. **The coarse levels** count those events by kind: per ten minutes for a day (144 slots) and per day for a year of
     365 world days. A day's timeline is drawn from its counts; scrubbing reads them while the handle moves and seeks
     on release (V9).

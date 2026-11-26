@@ -4,8 +4,10 @@
 // event's row into the public event index (V4, v2/docs/archive.md): `[at µs, kind number, node, actor]`, a creator's
 // actor `[2, principal]`. This reads that index from the world's history export, as the agent's `history` does
 // (v2/client/src/history/history.mjs), so nothing here asks the world and nothing runs on its clock thread. Only the
-// creator's God Mode asks for it; the rows are public, as every named event's are.
-import { eventsKey, DAY_US } from './history-keys.ts';
+// creator's God Mode asks for it; the rows are public, as every named event's are. What it reads grows with the edits,
+// not with the world's other events: the year's counts (a slot a day) name the days with an edit, and a day's counts
+// (a slot each ten minutes) the split hours with one; the archiver writes both with the open day's index.
+import { eventsKey, dayCountsKey, yearCountsKey, DAY_US } from './history-keys.ts';
 import { shortKind, type BuildNode } from './creator-build.ts';
 
 /** How far back a page reads: the agent's `history` look-back at most (history.mjs `LOOK_BACK_MOST`). */
@@ -49,14 +51,39 @@ export function creatorRows(obj: unknown): { rows: EditRow[]; split: number[] } 
   return out;
 }
 
-/** A world day's creator rows: its object, then each hour it names as split. A day before today is kept in `cache`
- *  (its objects no longer change once the day has ended). */
+/** The slots of a counts object (`{4: [kind, ...], 5: [[slot, kind number, count], ...]}`) that count an edit. */
+export function editSlots(obj: unknown): number[] {
+  if (!(obj instanceof Map)) return [];
+  const kinds = obj.get(4), rows = obj.get(5);
+  if (!Array.isArray(kinds) || !Array.isArray(rows)) return [];
+  return [...new Set(rows.filter((r) => Array.isArray(r) && isKind(kinds[Number(r[1])]) && Number(r[2]) > 0).map((r) => Number(r[0])))];
+}
+
+const YEAR_DAYS = 365;
+/** The world days from `last` back to `first` whose year's counts count an edit, newest first. */
+async function editDays(get: Get, decode: Decode, first: number, last: number): Promise<number[]> {
+  const days: number[] = [];
+  for (let y = Math.floor(last / YEAR_DAYS); y >= Math.floor(first / YEAR_DAYS); y--) {
+    const b = await get(yearCountsKey(y));
+    for (const s of b ? editSlots(decode(b)) : []) { const d = y * YEAR_DAYS + s; if (d >= first && d <= last) days.push(d); }
+  }
+  return days.sort((a, b) => b - a);
+}
+
+/** A world day's creator rows: its object, then each hour it names as split that its counts count an edit in (each
+ *  split hour when it has no counts). A day before today is kept in `cache` (its objects no longer change once the
+ *  day has ended). */
 async function dayRows(get: Get, decode: Decode, day: number, today: number, cache?: Map<number, EditRow[]>): Promise<EditRow[]> {
   const kept = cache?.get(day);
   if (kept) return kept;
   const read = async (key: string) => { const b = await get(key); return b ? creatorRows(decode(b)) : { rows: [], split: [] }; };
   const whole = await read(eventsKey(day));
-  const hours = await Promise.all(whole.split.map((h) => read(eventsKey(day, h))));
+  let split = whole.split;
+  if (split.length) {
+    const c = await get(dayCountsKey(day));
+    if (c) { const hours = new Set(editSlots(decode(c)).map((s) => Math.floor(s / 6))); split = split.filter((h) => hours.has(h)); }
+  }
+  const hours = await Promise.all(split.map((h) => read(eventsKey(day, h))));
   const rows = [...whole.rows, ...hours.flatMap((h) => h.rows)];
   if (day < today) cache?.set(day, rows);
   return rows;
@@ -75,13 +102,13 @@ export function editsOf(rows: readonly EditRow[]): Edit[] {
 }
 
 /** The creator's edits before world time `before` (µs; the newest when not given), newest first, at most `most`,
- *  read day by day back to `LOOK_BACK_DAYS` world days before `now`. An edit is never split across pages: the next
- *  page is the edits before the oldest one given. */
+ *  read day by day back to `LOOK_BACK_DAYS` world days before `now`, only the days the year's counts count an edit
+ *  on. An edit is never split across pages: the next page is the edits before the oldest one given. */
 export async function editPage({ get, decode, now, before, most = PAGE, cache }: { get: Get; decode: Decode; now: number; before?: number | null; most?: number; cache?: Map<number, EditRow[]> }): Promise<EditPage> {
   const today = Math.floor(now / DAY_US), floor = today - LOOK_BACK_DAYS + 1;
   const upTo = before ?? Infinity;
   const edits: Edit[] = [];
-  for (let day = Math.min(today, Math.floor(Math.min(upTo, now) / DAY_US)); day >= floor; day--) {
+  for (const day of await editDays(get, decode, floor, Math.min(today, Math.floor(Math.min(upTo, now) / DAY_US)))) {
     edits.push(...editsOf((await dayRows(get, decode, day, today, cache)).filter((r) => r.at < upTo)));
     if (edits.length >= most) return { edits: edits.slice(0, most), before: edits[most - 1]!.at };
   }
