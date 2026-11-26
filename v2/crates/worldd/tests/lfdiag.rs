@@ -73,6 +73,31 @@ fn diag_walk_trace() {
     };
     b.add_body(family, placed).unwrap();
     b.begin(1_000_000_000);
+    {
+        let (edge, middle) = replica::select::nearest_in(&b.town.tree, place, ground, p).unwrap();
+        println!("edge {edge:?} middle {middle:?}");
+        let body_now = *b.runner.controller.body(body).unwrap();
+        let view = b.town.view();
+        for (what, q) in [("edge", edge), ("middle", middle)] {
+            let reached = view.stand_reached(ground, q, (ground, p));
+            let plan = reached.map(|r| view.plan(&body_now, ground, r).map(|l| l.len()));
+            println!("{what}: stand_reached {reached:?} plan {plan:?}");
+        }
+        // Along the line from the edge to the walker, every 10 m: where a body may stand and the walk may reach.
+        let (dx, dz) = (p.x - edge.x, p.z - edge.z);
+        let n = ((dx as f64).hypot(dz as f64) / 10e6) as i64;
+        for k in 0..=n {
+            let q = Vec3::new(edge.x + dx * k / n.max(1), 0, edge.z + dz * k / n.max(1));
+            let reached = view.stand_reached(ground, q, (ground, p));
+            let plan = reached.map(|r| view.plan(&body_now, ground, r).map(|l| l.len()));
+            println!(
+                "  ({:.0}, {:.0}): {} plan {plan:?}",
+                q.x as f64 / 1e6,
+                q.z as f64 / 1e6,
+                reached.is_some()
+            );
+        }
+    }
     let id = Id::new(Scope([0xc3; 16]), 1).unwrap();
     let r = b.start(vec![(
         id,
