@@ -4342,6 +4342,163 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
 }
 
+/// soul.game, 0.137 trial: three Souls could not ride Eden's launch balloon (e_378bd506, an `eden:balloon` by Eden's
+/// map, its def with no seats), on a world seeded before its rides flew, so its tree has no course: `ride` naming no
+/// seat was refused `arg-missing`, one naming a seat walked there and was refused `place-unknown`, and the others were
+/// refused `thing-reserved` while the first one's `ride` ran. Here the world is seeded with the balloon's entry without
+/// its `ride` (no course in the log's tree) and served with today's entries: the world gives the balloon its course at
+/// its first tick, from its home. Three Souls born by its door all ask `ride` at once, naming no seat: each is given
+/// its own free place in the basket; aloft a rise is refused `boarding-frame-away`; back home each gets off onto the
+/// ground. Served again, the course is in the log and nothing is given twice.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits are real time.
+#[allow(clippy::disallowed_methods)]
+fn three_souls_ride_the_eden_balloon_together_on_a_world_seeded_before_it_flew() {
+    use replica::rules::json::{Value as J, parse};
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (balloon, lineage) = (im.nodes["e_378bd506"], im.nodes["world"].scope());
+    let pid = std::process::id();
+    let entries = std::env::temp_dir().join(format!("eden-balloon3-kinds-{pid}"));
+    let dir = std::env::temp_dir().join(format!("eden-balloon3-{pid}"));
+    let _ = std::fs::remove_dir_all(&entries);
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &entries);
+    let path = entries.join("rides/balloon.json");
+    let mut old = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let J::Obj(kv) = &mut old else {
+        panic!("an entry")
+    };
+    let ride = kv
+        .iter()
+        .find(|(k, _)| k == "ride")
+        .cloned()
+        .expect("a ride");
+    kv.retain(|(k, _)| k != "ride");
+    std::fs::write(&path, old.to_json()).unwrap();
+    // Born 1 m beyond the balloon's door (1.6 m toward -x of it, at (-20, -9) m).
+    let worldd = env!("CARGO_BIN_EXE_worldd");
+    let seeded = Command::new(worldd)
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(&dir)
+        .arg("--entries")
+        .arg(&entries)
+        .args(["--souls", "0", "--at", "-22.6,-9.0"])
+        .output()
+        .unwrap();
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    // Today's entry, as the seed kept it, with its ride again.
+    let kept = dir.join("entries/eden.balloon.json");
+    let mut now = parse(&std::fs::read_to_string(&kept).unwrap()).unwrap();
+    let J::Obj(kv) = &mut now else {
+        panic!("an entry")
+    };
+    kv.push(ride);
+    std::fs::write(&kept, now.to_json()).unwrap();
+    let start = || {
+        let mut child = Command::new(worldd)
+            .args(["serve", "--dir"])
+            .arg(&dir)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let served = Served(child);
+        let (mut line, mut lines) = (String::new(), Vec::new());
+        while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+            lines.push(std::mem::take(&mut line));
+        }
+        std::thread::spawn(move || for _ in out.lines().map_while(Result::ok) {});
+        (served, lines)
+    };
+    let given = |lines: &[String]| {
+        lines.iter().any(|l| {
+            l.contains("ride given its course") && l.contains(&replica::world_model::show(balloon))
+        })
+    };
+    let (served, lines) = start();
+    let first = given(&lines);
+    println!("given its course at the first tick: {first}");
+    let mut souls: Vec<Client> = (1..=3).map(|n| join(&dir, n, lineage)).collect();
+    // All three at once, naming no seat.
+    for s in souls.iter_mut() {
+        s.send("eden:ride", Some(balloon), BTreeMap::new(), 120_000_000);
+    }
+    let rode: Vec<_> = souls.iter_mut().map(|s| s.answer("eden:ride")).collect();
+    println!("three ride at once: {rode:?}");
+    let frames = last_frames(&dir);
+    let aboard: Vec<Option<u64>> = frames
+        .iter()
+        .filter(|(_, f)| f.0 == balloon)
+        .map(|(_, f)| f.1)
+        .collect();
+    println!(
+        "in the basket's slots: {aboard:?} of {} bodies",
+        frames.len()
+    );
+    // Aloft: a minute and a half after boarding it is on its loop.
+    std::thread::sleep(Duration::from_secs(90));
+    let aloft = souls[0].act("eden:rise", None, BTreeMap::new());
+    println!("rise aloft: {aloft:?}");
+    // Back at its home: each gets off.
+    let mut off = Err("never home".to_owned());
+    for _ in 0..40 {
+        off = souls[0].act("eden:rise", None, BTreeMap::new());
+        if off.is_ok() {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(10));
+    }
+    println!("rise at its home: {off:?}");
+    let others: Vec<_> = souls[1..]
+        .iter_mut()
+        .map(|s| s.act("eden:rise", None, BTreeMap::new()))
+        .collect();
+    println!("the other two get off: {others:?}");
+    let after = last_frames(&dir);
+    drop(served);
+    let (served, lines) = start();
+    let again = given(&lines);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&entries);
+    assert!(
+        first,
+        "the world gives the balloon its course at its first tick"
+    );
+    for r in &rode {
+        r.as_ref()
+            .expect("each rides, the world giving it a free place");
+    }
+    let mut places = aboard.clone();
+    places.sort_unstable();
+    places.dedup();
+    assert_eq!(places.len(), 3, "three places in the basket: {aboard:?}");
+    assert_eq!(aloft, Err("boarding-frame-away".to_owned()), "aloft");
+    off.expect("gets off at its home");
+    for r in others {
+        r.expect("gets off at its home");
+    }
+    let riders: Vec<&Id> = frames
+        .iter()
+        .filter(|(_, f)| f.0 == balloon)
+        .map(|(b, _)| b)
+        .collect();
+    assert!(
+        riders
+            .iter()
+            .all(|b| after.get(b).is_some_and(|a| a.0 == im.nodes["ground"])),
+        "each off onto the ground: {after:?}"
+    );
+    assert!(!again, "served again: the course is in the log, given once");
+}
+
 /// #1960: a Soul closes, knocks on and opens a door from each side of it, on a served full Eden, at doors of each
 /// kind of building: the library's and the café's from inside (their outsides are
 /// [`c25_lights_fire_doors_and_locks_from_outside`]'s), a cottage's front door from behind the cottage and from its

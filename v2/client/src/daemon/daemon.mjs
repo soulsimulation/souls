@@ -2022,7 +2022,9 @@ async function answer(req, conn = null) {
  * R1b: for an act the world refused, one other offer of the thing or place it named first (`thingOf`'s offers, from
  * this machine's kind entries) that would work: the first the form rules pass on the copy (`yes`), else the first they
  * cannot judge here (`unknown`, a move such as a sit); never one they refuse, one needing arguments it has no default
- * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
+ * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none. A refusal no other
+ * offer can answer gives the refused act again, with what to do first: `not_held` (pick it up), `resource-held` (rise),
+ * `thing-reserved` (wait until it is free) and `place-taken` (send it with no place named).
  */
 function suggestionFor(r) {
   const target = String(r.target ?? '').split(' ')[0];
@@ -2042,6 +2044,11 @@ function suggestionFor(r) {
     const slots = on && on.id !== target ? Object.values(heldKinds()[on.entry ?? on.kind]?.slots ?? {}) : [];
     if (slots.some((x) => x?.admits === 'body')) return { act: `${NS}:rise`, name: 'rise', checked: 'unknown', then: again, why: `${body.name} is in ${on.name}` };
   }
+  // A thing another Soul's act holds is held for every offer of it (a balloon's `board` is refused as its `ride` is):
+  // the same act once it is free, never another offer refused the same way. A seat named that is taken: the same act
+  // with no seat named, and the world gives the first free one.
+  if (r.answers.at(-1)?.reason === 'thing-reserved') return { act: again, name: verb, checked: 'unknown', why: 'held by another Soul\'s act: wait until it is free, then send it again' };
+  if (r.answers.at(-1)?.reason === 'place-taken') return { act: again, name: verb, checked: 'unknown', why: 'that place is taken: send it with no place named and the world gives a free one' };
   const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
   const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
   const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));
