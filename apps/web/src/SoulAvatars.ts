@@ -15,22 +15,26 @@ const activityProp=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.pa
 export function soulPortraitView(root:THREE.Object3D,rigid:boolean){
  root.position.set(0,0,0);root.rotation.set(0,0,0);root.visible=true;root.updateMatrixWorld(true);const box=new THREE.Box3(),skins:THREE.SkinnedMesh[]=[],hiddenBones=new Set<THREE.Object3D>(),face=new THREE.Box3();let head:THREE.Object3D|null=null;
  root.traverse(o=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(!p.visible){if((o as THREE.SkinnedMesh).isSkinnedMesh)for(const b of (o as THREE.SkinnedMesh).skeleton.bones)hiddenBones.add(b);return;}if((o as THREE.Bone).isBone&&/head$/i.test(o.name))head??=o;if(o.userData.portraitFace)face.union(new THREE.Box3().setFromObject(o));if((o as THREE.Mesh).isMesh){const mesh=o as THREE.Mesh;let local:THREE.Box3|null;if((o as THREE.SkinnedMesh).isSkinnedMesh){const skin=o as THREE.SkinnedMesh;skin.skeleton.update();skin.computeBoundingBox();local=skin.boundingBox;skins.push(skin);}else if((o as THREE.InstancedMesh).isInstancedMesh){const instances=o as THREE.InstancedMesh;instances.computeBoundingBox();local=instances.boundingBox;}else{if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();local=mesh.geometry.boundingBox;}if(local)box.union(local.clone().applyMatrix4(o.matrixWorld));}});
+ // plain meshes over a hidden rig with a head bone, and no skin shown (the ghost), are all head: framed whole by their
+ // outline, like a creature's face
+ const ghost=!rigid&&!!head&&!skins.length&&hiddenBones.size>0;
  // a head bone only a hidden skin follows (a rigid mesh such as the ghost, carried by a hidden rig) is not this body's head
  if(head&&hiddenBones.has(head)&&!skins.some(s=>s.skeleton.bones.includes(head as THREE.Bone)))head=null;
  if(box.isEmpty()||![...box.min.toArray(),...box.max.toArray()].every(Number.isFinite))return null;const size=box.getSize(new THREE.Vector3()),target=box.getCenter(new THREE.Vector3());
  // #5039: frame the head and the top of the shoulders. With skinned meshes the head is what is skinned to the head bone
  // (face, hair, a hat; Pip's big eyes): the frame is 1.8x its height (1.4x its width when wider), its top 15 % of
- // the head over the crown. Without (a bone and plain meshes), h is the height above the head joint, bounded by the
- // body's size, the frame from 0.75 h under the joint to 0.12 h over the crown. Either way at most 45 % of the body.
+ // the head over the crown. Without (a head bone and no vertices on it), h is the height above the head joint, bounded
+ // by the body's size, the frame from 0.75 h under the joint to 0.12 h over the crown. Either way at most 45 % of the body.
  let height=rigid?Math.max(size.x,size.y,size.z):Math.max(size.y*.42,size.x*.85),slack=rigid?1.05:1.4;
  const headBox=!rigid&&head&&skins.length?skinnedTo(head,skins):null;
  if(headBox){const hs=headBox.getSize(new THREE.Vector3());headBox.getCenter(target);height=Math.min(Math.max(hs.y*1.8,Math.max(hs.x,hs.z)*1.4),size.y*.45);target.y=headBox.max.y+hs.y*.15-height/2;slack=1.05;}
- else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=skins.length?1:1.4;/* a plain mesh on a bone (the ghost): its outline, not a face, sets the edge */}
+ else if(ghost)face.copy(box);
+ else if(!rigid&&head){const y=(head as THREE.Object3D).getWorldPosition(target).y,h=Math.min(Math.max(box.max.y-y,size.y*.06),size.y*.18);target.y=y+h*.185;height=h*1.87;slack=1;}
  else if(!rigid)target.y=box.max.y-size.y*.17;
  // a creature marks its face (a head, a snail's eye stalks): frame it as seen from the portrait's view, 1.3x, and a little below
- if(rigid&&!face.isEmpty()){const r=new THREE.Vector3(-PORTRAIT_VIEW.z,0,PORTRAIT_VIEW.x).normalize(),u=new THREE.Vector3().crossVectors(PORTRAIT_VIEW,r),mid=face.getCenter(new THREE.Vector3()),c=new THREE.Vector3();let w=0,h=0;
+ if(!face.isEmpty()){const r=new THREE.Vector3(-PORTRAIT_VIEW.z,0,PORTRAIT_VIEW.x).normalize(),u=new THREE.Vector3().crossVectors(PORTRAIT_VIEW,r),mid=face.getCenter(new THREE.Vector3()),c=new THREE.Vector3();let w=0,h=0;
   for(let i=0;i<8;i++){c.set(i&1?face.max.x:face.min.x,i&2?face.max.y:face.min.y,i&4?face.max.z:face.min.z).sub(mid);w=Math.max(w,Math.abs(c.dot(r)));h=Math.max(h,Math.abs(c.dot(u)));}
-  height=Math.min(2.6*Math.max(w,h),height);target.copy(mid);target.y-=height*.1;slack=1;}
+  height=2.6*Math.max(w,h);target.copy(mid);if(!ghost)target.y-=height*.1;slack=1;}
  return{box,target,height,slack};
 }
 /** World box of the skinned vertices that follow `head` or a bone under it most (their largest skin weight), or null. */
