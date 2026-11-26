@@ -1402,6 +1402,22 @@ impl Forms {
                 _ => true,
             });
         }
+        // A body seated or lying in a seat of another thing, asked to do a form here that walks (the lamp across the
+        // room, asked from the sofa), first rises from that seat, as a person gets up to go: its legs are the seat's, so
+        // the walk was refused `resource-held` (Eden indoor audit). Not from a thing that moves (a ride, a boat): its
+        // seats are left by its own forms. A form that starts with its own rise keeps it.
+        let seat = w.places.as_ref().and_then(|p| {
+            p.slots
+                .held_by(body)
+                .filter(|s| *s != node && !p.slots.moves(*s))
+        });
+        if node != body
+            && seat.is_some()
+            && steps.iter().any(|s| matches!(s, Step::WalkTo { .. }))
+            && !matches!(steps.first(), Some(Step::Rise))
+        {
+            steps.insert(0, Step::Rise);
+        }
         // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
         // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
         // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect

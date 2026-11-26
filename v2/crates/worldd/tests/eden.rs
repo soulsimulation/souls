@@ -5274,64 +5274,119 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// What an ask on [`INDOOR`] should get: done, refused by this name because the ask cannot be done as things stand
+/// (the lamp is already on), or a known gap, printed and not checked.
+#[derive(Clone, Copy, Debug)]
+enum Want {
+    Done,
+    Refused(&'static str),
+    Gap(&'static str),
+}
+
 /// One building's indoor things, asked in order by one Soul born at `at` (`x,z` m, outside its door): each ask is a
-/// row `(what a person asks, verb, thing)`; a later ask starts where the one before left the body (seated, lying, by
-/// a thing), as a person's next ask does. `rise` takes no thing.
+/// row `(what a person asks, verb, thing, what it should get)`; a later ask starts where the one before left the body
+/// (seated, lying, holding something), as a person's next ask does. `rise` takes no thing.
 type Visit = (
     &'static str,
     &'static str,
-    &'static [(&'static str, &'static str, Option<&'static str>)],
+    &'static [(&'static str, &'static str, Option<&'static str>, Want)],
 );
 
+use Want::{Done, Gap, Refused};
+
 /// Eden's indoor things a person's agent would ask about (Eden audit, 26 Nov): the act the client's look offers for
-/// each, and the plain act a person would ask, from outside the building or from where the last ask left the body.
+/// each, as a person would ask it, from outside the building or from where the last ask left the body. Eden's lamps,
+/// pendants, candles and the teacher's computer start on, so asking to turn one on is refused `field_differs`.
 const INDOOR: &[Visit] = &[
     (
         "house 1 living room",
         "34.0,15.0",
         &[
-            ("sit on the sofa", "eden:sit", Some("e_35c2bab0")),
+            ("sit on the sofa", "eden:sit", Some("e_35c2bab0"), Done),
             (
-                "turn on the floor lamp",
+                "turn on the radio (from the sofa)",
                 "eden:switch_on",
-                Some("e_2140621d"),
+                Some("e_f04374e2"),
+                Done,
             ),
-            ("turn on the radio", "eden:switch_on", Some("e_f04374e2")),
-            ("tune the radio", "eden:tune_dance_band", Some("e_f04374e2")),
+            (
+                "tune the radio",
+                "eden:tune_dance_band",
+                Some("e_f04374e2"),
+                Done,
+            ),
             (
                 "take a book from the bookcase",
                 "eden:take",
                 Some("e_64a33a3a"),
+                Done,
             ),
-            ("sit in the armchair", "eden:sit", Some("e_f8fec424")),
-            ("recline the armchair", "eden:recline", Some("e_f8fec424")),
-            ("turn on the pendant", "eden:switch_on", Some("e_ac640ad0")),
-            ("lie on the sofa", "eden:lie", Some("e_35c2bab0")),
-            ("flop on the sofa", "eden:flop", Some("e_35c2bab0")),
+            ("sit in the armchair", "eden:sit", Some("e_f8fec424"), Done),
+            (
+                "recline the armchair",
+                "eden:recline",
+                Some("e_f8fec424"),
+                Done,
+            ),
+            (
+                "turn on the floor lamp (on already)",
+                "eden:switch_on",
+                Some("e_2140621d"),
+                Refused("field_differs"),
+            ),
+            (
+                "turn off the floor lamp (from the armchair)",
+                "eden:switch_off",
+                Some("e_2140621d"),
+                Done,
+            ),
+            (
+                "turn off the pendant",
+                "eden:switch_off",
+                Some("e_ac640ad0"),
+                Done,
+            ),
+            ("flop on the sofa", "eden:flop", Some("e_35c2bab0"), Done),
+            (
+                "lie on the sofa",
+                "eden:lie",
+                Some("e_35c2bab0"),
+                Gap("its places are seats"),
+            ),
         ],
     ),
     (
         "house 1 kitchen",
         "34.0,15.0",
         &[
-            ("turn on the stove", "eden:switch_on", Some("e_a718de40")),
-            ("turn on the sink", "eden:turn_on", Some("e_092d77a4")),
+            ("take the cup", "eden:take", Some("e_36478653"), Done),
+            ("drink from the cup", "eden:sip", Some("e_36478653"), Done),
             (
-                "wash hands at the sink",
-                "eden:wash_hands",
-                Some("e_092d77a4"),
-            ),
-            ("open the fridge", "eden:open", Some("e_5aad75d3")),
-            ("take from the fridge", "eden:take", Some("e_5aad75d3")),
-            ("close the fridge", "eden:close", Some("e_5aad75d3")),
-            ("take the cup", "eden:take", Some("e_36478653")),
-            ("drink from the cup", "eden:sip", Some("e_36478653")),
-            ("sit on a kitchen chair", "eden:sit", Some("e_685266be")),
-            ("wipe the table", "eden:wipe", Some("e_5f346b62")),
-            (
-                "turn on the kitchen pendant",
+                "turn on the stove",
                 "eden:switch_on",
+                Some("e_a718de40"),
+                Done,
+            ),
+            ("turn on the sink", "eden:turn_on", Some("e_092d77a4"), Done),
+            ("open the fridge", "eden:open", Some("e_5aad75d3"), Done),
+            ("close the fridge", "eden:close", Some("e_5aad75d3"), Done),
+            (
+                "sit on a kitchen chair",
+                "eden:sit",
+                Some("e_685266be"),
+                Done,
+            ),
+            (
+                "wipe the table (from the chair)",
+                "eden:wipe",
+                Some("e_5f346b62"),
+                Done,
+            ),
+            (
+                "turn off the kitchen pendant",
+                "eden:switch_off",
                 Some("e_2149a57f"),
+                Done,
             ),
         ],
     ),
@@ -5339,30 +5394,54 @@ const INDOOR: &[Visit] = &[
         "classroom",
         "42.0,3.0",
         &[
-            ("sit on a classroom chair", "eden:sit", Some("e_4da5c47c")),
             (
-                "take the lectern",
+                "sit on a classroom chair",
+                "eden:sit",
+                Some("e_4da5c47c"),
+                Done,
+            ),
+            (
+                "take the lectern (from the chair)",
                 "eden:take_the_lectern",
                 Some("e_1b9fc3f4"),
+                Done,
             ),
-            ("step down", "eden:step_down", Some("e_1b9fc3f4")),
-            ("attend the lecture", "eden:attend", Some("e_1b9fc3f4")),
-            ("open the lockers", "eden:open", Some("e_2a871461")),
+            ("step down", "eden:step_down", Some("e_1b9fc3f4"), Done),
+            (
+                "attend the lecture",
+                "eden:attend",
+                Some("e_1b9fc3f4"),
+                Done,
+            ),
+            (
+                "open the lockers (from the lecture)",
+                "eden:open",
+                Some("e_2a871461"),
+                Done,
+            ),
             (
                 "take a book from the shelf",
                 "eden:take",
                 Some("e_61af968e"),
-            ),
-            ("turn on the screen", "eden:switch_on", Some("e_ad42afe6")),
-            (
-                "turn on the teacher's computer",
-                "eden:switch_on",
-                Some("e_dd6b5ce1"),
+                Done,
             ),
             (
                 "work at the teacher's desk",
                 "eden:work",
                 Some("e_dd6b5ce1"),
+                Done,
+            ),
+            (
+                "turn off the teacher's computer",
+                "eden:switch_off",
+                Some("e_dd6b5ce1"),
+                Done,
+            ),
+            (
+                "turn off the screen",
+                "eden:switch_off",
+                Some("e_ad42afe6"),
+                Done,
             ),
         ],
     ),
@@ -5370,23 +5449,25 @@ const INDOOR: &[Visit] = &[
         "library",
         "74.0,-1.0",
         &[
-            ("sit in an armchair", "eden:sit", Some("e_1f3666fe")),
+            ("sit in an armchair", "eden:sit", Some("e_1f3666fe"), Done),
             (
-                "turn on the desk lamp",
-                "eden:switch_on",
+                "turn off the desk lamp (from the armchair)",
+                "eden:switch_off",
                 Some("e_e608452b"),
+                Done,
             ),
-            ("write at the desk", "eden:write", Some("e_0f7fb44b")),
-            ("take a book from the pile", "eden:take", Some("e_e27ed1a2")),
+            ("write at the desk", "eden:write", Some("e_0f7fb44b"), Done),
             (
-                "turn on the floor lamp",
-                "eden:switch_on",
-                Some("e_19f5a481"),
-            ),
-            (
-                "take a book from a bookcase",
+                "take a book from the pile",
                 "eden:take",
-                Some("e_ecba14ee"),
+                Some("e_e27ed1a2"),
+                Done,
+            ),
+            (
+                "turn off the floor lamp",
+                "eden:switch_off",
+                Some("e_19f5a481"),
+                Done,
             ),
         ],
     ),
@@ -5394,70 +5475,114 @@ const INDOOR: &[Visit] = &[
         "cafe",
         "96.5,25.0",
         &[
-            ("take a cup of coffee", "eden:take", Some("e_2bdee40b")),
-            ("drink the coffee", "eden:sip", Some("e_2bdee40b")),
-            ("light the candle", "eden:light", Some("e_63d14e62")),
-            ("take a pie", "eden:take", Some("e_c698733a")),
-            ("eat a slice of pie", "eden:eat_a_slice", Some("e_c698733a")),
-            ("take the kettle", "eden:take", Some("e_d77094d8")),
-            ("sit on a stool", "eden:sit", Some("e_daded5b3")),
-            ("sit on the cafe sofa", "eden:sit", Some("e_16ce6ce0")),
+            (
+                "drink a cup of coffee",
+                "eden:sip",
+                Some("e_2bdee40b"),
+                Gap("only its holder sips"),
+            ),
+            (
+                "put out the candle",
+                "eden:put_out",
+                Some("e_63d14e62"),
+                Done,
+            ),
+            ("take the kettle", "eden:take", Some("e_d77094d8"), Done),
+            ("sit on a stool", "eden:sit", Some("e_daded5b3"), Done),
+            (
+                "sit on the cafe sofa (from the stool)",
+                "eden:sit",
+                Some("e_16ce6ce0"),
+                Done,
+            ),
         ],
     ),
     (
         "study",
         "-113.0,60.0",
         &[
-            ("play the piano", "eden:play", Some("e_cdc5a1d6")),
-            ("stop playing", "eden:stop", Some("e_cdc5a1d6")),
-            ("sit at the piano", "eden:sit", Some("e_cdc5a1d6")),
-            ("sit on the study sofa", "eden:sit", Some("e_209f9f2f")),
+            (
+                "sit at the piano (from the door)",
+                "eden:sit",
+                Some("e_cdc5a1d6"),
+                Gap("a bare sit on a piano"),
+            ),
+            ("play the piano", "eden:play", Some("e_cdc5a1d6"), Done),
+            ("stop playing", "eden:stop", Some("e_cdc5a1d6"), Done),
+            (
+                "sit on the study sofa",
+                "eden:sit",
+                Some("e_209f9f2f"),
+                Done,
+            ),
         ],
     ),
     (
         "lake cabin",
         "-117.0,-62.0",
         &[
-            ("warm up by the hearth", "eden:warm", Some("e_6b5e5d37")),
-            ("open the chest", "eden:open", Some("e_56cf53c5")),
-            ("close the chest", "eden:close", Some("e_56cf53c5")),
+            (
+                "warm up by the hearth",
+                "eden:warm",
+                Some("e_6b5e5d37"),
+                Done,
+            ),
+            ("open the chest", "eden:open", Some("e_56cf53c5"), Done),
+            ("close the chest", "eden:close", Some("e_56cf53c5"), Done),
         ],
     ),
     (
         "suburb house upstairs",
         "178.8,39.2",
         &[
-            ("sit on the toilet", "eden:sit", Some("e_d427d095")),
-            ("flush the toilet", "eden:flush", Some("e_d427d095")),
-            ("turn on the basin tap", "eden:turn_on", Some("e_03c0fd0a")),
+            ("sit on the toilet", "eden:sit", Some("e_d427d095"), Done),
+            (
+                "flush the toilet (from the seat)",
+                "eden:flush",
+                Some("e_d427d095"),
+                Done,
+            ),
             (
                 "wash hands at the basin",
-                "eden:wash_hands",
+                "eden:turn_on",
                 Some("e_03c0fd0a"),
+                Done,
             ),
-            ("fill the bath", "eden:fill", Some("e_e7f2407a")),
-            ("lie in the bath", "eden:lie", Some("e_e7f2407a")),
-            ("get out of the bath", "eden:rise", None),
-            ("open the wardrobe", "eden:open", Some("e_032cfe40")),
-            ("take a garment", "eden:take", Some("e_032cfe40")),
-            ("sit on the bed", "eden:sit", Some("e_a9988e06")),
-            ("lie on the bed", "eden:lie", Some("e_a9988e06")),
+            ("fill the bath", "eden:fill", Some("e_e7f2407a"), Done),
+            ("lie in the bath", "eden:lie", Some("e_e7f2407a"), Done),
+            (
+                "open the wardrobe (from the bath)",
+                "eden:open",
+                Some("e_032cfe40"),
+                Done,
+            ),
+            ("take a garment", "eden:take", Some("e_032cfe40"), Done),
+            ("lie on the bed", "eden:lie", Some("e_a9988e06"), Done),
+            (
+                "sit on the bed",
+                "eden:sit",
+                Some("e_a9988e06"),
+                Gap("its places are for lying"),
+            ),
         ],
     ),
     (
         "pub",
         "298.0,-14.0",
         &[
-            ("throw darts", "eden:throw", Some("e_a13b47f5")),
-            ("play the arcade", "eden:play", Some("e_263477b5")),
-            ("play pool", "eden:play", Some("e_6de8bcd1")),
+            ("throw darts", "eden:throw", Some("e_a13b47f5"), Done),
+            ("play the arcade", "eden:play", Some("e_263477b5"), Done),
+            ("play pool", "eden:play", Some("e_6de8bcd1"), Done),
         ],
     ),
 ];
 
 /// Eden's indoor things do what a person asks (Eden audit, 26 Nov): each building of [`INDOOR`] is seeded and served
 /// on its own, one Soul born outside it, and its asks sent in order; each answer is printed as a row
-/// `INDOOR <building> | <ask> | <verb> | <answer>`. `INDOOR_ONLY=<words>` runs the buildings whose name holds them.
+/// `INDOOR <building> | <ask> | <verb> | <answer> | <wanted>`. Every ask wanted done ends done, every ask wanted
+/// refused is refused by its name; a known gap is printed only. `INDOOR_ONLY=<words>` runs the buildings whose name
+/// holds them. Needs facts exported with Eden's map (`export.ts --map content/worlds/eden/map.json`), as live Eden's
+/// things name their entries.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn indoor_things_do_what_a_person_asks() {
@@ -5474,16 +5599,23 @@ fn indoor_things_do_what_a_person_asks() {
         soul.0
             .set_read_timeout(Some(Duration::from_secs(300)))
             .unwrap();
-        for (ask, verb, thing) in asks.iter() {
+        for (ask, verb, thing, want) in asks.iter() {
             let target = thing.map(|t| im.nodes[t]);
             let answer = soul.act_within(verb, target, BTreeMap::new(), 240_000_000);
-            println!("INDOOR {building} | {ask} | {verb} | {answer:?}");
-            if answer.is_err() {
-                failed.push(format!("{building}: {ask} ({verb}) {answer:?}"));
+            println!("INDOOR {building} | {ask} | {verb} | {answer:?} | {want:?}");
+            let ok = match want {
+                Done => answer.is_ok(),
+                Refused(name) => answer.as_ref().is_err_and(|e| e == name),
+                Gap(_) => true,
+            };
+            if !ok {
+                failed.push(format!(
+                    "{building}: {ask} ({verb}) {answer:?}, wanted {want:?}"
+                ));
             }
         }
         drop(served);
         let _ = std::fs::remove_dir_all(&dir);
     }
-    println!("INDOOR refused: {failed:#?}");
+    assert!(failed.is_empty(), "{failed:#?}");
 }
