@@ -17,7 +17,6 @@ const exec = promisify(execFile);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const names = ['Cedar', 'Maple', 'Willow', 'Birch', 'Aspen'];
-const places = [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4], [0, 0]];
 
 export function partyTemplate(jukeboxEntry) {
   assert.equal(jukeboxEntry.kind, 'eden:jukebox', 'use the shipped jukebox');
@@ -41,7 +40,7 @@ export function completed(answer, label) {
 }
 
 /** One member leaving must not end the other members' dance. The camera records this entire sequence. */
-export async function performParty({ seats, floor, jukebox, record = () => {}, pause = sleep }) {
+export async function performParty({ seats, jukebox, record = () => {}, pause = sleep }) {
   assert.equal(seats.length, 5, 'the rehearsal uses five independent Souls');
   const [operator, ...guests] = seats;
   const command = async (seat, ...words) => {
@@ -51,7 +50,7 @@ export async function performParty({ seats, floor, jukebox, record = () => {}, p
   };
   const act = async (seat, form, target, ...args) => completed(await command(seat, 'act', `${form}:${target}`, ...args, '--wait'), form);
   const body = async (seat, form) => completed(await command(seat, 'act', form, '--wait'), form);
-  const walk = (seat, [x, z]) => act(seat, 'walk', floor, `x=${x}`, `z=${z}`);
+  const walk = (seat, target) => act(seat, 'walk', target);
   const leave = async (seat) => completed(await command(seat, 'together', 'leave', 'dance-together'), 'leave dance');
   async function spoken(speaker, listener, words, gesture) {
     const sent = await command(speaker, 'say', words, '--to', listener.body, '--gesture', gesture);
@@ -72,12 +71,11 @@ export async function performParty({ seats, floor, jukebox, record = () => {}, p
       assert(Date.now() < until, 'the other Soul must actually hear the words'); await pause(100);
     }
   }
-  // Space the initial greetings through ordinary walks; the activity chooses its own dance places later.
-  for (let index = 0; index < seats.length; index++) await walk(seats[index], places[index]);
   await spoken(operator, guests[0], 'Welcome! Would you like to dance?', 'wave');
   await spoken(guests[0], operator, 'Yes, let us dance together!', 'nod');
   await act(operator, 'switch_on', jukebox);
-  await walk(operator, places[0]);
+  // Return to the guests through the supported walk-to-body form before offering the dance.
+  await walk(operator, guests[0].body);
   completed(await command(operator, 'together', 'offer', 'dance-together', ...guests.map((seat) => seat.body)), 'offer dance');
   for (const guest of guests) completed(await command(guest, 'together', 'accept', 'dance-together'), 'accept dance');
   const together = await command(operator, 'look');
@@ -87,7 +85,7 @@ export async function performParty({ seats, floor, jukebox, record = () => {}, p
   await leave(leaving);
   // A leave releases a move at its phase boundary. Keep that visible rather than cutting to the next action.
   await pause(850);
-  await walk(leaving, [3, 3]);
+  await walk(leaving, jukebox);
   await body(leaving, 'wave');
   const remaining = await command(operator, 'look');
   assert((remaining.doing ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the other four keep dancing after one leaves');
@@ -96,7 +94,7 @@ export async function performParty({ seats, floor, jukebox, record = () => {}, p
   await leave(operator);
   await pause(850);
   await act(operator, 'switch_off', jukebox);
-  await walk(operator, [2, 3]);
+  await walk(operator, guests[0].body);
   await body(operator, 'nod');
   const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
   assert(final.every((look) => !(look.doing ?? []).some((line) => line.includes('dance-together'))), 'all members leave the dance');
@@ -163,7 +161,7 @@ export async function rehearse({ directory, startFile = null, onReady = () => {}
       for (const until = Date.now() + 300000; !existsSync(startFile);) { assert(Date.now() < until, 'the recorder did not start'); await sleep(100); }
     }
     report.demonstrationStart = Date.now(); save();
-    report.result = await performParty({ seats, floor, jukebox, record });
+    report.result = await performParty({ seats, jukebox, record });
     report.complete = true; report.demonstrationEnd = Date.now(); save();
     await sleep(2000);
     return report;
