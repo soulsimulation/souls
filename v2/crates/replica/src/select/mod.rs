@@ -357,16 +357,43 @@ pub fn nearest_in(tree: &Tree, target: Id, frame: Id, at: Vec3) -> R<(Vec3, Vec3
 }
 
 /// Whether `inner`'s shape lies within `outer`'s area, on the level: every point of its outline, its line or its point
-/// inside it or on its edge. Never within a line or a point.
+/// inside it or on its edge, and none of its sides crossing `outer`'s outline (an outline with a notch). Never within a
+/// line or a point.
 pub fn within(tree: &Tree, inner: Id, outer: Id) -> R<bool> {
     let v = View { tree };
-    let (i, o) = (v.shape(inner)?, v.shape(outer)?);
-    let points: &[Xz] = match &i {
-        Shape::Point(p) => std::slice::from_ref(p),
-        Shape::Line(l) => l,
-        Shape::Area(a) => a,
+    Ok(shape_within(&v.shape(inner)?, &v.shape(outer)?))
+}
+
+/// [`within`] on shapes in one frame.
+fn shape_within(i: &Shape, o: &Shape) -> bool {
+    let Shape::Area(out) = o else { return false };
+    let (points, closed): (&[Xz], bool) = match i {
+        Shape::Point(p) => (std::slice::from_ref(p), false),
+        Shape::Line(l) => (l, false),
+        Shape::Area(a) => (a, true),
     };
-    Ok(matches!(o, Shape::Area(_)) && points.iter().all(|p| gap_to(&o, *p) == 0))
+    // Which side of a→b point p is on: -1, 0 or 1.
+    let side = |a: Xz, b: Xz, p: Xz| {
+        let c = i128::from(b[0] - a[0]) * i128::from(p[1] - a[1])
+            - i128::from(b[1] - a[1]) * i128::from(p[0] - a[0]);
+        c.signum()
+    };
+    let sides = |s: &[Xz], closed: bool| -> Vec<(Xz, Xz)> {
+        let n = if closed {
+            s.len()
+        } else {
+            s.len().saturating_sub(1)
+        };
+        (0..n).map(|k| (s[k], s[(k + 1) % s.len()])).collect()
+    };
+    let crosses = |(a, b): (Xz, Xz), (c, d): (Xz, Xz)| {
+        side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0
+    };
+    let edges = sides(out, true);
+    points.iter().all(|p| gap_to(o, *p) == 0)
+        && sides(points, closed)
+            .into_iter()
+            .all(|s| edges.iter().all(|e| !crosses(s, *e)))
 }
 
 /// [`gap`] on a shape in the root's frame.
@@ -938,6 +965,28 @@ mod tests {
             gap_to(&Shape::Point([0, 0]), [3_000_000, 4_000_000]),
             5_000_000
         );
+    }
+
+    /// First-day round 2: an area is within another when its corners are inside it and no side of it crosses the
+    /// other's outline: a strip across an L's notch has its corners inside the L and is not within it.
+    #[test]
+    fn an_area_is_within_another_only_when_no_side_crosses_its_outline() {
+        let m = |x: i64, z: i64| [x * 1_000_000, z * 1_000_000];
+        let ell = Shape::Area(vec![
+            m(0, 0),
+            m(10, 0),
+            m(10, 4),
+            m(4, 4),
+            m(4, 10),
+            m(0, 10),
+        ]);
+        let inside = Shape::Area(vec![m(1, 1), m(9, 1), m(9, 3), m(1, 3)]);
+        let across = Shape::Area(vec![m(2, 2), m(8, 2), m(8, 3), m(3, 8), m(2, 8)]);
+        assert!(shape_within(&inside, &ell));
+        assert!(!shape_within(&across, &ell), "across the notch");
+        assert!(!shape_within(&Shape::Line(vec![m(8, 2), m(2, 8)]), &ell));
+        assert!(shape_within(&Shape::Point(m(2, 8)), &ell));
+        assert!(!shape_within(&ell, &Shape::Line(vec![m(0, 0), m(9, 9)])));
     }
 
     #[test]

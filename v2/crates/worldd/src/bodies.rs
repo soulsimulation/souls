@@ -1360,10 +1360,12 @@ impl Bodies {
                 .is_some();
             // First-day round 2 (0.139): a district round water (a harbour, its middle the sea between its piers) is
             // walked into by the nearest area it holds whose middle the walker may stand on and reach (its
-            // boardwalk), the same way; stood back from, it ended over its border, in the park beside it.
+            // boardwalk), the same way; stood back from, it ended over its border, in the park beside it. Only an
+            // area within [`INNER_REACH`] of the edge the walker comes to: a river's bridge far along it is not.
             if area
                 && !walkable
-                && let Some(inner) = inner_ground(&mut self.town, body, node, ground, here, from)?
+                && let Some(inner) =
+                    inner_ground(&mut self.town, body, node, ground, here, edge, from)?
             {
                 return self.goal(body, inner, None);
             }
@@ -2742,15 +2744,23 @@ fn place_half_width(tree: &Tree, node: Id) -> Option<(i64, bool)> {
     })
 }
 
+/// How far from the point of a place's edge nearest the walker an area within it may lie and still be walked into in
+/// its stead ([`inner_ground`]), µm: the harbour's boardwalk lies 9.5 m in from the edge a walker from the park comes
+/// to; the west river's stone bridge, 200 m along the river from a walker by the fishing hamlet, is not where a walk to
+/// the river ends.
+const INNER_REACH: i64 = 20_000_000;
+
 /// The area within area `node` (a child of `ground` too, [`place_half_width`]) whose middle the walker at `from` may
-/// stand on and reach, nearest the walker's point `here` (`ground`'s frame), the first by id on a tie; none when no
-/// such area lies within it. Read off the tree first, then checked on the walker's map.
+/// stand on and reach, within [`INNER_REACH`] of `edge` (the point of `node`'s edge nearest the walker), nearest the
+/// walker's point `here` (both `ground`'s frame), the first by id on a tie; none when no such area lies within it.
+/// Read off the tree first, then checked on the walker's map.
 fn inner_ground(
     town: &mut Town,
     body: Id,
     node: Id,
     ground: Id,
     here: Vec3,
+    edge: Vec3,
     from: (Id, Vec3),
 ) -> R<Option<Id>> {
     let tree = &town.tree;
@@ -2761,6 +2771,7 @@ fn inner_ground(
         .iter()
         .filter_map(|c| tree.node(*c).map(|n| n.id()))
         .filter(|c| *c != node && place_half_width(tree, *c) == Some((0, true)))
+        .filter(|c| select::gap(tree, *c, ground, edge).is_ok_and(|g| g <= INNER_REACH))
         .filter(|c| select::within(tree, *c, node).unwrap_or(false))
         .filter_map(|c| {
             let (_, middle) = select::nearest_in(tree, c, ground, here).ok()?;
