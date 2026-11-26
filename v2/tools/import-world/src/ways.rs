@@ -31,6 +31,8 @@ const SPEED: i64 = 1_400_000;
 /// A walk with no answer after this much of the world's time never ends: ten minutes, eight times the longest walk
 /// across the Mars campus or Eden at walking pace.
 pub const WAIT: Micros = 600_000_000;
+/// A walk back that ends done ends within this of the arrival point, mm: the standing spot granted by it.
+const NEAR: i128 = 10_000;
 /// A floor's piece smaller than this, µm², holds no standing body worth a walk (a sliver between two solids).
 const SMALLEST: i128 = 250_000_000_000;
 
@@ -244,7 +246,20 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             continue;
         }
         let there = *r.controller.body(who).ok_or("the walker's body")?;
-        if let Err(why) = walk(&mut r, &mut t, there, Target::new(ground, arrival), order(2)?) {
+        let back = walk(&mut r, &mut t, there, Target::new(ground, arrival), order(2)?).and_then(|()| {
+            // A walk that ends done ends by the arrival point, on the open ground.
+            let b = r.controller.body(who).ok_or("the walker's body")?;
+            let (dx, dz) = (b.pose.position.x - arrival.x, b.pose.position.z - arrival.z);
+            let off = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt() / 1000;
+            match (b.pose.frame.node == ground, off <= NEAR) {
+                (true, true) => Ok(()),
+                (on, _) => Err(format!(
+                    "ended done {off} mm from it{}",
+                    if on { "" } else { ", off the open ground" }
+                )),
+            }
+        });
+        if let Err(why) = back {
             out.one_way.push(OneWay {
                 name: label,
                 why: format!("the walk back to the arrival point: {why}"),
