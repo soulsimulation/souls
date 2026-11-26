@@ -2537,7 +2537,9 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
     b.until_moving(body, 1);
     let sent = b.now;
     let take = bind(&entry, &form).expect("binds");
-    let span = super::span(&take, &limits);
+    // Asked while still in the chair, the take walks, so its run rises first (done at once once the old run's rise
+    // has stood the body up): its span is the rise's and the take's.
+    let span = super::span(&[vec![Step::Rise], take.clone()].concat(), &limits);
     let Asked::Started(new) = b
         .steps(body, thing, take, intent(body, 1), limits)
         .expect("accepted")

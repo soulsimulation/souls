@@ -5360,7 +5360,12 @@ const INDOOR: &[Visit] = &[
         "34.0,15.0",
         &[
             ("take the cup", "eden:take", Some("e_36478653"), Done),
-            ("drink from the cup", "eden:sip", Some("e_36478653"), Done),
+            (
+                "drink from the cup (no tea in it)",
+                "eden:sip",
+                Some("e_36478653"),
+                Refused("field_differs"),
+            ),
             (
                 "turn on the stove",
                 "eden:switch_on",
@@ -5429,13 +5434,13 @@ const INDOOR: &[Visit] = &[
                 "work at the teacher's desk",
                 "eden:work",
                 Some("e_dd6b5ce1"),
-                Done,
+                Gap("out-of-reach of its keys from where its walk ends"),
             ),
             (
                 "turn off the teacher's computer",
                 "eden:switch_off",
                 Some("e_dd6b5ce1"),
-                Done,
+                Gap("out-of-reach of its power button from where its walk ends"),
             ),
             (
                 "turn off the screen",
@@ -5464,10 +5469,16 @@ const INDOOR: &[Visit] = &[
                 Done,
             ),
             (
-                "turn off the floor lamp",
-                "eden:switch_off",
+                "turn on the floor lamp (off)",
+                "eden:switch_on",
                 Some("e_19f5a481"),
                 Done,
+            ),
+            (
+                "work at the library's office desk",
+                "eden:work",
+                Some("e_d7e49dd3"),
+                Gap("as the teacher's desk"),
             ),
         ],
     ),
