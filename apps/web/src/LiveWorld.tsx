@@ -110,7 +110,7 @@ import { setFleeSources, AFLOAT } from './gen-mesh/motion.ts';
 import { WorldLightning } from './WorldLightning.ts';
 import { worldArrivalPose } from './arrival-shot.ts';
 import { anyPersonInView } from './people-in-view.ts';
-import { setAssetLoader } from './gen-mesh/gltf-assets.ts';import { worldResolution } from './adaptive-resolution.ts';import { browserQuality } from './quality-tier.ts';import { WorldDistanceDetail } from './WorldDistanceDetail.ts';import { WorldMeshLod, PHONE_MESH_LOD, DESKTOP_MESH_LOD, workerSimplifier, type Simplifier } from './WorldMeshLod.ts';import { WorldFarStandIns, PHONE_STAND_INS, rendererSnapshotter } from './WorldFarStandIns.ts';import { captureTexturePreparation, fitTextures, compileSceneAsync, setTextureRenderer, warmReadyProgramMetadata } from './gen-mesh/texture-budget.ts';
+import { setAssetLoader } from './gen-mesh/gltf-assets.ts';import { worldResolution, rendererName, softwareRenderer } from './adaptive-resolution.ts';import { browserQuality } from './quality-tier.ts';import { WorldDistanceDetail } from './WorldDistanceDetail.ts';import { WorldMeshLod, PHONE_MESH_LOD, DESKTOP_MESH_LOD, workerSimplifier, type Simplifier } from './WorldMeshLod.ts';import { WorldFarStandIns, PHONE_STAND_INS, rendererSnapshotter } from './WorldFarStandIns.ts';import { captureTexturePreparation, fitTextures, compileSceneAsync, setTextureRenderer, warmReadyProgramMetadata } from './gen-mesh/texture-budget.ts';
 // P1 phones: the god panel and the constitution card are lazy chunks, mounted once the arrival card has gone (20 s cap), or
 // at once when the landing URL carries something for the panel (#join, #approve/…, an offer or pairing link, a preview)
 const GodPanel=lazy(()=>import('./GodPanel.tsx').then(m=>({default:m.GodPanel})));
@@ -124,7 +124,7 @@ import { composeVisibleViewport, viewportNote, visibleViewport, type ViewportIns
 import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
 import { cardLook, fadeCard } from './WorldCardSight.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
-import {paintSpeakingDot,speakingNow} from './dialogue-speaking.ts';
+import {bubbleLift,paintSpeakingDot,speakingClock,speakingNow} from './dialogue-speaking.ts';
 import {WorldGames} from './WorldGames.ts';
 import {parsePlatformFloors,platformFloorOffset,type PlatformFloor} from '../../../mars/viewer/lib/platform-floor.ts';
 import {WorldPlatforms} from './WorldPlatforms.ts';
@@ -336,8 +336,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // only when none of them stands in the arrival camera's view (otherwise the card waits for them as before).
     const peopleAsk=new URLSearchParams(location.search).get('people'),peopleRule=((q:string|null)=>q==='wait'?false:q==='later'?true:quality.tier==='phone'&&!shotMode)(peopleAsk);
     let peopleLater=peopleRule&&(newWorld||peopleAsk!=='wait');const peopleByView=peopleLater&&!newWorld&&peopleAsk!=='later';
-    const adaptive=worldResolution(renderer,Math.min(devicePixelRatio,quality.maxPixelRatio),newWorld,shotMode);if(adaptive)(window as unknown as {__soulsAdaptive?:unknown}).__soulsAdaptive=adaptive;  // W2b: shot mode stays at pixel ratio 1; phones cap the ratio (quality tier); ordinary worlds retain adaptive resolution
-    renderer.shadowMap.enabled = true;
+    // no GPU (SwiftShader, llvmpipe): a lower pixel ratio and no shadows, or the page draws at about 2 fps; never in shot mode
+    const softGl=!shotMode&&softwareRenderer(rendererName(renderer));
+    const adaptive=worldResolution(renderer,Math.min(devicePixelRatio,quality.maxPixelRatio),newWorld,shotMode,softGl);if(adaptive)(window as unknown as {__soulsAdaptive?:unknown}).__soulsAdaptive=adaptive;  // W2b: shot mode stays at pixel ratio 1; phones cap the ratio (quality tier); ordinary worlds retain adaptive resolution
+    (window as unknown as {__soulsSoftwareGl?:boolean}).__soulsSoftwareGl=softGl;
+    renderer.shadowMap.enabled = !softGl;
     // look pass for entity worlds: occlusion, highlight roll-off + night exposure, material detail (rendering/WorldLook.ts)
     const look=lookSettings(location.search,quality.tier,newWorld),post=look.ao?new WorldPost():null;if(look.enabled)renderer.toneMapping=THREE.CustomToneMapping;setMaterialDetail(look.detail);(window as unknown as {__soulsLook?:unknown}).__soulsLook={settings:look,post:post?.params??null,get failed(){return post?.failed??null;}};
     renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -412,7 +415,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       extent:()=>(entityLayer.active?entityLayer.groundExtent():null)??(expansion?EDEN_TERRAIN_EXTENT:geometry.bounds),home:()=>{context.current.setCameraMode('manual');controlsApi.current?.overview();}});scene.add(rts.marker);  // VF2: your camera (keys, pivot, double-click)
     // #891: on a touch screen in Free, the floating stick walks, one finger looks, pinch glides, two fingers rise, double-tap flies (all through rts)
     const touchFree=new WorldTouchFree(renderer.domElement,host,{camera:rts,free:()=>context.current.cameraMode==='manual'&&context.current.manualNavigation==='orbit'&&!chipFlight(),soulAt:(x,y)=>hover.pick(x,y)?.kind==='soul'});
-    const speechLayer=new SpectatorSpeechLayer();scene.add(speechLayer.group);let speeches:SpectatorSpeech[]=[];const speechHead=new THREE.Vector3();
+    const speechLayer=new SpectatorSpeechLayer();scene.add(speechLayer.group);let speeches:SpectatorSpeech[]=[];const speechHead=new THREE.Vector3();let paintedSpeaking=-1;
     // W3 fading visuals: Core C9 state when it ships; meanwhile a ?fade= preview override.
     // W2/W5 preview: ?snapshots=1 exposes on-demand low-res JPEG eyes/overhead/map frames (steward queue C10 will call these).
     if(new URLSearchParams(location.search).has('snapshots')){const soulAt=(name:string)=>{const c=context.current,soul=[...c.sim.conn.replica.souls.values()].find(x=>x.name.toLowerCase()===name.toLowerCase()),p=soul?shown.current.entities[soul.entityId]:null;return soul&&p?{soul,p:p.p,yaw:p.yaw??0}:null;};
@@ -502,7 +505,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const dressForkLand=(camp:THREE.Object3D)=>{if(!marsFork)return;forkLandLoad??=import('./WorldMarsForkLand.ts').then(m=>{if(abort.signal.aborted)return;forkLand=m.createForkLand(0);scene.add(forkLand.group);(window as unknown as {__soulsForkLand?:unknown}).__soulsForkLand=forkLand.stats;},e=>console.warn('mars fork land could not be drawn',e));void forkLandLoad.then(()=>forkLand?.dress(camp));};let atmosphereSeconds=0,coveredNoted=false;const reducedMotionQuery=typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):null;
     // #1649: a world clock that jumps 20+ minutes (an owner's zone change, a set hour) eases the sky over a few seconds; one easer per drawn clock
     const lightEase=clockEaser(),skyEase=clockEaser(),cutClock=()=>!!past.current||shotMode||!!reducedMotionQuery?.matches;
-    const light = (adopted?.light as Daylight|undefined) ?? new Daylight(scene,{bakedShadow:quality.bakedShadows});if(quality.shadowMapSize!==light.sun.shadow.mapSize.x)light.sun.shadow.mapSize.set(quality.shadowMapSize,quality.shadowMapSize);
+    const light = (adopted?.light as Daylight|undefined) ?? new Daylight(scene,{bakedShadow:quality.bakedShadows&&!softGl});if(quality.shadowMapSize!==light.sun.shadow.mapSize.x)light.sun.shadow.mapSize.set(quality.shadowMapSize,quality.shadowMapSize);
     // PERF-BAKED-SHADOWS: still things cast into the sun's cached map (redrawn when the sun turns, the view steps or a still thing changes); the per-frame map draws what moves
     const sunCache=light.baked?new SunShadowCache(renderer,scene,light.sun,light.baked,{enabled:()=>look.enabled&&look.follow&&entityLayer.active&&!expansion&&!eyes&&entityLayer.freezeSettled,statics:()=>{const out=entityLayer.shadowStatics([]);out.push(entityBatches.group,staticBatches.group);return out;},revision:()=>entityLayer.shadowRevision}):null;
     const broadcast = new WorldBroadcast();if(earlyWanted)broadcast.openingShown();  // phone arrival: the card lifted over the opening view seconds ago; the live world opens on its Souls
@@ -1050,7 +1053,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         if((refresh||!soulAvatars.images.has(soul.id))&&!eyes&&!soul.profilePhoto&&soulAvatars.wanted.has(soul.id))void portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
-        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : 1.9), pos[2]); l.bubble.visible = true;   // its tail just over the head
+        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : bubbleLift(at.entities[soul.entityId]?.activity)), pos[2]); l.bubble.visible = true;   // its tail just over the head
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
         l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]);
         l.obj.visible = true;
@@ -1091,6 +1094,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');
           const chip=l.obj.element.querySelector('[data-channel-chip]') as HTMLElement|null;if(!chip)continue;const sp=latest.get(id);
           if(!sp||context.current.publishSpeechAnchors){chip.style.display='none';continue;}const c=channelChip(sp,nameOf);chip.textContent=c.text;chip.style.color=c.colour;chip.style.display='';}}
+      // a new line shows on the next frame, not at the next refresh (trial of 0.137: the bubble came about 2.5 s after say)
+      else if(speakingClock.version!==paintedSpeaking)for(const [id,l] of labels){const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');}
+      paintedSpeaking=speakingClock.version;
       speechLayer.update(speeches,Date.now(),soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId,e=id?at.entities[id]:null;if(!id||!e)return null;const body=recordedBody(records[id]?.body,e.state),b=body?.family==='floater'?floaterBody(body):null;return speechHead.set(e.p[0],e.p[1]+(b?b.hoverHeight+b.radius+.05:1.95),e.p[2]).clone();});
       for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; l.bubble.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); labels.delete(id); } }
       if (!focus && thingId) {
@@ -1295,7 +1301,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
         else speechVisibility.reset();
         emitState(viewerPresentation({room:context.current.edenExpansion?exploreRoom(camera.position.toArray(),EDEN_VIEWER_PLACES,s.conn.replica.souls,at.entities):null,assetDownloads:downloads.snapshot(),soulIds:[...groupSelection],
           drawnTick: drawnTick.current, history: !!past.current, playing: past.current?.playing ?? false,
-          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.held,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
+          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.turnedAway,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
           loading: initialGate?.snapshot().stage!=='ready'||context.current.loading || (!at.take && renderer.domElement.dataset.sceneBinding!=='unavailable'),
           unavailableReason: context.current.graphicsUnavailable ?? context.current.sim.streamNotice ?? sceneReason ?? (coveredNote || (brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null)),
           speechAnchors,
