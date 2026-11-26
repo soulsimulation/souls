@@ -1,10 +1,16 @@
 // Time to Live: the stream reader the page's first phase starts is handed to the bridge with what it read meanwhile
 // (early-stream.ts).
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-(globalThis as { location?: unknown }).location ??= new URL('https://example.invalid/w/eden/');
+// this file's own page address, whatever the suite's loader set (web-loader.mjs: http://fixture.invalid/w/eden/),
+// put back when it is done; world-path.ts reads it once, at import, so it is set first
+const g = globalThis as { location?: unknown }, suiteLocation = Object.getOwnPropertyDescriptor(g, 'location');
+Object.defineProperty(g, 'location', { value: new URL('https://example.invalid/w/eden/'), configurable: true, writable: true });
+after(() => { if (suiteLocation) Object.defineProperty(g, 'location', suiteLocation); else delete g.location; });
 const { EarlyReader, claimEarlyReader, startEarlyReader, takeEarlyScene, v2Stream } = await import('./early-stream.ts');
+/** Leaves no early reader, timer or scene request behind a test, whatever it asserted. */
+async function settle() { claimEarlyReader('/s/none/', ''); await takeEarlyScene(); }
 
 /** A stand-in for the reader's worker: what the page posted to it, and a way to post from it. */
 class FakeWorker extends EventTarget {
@@ -82,9 +88,10 @@ test('only a page whose config names a v2 stream starts one; the bridge takes it
     assert.equal(startEarlyReader(() => new FakeWorker()), null, 'no stream named: nothing started');
     w.__simConfig = { v2Stream: '/s/w/x-0/views/a/b/', v2Replica: '/w/eden/v2/replica/1/replica.js' };
     assert.equal(v2Stream(), '/s/w/x-0/views/a/b/');
-    const made: FakeWorker[] = [];
-    const reader = startEarlyReader((replica) => { assert.equal(replica, 'https://example.invalid/w/eden/v2/replica/1/replica.js'); const f = new FakeWorker(); made.push(f); return f; });
+    const made: FakeWorker[] = [], replicas: string[] = [];
+    const reader = startEarlyReader((replica) => { replicas.push(replica); const f = new FakeWorker(); made.push(f); return f; });
     assert.ok(reader);
+    assert.deepEqual(replicas, ['https://example.invalid/w/eden/v2/replica/1/replica.js']);
     assert.deepEqual(made[0].posted, [{ stream: 'https://example.invalid/s/w/x-0/views/a/b/' }]);
     assert.deepEqual(scenes, ['/w/eden/v1/scene'], 'the scene leaves with it');
     assert.deepEqual(await takeEarlyScene(), { renderSceneRef: { rulesVersion: 'v' } });
@@ -92,10 +99,10 @@ test('only a page whose config names a v2 stream starts one; the bridge takes it
     assert.equal(claimEarlyReader('/s/w/x-0/views/a/b/', 'https://example.invalid/w/eden/v2/replica/1/replica.js'), reader);
     assert.equal(claimEarlyReader('/s/w/x-0/views/a/b/', 'https://example.invalid/w/eden/v2/replica/1/replica.js'), null, 'claimed once');
     reader!.terminate();
-  } finally { Object.assign(w, saved); delete w.__simConfig; }
+  } finally { await settle(); Object.assign(w, saved); delete w.__simConfig; }
 });
 
-test('a reader for another stream is stopped, not handed over', () => {
+test('a reader for another stream is stopped, not handed over', async () => {
   const w = globalThis as { window?: unknown; Worker?: unknown; __simConfig?: unknown; fetch?: unknown };
   const saved = { window: w.window, Worker: w.Worker, fetch: w.fetch };
   w.window = globalThis; w.Worker = FakeWorker; w.fetch = undefined;
@@ -107,5 +114,5 @@ test('a reader for another stream is stopped, not handed over', () => {
     assert.equal(takeEarlyScene(), null, 'no old views: no scene asked for');
     assert.equal(claimEarlyReader('/s/w/z-0/views/a/b/', reader!.replica), null);
     assert.equal((made as unknown as FakeWorker).terminated, true);
-  } finally { Object.assign(w, saved); delete w.__simConfig; }
+  } finally { await settle(); Object.assign(w, saved); delete w.__simConfig; }
 });
