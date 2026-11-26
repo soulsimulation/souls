@@ -417,10 +417,61 @@ async fn a_socket_replaced_by_a_newer_sign_in_is_closed_as_replaced() {
     })
     .await
     .unwrap();
-    assert_eq!(close, Some((gatewayd::REPLACED, "agent.replaced".to_owned())));
+    assert_eq!(
+        close,
+        Some((gatewayd::REPLACED, "agent.replaced".to_owned()))
+    );
     // The newer socket goes on.
     put(&mut second, intent(soul(21), 1)).await;
     assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(1));
+}
+
+/// A sign-in that asks only if the Soul is free (`?free=1`, a client another took the Soul from) is closed as
+/// `agent.held` while a live socket holds it, and that socket goes on; once none holds it, the same sign-in takes it.
+#[tokio::test]
+async fn a_sign_in_that_asks_if_free_never_takes_the_soul_from_a_live_socket() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(22));
+    let r = start("free", tokens).await;
+    let free = format!("{}?{}", r.url, gatewayd::FREE);
+    let (mut holder, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let (mut asking, _) = tokio_tungstenite::connect_async(&free).await.unwrap();
+    put(&mut asking, hello()).await;
+    next(&mut asking).await.unwrap();
+    put(&mut asking, sign_in(t.reveal(), None, None)).await;
+    let close = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match asking.next().await {
+                Some(Ok(Message::Close(c))) => {
+                    return c.map(|c| (u16::from(c.code), c.reason.to_string()));
+                }
+                Some(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(close, Some((gatewayd::REPLACED, "agent.held".to_owned())));
+    // The holder goes on.
+    put(&mut holder, intent(soul(22), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut holder).await.unwrap()), Some(1));
+    // Once it has gone, the same sign-in takes the Soul.
+    holder.close(None).await.unwrap();
+    while next(&mut holder).await.is_some() {}
+    let o = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let (_ws, o) = connect(&free, t.reveal(), None).await;
+            if o == "stream.started" {
+                return o;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(o, "stream.started");
 }
 
 /// The wall clock, µs from the Unix epoch, for an intent's expiry (world time is real time).

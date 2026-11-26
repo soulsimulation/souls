@@ -26,6 +26,8 @@ const SOUL = 's_r6test';
 const WORLD_SCOPE = '2b'.repeat(16);
 const LAMP = `${WORLD_SCOPE}-3`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A replaced daemon asks whether the Soul is free this often (5 min in use).
+process.env.SOULS_REPLACED_RETRY_MS = '1500';
 
 const dir = mkdtempSync(join(tmpdir(), 'souls-r6-'));
 const home = join(dir, '.souls');
@@ -393,31 +395,55 @@ test('#4700: a copy confirmed within 1 s answers at once, the world not asked; a
   assert.ok(act.age < 6000, `age ${act.age}`);
 });
 
-test('another client of the Soul takes it: this one is told so and stays off until its next command, then takes it back', async () => {
+test('another client of the Soul takes it: this one is told so, never takes it from the live one, takes it once that one has gone or at its own next command', async () => {
   await waitFor(async () => (await status()).connected);
   const other = join(dir, 'other', '.souls');
   mkdirSync(other, { recursive: true });
   writeFileSync(join(other, 'config.json'), readFileSync(join(home, 'config.json')));
   writeFileSync(join(other, 'credentials.json'), readFileSync(join(home, 'credentials.json')), { mode: 0o600 });
   const otherRt = runtimeOf(other, SOUL);
-  start(other, SOUL, PKG);
+  const otherStatus = () => request(otherRt.socket, { op: 'status' }).catch(() => null);
+  const startOther = async () => {
+    start(other, SOUL, PKG);
+    await waitFor(async () => (await otherStatus())?.connected, 60_000);
+  };
+  const stopOther = async () => {
+    const pid = (await otherStatus())?.pid;
+    await request(otherRt.socket, { op: 'stop' }).catch(() => {});
+    await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 10_000);
+  };
   try {
-    await waitFor(async () => (await request(otherRt.socket, { op: 'status' }).catch(() => null))?.connected, 60_000);
+    await startOther();
     const s = await waitFor(async () => { const s = await status(); return s.replaced && !s.connected && s; }, 10_000);
     assert.match(s.replaced.say, /Another client of this Soul connected/);
-    // It stays off: no sign-in by itself (two clients took the Soul from each other about seven times a second).
-    await sleep(3000);
+    // Reading what came and asking for a receipt do not take it back, nor do its asks whether the Soul is free
+    // (every REPLACED_RETRY_MS: 1.5 s here). Two clients took the Soul from each other about seven times a second.
+    await request(rt.socket, { op: 'read' });
+    await request(rt.socket, { op: 'receipt' });
+    await sleep(4000);
     const later = await status();
-    assert.equal(later.connects, s.connects, 'no sign-in of its own');
-    assert.equal((await request(otherRt.socket, { op: 'status' })).connected, true, 'the other keeps the Soul');
-    // Its own agent's next command takes it back; the other is told so in turn.
+    assert.ok(later.replaced && !later.connected, 'still off while the other holds the Soul');
+    assert.ok(later.connects >= s.connects + 2, `asked whether the Soul is free: ${later.connects - s.connects} times`);
+    assert.equal((await otherStatus()).connected, true, 'the other keeps the Soul');
+    // The other goes: this one signs in again by itself, at its next ask.
+    await stopOther();
+    await waitFor(async () => { const s = await status(); return s.connected && !s.replaced; }, 10_000);
+    // Taken again; its own agent's next command takes it back, and the other, replaced in turn, never takes it.
+    await startOther();
+    await waitFor(async () => { const s = await status(); return s.replaced && !s.connected; }, 10_000);
     const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP });
     outputs.push(JSON.stringify(a));
     // (An earlier test's wave is never answered by this world of lamps: only this act's answer is waited for.)
     await waitFor(async () => { const s = await status(); return s.connected && !s.replaced && !s.unanswered.includes(a.sequence); }, 30_000);
-    await waitFor(async () => (await request(otherRt.socket, { op: 'status' })).replaced, 10_000);
+    await waitFor(async () => (await otherStatus())?.replaced, 10_000);
+    const held = await status();
+    await sleep(4000);
+    const after4 = await status();
+    assert.ok(after4.connected && !after4.replaced, 'this one keeps the Soul');
+    assert.equal(after4.connects, held.connects, 'and never lost it to the other\'s asks');
+    assert.ok((await otherStatus()).connects >= 3, 'the other asked');
   } finally {
-    await request(otherRt.socket, { op: 'stop' }).catch(() => {});
+    await stopOther().catch(() => {});
   }
 });
 
