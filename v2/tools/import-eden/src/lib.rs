@@ -2272,18 +2272,29 @@ pub fn body_slots(
 ) -> (Vec<BodySlot>, usize) {
     let by_kind = body_slots_by_kind(entries);
     let (mut out, mut all) = (Vec::new(), 0);
-    let mut next = vec![tree.root()];
-    while let Some(h) = next.pop() {
-        next.extend(tree.children(h).unwrap_or(&[]).iter().copied());
-        let Some(n) = tree.node(h) else { continue };
-        all += slots_on(&by_kind, n.id(), n.kind().as_str(), n.fields(), &mut out);
+    // Each node, with whether its parent is the open ground.
+    let mut next = vec![(tree.root(), false)];
+    while let Some((h, on_ground)) = next.pop() {
+        let n = tree.node(h);
+        let ground = n.is_some_and(|n| plain(n.kind().as_str()) == GROUND);
+        next.extend(tree.children(h).unwrap_or(&[]).iter().map(|&c| (c, ground)));
+        let Some(n) = n else { continue };
+        all += slots_on(
+            &by_kind,
+            n.id(),
+            n.kind().as_str(),
+            n.fields(),
+            on_ground,
+            &mut out,
+        );
     }
     out.sort_by_key(|s| (s.thing, s.slot));
     (out, all)
 }
 
 /// [`body_slots`] for one thing, `id` of `kind` with its `fields` (a god edit's moved or placed thing): the entry it
-/// names in field 27, else its kind's, and its own slots when it borrows another kind's entry.
+/// names in field 27, else its kind's, and its own slots when it borrows another kind's entry. A ride with no course
+/// gets no seats it would have only for the course `worldd serve` gives at its start: an edit gives no course.
 pub fn body_slots_of(
     id: Id,
     kind: &str,
@@ -2291,7 +2302,14 @@ pub fn body_slots_of(
     entries: &[(String, replica::rules::json::Value)],
 ) -> Vec<BodySlot> {
     let mut out = Vec::new();
-    slots_on(&body_slots_by_kind(entries), id, kind, fields, &mut out);
+    slots_on(
+        &body_slots_by_kind(entries),
+        id,
+        kind,
+        fields,
+        false,
+        &mut out,
+    );
     out
 }
 
@@ -2384,12 +2402,14 @@ fn loops_aloft(e: &replica::rules::json::Value) -> bool {
         && matches!(r.get("speed_mm_s"), Some(J::Int(n)) if *n > 0)
 }
 
-/// The body slots of one thing onto `out`; returns how many its entry declares.
+/// The body slots of one thing onto `out`, `on_ground` when its parent is the open ground; returns how many its entry
+/// declares.
 fn slots_on(
     by_kind: &ByKind<'_>,
     id: Id,
     kind: &str,
     fields: &BTreeMap<u64, Value>,
+    on_ground: bool,
     out: &mut Vec<BodySlot>,
 ) -> usize {
     let entry = entry_name(kind, fields);
@@ -2400,11 +2420,12 @@ fn slots_on(
     // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
     // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered. A ride on its
     // course whose kind declares no slots at all (Eden's launch balloon, a `core/balloon` by another name, flying the
-    // balloon's loop) has no shape of its own to fit: it takes the entry's seats as they are. So does one whose entry
-    // flies a loop aloft and that has no course yet (a world seeded before its rides flew): `worldd serve` gives it its
-    // course at its start.
+    // balloon's loop) has no shape of its own to fit: it takes the entry's seats as they are. So does one on the open
+    // ground whose entry flies a loop aloft and that has no course yet (a world seeded before its rides flew): `worldd
+    // serve` gives it its course at its start (`worldd::places::rides_given`, the ground's rides only).
     let has_slots = matches!(fields.get(&F_SLOTS), Some(Value::Array(rows)) if !rows.is_empty());
-    let bare_ride = !has_slots && (*aloft || fields.contains_key(&replica::schedule::F_COURSE));
+    let course = fields.contains_key(&replica::schedule::F_COURSE);
+    let bare_ride = !has_slots && (course || (*aloft && on_ground));
     let borrowed = entry != plain(kind) && !bare_ride;
     out.extend(
         found

@@ -682,14 +682,23 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
         )
         .unwrap(),
     ));
-    let (seats, _) = import_eden::body_slots(
-        &im.tree,
-        &[("eden:sofa".into(), replica::rules::json::Value::Obj(aloft))],
-    );
+    let aloft = [("eden:sofa".into(), replica::rules::json::Value::Obj(aloft))];
+    let (seats, _) = import_eden::body_slots(&im.tree, &aloft);
     assert_eq!(
         seats.len(),
         3,
-        "a ride aloft with no course yet: the entry's seats"
+        "a ride aloft on the ground with no course yet: the entry's seats"
+    );
+    // A god edit gives no course, so the same thing alone (a moved or placed one) is offered none.
+    let n = im
+        .tree
+        .handle(seats[0].thing)
+        .and_then(|h| im.tree.node(h))
+        .unwrap();
+    let one = import_eden::body_slots_of(n.id(), n.kind().as_str(), n.fields(), &aloft);
+    assert!(
+        one.is_empty(),
+        "an edited ride aloft with no course: no seats"
     );
     let flying = SMALL.replace(
         r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,

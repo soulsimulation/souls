@@ -2022,7 +2022,9 @@ async function answer(req, conn = null) {
  * R1b: for an act the world refused, one other offer of the thing or place it named first (`thingOf`'s offers, from
  * this machine's kind entries) that would work: the first the form rules pass on the copy (`yes`), else the first they
  * cannot judge here (`unknown`, a move such as a sit); never one they refuse, one needing arguments it has no default
- * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
+ * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none. A refusal no other
+ * offer can answer gives the refused act again, with what to do first: `not_held` (pick it up), `resource-held` (rise),
+ * `thing-reserved` (wait until it is free) and `place-taken` (send it with no place named).
  */
 function suggestionFor(r) {
   const target = String(r.target ?? '').split(' ')[0];

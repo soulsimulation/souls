@@ -1191,15 +1191,23 @@ impl Engine {
         // before its rides flew) is given its course at the start's first tick: from now, at its home, so it stands
         // there for its boarding minute first and never jumps onto its loop.
         for (thing, mut c) in slots.courses_given() {
-            let held = live
-                .handle(thing)
-                .and_then(|h| live.node(h))
-                .map(|n| n.fields().contains_key(&replica::schedule::F_COURSE));
-            if held != Some(false) {
+            let Some(n) = live.handle(thing).and_then(|h| live.node(h)) else {
+                continue;
+            };
+            if n.fields().contains_key(&replica::schedule::F_COURSE) {
+                continue;
+            }
+            // Its course was laid from where it stood at the start. A god edit that moved it since (and gave it no
+            // seats, `import_eden::body_slots_of`) leaves it standing: the next start lays one from where it is.
+            let home = c.stations.first().map_or(Vec3::ZERO, |s| s.at);
+            if n.place().map(|p| p.position) != Some(home) {
+                eprintln!(
+                    "worldd: {} moved before its course was given: none given",
+                    show(thing)
+                );
                 continue;
             }
             c.t0 = now;
-            let home = c.stations.first().map_or(Vec3::ZERO, |s| s.at);
             let e = slots.moving(thing, &c, home).and_then(|()| {
                 crate::carrier::entry(
                     live,
