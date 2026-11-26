@@ -23,6 +23,23 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A full disk** (O10, #2806). The running world exits 87 at the first write the disk refuses; nothing unwritten
+  was acknowledged. Its restart waits for room before it writes anything: `worldd: disk.full: <free> bytes free under
+  the world, <need> to start; the start waits for room` (`need` is 16 MiB and the newest checkpoint's size), saying
+  progress to systemd meanwhile, so the unit never loops on it and the world is restarted once. Within half a second
+  of room coming back it says `worldd: disk.full cleared` and starts; its time owed is paid at its first ticks,
+  exactly. While it waits it does not listen: its gateway keeps intents and sends them once it does, or answers
+  one `act.timed-out` at its deadline (`world.restarting` for a sync). Free space; nothing
+  else is needed.
+- **A clock that steps** (O10, #2806). A running world reads the wall clock once and then the steady clock, so a
+  step moves nothing; the watchdog says it within a second (`worldd: clock.stepped: the machine's clock moved <ms>
+  ms while the world ran …`) and `health.json` has `"clock":{"state":"stepped","ahead_ms":<ms>}` (how far the
+  world's clock is ahead of the machine's; `steady` under a second). A restart that finds the machine's clock behind
+  its last logged tick (the clock went back while it was down) once ticked nothing until the clock came round, and
+  its watchdog ended it every 15 s (`tick-stalled`): now it says `worldd: clock.stepped: the machine's clock is <ms>
+  ms behind the last logged tick …` and goes on from that tick, ahead of the machine's clock by the step. World time
+  never goes back. A step forward while down is caught up exactly at the start, back to back (120 s took about 3 s
+  in the test world). Nothing is needed; the offset closes at the world's next sleep longer than it.
 - **A store that does not answer at the start** (R17). No read of the store ends a world's start. The claim and
   shipping, the history archive's open (its header, bundle index and public history) and the creator's record are
   read on their own threads after the world listens, each tried after 1, 2, 4 … s, then every 60 s, until the store

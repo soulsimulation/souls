@@ -55,7 +55,9 @@ socket is group-writable and a world or a gateway running as souls can reach it.
 - **Waking** is `systemctl start --no-block worldd@<world>.service` (a world already running is left as it is), or
   with `$SUPERVISOR_WAKE` set, that program run with the world's name.
 - **Idle**, it blocks on its queue and reads the wall clock again at least once a second, so a stepped clock moves an
-  alarm by at most a second (clock jumps are O10's).
+  alarm by at most a second. A world whose clock runs ahead of the machine's after a `clock.stepped` restart
+  (O10, `world-restarting.md`) sets its alarms on its own time, so it may wake up to that step late; an intent still
+  wakes it at once.
 
 ```text
 WORLDS_ROOT=/var/lib/souls/worlds /usr/local/lib/souls/supervisor wake <world>   # wake one now
