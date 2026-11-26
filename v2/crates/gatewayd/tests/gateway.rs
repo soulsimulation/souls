@@ -694,6 +694,107 @@ async fn the_gateways_own_refusal_lost_on_a_drop_is_replayed_once_on_resume() {
     assert_eq!(frame_sequence(&soon(&mut ws).await), Some(2), "once");
 }
 
+/// A frame of `grant`'s stream at version `sequence`: the world's receipt for its intent `sequence`.
+fn receipt_frame(grant: Grant, sequence: u64) -> Vec<u8> {
+    let Grant::Actor(actor) = grant;
+    let answer = Answer::Receipt {
+        actor,
+        sequence,
+        intent: Id::new(LINEAGE, sequence).unwrap(),
+        entries: vec![sequence],
+        names: BTreeMap::new(),
+    };
+    encode(&Value::Map(
+        [(1, version(sequence).to_value()), (2, answer.to_value())].into(),
+    ))
+    .unwrap()
+}
+
+/// #4979: an agent's socket let go for a full queue is closed at once with 1013 and the reason `agent.behind`, as a
+/// view socket that fell behind is (#4078), and is not first sent the frames still queued for it. Before, it was sent
+/// all of them and then dropped with no close frame, so its client could not tell it from a network drop and learned
+/// only by its own sync bound, 10 to 15 s later. Its client resumes from its cursor and is sent each frame once.
+#[tokio::test]
+async fn a_socket_let_go_for_a_full_queue_is_closed_as_behind_and_resumes_each_frame_once() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(33));
+    let r = start("behind", tokens).await;
+    let (mut ws, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let deliver = |s: u64| {
+        let at = gatewayd::resume::Cursor::from_value(&version(s).to_value()).unwrap();
+        let a = gatewayd::Answering {
+            sequence: s,
+            ends: true,
+        };
+        r.gw.deliver(soul(33).key(), a, at, receipt_frame(soul(33), s));
+    };
+    deliver(1);
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(1));
+    // More frames than its queue holds, queued while its task cannot send any (this runtime has one thread).
+    let last = gatewayd::OUTBOUND as u64 + 8;
+    for s in 2..=last {
+        deliver(s);
+    }
+    assert!(
+        r.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("agent.behind")),
+        "let go for its full queue"
+    );
+    // Told at once, by name: at most a frame or two that its task had in hand before the close.
+    let (got, close) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut got = Vec::new();
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Binary(b))) => {
+                    got.push(frame_sequence(&decode(&b).unwrap().value).unwrap());
+                }
+                Some(Ok(Message::Close(c))) => {
+                    return (got, c.map(|c| (u16::from(c.code), c.reason.to_string())));
+                }
+                Some(Ok(_)) => {}
+                _ => return (got, None),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        close,
+        Some((gatewayd::BEHIND, gatewayd::AGENT_BEHIND.to_owned())),
+        "closed by name after {} frames",
+        got.len()
+    );
+    assert!(
+        got.len() < gatewayd::OUTBOUND / 4,
+        "the close is not held behind what was queued: {} frames first",
+        got.len()
+    );
+    // It resumes after the frames it applied, and is sent each of the rest once, in order.
+    let applied = got.last().copied().unwrap_or(1);
+    let cursor = Some(version(applied).to_value());
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), cursor, Some(1)).await;
+    assert_eq!(o, "stream.resumed");
+    let mut replay = Vec::new();
+    for _ in applied + 1..=last {
+        replay.push(frame_sequence(&soon(&mut ws).await).unwrap());
+    }
+    assert_eq!(
+        replay,
+        (applied + 1..=last).collect::<Vec<_>>(),
+        "each once"
+    );
+    deliver(last + 1);
+    assert_eq!(
+        frame_sequence(&soon(&mut ws).await),
+        Some(last + 1),
+        "none twice"
+    );
+}
+
 fn tmp(name: &str) -> PathBuf {
     let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_dir_all(&d);

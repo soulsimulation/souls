@@ -7,7 +7,7 @@
 // - **gap**: present while the copy is not known current, with how long and why: `not-connected` (no signed-in socket),
 //   `no-answer` (signed in, but the gateway did not confirm in time), `syncing` (a compare under way), `unconfirmed`
 //   (an act's answer, which does not ask, from a copy older than FRESH_MS), `replaced` (another client of this Soul
-//   holds it). The answer also says `stale: true`.
+//   holds it), `behind` (the gateway let its socket go for a full queue, #4979). The answer also says `stale: true`.
 // - **unchangedMs**: a copy confirmed current whose world has written nothing for ASLEEP_AFTER_MS is a still world, not
 //   a stale copy: `unchangedMs`, how long ago it last wrote. (First day, 26 Nov: it was `asleep: { sinceMs }`, which a
 //   new agent read as its Soul asleep, a body state of its own.)
