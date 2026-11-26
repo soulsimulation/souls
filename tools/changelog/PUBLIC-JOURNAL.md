@@ -20,7 +20,7 @@ without media elements. For a newly broken link, retain the entry id/source and 
 is repaired; the page always retains a text fallback. There is no runtime availability probe or GitHub/API fetch.
 
 URLs must be canonical HTTPS, without credentials, nondefault port, query or fragment. Media is restricted to
-`https://assets.eden.art/public-journal/…` or this repository's proof-release assets: `releases/download/proofs/…` (the shared release) or
+`https://cdn.soul.game/public-journal/…` (soul.game's CDN) or this repository's proof-release assets: `releases/download/proofs/…` (the shared release) or
 `releases/download/proofs-<pr>/…` (a PR's own release, the `tools/proof/upload.mjs` default). Source links are
 restricted to this repository's PRs, exact commits or release tags. Unknown fields fail the build. All prose is
 escaped, including captions. These checks do not replace human publication review: never copy private board cards,
@@ -36,7 +36,7 @@ media → return with real input; record proof through the repo proof workflow. 
 a live owner-board request. An empty array remains valid for text-only releases.
 
 GitHub release-asset URLs redirect from `github.com` to `release-assets.githubusercontent.com`. A future restrictive
-CSP `media-src`/`img-src` must allow both origins (and `assets.eden.art` when publishing through that CDN); do not
+CSP `media-src`/`img-src` must allow both origins (and `cdn.soul.game` when publishing through that CDN); do not
 assume the initial link origin alone is sufficient. Publication URLs remain stable; never store expiring redirect
 query strings. `poster` on an image or retired entry is validated but intentionally unused; retained metadata does
 not cause a media request from a retired entry.

@@ -1030,6 +1030,16 @@ impl Slots {
         self.by_body.get(&body).map(|k| k.0)
     }
 
+    /// Whether `thing` moves (on a course, #3603) or has seats that move with their cabin (N14): a ride or a boat.
+    pub fn moves(&self, thing: Id) -> bool {
+        self.moving.contains_key(&thing)
+            || self
+                .runs
+                .range((thing, 0)..=(thing, u64::MAX))
+                .next()
+                .is_some()
+    }
+
     /// The seat `body` holds, if any.
     pub fn held_place(&self, body: Id) -> Option<&PlaceAt> {
         self.places.get(&seat_of(*self.by_body.get(&body)?))

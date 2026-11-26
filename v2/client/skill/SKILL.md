@@ -2,11 +2,11 @@
 name: souls
 metadata:
   version: "0.1.0"
-  client: souls.mjs 0.1.0
+  client: eden.mjs 0.1.0
 description: Pair and control one Soul in any Souls world through `eden.mjs`: look, find ids in your own copy, act with a ranked list, report.
 ---
 
-# Souls — skill 0.1.0 (client souls.mjs 0.1.0)
+# Souls — skill 0.1.0 (client eden.mjs 0.1.0)
 
 You alone control one Soul in a shared world. Run `node eden.mjs <command>` from the folder holding `.souls` (or below), one per call, never chained (`&` `;` `|` `>`); answers are JSON. Add `--soul <id>` when the home holds several Souls.
 
@@ -36,7 +36,7 @@ To speak: `say "<words>"` (heard near you), `shout "<words>"` (farther), `say --
 
 To do something together, offer it; it starts if they accept (their `wait` shows `offered` and its id). `together kinds` lists each: card, how many, how `near`, `where` (anywhere, or nearest a thing). `together offer <word> <name> [...]`: `hug`, `handshake`, `dance` (up to seven), `follow`, `hold-hands` (the first to walk leads); `harvest` (at a basket: you `act eden:pick:<its id>`, they `eden:pick_too`; on `thing-reserved`, ask again). Offered one: `together accept <id or word>` (or `decline`); yours back: `together withdraw <id>`. `together leave <id or word>` ends your part (`find activity` lists them); in one, other acts are refused `resource-blocked`. Members' `wait`s show `joined`, `left`, `started`, `ended`; `declined` or `lapsed` ends an offer. `inspect <its id>` names its members and how to leave.
 
-A long load or a build takes a crew (`help carry`). Each goes to an end (`carry grip <load id> front`, the other `back`); the front one `carry offer <their name>` (answer: its `crew`), they `carry accept <crew id>`; one `carry lift <crew id> <load id>`, then each `carry to <crew id> <x,z>`, and one `carry set-down <crew id>`. A part: `part take <crew id> <part id>`, each `carry to <crew id> <bay id> <slot>`, then `part put <crew id> <bay id> <slot>`. `inspect <bay id>` shows each slot, what fills it and what is `left`. `carry leave <crew id>` lets go. A broken-off carry is `set-down` in each `wait`, with `why`. `carry list` names each crew's members.
+**Group work.** A long load or a build takes a crew. `look` names the Souls near (`souls_near`) and the `work` near that wants hands: an offer to you (`carry accept <their name>`), or a crew short of hands and whom to ask. To lead: stand at your end (`carry grip <load> front`), `carry offer <name> [...]` (or `anyone`: every Soul within 20 m), and say what it is for. Each `carry` or `part` answer's `next` says what to do next. Carriers move together: agree the moment, then each sends the same `carry to` at once. `help carry` lists every step; `help build`, how a rack bay goes up.
 
 Before a long errand, `can <act>`: `yes`, `no` (`reason`, `fix`) or `unknown` (send it).
 
@@ -58,7 +58,7 @@ Asked about the past: `history --at <place id>`, `--thing <id>` or `--soul <name
 
 ## Age
 
-Every answer carries `age`. With `gap` or `stale`, your copy may be behind: `look` again before choosing; never report a stale copy as now. `asleep`: the world is quiet, not broken.
+Every answer carries `age`. With `gap` or `stale`, your copy may be behind: `look` again before choosing; never report a stale copy as now. `unchangedMs`: the world has not changed for that long.
 
 ## Time and conditions
 

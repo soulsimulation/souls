@@ -56,6 +56,10 @@ mkdirSync(folder, { recursive: true });
 writeFileSync(join(folder, 'facts.json'), '{"format": "souls/import-eden/1"}');
 writeFileSync(join(folder, 'world.json'), `{"format": "souls/world/1", "name": "${world}", "creator": "${'f'.repeat(32)}-1", "entry": [1500, -2500]}`);
 writeFileSync(join(folder, 'log'), 'the old log');
+// #4837: its stock and library, as a seed with --stock kept them: the fresh seed is given them again.
+writeFileSync(join(folder, 'stock.json'), '{"format": "souls-world-stock/1", "libraries": {"books": "content/library/books.json"}}');
+mkdirSync(join(folder, 'library'));
+writeFileSync(join(folder, 'library/books.json'), '{"library": "books", "books": []}');
 for (const k of ['record', 'checkpoint-1', 'part-1']) writeFileSync(join(bucket, 'live', world, k), k);
 writeFileSync(join(state, 'pin'), `${built}\n`);
 writeFileSync(join(state, `worldd@${world}`), 'active\n');
@@ -74,6 +78,7 @@ test('a moved world reseeds fresh from its facts on the build it is on, with eve
   assert.match(check.stdout, /the release +0\.133\.9 at b{40}, its worldd 1220[0-9a-f]{64} \(the build it is on\)/);
   assert.match(check.stdout, /creator +kept \(from world\.json\)/);
   assert.match(check.stdout, /entry point +1\.500,-2\.500 m/);
+  assert.match(check.stdout, /stock +the world's own \(stock\.json, library\/\)/);
   assert.match(check.stdout, /3 of the world's objects at their keys/);
   assert.match(check.stdout, /and the world \(it was running\)/);
   assert.match(check.stdout, /check only; nothing changed/);
@@ -90,8 +95,8 @@ test('a moved world reseeds fresh from its facts on the build it is on, with eve
   assert.ok(!existsSync(join(folder, 'log')));
   assert.equal(
     readFileSync(join(folder, 'args'), 'utf8').trim(),
-    `seed --facts ${aside}/facts.json --dir ${join(root, 'aside', `.seed-${world}-20261124T200000Z`)} --entries ${rel}/reseed/kinds --souls 0 --at 1.500,-2.500 --creator ${'f'.repeat(32)}-1`,
-    'seeded from the same facts, with its creator and entry point',
+    `seed --facts ${aside}/facts.json --dir ${join(root, 'aside', `.seed-${world}-20261124T200000Z`)} --entries ${rel}/reseed/kinds --souls 0 --at 1.500,-2.500 --creator ${'f'.repeat(32)}-1 --stock ${aside}/stock.json`,
+    'seeded from the same facts, with its creator, entry point and stock (its library beside it)',
   );
   assert.equal(readFileSync(join(state, 'pin'), 'utf8').trim(), built);
   assert.equal(unit('worldd'), 'active', 'the world was running, and runs again');

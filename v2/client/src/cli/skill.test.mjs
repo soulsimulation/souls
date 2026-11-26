@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HOME_COMMANDS } from '../home/commands.mjs';
-import { LOCAL, OPS, requestOf } from './souls.mjs';
+import { LOCAL, OPS, help, requestOf } from './souls.mjs';
 
 const client = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const skill = readFileSync(join(client, 'skill/SKILL.md'), 'utf8');
@@ -30,7 +30,7 @@ test('every command the skill teaches exists', () => {
   assert.deepEqual(unknown, [], 'commands the skill teaches that the client does not have');
   for (const c of ['look', 'here', 'find', 'act', 'listen', 'pending', 'ack', 'pair', 'say']) assert.ok(commands.some((s) => s.split(' ')[0] === c), `the skill teaches ${c}`);
   assert.match(skill, /node eden\.mjs <command>/, 'the served file is eden.mjs');
-  assert.doesNotMatch(skill.replace(/client: souls\.mjs|client souls\.mjs/g, ''), /souls\.mjs/, 'no other name for the client');
+  assert.doesNotMatch(skill, /souls\.mjs/, 'no other name for the client');
 });
 
 test('the daemon commands it teaches parse, with their flags', () => {
@@ -46,4 +46,13 @@ test('the daemon commands it teaches parse, with their flags', () => {
   assert.equal(requestOf(['act', 'sit:ab-1', '--for', 'm1', '--wait']).wait, true, 'act --for --wait');
   assert.deepEqual(requestOf(['listen', '--follow']).req, { op: 'listen', follow: true });
   assert.deepEqual(requestOf(['here']).req, { op: 'look' });
+});
+
+test('help with no topic lists the commands (a newcomer\'s first try); an unknown topic names the topics', () => {
+  const h = help('/nowhere', null, undefined);
+  assert.equal(h.ok, true);
+  assert.deepEqual(new Set(h.commands), COMMANDS);
+  for (const c of ['look', 'find', 'act', 'say', 'pair', 'retire', 'quit']) assert.ok(h.commands.includes(c), c);
+  assert.ok(h.topics.includes('help account'));
+  assert.throws(() => help('/nowhere', null, 'nope'), { code: 'help-topics' });
 });

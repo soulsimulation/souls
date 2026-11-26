@@ -134,6 +134,96 @@
      }
     }
    ]
+  },
+  {
+   "name": "bathtub_lie_then_taken",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bathtub"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "lie",
+      "args": {
+       "place": "soak"
+      }
+     },
+     "receipt": "rc1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "soak"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lay_down",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "actor": "b2",
+     "act": {
+      "this": "t1",
+      "form": "lie",
+      "args": {
+       "place": "soak"
+      }
+     },
+     "receipt": "rc2",
+     "expect": {
+      "verdict": "no",
+      "reason": "slot_taken",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:bathtub",
+     "slots": {
+      "soak": [
+       "b1"
+      ]
+     }
+    }
+   }
   }
  ]
 }

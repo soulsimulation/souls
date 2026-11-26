@@ -11,8 +11,9 @@
 #     and history; only this world's keys) under aside/<time>/ in the same bucket. Each object is copied, read back and
 #     compared (length and SHA-256) before any original is deleted, and no original is deleted until every copy checks.
 #     Nothing else in the bucket is touched: not accounts, not Souls, not the name "eden", not other worlds;
-#   - seeds a fresh world from the same facts with the release's build, puts it where the old one was, pins that build
-#     and starts the gateway. The world itself stays stopped: release-v2 starts it.
+#   - seeds a fresh world from the same facts with the release's build (and Eden's stock the release carries, #4837),
+#     puts it where the old one was, pins that build and starts the gateway. The world itself stays stopped: release-v2
+#     starts it.
 # Undo: reseed-eden-undo.sh <time> (printed at the end).
 #
 #   bash reseed-eden.sh <sha> check                  reads and prints every value; changes nothing
@@ -158,6 +159,10 @@ ARRIVAL=$(sed -n 's/.*"arrival": *"\([A-Za-z0-9_.:-]*\)".*/\1/p' "$SRC_DIR/world
 if grep -q '"arrival"' "$SRC_DIR/world.json" && [ -z "$ARRIVAL" ]; then die "world.json names an arrival place this cannot read"; fi
 BODIES=''
 [ -f "$SRC_DIR/bodies.json" ] && BODIES=bodies.json
+# Eden's stock and the libraries it draws (#4837): the release's (reseed/stock: stock.json and library/, as a world
+# folder keeps them), else the world's own kept copy, else none (a take then carries no title).
+STOCK=''
+if [ -f "$REL/reseed/stock/stock.json" ]; then STOCK=$REL/reseed/stock/stock.json; elif [ -f "$SRC_DIR/stock.json" ]; then STOCK=kept; fi
 if [ -n "${DIRECTORY_STORE_URL:-}${DIRECTORY_STORE_ENDPOINT:-}" ]; then STORE_WHAT="the directory's bucket (DIRECTORY_STORE_*)"; else STORE_WHAT="the folder $ROOT/directory"; fi
 count() { "$TOOL" "$WORLD" "$@" --dry-run | sed -n 's/^dry run: \([0-9]*\) objects.*/\1/p'; }
 IN_PLACE=$(count --label "$STAMP")
@@ -192,6 +197,7 @@ echo "reseed: creator          $([ -n "$CREATOR" ] && echo "kept (from world.jso
 echo "reseed: entry point      $AT m"
 echo "reseed: arrival place    ${ARRIVAL:-none (the entry point)}"
 echo "reseed: bodies           ${BODIES:-none}"
+echo "reseed: stock            $([ "$STOCK" = kept ] && echo "the world's own (stock.json, library/)" || echo "${STOCK:-none}")"
 echo "reseed: units            worldd@ $(systemctl is-active "worldd@$WORLD" || true), souls-gateway@ $(systemctl is-active "souls-gateway@$WORLD" || true)"
 echo "reseed: bucket           $IN_PLACE of the world's objects at their keys; $COPIED already copied under aside/$STAMP/"
 if [ -n "$RESUME" ]; then
@@ -222,6 +228,7 @@ if [ "$done5" = yes ]; then echo "reseed: 4-5. the fresh seed: already in place"
   if [ -n "$CREATOR" ]; then args+=(--creator "$CREATOR"); fi
   if [ -n "$ARRIVAL" ]; then args+=(--arrival "$ARRIVAL"); fi
   if [ -n "$BODIES" ]; then args+=(--bodies "$ASIDE_DIR/bodies.json"); fi
+  if [ "$STOCK" = kept ]; then args+=(--stock "$ASIDE_DIR/stock.json"); elif [ -n "$STOCK" ]; then args+=(--stock "$STOCK"); fi
   SEEDED=$("$NEW_WORLDD" "${args[@]}" | sed -n 's/^seeded //p')
   [ "$SEEDED" = "$WORLD" ] || die "the seed is '$SEEDED', not $WORLD (left at $SEED_DIR); undo: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check"
   echo "reseed: 5. the fresh folder in place"
