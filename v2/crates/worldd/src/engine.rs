@@ -134,6 +134,10 @@ pub struct Act {
 /// each side carrier's place at the part (C5).
 type Taking = (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>);
 
+/// A carrying ground's fixed geometry and what it was read at (0.135 C7, [`Engine`]'s `fixed`): the walkers' ground
+/// versions, and the carries on it, each by its activity and when it began.
+type FixedRead = (sim::ground::Versions, Vec<(Id, Micros)>, Fixed);
+
 /// The engine's systems, with their own due list, moves and minter.
 pub struct Engine {
     header: Header,
@@ -171,7 +175,7 @@ pub struct Engine {
     /// onto its ground without changing a walker's map (`crate::assembly::Ready::town_part`), so the versions alone
     /// would keep a part just taken where it stood, and a load just set down out of the geometry, until the next
     /// seating (two crews taking two bents at once).
-    fixed: BTreeMap<Id, (sim::ground::Versions, Vec<(Id, Micros)>, Fixed)>,
+    fixed: BTreeMap<Id, FixedRead>,
     /// The way searches lifts asked since the last call to [`Engine::ways_asked`], in order.
     asked: Vec<WayAsk>,
     /// Each lift waiting for its way, by intent: the act, run again when the way comes back ([`Engine::way_back`]).
