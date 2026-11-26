@@ -356,3 +356,111 @@ export function crewsIn(rows) {
   const all = [...rows.values()];
   return all.filter((r) => isCrew(r.kind)).map((r) => ({ id: r.id, on: r.parent, holds: all.filter((c) => c.parent === r.id).map((c) => ({ id: c.id, name: c.name, kind: c.kind })) }));
 }
+
+// Group work, as an agent finds and joins it: who needs hands near this Soul, an open crew offer accepted by its
+// offerer's name, and what each step's answer says to do next. Plain facts from the copy and the kind entries; the
+// world decides nothing here.
+
+/** How many carry a load, as the world reads its entry (`sim::activity::carry::Load::of`): its `carry_crew`, else its
+ *  `hold_crew`, else two; never fewer than a crew's front and back. */
+export function crewNeeds(entry) {
+  const n = entry?.state?.carry_crew?.default ?? entry?.state?.hold_crew?.default;
+  return Math.max(2, Number.isInteger(n) ? n : 2);
+}
+
+/** Words for "whoever is near" in `carry offer anyone`: every other Soul within NEAR_M metres, nearest first. */
+export const NEAR_WORDS = new Set(['anyone', 'everyone', 'near', 'nearby']);
+export const NEAR_M = 20;
+/** The most a crew is offered to at once (`carry offer`'s own limit). */
+export const OFFER_MOST = 5;
+
+/**
+ * The crew offers to this Soul still open: each `offered` of kind carry it was told (`logged`, oldest first) whose crew
+ * is still in the copy and does not hold this Soul yet. `mine`: this Soul's ids. → [{crew, from}], newest last.
+ */
+export function openCrewOffers(logged, rows, mine) {
+  const seen = new Set(), out = [];
+  for (const e of [...logged].reverse()) {
+    if (e.kind !== 'carry' || e.what !== 'offered' || !e.offer || seen.has(e.offer)) continue;
+    seen.add(e.offer);
+    const r = rows.get(e.offer);
+    if (!r || r.members?.some((m) => mine.includes(m.body) || mine.includes(m.soul))) continue;
+    out.unshift({ crew: e.offer, from: e.from });
+  }
+  return out;
+}
+
+/**
+ * `carry accept|decline [<crew id | name>]`: the crew by its id, by its offerer's name (`Ada`), or with no word the
+ * newest open offer to this Soul. `offers`: `openCrewOffers`; `nameOf(id)`: a body's name. → {crew}, or a refusal by
+ * name that says what to do instead.
+ */
+export function crewOffered(word, offers, nameOf) {
+  if (ID.test(String(word ?? ''))) return { crew: word };
+  if (!offers.length) return no('carry-no-offer', 'no crew offer to you is open: `look` shows the crews near (`work`) and who leads each; ask one (`say --to <name> "I can help"`) to offer you a place');
+  if (word === undefined) return { crew: offers.at(-1).crew };
+  const want = String(word).trim().toLowerCase();
+  const hit = offers.filter((o) => String(nameOf(o.from) ?? '').toLowerCase() === want || o.from === word);
+  if (hit.length) return { crew: hit.at(-1).crew };
+  return no('carry-no-offer', `no open crew offer from ${String(word).slice(0, 40)}: the open ones are from ${offers.map((o) => nameOf(o.from) ?? o.from).join(', ')}`);
+}
+
+/**
+ * Whom `carry offer anyone` asks: every other body within `within` metres, nearest first, at most OFFER_MOST.
+ * `bodies`: [{id, m}] (metres from this Soul). → ids, or a refusal by name when nobody is near.
+ */
+export function offerNear(bodies, within = NEAR_M) {
+  const near = bodies.filter((b) => Number.isFinite(b.m) && b.m <= within).sort((a, b) => a.m - b.m).slice(0, OFFER_MOST);
+  return near.length ? near.map((b) => b.id) : no('carry-nobody-near', `no other Soul within ${within} m: shout what you need ("Who can help carry the rack frames?"), wait, then offer by name`);
+}
+
+const metresText = (m) => `${m < 10 ? Math.round(m * 10) / 10 : Math.round(m)} m`;
+
+/**
+ * "Who needs help?": the group work near this Soul as plain lines (`look`'s `work`): each crew offer to it still open,
+ * with the command that joins it; then each crew near that it is not in: who is in it, what it holds and how many
+ * hands that takes, and whom to ask. `crews`: `crewsIn(rows)`; `offers`: `openCrewOffers`; `nameOf(id)`; `metres(id)`
+ * from this Soul (undefined when unplaced); `needs(id)`: how many carry a thing (`crewNeeds` of its entry);
+ * `nearest(id)`: the name of the thing nearest a crew that holds none.
+ */
+export function workLines({ crews, rows, mine, offers, nameOf, metres, needs, nearest = () => null, within = 40, most = 4 }) {
+  const out = [];
+  for (const o of offers.slice(-2).reverse()) {
+    const c = crews.find((x) => x.id === o.crew), held = c?.holds?.[0]?.name, by = nearest(o.crew), who = nameOf(o.from) ?? o.from;
+    out.push(`${who} offers you a place in a carry crew${held ? ` holding ${held}` : by ? ` near ${by}` : ''} (${o.crew}): carry accept ${who}`);
+  }
+  const offered = new Set(offers.map((o) => o.crew)), membersOf = (id) => rows.get(id)?.members ?? [];
+  const near = crews.filter((c) => !offered.has(c.id) && !membersOf(c.id).some((m) => mine.includes(m.body) || mine.includes(m.soul)))
+    .map((c) => ({ c, m: Math.min(metres(c.id) ?? Infinity, ...membersOf(c.id).map((x) => metres(x.body) ?? Infinity)) }))
+    .filter((x) => x.m <= within).sort((a, b) => a.m - b.m);
+  for (const { c, m } of near) {
+    if (out.length >= most) break;
+    const members = membersOf(c.id), lead = members.find((x) => /:front$/.test(x.role)) ?? members[0];
+    const load = c.holds?.[0], want = load ? needs(load.id) : null, short = want === null || members.length < want;
+    const hands = want ? `, ${members.length} of ${want} hands${short ? `: ${want - members.length} more wanted` : ''}` : '';
+    const at = load ? `holds ${load.name}` : nearest(c.id) ? `by ${nearest(c.id)}` : 'here';
+    const ask = short && lead ? `; to help, ask ${nameOf(lead.body)}: say --to ${nameOf(lead.body)} "I can help"` : '';
+    out.push(`a carry crew (${c.id}, ${metresText(m)}) ${at}: ${members.map((x) => nameOf(x.body)).join(', ') || 'nobody yet'}${hands}${ask}`);
+  }
+  return out;
+}
+
+/** What a step's answer says to do next, plainly (the `next` of `carry` and `part` answers). `req`: the request sent;
+ *  `load`: the name of what the crew holds; `bay`: `slotsCard` of the thing a part was put into, when it was. */
+export function nextStep(req, { load = null, bay = null } = {}) {
+  const c = req.crew ?? '<crew id>';
+  switch (req.kind === 'part' ? `part ${req.do}` : req.do) {
+    case 'grip': return 'you are at your end: the one who leads offers the crew (carry offer <name>); each other accepts (carry accept <their name>)';
+    case 'offer': return `wait for an accept (\`wait\` shows joined); then take or lift it (part take ${c} <part> | carry lift ${c} <load>) and say where it goes`;
+    case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; then every carrier sends the same carry to ${c} <where> [<slot>] at the same moment`;
+    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes and when; every carrier sends the same carry to ${c} <x,z | bay id> [<slot>] at that moment, or the carry breaks off`;
+    case 'to': return `when every carrier has arrived, one of you seats it (part put ${c} <bay id> <slot>) or sets it down (carry set-down ${c})`;
+    case 'part put':
+      if (bay?.left?.length) return `seated: ${bay.built}; still to fill: ${bay.left.join(', ')}. A seated frame stays held while one of you stays in its crew; the others: carry leave ${c}`;
+      if (bay) return `seated: ${bay.built}, so it is built: everyone in its crews can let go (carry leave <crew id>)`;
+      return `laid down: carry leave ${c} when you are done`;
+    case 'set-down': return `set down: lift it again, or let go (carry leave ${c})`;
+    case 'leave': return 'you let go: `look` shows the crews near that still want hands';
+    default: return null;
+  }
+}

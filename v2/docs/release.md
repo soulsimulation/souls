@@ -56,7 +56,8 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    (`/var/lib/souls/worlds`) only if its bytes hash to the manifest's, and `worldd schemas` must run there first (a
    binary built against a newer system library than the machine's does not start: `release.will-not-start`). The
    release's record (manifest, tools, `release.sh`) is `/var/lib/souls/releases/<sha>/`, with `world-aside` among its
-   tools and, under `reseed/`, Eden's reseed, its undo and the kinds at the commit. It prints the staged files'
+   tools and, under `reseed/`, Eden's reseed, its undo, the kinds at the commit and Eden's stock with its libraries
+   (`reseed/stock`: `stock.json`, `library/`; the reseed seeds with them, #4837). It prints the staged files'
    hashes against the manifest's. A dry run stops here: builds by hash are inert until a pin names one.
    - **Reseed (input `reseed`).** When this build cannot read Eden's store (`header-mismatch`), `reseed=fresh` starts
      Eden fresh on it before the move ([cutover.md](cutover.md#a-fresh-eden-on-a-new-build-0132)): `release.sh reseed

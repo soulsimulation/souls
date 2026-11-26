@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { activityPin, byName, carryIntents, crewsIn, gripSpot, loadOf, placer, slotPoint } from './carry.mjs';
+import { activityPin, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
+import { nextOf } from '../cli/souls.mjs';
+import { slotsCard } from '../together/members.mjs';
 
 const ROOT = join(import.meta.dirname, '../../../../content/kinds');
 const entry = (dir, f) => JSON.parse(readFileSync(join(ROOT, dir, f), 'utf8'));
@@ -192,4 +194,90 @@ test('a place that shares a thing\'s name is passed over for the thing (Mars Col
     [id(11), { id: id(11), kind: 'eden:place', parent: id(1), name: 'yard' }], [id(12), { id: id(12), kind: 'eden:place', parent: id(1), name: 'yard' }]]);
   assert.equal(byName({ kind: 'part', do: 'put', crew: id(8), into: 'rack-bay', slot: 'upright_a' }, named).into, id(5));
   assert.equal(byName({ do: 'to', crew: id(8), where: 'yard' }, named).code, 'carry-name-ambiguous', 'two places alone stay ambiguous');
+});
+
+// Group work as an agent finds and joins it: who needs hands, an offer accepted by its offerer's name, what is next.
+test('a load takes the crew its entry states: a 6 m upright four, a beam or frame two', () => {
+  const six = entry('construction', 'rack_upright_6m.json');
+  assert.equal(crewNeeds(six), 4);
+  assert.equal(crewNeeds(kinds['mars:rack_beam']), 2);
+  assert.equal(crewNeeds(kinds['mars:rack_upright']), 2, 'a crew is never fewer than its front and back');
+  assert.equal(crewNeeds(null), 2);
+});
+
+test('an open crew offer is accepted by its offerer\'s name, or the newest with no word; none says how to get one', () => {
+  const ada = id(20), cy = id(21), mine = [id(6)];
+  const crews = new Map([[id(30), { id: id(30), kind: 'mars:carry_activity', members: [{ body: ada, role: 'mars:front' }] }],
+    [id(31), { id: id(31), kind: 'mars:carry_activity', members: [{ body: cy, role: 'mars:front' }] }],
+    [id(32), { id: id(32), kind: 'mars:carry_activity', members: [{ body: ada, role: 'mars:front' }, { body: id(6), role: 'mars:back' }] }]]);
+  const logged = [{ kind: 'carry', what: 'offered', offer: id(30), from: ada }, { kind: 'carry', what: 'offered', offer: id(33), from: ada },
+    { kind: 'carry', what: 'offered', offer: id(32), from: ada }, { kind: 'together', what: 'offered', offer: id(34), from: cy },
+    { kind: 'carry', what: 'offered', offer: id(31), from: cy }];
+  const offers = openCrewOffers(logged, crews, mine);
+  assert.deepEqual(offers, [{ crew: id(30), from: ada }, { crew: id(31), from: cy }], 'gone (33) and joined (32) offers are not open');
+  const nameOf = (b) => ({ [ada]: 'Ada', [cy]: 'Cy' })[b];
+  assert.deepEqual(crewOffered('ada', offers, nameOf), { crew: id(30) });
+  assert.deepEqual(crewOffered(undefined, offers, nameOf), { crew: id(31) }, 'the newest');
+  assert.deepEqual(crewOffered(id(40), offers, nameOf), { crew: id(40) }, 'an id goes as it is');
+  const bo = crewOffered('Bo', offers, nameOf);
+  assert.equal(bo.code, 'carry-no-offer');
+  assert.match(bo.detail, /from Ada, Cy/);
+  assert.match(crewOffered('Ada', [], nameOf).detail, /look.*say --to/);
+});
+
+test('carry offer anyone asks every Soul within 20 m, nearest first, five at most; nobody near says what to do', () => {
+  const bodies = [{ id: 'c', m: 12 }, { id: 'a', m: 3 }, { id: 'far', m: 40 }, { id: 'b', m: 5 }, { id: 'd', m: 6 }, { id: 'e', m: 7 }, { id: 'f', m: 8 }];
+  assert.deepEqual(offerNear(bodies), ['a', 'b', 'd', 'e', 'f']);
+  const none = offerNear([{ id: 'far', m: 40 }]);
+  assert.equal(none.code, 'carry-nobody-near');
+  assert.match(none.detail, /shout/);
+  assert.equal(requestOf(['carry', 'offer', 'anyone']).req.to[0], 'anyone');
+  assert.deepEqual(requestOf(['carry', 'accept']).req, { op: 'carry', do: 'accept' }, 'an accept with no word: the newest offer');
+  assert.deepEqual(requestOf(['carry', 'accept', 'Ada']).req, { op: 'carry', do: 'accept', crew: 'Ada' });
+});
+
+test('who needs help: an offer to me with the command that joins it, and a crew near short of hands with whom to ask', () => {
+  const ada = id(20), bo = id(21), cy = id(22), six = entry('construction', 'rack_upright_6m.json');
+  const r = new Map([
+    [id(30), { id: id(30), kind: 'mars:carry_activity', members: [{ body: ada, role: 'mars:front' }] }],
+    [id(31), { id: id(31), kind: 'mars:carry_activity', members: [{ body: bo, role: 'mars:front' }, { body: cy, role: 'mars:back' }] }],
+    [id(35), { id: id(35), name: '6 m upright', kind: 'mars:rack_upright_6m', parent: id(31) }],
+    [id(32), { id: id(32), kind: 'mars:carry_activity', members: [{ body: id(23), role: 'mars:front' }] }],
+  ]);
+  const names = { [ada]: 'Ada', [bo]: 'Bo', [cy]: 'Cy', [id(23)]: 'Far' }, at = { [ada]: 2, [bo]: 6, [cy]: 8, [id(23)]: 90 };
+  const lines = workLines({ crews: crewsIn(r), rows: r, mine: [id(6)], offers: [{ crew: id(30), from: ada }], nameOf: (b) => names[b],
+    metres: (b) => at[b], needs: (t) => crewNeeds(r.get(t)?.kind === 'mars:rack_upright_6m' ? six : null), nearest: (c) => (c === id(30) ? 'rack frame 1' : null) });
+  assert.deepEqual(lines, [
+    `Ada offers you a place in a carry crew near rack frame 1 (${id(30)}): carry accept Ada`,
+    `a carry crew (${id(31)}, 6 m) holds 6 m upright: Bo, Cy, 2 of 4 hands: 2 more wanted; to help, ask Bo: say --to Bo "I can help"`,
+  ], 'the crew 90 m away is not near');
+});
+
+test('each step says what comes next; a seated part says what is left of its bay, or that it is built', () => {
+  const crew = id(8);
+  assert.match(nextStep({ do: 'grip' }), /carry offer <name>.*carry accept/);
+  assert.match(nextStep({ do: 'offer', crew }), new RegExp(`part take ${crew}`));
+  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*at the same moment/);
+  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes and when; every carrier sends the same carry to ${crew}`));
+  assert.match(nextStep({ do: 'to', crew }), /part put/);
+  assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a']) }), /1 of 6 slots filled; still to fill: upright_b: a rack upright/);
+  assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a', 'upright_b', 'beam_high_l', 'beam_high_r', 'beam_low_l', 'beam_low_r']) }), /6 of 6 slots filled, so it is built/);
+  assert.equal(nextStep({ do: 'list' }), null);
+});
+
+/** The bay of the copy above with parts in those slots, as `inspect` shows it. */
+function bayWith(filled) {
+  const names = Object.keys(kinds['mars:rack_bay'].slots), r = new Map([...rows]);
+  filled.forEach((s, k) => r.set(id(50 + k), { id: id(50 + k), name: `part ${k}`, kind: 'mars:rack_beam', parent: id(5), slot: names.indexOf(s) + 1 }));
+  return slotsCard(r, r.get(id(5)), kinds['mars:rack_bay'], (n) => r.get(n)?.slot ?? null);
+}
+
+test('a refused step says no next; a part seated in a bay reads the bay as it stands', async () => {
+  const refused = { ok: false, code: 'carry-crew-too-small', next: 'x' };
+  await nextOf(async () => assert.fail('asks nothing'), { op: 'carry', do: 'lift' }, refused);
+  assert.equal(refused.next, undefined);
+  const done = { ok: true, phase: 'done', next: 'x' }, asked = [];
+  await nextOf(async (r) => { asked.push(r); return { ok: true, built: '6 of 6 slots filled' }; }, { op: 'carry', kind: 'part', do: 'put', crew: id(8), into: id(5), slot: 'beam_low_r' }, done);
+  assert.deepEqual(asked, [{ op: 'inspect', this: id(5) }]);
+  assert.match(done.next, /it is built/);
 });

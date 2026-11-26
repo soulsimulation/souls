@@ -10,6 +10,7 @@
     "count is the copy's starting count, written into the stock's count field in place of the entry's default; it never exceeds the field's max. 0 is an empty container, said on purpose with its reason.",
     "draw picks library rows: the rows of that library whose tags meet the given tags (or all), in library order, are the pool. A row's copies are numbered 0, 1, 2 in template order; copy k holds pool[(k * count + j) mod pool size] for j below count, so neighbouring shelves differ and every book in a big pool is on some shelf. A take yields the held row at index count - 1 (the top of the pile), as the count falls by one.",
     "A book yielded carries its title and first page by reference to its books row (the stock's carries). A garment yielded gets its style from its garments row, and is drawn by the row's look for the wearer's family (Engine v2 E15).",
+    "A row that names no stock names copies of a yielded kind placed in the world (the commons' one book): each carries the top row of its own pile, as a take would yield it, from the world's start (#4837).",
     "A closed container (a wardrobe, a dresser, a fridge) shows its stock only once opened (its closed section; Engine v2 E22). A shelf, a crate and a stall are open.",
     "Stock is free to take. Buying, lending and debts are not here."
   ],
@@ -38,7 +39,8 @@
     {"entry": "eden:crate", "stock": "apples", "where": {}, "count": 6, "note": "street, market and barn crates: full"},
 
     {"entry": "eden:shop_counter", "stock": "apples", "where": {"room": ["reading"]}, "count": 0, "note": "the annex's two reading desks: no apples at a library desk; the counter's one stock is apples"},
-    {"entry": "eden:shop_counter", "stock": "apples", "where": {}, "count": 12}
+    {"entry": "eden:shop_counter", "stock": "apples", "where": {}, "count": 12},
+    {"entry": "eden:book", "where": {"name": ["commons-reading-book"]}, "count": 1, "draw": {"library": "books", "tags": ["story"]}, "note": "the one book placed on its own, on the commons kitchen table: its title and first page from the world's start"}
   ],
   "waiting": [
     {"entry": "eden:workbench", "why": "the workbench entry has no stock section, and Eden has no tool kinds yet; 81 of its 112 copies are kitchen counters. Tools on workbenches wait on a stock section for the workbench (storage/tables corrections) and tool kinds."},

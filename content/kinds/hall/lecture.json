@@ -26,7 +26,12 @@
     "take_the_lectern": {
       "who": "anyone",
       "starts": "act",
-      "takes": { "place": { "type": "slot" } },
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
       "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
       "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
       "effects": [
@@ -38,7 +43,12 @@
     "attend": {
       "who": "anyone",
       "starts": "act",
-      "takes": { "seat": { "type": "slot" } },
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "parent", "anchor": "this", "order": "nearest", "rank": 1 }
+        }
+      },
       "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
       "steps": [
         { "step": "walk_to", "point": { "arg": "seat" } },

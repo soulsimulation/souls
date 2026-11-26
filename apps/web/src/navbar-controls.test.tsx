@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MySouls} from './MySouls.tsx';
-import {orderedSoulIds,selectedSoulIds} from './soul-recency.ts';
+import {freshSoulIds,orderedSoulIds,selectedSoulIds} from './soul-recency.ts';
 import {MUSIC_STATIONS,stationPlaylist} from './music-stations.ts';
 import {audioSettings,loadAudioSettings,setAudioSettings,subscribeAudioSettings} from './audio-settings.ts';
 import {AudioMenu} from './AudioMenu.tsx';
@@ -25,6 +25,13 @@ test('recency is distinct, stable, and filtered through server ownership, includ
  assert.deepEqual(orderedSoulIds(['a','c'],recent),['c','a']);
  assert.deepEqual(orderedSoulIds(['x','y'],recent),['x','y']);
  assert.deepEqual(orderedSoulIds(ids,[]),ids);
+});
+test('a newly paired Soul goes ahead of older selections, so the three avatars show it; a first visit marks none new',()=>{
+ const ids=['a','b','c','d','new'],recent=['a','b','c'];
+ assert.deepEqual(freshSoulIds(ids,null),[]);
+ assert.deepEqual(freshSoulIds(ids,['a','b','c','d']),['new']);
+ assert.deepEqual(orderedSoulIds(ids,[...freshSoulIds(ids,['a','b','c','d']),...recent]).slice(0,3),['new','a','b']);
+ assert.deepEqual(freshSoulIds(['a','b'],['a','b','gone']),[]);
 });
 test('each station has actual existing pieces and All restores the complete playlist',()=>{
  for(const station of MUSIC_STATIONS){const list=stationPlaylist(PLAYLIST,station.id);assert.ok(list.length>0);assert.ok(list.every(id=>PLAYLIST.includes(id)));if(station.id!=='all')assert.equal(list.length,station.pieces.length);}

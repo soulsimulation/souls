@@ -100,6 +100,9 @@
 
 pub mod amounts;
 mod links;
+pub mod stock;
+
+pub use stock::{Stocked, Stocks};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -618,6 +621,9 @@ pub struct Forms {
     /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
     /// (E14, [`other_slots`]).
     slots_of: BTreeMap<String, BTreeSet<u64>>,
+    /// The world's stocked containers (#4837): a `create` of a stock's kind at one gives the made thing its carried
+    /// fields ([`Forms::stocks`]).
+    stocks: std::sync::Arc<Stocks>,
 }
 
 /// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
@@ -1421,17 +1427,23 @@ impl Forms {
                 _ => true,
             });
         }
-        // Trial 0.137: a form at another thing by a body a seat, a bed or a standing slot holds (a seated Soul's
-        // `take` of a book stack) walks there first, on legs the slot holds, which its hold refused `resource-held`.
-        // It rises first instead, by the rise move (as a form that moves the actor does, `rises_out`), as a sit at a
-        // seat walks there by itself. A form with a rise, a sit or a settle of its own keeps its steps; a walk the
-        // runner would skip (an approach to a hand step's thing already within reach, #4086) needs no rise, so that
-        // take is made from the seat.
+        // A body held by a seat, a bed or a standing slot of another thing, asked to do a form here that walks (the
+        // lamp across the room asked from the sofa, Eden indoor audit; a seated Soul's `take` of a book stack, trial
+        // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
+        // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
+        // moves (a ride, a boat): its seats are left by its own forms. Asked while a sit or rise is still under way, it
+        // waits behind that run and rises first when it starts (#4187). A form with a rise, a sit or a settle of its
+        // own keeps its steps (a sit at a seat walks there by itself), and a walk the runner would skip (an approach to
+        // a hand step's thing already within reach, a cup by the chair, #4086) needs no rise, so that take is made
+        // from the seat.
+        let held_in = w.places.as_ref().and_then(|p| {
+            p.slots
+                .held_by(body)
+                .filter(|s| *s != node && !p.slots.moves(*s))
+        });
         let rises_elsewhere = node != body
             && !in_its_slot
-            && w.places
-                .as_ref()
-                .is_some_and(|p| p.slots.held_by(body).is_some())
+            && held_in.is_some()
             && !steps
                 .iter()
                 .any(|s| matches!(s, Step::Rise | Step::Sit { .. } | Step::Settle { .. }))
@@ -1808,6 +1820,12 @@ impl Forms {
         self.header = Some(header);
     }
 
+    /// The world's stocked containers (#4837, [`stock`]): a `create` of a stock's kind at one of them gives the made
+    /// thing the fields of the row at the top of its pile. Called after [`Forms::new`] or [`Forms::recover`].
+    pub fn stocks(&mut self, stocks: std::sync::Arc<Stocks>) {
+        self.stocks = stocks;
+    }
+
     /// Writes run `run`'s effects at `at`, but no key already written or waiting to be. Each effect's entries, worked
     /// out against the tree and what is already in [`Forms::out`], go in order, the first carrying its key; they are
     /// one part. All of the run's effects or none: a refusal takes back what this call wrote and is returned.
@@ -1872,6 +1890,7 @@ impl Forms {
                 node: fr.node,
                 reserved: &reserved,
                 now: at,
+                stocks: &self.stocks,
             };
             let made = pin_made(self.header.as_ref(), e);
             let entries = match cx.entries(mint, made.as_ref().unwrap_or(e)) {

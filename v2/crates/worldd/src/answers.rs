@@ -725,6 +725,10 @@ pub struct Config {
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The world's stock (#4837, [`crate::stock`]): its stocked containers, which a take from one reads, and its
+    /// libraries' words by reference, served beside the records that hold them as public words are.
+    pub stocks: Arc<sim::forms::Stocks>,
+    pub library_words: Arc<BTreeMap<Id, Vec<u8>>>,
     /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
     pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
@@ -865,6 +869,8 @@ impl Config {
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            stocks: Arc::default(),
+            library_words: Arc::default(),
             closed: Default::default(),
             follow: None,
             rate: None,
@@ -5115,6 +5121,8 @@ impl Clock {
         self.faults += slice.faults.len() as u64;
         at[8] = mark();
         if let Some(m) = &self.measures {
+            // The Souls embodied now, for `health.json` (the home page's count, 26 Nov): off the tick's phases.
+            m.souls(self.life.as_ref().map(|l| l.life.embodied().count()));
             let mut phases = [0; measures::NPHASES];
             for (i, p) in phases.iter_mut().enumerate() {
                 if let (Some(a), Some(b)) = (at[i], at[i + 1]) {
@@ -5967,6 +5975,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&cfg.library_words),
         Arc::clone(&text),
         std::mem::take(&mut cfg.closed),
     )
@@ -6051,6 +6060,7 @@ pub fn start<S: Storage + 'static>(
         walkers,
         forms: {
             let mut acts = Acts::new(kinds, library, header, forms_scope);
+            acts.stocks(Arc::clone(&cfg.stocks));
             // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
             let _ = acts.hatches(&hatches);
             acts
