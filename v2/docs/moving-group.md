@@ -74,6 +74,19 @@ last walked, by its own `souls:follow` order with a place beside (`skills::close
 target: a walker more than 1.5 m from it for 2 s lets go (`souls:follow-lost-place`). Its leave rule is the hold's:
 either member's leave, the other's own walk or act, or a restart (moves are not stored) ends it for both.
 
+**Carrying together** is `carried-load` with every carrier a walker: when a lifted carry's front walks, it leads,
+and every other carrier that is not moving on its own (no move, no order of its own) walks with it by its own
+`souls:follow` order, keeping a place at a fixed offset from the front on the plan (parameter 4, `[x, z]` µm,
+`skills::close::Follow::at`): the offset it stood at when the order began (worldd's `keep_carry_orders`). The group
+moves as the front walks and does not turn, so the load arrives where the front's walk takes it, turned as it was
+lifted. So one walk moves the crew: separate agents need not set off within the 0.7 s a 1 m stretch allows. A
+carrier's own act takes its legs back (B2) and it walks its own way, still in the carry, as before (a late carrier's
+own `carry to` does not fight the group; to turn a load square into a slot, every carrier sends the same one); once its
+own walk ends while the front's still goes, it takes a place again where it stands. The leave rule is the carry's: a
+side's leave with the load's crew left closes up, its order cancelled; a carry that breaks off (`souls:partner-left`,
+`souls:carriers-apart`, `souls:carry-blocked`) stops the front's walk with that reason and cancels the walkers' orders,
+so the whole group stops with one reason. A restart sets the load down (C3) and cancels the orders.
+
 No task needs a seventh idea: each is one of these with its own data (places, outline, speed, region, stops).
 
 ## What would quietly break this
