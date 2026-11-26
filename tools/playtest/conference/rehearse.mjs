@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
@@ -29,8 +29,8 @@ export function rehearsalTemplate(eden) {
     batches: [{ group: 'conference-rehearsal', ops: [...definitions,
       { op: 'place', def: 'core/hall_lecture@1', name: 'presentation-lectern', p: [0, 0, 4] },
       { op: 'place', def: 'core/conference_question@1', name: 'question-stand', p: [3, 0, 3] },
-      { op: 'place', def: 'core/bench@1', name: 'audience-left', p: [-1.4, 0, 0], r: Math.PI },
-      { op: 'place', def: 'core/bench@1', name: 'audience-right', p: [1.4, 0, 0], r: Math.PI },
+      { op: 'place', def: 'core/bench@1', name: 'audience-left', p: [-1.4, 0, 0], r: 0 },
+      { op: 'place', def: 'core/bench@1', name: 'audience-right', p: [1.4, 0, 0], r: 0 },
     ] }],
   };
 }
@@ -78,7 +78,10 @@ export async function performConference({ seats, lecture, benches, question, rec
     await act(speaker, 'step_down', lecture);
     for (const listener of listeners) await leave(listener, 'hall-lecture');
     await leave(speaker, 'hall-lecture');
-    for (const listener of listeners) await body(listener, 'rise');
+    for (const listener of listeners) {
+      // A questioner has already stood and walked to the question stand.
+      if (benches.includes(await parent(listener))) await body(listener, 'rise');
+    }
   }
   await assemble(presenter, seats.slice(1));
   await explain(presenter);
@@ -141,7 +144,11 @@ export async function rehearse({ directory, startFile = null, onReady = () => {}
   assert(directory.startsWith(join(REPO_ROOT, '.local') + '/'), 'rehearsal outputs belong in this checkout’s ignored .local/');
   mkdirSync(directory, { recursive: true });
   const report = { fakeMinds: true, rows: [], complete: false };
-  const save = () => writeFileSync(join(directory, 'rehearsal-private.json'), JSON.stringify(report, null, 2));
+  const save = () => {
+    const file = join(directory, 'rehearsal-private.json');
+    writeFileSync(file + '.tmp', JSON.stringify(report, null, 2));
+    renameSync(file + '.tmp', file);
+  };
   const record = (row) => { report.rows.push({ at: Date.now(), ...row }); save(); };
   const template = join(directory, 'presentation-rehearsal.json');
   writeFileSync(template, JSON.stringify(rehearsalTemplate(JSON.parse(readFileSync(join(REPO_ROOT, 'worlds/templates/eden-2026.json'), 'utf8')))));
