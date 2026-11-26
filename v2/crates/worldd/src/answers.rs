@@ -5936,6 +5936,8 @@ pub fn start<S: Storage + 'static>(
         Scope(s)
     };
     let (forms_scope, engine_scope) = (scope("forms"), scope("engine"));
+    // The nodes of the kinds this start defines (#4954, [`Clock::put_kinds`]).
+    let kinds_scope = scope("kinds");
     let life = cfg.join.take().map(|j| {
         let entry = j.entry.0;
         Lives {
@@ -6080,7 +6082,7 @@ pub fn start<S: Storage + 'static>(
         })
         .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
-    let define = Some((std::mem::take(&mut cfg.define), Minter::new(scope("kinds"))));
+    let define = Some((std::mem::take(&mut cfg.define), Minter::new(kinds_scope)));
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let hatches = std::mem::take(&mut cfg.hatches);
