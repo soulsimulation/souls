@@ -11,9 +11,10 @@ export const PORTRAIT_TINTS=['#c4dcf2','#c4e6cf','#d6cdef','#bfe3e6','#d6e6bd','
 export function portraitTint(id:string):string{let h=0x811c9dc5;for(let i=0;i<id.length;i++){h^=id.charCodeAt(i);h=Math.imul(h,0x01000193);}h=Math.imul(h^h>>>16,0x85ebca6b);h=Math.imul(h^h>>>13,0xc2b2ae35);h^=h>>>16;/* a final mix: ids that differ only at the end spread too */return PORTRAIT_TINTS[(h>>>0)%PORTRAIT_TINTS.length];}
 /** Where a portrait's camera looks from, relative to its target: in front of the body (+X) and a little to its side. */
 const PORTRAIT_VIEW=new THREE.Vector3(1,.08,.45).normalize(),PORTRAIT_FOV=28;
-/** How much of the round crop's diameter the face fills (#5039, Gene: "maximize face ... 85% rule"). Hair, hats, horns,
- * stalks and shoulders may be cut off by the crop; the face is never sized from them. The server's portrait uses it too. */
-export const FACE_FILL=.85;
+/** How much of the round crop's diameter the face fills (#5039). Hair, hats, horns, stalks and shoulders may be cut off
+ * by the crop; the face is never sized from them. The server's portrait uses it too. Gene found 0.85 "a bit too big":
+ * 0.64 is halfway to the first large framing he liked (Bo, Chiron, Cy, Eli: faces 0.40 to 0.54 of the crop, mean 0.43). */
+export const FACE_FILL=.64;
 /** A look's face from its Head joint, in kit metres (kit.json face landmarks; the rig's neck to head joint is 0.0767):
  * the chin 0.02 under the joint, the forehead 0.20 over it, the ears 0.107 to each side, the nose 0.13 in front. */
 export const KIT_FACE={neckToHead:.07673,chin:-.02,forehead:.2,ear:.107,nose:.13} as const;
