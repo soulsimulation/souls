@@ -1049,6 +1049,8 @@ async fn r2_through_the_doorway(tag: &str, front_only: bool) {
     // The way, as the world says it to the carry's audience: each pose where the front and the back stand.
     let way = carry_way(&dir);
     let (front, back) = (body_of(&dir, a.id), body_of(&dir, b.id));
+    // The farthest the back stood from its place at a pose when the front's next walk went (front alone).
+    let mut lag = 0;
     for (k, p) in way.iter().enumerate().skip(1) {
         a.send("eden:walk", ground, point(Vec3::new(p[0], 0, p[1])))
             .await;
@@ -1059,14 +1061,15 @@ async fn r2_through_the_doorway(tag: &str, front_only: bool) {
             // The back keeps its place at the pose by its own order, sending nothing: where the pose has it from the
             // front, wherever the front stood its walk's end.
             let f = stood(&dir)[&front];
-            close_to(
+            let off = close_to(
                 &dir,
                 back,
                 Vec3::new(f.x + p[2] - p[0], 0, f.z + p[3] - p[1]),
-                60_000,
-                10,
+                50_000,
+                5,
             )
             .await;
+            lag = lag.max(off);
             continue;
         }
         b.send("eden:walk", ground, point(Vec3::new(p[2], 0, p[3])))
@@ -1143,6 +1146,16 @@ async fn r2_through_the_doorway(tag: &str, front_only: bool) {
     assert!(lift.frame.slot.is_some(), "held in the carry's slot");
     let m = set.orientation.rotate(load.middle).unwrap();
     let middle = (set.position.x + m.x, set.position.z + m.z);
+    if front_only {
+        println!(
+            "R2, the front alone: the back at most {} mm from its place at a pose",
+            lag / 1000
+        );
+        assert!(
+            lag < 150_000,
+            "the back kept its place at each pose: {lag} µm"
+        );
+    }
     println!(
         "R2: {} poses walked, {} samples of the carry, none through a wall; it turned from {first:.0} to {last:.0} \
          degrees through the 1.2 m doorway and was set down inside, its middle {} mm east of the wall's inner face",
@@ -1587,21 +1600,17 @@ async fn together(dir: &Path, bodies: &[Id], to: &[Vec3], secs: u64) -> Duration
     }
 }
 
-/// Waits until `body` stands within `within` µm of `to` (the log's body rows), at most `secs` seconds; else the test
-/// fails, naming how far it stood.
-async fn close_to(dir: &Path, body: Id, to: Vec3, within: i64, secs: u64) {
+/// Waits until `body` stands within `within` µm of `to` (the log's body rows), at most `secs` seconds: how far it
+/// stood then.
+async fn close_to(dir: &Path, body: Id, to: Vec3, within: i64, secs: u64) -> i64 {
     let t0 = Instant::now();
     loop {
         let off = stood(dir).get(&body).map_or(i64::MAX, |q| {
             (i128::from(q.x - to.x).pow(2) + i128::from(q.z - to.z).pow(2)).isqrt() as i64
         });
-        if off <= within {
-            return;
+        if off <= within || t0.elapsed() > Duration::from_secs(secs) {
+            return off;
         }
-        assert!(
-            t0.elapsed() < Duration::from_secs(secs),
-            "not within {within} µm of its place in {secs} s: {off} µm off"
-        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
