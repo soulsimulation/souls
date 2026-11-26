@@ -1645,11 +1645,15 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
     // Walked onto: an area of the open ground a body can stand on (the park's sand) ends on it, at its edge. (The
     // harbour boardwalk's region lies over the boardwalk's own deck, not the open ground: a walk ends facing it.)
     let onto = ["park-playground-sand"];
-    // Not here: the northern mountains' region (`place-region-northern-mountains`). Its walks get a standing point on
-    // the walker's part of the map ((45.5, -279.4) m from the town, (-13.0, -318.4) m from the channel) and still end
-    // `goal-unreachable` on the way: the map joins ground there that the walk cannot cross.
+    // The north from (7.4, -296.9) m: walks north from the channel's start (-14.0, -296.0) and from the town (45.0,
+    // -78.0) stop on the way, `goal-unreachable`, at (7.4, -296.9) and (27.7, -74.6) m whatever their goal (the walk
+    // is held there, not the goal).
     for (at, names, tag) in [
-        ("-14.0,-296.0", &["land-ring-north-range"][..], "lfnorth"),
+        (
+            "7.4,-296.9",
+            &["place-region-northern-mountains", "land-ring-north-range"][..],
+            "lfnorth",
+        ),
         (
             "40.0,120.0",
             &[
