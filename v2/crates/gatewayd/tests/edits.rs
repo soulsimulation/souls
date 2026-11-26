@@ -313,3 +313,221 @@ async fn g1b_a_creators_socket_places_moves_and_removes_and_others_are_refused()
     assert_eq!((receipts, refusals), (3, 3));
     world.stop();
 }
+
+/// An answer's sequence: the intent it answers.
+fn answered_sequence(v: &Value) -> u64 {
+    let Value::Map(f) = v else { panic!("a frame") };
+    let Some(Value::Map(a)) = f.get(&2) else {
+        panic!("an answer")
+    };
+    match a.get(&2) {
+        Some(Value::Uint(s)) => *s,
+        _ => panic!("a sequence"),
+    }
+}
+
+/// Nothing comes on `ws` for a while: no answer of another socket's intent.
+async fn quiet(ws: &mut Ws, who: &str) {
+    if let Ok(Some(Ok(m))) = tokio::time::timeout(Duration::from_millis(300), ws.next()).await {
+        panic!("{who} was sent a frame of another socket's: {m:?}");
+    }
+}
+
+/// Sends one edit on `from` and reads its answer there; the other socket is sent nothing.
+async fn edit_on(from: &mut Ws, other: &mut Ws, names: (&str, &str), bytes: Vec<u8>) -> Got {
+    put(from, bytes).await;
+    let v = next(from).await;
+    let got = read_answer(&v);
+    println!("{} {}: {got:?}", names.0, answered_sequence(&v));
+    quiet(other, names.1).await;
+    got
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_creators_page_and_agent_edit_in_turn_and_each_gets_every_answer() {
+    // #5006: the creator's page (signed in with a token from the session exchange) and the creator's agent (its own
+    // paired token) hold the creator's grant at once, on one real world.
+    let built = toggles::World::build(1, 0, 0);
+    let tree = built.replica.tree();
+    let room = tree
+        .children(tree.root())
+        .and_then(|c| c.first())
+        .and_then(|h| tree.node(*h))
+        .map(|n| n.id())
+        .expect("a room");
+    let kinds = toggles::kinds();
+    let item = kinds
+        .keys()
+        .find(|k| k.starts_with("souls:item@"))
+        .map(|k| Name::new(k).unwrap())
+        .expect("the item kind");
+    let creator = actor(0xc0, Actor::Creator);
+    let Actor::Creator(creator_id) = creator else {
+        unreachable!()
+    };
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.measures = false;
+    cfg.tick = Duration::from_millis(10);
+    cfg.edits = Some(edit::World {
+        creator: creator_id,
+        kinds,
+    });
+    let world = answers::start(
+        built.replica,
+        toggles::rules(),
+        sim::log::Mem::default(),
+        cfg,
+    )
+    .unwrap();
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-5006-together.sock");
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let d = door.clone();
+            std::thread::spawn(move || answers::serve(d, stream));
+        }
+    });
+    let soul = actor(0xdd, Actor::Soul);
+    let mut tokens = Tokens::default();
+    let mut issue = |a: Actor| {
+        let t = Token::issue(Grant::Actor(a)).unwrap();
+        tokens.add(Grant::Actor(a), t.hash());
+        t
+    };
+    let (page_token, agent_token, soul_token) = (issue(creator), issue(creator), issue(soul));
+    let log: Log = std::sync::Arc::new(|_: &str| {});
+    let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, Receipts::off());
+    tokio::spawn(world_link::run(gw.clone(), path));
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", tcp.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(tcp, socket::router(gw.clone())).into_future());
+    while !gw.link.up() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let place = |name: u64, x: i64| Op::Place {
+        name,
+        kind: item.clone(),
+        parent: Ref::Node(room),
+        at: spot(x),
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+
+    // The agent is connected; the page signs in beside it.
+    let mut agent = connect(&url, &agent_token).await;
+    let mut page = connect(&url, &page_token).await;
+    let (mut sequence, mut version, mut answered) = (0, 0, 0);
+    let mut placed = Vec::new();
+    // In turn, page then agent, three times each: one numbering for the creator, each answer on its sender.
+    for turn in 0..6 {
+        sequence += 1;
+        let op = place(1, turn * 1_000_000);
+        let bytes = edit_intent(creator, sequence, version, &[op]);
+        let got = if turn % 2 == 0 {
+            edit_on(&mut page, &mut agent, ("page", "agent"), bytes).await
+        } else {
+            edit_on(&mut agent, &mut page, ("agent", "page"), bytes).await
+        };
+        assert_eq!(got.kind, 1, "{got:?}");
+        answered += 1;
+        version = got.version;
+        placed.push(*got.names.get(&1).expect("the new thing's id"));
+    }
+    // The agent moves what the page placed, and the page removes what the agent placed: one world.
+    sequence += 1;
+    let moved = Op::Move {
+        node: Ref::Node(placed[0]),
+        at: spot(9_000_000),
+    };
+    let bytes = edit_intent(creator, sequence, version, &[moved]);
+    let got = edit_on(&mut agent, &mut page, ("agent", "page"), bytes).await;
+    assert_eq!(got.kind, 1, "{got:?}");
+    (answered, version) = (answered + 1, got.version);
+    sequence += 1;
+    let removed = Op::Remove {
+        node: Ref::Node(placed[1]),
+    };
+    let bytes = edit_intent(creator, sequence, version, &[removed]);
+    let got = edit_on(&mut page, &mut agent, ("page", "agent"), bytes).await;
+    assert_eq!(got.kind, 1, "{got:?}");
+    (answered, version) = (answered + 1, got.version);
+
+    // Both at once: each is answered on its own socket, and only there.
+    let (p, a) = (sequence + 1, sequence + 2);
+    sequence += 2;
+    put(
+        &mut page,
+        edit_intent(creator, p, version, &[place(1, 20_000_000)]),
+    )
+    .await;
+    put(
+        &mut agent,
+        edit_intent(creator, a, version, &[place(1, 21_000_000)]),
+    )
+    .await;
+    let (on_page, on_agent) = (next(&mut page).await, next(&mut agent).await);
+    assert_eq!(
+        (answered_sequence(&on_page), answered_sequence(&on_agent)),
+        (p, a)
+    );
+    for v in [&on_page, &on_agent] {
+        let got = read_answer(v);
+        assert_eq!(got.kind, 1, "{got:?}");
+        version = version.max(got.version);
+    }
+    answered += 2;
+    quiet(&mut page, "page").await;
+    quiet(&mut agent, "agent").await;
+
+    // The page goes: the agent still edits and is answered.
+    page.close(None).await.unwrap();
+    drop(page);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    sequence += 1;
+    put(
+        &mut agent,
+        edit_intent(creator, sequence, version, &[place(1, 30_000_000)]),
+    )
+    .await;
+    let got = read_answer(&next(&mut agent).await);
+    assert_eq!(got.kind, 1, "{got:?}");
+    (answered, version) = (answered + 1, got.version);
+    // The page comes back, and the agent goes: the page edits and is answered.
+    let mut page = connect(&url, &page_token).await;
+    sequence += 1;
+    let bytes = edit_intent(creator, sequence, version, &[place(1, 31_000_000)]);
+    let got = edit_on(&mut page, &mut agent, ("page", "agent"), bytes).await;
+    assert_eq!(got.kind, 1, "{got:?}");
+    (answered, version) = (answered + 1, got.version);
+    agent.close(None).await.unwrap();
+    drop(agent);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    sequence += 1;
+    put(
+        &mut page,
+        edit_intent(creator, sequence, version, &[place(1, 32_000_000)]),
+    )
+    .await;
+    let got = read_answer(&next(&mut page).await);
+    assert_eq!(got.kind, 1, "{got:?}");
+    answered += 1;
+    println!("{answered} edits from two sockets, each answered once on its sender");
+    assert_eq!(answered, sequence);
+
+    // A Soul's grant keeps one holder: its second sign-in lets the first go.
+    let mut first = connect(&url, &soul_token).await;
+    let _second = connect(&url, &soul_token).await;
+    let closed = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match first.next().await {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "a Soul's first socket is let go");
+    world.stop();
+}

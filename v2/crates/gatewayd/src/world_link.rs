@@ -26,8 +26,8 @@
 //! forever. The sync request itself is still answered [`RESTARTING`]: the client asks again once the world is up.
 //!
 //! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
-//! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
-//! away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
+//! asking actor; its answer goes back to the socket that asked, under the client's number. One asked while the world
+//! is away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
 //!
 //! **Never silence** (C8, #3396). Each kept intent has a deadline: its expiry, or [`DEADLINE`] after it was received,
 //! whichever is sooner (the world's own, `worldd::answers::Config::deadline`). Once it passes while the world is away,
@@ -235,8 +235,9 @@ struct State {
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
-    /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
-    syncs: BTreeMap<u64, (Vec<u8>, Value)>,
+    /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes, the asking socket's
+    /// session and the client's number.
+    syncs: BTreeMap<u64, (Vec<u8>, u64, Value)>,
     /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
     wake: Option<Wake>,
     asked: bool,
@@ -373,8 +374,9 @@ impl Link {
         Sent::Sent
     }
 
-    /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out.
-    pub fn ask(&self, key: Vec<u8>, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
+    /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out, from the
+    /// socket signed in as `session`, which alone is given its answer.
+    pub fn ask(&self, key: Vec<u8>, session: u64, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
             // Only an agent (a grant on a socket) asks here: a Soul's client syncs before it sends any intent, so a
@@ -394,7 +396,7 @@ impl Link {
         let Ok(bytes) = encode(&Value::Map(ask)) else {
             return Sent::Restarting;
         };
-        s.syncs.insert(ours, (key, n));
+        s.syncs.insert(ours, (key, session, n));
         let _ = out.send(bytes);
         Sent::Sent
     }
@@ -495,9 +497,10 @@ impl Link {
         out
     }
 
-    /// A sync answer from the world (key 20): the actor it is for and the frame under the client's number, or
-    /// `Some(None)` for one answering a request not kept. `None` if the frame is not a sync answer.
-    fn sync_answered(&self, frame: &[u8]) -> Option<Option<(Vec<u8>, Vec<u8>)>> {
+    /// A sync answer from the world (key 20): the actor it is for, the asking socket's session and the frame under
+    /// the client's number, or `Some(None)` for one answering a request not kept. `None` if the frame is not a sync
+    /// answer.
+    fn sync_answered(&self, frame: &[u8]) -> Option<Option<(Vec<u8>, u64, Vec<u8>)>> {
         let Value::Map(mut m) = decode(frame).ok()?.value else {
             return None;
         };
@@ -511,10 +514,10 @@ impl Link {
             .unwrap_or_else(|e| e.into_inner())
             .syncs
             .remove(&ours);
-        Some(kept.and_then(|(key, n)| {
+        Some(kept.and_then(|(key, session, n)| {
             m.insert(wire::ASK, n);
             m.remove(&wire::ACTOR);
-            Some((key, encode(&Value::Map(m)).ok()?))
+            Some((key, session, encode(&Value::Map(m)).ok()?))
         }))
     }
 
@@ -541,7 +544,7 @@ impl Link {
     }
 
     /// The world went away: the sync requests it had not answered, to answer with [`RESTARTING`].
-    fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
+    fn disconnected(&self) -> Vec<(Vec<u8>, u64, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = None;
         // A world that went to sleep with intents still unanswered here (one arrived as it went): asked awake at
@@ -631,8 +634,8 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 continue;
             }
             if let Some(answer) = gw.link.sync_answered(&frame) {
-                if let Some((key, frame)) = answer {
-                    gw.reply(&key, frame);
+                if let Some((key, session, frame)) = answer {
+                    gw.reply(&key, session, frame);
                 }
                 continue;
             }
@@ -640,7 +643,11 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             if let Some((key, sequence, cursor, left)) = read_progress(&frame) {
                 if let Some((received, handed)) = gw.link.progress(&key, sequence, left, at) {
                     let frame = times::read_from_world(frame, received, handed, at);
-                    gw.deliver(key, cursor, frame);
+                    let a = crate::Answering {
+                        sequence,
+                        ends: false,
+                    };
+                    gw.deliver(key, a, cursor, frame);
                 }
                 continue;
             }
@@ -660,7 +667,11 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                             t.at("receipt-record", "returned");
                         }
                         let frame = times::read_from_world(frame, received, handed, at);
-                        gw.deliver(key, cursor, frame);
+                        let a = crate::Answering {
+                            sequence,
+                            ends: true,
+                        };
+                        gw.deliver(key, a, cursor, frame);
                         if let Some(t) = &trace {
                             t.at("deliver", "returned");
                         }
@@ -671,8 +682,8 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 None => (gw.log)("a frame from the world was not {1: version, 2: answer}"),
             }
         }
-        for (key, n) in gw.link.disconnected() {
-            gw.reply(&key, sync_refused(n, RESTARTING));
+        for (key, session, n) in gw.link.disconnected() {
+            gw.reply(&key, session, sync_refused(n, RESTARTING));
         }
         writer.abort();
         if stopping {
@@ -688,7 +699,7 @@ pub async fn deadlines(gw: Arc<Gateway>) {
         tokio::time::sleep(SWEEP).await;
         for (key, actor, sequence, reason) in gw.link.overdue(times::stamp()) {
             let frame = crate::socket::refused(actor, sequence, reason, gw.link.now());
-            gw.tell(&key, frame);
+            gw.tell(&key, sequence, frame);
         }
     }
 }
