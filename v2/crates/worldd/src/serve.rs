@@ -1503,7 +1503,10 @@ pub(crate) fn added_kinds(
             .find(|(k, _)| k == p || p.strip_suffix("_activity") == Some(k.as_str()))
             .map(|(_, e)| e)
     };
-    let defined: Vec<String> = defined::nodes(tree).into_iter().map(|(_, n, _)| n).collect();
+    let defined: Vec<String> = defined::nodes(tree)
+        .into_iter()
+        .map(|(_, n, _)| n)
+        .collect();
     let mut renames = BTreeMap::new();
     let mut out = Vec::new();
     for ours in std::mem::take(&mut built.anew) {

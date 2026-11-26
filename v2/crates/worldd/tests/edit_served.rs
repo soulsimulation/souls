@@ -6525,7 +6525,8 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     println!("plan: {out}");
     assert_eq!(status, 0, "{out}");
     assert!(
-        out.contains("change eden:humanoid ") && out.contains("1 would change, 0 would be added, 0 unchanged"),
+        out.contains("change eden:humanoid ")
+            && out.contains("1 would change, 0 would be added, 0 unchanged"),
         "{out}"
     );
     assert_eq!(
@@ -6536,7 +6537,10 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     let (status, out) = entries_cmd("stage", &w.dir, &release);
     println!("stage: {out}");
     assert_eq!(status, 0, "{out}");
-    assert!(out.contains("1 changed and 0 added staged, 0 unchanged"), "{out}");
+    assert!(
+        out.contains("1 changed and 0 added staged, 0 unchanged"),
+        "{out}"
+    );
     assert_eq!(
         std::fs::read(&file).unwrap(),
         seeded,
@@ -6849,7 +6853,11 @@ fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
     let (old, release) = (d.join("old"), d.join("release"));
     std::fs::create_dir_all(&old).unwrap();
     std::fs::create_dir_all(release.join("greetings")).unwrap();
-    std::fs::copy(content.join("body/humanoid.json"), old.join("humanoid.json")).unwrap();
+    std::fs::copy(
+        content.join("body/humanoid.json"),
+        old.join("humanoid.json"),
+    )
+    .unwrap();
     std::fs::copy(
         content.join("body/humanoid.json"),
         release.join("humanoid.json"),
