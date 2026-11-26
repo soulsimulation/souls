@@ -1199,9 +1199,10 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// logged answer (a sit refused as it starts; same 905 records, 2,342 motion samples); the branch's first commit alone
 /// (the words) writes this pin, and its later ones (sits and rises answered as they start) leave it, so the words are
 /// the whole difference.
-/// MERGEPIN_NOTE
+/// With both, as merged: 904 records, 2,331 motion samples (#4974's), and a hash of their own; each change alone
+/// writes its own pin above (f7b20d34... for #4974's tick, 4c81bf20... for the whole-mm words).
 const PINNED_MOTION_HISTORY: &str =
-    "f7b20d34002b6b05b9ed86605a1e940eca51750dabd4656ad3f255f9d2030bd1";
+    "25b7a2777f569d139b11549facdbf0282abeb2dfd3fba7a0aa61134e6f3c5e98";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
