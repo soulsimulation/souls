@@ -415,6 +415,20 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 Ref::New(_) => None,
             })
         };
+        // A place's outline and line as the batch has left them, and whether a node is the open ground (#5006).
+        let place_fields = |node: Ref| -> BTreeMap<u64, Value> {
+            crate::arrival::READS
+                .iter()
+                .filter_map(|&f| Some((f, value(node, f)?)))
+                .collect()
+        };
+        let is_ground = |node: Ref| match node {
+            Ref::Node(id) => tree
+                .handle(id)
+                .and_then(|h| tree.node(h))
+                .is_some_and(|n| n.fields().contains_key(&crate::arrival::TILES)),
+            Ref::New(_) => false,
+        };
         let wall_of = |wall: Ref, ends: [Ref; 2]| -> Result<(), Refused> {
             let (kind, _) = named(wall)?;
             if !copy.header().kinds.iter().any(|k| k.as_str() == kind)
@@ -569,6 +583,34 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 }
                 if let Err(why) = crate::tint::check(*field, to) {
                     return refuse(here, "edit.tint-malformed", why);
+                }
+                // #5006: where new Souls arrive, on the world's root: a place of the world, or none.
+                if *field == crate::arrival::F_ARRIVAL {
+                    if named(*node)?.1.is_some() {
+                        return refuse(
+                            here,
+                            crate::arrival::UNKNOWN,
+                            "the arrival is set on the world's root",
+                        );
+                    }
+                    let place = match crate::arrival::read(to) {
+                        Ok(p) => p,
+                        Err(why) => return refuse(here, crate::arrival::UNKNOWN, why),
+                    };
+                    if let Some(place) = place {
+                        let is_place = matches!(named(Ref::Node(place)), Ok((_, Some(parent)))
+                            if crate::arrival::is_place(&place_fields(Ref::Node(place)), is_ground(parent)));
+                        if !is_place {
+                            return refuse(
+                                here,
+                                crate::arrival::UNKNOWN,
+                                format!(
+                                    "{} is not a place of this world: an area or a line on the open ground",
+                                    show(place)
+                                ),
+                            );
+                        }
+                    }
                 }
                 written = write_size(here, written, to)?;
                 if let Ref::Node(id) = node {

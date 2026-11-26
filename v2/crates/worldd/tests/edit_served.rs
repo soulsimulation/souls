@@ -1406,6 +1406,163 @@ async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
     assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
 }
 
+/// Each body born in the world's log, with its spot on the open ground (µm), in the order born.
+fn births(w: &Seeded) -> Vec<(Id, Vec3)> {
+    let bytes = std::fs::read(w.dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in replica::effects::Part::read(&r).unwrap().effects {
+            if let replica::effects::Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node, kind, pose, ..
+                    } = c.change
+                        && kind.as_str().contains("body")
+                    {
+                        out.push((node, pose.position));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #5006 (god-mode audit row 37): the creator names where new Souls arrive, on a served world, with no restart. Set to
+/// N2's build site, a joining Soul is born round its middle; an unknown place is refused `edit.arrival-unknown`;
+/// cleared, the next is born round the world's entry.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let im = import_eden::load(&text).unwrap();
+    let (origin, middle) = {
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes["site"]).unwrap()).unwrap();
+        (
+            n.fields()[&import_eden::F_ORIGIN].clone(),
+            replica::arrival::middle(n.fields()).expect("the build site has an outline"),
+        )
+    };
+    let d = scratch("arrival");
+    let w = seed(&d, &text, 2, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc3);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    // The build site as the served world holds it (its node by the facts' id of it).
+    let site = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        t.children(ground)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&c| t.node(c))
+            .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(&origin))
+            .expect("the served world holds the build site")
+            .id()
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let nowhere = Id::new(Scope([9; 16]), 1).unwrap();
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, arrival(nowhere.to_value())),
+    )
+    .await;
+    println!("an arrival at no place: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN)
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, arrival(w.ground.to_value())),
+    )
+    .await;
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN),
+        "the open ground itself is not a place: {got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, got.version, arrival(site.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the build site is named: {got:?}");
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let near = |p: Vec3, (x, z): (i64, i64)| {
+        let (dx, dz) = (p.x - x, p.z - z);
+        (((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt()) / 1e6
+    };
+    // A Soul's first act births it (C3); its walk is to a spot near the build site, so it never walks far.
+    walk(
+        &mut souls,
+        &w,
+        w.souls[0],
+        1,
+        middle.0 * 1000 + 3 * M,
+        middle.1 * 1000,
+    );
+    let walked = socket_end(&mut souls);
+    assert_eq!(
+        walked.kind, 1,
+        "the first Soul is born and walks: {walked:?}"
+    );
+    let born = births(&w);
+    assert_eq!(born.len(), 1, "one body born");
+    let at_site = near(born[0].1, (middle.0 * 1000, middle.1 * 1000));
+    println!(
+        "born with the build site named: ({:.2}, {:.2}) m, {at_site:.2} m from its middle ({:.1}, {:.1}) m",
+        born[0].1.x as f64 / 1e6,
+        born[0].1.z as f64 / 1e6,
+        middle.0 as f64 / 1e3,
+        middle.1 as f64 / 1e3
+    );
+    assert!(at_site <= 9.0, "born round the build site: {at_site} m");
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            4,
+            walked.version,
+            arrival(Value::Array(Vec::new())),
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the arrival is cleared: {got:?}");
+    walk(&mut souls, &w, w.souls[1], 1, -37 * M, 30 * M);
+    let walked = socket_end(&mut souls);
+    assert_eq!(
+        walked.kind, 1,
+        "the second Soul is born and walks: {walked:?}"
+    );
+    let born = births(&w);
+    assert_eq!(born.len(), 2, "two bodies born");
+    let at_entry = near(born[1].1, (-40 * M, 30 * M));
+    println!(
+        "born once cleared: ({:.2}, {:.2}) m, {at_entry:.2} m from the entry (-40, 30) m",
+        born[1].1.x as f64 / 1e6,
+        born[1].1.z as f64 / 1e6
+    );
+    assert!(at_entry <= 9.0, "born round the entry: {at_entry} m");
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 /// The facts the G1f and K18d served tests build on, and the id of the chair whose kind and fields a creator copies:

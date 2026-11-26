@@ -3395,10 +3395,22 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
+        // Where they arrive: the place the world's creator names on its root (#5006, `replica::arrival`), read from the
+        // tree each tick a birth waits, so a new arrival holds from the next birth with no restart; else the entry as
+        // configured (`world.json`'s `arrival`, else its `entry`).
+        let at = replica::arrival::point(self.replica.tree())
+            .filter(|(ground, _)| *ground == l.at.0)
+            .unwrap_or(l.at);
+        let ring = Ring {
+            entries: BTreeMap::from([(l.entry, at)]),
+            radius: l.ring.radius,
+            gap: l.ring.gap,
+            rings: l.ring.rings,
+        };
         // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
         // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
-        let floor = (l.at.0 == b.town.ground)
-            .then(|| b.town.entry_floor(l.at.1))
+        let floor = (at.0 == b.town.ground)
+            .then(|| b.town.entry_floor(at.1))
             .flatten()
             .map(|e| Ring {
                 entries: BTreeMap::from([(l.entry, e)]),
@@ -3406,7 +3418,7 @@ impl Clock {
                 gap: l.ring.gap,
                 rings: l.ring.rings,
             });
-        let standing = sim::life::Then(&l.ring, floor.as_ref());
+        let standing = sim::life::Then(&ring, floor.as_ref());
         let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
             self.birth_builds
                 .get(&soul)
