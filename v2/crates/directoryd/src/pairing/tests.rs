@@ -293,6 +293,59 @@ fn g7b_a1_the_creator_account_pairs_the_grant_it_holds_and_others_are_refused() 
     );
 }
 
+/// #5006 row 3: the world page lists a pending creator request from its address, but only to the account holding
+/// its creator grant (the owner, who alone can approve it), and not one that names another world.
+#[test]
+fn the_world_page_lists_its_creators_request_only_to_the_grant_holder() {
+    let (p, _) = store();
+    let creator = "creator-0123456789abcdef0123456789abcdef-1";
+    let here: std::net::IpAddr = "192.0.2.7".parse().expect("an address");
+    let asked = |scope: &str, soul: Option<&str>, at: u64| {
+        let a = Ask {
+            secret_hash: sha256(to_hex(&random::<32>()).as_bytes()),
+            device: "studio laptop".into(),
+            label: "souls-god.mjs".into(),
+            soul: soul.map(str::to_string),
+            scope: scope.into(),
+            force: false,
+        };
+        let code = p.ask(&a, at).expect("asked").code;
+        p.ask_from(&code, here, at);
+        code
+    };
+    let soul = asked("soul", None, T0);
+    p.ask_world(&soul, "eden").expect("its world");
+    let mine = asked("creator", Some(creator), T0 + 1);
+    let codes = |holds: &dyn Fn(&str) -> bool| -> Vec<(String, Option<String>)> {
+        p.waiting("eden", here, T0 + 2, holds)
+            .expect("the list")
+            .into_iter()
+            .map(|(code, _, _, soul, ..)| (code, soul))
+            .collect()
+    };
+    assert_eq!(
+        codes(&|g| g == creator),
+        vec![
+            (mine.clone(), Some(creator.to_string())),
+            (soul.clone(), None)
+        ],
+        "the holder sees its agent's creator request, newest first, with the Soul's"
+    );
+    assert_eq!(
+        codes(&|_| false),
+        vec![(soul.clone(), None)],
+        "anyone else sees only the Soul's"
+    );
+    let elsewhere = asked("creator", Some(creator), T0 + 2);
+    p.ask_world(&elsewhere, "elsewhere").expect("its world");
+    assert!(
+        !codes(&|g| g == creator)
+            .iter()
+            .any(|(c, _)| *c == elsewhere),
+        "a creator request naming another world is not this page's"
+    );
+}
+
 /// G7 (#2796): a creator pairs like a Soul, for a world's creator grant its account holds, and is handed a creator
 /// token, which the gateway's tokens file then lists.
 #[test]
@@ -1365,6 +1418,34 @@ fn n3720_a_new_soul_past_the_accounts_cap_is_refused_too_many_and_a_retire_makes
     p.retire("acct_owner", &first, T0).expect("retired");
     let (_, code) = ask(&p, "studio laptop", None, false, T0);
     assert!(p.approve("acct_owner", &code, T0).is_ok());
+}
+
+#[test]
+fn first_day_an_approved_new_soul_is_listed_by_the_name_its_agent_asked_for() {
+    let (p, tokens) = store();
+    let approved = |account: &str, soul: Option<&str>, name: &str| {
+        let (_, code) = ask(&p, "studio laptop", soul, soul.is_some(), T0);
+        p.ask_world(&code, "mars").expect("a world");
+        p.ask_name(&code, name).expect("kept");
+        p.approve(account, &code, T0).expect("approved")
+    };
+    let name_of = |account: &str| p.mine(account).expect("souls")[0].name.clone();
+    // At the approval, before its daemon polls for the token and before any world has its body.
+    let fern = approved("acct_owner", None, "Fern");
+    assert_eq!(name_of("acct_owner").as_deref(), Some("Fern"));
+    let mut souls = tokens.file_name().unwrap().to_os_string();
+    souls.push(".souls");
+    let file = std::fs::read_to_string(tokens.with_file_name(&souls)).unwrap();
+    assert!(
+        file.contains(&format!("words {fern} {} -", to_hex(b"Fern"))),
+        "{file}"
+    );
+    // A Soul that has a name keeps it.
+    approved("acct_owner", Some(&fern), "Moss");
+    assert_eq!(name_of("acct_owner").as_deref(), Some("Fern"));
+    // A name another Soul of the world has is not given; the approval stands.
+    approved("acct_other", None, "fern");
+    assert_eq!(name_of("acct_other"), None);
 }
 
 #[test]

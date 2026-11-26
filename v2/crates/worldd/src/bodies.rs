@@ -11,7 +11,8 @@
 //! - **Checked off the clock, committed on it** (K18b, #3175). A move's checks are its own: the controller's claims
 //!   (T9 rule 4), the reach (B2), the seat free and in reach (B3), a route (N7). The route searches and the reach
 //!   distances run on the world's planner thread (`sim::planner`), from the bodies as a tick left them, and come
-//!   back for the next tick: a walk gets its place and legs a tick after it starts; a sit or a rise is committed at
+//!   back for the next tick: a walk's place question goes in the tick it starts, with the bodies as that tick left
+//!   them (#4974), so it gets its place and legs at the next tick; a sit or a rise is committed at
 //!   the first tick after its reach is back, a tick later than asked. The clock commits: the claims, and the seat
 //!   held or free and the distance against the move's reach, as B3 reserves a seat: one tick's sits are taken
 //!   together, in B3's stable order. A move refused there ends by that name.
@@ -1562,11 +1563,24 @@ impl Bodies {
 
     /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
     /// A ranked list is bound first, the move taken is checked as a client checks it (`replica::move_check`), then
-    /// started (C14). A walk starts now (its place and legs come from the planner); a sit or a rise waits for its
-    /// reach, and comes back from the first call after the planner found it (K18b).
+    /// started (C14). A walk starts now (its place and legs come from the planner, asked at its next body tick); a sit
+    /// or a rise waits for its reach, and comes back from the first call after the planner found it (K18b).
     pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+        self.start_with(asks, false)
+    }
+
+    /// The world's commit of one tick's gateway moves (step 4, after the bodies stepped): as [`Bodies::start`], and
+    /// the new walks' place questions go to the planner now, with the bodies as the tick left them (#4974): the next
+    /// tick reads their place and legs, so each walk is planned and its act answered a tick after it starts, not two.
+    /// Moves started inside a body step (the wind-down's walks) are asked with that step's own wants already.
+    pub fn start_committed(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+        self.start_with(asks, true)
+    }
+
+    fn start_with(&mut self, asks: Vec<(Id, Asked)>, ask_now: bool) -> Vec<(Id, R<()>)> {
         let mut out = Vec::new();
         let mut asked = Vec::new();
+        let mut walked = Vec::new();
         for (id, a) in asks {
             if self.runner.controller.body(a.body).is_none() {
                 out.push((id, Err(refusal("body-unknown", a.body))));
@@ -1595,6 +1609,7 @@ impl Bodies {
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
+                        walked.push((a.body, id));
                     } else {
                         self.walked_to.remove(&id);
                     }
@@ -1639,14 +1654,21 @@ impl Bodies {
             .collect();
         self.reached
             .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
-        if !pairs.is_empty() {
-            let reach = self.reach_of(pairs);
-            self.send(Wants {
-                form_map: Some(Arc::clone(&self.form_map)),
-                classes: self.town.body_classes.clone(),
-                reach,
-                ..Wants::default()
-            });
+        // Committed by the world's step 4, the new walks' place questions go with them, now (#4974).
+        let mut wants = if ask_now {
+            self.runner.ask_places(&walked, self.sent)
+        } else {
+            Wants::default()
+        };
+        if !pairs.is_empty() || !wants.places.is_empty() {
+            if wants.places.is_empty() {
+                wants.classes = self.town.body_classes.clone();
+            }
+            if !pairs.is_empty() {
+                wants.reach = self.reach_of(pairs);
+            }
+            wants.form_map = Some(Arc::clone(&self.form_map));
+            self.send(wants);
         }
         self.waiting.extend(asked);
         out

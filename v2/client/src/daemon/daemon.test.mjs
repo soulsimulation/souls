@@ -236,7 +236,7 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
 test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says so within 10 s; then asleep, not stale', async () => {
   const ask = async (req) => { const t = performance.now(); const a = await request(rt.socket, req, 30_000); outputs.push(JSON.stringify(a)); return { ...a, ms: Math.round(performance.now() - t) }; };
   const seen = []; // the transcript of answers, for the PR
-  const keep = (op, t0, a) => seen.push({ s: Math.round((performance.now() - t0) / 100) / 10, op, age: a.age, ...(a.gap ? { gap: a.gap } : {}), ...(a.asleep ? { asleep: a.asleep } : {}) });
+  const keep = (op, t0, a) => seen.push({ s: Math.round((performance.now() - t0) / 100) / 10, op, age: a.age, ...(a.gap ? { gap: a.gap } : {}), ...(a.unchangedMs ? { unchangedMs: a.unchangedMs } : {}) });
   // A1: every answer, of every command, carries a numeric age.
   const { answered } = await waitFor(async () => { const s = await status(); return s.connected && s; });
   const act = await ask({ op: 'act', verb: 'eden:wave' });
@@ -277,7 +277,7 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
   keep('look', t0, back);
   assert.equal(back.stale, undefined);
   assert.ok(back.age < 2000, `age ${back.age}`);
-  assert.ok(back.asleep?.sinceMs > 30_000, `asleep ${JSON.stringify(back)} ${JSON.stringify(seen.slice(-4))}`);
+  assert.ok(back.unchangedMs > 30_000, `unchangedMs ${JSON.stringify(back)} ${JSON.stringify(seen.slice(-4))}`);
   // A3: stats over what this daemon did: every achieved intent's commands, bytes and first send.
   const st = await ask({ op: 'stats' });
   assert.ok(st.achieved >= 21, `achieved ${st.achieved}`);

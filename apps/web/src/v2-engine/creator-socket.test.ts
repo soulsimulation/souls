@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CreatorSession, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
 const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
@@ -64,6 +64,29 @@ test('a refusal is answered by name; a stale weather is sent once more against t
   assert.equal((await undo as { reason: string }).reason, 'undo.nothing', 'the panel\'s note shows the refusal\'s name');
 });
 
+test('edits are numbered by the clock, never below the last, so the creator\'s agent (also by the clock) and the page never lock each other out', async () => {
+  const sent: Uint8Array[] = [];
+  let now = 5_000;
+  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
+  s.frame(encode(new Map([[1, 2]]))); s.frame(encode(new Map([[4, 'stream.started']])));
+  void s.edit({ undo: 'undo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 5_000, 'the clock, above the first');
+  void s.edit({ undo: 'redo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 5_001, 'the same instant: one more than the last');
+  now = 9_000;
+  void s.edit({ undo: 'undo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 9_000, 'later: the clock again');
+});
+
+test('a socket that closes answers every waiting press creator.closed, in plain words, instead of leaving it Sending for ever (the edit may have been made)', async () => {
+  const { s } = signedIn();
+  const a = s.edit({ undo: 'undo' }), b = s.edit({ ops: [{ op: 'remove', node: WORLD }] });
+  s.closed();
+  assert.deepEqual([(await a as { reason: string }).reason, (await b as { reason: string }).reason], [CLOSED, CLOSED]);
+  assert.match(refusalText(CLOSED), /answer did not reach this page.*look at the world before you press again/);
+  s.frame(answer(100, 1, 3));   // a late answer finds nothing waiting
+});
+
 test('Build\'s place, move and remove are the batch\'s operations 1, 2 and 4; the receipt names the placed thing', async () => {
   const { s, sent } = signedIn();
   const HASH = '1220' + 'ab'.repeat(32), GROUND = `${'1a'.repeat(16)}.3`, BENCH = `${'1a'.repeat(16)}.40`;
@@ -115,4 +138,19 @@ test('the exchange is asked only for an account the directory lists a creator gr
   assert.equal(await mayCreate(place, owning(`soul-${'ab'.repeat(16)}-1`)), false, 'an owner of Souls only is not');
   assert.equal(await mayCreate(place, async () => { throw new NothingOwned(); }), false, 'a new person, owning nothing, is not');
   assert.equal(await mayCreate(place, async () => { throw new Error('no view: the directory said 500'); }), true, 'a view the directory cannot give leaves it to the exchange');
+});
+
+test('#5006: the panel\'s inbox says the creator\'s agent is connected only while the gateway says so', async () => {
+  const sock = { onText: null as ((t: string) => void) | null, start() {}, stop() {}, sendText() { return true; } };
+  const creator = new V2Creator('stream');
+  // the creator's mailbox, as mailbox() attaches it once the view token is held
+  Object.assign(creator, { box: new V2OwnerMailbox(async (self) => self.attach(new MailBox(), sock, CREATOR)) });
+  const said = async () => { const i = await creator.inbox(); return [i.connected, i.presence]; };
+  assert.deepEqual(await said(), [false, 'away'], 'not told yet: not connected, so the panel shows the line for the agent');
+  sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: true } }));
+  assert.deepEqual(await said(), [true, 'listening'], 'its agent signed in for the grant');
+  sock.onText!(JSON.stringify({ agent: { grant: `soul-${SCOPE}-2`, connected: false } }));
+  assert.deepEqual(await said(), [true, 'listening'], 'another grant\'s agent is not the creator\'s');
+  sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: false } }));
+  assert.deepEqual(await said(), [false, 'away'], 'gone again: the line comes back');
 });

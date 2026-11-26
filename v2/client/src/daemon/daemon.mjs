@@ -49,7 +49,7 @@
 //   An event reaches the reflexes once by its entry's sequence and name, however it arrived and across drops; after a
 //   drop the copy is brought current by hash, since the items missed while away are not replayed.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
-//   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
+//   `unchangedMs` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
 //   and R13's (#2753), wake rules on R9's events within the owner's budget (`../wake/wake.mjs`), and the owner's
@@ -104,6 +104,8 @@
 //                                         goes through `act` (`acts: ["<offer>:<id>", ...args]`)
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
+//     {"op":"space"}                      every node's name, kind, parent, pose and shape (outline, solids, slots,
+//                                         scale): what `where`, `clear`, `free` and a words-`look` read (#5006)
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
 //     {"op":"fields","node":"<id>"}       a node's fields as the copy holds them, the zone's root when no node
 //                                         (#3701: district plans and build claims are root fields 140 and 141)
@@ -152,7 +154,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy, holdingOf as heldIn } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf, shapesOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -184,14 +186,14 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
-import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
+import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair.mjs';
 import { activityTry, answerParts, readableDetail } from './refusal.mjs';
+import { reconnectWait } from './reconnect.mjs';
 
-const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // gatewayd's `REPLACED`: another client of this Soul signed in, and this socket was let go; or, asked only if free, a
 // live socket holds the Soul. While replaced, the daemon asks whether the Soul is free this often.
 const REPLACED = 4001;
@@ -349,7 +351,7 @@ const movesOf = new Map(); // sequence → its move's form (C14), until answered
 const joinsOf = new Set(); // own join sequences: only a successful receipt requests a post-birth copy
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
-let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
+let ws = null, signedIn = false, attempt = 0, refusals = 0, stopping = false, since = Date.now(), signedInAt = 0;
 let replacedAt = null; // when another client of this Soul took it, while this daemon waits for its next command
 let retryTimer = null, gaveUpAt = -Infinity; // the next sign-in (or ask whether the Soul is free); a sign-in given up
 let lostAt = null; // #4977: when a signed-in socket was lost, until the next is current
@@ -424,7 +426,7 @@ function current() {
     lostAt = null;
     note({ kind: 'reconnected', gap_ms: gap, say: `The client is connected to the world again after ${Math.round(gap / 100) / 10} s; acts held meanwhile go now.` });
   }
-  attempt = 0;
+  attempt = refusals = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
@@ -671,6 +673,7 @@ function refreshKinds() {
 function connect() {
   clearTimeout(retryTimer);
   retryTimer = null;
+  if (stopping) return; // a retry due while the daemon stops opens nothing
   counts.connects++;
   let step = 'hello', ended = false;
   // Replaced, it asks only if the Soul is free: it never takes the Soul from another client's live socket.
@@ -707,10 +710,11 @@ function connect() {
       }
       const { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
       if (kind === 'outcome') {
-        if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
+        if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); refusals++; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        refusals = 0;
         if (replacedAt !== null) { replacedAt = null; log('the Soul was free again: this client holds it'); }
         owed = ownOwed = 0; // versions named on an earlier socket may be another epoch's
         again = 0;
@@ -789,8 +793,8 @@ function connect() {
     }
     if (stopping) return;
     counts.drops++;
-    const most = Math.min(WAIT_MOST, WAIT_FIRST * 2 ** Math.min(attempt, 10));
-    const wait = Math.round(most / 2 + Math.random() * most / 2);
+    // A refused sign-in waits minutes, not seconds: the same token is refused until its owner pairs again.
+    const wait = reconnectWait(attempt, refusals);
     // Signed in, this socket held the Soul and a newer client took it. Not signed in, it asked only if free and a live
     // client holds it; unless its agent asked meanwhile (`takeBack`): then it falls through, and the Soul is taken.
     const held = step === 'stream';
@@ -1024,6 +1028,29 @@ function meNow(rows) {
   return { now, holding: holdingOf(rows).holding ?? [], metres: metresFrom(rows, body.id, { placed: true }) ?? undefined };
 }
 
+/** The other Souls' bodies in the copy with their metres from this Soul (`metres`: meNow's), nearest first. */
+function soulsAround(rows, metres) {
+  const me = [...rows.values()].find((r) => r.id === ME || r.soul === ME);
+  if (!me || !metres) return [];
+  return [...rows.values()].filter((r) => r !== me && r.soul !== undefined && r.kind === me.kind)
+    .map((r) => ({ id: r.id, name: r.name, m: metres(r) })).filter((b) => Number.isFinite(b.m)).sort((a, b) => a.m - b.m);
+}
+
+/** "Who needs help?" (`look`'s `work`): the crew offers to this Soul still open and the crews near it, as lines
+ *  (`../carry/carry.mjs` `workLines`); a crew holding nothing is named by the load nearest its first member. */
+function groupWork(rows, metres) {
+  if (!metres) return [];
+  const mine = mineIn(rows), kinds = heldKinds(), entryOf = (id) => kinds[rows.get(id)?.entry ?? rows.get(id)?.kind];
+  const loads = [...rows.values()].filter((r) => r.parent && !isCrew(rows.get(r.parent)?.kind) && loadOf(kinds[r.entry ?? r.kind]));
+  const nearest = (crew) => {
+    const first = rows.get(crew)?.members?.[0]?.body, from = first && metresFrom(rows, first, { placed: true });
+    const best = from ? loads.map((r) => ({ r, d: from(r) })).filter((x) => x.d <= 6).sort((a, b) => a.d - b.d)[0] : null;
+    return best?.r.name ?? null;
+  };
+  return workLines({ crews: crewsIn(rows), rows, mine, offers: openCrewOffers(logged, rows, mine), nameOf: (id) => nameIn(rows, id, mine),
+    metres: (id) => (rows.get(id) ? metres(rows.get(id)) : undefined), needs: (id) => crewNeeds(entryOf(id)), nearest });
+}
+
 /** The copy brought current unless `now`, and its age fields (R10). */
 async function ageAfter({ now = false } = {}) {
   // A gateway that does not answer leaves the copy as it is, and the answer says it is stale, since when and why.
@@ -1118,6 +1145,7 @@ const OPS = new Set([
   'redo',
   'reflex',
   'say',
+  'space',
   'stats',
   'status',
   'stop',
@@ -1231,7 +1259,11 @@ async function editOnce(req) {
     defines = v.defines;
   }
   if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
-  state.sequence++;
+  // The world keeps one sequence per creator, and the creator's page (its Build, Undo and weather) numbers its edits by
+  // the clock in µs (apps/web creator-socket.ts): counted from 1 here, every edit after one from the page would be
+  // `intent.stale-seq` for good. So a creator's edit is numbered by the clock too, and never below the last.
+  const before = state.sequence;
+  state.sequence = Math.max(state.sequence + 1, Date.now() * 1000);
   // Planned at the copy's version: its sequence is the version the world checks the batch's nodes against.
   let bytes;
   try {
@@ -1239,7 +1271,7 @@ async function editOnce(req) {
       ? wire.wireEditAsked(scope, seat.grant.counter, BigInt(state.sequence), unhex(copyVersion), undo ? req.op : 'step', batch ?? '', step?.build ?? '', step?.step ?? '')
       : wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
   } catch (e) {
-    state.sequence--;
+    state.sequence = before;
     return closing({ ok: false, code: 'edit.batch', sent: false, detail: String(e.message ?? e).slice(0, 200) }, null, { age });
   }
   save();
@@ -1490,7 +1522,7 @@ async function keyed(req) {
     const first = await going;
     // Kept only once it wrote: a refusal before anything was sent can be fixed and sent again with the same key.
     if (first.ok && first.sequence !== undefined) {
-      const { at: _a, changed: _c, age: _g, gap: _p, stale: _s, asleep: _z, ...answerOnly } = first;
+      const { at: _a, changed: _c, age: _g, gap: _p, stale: _s, unchangedMs: _z, ...answerOnly } = first;
       state.keys[k] = { sequence: first.sequence, first: answerOnly, answer: null };
       const names = Object.keys(state.keys);
       if (names.length > KEYS_KEPT) delete state.keys[names[0]];
@@ -1724,8 +1756,8 @@ async function answer(req, conn = null) {
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
-      const heard = named(rows, heardSince.splice(0));
-      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...meNow(rows), ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const heard = named(rows, heardSince.splice(0)), mn = meNow(rows);
+      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...mn, souls: soulsAround(rows, mn.metres), work: groupWork(rows, mn.metres), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
       const away = (arrive(), arrival());
@@ -1922,6 +1954,11 @@ async function answer(req, conn = null) {
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
+    });
+    case 'space': return closing({ ok: true }, (rows) => {
+      // #5006 finding 5: the plan facts a creator's where, clear, free and words-look read, with no browser.
+      const shapes = shapesOf(copy);
+      return { nodes: [...rows.values()].map((r) => ({ id: r.id, name: r.name, kind: r.kind, parent: r.parent, ...(r.pos ? { pos: r.pos } : {}), ...(r.rot ? { rot: r.rot } : {}), ...(r.soul ? { soul: r.soul } : {}), ...(r.aliases ? { aliases: r.aliases } : {}), ...shapes.get(r.id) })) };
     });
     case 'export': {
       // #3728: every node of the copy, brought current first, to the file the creator named (absolute).
@@ -2428,14 +2465,26 @@ async function carry(req) {
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); age = await ageAfter(); }
   const rows = rowsOf(copy), all = [...rows.values()], kinds = heldKinds(), poses = posesOf(copy);
   const me = all.find((r) => r.soul === ME)?.id ?? null;
-  // A Soul named by its name (a body's name in the copy), as `together offer` takes it.
+  const crews = crewsIn(rows), mine = mineIn(rows);
+  // A Soul named by its name (a body's name in the copy), as `together offer` takes it; `anyone` asks every Soul near.
   if (req.do === 'offer' && Array.isArray(req.to)) {
-    const to = req.to.map((w) => soulNamed(w, 'carry-names-a-soul', 'carry offer <name or body id> [...]')), bad = to.find((t) => t.code);
-    if (bad) return closing({ ok: false, code: bad.code, detail: bad.detail }, null, { age });
-    req = { ...req, to: to.map((t) => t.id) };
+    if (req.to.length === 1 && NEAR_WORDS.has(String(req.to[0]).toLowerCase())) {
+      const near = offerNear(soulsAround(rows, me ? metresFrom(rows, me, { placed: true }) : null));
+      if (near.code) return closing({ ok: false, code: near.code, detail: near.detail }, null, { age });
+      req = { ...req, to: near };
+    } else {
+      const to = req.to.map((w) => soulNamed(w, 'carry-names-a-soul', 'carry offer <name or body id> [...] | carry offer anyone')), bad = to.find((t) => t.code);
+      if (bad) return closing({ ok: false, code: bad.code, detail: bad.detail }, null, { age });
+      req = { ...req, to: to.map((t) => t.id) };
+    }
+  }
+  // An offer accepted (or declined) by its offerer's name, or the newest open one with no word.
+  if (req.kind !== 'part' && (req.do === 'accept' || req.do === 'decline')) {
+    const o = crewOffered(req.crew, openCrewOffers(logged, rows, mine), (id) => nameIn(rows, id, []));
+    if (o.code) return closing({ ok: false, code: o.code, detail: o.detail }, null, { age });
+    req = { ...req, crew: o.crew };
   }
   // Who is in each crew: its members as the world's node holds them in the copy (0.135), front and back first.
-  const crews = crewsIn(rows), mine = mineIn(rows);
   const ends = (crew) => ['front', 'back'].map((end) => rows.get(crew)?.members?.find((m) => m.role.endsWith(`:${end}`))?.body);
   if (req.do === 'list') {
     return closing({ ok: true, crews: crews.map((c) => ({ ...c, with: (rows.get(c.id)?.members ?? []).map((m) => ({ name: nameIn(rows, m.body, mine), role: m.role.replace(/^[^:]*:/, ''), body: m.body })), started: Boolean(rows.get(c.id)?.started) })) }, null, { age });
@@ -2458,14 +2507,27 @@ async function carry(req) {
   // The parts in a node's slots, and the part a crew holds: a carry into a bay's slot is checked against the rest.
   const seated = (id) => all.filter((r) => r.parent === id && poses.get(r.id)?.slot != null).map((r) => ({ id: r.id, slot: poses.get(r.id).slot }));
   const heldBy = (crew) => all.find((r) => r.parent === crew && !r.soul)?.id ?? null;
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, seated, heldBy, served: activitiesServed(home, seat.world) });
+  // A crew's front and back and where they stand: a carry into a slot lines up on the slot's axis nearest their line.
+  const crewEnds = (crew) => { const ids = ends(crew), p = ids.map((b) => (b ? at(b) : null)); return p.every(Boolean) ? { ids, at: p.map((x) => [x.pos[0], x.pos[2]]) } : null; };
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
+  // `--go <time>`: sent at the moment the crew's leader named, so every carrier sets off together. Carriers that set off
+  // a second apart (each its own command, on a busy machine) drift past the world's 1 m stretch and the carry breaks off.
+  let late = 0;
+  if (req.go !== undefined) {
+    const wait = Number(req.go) - Date.now();
+    if (!Number.isFinite(wait) || wait > GO_MOST_MS) return closing({ ok: false, code: 'carry-go', detail: `--go names a moment at most ${GO_MOST_MS / 1000} s from now: hh:mm:ss (UTC), an ISO time or Unix ms` }, null, { age });
+    if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
+    late = Math.max(0, Date.now() - Number(req.go));
+  }
   const basis = shownVersion ?? state.cursor;
   // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.
   const before = req.do === 'offer' ? crews.map((c) => c.id) : null;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
   const walked = intents.find((i) => /:walk$/.test(i.verb));
-  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}) }, null, { now: true });
+  // What to do next, plainly; the command drops it when the step is refused.
+  const next = nextStep(req, { load: rows.get(req.load ?? req.part)?.name ?? null });
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(late > 50 ? { late_ms: late } : {}), ...(next ? { next } : {}) }, null, { now: true });
 }
 
 /**
