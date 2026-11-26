@@ -1203,9 +1203,9 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// (the words) writes this pin, and its later ones (sits and rises answered as they start) leave it, so the words are
 /// the whole difference.
 /// With #4974's tick, #5034's walk-end field 7 and the whole-mm words, as merged: 904 records, 2,331 motion samples,
-/// and a hash of their own (MERGEPIN); each alone writes its own pin above.
+/// and a hash of their own (farm run of the merge); each alone writes its own pin above.
 const PINNED_MOTION_HISTORY: &str =
-    "3148abac4afea323b3e04d9e0e466aed89503d96a3416b7ea84616be775186e9";
+    "58835756d480a3c5dd40069b08ba744f09551cede721ab5195496785557ab487";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
