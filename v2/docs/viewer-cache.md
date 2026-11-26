@@ -80,8 +80,9 @@ required release prerequisite (#3634).
 Each rollover to a new generation (every 240 parts, #3825) starts a new recovery chain from a seed that holds the
 canonical copy and what the writer carries at that place, so a restart reads only the newest generation and its
 time does not grow with the world's age (#3833). Chains of generations before the previous one are deleted from the
-Store once they closed longer than the grace ago (`SOULS_STREAM_PRUNE_GRACE_S`, 10 minutes), a few objects after
-each part.
+Store once they closed longer than the grace ago (`SOULS_STREAM_PRUNE_GRACE_S`, 10 minutes), by the stream backup's
+own clean-up thread, which tries a refused delete again with back-off and never deletes an object the current chain
+names (#4954).
 
 ## What a cache in front must do
 
