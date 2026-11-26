@@ -47,7 +47,7 @@ function Head({ title = 'God Mode', right, back }: { title?: string; right?: Rea
 }
 
 /** The owner's God Mode: one view, or the Forsake danger zone over it. */
-export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, forsake, paired }: { banner?: ReactNode; connectUrl: string | null; grant?: string | null; tools: ReactNode; prayers?: ReactNode; more?: ReactNode; forsake: ReactNode | null; paired: boolean }) {
+export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, forsake, paired, edits }: { banner?: ReactNode; connectUrl: string | null; grant?: string | null; tools: ReactNode; prayers?: ReactNode; more?: ReactNode; forsake: ReactNode | null; paired: boolean; edits?: ReactNode }) {
   const { section, inbox } = useGod();
   const connected = !!inbox?.connected;
   if (section === 'forsake' && forsake) return <Frame label="Forsake world" wide>
@@ -67,6 +67,7 @@ export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, fors
       {!live && connectUrl && <Connect url={connectUrl} grant={grant ?? null} state={grant ? 'not-connected' : !paired ? 'not-paired' : 'connecting'} />}
       {live && <GodConsole paired={paired} tools={tools} prayers={prayers} />}
       {live && more}
+      {edits /* #5006 row 14: the creator's edits on a world the new engine runs, with or without the agent */}
       {forsake && <footer className="gm-foot"><button type="button" className="gm-forsake-open" data-forsake-open="1" onClick={() => showSection('forsake')}>Forsake world</button></footer>}
     </div>
   </Frame>;

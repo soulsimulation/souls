@@ -36,6 +36,8 @@ const landingPreviewKey = typeof location === 'undefined' ? null : takePreviewKe
 const PAIRED_KEY = `sim.godPaired:${worldKey}`;
 // 0.133 item 6: loaded when the creator opens Build, not with the panel
 const BuildBar = lazy(() => import('./god-ui/BuildBar.tsx').then((m) => ({ default: m.BuildBar })));
+// #5006 row 14: loaded when the creator opens God Mode on a world the new engine runs
+const EditLog = lazy(() => import('./god-ui/EditLog.tsx').then((m) => ({ default: m.EditLog })));
 // #5006: Forsake on a new-engine world is loaded when the creator opens it, not with the panel
 const V2ForsakeWorld = lazy(() => import('./god-ui/V2ForsakeWorld.tsx').then((m) => ({ default: m.V2ForsakeWorld })));
 const PHONE = () => typeof matchMedia === 'function' && matchMedia(SMALL_SCREEN).matches;  // P6: landscape phones (coarse pointer) too
@@ -333,6 +335,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt, soulName }: { flagM
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting source={prayerSource} />} more={more}
+      edits={v2 ? <Suspense fallback={null}><EditLog grant={status.creatorGrant ?? null} /></Suspense> : null}
       forsake={v2 ? <Suspense fallback={null}><V2ForsakeWorld name={name} /></Suspense> : <ForsakeWorld name={name} />} />}
   </>;
 }
