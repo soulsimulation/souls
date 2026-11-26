@@ -1174,10 +1174,12 @@ fn start_in(store: &Mem, body: Id, souls: u64) -> Vec3 {
 }
 
 /// Rung 2 (0.135 C3): a carry that breaks off. A decline and a lapsed offer move nothing, and the asker is told
-/// (`souls:offer-declined`, `souls:offer-lapsed`). A partner who leaves mid-carry, a partner whose connection is gone
-/// mid-carry, and a world restarted mid-carry each leave the beam set down on the ground where the carry had it,
-/// and the world says why (`souls:carry-set-down`: `souls:partner-left`, `souls:carriers-apart`, `souls:world-restarted`). Every leave
-/// after is accepted at once, so no Soul is held; every id is conserved, and the log replays to its state hash.
+/// (`souls:offer-declined`, `souls:offer-lapsed`). A partner who leaves mid-carry and a world restarted mid-carry each
+/// leave the beam set down on the ground where the carry had it, and the world says why (`souls:carry-set-down`:
+/// `souls:partner-left`, `souls:world-restarted`); the front's walk, which leads the carry, ends with it. A partner
+/// whose connection is gone mid-carry sends nothing, so it is walked with the front (`v2/docs/moving-group.md` rule 3)
+/// and the carry goes on until it is back and leaves. Every leave after is accepted at once, so no Soul is held; every
+/// id is conserved, and the log replays to its state hash.
 #[tokio::test(flavor = "multi_thread")]
 async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
     let store = Mem::with(Vec::new());
@@ -1236,9 +1238,14 @@ async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
     walk_on(&mut a, &store, 6 * M).await;
     walk_on(&mut b, &store, 6 * M).await;
     tokio::time::sleep(Duration::from_millis(2_000)).await;
-    // The partner leaves while both walk (its own walk goes on, without the beam).
+    // The partner leaves while both walk (its own walk goes on, without the beam). The front's walk leads the carry,
+    // so it stops where the beam is set down, ended by why (moving-group rule 8: the group stops and sets down).
     held = held.max(leave(&mut b, carry, "the partner leaves").await);
-    a.answer().await.expect("the front's walk ends");
+    assert_eq!(
+        a.answer().await,
+        Err("souls:partner-left".to_owned()),
+        "the front's walk ends with its carry"
+    );
     held = held.max(leave(&mut a, carry, "the front leaves").await);
     assert_eq!(Logged::read(&store).set_downs(), vec!["souls:partner-left"]);
     let (on, at) = lies(&store, beam());
@@ -1251,7 +1258,8 @@ async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
     );
     cases.push("partner left");
 
-    // A partner whose connection is gone mid-carry: it stops; the front walks on.
+    // A partner whose connection is gone mid-carry sends nothing, so it keeps its place and is walked with the front
+    // (moving-group rule 3; it used to stand and break the carry off): the carry goes on until it is back and leaves.
     to_the_beam(&mut a, &mut b, &store).await;
     let carry = offer(&mut a, 2, &store).await;
     b.act("activity:accept", Some(carry), none())
@@ -1262,14 +1270,19 @@ async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
         .expect("lifted");
     drop(b);
     walk_on(&mut a, &store, 6 * M).await;
-    a.answer().await.expect("the front walks on alone");
+    a.answer().await.expect("the front walks on, its partner with it");
+    assert_eq!(
+        Logged::read(&store).set_downs(),
+        vec!["souls:partner-left"],
+        "the carry goes on"
+    );
     let mut b = Soul::connect(&url, soul(2), &issued[1]).await;
     b.sequence = 2_000;
     held = held.max(leave(&mut b, carry, "back again, the partner leaves").await);
     held = held.max(leave(&mut a, carry, "the front leaves").await);
     assert_eq!(
         Logged::read(&store).set_downs(),
-        vec!["souls:partner-left", "souls:carriers-apart"]
+        vec!["souls:partner-left", "souls:partner-left"]
     );
     assert_eq!(
         lies(&store, beam()).0,
@@ -1300,7 +1313,7 @@ async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
         Logged::read(&store).set_downs(),
         vec![
             "souls:partner-left",
-            "souls:carriers-apart",
+            "souls:partner-left",
             "souls:world-restarted"
         ]
     );
@@ -1431,7 +1444,9 @@ fn side_drift(logged: &Logged, front: Id, back: Id, sides: &[Id]) -> i64 {
 ///   is refused `carry-lifted` (nobody joins mid-carry);
 /// - a side carrier leaves and the carry goes on with four (`souls:carry-going-on`, `souls:carrier-left`), 3 m more;
 ///   a second leaves, below four, and the plank is set down where it is (`souls:partner-left`);
-/// - in a new carry of four, a side who stays while the others walk on breaks it off (`souls:carriers-apart`).
+/// - in a new carry of four, a side who walks its own way while the others walk on breaks it off
+///   (`souls:carriers-apart`), and the front's walk ends with it; one who sends nothing would be walked with the crew
+///   (`v2/docs/moving-group.md` rule 3), so staying behind is a walk of its own.
 ///
 /// Every id is conserved and the log replays to the state hash it holds.
 #[tokio::test(flavor = "multi_thread")]
@@ -1578,7 +1593,9 @@ async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
     }
     steps.push("a second side left and it was set down");
 
-    // A new carry of four: a side who stays while the others walk on drifts from its place and breaks it off.
+    // A new carry of four: a side who walks its own way while the others walk on drifts from its place and breaks it
+    // off. (One who sends nothing keeps its place and is walked with the crew, moving-group rule 3, so it steps 3 m
+    // away from the plank instead of standing.)
     let at = crew_places(&store);
     for (s, p) in crew[..4].iter_mut().zip(&at) {
         s.send("eden:walk", Some(g), point(*p)).await;
@@ -1607,7 +1624,20 @@ async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
     for (s, p) in crew[..3].iter_mut().zip(from) {
         s.send("eden:walk", Some(g), point(east(p, 5 * M))).await;
     }
-    for s in &mut crew[..3] {
+    let away = if 2 * at[3].z >= at[0].z + at[1].z {
+        3 * M
+    } else {
+        -3 * M
+    };
+    crew[3]
+        .send("eden:walk", Some(g), point(Vec3::new(at[3].x, 0, at[3].z + away)))
+        .await;
+    assert_eq!(
+        crew[0].answer().await,
+        Err("souls:carriers-apart".to_owned()),
+        "the front's walk ends with its carry"
+    );
+    for s in &mut crew[1..3] {
         s.answer().await.expect("walks on");
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1617,14 +1647,14 @@ async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
             "souls:partner-left".to_owned(),
             "souls:carriers-apart".to_owned()
         ],
-        "a side who stays behind breaks the carry off"
+        "a side who walks its own way breaks the carry off"
     );
     for s in &mut crew[..4] {
         s.act("activity:leave", Some(again), none())
             .await
             .expect("a leave is always accepted");
     }
-    steps.push("a side stayed behind and it was set down");
+    steps.push("a side walked its own way and it was set down");
     tokio::time::sleep(Duration::from_millis(300)).await;
     served.stop();
 
@@ -1648,7 +1678,7 @@ async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
     println!(
         "team gate: rung 3 reached ({}); six for five grips refused carry-crew-too-large; a side not at its grip \
          refused carry-grip-out-of-reach; a join mid-carry refused carry-lifted; a side's leave went on \
-         (souls:carrier-left), a second set it down (souls:partner-left); a side left behind broke it off \
+         (souls:carrier-left), a second set it down (souls:partner-left); a side walking its own way broke it off \
          (souls:carriers-apart); the sides drifted at most {} mm from their places over 25 m; ids conserved; the log \
          replays to its state hash",
         steps.join(", "),
