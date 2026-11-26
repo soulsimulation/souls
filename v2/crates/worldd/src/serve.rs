@@ -4621,7 +4621,7 @@ mod tests {
 
     /// #4092: every body slot the entries declare is registered or counted under one reason. A one-seat tier naming
     /// the two-seat bench entry offers its slot 1, not 2; a toilet whose def has no slots offers none of its entry's; a
-    /// pew with both slots offers both.
+    /// pew with both slots offers both. Each kind is named unlike its entry (`core:toilet` would be `eden:toilet`'s own).
     #[test]
     fn every_declared_seat_is_offered_or_named_with_its_reason() {
         let thing = |id: &str, r: &str, entry: &str, slots: &str| {
@@ -4635,9 +4635,9 @@ mod tests {
         };
         let facts = format!(
             r#"{{"format": "souls/import-eden/1",
-            "kinds": [{{"ref": "core-tier@2", "hash": "aa", "name": "core:tier", "form": "point"}},
-                      {{"ref": "core-toilet@1", "hash": "bb", "name": "core:toilet", "form": "point"}},
-                      {{"ref": "core-pew@1", "hash": "cc", "name": "core:pew", "form": "point"}}],
+            "kinds": [{{"ref": "core-tier@2", "hash": "aa", "name": "core:mars_tier", "form": "point"}},
+                      {{"ref": "core-toilet@1", "hash": "bb", "name": "core:mars_toilet", "form": "point"}},
+                      {{"ref": "core-pew@1", "hash": "cc", "name": "core:mars_pew", "form": "point"}}],
             "things": [{}, {}, {}],
             "doors": [], "places": [], "bake": {{}}, "byRef": {{}}}}"#,
             thing("e_tier", "core-tier@2", "eden:bench", &slot(1, 0)),
