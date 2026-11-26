@@ -110067,6 +110067,139 @@
           "r": 0
         }
       ]
+    },
+    {
+      "note": "Existing lecture fixture beside the preserved classroom podium and question stand",
+      "group": "eden-4840-lecture",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-hall_lecture",
+            "version": 1,
+            "description": "A lecture: one Soul speaks at the lectern, others sit in the seats near it.",
+            "tags": [
+              "hall",
+              "lectern",
+              "lecture"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "round": 0.006,
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.05,
+                      0
+                    ],
+                    "size": [
+                      1.6,
+                      0.1,
+                      1.2
+                    ],
+                    "round": 0.01,
+                    "tint": "dais"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.13,
+                      0.1
+                    ],
+                    "size": [
+                      0.56,
+                      0.06,
+                      0.42
+                    ],
+                    "round": 0.01,
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.64,
+                      0.1
+                    ],
+                    "size": [
+                      0.38,
+                      0.98,
+                      0.3
+                    ],
+                    "round": 0.012,
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      1.16,
+                      0.06
+                    ],
+                    "size": [
+                      0.7,
+                      0.05,
+                      0.5
+                    ],
+                    "round": 0.008,
+                    "pitch": -0.3490658503988659,
+                    "tint": "top"
+                  }
+                ]
+              }
+            },
+            "params": {},
+            "palette": {
+              "dais": "#6b5a4a",
+              "wood": "#9a6b3f",
+              "top": "#b98a57"
+            },
+            "state": {
+              "phase": {
+                "type": "enum",
+                "values": [
+                  "announced",
+                  "speaking"
+                ],
+                "default": "announced"
+              },
+              "left_us": {
+                "type": "number",
+                "default": 3600000000
+              }
+            },
+            "size": {
+              "box": [
+                1.6,
+                1.3,
+                1.2
+              ]
+            }
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/hall_lecture@1",
+          "name": "classroom-hall-lecture",
+          "in": {
+            "parent": "eden-classroom-1",
+            "slot": "classroom"
+          },
+          "p": [
+            -2.2,
+            0,
+            -7
+          ],
+          "r": 0
+        }
+      ]
     }
   ]
 }
