@@ -1040,14 +1040,6 @@ impl Slots {
                 .is_some()
     }
 
-    /// Whether `body` is settled in its seat: neither lowering into it nor rising out.
-    pub fn settled(&self, body: Id) -> bool {
-        self.by_body
-            .get(&body)
-            .and_then(|k| self.held.get(k))
-            .is_some_and(|h| matches!(h.state, State::Seated(_)))
-    }
-
     /// The seat `body` holds, if any.
     pub fn held_place(&self, body: Id) -> Option<&PlaceAt> {
         self.places.get(&seat_of(*self.by_body.get(&body)?))
