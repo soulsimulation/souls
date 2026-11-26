@@ -95,9 +95,14 @@ struct Snap {
     no_way: bool,
     /// The thing every move aims at, when set (worldd's thing argument).
     aimed: Option<Id>,
+    /// Every thing is within a hand's reach of every body, when set (worldd's `Sight::within_reach`).
+    within: bool,
 }
 
 impl Geometry for Snap {
+    fn within_reach(&self, _: Id, _: Id) -> Option<bool> {
+        self.within.then_some(true)
+    }
     fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
         if self.defer_walk {
             replica::host::WalkPlan::Pending
@@ -1823,6 +1828,56 @@ fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
     );
 }
 
+/// Review of the rise-first change: a bare take of a thing already within reach of the seat (a cup by the chair) is
+/// done from the seat, its approach skipped by the runner, so no rise is added: the body is still seated after it.
+#[test]
+fn a_seated_body_takes_a_thing_within_reach_from_its_seat() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    let other = b.mint.mint().expect("id");
+    b.snap.things.insert(
+        other,
+        (Vec3::new(stand.x, stand.y, stand.z), BTreeMap::new()),
+    );
+    b.snap.within = true;
+    let approach = Step::WalkTo {
+        point: Name::new(skills::form_runner::TO_THING).expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        other,
+        vec![approach, Step::Hand],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done");
+    assert_eq!(
+        b.slots.as_ref().and_then(|s| s.held_by(body)),
+        Some(chair),
+        "taken from its seat, still seated"
+    );
+}
+
 /// 0.135 E14: a form done at one thing takes a seat of another (a lecture's `attend` takes a bench's seat, the hall's
 /// chairs) through the same places: the sit's hand-off puts the body in the chair, another body is refused the taken
 /// seat by name, and the rise of the lecture's `leave` gives it back. A Soul that leaves mid-walk or mid-sit keeps no
@@ -2537,9 +2592,7 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
     b.until_moving(body, 1);
     let sent = b.now;
     let take = bind(&entry, &form).expect("binds");
-    // Asked while still in the chair, the take walks, so its run rises first (done at once once the old run's rise
-    // has stood the body up): its span is the rise's and the take's.
-    let span = super::span(&[vec![Step::Rise], take.clone()].concat(), &limits);
+    let span = super::span(&take, &limits);
     let Asked::Started(new) = b
         .steps(body, thing, take, intent(body, 1), limits)
         .expect("accepted")

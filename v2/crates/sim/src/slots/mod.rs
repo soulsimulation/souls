@@ -1032,7 +1032,20 @@ impl Slots {
 
     /// Whether `thing` moves (on a course, #3603) or has seats that move with their cabin (N14): a ride or a boat.
     pub fn moves(&self, thing: Id) -> bool {
-        self.moving.contains_key(&thing) || self.runs.keys().any(|k| k.0 == thing)
+        self.moving.contains_key(&thing)
+            || self
+                .runs
+                .range((thing, 0)..=(thing, u64::MAX))
+                .next()
+                .is_some()
+    }
+
+    /// Whether `body` is settled in its seat: neither lowering into it nor rising out.
+    pub fn settled(&self, body: Id) -> bool {
+        self.by_body
+            .get(&body)
+            .and_then(|k| self.held.get(k))
+            .is_some_and(|h| matches!(h.state, State::Seated(_)))
     }
 
     /// The seat `body` holds, if any.
