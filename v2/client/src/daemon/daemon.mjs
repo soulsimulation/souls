@@ -172,9 +172,9 @@ import { checkedFurnish, furnishOps } from '../creator/furnish.mjs';
 import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs';
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
-import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
+import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
-import { activitiesIn, activityNamed, touchOf } from '../together/together.mjs';
+import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
 import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -2217,8 +2217,9 @@ function converse(req) {
         .map((r) => ({ id: r.id, ...(state.conversations[r.id]?.private ? { private: true } : {}) })),
     }));
   }
-  // The node this Soul's body stands under: the body is the Soul's own node, or (C3's joins) one linked to it.
-  const place = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  // The open ground, which takes the conversation as a child, else the node this Soul's body stands under (never
+  // the seat it sits on: two Souls on a bench still talk).
+  const place = offerPlace(rowsOf(copy), ME);
   const intents = converseIntents(req, { ns: NS, place, privateOf: (id) => Boolean(state.conversations[id]?.private) });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   if (req.private && req.conversation) state.conversations[req.conversation] = { private: true };
@@ -2236,11 +2237,11 @@ async function give(req) {
   await ageAfter();
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); await ageAfter(); }
   const rows = [...rowsOf(copy).values()], kinds = heldKinds(), served = activitiesServed(home, seat.world), list = activitiesIn(served);
-  const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  const place = offerPlace(rows, ME);
   // 0.135: the activities this world serves, as it serves them, by the words `together offer` takes.
   if (req.do === 'kinds') {
     if (!served) return closing({ ok: false, code: 'together-not-served', detail: 'this world has served no list of its activities yet: `status`, then try again once the daemon has signed in' }, null, { now: true });
-    return closing({ ok: true, activities: list.map(({ word, card, most, near_m: near, at }) => ({ word, ...(card ? { card } : {}), asks: most, near: near === null ? 'any distance' : `within ${near} m`, where: at ? `at a ${at.replace(/^.*:/, '').replace(/_/g, ' ')} (${at})` : 'anywhere' })) }, null, { now: true });
+    return closing({ ok: true, activities: kindsListed(served) }, null, { now: true });
   }
   // The nearest thing of a kind in the copy, where an activity played at it is offered.
   const poses = posesOf(copy), at = placer(rowsOf(copy), (id) => poses.get(id)?.slot ?? null, (r) => kinds[r?.entry ?? r?.kind]);

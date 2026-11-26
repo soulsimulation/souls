@@ -35,6 +35,9 @@ const GROUND: &str =
 const WALKER: &str =
     "test:walker@12200000000000000000000000000000000000000000000000000000000000000002";
 const PAIR: &str = "test:pair@12200000000000000000000000000000000000000000000000000000000000000003";
+/// A conversation (E26), by its plain name as the engine knows it.
+const TALK: &str =
+    "souls:conversation@12200000000000000000000000000000000000000000000000000000000000000005";
 /// A book a walker holds in one hand (0.133 R4's give).
 const BOOK: &str = "test:book@12200000000000000000000000000000000000000000000000000000000000000004";
 /// The pair's bound on a leave, µs: shorter than some phases of the fixture moves and longer than others.
@@ -96,8 +99,31 @@ fn pair() -> ActivityKind {
     .expect("the pair")
 }
 
+/// The conversation: an opener and a member, each claiming one voice, as the engine's.
+fn talk() -> ActivityKind {
+    let role = |r: &str| {
+        let voice = Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, Value::Uint(4))]));
+        Value::Map(BTreeMap::from([
+            (1, Value::Text(n(r))),
+            (2, Value::Text(n("souls:here"))),
+            (3, Value::Array(vec![voice])),
+        ]))
+    };
+    ActivityKind::from_value(&Value::Map(BTreeMap::from([
+        (1, Value::Text(n(TALK))),
+        (2, Value::Uint(1)),
+        (
+            3,
+            Value::Array(vec![role("souls:opener"), role("souls:member")]),
+        ),
+        (4, Value::Uint(60_000_000)),
+        (5, Value::Uint(LEAVE_WITHIN as u64)),
+    ])))
+    .expect("the conversation")
+}
+
 fn header(zone: Id) -> Header {
-    let kinds = [GROUND, WALKER, PAIR, BOOK]
+    let kinds = [GROUND, WALKER, PAIR, BOOK, TALK]
         .iter()
         .map(|k| Value::Text(n(k)))
         .collect();
@@ -135,9 +161,13 @@ fn rules(souls: &[Id]) -> Rules {
     book.hands = Some(1);
     Rules {
         kinds: BTreeMap::from([
-            (GROUND.to_owned(), kind("place", &["body", "test:pair"])),
+            (
+                GROUND.to_owned(),
+                kind("place", &["body", "test:pair", "souls:conversation"]),
+            ),
             (WALKER.to_owned(), walker),
             (PAIR.to_owned(), kind("activity", &[])),
+            (TALK.to_owned(), kind("activity", &[])),
             (BOOK.to_owned(), book),
         ]),
         souls: souls.iter().copied().collect(),
