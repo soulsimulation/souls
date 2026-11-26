@@ -529,8 +529,15 @@ fn crew_of_six_accepting_15_s_apart_forms_past_the_kinds_minute() {
             .accept(who, offer, at)
             .unwrap_or_else(|r| panic!("accept {who} at {} s: {}", at / S, r.name));
         assert_eq!(joined, offer, "each joins the one crew");
-        let e = event(w.last());
-        assert_eq!(e.name.as_str(), "souls:activity-joined");
+        // The join's own event (the first accept also starts the crew, written after it).
+        let e = w
+            .acts
+            .stream
+            .iter()
+            .rev()
+            .map(event)
+            .find(|e| e.name.as_str() == "souls:activity-joined")
+            .expect("a join");
         let renewed = if who < 5 { uint(at + LASTS) } else { None };
         assert_eq!(
             e.fields.get(&2).cloned(),
