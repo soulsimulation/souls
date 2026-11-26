@@ -666,18 +666,22 @@ fn a_sync_lets_go_by_what_it_changed_and_the_copy_stays_its_scope() {
             _ => rooms[a].push(10_000 + step),
         }
         w.set(&tree(&rooms));
-        // Cut off mid-descent: only when the world changed, or there is nothing to fetch.
-        if step % 7 == 0 && copy.roots().get(&world_id(0)) != w.root.map(Hash::to_bytes).as_ref() {
+        // Cut off mid-descent, after its root, its rooms or its things: a descent with fewer levels finishes.
+        if step % 7 == 0 {
             let before = copy.reach().unwrap();
             let bytes = copy.held_bytes();
-            let cut = copy.sync(&scope, &mut CutMade(&mut w, 1));
-            assert_eq!(cut.map(|_| ()).map_err(|e| e.name), Err("cut"));
-            assert_eq!(
-                copy.reach().unwrap(),
-                before,
-                "step {step}: a sync cut off leaves the copy as it was"
-            );
-            assert_eq!(copy.held_bytes(), bytes);
+            match copy.sync(&scope, &mut CutMade(&mut w, 1 + (step as usize / 7) % 3)) {
+                Err(e) => {
+                    assert_eq!(e.name, "cut");
+                    assert_eq!(
+                        copy.reach().unwrap(),
+                        before,
+                        "step {step}: a sync cut off leaves the copy as it was"
+                    );
+                    assert_eq!(copy.held_bytes(), bytes);
+                }
+                Ok(s) => whole(&copy, s.held),
+            }
         }
         let s = copy.sync(&scope, &mut w).unwrap();
         whole(&copy, s.held);
