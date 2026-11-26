@@ -1,0 +1,207 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:timber_bundle",
+ "owner": "thing",
+ "state": {
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 4,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "grip_1": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    250,
+    -2400
+   ]
+  },
+  "grip_2": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    250,
+    -1500
+   ]
+  },
+  "grip_3": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    250,
+    -500
+   ]
+  },
+  "grip_4": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    250,
+    500
+   ]
+  },
+  "grip_5": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    250,
+    1500
+   ]
+  },
+  "grip_6": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    250,
+    2400
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   700,
+   500,
+   4800
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {
+    "timber": "#c8935a",
+    "strap": "#2d6fb3"
+   },
+   "tags": [
+    "load",
+    "timber",
+    "bundle"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      -230,
+      115,
+      0
+     ],
+     "size": [
+      220,
+      220,
+      4800
+     ],
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      115,
+      0
+     ],
+     "size": [
+      220,
+      220,
+      4800
+     ],
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      230,
+      115,
+      0
+     ],
+     "size": [
+      220,
+      220,
+      4800
+     ],
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -115,
+      345,
+      0
+     ],
+     "size": [
+      220,
+      220,
+      4800
+     ],
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      115,
+      345,
+      0
+     ],
+     "size": [
+      220,
+      220,
+      4800
+     ],
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      240,
+      -1500
+     ],
+     "size": [
+      720,
+      480,
+      60
+     ],
+     "tint": "strap"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      240,
+      1500
+     ],
+     "size": [
+      720,
+      480,
+      60
+     ],
+     "tint": "strap"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A 4.8 m bundle of timbers: four to six carry it, one at each end and the rest beside it.",
+  "construction": "construction",
+  "timber": "timber",
+  "lumber": "lumber"
+ },
+ "card": {
+  "text": "card",
+  "category": "construction",
+  "synonyms": [
+   "timber",
+   "lumber"
+  ]
+ }
+}

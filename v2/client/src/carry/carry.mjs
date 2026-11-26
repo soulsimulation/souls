@@ -9,9 +9,11 @@
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
 //   carry grip <thing id> front|back|left|right [--from <m>]   walks to that end of a load (its grip's place, from its
 //                                     entry; 2.2 m off a part that stands), or beside it along its own x (1.2 m)
+//   carry grip <load> left|right <n>  beside its n-th grip between its ends, from its back: a side carrier's (spot.mjs)
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
 //   carry to <crew id> <x,z | thing id> [<slot>]   walks this Soul so the crew's load reaches there (its middle, or a
 //                                     bay's slot), keeping this Soul's place at the load: each carrier sends its own
+//   carry to <crew id> the loading spot   into the spot's first free bay that takes the load (spot.mjs)
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
 //   part take|unseat <crew id> <part id>   the crew takes a loose part, or one out of a bay or stand
@@ -22,6 +24,7 @@
 // `{"kind":"carry","what":"offered","offer":..,"from":..}`.
 
 import { createHash } from 'node:crypto';
+import { isSpot, sideSpot, toSpot } from './spot.mjs';
 
 export const CARRY_ENTRY = 'mars:carry';
 const ID = /^[0-9a-f]{32}-\d+$/;
@@ -36,7 +39,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>] [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -84,7 +87,10 @@ export function loadOf(entry) {
     .map((p) => (p.at_mm[axis] - middle) * 1000).sort((x, y) => x - y);
   if (along.length < 2 || along.at(-1) <= along[0]) return null;
   const long = [0, 0, 0]; long[axis] = b[axis] * 500;
-  return { axis, long, halfLength: b[axis] * 500, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
+  // Its grips between its ends (a side carrier's each, 0.135 C5) and its half width as the world reads it: the larger of
+  // its other two sides.
+  const halfWidth = Math.max(...[0, 1, 2].filter((i) => i !== axis).map((i) => b[i])) * 500;
+  return { axis, long, halfLength: b[axis] * 500, halfWidth, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH], inner: along.slice(1, -1) };
 }
 
 /** `v` turned by the quaternion `q` ([w, x, y, z], any scale), as the copy's poses hold it. */
@@ -171,7 +177,10 @@ export function byName(req, rows) {
     const v = out[k];
     if (v === undefined || ID.test(String(v)) || v === 'here' || pointOf(v)) continue;
     const want = String(v).trim().toLowerCase();
-    const named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    let named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    // None by the whole name: as said ("the loading spot" for `loading-spot`), dashes and underscores as spaces.
+    const said = (n) => String(n ?? '').trim().toLowerCase().replace(/^the\s+/, '').replace(/[\s_-]+/g, ' ');
+    if (!named.length) named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => said(n) === said(v)));
     // A map's place can share a thing's name (Mars College's `rack-bay` place and its rack bay): a place is never
     // gripped, taken or seated into, so with a thing of that name the thing is meant.
     const things = named.filter((r) => !/:place$/.test(String(r.kind ?? '')));
@@ -233,10 +242,20 @@ export function carryIntents(req, ctx) {
       if (!at) return no('carry-thing-unseen', `${req.thing} is not in the copy`);
       const from = req.from === undefined ? null : Number(req.from);
       if (from !== null && !(from > 0 && from < 10)) return no('carry-usage', '--from <metres, 0 to 10>');
+      if (req.n !== undefined && (req.end === 'left' || req.end === 'right')) {
+        // A side carrier's place (spot.mjs): beside the load's n-th grip between its ends, from its back.
+        const s = /^[1-4]$/.test(String(req.n)) ? sideSpot(at, loadOf(kinds[kindOf(req.thing)]), req.end, Number(req.n)) : null;
+        return s ? [walk(ns, ground, s)] : no('carry-grip-unknown', `${req.thing} has no grip ${req.n} between its ends (count from its back, 1 to ${loadOf(kinds[kindOf(req.thing)])?.inner.length ?? 0})`);
+      }
       return [walk(ns, ground, gripSpot(at, loadOf(kinds[kindOf(req.thing)]), req.end, from === null ? null : from * M))];
     }
     case 'to': {
       if (!id(req.crew) || req.where === undefined) return usage;
+      if (req.slot === undefined && id(req.where) && isSpot(kinds[kindOf(req.where)])) {
+        // A loading spot (spot.mjs): its first free bay that takes the crew's load, square in it.
+        const s = toSpot(req, ctx, req.where);
+        return s.code ? s : Object.assign([walk(ns, ground, s.point)], { bay: s.bay });
+      }
       let dest = pointOf(req.where);
       if (!dest && id(req.where)) {
         const at = placeOf(req.where);

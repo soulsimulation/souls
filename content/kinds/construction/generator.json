@@ -1,0 +1,149 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:generator",
+ "owner": "thing",
+ "state": {
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 4,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "grip_1": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    60,
+    -1000
+   ]
+  },
+  "grip_2": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    60,
+    -450
+   ]
+  },
+  "grip_3": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    60,
+    450
+   ]
+  },
+  "grip_4": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    60,
+    1000
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1000,
+   1100,
+   2000
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 20,
+   "palette": {
+    "skid": "#3b3d40",
+    "body": "#e0b02a",
+    "panel": "#2f3a44",
+    "pipe": "#6d6f73"
+   },
+   "tags": [
+    "load",
+    "generator",
+    "machine"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      60,
+      0
+     ],
+     "size": [
+      1000,
+      120,
+      2000
+     ],
+     "tint": "skid"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      545,
+      -100
+     ],
+     "size": [
+      900,
+      850,
+      1600
+     ],
+     "tint": "body"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      650,
+      800
+     ],
+     "size": [
+      700,
+      600,
+      300
+     ],
+     "tint": "panel"
+    },
+    {
+     "kind": "box",
+     "at": [
+      300,
+      1030,
+      -600
+     ],
+     "size": [
+      120,
+      140,
+      120
+     ],
+     "tint": "pipe"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A diesel generator on its skid: four carry it, one at each end and two beside it.",
+  "construction": "construction",
+  "genset": "genset"
+ },
+ "card": {
+  "text": "card",
+  "category": "construction",
+  "synonyms": [
+   "genset"
+  ]
+ }
+}

@@ -429,8 +429,10 @@ export function requestOf(argv) {
     Object.assign(req, { op: 'carry', do: does });
     if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
-    else if (does === 'grip') Object.assign(req, { thing: a, end: b, ...(from !== undefined ? { from } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b, ...(c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
+    // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
+    else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' ') });
     else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}) });
     else if (does !== 'list') req.crew = a;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
@@ -714,17 +716,19 @@ async function schedule(home, named, { sub, args, until, missed }) {
 /** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
 export const CARRY_HELP = [
   'carry grip <thing id> front|back|left|right [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it)',
+  'carry grip <load> left|right <n>   a crew\'s third and later carrier: beside the load\'s n-th grip between its ends, from its back (the n-th to accept takes grip n)',
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
   'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry to <crew id> the loading spot   every carrier at once: the load goes into the spot\'s first free bay (the answer names it); then one sends carry set-down',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
   'part unseat <crew id> <part id>   take it out of its bay',
   'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
 ];
-const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end first, then offer; wait for each step\'s answer before the next. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it.';
+const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end first, then offer; wait for each step\'s answer before the next. A part held in its slot stays held by whoever is left in its crew: a seated frame is held until beams join it, and a new holder takes over by a crew offered --on it. A heavy load takes a crew: a pallet of crates two, a generator four, a timber bundle four to six; fewer are refused carry-crew-too-small.';
 
 /** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
 export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
