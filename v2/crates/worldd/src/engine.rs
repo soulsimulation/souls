@@ -387,6 +387,29 @@ fn apart(f: Vec3, k: Vec3) -> i64 {
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
 }
 
+/// Turns `a` and `b`, each standing on the same floor, to face each other: the facing of its legs, set by a driver
+/// of them as a walk's end sets it (`Bodies::turn_to`). One seated, on another floor, within
+/// [`sim::controller::FACE_NEAR`] of the other or whose legs something else drives (a walk, a follow, settled on the
+/// ground: [`crate::bodies::turn_free`]) keeps its facing.
+fn face_each_other(c: &mut Controller, a: Id, b: Id) {
+    let at = |c: &Controller, x: Id| {
+        c.body(x)
+            .filter(|m| m.pose.frame.slot.is_none())
+            .map(|m| (sim::index::place_of(m).0, m.pose.position))
+    };
+    let (Some((na, pa)), Some((nb, pb))) = (at(c, a), at(c, b)) else {
+        return;
+    };
+    if na != nb {
+        return;
+    }
+    for (body, from, to) in [(a, pa, pb), (b, pb, pa)] {
+        if let Some(facing) = sim::controller::facing_toward(from, to) {
+            crate::bodies::turn_free(c, body, facing);
+        }
+    }
+}
+
 /// Where the controller has a body: the node it stands on and its position there.
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
@@ -501,6 +524,11 @@ impl Engine {
         let bodies = self.activities.beginning();
         if bodies.is_empty() {
             return;
+        }
+        // Two who begin a conversation (or any activity of two with no places) turn to face each other, each standing
+        // on one floor, as a walk's end turns a body to what it came to (trial of 25 Nov).
+        for [a, b] in self.activities.facing_pairs() {
+            face_each_other(c, a, b);
         }
         let feet = Feet::of(c, tree, &self.entries, bodies);
         for (body, r) in self.activities.begin_moves(
@@ -681,7 +709,38 @@ impl Engine {
                 // 0.134 T1: a touch starts only where its moves reach, read from the places the two will take when
                 // it starts (0.135 G3), so two who walked up to each other touch: each steps to its place no farther
                 // than the move reaches, and two farther apart are refused here, before anyone moves.
-                // A dance (T3) touches nobody: its moves are at each member's own body.
+                // A dance (T3) touches nobody: its moves are at each member's own body. But its members take their
+                // places together, within their role's `within` of the places' middle (0.135 G3), and one farther off
+                // is left where it is: one who accepts from farther than twice that from the asker, or from another
+                // floor (a seat), would be counted dancing while it stood 80 m off at a piano (trial of 25 Nov). It is
+                // refused here, before anyone moves; it walks over and accepts again.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| k.beat)
+                    && let Some(within) = e
+                        .offered_roles(offer)
+                        .and_then(|[_, other]| kind.role(other))
+                        .and_then(|r| r.within)
+                {
+                    let at = |b: Id| c.body(b).map(sim::index::place_of);
+                    let apart = match (at(asker), at(a.body)) {
+                        (Some((n0, p0)), Some((n1, p1))) if n0 == n1 => {
+                            let (dx, dz) = (i128::from(p1[0] - p0[0]), i128::from(p1[1] - p0[1]));
+                            Some((dx * dx + dz * dz).isqrt())
+                        }
+                        _ => None,
+                    };
+                    let most = i128::from(within) * 2;
+                    if apart.is_none_or(|d| d > most) {
+                        return Err(refusal(
+                            "together.too-far",
+                            format!(
+                                "{}: {} from {}, its places are within {most} µm of each other: stand and walk over first",
+                                plain(kind.name.as_str()),
+                                apart.map_or("not on one floor".into(), |d| format!("{d} µm")),
+                                show(asker),
+                            ),
+                        ));
+                    }
+                }
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let mut feet = Feet::of(c, &tree, &self.entries, [asker, a.body]);
                     let pair = [asker, a.body];

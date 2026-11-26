@@ -44,15 +44,33 @@ export function activitiesIn(served) {
     .sort((a, b) => a.word.localeCompare(b.word));
 }
 
-/** The activity a word names among `activitiesIn`: its word, its kind (`eden:hug`), its plain name, or the one word it
- *  starts (`dance` for `dance-together`); null if none. */
+/** The activity a word names among `activitiesIn`: its word, its kind (`eden:hug`), its plain name, the one word it
+ *  starts (`dance` for `dance-together`), or the one word it holds whole (`yoga` for `group-yoga`, `applause` for
+ *  `round-of-applause`, `jumping-jacks` for `group-jumping-jacks`); null if none or more than one. */
 export function activityNamed(list, word) {
   const w = String(word ?? '').toLowerCase().replace(/_activity$/, '');
   const d = w.replace(/_/g, '-');
   const exact = list.find((a) => a.word === d || a.kind === w || a.kind.replace(/^.*:/, '') === w);
   if (exact) return exact;
   const starts = list.filter((a) => a.word.startsWith(`${d}-`));
-  return starts.length === 1 ? starts[0] : null;
+  if (starts.length) return starts.length === 1 ? starts[0] : null;
+  const holds = d ? list.filter((a) => `-${a.word}-`.includes(`-${d}-`)) : [];
+  return holds.length === 1 ? holds[0] : null;
+}
+
+/** Every activity the world serves, for `together kinds`: those `together offer` takes (`activitiesIn`), and the rest
+ *  with how each is played instead: the carry crew by `carry offer`, one with no offerer at its thing (a frisbee game:
+ *  take a place at it). → [{word, card, asks, near, where, how?}], by word */
+export function kindsListed(served) {
+  const offered = activitiesIn(served);
+  const words = new Set(offered.map((a) => a.word));
+  const rest = (Array.isArray(served?.activities) ? served.activities : [])
+    .filter((a) => typeof a?.word === 'string' && typeof a.kind === 'string' && !words.has(a.word))
+    .map((a) => ({ word: a.word, card: typeof a.card === 'string' ? a.card : '', most: Number.isInteger(a.asks) ? a.asks : 1, near_m: typeof a.near_m === 'number' ? a.near_m : null, at: typeof a.at === 'string' ? a.at : null, kind: a.kind }));
+  const thing = (k) => k.replace(/^.*:/, '').replace(/_/g, ' ');
+  return [...offered.map((a) => ({ ...a, how: null })), ...rest.map((a) => ({ ...a, how: a.kind === CARRY_ENTRY ? '`carry offer <thing> <body id|name>`' : `at a ${thing(a.at ?? a.kind)}: \`find ${thing(a.at ?? a.kind)}\`, then act on it to take a place` }))]
+    .sort((a, b) => a.word.localeCompare(b.word))
+    .map(({ word, card, most, near_m: near, at, how }) => ({ word, ...(card ? { card } : {}), asks: most, near: near === null ? 'any distance' : `within ${near} m`, where: at ? `at a ${thing(at)} (${at})` : 'anywhere', ...(how ? { how } : {}) }));
 }
 
 const ID = /^[0-9a-f]{32}-\d+$/;
