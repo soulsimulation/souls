@@ -465,7 +465,8 @@ impl AuditPrint {
         self.dropped.load(Ordering::Relaxed)
     }
 
-    /// `{"limit":n,"queued":n,"printed":n,"dropped":n}`: `limit` the lines the queue holds.
+    /// `{"limit":n,"queued":n,"printed":n,"dropped":n}`: `limit` the lines the queue holds; `queued` the lines sent
+    /// and not yet printed, the one being printed included (so up to `limit` + 1).
     pub fn json(&self, o: &mut String) {
         let printed = self.printed.load(Ordering::Relaxed);
         let _ = write!(
