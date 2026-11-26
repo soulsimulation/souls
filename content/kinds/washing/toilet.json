@@ -54,6 +54,14 @@
     ]
   },
   "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {"seat": {"type": "slot", "select": {"of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}},
+      "needs": [{"need": "slot_free", "slot": {"arg": "seat"}}],
+      "steps": [{"step": "walk_to", "point": {"arg": "seat"}}, {"step": "sit", "slot": {"arg": "seat"}}],
+      "effects": [{"change": "reparent", "what": "actor", "into": {"arg": "seat"}, "event": "sat_down"}]
+    },
     "flush": {
       "who": "anyone",
       "starts": "act",
