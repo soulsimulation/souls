@@ -792,8 +792,9 @@ pub enum Effect {
     Set { field: u64, to: encode::Value },
     /// Field `field` of the node moved by `by` (`set ... by`, C22): refused when that leaves the kind's bounds.
     Add { field: u64, by: i64 },
-    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
-    /// above its least and the room the target has left, written as the source's and the target's sets in one part.
+    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked and what the source has
+    /// above its least (more than the room the target has left is refused, never moved in part), written as the
+    /// source's and the target's sets in one part.
     /// The field is named, not numbered: the two ends may be of kinds that number it differently, and the world finds
     /// its number on each end's own kind (E5). With `into_field`, the amount lands in that other field of the node
     /// itself (`from` and `into` both the node, #4103): a stock into a well.
