@@ -513,3 +513,24 @@ test('#2192: pictures are content-keyed and cached immutable; the WebP copy is o
         assert.equal((await app.request(a.thumb.replace(/key=[0-9a-f]+/, 'key=' + '0'.repeat(64)))).status, 404, 'another key is never served');
     } finally { await service.close(); db.close(); }
 });
+test('#5038: a picture is kept across releases: its key is the scene and the place, not the build', async () => {
+    const { god } = fixture();
+    let renders = 0;
+    const ref = god.model.get('seat')!.id;
+    const mount = () => { const app = new Hono(); return { app, service: mountContextViews(app, { god, edge: { places: { byId: new Map() }, knowledge: { knows: () => true } } as never,
+        contextReady: () => true, waitForContext: async () => {}, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() {},
+        renderer: async () => { renders++; return { png: new Uint8Array([1]) }; } }) }; };
+    const view = async (app: Hono) => (await (await app.request('/v1/world/context/views', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refs: [ref] }) })).json()).views[0];
+    const before = mount();
+    await view(before.app); await before.service.cache.settled();
+    const kept = await view(before.app);
+    await before.service.close();
+    const after = mount();   // the next release's process over the same world database
+    try {
+        const again = await view(after.app);
+        assert.equal(kept.status, 'ready');
+        assert.equal(again.status, 'ready', 'ready at once: nobody waits for it to be drawn again');
+        assert.equal(again.key, kept.key);
+        assert.equal(renders, 1, 'drawn once');
+    } finally { await after.service.close(); }
+});

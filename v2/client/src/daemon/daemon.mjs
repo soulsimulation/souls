@@ -139,9 +139,11 @@
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered for
-//   10 s) is let go at once, and acts wait for the next sign-in (#4980). A `wait` under way is told when a signed-in
-//   socket is lost (`{"kind":"disconnected","say":..}`) and when the next is current (`{"kind":"reconnected",
-//   "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by replica's WASM build (`wire*`).
+//   10 s) is let go at once, and acts wait for the next sign-in (#4980). One the gateway let go for a full queue is
+//   closed as `agent.behind` (1013): it signs in again at once, and answers say `gap.why` `behind` until its copy is
+//   current again (#4979). A `wait` under way is told when a signed-in socket is lost (`{"kind":"disconnected",
+//   "say":..}`, with `"why":"behind"` then) and when the next is current (`{"kind":"reconnected", "gap_ms":..}`),
+//   once each a gap (#4977). Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -201,6 +203,8 @@ import { reconnectWait } from './reconnect.mjs';
 // gatewayd's `REPLACED`: another client of this Soul signed in, and this socket was let go; or, asked only if free, a
 // live socket holds the Soul. While replaced, the daemon asks whether the Soul is free this often.
 const REPLACED = 4001;
+// The gateway let this socket go for a full queue (#4979): 1013 with the reason `agent.behind`. It signs in again at once.
+const BEHIND = 1013, AGENT_BEHIND = 'agent.behind';
 const REPLACED_RETRY_MS = Number(process.env.SOULS_REPLACED_RETRY_MS) || 5 * 60_000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
 // stay connecting for good, firing neither open nor close (seen with Node 22's WebSocket).
@@ -644,7 +648,7 @@ function closeMail(id, state, outcome) {
 function startSync(sock, kind) {
   syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
   forgetTaken(copy); // records an earlier sync took and never finished
-  if (cutAt !== null) cutWhy = 'syncing';
+  if (cutAt !== null && cutWhy !== 'behind') cutWhy = 'syncing'; // #4979: behind says why until it is current
   awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
 }
@@ -863,18 +867,19 @@ function connect() {
       if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.giveUp('sync refused; reconnecting'); }
     }
   };
-  sock.onclose = (ev) => closed(ev.code);
+  sock.onclose = (ev) => closed(ev.code, ev.reason);
   /** This socket is done with, once: by its close, or given up first. */
-  function closed(code) {
+  function closed(code, reason = '') {
     if (ended) return;
     ended = true;
+    const behind = code === BEHIND && reason === AGENT_BEHIND;
     publicNames.cancel(sock);
     clearTimeout(sock.granting);
     clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
       cutAt ??= performance.now();
-      cutWhy = 'not-connected';
+      cutWhy = behind ? 'behind' : 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
       for (const w of carried.splice(0)) w(false);
     }
@@ -888,7 +893,7 @@ function connect() {
     // #4977: a `wait` under way is told at once that the connection is gone, once a gap (replaced says so itself).
     if (held && lostAt === null) {
       lostAt = Date.now();
-      if (code !== REPLACED) note({ kind: 'disconnected', say: 'The client lost its connection to the world and is reconnecting; acts are held until it is back.' });
+      if (code !== REPLACED) note({ kind: 'disconnected', ...(behind ? { why: 'behind' } : {}), say: behind ? 'The client fell behind what the world sent it and is reconnecting at once; acts are held until it is back.' : 'The client lost its connection to the world and is reconnecting; acts are held until it is back.' });
     }
     if (code === REPLACED && (held || replacedAt !== null)) {
       cutWhy = 'replaced';
@@ -908,7 +913,7 @@ function connect() {
       return;
     }
     attempt++;
-    log(`socket closed (${code}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
+    log(`socket closed (${code}${reason ? ` ${reason}` : ''}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
     retryTimer = setTimeout(connect, wait);
   }
   sock.onerror = () => { /* onclose follows */ };

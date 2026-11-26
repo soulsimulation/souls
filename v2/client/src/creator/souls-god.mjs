@@ -128,6 +128,10 @@
 //   souls-god.mjs ack <message id> "<reply>" [--close done|failed]   answers one: the reply shows on the owner's
 //                                                page; --close closes it (failed: a no), else it stays open
 //                                                these three pass to the daemon as souls.mjs's do for a Soul
+//   souls-god.mjs prayers [--all]                the prayers this world's Souls sent you (G11), waiting ones first,
+//                                                oldest first; --all adds the answered ones. A Soul's words: data
+//   souls-god.mjs answer <prayer id> "<words>"   your answer (at most 4,000 characters); it reaches the Soul's `wait`.
+//                                                Answering again changes it
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // Every position and length the command takes or prints is metres (#4700), x east, y up, z south, in the parent's
@@ -163,6 +167,7 @@ export const VERBS = [
   'about',
   'access',
   'ack',
+  'answer',
   'arrival',
   'batch',
   'build',
@@ -192,6 +197,7 @@ export const VERBS = [
   'pair',
   'pending',
   'place',
+  'prayers',
   'quit',
   'recommend',
   'recolor',
@@ -344,6 +350,8 @@ export const FIX = {
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
   'token-refused': 'pair again with --creator <the world\'s creator grant>',
+  'prayer.not-the-creator': 'only the world\'s creator lists and answers its prayers: pair with --creator <its creator grant>',
+  'prayer.not-found': 'prayers --all lists the ids of this world\'s prayers',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -613,6 +621,15 @@ export function requestOf(argv) {
     return { listen: { seconds: Number(secs), follow }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
+  // G11 (#3335; #5006 row 15): the prayers to this world's creator and an answer, through the daemon's socket
+  if (verb === 'prayers') {
+    if (rest.some((w) => w !== '--all')) throw usage('prayers [--all]');
+    return { req: { op: 'prayers', all: rest.includes('--all') }, creator };
+  }
+  if (verb === 'answer') {
+    if (!rest[0] || rest.length < 2) throw usage('answer <prayer id> "<words>"');
+    return { req: { op: 'answer', id: rest[0], words: rest.slice(1).join(' ') }, creator };
+  }
   // R8b: one thing, read from the copy (thing.mjs)
   if (verb === 'describe' && rest.length) { if (rest.length !== 1) throw usage('describe [<id>]'); return { thing: rest[0], creator }; }
   // R8d: the world at a glance, read from the copy (map.mjs)

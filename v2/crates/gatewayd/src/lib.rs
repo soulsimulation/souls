@@ -104,6 +104,13 @@ pub fn unix_now() -> u64 {
 /// Frames queued to one socket before it counts as too slow and is closed (it may resume from its cursor).
 pub const OUTBOUND: usize = 64;
 
+/// The close code of an agent's socket let go for a full queue, its stream's or its view items' (#4979): 1013, Try
+/// Again Later, with the reason [`AGENT_BEHIND`], as a view socket that fell behind is (#4078). Its client signs in
+/// again at once and resumes from its cursor; what was still queued for it is not sent first.
+pub const BEHIND: u16 = 1013;
+/// The reason an agent's socket let go for a full queue is closed with (#4979).
+pub const AGENT_BEHIND: &str = "agent.behind";
+
 /// The gateway's shared state.
 pub struct Gateway {
     pub tokens: RwLock<Tokens>,
@@ -218,12 +225,13 @@ pub fn digest(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
-/// One signed-in socket: its queue of the stream's frames, its queue for the owner's messages, and the ids of the
-/// messages already given to it.
+/// One signed-in socket: its queue of the stream's frames, its queue for the owner's messages, the ids of the
+/// messages already given to it, and how its task is told at once that it was let go for a full queue (#4979).
 struct Live {
     frames: mpsc::Sender<Vec<u8>>,
     mail: mpsc::Sender<String>,
     mailed: BTreeSet<String>,
+    behind: Arc<tokio::sync::Notify>,
 }
 
 /// Which intent a frame of a grant's stream answers, and whether the answer ends it (a progress answer does not, C20).
@@ -280,6 +288,9 @@ pub struct Attached {
     pub newest: u64,
     /// The owner's messages for this socket, as text frames (R13).
     pub mail: mpsc::Receiver<String>,
+    /// Notified when the socket is let go for a full queue (#4979): its task closes it as [`AGENT_BEHIND`] at once,
+    /// not after sending the frames still queued.
+    pub behind: Arc<tokio::sync::Notify>,
 }
 
 impl Gateway {
@@ -362,6 +373,7 @@ impl Gateway {
         }
         let (tx, rx) = mpsc::channel(OUTBOUND);
         let (mail_tx, mail_rx) = mpsc::channel(OUTBOUND);
+        let behind = Arc::new(tokio::sync::Notify::new());
         hub.next_session += 1;
         let session = hub.next_session;
         let held = hub.grants.entry(grant.key()).or_default();
@@ -375,6 +387,7 @@ impl Gateway {
                 frames: tx,
                 mail: mail_tx,
                 mailed: BTreeSet::new(),
+                behind: behind.clone(),
             },
         );
         held.who = Some(who);
@@ -394,6 +407,7 @@ impl Gateway {
             replay,
             newest,
             mail: mail_rx,
+            behind,
         })
     }
 
@@ -727,8 +741,12 @@ impl Gateway {
                             },
                         );
                     }
+                    // Its task is told at once (#4979): it closes the socket as `agent.behind`, not after the backlog.
+                    live.behind.notify_one();
                     held.sessions.remove(session);
-                    (self.log)("a socket's outbound queue was full; it was let go and may resume");
+                    (self.log)(
+                        "a socket's outbound queue was full; it was let go as agent.behind and may resume",
+                    );
                 }
             }
         }

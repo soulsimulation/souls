@@ -14,7 +14,8 @@
 //!
 //! [`Choice`] then turns each act into an intent the way an agent would: a Soul its last sit seated rises first
 //! (a walk or a sit while seated is refused, `resource-held`), and says are withheld unless `--speech` opts in, so a
-//! run on a world people visit says nothing out loud.
+//! run on a world people visit says nothing out loud. A `look_at` or a `point` is at a thing the Soul can see: one
+//! within [`SIGHT_UM`] of where it was last sent (its birth place before that), as an agent looks at what is around it.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -73,6 +74,9 @@ pub struct Targets {
     /// #4193: each Soul's own walk, sit, take and thing targets, the nearest its body of those reachable, spread so
     /// that at most [`SHARE_MOST`] Souls share one where there are enough; a Soul not in it uses the lists above.
     pub mine: BTreeMap<Id, Mine>,
+    /// #5019 follow-up: from each place a Soul may be sent to (a target above) or born at (its body), the things
+    /// within [`SIGHT_UM`] of it, nearest first, at most [`SIGHT_EACH`]: what a `look_at` or a `point` there is at.
+    pub in_sight: BTreeMap<Id, Vec<Id>>,
 }
 
 /// #4193: one Soul's targets, nearest first.
@@ -106,6 +110,13 @@ pub struct Seen {
     /// #4154: each node's pose, for the things near the Souls.
     pub places: BTreeMap<Id, Place>,
 }
+
+/// #5019 follow-up: how far a `look_at`'s or a `point`'s thing may be from the place the Soul was last sent to, µm. Both
+/// moves reach 20 m (sight, `content/moves/look.json`); 5 m are kept for a walk that ends beside its thing, short of
+/// it, or a seat's stand point.
+pub const SIGHT_UM: i64 = 15_000_000;
+/// The things kept in sight of each place, nearest first.
+pub const SIGHT_EACH: usize = 8;
 
 /// #4154: how far from where the Souls stand a thing may be to be acted on, as an agent acts on what it sees: the
 /// radius (micrometres: 30 m) doubles from this until at least [`NEAR_LEAST`] things are in it.
@@ -213,6 +224,35 @@ fn spread(seen: &Seen, of: &[Id], used: &mut BTreeMap<Id, usize>) -> BTreeMap<Id
             *used.entry(*t).or_default() += 1;
         }
         out.insert(*soul, mine);
+    }
+    out
+}
+
+/// #5019 follow-up: for each of `from`, the things of `of` within [`SIGHT_UM`] of it across x and z, nearest first, at
+/// most [`SIGHT_EACH`]. A place with no position, or none in sight, is left out.
+fn in_sight(seen: &Seen, from: impl IntoIterator<Item = Id>, of: &[Id]) -> BTreeMap<Id, Vec<Id>> {
+    let at: Vec<(Id, (i64, i64))> = of
+        .iter()
+        .filter_map(|t| Some((*t, world_xz(seen, t)?)))
+        .collect();
+    let r = i128::from(SIGHT_UM).pow(2);
+    let mut out = BTreeMap::new();
+    for p in from {
+        if out.contains_key(&p) {
+            continue;
+        }
+        let Some((x, z)) = world_xz(seen, &p) else {
+            continue;
+        };
+        let mut by: Vec<(i128, Id)> = at
+            .iter()
+            .map(|(t, (tx, tz))| (i128::from(tx - x).pow(2) + i128::from(tz - z).pow(2), *t))
+            .filter(|(d, _)| *d <= r)
+            .collect();
+        by.sort_unstable();
+        if !by.is_empty() {
+            out.insert(p, by.into_iter().take(SIGHT_EACH).map(|(_, t)| t).collect());
+        }
     }
     out
 }
@@ -364,7 +404,27 @@ impl Targets {
         let mut w = spread(seen, &every(&|e| has_slot(e, None)), &mut used);
         let mut s = spread(seen, &every(&|e| has_slot(e, Some("sit"))), &mut used);
         let mut k = spread(seen, &every(&|e| has_form(e, "take")), &mut used);
-        let mut a = spread(seen, &every(&thing), &mut BTreeMap::new());
+        let lookable = every(&thing);
+        let mut a = spread(seen, &lookable, &mut BTreeMap::new());
+        // Every place a Soul may be sent to or stand at: its body, and each target it may be sent to.
+        let places: Vec<Id> = seen
+            .bodies
+            .values()
+            .copied()
+            .chain(
+                [&w, &s, &k, &a]
+                    .into_iter()
+                    .flat_map(|m| m.values().flatten().copied()),
+            )
+            .chain(
+                walk.iter()
+                    .chain(&sit)
+                    .chain(&takeable)
+                    .chain(&all_things)
+                    .copied(),
+            )
+            .collect();
+        let in_sight = in_sight(seen, places, &lookable);
         let mine = seen
             .bodies
             .keys()
@@ -388,6 +448,7 @@ impl Targets {
             forms,
             bodies: seen.bodies.clone(),
             mine,
+            in_sight,
         }
     }
 
@@ -444,6 +505,9 @@ pub struct Choice {
     /// #4154: the thing the Soul's last take put in its hand (set by the agent's socket on the take's receipt); its
     /// next take puts it down first (`hands:set-down`, `v2/docs/intents.md` rule 16).
     pub holding: Arc<std::sync::Mutex<Option<Id>>>,
+    /// #5019 follow-up: the place the Soul was last sent to (a walk's or a sit's target, a take's thing, a walking body
+    /// form's thing), where its `look_at` and `point` look from; none yet: its body, where it was born.
+    at: Option<Id>,
     n: u64,
 }
 
@@ -509,8 +573,12 @@ impl Choice {
             }
             k if t.body_forms.contains_key(k) && body.is_some() && !things.is_empty() => {
                 let (v, arg) = &t.body_forms[k];
+                // A look or a point is at a thing in sight of where the Soul is (#5019 follow-up), else as before.
+                let seen = (k == "look_at" || k == "point")
+                    .then(|| self.at.or(body).and_then(|p| t.in_sight.get(&p)))
+                    .flatten();
                 Chosen {
-                    arg: pick(&things, a * 11 + n).map(|x| (arg.clone(), x)),
+                    arg: pick(seen.unwrap_or(&things), a * 11 + n).map(|x| (arg.clone(), x)),
                     ..plain(v.clone(), body)
                 }
             }
@@ -541,6 +609,13 @@ impl Choice {
                 },
             },
         };
+        // Where the Soul goes: a walk's, a sit's or a take's target, or a walking body form's thing.
+        let v = out.verb.as_str();
+        if v.ends_with(":walk") || v.ends_with(":sit") || v.ends_with(":take") {
+            self.at = out.target.or(self.at);
+        } else if !(v.ends_with(":look_at") || v.ends_with(":point")) && out.arg.is_some() {
+            self.at = out.arg.as_ref().map(|x| x.1);
+        }
         self.n += 1;
         Some(out)
     }
@@ -793,6 +868,71 @@ mod tests {
             t.forms.is_empty(),
             "a body whose kind has no entry offers no form"
         );
+    }
+
+    /// #5019 follow-up: a look or a point is at a thing in sight of where the Soul was last sent, not at its nearest
+    /// things from where it was born.
+    #[test]
+    fn a_look_or_a_point_is_at_a_thing_in_sight_of_where_the_soul_was_sent() {
+        const BODY_ENTRIES: &str = r#"[
+          {"kind": "eden:chair", "slots": {"seat": {"admits": "body", "posture": "sit"}}, "forms": {"sit": {}}},
+          {"kind": "eden:lamp", "forms": {}},
+          {"kind": "eden:humanoid", "forms": {
+            "look_at": {"takes": {"target": {"type": "thing"}}},
+            "point": {"takes": {"toward": {"type": "thing"}}}}}
+        ]"#;
+        let (g, me, body) = (id(100), id(9), id(8));
+        let (near_chair, far_chair, near_lamp, far_lamp) = (id(1), id(2), id(3), id(4));
+        let at = |x: i64| Place {
+            frame: g,
+            at: Vec3::new(x, 0, 0),
+            turn: Quat::IDENTITY,
+        };
+        let seen = Seen {
+            nodes: vec![
+                (near_chair, "eden:chair".to_owned()),
+                (far_chair, "eden:chair".to_owned()),
+                (near_lamp, "eden:lamp".to_owned()),
+                (far_lamp, "eden:lamp".to_owned()),
+                (body, "eden:humanoid".to_owned()),
+            ],
+            bodies: BTreeMap::from([(me, body)]),
+            places: BTreeMap::from([
+                (body, at(0)),
+                (near_chair, at(5_000_000)),
+                (far_chair, at(100_000_000)),
+                (near_lamp, at(3_000_000)),
+                (far_lamp, at(106_000_000)),
+            ]),
+        };
+        let t = Targets::of(&seen, &json::parse(BODY_ENTRIES).unwrap());
+        assert_eq!(t.in_sight[&body], [near_lamp, near_chair], "from its birth");
+        assert_eq!(t.in_sight[&far_chair], [far_chair, far_lamp]);
+        let mut c = Choice::default();
+        let arg = |c: &mut Choice, kind| c.next(&t, kind, "eden:x", 0, me, false).unwrap().arg;
+        for kind in ["look_at", "point"] {
+            let (_, x) = arg(&mut c, kind).expect("a thing");
+            assert!(
+                [near_lamp, near_chair].contains(&x),
+                "{kind} from its birth: {x:?}"
+            );
+        }
+        // Sent to the far chair: its looks and points are at the things around that chair.
+        let walked = (0..4)
+            .map(|_| {
+                c.next(&t, "walk", "eden:walk", 0, me, false)
+                    .unwrap()
+                    .target
+            })
+            .any(|w| w == Some(far_chair));
+        assert!(walked, "a walk to the far chair");
+        for kind in ["look_at", "point", "look_at", "point"] {
+            let (_, x) = arg(&mut c, kind).expect("a thing");
+            assert!(
+                [far_chair, far_lamp].contains(&x),
+                "{kind} by the far chair: {x:?}"
+            );
+        }
     }
 
     #[test]
