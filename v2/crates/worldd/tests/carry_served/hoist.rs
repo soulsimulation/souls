@@ -595,6 +595,7 @@ async fn hoist_a_lift_let_go_mid_way_and_one_cut_off_by_a_restart_end_at_rest() 
     let socket = d.join("t");
     let again = serve_again(&dir, &socket);
     again.line("listening ", 180);
+    wait_word(&dir, carry, "souls:released", last.0 + 1, 30);
     let rest = set_down(
         "restart",
         &dir,

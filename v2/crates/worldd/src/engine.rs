@@ -1159,6 +1159,14 @@ impl Engine {
                     ));
                 }
                 let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
+                // #5067: a lift or a set-down asked while the load is on its way down waits until it rests; a set-down
+                // asked during the lift waits for the lift's end.
+                if let Some(c) = self.carries.get(&activity)
+                    && (c.lowering() || (a.verb == Verb::SetDown && c.lifting()))
+                {
+                    self.hold(activity, a);
+                    return Ok(());
+                }
                 let transfer = self
                     .mint
                     .mint()
@@ -1300,11 +1308,6 @@ impl Engine {
                         .carries
                         .get_mut(&activity)
                         .ok_or_else(|| refusal("not-carried", show(activity)))?;
-                    // #5067: a set-down asked during the lift waits for its end.
-                    if carry.lifting() {
-                        self.hold(activity, a);
-                        return Ok(());
-                    }
                     let by = (a.id, a.soul);
                     // A set-down's track straight down to rest, said at once; the load leaves the slot at its end.
                     let times = carry.set_down(&tree, now, ground, f, k, Some(by), transfer)?;
@@ -3255,10 +3258,11 @@ impl Engine {
     /// broke off, its front's body, its walk and why (`souls:partner-left`, `souls:carriers-apart`,
     /// `souls:carry-blocked`), so the whole group stops with that one reason.
     pub fn led_over(&mut self) -> Vec<(Id, Id, &'static str)> {
+        // A carry on its way down (#5067) is over for its front: its walk stops now, not when the load rests.
         let over: Vec<Id> = self
             .led
             .keys()
-            .filter(|a| !self.carries.contains_key(a))
+            .filter(|a| !self.carries.get(a).is_some_and(|c| !c.lowering()))
             .copied()
             .collect();
         let mut out = Vec::new();
