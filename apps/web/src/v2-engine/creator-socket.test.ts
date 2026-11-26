@@ -122,6 +122,19 @@ test('Build\'s place, move and remove are the batch\'s operations 1, 2 and 4; th
   assert.equal(refusalText('edit.node-missing'), 'Refused: edit.node-missing');
 });
 
+test('#5006 row 9: a turn is one move whose spot carries the new facing where the thing stands; build safety\'s refusal of it comes back by name', async () => {
+  const { s, sent } = signedIn();
+  const BENCH = `${'1a'.repeat(16)}.40`;
+  const turn = s.edit({ ops: [{ op: 'move', node: BENCH, at: { x: 4_000_000, y: 0, z: -2_000_000 }, rot: [759250125, 0, 759250125, 0] }] });
+  const [move] = (dec(sent.at(-1)!).get(4) as Map<number, unknown>).get(1) as Map<number, unknown>[];
+  assert.equal(move!.get(1), 2, 'a move: the world\'s own edit path, no other');
+  assert.deepEqual([...(move!.get(3) as Map<number, unknown>)].slice(0, 2), [[1, [4_000_000, 0, -2_000_000]], [2, [759250125, 0, 759250125, 0]]]);
+  s.frame(answer(100, 2, 5, 'edit.would-bury'));
+  const f = await turn;
+  assert.ok(f.t === 'refused' && f.reason === 'edit.would-bury');
+  assert.match(refusalText(f.t === 'refused' ? f.reason : ''), /^Refused: edit\.would-bury \(a Soul stands there now/, 'what Build\'s note shows');
+});
+
 test('the exchange posts the page\'s session to /v2/creator-token beside the gateway; a refusal is named', async () => {
   const place = { directory: 'http://127.0.0.1:9', gateway: 'ws://127.0.0.1:8/v2/ws', session: { testName: 'Ada' } };
   const asked: [string, RequestInit][] = [];

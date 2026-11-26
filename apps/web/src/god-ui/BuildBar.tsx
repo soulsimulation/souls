@@ -221,8 +221,8 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
         ? <div className="gp-row" data-build-selected={selected!}>
           <span><b>{shortKind(sel.kind)}</b> <span className="gp-dim">drag, arrow keys; [ ] turn</span></span>
           <span>
-            <button className="gp-btn gp-small" data-build-turn="left" disabled={busy} title="Turn 15° left ([)" aria-label="turn left" onClick={() => turnRef.current(selected!, TURN)}>⟲</button>{' '}
-            <button className="gp-btn gp-small" data-build-turn="right" disabled={busy} title="Turn 15° right (])" aria-label="turn right" onClick={() => turnRef.current(selected!, -TURN)}>⟳</button>{' '}
+            <button className="gp-btn gp-small" data-build-turn="left" disabled={busy} title="Turn 15° left ([)" aria-label="turn left" onClick={() => turnRef.current(selected!, TURN)}>↺ 15°</button>{' '}
+            <button className="gp-btn gp-small" data-build-turn="right" disabled={busy} title="Turn 15° right (])" aria-label="turn right" onClick={() => turnRef.current(selected!, -TURN)}>↻ 15°</button>{' '}
             <button className="gp-btn gp-small" data-build-remove="1" disabled={busy} onClick={() => { const s = selected!; void send([removeOp(s)], `Removed the ${shortKind(sel.kind)}.`); }}>Remove</button>
           </span>
         </div>
