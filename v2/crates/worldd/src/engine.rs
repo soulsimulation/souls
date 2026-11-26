@@ -1277,7 +1277,7 @@ impl Engine {
                     n.place()?.orientation,
                 ))
             }) {
-                carry.load = Load { turn: held, ..*l };
+                carry.load = l.held_turned(held).unwrap_or(Load { turn: held, ..*l });
             }
             match break_off(
                 &mut carry,
@@ -2403,10 +2403,8 @@ impl Engine {
     fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
         let n = tree.handle(part).and_then(|h| tree.node(h))?;
         let l = self.loads.get(plain(n.kind().as_str()))?;
-        Some(Load {
-            turn: n.place()?.orientation,
-            ..*l
-        })
+        let turn = n.place()?.orientation;
+        Some(l.held_turned(turn).unwrap_or(Load { turn, ..*l }))
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings

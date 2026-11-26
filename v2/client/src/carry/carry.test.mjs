@@ -126,3 +126,10 @@ test('a thing is named by its title as look shows it, in any case; crews stay id
   assert.equal(byName({ do: 'grip', thing: 'frame 9', end: 'back' }, named).code, 'carry-name-unknown');
   assert.equal(byName({ do: 'accept', crew: 'my crew' }, named).crew, 'my crew', 'a crew is never looked up by name');
 });
+
+test('a place that shares a thing\'s name is passed over for the thing (Mars College\'s rack-bay place and rack bay)', () => {
+  const named = new Map([...rows, [id(5), { ...rows.get(id(5)), name: 'rack-bay' }], [id(10), { id: id(10), kind: 'eden:place', parent: id(1), name: 'rack-bay' }],
+    [id(11), { id: id(11), kind: 'eden:place', parent: id(1), name: 'yard' }], [id(12), { id: id(12), kind: 'eden:place', parent: id(1), name: 'yard' }]]);
+  assert.equal(byName({ kind: 'part', do: 'put', crew: id(8), into: 'rack-bay', slot: 'upright_a' }, named).into, id(5));
+  assert.equal(byName({ do: 'to', crew: id(8), where: 'yard' }, named).code, 'carry-name-ambiguous', 'two places alone stay ambiguous');
+});
