@@ -5440,6 +5440,7 @@
             82.6,
             -150
           ],
+          "r": 1.5708,
           "params": {
             "wall": "#e6c86e",
             "trim": "#e9dfcc",
@@ -18632,7 +18633,7 @@
             ]
           },
           "params": {
-            "height": 0.24,
+            "height": 0.2,
             "rails": false,
             "material": "wood"
           }
@@ -18660,7 +18661,7 @@
           "name": "commons-podium",
           "p": [
             9,
-            0.24,
+            0.2,
             -2
           ]
         },
@@ -63620,8 +63621,9 @@
           "p": [
             -2.3,
             0,
-            -0.97
+            0.97
           ],
+          "r": 3.1416,
           "params": {
             "cab": "#8ea47f",
             "top": "#c9b48f"
@@ -105598,11 +105600,11 @@
           "def": "core/door@2",
           "name": "region-vineyard-villa-tower-door-1",
           "p": [
-            82.6,
+            84.99,
             9.81,
-            -147.61
+            -150
           ],
-          "r": 0,
+          "r": 1.5708,
           "anchor": "center",
           "params": {
             "sx": 1.01,

@@ -13,8 +13,15 @@
 //!
 //! #4083: Eden's tower floor lamps stood over the stairwell (or behind the spiral stair), and its roof-terrace planters
 //! and pots on roofs with no way up. The lamps now stand on each floor's central landing and the terrace things on the
-//! ground by their building's door; every one is reached both ways (but the vineyard villa tower's four, a tower no walk
-//! enters). Every thing a form's walk still does not reach at its footprint is listed by name.
+//! ground by their building's door; every one is reached both ways. Every thing a form's walk still does not reach at
+//! its footprint is listed by name.
+//!
+//! The last such things that were not windows: the vineyard villa tower's door faced uphill, 0.25 m under the ground
+//! at its threshold (beyond a step), so no walk entered it; it now opens on its downhill side. eden-house-2's kitchen
+//! counter stood on its stair's foot, so no walk went upstairs; it now stands at the opposite wall. The commons deck
+//! stood 0.24 m up, above a step, with no way onto it; at 0.2 m it is ground cover, walked as the open ground, and the
+//! podium on it is walked from the nearest doorway. Every thing a form's walk does not reach at its footprint is now a
+//! window or the campus library's dome, which stands on a flat roof no way reaches: architecture, not a place to go.
 //!
 //! Needs the exported Eden facts file: `cargo test -p sim --release --test rooms -- --ignored --nocapture`.
 
@@ -82,6 +89,20 @@ fn terrace_thing(name: &str) -> bool {
     name.ends_with("-roof-planter")
         || name.ends_with("-roof-pot")
         || name.contains("-roof-planter-")
+}
+
+/// The commons podium, on a deck low enough to be walked as the open ground.
+const PODIUM: &str = "commons-podium";
+
+/// A thing on the open ground this test walks too, from the nearest doorway.
+fn on_ground(name: &str) -> bool {
+    terrace_thing(name) || name == PODIUM
+}
+
+/// Architecture a form's walk is not meant to reach: a window, and the campus library's dome on its flat roof, which no
+/// flight, ladder or link reaches.
+fn architecture(unreached: &str) -> bool {
+    unreached.starts_with("(window) ") || unreached.contains(" campus-library-dome in ")
 }
 
 /// Each thing's name by its origin id (`e_…`), from the facts.
@@ -195,6 +216,8 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     // #4083: each tower lamp and each terrace thing moved to the ground, and whether a form's walk (by the footprint)
     // and a plain walk reach it.
     let mut fixed_4083: Vec<(String, bool, bool)> = Vec::new();
+    // The commons podium: whether a form's walk (by the footprint) and a plain walk reach it.
+    let mut podium: Vec<(bool, bool)> = Vec::new();
     // Every thing a form's walk does not reach at its footprint, by name: kind, name, building.
     let mut unreached_named: Vec<String> = Vec::new();
     let ids: Vec<Id> = im.nodes.values().copied().collect();
@@ -202,7 +225,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         let Some((floor, at, _)) = town.view().on_floor(id, Vec3::ZERO) else {
             continue;
         };
-        let moved = floor == ground && terrace_thing(&name_of(id));
+        let moved = floor == ground && on_ground(&name_of(id));
         if (floor == ground && !moved) || floor == id {
             continue;
         }
@@ -304,7 +327,9 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             d => d,
         };
         let building_name = name_of(b);
-        if moved
+        if name_of(id) == PODIUM {
+            podium.push((foot, walk));
+        } else if moved
             || (kind.starts_with("core-floor-lamp") && TOWERS.contains(&building_name.as_str()))
         {
             fixed_4083.push((format!("{} in {building_name}", name_of(id)), foot, walk));
@@ -429,22 +454,37 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     }
     // #4083: Eden's 38 tower lamps stand on their central floor and its 35 roof-terrace things on the ground by their
     // building's door, and a form's walk and a plain walk reach each.
-    // The vineyard villa's tower has no doorway onto the ground a walk reaches (none of its rooms is reached): its four
-    // lamps move too but are not counted until it has one.
-    let (shut, open): (Vec<_>, Vec<_>) = fixed_4083
-        .iter()
-        .partition(|t| t.0.ends_with(" in region-vineyard-villa-tower"));
-    let lost_4083: Vec<_> = open.iter().filter(|t| !(t.1 && t.2)).collect();
+    // The vineyard villa's tower now has a doorway onto the ground, so its four lamps count with the rest.
+    let lost_4083: Vec<_> = fixed_4083.iter().filter(|t| !(t.1 && t.2)).collect();
     println!(
-        "#4083: tower lamps and terrace things {} (and {} in the vineyard villa's tower, which no walk enters), not \
-         reached {lost_4083:?}",
-        open.len(),
-        shut.len()
+        "#4083: tower lamps and terrace things {}, not reached {lost_4083:?}",
+        fixed_4083.len()
     );
-    assert_eq!(open.len(), 34 + 35, "Eden's tower lamps and terrace things");
+    assert_eq!(
+        fixed_4083.len(),
+        38 + 35,
+        "Eden's tower lamps and terrace things"
+    );
     assert!(
         lost_4083.is_empty(),
         "every tower lamp and terrace thing is reached"
+    );
+    // The commons podium, on its deck walked as the open ground, is reached both ways.
+    println!("commons podium (form at footprint, plain walk): {podium:?}");
+    assert_eq!(podium, [(true, true)], "the commons podium is reached");
+    // Every other thing on a building floor is reached by a form's walk at its footprint: what is left is architecture.
+    let left: Vec<_> = unreached_named
+        .iter()
+        .filter(|u| !architecture(u))
+        .collect();
+    println!(
+        "not reached at the footprint: {} windows and the library's dome, {} else {left:?}",
+        unreached_named.len() - left.len(),
+        left.len()
+    );
+    assert!(
+        left.is_empty(),
+        "every thing on a building floor but a window and the library's dome is reached"
     );
 
     // A target the walk does not reach answers at once: no route search per place round it (#4072's review: about
