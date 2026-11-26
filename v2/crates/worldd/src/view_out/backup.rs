@@ -1398,7 +1398,7 @@ mod tests {
             Memory::default(),
             old,
             prefix.to_owned(),
-            Box::new(|_: &str| {}),
+            Box::new(|_| {}),
         )
         .unwrap();
         spool.prune(record, BTreeSet::new());
