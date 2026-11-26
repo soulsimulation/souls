@@ -1603,7 +1603,11 @@ mod tests {
             store.get(&words).unwrap().is_none(),
             "the delete landed after the put"
         );
-        assert_eq!(backup.objects(), [words.clone()], "still queued");
+        assert_eq!(
+            backup.objects(),
+            std::slice::from_ref(&words),
+            "still queued"
+        );
         assert!(matches!(backup.pass(), Ok(true)));
         assert!(
             store.get(&words).unwrap().is_some(),
