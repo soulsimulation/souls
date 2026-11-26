@@ -181,8 +181,8 @@ import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '.
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { activitiesServed, refreshEntries, refreshKindsText } from '../pair/pair.mjs';
 import { activityTry, answerParts, readableDetail } from './refusal.mjs';
+import { reconnectWait } from './reconnect.mjs';
 
-const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
 // stay connecting for good, firing neither open nor close (seen with Node 22's WebSocket).
 const SIGN_IN_WITHIN = 5000;
@@ -336,7 +336,7 @@ const movesOf = new Map(); // sequence → its move's form (C14), until answered
 const joinsOf = new Set(); // own join sequences: only a successful receipt requests a post-birth copy
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
-let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
+let ws = null, signedIn = false, attempt = 0, refusals = 0, stopping = false, since = Date.now(), signedInAt = 0;
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked) {
@@ -402,7 +402,7 @@ async function sendBulk(bytes, sequence) {
 function current() {
   if (!signedIn) signedInAt = Date.now();
   signedIn = true;
-  attempt = 0;
+  attempt = refusals = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
@@ -671,10 +671,11 @@ function connect() {
       }
       const { kind, a, b, c, d, names, op, detail: said } = answerParts(wire.wireFrame(bytes));
       if (kind === 'outcome') {
-        if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
+        if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); refusals++; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        refusals = 0;
         owed = ownOwed = 0; // versions named on an earlier socket may be another epoch's
         again = 0;
         refreshKinds();
@@ -752,8 +753,8 @@ function connect() {
     }
     if (stopping) return;
     counts.drops++;
-    const most = Math.min(WAIT_MOST, WAIT_FIRST * 2 ** Math.min(attempt, 10));
-    const wait = Math.round(most / 2 + Math.random() * most / 2);
+    // A refused sign-in waits minutes, not seconds: the same token is refused until its owner pairs again.
+    const wait = reconnectWait(attempt, refusals);
     attempt++;
     log(`socket closed (${code}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
     setTimeout(connect, wait);
