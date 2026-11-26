@@ -18,9 +18,9 @@
 //! judged on the commit tick before the safety rule. A creator's weather is set through [`weather`].
 //!
 //! Each effect carries the named events that say what the edit did (#5006 row 14, [`events_of`]): `souls:placed`
-//! (one a thing), `souls:moved`, `souls:changed` and `souls:removed`, each naming the changes it explains. With the envelope's actor
-//! (the creator) and world time, they are the edit's public event index rows (`replica::history::events::rows`), from
-//! which God Mode's panel lists the creator's edits. They add no state.
+//! (one a thing), `souls:moved`, `souls:changed` and `souls:removed`, each naming the changes it explains. With the
+//! envelope's actor (the creator) and world time, they are the edit's public event index rows
+//! (`replica::history::events::rows`), from which God Mode's panel lists the creator's edits. They add no state.
 
 pub mod safety;
 pub mod terrain;
@@ -67,11 +67,12 @@ pub fn events_of(changes: &[Change]) -> Option<Vec<Event>> {
             Change::Remove { .. } => EV_REMOVED,
             _ => EV_CHANGED,
         };
-        let grouped = name != EV_PLACED;
-        match events
-            .iter_mut()
-            .find(|e| grouped && e.name.as_str() == name)
-        {
+        let same = if name == EV_PLACED {
+            None
+        } else {
+            events.iter_mut().find(|e| e.name.as_str() == name)
+        };
+        match same {
             Some(e) => e.changes.push(i as u64),
             None => events.push(Event {
                 name: Name::new(name).expect("a constant name"),
