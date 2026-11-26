@@ -131,7 +131,7 @@ import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, for
 import { canonicalRequest } from './world-urls.mjs';
 import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
 import { movedAssets } from './moved-assets.mjs';
-import { placeShots } from './place-shots.mjs';
+import { placeShotKeeper, placeShots } from './place-shots.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -289,7 +289,8 @@ const SITE_PAUSED = {
  *           publicOrigin?: string, devAuth?: boolean, authEnvFile?: string, clerkSatellite?: string, clerkSignInUrl?: string, clerkLegacySatellites?: string, clerkAuthorizedParties?: string, maxWorlds?: number, maxRunning?: number,
  *           minFreeMb?: number, worldHeapMb?: number, createLimit?: number, diskMinFreeMb?: number, diskFreeMb?: () => number, base?: string,
  *           soulSkill?: string, soulInstructions?: string, maxWorldsPerAccount?: number,
- *           newAccountHours?: number, newAccountWorldLimit?: number, newAccountCreateLimit?: number, newAccountWindowMinutes?: number }} cfg
+ *           newAccountHours?: number, newAccountWorldLimit?: number, newAccountCreateLimit?: number, newAccountWindowMinutes?: number,
+ *           placeShotsDraw?: boolean }} cfg
  * Without the production fields the launcher behaves as it always did locally (dev auth, 200 worlds, origin = bind).
  */
 export async function openLauncher(cfg = {}) {
@@ -1956,7 +1957,7 @@ export async function openLauncher(cfg = {}) {
       }
       if (path === '/__sim/launcher' && req.method === 'GET') {
         if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
-        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
+        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), placeShots: shotKeeper?.status() ?? null, children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
       }
       // lane L7: Prometheus text for the worlds and the launcher (LOAD-CONTRACT §5), loopback only
       if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb(), ...launcherGauges() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), viewers: live.get(w.slug) ?? 0, refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
@@ -2160,6 +2161,13 @@ export async function openLauncher(cfg = {}) {
   // D2b: an old process of a world switched while it ran (the binding is read again live) is stopped: it saves and exits
   const retireMoved = () => { for (const w of registry.worlds) { const k = pool.state(w.slug); if (k?.child && !k.adopted && !k.stopping && !k.stopped && moved(w)) { log(`${w.slug} runs on the new engine: its old process stops`); pool.stop(w.slug).catch((e) => log(`${w.slug}: its old process did not stop: ${e.message}`)); } } };
   const lookTimer = setInterval(() => { retireMoved(); lookAtWorlds().catch(() => {}); }, cfg.lookEveryMs ?? PSS_EVERY_MS); lookTimer.unref?.();   // #2233
+  // #5038: a moved world's Explore pictures are drawn ahead of its visitors, in the background, after a release and after
+  // its places change (place-shots.mjs placeShotKeeper: one run at a time, its own process, never in a world's); a run
+  // starts only with 2 GB beyond the worlds' floor free. On for the launcher run as a program (the host's), unless
+  // SIM_PLACE_SHOTS_DRAW=0; off for one opened in a test.
+  const shotKeeper = cfg.placeShotsDraw ? placeShotKeeper({ shots, dir: join(dataDir, 'place-shots'), log,
+    worlds: () => registry.worlds.filter((w) => moved(w)).flatMap((w) => { const p = cutover?.publishedPlaces(w); return p?.places?.length ? [{ slug: w.slug, places: p.places }] : []; }),
+    page: (slug) => `${publicOrigin}${wp(slug)}/`, canStart: () => memAvailableMb() >= (prod.minFreeMb ?? 0) + 2048 }) : null;
   const stillTimer = unloadStill ? setInterval(() => { if (unloading) return; unloading = true; unloadSweep().catch((e) => log(`unloading still worlds: ${e.message}`)).finally(() => { unloading = false; }); }, STILL.everyMs) : null;
   const alarmTimer = unloadStill ? setInterval(() => alarmScan(), STILL.alarmMs) : null;
   stillTimer?.unref(); alarmTimer?.unref();
@@ -2276,7 +2284,7 @@ export async function openLauncher(cfg = {}) {
      *  a held port every moment here is refused connections, so it stops at once, as before. After a handover (`gentle`)
      *  the keeper's port is served by the next launcher, so that exit is gentle too. */
     close: async ({ drainMs = 3_000, idleMs = 1_500, gentle = process.env.SIM_PORT_HELD === '1' } = {}) => {
-      if (closed) return; closed = true; clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
+      if (closed) return; closed = true; shotKeeper?.close(); clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)
@@ -2347,6 +2355,7 @@ if (isMain(import.meta.url)) {
       maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), worldsMemMb: num('worlds-mem-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), unloadStill: flag('unload-still') === undefined ? undefined : num('unload-still') === 1, loadParallel: num('load-parallel'), loadHoldMs: num('load-hold-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'), diskMinFreeMb: num('disk-min-free-mb'),
       maxWorldsPerAccount: num('max-worlds-per-account'), newAccountHours: num('new-account-hours'), newAccountWorldLimit: num('new-account-world-limit'), newAccountCreateLimit: num('new-account-create-limit'), newAccountWindowMinutes: num('new-account-window-minutes'),
       marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
+      placeShotsDraw: process.env.SIM_PLACE_SHOTS_DRAW !== '0',
       ...(underKeeper ? { listen: false, adopt: process.env.SIM_ADOPT ? JSON.parse(process.env.SIM_ADOPT) : null } : {}) });
     let stopping = false;
     const stop = (why, gentle) => { if (stopping) return; stopping = true; console.log(`[launcher] ${why}: stopping worlds…`); void l.close(gentle ? { gentle } : {}).then(() => process.exit(0)); };

@@ -57,11 +57,16 @@ too: each thing at the world's root, the ones with an authored meaning listed an
 the old process pages them, and with nothing published a listing with no places; Explore's place pictures (25 Nov) as the
 world's kept picture of the place as it is now, a small WebP served immutable at `/w/<slug>/v1/world/context/shot/<sha>.webp`,
 else `unavailable` with `draw: 'page'`, and the page draws that place itself from what it shows (kept in the browser per
-build). The kept pictures are made at release, after the release is live, by
-`tools/world-launcher/deploy/place-shots.sh` (`--dry-run` first): for every moved world soul.game lists, it fetches the
-host's kept pictures, has the world's public page draw each place still missing on this machine's GPU, and copies the
-pictures and then their index to `<launcher data>/place-shots/<slug>/` (the host from `SIM_DEPLOY_HOST`, as ship.sh);
-a second run draws nothing. The launcher logs, once per world and index, how many places have no kept picture; writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
+build). The kept pictures are made ahead of visitors (#5038): a minute after the launcher starts (a release) and every
+ten minutes after (a world's published places changed), a moved world with places that have no kept picture gets one
+drawing run on the host, `tools/world-launcher/place-shots.mjs` in its own process with its own headless browser at the
+lowest CPU priority, one run at a time for all worlds, ended after 45 minutes (what it drew is kept), and only with 2 GB
+beyond the worlds' memory floor free; the places Explore lists come first. A picture is keyed by the place and how
+pictures are drawn, never the build, so it survives releases. `/__sim/launcher` shows the run (`placeShots`);
+`SIM_PLACE_SHOTS_DRAW=0` turns it off. By hand, from a machine with a GPU: `tools/world-launcher/deploy/place-shots.sh`
+(`--dry-run` first) fetches the host's kept pictures, has the world's public page draw each place still missing, and
+copies the pictures and then their index to `<launcher data>/place-shots/<slug>/` (the host from `SIM_DEPLOY_HOST`, as
+ship.sh); a second run draws nothing. The launcher logs, once per world and index, how many places have no kept picture; writes 409; the rest, its old socket among them, 404 `world.new-engine`. Turned back (`--back`), the world is
 an old one again and its process starts on demand.
 
 ### One world's old page, on and off (B3-1)

@@ -34,12 +34,12 @@ export type Target = {
         ];
     };
 };
-/** A listed place as Explore's location (also what tools/world-launcher/place-shots.mjs has the page draw). */
-export function contextLocation(t: Target, revision: number | string, label?: string): WorldLocation {
+/** A listed place as Explore's location (also what tools/world-launcher/place-shots.mjs has the page draw). Its name is
+ *  its card's only label (#5038: no hover text about how the picture was made). */
+export function contextLocation(t: Target, revision: number | string): WorldLocation {
     const camera = t.viewpoint ?? t.camera;
     return { id: 'context:' + t.ref, regionId: 'context:' + t.ref, label: t.title,
         previewRevision: revision,
-        previewLabel: label ?? 'Architectural context · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.',
         target: camera?.at ?? t.point,
         p: camera?.eye ?? [t.point[0] + t.radius * 1.5, t.point[1] + t.radius, t.point[2] + t.radius * 1.5] as [number, number, number],
         radius: t.radius, ...(t.enclosed && camera ? { inside: { p: camera.eye, target: camera.at } } : {}) };
@@ -58,7 +58,7 @@ export class WorldContextViews {
     private pending = new Map<string, (url: string | null) => void>();
     /** #2192: settled pictures by ref for the world revision they came from (a URL, or null when the server could not
      * make one); a reopened Explore asks the server nothing. Pictures still pending are asked for again. */
-    private ready = new Map<string, { url: string | null; label?: string }>();
+    private ready = new Map<string, { url: string | null }>();
     private readyRevision: number | null = null;
     private scheduled = false;
     private pictureController = new AbortController();
@@ -129,7 +129,7 @@ export class WorldContextViews {
                 return;
             }
             if (!append && revision !== this.revision) this.cancelPictures();
-            const locations = data.targets.map(t => contextLocation(t, revision, this.ready.get(t.ref)?.label));
+            const locations = data.targets.map(t => contextLocation(t, revision));
             this.locations = append ? [...new Map([...this.locations, ...locations].map(location => [location.id, location])).values()] : locations;
             this.revision = revision;
             this.total = data.total ?? this.locations.length;
@@ -178,12 +178,6 @@ export class WorldContextViews {
                     for (const view of data.views ?? []) {
                         if (view.status === 'pending')
                             continue;
-                        let label: string | undefined;
-                        if (view.status === 'ready' && view.photo) {
-                            label = `Architectural context${view.photo.cutaway ? ' · Cutaway (classified roof/wall removed)' : ''} · ${view.photo.provenance?.camera === 'authored' ? 'authored camera' : 'geometric camera'} · front ${view.photo.provenance?.front ?? 'unknown'} · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.`;
-                            this.locations = this.locations.map(location => location.id === 'context:' + view.ref ? { ...location, previewLabel: label } : location);
-                            this.changed();
-                        }
                         const location = view.status === 'unavailable' && view.draw === 'page' && this.draw ? this.locations.find(l => l.id === 'context:' + view.ref) : undefined;
                         if (location && this.draw) {
                             const resolve = waiting.get(view.ref), draw = this.draw;
@@ -194,7 +188,7 @@ export class WorldContextViews {
                         }
                         // #2192: the compact WebP when the server has one; both URLs are content-keyed and cached immutable
                         const url = view.status === 'ready' && (view.thumb || view.url) ? this.api(view.thumb || view.url) : null;
-                        if (view.status === 'ready' || view.status === 'unavailable') this.ready.set(view.ref, { url, label });
+                        if (view.status === 'ready' || view.status === 'unavailable') this.ready.set(view.ref, { url });
                         waiting.get(view.ref)?.(url);
                         waiting.delete(view.ref);
                     }
