@@ -84,6 +84,7 @@ before(async () => {
   writeFileSync(tokens, '');
   mkdirSync(inbox, { recursive: true });
   mkdirSync(join(dir, 'templates'));
+  mkdirSync(join(dir, 'store'));
   const store = { ...env, DIRECTORYD_WORLD_STORE: join(dir, 'store') };
   await promisify(execFile)(bin('register-world'), [WORLD, '--instance', instance, '--creator', ada, '--label', 'Forsaken'], { env: store });
   writeFileSync(join(dir, 'authority.json'), JSON.stringify({ format: 'souls/world-authority/1', worldsRoot: dir, worlds: { [WORLD]: { instance, creator: ada } } }));
