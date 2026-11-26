@@ -909,6 +909,12 @@ impl Pairing {
         self.authority_file.is_some()
     }
 
+    /// Whether a handoff of `world` can be published here: the registry names it (#5006). Read from the registry file
+    /// alone, before an acceptance writes anything, so a directory that could never publish one refuses at once.
+    pub fn can_hand_on(&self, world: &str) -> bool {
+        self.authority_file.is_some() && self.placed(world).is_ok()
+    }
+
     /// Every world's files, from each world's owner (read before the pairing store is locked, so a slow world store
     /// holds no request). A world whose owner came from the last read is owed to the copier until the store answers.
     /// Refused by name: `world-authority-unavailable` (no owner to be had), `world-authority-mismatch`, or

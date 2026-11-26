@@ -1209,7 +1209,16 @@ fn w16_scoped_handoff_revokes_creator_preserves_souls_other_world_and_reopens() 
     let registry = root.join("authority.json");
     let registry_bytes=serde_json::to_vec(&serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,"worlds":{"garden":{"instance":instance,"creator":crate::accounts::principal_text(a)},"forest":{"instance":other,"creator":crate::accounts::principal_text(a)}},"aliases":{"old-garden":"garden"}})).unwrap();
     std::fs::write(&registry, &registry_bytes).unwrap();
+    assert!(
+        !p.can_hand_on("garden"),
+        "no registry: no handoff can be published"
+    );
     p.authority_file = Some(registry.clone());
+    assert!(p.can_hand_on("garden") && p.can_hand_on("forest"));
+    assert!(
+        !p.can_hand_on("meadow"),
+        "a world the registry does not name cannot be handed on here"
+    );
     let reader_owner = owner.clone();
     p.current_owner_reader(Arc::new(move |world| {
         let mut value = reader_owner.read().unwrap().clone();

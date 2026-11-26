@@ -19,7 +19,7 @@ import { OwnerGod, ago as since } from './god-ui/GodModal.tsx';
 import { closeGod, openGod, useGod, watchInbox } from './god-ui/god-store.ts';
 import { agentPaired } from './god-ui/god-agent-state.ts';
 import { ConstitutionBody } from './god-ui/Constitution.tsx';
-import { ForsakeWorld } from './god-ui/WorldOwnerOps.tsx';
+import { ForsakeWorld, V2ForsakeWorld } from './god-ui/WorldOwnerOps.tsx';
 import { PrayersWaiting } from './god-ui/Prayers.tsx';
 import { godFeature } from './god-ui/features.ts';
 import { approvalFromHash, landingHash } from './god-ui/join-api.ts';
@@ -154,7 +154,8 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   const who = (session.label ?? 'you').replace(/^dev:/, '');
   const claim = () => run('claim', G.claim, () => 'This world is yours.');
   // G1 (0.133): on a v2 world undo, redo and the weather are the creator's own edits on its socket; the note shows the
-  // receipt's words or the refusal's name. Strike, flags and Forsake have no creator verb there and are not shown.
+  // receipt's words or the refusal's name. Strike and flags have no creator verb there and are not shown; Forsake asks
+  // the world's directory, which holds its creator (V2ForsakeWorld, #5006).
   // 0.133 item 6: Build (BuildBar.tsx) places, moves and removes things with the same socket's edits.
   const v2 = G.v2Creator();
   const undoRedo = (which: 'undo' | 'redo') => v2 ? run(which, async () => (await v2).undo(which), (r) => r as string) : run(which, () => (which === 'undo' ? G.undo() : G.redo()), (r) => { const x = r as G.UndoResult; return x.accepted ? `${which === 'undo' ? 'Undid' : 'Redid'} edit ${x.reverted}.` : (x.failures?.[0]?.detail ?? `nothing to ${which}`); });
@@ -321,7 +322,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
-      forsake={v2 ? null : <ForsakeWorld name={name} />} />}
+      forsake={v2 ? <V2ForsakeWorld name={name} /> : <ForsakeWorld name={name} />} />}
   </>;
 }
 

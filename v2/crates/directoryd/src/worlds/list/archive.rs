@@ -284,6 +284,11 @@ pub fn check_fence(bytes: &[u8], instance: &str) -> R<()> {
     refuse("world-archived", "the local archive fence is installed")
 }
 
+/// Whether this directory has an archive initializer to finish an archive (#5006).
+pub(super) fn configured() -> bool {
+    std::env::var_os("DIRECTORYD_PLACEMENT").is_some()
+}
+
 pub(super) fn enqueue(request: &str) -> R<()> {
     let root = std::env::var_os("DIRECTORYD_PLACEMENT")
         .map(PathBuf::from)

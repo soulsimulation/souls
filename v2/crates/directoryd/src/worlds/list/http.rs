@@ -218,6 +218,14 @@ pub fn handoff(req: &Request, app: &App) -> Answer {
             Ok(json!({"cancelled":true}))
         }
         "/v1/worlds/handoff/accept" => {
+            // Acceptance fences the row (no creator) until the new one is published; a directory that cannot publish
+            // this world's authority would leave it so for good, so it refuses before writing anything (#5006).
+            if !app.pairing.as_ref().is_some_and(|p| p.can_hand_on(world)) {
+                return crate::directory::store::refuse(
+                    "world-authority-required",
+                    "this directory cannot publish the world's authority",
+                );
+            }
             let code = body.get("code").and_then(Value::as_str).unwrap_or_default();
             let pending =
                 worlds.begin_handoff(world, code, &account.account, account.principal, now())?;
@@ -277,6 +285,11 @@ pub fn archive(req: &Request, app: &App) -> Answer {
         .get("confirm")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // With nothing to finish it, an archive begun here would stay `archiving` for good: the world off the list and its
+    // creator unable to hand it on. Refuse before the row changes (#5006).
+    if !super::archive::configured() {
+        return refuse(503, "archive-unavailable");
+    }
     let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
     match super::archive::begin(
         &inner.dir.store,

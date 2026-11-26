@@ -1084,4 +1084,113 @@ mod w16_current_account_tests {
             "global grant history was not deleted"
         );
     }
+
+    /// #5006: on a directory that could never finish them (no archive initializer, no world authority to publish), an
+    /// archive or an acceptance is refused before the world's row changes, so the world stays listed, with its creator.
+    #[test]
+    fn forsake_a_directory_cannot_finish_is_refused_before_the_row_changes() {
+        use crate::directory::store::{Memory, Store as ObjectStore, When};
+        use crate::worlds::{create::NameRecord, list::Worlds, list::archive};
+        use replica::{
+            encode::{Name, to_hex},
+            ids::{Id, Scope},
+        };
+        assert!(
+            std::env::var_os("DIRECTORYD_PLACEMENT").is_none(),
+            "this test is of a directory with no archive initializer"
+        );
+        let memory: &'static (dyn ObjectStore + Send + Sync) =
+            Box::leak(Box::new(Memory::default()));
+        let accounts = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let a = accounts.sign_in(TEST_ISSUER, "first", 0).unwrap();
+        accounts.sign_in(TEST_ISSUER, "next", 0).unwrap();
+        let name = NameRecord {
+            name: "garden".into(),
+            lineage: [6; 16],
+            zone: Id::new(Scope([7; 16]), 0).unwrap(),
+            creator: a.principal,
+            source: [8; 16],
+        };
+        memory
+            .put(
+                &NameRecord::key("garden"),
+                &name.to_bytes().unwrap(),
+                When::Absent,
+            )
+            .unwrap();
+        memory.put(crate::worlds::list::KEY,&serde_json::to_vec(&json!({"worlds":[{"name":"garden","lineage":to_hex(&name.lineage),"zone":super::super::principal_text(name.zone),"creator":super::super::principal_text(a.principal)}]})).unwrap(),When::Absent).unwrap();
+        let app = App {
+            store: accounts,
+            verifier: None,
+            test_sign_in: true,
+            view_key: Some(ViewKey::new(&[1; 32])),
+            origin: None,
+            mailbox_key: None,
+            pairing: None,
+            log: Mutex::new(Box::new(std::io::sink())),
+            worlds: Some(Worlds::new(
+                crate::directory::Directory::new(memory, Name::new("fixture").unwrap()),
+                std::collections::BTreeMap::new(),
+                Box::new(|_| Ok(())),
+            )),
+        };
+        let post = |path: &str, who: &str, body: Value| Request {
+            method: "POST".into(),
+            path: path.into(),
+            bearer: Some(format!("test:{who}")),
+            soul: None,
+            body: body.to_string().into_bytes(),
+        };
+        let worlds = app.worlds.as_ref().unwrap();
+        let archive = post(
+            "/v1/worlds/archive",
+            "first",
+            json!({"world":"garden","confirm":"garden"}),
+        );
+        let (status, body, _) = route(&archive, &app);
+        assert_eq!(
+            (status, body),
+            (503, json!({"refused":"archive-unavailable"}))
+        );
+        assert_eq!(archive::get(&memory, "garden").unwrap().state, "active");
+        let (status, offer, _) = route(
+            &post(
+                "/v1/worlds/handoff/offer",
+                "first",
+                json!({"world":"garden"}),
+            ),
+            &app,
+        );
+        assert_eq!(status, 200, "the world is not left archiving: {offer}");
+        let accept = post(
+            "/v1/worlds/handoff/accept",
+            "next",
+            json!({"world":"garden","code":offer["code"]}),
+        );
+        let (status, body, _) = route(&accept, &app);
+        assert_eq!(
+            (status, body),
+            (503, json!({"refused":"world-authority-required"}))
+        );
+        let owner = worlds.ownership("garden").unwrap();
+        assert_eq!(
+            owner.creator,
+            Some(a.principal),
+            "no pending fence was written"
+        );
+        assert_eq!(owner.generation, 0);
+        assert_eq!(
+            route(
+                &post(
+                    "/v1/worlds/handoff/cancel",
+                    "first",
+                    json!({"world":"garden"})
+                ),
+                &app
+            )
+            .0,
+            200,
+            "the creator still holds the world"
+        );
+    }
 }
