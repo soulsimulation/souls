@@ -15,8 +15,8 @@
 //! copied: a `folder:` store refuses. Keys are read from the files by path and never printed; neither is an endpoint,
 //! a bucket or a prefix: output names the setting only.
 //!
-//! `copy` lists every key under the source (or, with `--world`, only that world's keys, as `world-aside` names them),
-//! and for each one: none at the target is written create-only; one there with the same length and ETag (or, when
+//! `copy` lists every key under the source (or, with `--world`, only that world's keys, as `world-aside` names them,
+//! and the same keys under every store generation, `g/<label>/`, where a rebuilt world's are: #4954), and for each one: none at the target is written create-only; one there with the same length and ETag (or, when
 //! the ETags differ, the same SHA-256) counts as made; one there with other bytes (a record written again since the
 //! last run) is replaced on its ETag. So a run stopped halfway is finished by the next. With `--manifest`, each key's
 //! ETag at the target as this tool last wrote or matched it is appended to the file (`<etag> <key>` lines), and a key
@@ -144,13 +144,23 @@ fn world_places(world: &World) -> (String, [String; 4]) {
     )
 }
 
-/// The keys to copy: every key under the source, or only the worlds' own.
+/// Whether `key` is one of `world`'s own objects under a store generation (#4954): `g/<label>/<k>`, `k` a key the world
+/// owns ([`World::owns`]). A rebuilt world's objects are all there, under the label its folder names.
+fn in_generation(world: &World, key: &str) -> bool {
+    key.strip_prefix("g/")
+        .and_then(|k| k.split_once('/'))
+        .is_some_and(|(label, k)| !label.is_empty() && world.owns(k))
+}
+
+/// The keys to copy: every key under the source, or only the worlds' own, under every store generation too.
 fn source_keys(from: &dyn Store, worlds: &[World]) -> R<Vec<String>> {
     if worlds.is_empty() {
         return tried("the listing", || from.list(""));
     }
+    let generations = tried("the listing", || from.list("g/"))?;
     let mut out = Vec::new();
     for w in worlds {
+        out.extend(generations.iter().filter(|k| in_generation(w, k)).cloned());
         let (record, prefixes) = world_places(w);
         out.extend(
             tried("the listing", || from.list(&record))?
@@ -555,6 +565,55 @@ mod tests {
         );
         probe(&dst, "probe/store-switch/1/").unwrap();
         assert_eq!(b.paths().len(), 3, "the probe leaves nothing");
+    }
+
+    /// #4954: a rebuilt world's own objects are under its store generation, `g/<label>/`. A move's per-world catch-up
+    /// (`--world`) copies them with the keys as they are (the old world's, which an undo serves again), and none of
+    /// another world's or the directory's.
+    #[test]
+    fn a_worlds_store_generation_is_copied_with_it() {
+        let (a, b) = (StandIn::start(2).unwrap(), StandIn::start(2).unwrap());
+        let src = store(&vars(&format!("{}/dir", a.url("old"))), URL_ENV).unwrap();
+        let dst = store(&vars(&format!("{}/dir", b.url("new"))), URL_ENV).unwrap();
+        let (l, s) = ("ab".repeat(16), "01".repeat(16));
+        let w = World::parse(&format!("{l}-{s}-7")).unwrap();
+        let other = World::parse(&format!("{l}-{s}-8")).unwrap();
+        let (z, name) = (format!("{l}/{s}-7"), w.name());
+        let ours = [
+            format!("world/{z}"),
+            format!("part/{z}/0/t/1"),
+            format!("g/20261126T120000Z/world/{z}"),
+            format!("g/20261126T120000Z/ckpt/{z}/5"),
+            format!("g/20261126T120000Z/part/{z}/0/t/1"),
+            format!("g/20261126T120000Z/stream-recovery/{z}/head"),
+            format!("g/20261126T120000Z/h/{name}/{l}/archive/head"),
+        ];
+        let theirs = [
+            format!("g/20261126T120000Z/world/{l}/{s}-8"),
+            format!("g/20261126T120000Z/part/{l}/{s}-70/x"),
+            format!("g/20261126T120000Z/h/{}/x", other.name()),
+            "g/20261126T120000Z/world-name/eden".to_owned(),
+            format!("g//world/{z}"),
+            "world-name/eden".to_owned(),
+        ];
+        for k in ours.iter().chain(&theirs) {
+            src.put(k, k.as_bytes(), When::Absent).unwrap();
+        }
+        let mut keys = source_keys(&src, &[w]).unwrap();
+        keys.sort();
+        let mut want = ours.to_vec();
+        want.sort();
+        assert_eq!(keys, want);
+        let none = BTreeMap::new();
+        let c = copy(&src, &dst, &keys, false, &none, &mut |_, _| {}).unwrap();
+        assert_eq!((c.objects, c.written, c.held), (7, 7, 7));
+        let mut there = dst.list("").unwrap();
+        there.sort();
+        assert_eq!(there, want);
+        assert_eq!(
+            dst.get(&ours[4]).unwrap().map(|o| o.bytes),
+            Some(ours[4].as_bytes().to_vec())
+        );
     }
 
     #[test]

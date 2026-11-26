@@ -70,9 +70,10 @@ bash v2/tools/ops/store-switch.sh undo     # the last move backwards
    a manifest, so a later pass never copies an old version over what a moved world has since written in the new
    bucket (`newer there and kept`). Then it prints the source's count and bytes against what the new bucket holds of
    the same keys, and stops on any difference.
-3. For each running world, one at a time: stops it, copies its own keys written since, points that world alone at the
-   new store (`worldd@<world>.service.d/50-store-switch.conf`), starts it and waits for it to stay up 15 s. A world that
-   does not is switched back at once (the drop-in removed, started on the old store) and the run stops there.
+3. For each running world, one at a time: stops it, copies its own keys written since (those under any store generation
+   too, `g/<label>/`, where a rebuilt world's are), points that world alone at the new store
+   (`worldd@<world>.service.d/50-store-switch.conf`), starts it and waits for it to stay up 15 s. A world that does not
+   is switched back at once (the drop-in removed, started on the old store) and the run stops there.
 4. Stops `souls-directory` and `souls-alarms`, copies what they wrote since, installs the new `secrets.env`, removes the
    drop-ins and starts both again.
 
