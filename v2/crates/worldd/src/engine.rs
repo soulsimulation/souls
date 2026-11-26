@@ -128,6 +128,10 @@ pub struct Act {
     pub params: BTreeMap<u64, Value>,
 }
 
+/// A take waiting for its commit (0.135 A2): the crew's ground, its node's place and turn, its carriers' span, and
+/// each side carrier's place at the part (C5).
+type Taking = (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>);
+
 /// The engine's systems, with their own due list, moves and minter.
 pub struct Engine {
     header: Header,
@@ -153,7 +157,7 @@ pub struct Engine {
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
-    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>)>,
+    taking: BTreeMap<Id, Taking>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
