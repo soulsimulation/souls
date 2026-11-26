@@ -629,7 +629,7 @@ function syncAnswer(sock, n, refused, bytes) {
   confirmedAt = t;
   cutAt = null;
   if (laggingAt !== null) log(`caught up: the sync answered ${Math.round(t - laggingAt)} ms after it was found behind`);
-  else if (t - syncing.t0 < SYNC_WITHIN) slowLink = false; // a whole sync in time, never behind: the link keeps up again
+  else if (t - syncing.t0 < SYNC_WITHIN) slowLink = false; // a whole sync in time, never behind: the link keeps up
   laggingAt = null;
   const { waiters } = syncing;
   syncing = null;
