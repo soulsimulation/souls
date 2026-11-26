@@ -44,7 +44,8 @@ const ENTRY: &str = r#"{
   "state": {
     "amount": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } },
     "mood": { "n": 2, "type": "enum", "values": ["calm", "sad"], "default": "calm", "audience": { "rule": "everyone" } },
-    "words": { "n": 3, "type": "text", "default": "", "audience": { "rule": "everyone" } }
+    "words": { "n": 3, "type": "text", "default": "", "audience": { "rule": "everyone" } },
+    "well": { "n": 4, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 100, "audience": { "rule": "everyone" } }
   },
   "links": { "user": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
   "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
@@ -90,7 +91,23 @@ const ENTRY: &str = r#"{
     "grieve": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
       "effects": [{ "change": "set", "field": "mood", "to": "angry", "event": "angered" }] },
     "overfill": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
-      "effects": [{ "change": "set", "field": "amount", "to": 5000, "event": "overfilled" }] }
+      "effects": [{ "change": "set", "field": "amount", "to": 5000, "event": "overfilled" }] },
+    "to_well": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": 30, "event": "welled" }] },
+    "to_well_by": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "n": { "type": "count" } },
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": { "arg": "n" }, "event": "welled" }] },
+    "from_well": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "well", "from": "this", "into": "this", "into_field": "amount", "amount": 500, "event": "drained" }] },
+    "to_other_well": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": { "arg": "other" }, "into_field": "well", "amount": 30, "event": "welled" }] },
+    "make_filled": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "m": { "type": "value" } },
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "amount", "to": 300 }, { "field": "mood", "to": { "arg": "m" } }], "event": "made" }] },
+    "make_overfilled": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "amount", "to": 5000 }], "event": "made" }] },
+    "make_unknown": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "colour", "to": 1 }], "event": "made" }] },
+    "make_wrong": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "mood", "to": "angry" }], "event": "made" }] }
   }
 }"#;
 
@@ -1143,6 +1160,144 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
         b.log.len() - b.parts[0]
     );
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
+}
+
+/// #4103: a transfer between two fields of one thing (`into_field`, both ends `"this"`) moves the least of what it
+/// asks, what the source has above its least and the room the other field has left, as two sets in one part, through
+/// the tree's commit; with nothing to move it is refused by name and writes nothing. An amount given by a count
+/// argument binds as that number. #4104: a `create` with `set` makes the thing with those fields, read against the
+/// made kind's own (by name, its bounds, its enum's values), or is refused by name and makes nothing; a resend of the
+/// intent, before and after a restart, makes no second thing; the log replayed onto a fresh tree gives the same tree.
+#[test]
+fn own_field_transfers_and_a_made_things_fields_commit_once_and_replay() {
+    const WELL: u64 = 4;
+    let mut b = Bench::new(1, 1, &[400]);
+    let entry = b.entry.clone();
+    let (body, a) = (id(2), id(100));
+    let ns = b.full.split(':').next().expect("a namespace").to_owned();
+    let n = std::cell::Cell::new(0);
+    let run = |b: &mut Bench, form: &str, vals: &[(&str, Arg)]| {
+        n.set(n.get() + 1);
+        start(b, &entry, body, a, form, a, vals, n.get())?;
+        while !b.p.forms.is_empty() {
+            b.tick();
+            b.flush();
+        }
+        let e = b.p.forms.ended.pop().expect("ended");
+        Ok::<String, String>(e.how.as_str().to_owned())
+    };
+    let amounts = |b: &Bench| {
+        let n = b.tree.node(b.tree.handle(a).expect("a")).expect("a node");
+        let int = |f: u64| match n.fields().get(&f) {
+            Some(Value::Uint(u)) => i64::try_from(*u).expect("small"),
+            _ => 0,
+        };
+        (int(AMOUNT), int(WELL))
+    };
+    let held = |b: &Bench| -> Vec<(Id, BTreeMap<u64, Value>)> {
+        let h = b.tree.handle(body).expect("the body");
+        b.tree
+            .children(h)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|c| b.tree.node(*c))
+            .map(|n| (n.id(), n.fields().clone()))
+            .collect()
+    };
+
+    // #4103: between two fields of one thing, as one part the tree takes.
+    assert_eq!(run(&mut b, "to_well", &[]), Ok("done".into()));
+    assert_eq!(amounts(&b), (370, 30));
+    // A count argument's amount, up to the room the well has left (70 of the 80 asked).
+    assert_eq!(
+        run(&mut b, "to_well_by", &[("n", Arg::Int(80))]),
+        Ok("done".into())
+    );
+    assert_eq!(amounts(&b), (300, 100));
+    // The well is full: refused by name, nothing written.
+    assert_eq!(run(&mut b, "to_well", &[]), Ok("nothing-to-move".into()));
+    assert_eq!(amounts(&b), (300, 100));
+    // Asked for more than the well holds: what it holds moves; then nothing is left to move.
+    assert_eq!(run(&mut b, "from_well", &[]), Ok("done".into()));
+    assert_eq!(amounts(&b), (400, 0));
+    assert_eq!(run(&mut b, "from_well", &[]), Ok("nothing-to-move".into()));
+    assert_eq!(amounts(&b), (400, 0));
+    // A field of another thing is not this transfer.
+    assert_eq!(
+        run(&mut b, "to_other_well", &[]),
+        Err("effect-malformed".into())
+    );
+    println!("own-field transfers: amount and well {:?}", amounts(&b));
+
+    // #4104: made with its fields, or refused by name with nothing made.
+    let sad = Value::Text(replica::encode::Name::new(&format!("{ns}:sad")).expect("a name"));
+    assert_eq!(
+        run(&mut b, "make_overfilled", &[]),
+        Ok("out-of-range".into())
+    );
+    assert_eq!(run(&mut b, "make_unknown", &[]), Ok("field-unknown".into()));
+    assert_eq!(run(&mut b, "make_wrong", &[]), Ok("not-allowed".into()));
+    assert!(held(&b).is_empty(), "a refused make makes nothing");
+    let made_at = n.get() + 1;
+    assert_eq!(
+        run(&mut b, "make_filled", &[("m", Arg::Name("sad".into()))]),
+        Ok("done".into())
+    );
+    let made = held(&b);
+    println!("made with fields: {made:?}");
+    let [(child, ref fields)] = made[..] else {
+        panic!("one thing made: {made:?}")
+    };
+    assert_eq!(fields.get(&AMOUNT), Some(&Value::Uint(300)));
+    assert_eq!(fields.get(&2), Some(&sad));
+
+    // A resend of the intent is its first receipt, before and after a restart: never a second thing.
+    let resend = |b: &mut Bench| {
+        let args: Args = BTreeMap::from([
+            ("m".to_owned(), Arg::Name("sad".into())),
+            ("other".to_owned(), Arg::Node(a)),
+        ]);
+        let effects = bind_effects_args(&entry, "make_filled", &args).expect("binds");
+        let steps = bind(&entry, "make_filled").expect("binds");
+        let now = b.now;
+        let (mut w, forms) = b.world();
+        let asked = forms.start(
+            &mut w,
+            body,
+            a,
+            intent(body, made_at),
+            steps,
+            effects,
+            Limits::default(),
+            now,
+        );
+        while !b.p.forms.is_empty() {
+            b.tick();
+            b.flush();
+        }
+        asked
+    };
+    assert!(matches!(resend(&mut b), Ok(Asked::Applied(_))));
+    let forms = Forms::recover(&b.log, b.now);
+    b.restart(forms);
+    assert!(matches!(resend(&mut b), Ok(Asked::Applied(_))));
+    assert_eq!(held(&b).len(), 1, "one thing made");
+
+    // A fresh observer: the log replayed onto a fresh tree gives the same tree, the made thing's fields in it.
+    let mut fresh = Bench::new(1, 1, &[400]);
+    let mut from = b.parts[0];
+    for &len in &b.parts[1..] {
+        fresh.commit(b.log[from..from + len].to_vec());
+        from += len;
+    }
+    assert_eq!(fresh.tree.to_state(), b.tree.to_state());
+    let seen = fresh
+        .tree
+        .node(fresh.tree.handle(child).expect("replayed"))
+        .expect("a node");
+    assert_eq!(seen.fields().get(&AMOUNT), Some(&Value::Uint(300)));
+    assert_eq!(seen.fields().get(&2), Some(&sad));
+    assert_eq!(amounts(&fresh), (400, 0));
 }
 
 /// E5's kinds: linen (dirt 1, soap 2), a board (soap 1, dirt 2), a tub (soap 2, as linen numbers it) and a funnel
