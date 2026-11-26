@@ -21,6 +21,8 @@ import { unreadFormat } from '../stream-format.ts';
 const AHEAD = 16;
 /** How often a catch-up says how far behind it is (#4684). */
 const CATCHING_MS = 1000;
+/** The existing live pointer cadence, also used while a starting world has no pointer yet. */
+const POLL_MS = 250;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string } | { t: 'format'; format: number }
   | { t: 'catching'; behind: number };
@@ -144,7 +146,14 @@ type StreamPointer = Pointer & { header: string; baseline?: string; generation?:
 
 async function run(stream: URL) {
   await init();
-  let ptr = readPtr((await get(new URL('pointer', stream)))!) as StreamPointer;
+  // A starting/restarting world may not have published its pointer yet. Keep one bounded read in flight;
+  // parse only after it answers, outside the retry catch, so invalid pointer bytes remain a visible error.
+  let first: Uint8Array | null = null;
+  while (!first) {
+    first = await get(new URL('pointer', stream), true).catch(() => null);
+    if (!first) await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
+  let ptr = readPtr(first) as StreamPointer;
   let player: StreamPlayer;
   let active: string | undefined;
   let version = 0;
@@ -415,7 +424,7 @@ async function run(stream: URL) {
     finally { busy = false; }
   };
   await poll();
-  setInterval(poll, 250);
+  setInterval(poll, POLL_MS);
 }
 
 scope.onmessage = (e: MessageEvent<{ stream: string }>) => {
