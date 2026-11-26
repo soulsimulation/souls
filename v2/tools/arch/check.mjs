@@ -107,7 +107,8 @@ export function floats(file, src) {
 
 // G1e (#3532): the served-edit test drives a real gateway. These dependencies stay test-only;
 // listing them here never permits them in worldd's normal or build dependencies, or in another crate.
-export const DEV_ALLOWED = { worldd: ['gatewayd', 'tokio', 'tokio-tungstenite', 'futures-util', 'axum'] };
+// templates: test-only: tests/serve.rs rehearses a world forked from a published template (#5066).
+export const DEV_ALLOWED = { worldd: ['gatewayd', 'tokio', 'tokio-tungstenite', 'futures-util', 'axum', 'templates'] };
 
 /** The crates under v2/crates and their dependencies, from `cargo metadata`, against ALLOWED. */
 export function dependencies(packages) {
