@@ -31,7 +31,9 @@ export const UNCLAIMED_MS = 30_000;
 /** At most this long of one task replaying what the worker posted before it was taken. */
 const SLICE_MS = 8;
 
-type Got = { data: unknown } | { error: string };
+// the event itself, not its data: its data is read (structured-clone deserialised, a whole world's nodes in a snapshot)
+// only when it is delivered, so nothing is spent on it while the page's first phase draws its poster
+type Got = { event: MessageEvent } | { error: string };
 type WorkerLike = Pick<Worker, 'postMessage' | 'terminate' | 'addEventListener'>;
 
 /** A reader worker started before its bridge: to the bridge and its watchers it is the Worker (their `message`
@@ -50,7 +52,7 @@ export class EarlyReader extends EventTarget {
   constructor(worker: WorkerLike, stream: string, replica: string) {
     super();
     this.worker = worker; this.stream = stream; this.replica = replica;
-    worker.addEventListener('message', (e) => this.got({ data: (e as MessageEvent).data }));
+    worker.addEventListener('message', (e) => this.got({ event: e as MessageEvent }));
     worker.addEventListener('error', (e) => this.got({ error: (e as ErrorEvent).message || 'the v2 reader stopped' }));
     worker.postMessage({ stream });
   }
@@ -79,7 +81,7 @@ export class EarlyReader extends EventTarget {
   private deliver(x: Got) {
     try {
       if ('error' in x) { const e = errorEvent(x.error); this.dispatchEvent(e); this.onerror?.(e); return; }
-      const e = new MessageEvent('message', { data: x.data }); this.dispatchEvent(e); this.onmessage?.(e);
+      const e = new MessageEvent('message', { data: x.event.data }); this.dispatchEvent(e); this.onmessage?.(e);
     } catch (error) { report(error); }   // as a worker's listener's would be: reported, and the next message still delivered
   }
 }
