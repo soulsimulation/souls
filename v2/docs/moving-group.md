@@ -83,23 +83,27 @@ need not set off within the 0.7 s a 1 m stretch allows.
 
 **The crew turns with its front.** A front's walk that names the carry's heading at its goal (the walk's parameter 3,
 `[x, z]`, from the back toward the front: the client's `carry to <crew> <bay> <slot>` and `carry to <crew> the loading
-spot` send it, so a load goes into a slot or a bay square), or that goes to a pose of the way a lift found (0.135 R2: its front within 0.1 m of the walk's goal),
-turns the group: each order also names the goal and the place's offset there (parameter 5, `[goal x, goal z, x, z]`,
-`Follow::turning`), and the place swings about the front by the share of the way to the goal the front has walked,
-keeping its length, at most a jog's pace along its chord (`skills::close::SWING`), so a large turn on a short walk
-is a pivot that goes on after the front stops; the carrier is fed its place's own pace, so it keeps up as the place
-swings. A walk that ends short of its goal (a granted spot) finishes its turn where the front stands, the same way. A
-front's new walk takes the places again when it or the walk before turns the crew; a straight one keeps them. The
-turn's sweep is not checked before it starts: each step is C7's check, so a load swung into a post is set down there
-(`souls:carry-blocked`). A walk that names no heading and goes to no pose leaves the load turned as it is.
+spot` send it, so a load goes into a slot or a bay square), or that goes to a pose of the way a lift found (0.135 R2:
+its front within 0.1 m of the walk's goal), turns the group: each order also names the goal and the place's offset there
+(parameter 5, `[goal x, goal z, x, z]`, `Follow::turning`), and the place swings about the front by the share of the way
+to the goal the front has walked, keeping its length, at most a jog's pace along its chord (`skills::close::SWING`), so
+a large turn on a short walk is a pivot that goes on after the front stops; the carrier is fed its place's own pace, so
+it keeps up as the place swings. A walk that ends short of its goal (a granted spot) finishes its turn where the front
+stands, the same way. A front's new walk takes the places again when it or the walk before turns the crew; a straight
+one keeps them. The turn's sweep is not checked before it starts: each step is C7's check, so a load swung into a post
+is set down there (`souls:carry-blocked`). A walk that names no heading and goes to no pose leaves the load turned as it
+is.
+
 
 A carrier's own act takes its legs back (B2) and it walks its own way, still in the carry, as before (a late carrier's
 own `carry to` does not fight the group); once its own walk ends while the front's still goes, it stays where it chose
-(a scripted crew's carrier that arrives first is not dragged on past its place), and no turn of that walk moves it:
-it takes its place again at the front's next walk, where the carry's frame has it then, turned as the frame is. The leave rule is the carry's: a side's leave with the load's crew left closes up, its order cancelled; a carry
-that breaks off (`souls:partner-left`, `souls:carriers-apart`, `souls:carry-blocked`) stops the front's walk with that
-reason and cancels the walkers' orders, so the whole group stops with one reason. A restart sets the load down (C3)
-and cancels the orders.
+(a scripted crew's carrier that arrives first is not dragged on past its place), and no turn of that walk moves it: it
+takes its place again at the front's next walk, where the carry's frame has it then, turned as the frame is. The leave
+rule is the carry's: a side's leave with the load's crew left closes up, its order cancelled; a carry that breaks off
+(`souls:partner-left`, `souls:carriers-apart`, `souls:carry-blocked`) stops the front's walk with that reason and
+cancels the walkers' orders, so the whole group stops with one reason. A restart sets the load down (C3) and cancels the
+orders.
+
 
 **Others keep apart from a carried load.** The walkers' map learns where a load rests only when it is set down or
 seated, so while it is carried it stands among the bodies a walker keeps apart from (`sim::host::Carried`, the route
