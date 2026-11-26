@@ -23,8 +23,10 @@ const bin = (n) => process.env[n.toUpperCase().replaceAll('-', '_')] ?? join(pro
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const WORLD = 'forsaken';
 
-// The authority map's paths may hold no symbolic link (a temp folder on macOS is under one).
-const dir = realpathSync(mkdtempSync(join(tmpdir(), 'souls-forsake-')));
+// The authority map's paths may hold no symbolic link (a temp folder on macOS is under one), and the gateway's control
+// socket sits beside the world's tokens file, under `worlds/<instance>/`: a short folder keeps it within a socket
+// path's length.
+const dir = realpathSync(mkdtempSync(join(existsSync('/tmp') ? '/tmp' : tmpdir(), 'sf-')));
 const lineage = randomBytes(16).toString('hex');
 const instance = `${lineage}-${randomBytes(16).toString('hex')}-0`;
 const tokens = join(dir, 'worlds', instance, 'tokens');
