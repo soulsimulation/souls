@@ -49,7 +49,7 @@
 //   An event reaches the reflexes once by its entry's sequence and name, however it arrived and across drops; after a
 //   drop the copy is brought current by hash, since the items missed while away are not replayed.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
-//   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
+//   `unchangedMs` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
 //   and R13's (#2753), wake rules on R9's events within the owner's budget (`../wake/wake.mjs`), and the owner's
@@ -1431,7 +1431,7 @@ async function keyed(req) {
     const first = await going;
     // Kept only once it wrote: a refusal before anything was sent can be fixed and sent again with the same key.
     if (first.ok && first.sequence !== undefined) {
-      const { at: _a, changed: _c, age: _g, gap: _p, stale: _s, asleep: _z, ...answerOnly } = first;
+      const { at: _a, changed: _c, age: _g, gap: _p, stale: _s, unchangedMs: _z, ...answerOnly } = first;
       state.keys[k] = { sequence: first.sequence, first: answerOnly, answer: null };
       const names = Object.keys(state.keys);
       if (names.length > KEYS_KEPT) delete state.keys[names[0]];

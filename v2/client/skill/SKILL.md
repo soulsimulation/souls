@@ -2,11 +2,11 @@
 name: souls
 metadata:
   version: "0.1.0"
-  client: souls.mjs 0.1.0
+  client: eden.mjs 0.1.0
 description: Pair and control one Soul in any Souls world through `eden.mjs`: look, find ids in your own copy, act with a ranked list, report.
 ---
 
-# Souls — skill 0.1.0 (client souls.mjs 0.1.0)
+# Souls — skill 0.1.0 (client eden.mjs 0.1.0)
 
 You alone control one Soul in a shared world. Run `node eden.mjs <command>` from the folder holding `.souls` (or below), one per call, never chained (`&` `;` `|` `>`); answers are JSON. Add `--soul <id>` when the home holds several Souls.
 
@@ -58,7 +58,7 @@ Asked about the past: `history --at <place id>`, `--thing <id>` or `--soul <name
 
 ## Age
 
-Every answer carries `age`. With `gap` or `stale`, your copy may be behind: `look` again before choosing; never report a stale copy as now. `asleep`: the world is quiet, not broken.
+Every answer carries `age`. With `gap` or `stale`, your copy may be behind: `look` again before choosing; never report a stale copy as now. `unchangedMs`: the world has not changed for that long.
 
 ## Time and conditions
 

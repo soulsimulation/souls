@@ -510,6 +510,9 @@ export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
   return { params };
 }
 
+/** How long a command waits for its daemon's answer before it says daemon-not-answering: on a busy machine a daemon
+ *  answered after 9 to 25 s (first day, 26 Nov), which had read as every command failing. */
+export const DAEMON_PATIENCE_MS = 30_000;
 /** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
 export const ACT_WAIT_MS = 60_000;
 /** 0.135: an act that declares how long it lasts (`act dance for=<seconds>`) is waited for that long and this much more. */
@@ -549,13 +552,13 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
   // latest. Any other act (a walk, a sit, whose deadline may be long) is waited for as before.
   const outlastsWait = sent.lasts_s !== undefined && sent.lasts_s * 1000 + ACT_WAIT_MARGIN_MS > ms;
   for (;;) {
-    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
+    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, DAEMON_PATIENCE_MS);
     const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
     const outlasts = outlastsWait && last?.answer === 'accepted';
     const over = now() >= until || outlasts;
     if (ENDED(last) || over) {
       // The last read closes the answer as any command does: the copy's version and what changed since the act.
-      const r = await ask({ op: 'receipt', sequence: sent.sequence }, 5000);
+      const r = await ask({ op: 'receipt', sequence: sent.sequence }, DAEMON_PATIENCE_MS);
       const end = r?.ok ? r.receipt.answers.at(-1) : last;
       if (ENDED(end)) {
         const phase = end.answer === 'receipt' ? 'done' : end.answer;
@@ -599,7 +602,7 @@ export async function listen(ask, print, { follow = false, seconds = 60, pause =
   let since, daemon;
   for (;;) {
     let got;
-    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + 5000); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
+    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + DAEMON_PATIENCE_MS); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
     if (got?.ok !== true) {
       if (!follow) return print(got);
       [since, daemon] = [undefined, undefined];
@@ -729,7 +732,7 @@ const CARRY_NOTE = 'Points are metres, x east and z south. Walk to your end firs
 /** 0.135 C: the crew an offer made, the first crew in the copy that was not there before it: `{crew}`, or a note. */
 export async function newCrew(ask, before, { tries = 25, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
   for (let i = 0; i < tries; i++) {
-    const listed = await ask({ op: 'carry', do: 'list' }, 5000);
+    const listed = await ask({ op: 'carry', do: 'list' }, DAEMON_PATIENCE_MS);
     const made = (listed?.crews ?? []).find((c) => !before.includes(c.id));
     if (made) return { crew: made.id };
     await sleep(200);
@@ -789,8 +792,10 @@ if (isMain(import.meta.url)) {
       const waiting = ['look', 'status'].includes(req.op) && soulsWithTokens(home).length === 0 ? pairingState(home) : null;
       if (waiting) { out(waiting); process.exit(0); }
       const { soul, resident } = await chooseCommandSoul(home, named);
-      // carry/part: the daemon first brings its copy current (up to 10 s), so its answer may take longer than 5 s
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'carry' ? 15_000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
+      // First day (26 Nov): on a busy machine a daemon answered after 9 to 25 s, and every command had already said
+      // daemon-not-answering at 5 s while the Soul did what it was told. Each now waits DAEMON_PATIENCE_MS (carry/part
+      // first bring the copy current, up to 10 s, within it); a wait, its seconds and that.
+      const ms = (req.op === 'wait' ? (req.seconds ?? 30) * 1000 : 0) + DAEMON_PATIENCE_MS;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
@@ -798,7 +803,7 @@ if (isMain(import.meta.url)) {
       // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
-      if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
+      if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, DAEMON_PATIENCE_MS);
       const update = await updating;
       if (update && answer && typeof answer === 'object') answer.update = update;
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
