@@ -122,9 +122,9 @@ import { WorldNavigation, createWorldOrbitControls, type ManualNavigation, type 
 import {WorldPlaceCamera} from './WorldPlaceCamera.ts';
 import { composeVisibleViewport, viewportNote, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
 import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
-import { cardLook, fadeCard } from './WorldCardSight.ts';
+import { cardLook, fadeCard, TAG_SHOWN_MIN } from './WorldCardSight.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
-import {bubbleLift,paintSpeakingDot,speakingClock,speakingNow} from './dialogue-speaking.ts';
+import {bubbleLift,bubbleShows,paintSpeakingDot,speakingClock,speakingNow} from './dialogue-speaking.ts';
 import {WorldGames} from './WorldGames.ts';
 import {parsePlatformFloors,platformFloorOffset,type PlatformFloor} from '../../../mars/viewer/lib/platform-floor.ts';
 import {WorldPlatforms} from './WorldPlatforms.ts';
@@ -172,7 +172,10 @@ type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolea
 type Shown = { tick: number; datetime: string | null; take: Take | null; entities: Record<string, SampledEntity> };
 type Label = { obj: CSS2DObject; head: THREE.Vector3; /** The speech bubble, anchored above the head, apart from the name tag. */ bubble: CSS2DObject; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
   /** #2195: the card's eased opacity, whether it is emphasised, and its last sightline check (performance.now ms). */
-  shown: number; emphasis: boolean; occluded: boolean; checkedAt: number };  // obj sits under the body (C2); head is where speech anchors
+  shown: number; emphasis: boolean; occluded: boolean; checkedAt: number;
+  /** The Soul is drawn this frame (its tag may still be faded out); `ahead`: in front of the camera; `bubbleBusy`: the
+   *  bubble holds a shown pop-up or speaking dot. Page FPS: a faded-out tag and an empty bubble are not CSS2D-drawn. */
+  live: boolean; ahead: boolean; bubbleBusy: boolean };  // obj sits under the body (C2); head is where speech anchors
 
 async function fetchChunks(from: number, to: number, limit: number, signal: AbortSignal): Promise<Chunk[]> {
   const v2 = v2History(); // R2: a world the new engine runs answers its past from its history export
@@ -773,6 +776,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const standIns = new THREE.Group(); scene.add(standIns);
     const bodyStandIns = new WorldBodyStandIns(standIns,standInGeometry,standInMaterial);
     const labels = new Map<string, Label>();
+    // Page FPS: `?tagCull=0` draws every tag and bubble through CSS2D every frame, as before (an A/B switch)
+    const tagCull=new URLSearchParams(location.search).get('tagCull')!=='0';
+    const paintedBubble=(id:string,l:Label)=>{l.bubbleBusy=bubbleShows(l.bubble.element);if(tagCull&&l.live)l.bubble.visible=l.bubbleBusy;};
     const labelFor = (soul: PublicSoul): Label => {
       let l = labels.get(soul.id);
       if (l) return l;
@@ -792,7 +798,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // A said line pops up above the head, never in the name tag (which hangs under the body, C2).
       const bubbleEl = document.createElement('div'); bubbleEl.className = 'world-speech-bubble'; bubbleEl.dataset.soulId = soul.id;
       const bubble = new CSS2DObject(bubbleEl); bubble.center.set(0.5, 1); labelScene.add(bubble);
-      l = { obj, head: new THREE.Vector3(), bubble, name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0 };
+      l = { obj, head: new THREE.Vector3(), bubble, name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0, live: false, ahead: false, bubbleBusy: false };
       labels.set(soul.id, l);
       return l;
     };
@@ -1053,10 +1059,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         if((refresh||!soulAvatars.images.has(soul.id))&&!eyes&&!soul.profilePhoto&&soulAvatars.wanted.has(soul.id))void portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
-        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : bubbleLift(at.entities[soul.entityId]?.activity)), pos[2]); l.bubble.visible = true;   // its tail just over the head
+        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : bubbleLift(at.entities[soul.entityId]?.activity)), pos[2]); l.bubble.visible = !tagCull || l.bubbleBusy;   // its tail just over the head
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
         l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]);
-        l.obj.visible = true;
+        l.live = true;
         if (cards) {
           const activity = at.entities[soul.entityId]?.activity;
           const away = past.current ? null : bodyLabel(soul.body);   // LINK: "Asleep" / "Zombie" over a body whose agent is away
@@ -1076,6 +1082,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           state: past.current ? null : soul.body?.state, speaking: cardSpeakers.has(soul.id), distance: cardOffset.length(), height: eye.y - pos[1], depth, focusDepth, occluded: l.occluded });
         const shown = fadeCard(l.shown, look.opacity, step), el = l.obj.element as HTMLElement;
         if (shown !== l.shown) { l.shown = shown; el.style.opacity = shown.toFixed(2); el.style.pointerEvents = shown > 0.3 ? 'auto' : 'none'; }
+        // Page FPS: a tag faded below TAG_SHOWN_MIN is already left unplaced and hidden (below); now CSS2D skips it too (no
+        // projection, transform or z-index write, no style recalc), so hundreds of faded tags in a crowd cost nothing a frame
+        l.ahead = depth > 0; l.obj.visible = !tagCull || l.shown >= TAG_SHOWN_MIN;
         if (look.emphasis !== l.emphasis) { l.emphasis = look.emphasis; l.name.style.fontSize = look.emphasis ? '1.2em' : ''; el.style.boxShadow = look.emphasis ? '0 0 0 1.5px rgba(140,220,255,.95)' : ''; }
       }
       // W4: who can hear each recent line (spectators see all channels).
@@ -1091,14 +1100,14 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         cardSpeakers=new Set(latest.keys());
         for(const [id,l] of labels){
           // DLG2: in dock mode the dialogue dock carries the words and who can hear; the tag only gets a small speaking dot.
-          const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');
+          const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.live&&l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');paintedBubble(id,l);
           const chip=l.obj.element.querySelector('[data-channel-chip]') as HTMLElement|null;if(!chip)continue;const sp=latest.get(id);
           if(!sp||context.current.publishSpeechAnchors){chip.style.display='none';continue;}const c=channelChip(sp,nameOf);chip.textContent=c.text;chip.style.color=c.colour;chip.style.display='';}}
       // a new line shows on the next frame, not at the next refresh (trial of 0.137: the bubble came about 2.5 s after say)
-      else if(speakingClock.version!==paintedSpeaking)for(const [id,l] of labels){const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');}
+      else if(speakingClock.version!==paintedSpeaking)for(const [id,l] of labels){const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.live&&l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');paintedBubble(id,l);}
       paintedSpeaking=speakingClock.version;
       speechLayer.update(speeches,Date.now(),soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId,e=id?at.entities[id]:null;if(!id||!e)return null;const body=recordedBody(records[id]?.body,e.state),b=body?.family==='floater'?floaterBody(body):null;return speechHead.set(e.p[0],e.p[1]+(b?b.hoverHeight+b.radius+.05:1.95),e.p[2]).clone();});
-      for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; l.bubble.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); labels.delete(id); } }
+      for (const [id, l] of labels) if (!alive.has(id)) { l.live = false; l.obj.visible = false; l.bubble.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); labels.delete(id); } }
       if (!focus && thingId) {
         const q = thingId.startsWith('kin:') ? kin.view.object(thingId)?.position.toArray() : at.entities[thingId]?.p;
         if (q) focus = spot.set(q[0], q[1], q[2]);
@@ -1247,7 +1256,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       // separate CSS translation, so packing never changes a body's anchor.
       const hostBox = labels2d.domElement.getBoundingClientRect(), boxes: LabelBox[] = [];
       for (const [id,l] of labels) {
-        if (!l.obj.visible || l.obj.element.style.display === 'none' || l.shown < 0.04) continue;   // #2195: a faded-out card takes no room
+        if (!l.obj.visible || l.obj.element.style.display === 'none' || l.shown < TAG_SHOWN_MIN) continue;   // #2195: a faded-out card takes no room
         const b=l.obj.element.getBoundingClientRect();
         boxes.push({id,x:b.left-hostBox.left-l.offset.dx,y:b.top-hostBox.top-l.offset.dy,width:b.width,height:b.height,selected:id===soulId,previous:l.offset});
       }
@@ -1262,7 +1271,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       // scenery fades. One evaluation (one bounds pass) for the batch, two points per body (chest, top of the head).
       if(refresh&&!holdDraw&&(++cardChecks&1)===0)try{
         const due:Label[]=[],ids=new Map<Label,string>();
-        for(const [id,l] of labels)if(alive.has(id)&&l.obj.visible&&l.obj.element.style.display!=='none'){due.push(l);ids.set(l,id);}
+        for(const [id,l] of labels)if(alive.has(id)&&l.live&&(tagCull?l.ahead:l.obj.element.style.display!=='none')){due.push(l);ids.set(l,id);}  // a culled tag is display:none, yet its sightline is still checked (it may come back)
         due.sort((a,b)=>a.checkedAt-b.checkedAt);due.length=Math.min(due.length,8);
         if(due.length){cardVisibility.prepareFresh(visualObstructionRoots());const pose={position:camera.position.toArray(),target:controls.target.toArray(),fov:camera.fov};
           cardVisibility.evaluate(()=>{for(const l of due){const e=at.entities[s.conn.replica.souls.get(ids.get(l)!)?.entityId??''];if(!e)continue;const p=e.p;
@@ -1286,7 +1295,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       if (refresh || pausedFrameChanged || firstShown) {
         const points:SpeechAnchorPoint[]=context.current.publishSpeechAnchors?souls.flatMap(soul=>{
           const label=labels.get(soul.id),rec=records[soul.entityId];
-          if(!at.take||!at.entities[soul.entityId]||!label?.obj.visible||rec?.kind!=='human')return [];
+          if(!at.take||!at.entities[soul.entityId]||!label?.live||rec?.kind!=='human')return [];
           const rendered=!!floaters.object(soul.entityId)||!!people?.bodyObject(soul.entityId)||!!standIns.getObjectByName(soul.entityId);
           return [{soulId:soul.id,point:label.head.toArray() as [number,number,number],rendered}];
         }):[];

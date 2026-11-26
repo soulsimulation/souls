@@ -2530,6 +2530,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .unwrap_or(self.closed.len());
                 self.closed.split_off(keep)
             };
+            // The current chain, which the backup's clean-up never deletes (#4954).
+            if let Some(spool) = &self.spool {
+                spool.live(self.live.iter().map(|h| self.object_key(h)).collect());
+            }
             for (record, _) in gone.iter().rev() {
                 let key = self.object_key(record);
                 if let Some(spool) = &self.spool {
@@ -2699,15 +2703,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     /// R15: backs this writer's spooled recovery chain up to `store` on its own thread ([`backup`]), telling `report`
-    /// how it stands. A writer opened without a spool has nothing to back up.
-    pub fn back_up<T: ObjectStore + Send + 'static>(
+    /// how it stands, and deletes old generations from it through `cleanup`, another client, on a thread of their own
+    /// (#4954). A writer opened without a spool has nothing to back up.
+    pub fn back_up<T: ObjectStore + Send + 'static, C: ObjectStore + Send + 'static>(
         &mut self,
         store: T,
+        cleanup: C,
         report: Box<dyn Fn(BackupState) + Send>,
     ) -> R<()> {
         let prefix = self.prefix.clone();
         match &mut self.spool {
-            Some(spool) => backup::start(spool, store, prefix, report),
+            Some(spool) => backup::start(spool, store, cleanup, prefix, report),
             None => Ok(()),
         }
     }

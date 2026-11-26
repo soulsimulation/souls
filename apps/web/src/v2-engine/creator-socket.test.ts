@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
 const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
@@ -62,6 +62,29 @@ test('a refusal is answered by name; a stale weather is sent once more against t
   const undo = s.edit({ undo: 'undo' });
   s.frame(answer(102, 2, 12, 'undo.nothing'));
   assert.equal((await undo as { reason: string }).reason, 'undo.nothing', 'the panel\'s note shows the refusal\'s name');
+});
+
+test('edits are numbered by the clock, never below the last, so the creator\'s agent (also by the clock) and the page never lock each other out', async () => {
+  const sent: Uint8Array[] = [];
+  let now = 5_000;
+  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
+  s.frame(encode(new Map([[1, 2]]))); s.frame(encode(new Map([[4, 'stream.started']])));
+  void s.edit({ undo: 'undo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 5_000, 'the clock, above the first');
+  void s.edit({ undo: 'redo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 5_001, 'the same instant: one more than the last');
+  now = 9_000;
+  void s.edit({ undo: 'undo' });
+  assert.equal(dec(sent.at(-1)!).get(5), 9_000, 'later: the clock again');
+});
+
+test('a socket that closes answers every waiting press creator.closed, in plain words, instead of leaving it Sending for ever (the edit may have been made)', async () => {
+  const { s } = signedIn();
+  const a = s.edit({ undo: 'undo' }), b = s.edit({ ops: [{ op: 'remove', node: WORLD }] });
+  s.closed();
+  assert.deepEqual([(await a as { reason: string }).reason, (await b as { reason: string }).reason], [CLOSED, CLOSED]);
+  assert.match(refusalText(CLOSED), /answer did not reach this page.*look at the world before you press again/);
+  s.frame(answer(100, 1, 3));   // a late answer finds nothing waiting
 });
 
 test('Build\'s place, move and remove are the batch\'s operations 1, 2 and 4; the receipt names the placed thing', async () => {
