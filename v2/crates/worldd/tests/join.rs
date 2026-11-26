@@ -1194,15 +1194,18 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
 /// difference. Re-pinned by #4974: a gateway walk's place is asked in the tick the walk starts, so it is planned,
 /// answered and walking a tick sooner (904 records, 2,331 motion samples); main without that one change writes the
-/// previous pin (aafd0a80...), so it is the whole difference.
+/// previous pin (aafd0a80...), so it is the whole difference. Re-pinned by #5034: a walk sent to a point says how far
+/// from that point it ended (its end's field 7), not from the ground node (same 904 records, 2,331 motion samples). 41
+/// walk ends' field 7 went from 39.9 m to 48.1 m to 0 mm to 48 mm, and nothing else differs; the spot change alone
+/// leaves this history as it was, and main's three files write the previous pin (f7b20d34...).
 /// Re-pinned by the #5019 follow-up: a move refused out of reach says how far in whole mm, not µm, in its
 /// logged answer (a sit refused as it starts; same 905 records, 2,342 motion samples); the branch's first commit alone
 /// (the words) writes this pin, and its later ones (sits and rises answered as they start) leave it, so the words are
 /// the whole difference.
-/// With both, as merged: 904 records, 2,331 motion samples (#4974's), and a hash of their own; each change alone
-/// writes its own pin above (f7b20d34... for #4974's tick, 4c81bf20... for the whole-mm words).
+/// With #4974's tick, #5034's walk-end field 7 and the whole-mm words, as merged: 904 records, 2,331 motion samples,
+/// and a hash of their own (MERGEPIN); each alone writes its own pin above.
 const PINNED_MOTION_HISTORY: &str =
-    "25b7a2777f569d139b11549facdbf0282abeb2dfd3fba7a0aa61134e6f3c5e98";
+    "3148abac4afea323b3e04d9e0e466aed89503d96a3416b7ea84616be775186e9";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

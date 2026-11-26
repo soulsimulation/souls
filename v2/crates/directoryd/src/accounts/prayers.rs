@@ -2,10 +2,13 @@
 //! other direction. Kept in the account store's file beside the mailbox, never in a world's log; the backup of that
 //! file (O20) holds them, and removing a person's words (W7) must reach `prayers_v1` as it does `mailbox_v1`.
 //!
-//! A prayer is kept under its world, the Soul's own scope (T3: a new scope for every world). Its world's creator is the
-//! principal the list of worlds (W3/G9) names as that world's creator, holding the creator grant of that principal
-//! (W5's and G7's); a world the list has no row for (one started by hand, as in tests) is its own scope's creator
-//! grant's ([`creator_worlds`]). The gateway has already checked the grant. A prayer is `waiting` until answered; an answer may be changed, and each answer is given to the Soul's socket until its daemon
+//! A prayer is kept under the principal its world's gateway names as that world's creator ([`addressed`], #5006 row 15:
+//! a Soul's grant has a scope of its own, `soul-<random>-0`, never its world's, so a prayer kept under it reached no
+//! creator). With none named (a world with no creator), under the Soul's own scope, as before. A creator lists and
+//! answers the prayers under its own principal, and under the worlds the list of worlds (W3/G9) names that principal
+//! the creator of, or its own grant's scope when the list has no row for it ([`creator_worlds`]). A prayer stays with
+//! the creator named when it was sent: a handoff does not move waiting prayers, and a creator of two worlds lists both
+//! worlds' prayers in one list (#5006 row 15 review, M2). The gateway has already checked the grant. A prayer is `waiting` until answered; an answer may be changed, and each answer is given to the Soul's socket until its daemon
 //! says it has it (`delivered`). Text limits are in characters, as today's server counts them.
 
 use super::random;
@@ -61,6 +64,15 @@ pub fn creator_worlds(grant: &str, rows: &[(String, String)]) -> Option<Vec<Stri
     Some(worlds)
 }
 
+/// The principal a creator grant (`creator-<scope hex>-<counter>`) holds, as a prayer to it is kept: `<scope>:<counter>`.
+pub fn addressed(grant: &str) -> Option<String> {
+    Some(format!(
+        "{}:{}",
+        scope_of(grant, "creator")?,
+        grant.rsplit('-').next()?
+    ))
+}
+
 fn sized(text: &str, most: usize) -> Result<(), &'static str> {
     match text.trim().chars().count() {
         0 => Err("empty"),
@@ -70,16 +82,21 @@ fn sized(text: &str, most: usize) -> Result<(), &'static str> {
 }
 
 impl Store {
-    /// `soul` prays; the prayer's id, or the refusal's name.
+    /// `soul` prays to `creator`, the creator grant of the world it prays in (the gateway's); the prayer's id, or the
+    /// refusal's name.
     pub fn pray(
         &self,
         soul: &str,
         text: &str,
         now: u64,
+        creator: Option<&str>,
     ) -> Result<Result<String, &'static str>, StoreError> {
-        let Some(scope) = scope_of(soul, "soul") else {
+        let Some(own) = scope_of(soul, "soul") else {
             return Ok(Err("prayer.not-a-soul"));
         };
+        let scope = creator
+            .and_then(addressed)
+            .unwrap_or_else(|| own.to_string());
         match sized(text, PRAYER_MOST) {
             Err("empty") => return Ok(Err("prayer.empty")),
             Err(_) => return Ok(Err("prayer.too-long")),
@@ -223,8 +240,11 @@ mod tests {
         let soul = format!("soul-{SCOPE}-2");
         let creator = creator_worlds(&format!("creator-{SCOPE}-0"), &[]).unwrap();
         let other = creator_worlds(&format!("creator-{}-0", "3c".repeat(16)), &[]).unwrap();
-        let a = s.pray(&soul, "let it rain", T0).unwrap().unwrap();
-        let b = s.pray(&soul, "and a bridge", T0 + 1).unwrap().unwrap();
+        let a = s.pray(&soul, "let it rain", T0, None).unwrap().unwrap();
+        let b = s
+            .pray(&soul, "and a bridge", T0 + 1, None)
+            .unwrap()
+            .unwrap();
         // The world's creator sees both waiting, oldest first; another world's creator sees none.
         let ids = |v: Vec<Prayer>| v.into_iter().map(|p| p.id).collect::<Vec<_>>();
         assert_eq!(
@@ -266,6 +286,68 @@ mod tests {
     }
 
     #[test]
+    fn a_prayer_reaches_the_creator_its_worlds_gateway_names_and_no_other() {
+        // #5006 row 15: a paired Soul's grant has a scope of its own, never its world's
+        let (s, dir) = store();
+        let soul = format!("soul-{}-0", "5a".repeat(16));
+        let creator = format!("creator-{SCOPE}-3");
+        let mine = |grant: &str| {
+            let mut w = creator_worlds(grant, &[]).unwrap();
+            w.push(addressed(grant).unwrap());
+            w
+        };
+        let id = s
+            .pray(&soul, "a well by the square", T0, Some(&creator))
+            .unwrap()
+            .unwrap();
+        let listed = s.prayers_to(&mine(&creator), false).unwrap();
+        assert_eq!(
+            listed.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            [id.as_str()]
+        );
+        // another creator, or the same scope's other principal, neither lists nor answers it
+        for other in [
+            format!("creator-{}-3", "3c".repeat(16)),
+            format!("creator-{SCOPE}-4"),
+        ] {
+            assert!(
+                s.prayers_to(&mine(&other), true)
+                    .unwrap()
+                    .into_iter()
+                    .all(|p| p.id != id),
+                "{other}"
+            );
+            assert_eq!(
+                s.answer(&[addressed(&other).unwrap()], &id, "no", T0)
+                    .unwrap(),
+                Err("prayer.not-found")
+            );
+        }
+        assert!(
+            s.answer(&mine(&creator), &id, "it is dug", T0 + 1)
+                .unwrap()
+                .is_ok()
+        );
+        // with no creator named (a world with none), under the Soul's own scope, as before
+        let lost = s.pray(&soul, "hello?", T0 + 2, None).unwrap().unwrap();
+        assert!(
+            s.prayers_to(&mine(&creator), true)
+                .unwrap()
+                .into_iter()
+                .all(|p| p.id != lost)
+        );
+        assert_eq!(
+            s.pray(&soul, "x", T0, Some("not-a-grant"))
+                .unwrap()
+                .map(|_| ()),
+            Ok(()),
+            "a malformed name: its own scope"
+        );
+        drop(s);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn the_worlds_creator_is_the_principal_the_list_names() {
         let lineage = "5e".repeat(16);
         let principal = "7a".repeat(16);
@@ -293,17 +375,23 @@ mod tests {
         let soul = format!("soul-{SCOPE}-2");
         let creator = vec![SCOPE.to_string()];
         // Characters, not bytes: 2,000 two-byte characters are a prayer.
-        assert!(s.pray(&soul, &"é".repeat(PRAYER_MOST), T0).unwrap().is_ok());
+        assert!(
+            s.pray(&soul, &"é".repeat(PRAYER_MOST), T0, None)
+                .unwrap()
+                .is_ok()
+        );
         assert_eq!(
-            s.pray(&soul, &"x".repeat(PRAYER_MOST + 1), T0).unwrap(),
+            s.pray(&soul, &"x".repeat(PRAYER_MOST + 1), T0, None)
+                .unwrap(),
             Err("prayer.too-long")
         );
-        assert_eq!(s.pray(&soul, "  ", T0).unwrap(), Err("prayer.empty"));
+        assert_eq!(s.pray(&soul, "  ", T0, None).unwrap(), Err("prayer.empty"));
         assert_eq!(
-            s.pray(&format!("creator-{SCOPE}-0"), "hi", T0).unwrap(),
+            s.pray(&format!("creator-{SCOPE}-0"), "hi", T0, None)
+                .unwrap(),
             Err("prayer.not-a-soul")
         );
-        let id = s.pray(&soul, "hear me", T0).unwrap().unwrap();
+        let id = s.pray(&soul, "hear me", T0, None).unwrap().unwrap();
         assert!(
             s.answer(&creator, &id, &"y".repeat(ANSWER_MOST), T0)
                 .unwrap()
