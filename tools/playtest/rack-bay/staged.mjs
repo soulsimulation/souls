@@ -19,9 +19,10 @@
 //
 //   node tools/playtest/rack-bay/staged.mjs --site https://soul.game [--name "Rack bay staged"] [--record 300]
 //
-//   The owner is whoever is signed in to the site in the browser window this opens: a Chrome profile of its own,
-//   kept at .local/rack-bay-staged/owner-profile (--profile), so the first run waits up to 10 minutes for you to sign
-//   in there as the world's owner (sign-in is never typed by this script) and later runs are already signed in. Each
+//   The owner is whoever is signed in to the site in the browser window this opens: a browser profile of its own,
+//   kept at .local/rack-bay-staged/owner-profile (--profile), opened with Playwright's Chromium, never installed
+//   Chrome (as tools/first-day opens its profiles), so the first run waits up to 10 minutes for you to sign in there
+//   as the world's owner (sign-in is never typed by this script) and later runs are already signed in. Each
 //   owner request is made in that page, with its own session token (Clerk's), as the page's own buttons make them.
 //   The window may be minimised; do not close it until the run ends.
 //
@@ -80,7 +81,9 @@ export async function browserOwner(site, profile, log) {
   const { chromium } = createRequire(join(REPO_ROOT, 'mars/viewer/package.json'))('@playwright/test');
   mkdirSync(profile, { recursive: true });
   const open = (o) => chromium.launchPersistentContext(profile, { headless: false, viewport: { width: 1100, height: 800 }, ...o });
-  const context = await open({ channel: 'chrome' }).catch(() => open({}));
+  // Playwright's Chromium only, as tools/first-day opens its profiles: installed Chrome keeps cookies under another
+  // keychain key, cannot read a Chromium profile's sign-in, and rewrites its cookies, signing the owner out
+  const context = await open({});
   const page = context.pages()[0] ?? await context.newPage();
   await page.goto(site, { waitUntil: 'domcontentloaded' });
   const signedIn = () => page.evaluate(async () => !!(await window.Clerk?.session?.getToken?.().catch(() => null)));
