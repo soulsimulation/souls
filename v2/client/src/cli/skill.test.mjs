@@ -30,7 +30,7 @@ test('every command the skill teaches exists', () => {
   assert.deepEqual(unknown, [], 'commands the skill teaches that the client does not have');
   for (const c of ['look', 'here', 'find', 'act', 'listen', 'pending', 'ack', 'pair', 'say']) assert.ok(commands.some((s) => s.split(' ')[0] === c), `the skill teaches ${c}`);
   assert.match(skill, /node eden\.mjs <command>/, 'the served file is eden.mjs');
-  assert.doesNotMatch(skill.replace(/client: souls\.mjs|client souls\.mjs/g, ''), /souls\.mjs/, 'no other name for the client');
+  assert.doesNotMatch(skill, /souls\.mjs/, 'no other name for the client');
 });
 
 test('the daemon commands it teaches parse, with their flags', () => {
