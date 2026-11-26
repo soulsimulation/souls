@@ -327,6 +327,7 @@ test('entries: plan lists each world\'s changes and changes nothing; the move st
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
+  exe(join(bins, 'store-copy'), 'exit 0');
   const client = join(root, 'client'), pkg = join(root, 'pkg');
   for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
   writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
