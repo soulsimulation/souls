@@ -565,7 +565,7 @@ function startSync(sock, kind) {
 /** The sync's next answer is due within SYNC_WITHIN. */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
-  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
+  syncing.timer = setTimeout(() => sock.giveUp('sync: no answer; reconnecting'), SYNC_WITHIN);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -675,6 +675,15 @@ function connect() {
     closed(1006);
     try { sock.close(); } catch { /* a socket still connecting may refuse to close; it is ignored from here */ }
   }, SIGN_IN_WITHIN);
+  // Given up by this daemon (a sync with no answer, a sync it refused): let go at once, as a close is, then closed. Over
+  // a stalled network the close completes only when the network is back (60 s stalled: 45 s), and until `closed` the
+  // daemon said it was connected and wrote each act into the closing socket, which sent nothing: never answered, and
+  // nothing said so (#4980). Let go, an act is held and goes at the next sign-in.
+  sock.giveUp = (why) => {
+    log(why);
+    closed(1006);
+    try { sock.close(); } catch { /* ignored from here */ }
+  };
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
@@ -751,7 +760,7 @@ function connect() {
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
-      if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
+      if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.giveUp('sync refused; reconnecting'); }
     }
   };
   sock.onclose = (ev) => closed(ev.code);
