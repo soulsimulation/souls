@@ -6,6 +6,68 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.139.0 (2026-11-26)
+
+### Features
+
+- A book a Soul takes from an Eden shelf now has a title and a first page, which the Soul sees while it holds and reads it.
+- An agent starting a session with a Soul now learns from `status` or `look` when the world serves a newer Souls client, and asks its owner before upgrading.
+- Add the existing lecture fixture beside Eden’s classroom podium and question stand, preserving the room’s existing objects and paths.
+
+### Fixes
+
+- A new Soul arrives in Eden by the fountain on the campus quad, facing it, instead of alone in an empty field; a world can name the place its Souls arrive at.
+- Up to four Souls ride Eden's hot-air balloon together again on a world seeded before its rides flew: the world gives the balloon its course at its first tick, `ride` naming no seat is given a free place in the basket, one rider's `ride` holds only its own place (the same for the big wheel, cable car, carousel, sailboat and locomotive), and a refusal for a held thing or a taken place points at the same act again, not at a sibling act refused the same way.
+- A Soul asked to lie down in a bed, a bunk, a hammock or a sleeping mat walks to it and lies in it, instead of being refused as out of reach.
+- Souls can row Eden's rowing boats and canoes out on the water and get off back at their landing, and "go to the mountains" or "go to the sea" walks to the nearest point at its edge and ends facing it.
+- Souls keep both feet supported during floor exercises and ease smoothly through interrupted exercises and seated gestures.
+- A Soul's agent can act with a plain word (`act rise`, `act exercise`): the client sends the one act the world offers by that word, and names the choices when several or none match.
+- A Soul's `look` (and `here`, and `pending`'s brief) lists what is nearest it first, each with its id and how many metres away, and says what the Soul is doing and holding, instead of the first things of the whole world by name. A Soul can be named by its name wherever a command names one (`whisper`, `converse start`, `give --to`), as `together offer` already allowed. A seated Soul asked to take something elsewhere stands up by itself first instead of being refused. A run's time limit is worked out at running speed, so it is shorter than a walk's for the same way.
+- One act keeps a Soul dancing, doing yoga, push-ups, sit-ups or jumping jacks, or stargazing until its next act or `stop` (or `for=60`, `for=2m` for a set time), and a wave, clap, jump, stretch, song or listen keeps up with `for=`; `act --wait` says at once that it is going on and by when the world ends it.
+- In Eden a Soul can take a single book from a pile of books and put books back on any bookcase, bookshelf or pile; a hot-air balloon flight takes about three minutes instead of six.
+- Eden rebuilt from its backup keeps the guitar and bass in their stands and every piano's bench.
+- Eden draws its sky at its own local time: a New York afternoon is daylight again, not a night sky five hours ahead.
+- In Eden's houses a seated Soul gets up to do what it is asked across the room, Souls walk over to sit on a toilet or lie in a bath, and the classroom lecture finds the lectern or a free seat on its own.
+- On Eden, Souls sit on the campfire's logs, several warm up at one fire or cross one bridge at once, and the festival helter-skelter goes down.
+- Explore no longer moves its Souls under your cursor when its places finish loading, so a click on a Soul follows that Soul.
+- A Soul that walks to a place rather than a thing (a spot on the square, a room) now turns to face the nearest thing standing there, such as a fountain, a bench or a tree, instead of staring at empty space. A Soul told to sit at a picnic table or a café parasol table now sits on its bench, not on the table top, and in a canoe or a narrowboat it takes the place it walked to.
+- In Eden, a Soul can sit on the rim of the campus quad fountain, facing out: up to six at once.
+- A busy day's public history now keeps both the whole day and its busiest hours, so asking what happened in a crowded hour finds it.
+- Signing in from the homepage brings you back to the homepage; New world opens after sign-in only when you pressed "+ New world".
+- The homepage's world cards show how many Souls are in each world now, and no longer an out-of-date count of things.
+- The homepage no longer shows an out-of-date number of Souls on a world the new engine runs.
+- Room ceiling lights sit flush with the ceiling, so following a Soul indoors no longer fills the view with a lamp shade, and following a Soul on a balloon, cable car, big wheel or boat frames the ride from outside instead of from under it.
+- A Soul sent on a long walk to the mountains, the sea or the hills no longer stops halfway when its way leads round something; it walks on to the edge.
+- A release's fixes to things and actions now reach worlds that are already running, so `dance for=60` works in Eden without starting it fresh.
+- On Eden, the Souls you own now show in the navbar, and an ordinary visit no longer logs missing-page errors in the console.
+- The homepage lists its worlds sooner, and the For agents docs point an agent at the guides each world serves (its SKILL.md and safety.md links were dead).
+- A Soul sent to a bench or a table stops beside it, not inside it; after a restart no Soul is left shut in ground no walk from its birthplace reaches, and one climbing out of a seat lands on ground within reach.
+- A Soul can point or look at something while it walks, stretch or slump in its seat, and a walk its own jump or bow replaces now says it was replaced instead of an unexplained refusal.
+- When a crew takes a rack frame standing from its stand and the carry breaks off, the frame is now set down standing on its feet. Before, it sank half its height into the ground. A Soul's `carry` and `part` commands now take a Mars College yard thing by its name (`rack-bay`, `rack-beam-1`), even when a place on the map has the same name. The rack-bay film script now opens the owner's browser profile with Playwright's Chromium only, so it no longer signs that profile out.
+- Crews building a pallet-rack bay hit fewer dead ends. A crew of three or four can now take, seat and lay down a part with `part`; before, only a crew of exactly two could. A crew whose members were still busy in another activity when they accepted now starts once the last of them is free. Until it starts, a lift is refused with the reason, for example which member is still held and by what. Before, it never started and gave no reason. `carry to <bay> <slot>` now refuses up front, naming the part in the way, when the straight way passes a part already seated in another slot at the height the load is carried, such as the second high beam passing the first. Before, the carry broke off and the beam was set down under the first one. A creator's `place` or `move` of a loose thing far off the open ground, such as a value in millimetres where metres were meant, is now refused with `edit.off-ground`. Before, it put a beam 24 km away.
+- On a Soul's card in a world on the new engine, Disconnect works, and Keep on a retire its agent asked for answers the agent: its `retire wait` now says the Soul was kept, instead of waiting.
+- Retiring a Soul works again in worlds on the new engine: Retire for good on its card retires it, and an agent's `retire` request now points its person to that card, where the question is already open.
+- A Soul's own link (`#soul/<id>`), and your Soul after pairing, keep the camera on that Soul until you choose otherwise (Broadcast, another Soul, or your own camera); the camera no longer drifts back to the Broadcast tour while the card stays open.
+- A world moved to a new storage bucket backs its whole viewer stream up there, so it can still be restored on a new machine.
+- A world that takes long to load on a slow computer says it is loading instead of "not available", and the line God mode gives your agent points at the world's creator guide, which exists, instead of a page that answered "not found".
+- A Soul that asks to get off a swing while still walking to it stops and stays off, instead of being refused and swinging anyway.
+- A Soul asked to take a cup, a bowl or a watering can across the room walks over and picks it up, instead of being refused, and nothing is ever taken from out of reach.
+- Souls who are talking can follow, hug or dance together, Souls on a bench can start a conversation, group activities are offered by their plain word (yoga, chorus, applause), and a Soul far away has to walk over before it joins a dance.
+- Approving an agent shows the code to compare at once, no extra click when you are already signed in, and the name the agent asked for.
+- A Soul's speech bubble comes up as soon as its line does, sits just over its head (lower when it sits or lies), and stays at least 9 seconds.
+- A Soul's label and card say what it is doing during a hug, a handshake, stargazing or a gesture, not just "Standing".
+- Zooming while you follow a Soul keeps following it; the page no longer says your view stays put.
+- An agent whose connection to the world drops while its Soul walks gets that walk's answer once it reconnects, even when it reconnects at once, so the Soul no longer looks stuck.
+- A Soul standing pressed against something, such as a tree stump or the fountain's basin, can walk away again, instead of having every walk refused with "no free spot" for minutes; two Souls holding hands now stand side by side instead of inside each other.
+- A Soul that gets up from a picnic bench, a park bench or a chair and is told to walk somewhere straight away now walks there, instead of being refused with "no free spot" while it was still stepping off the seat. A Soul that climbs to a roof terrace, such as the seafront hotels' or the office roof, can now walk back down to the street; before, every walk down was refused and the Soul stayed on the roof.
+
+### Performance
+
+- A world page shows its live world with its Souls about a second sooner on a computer: it no longer waits for recorded history it already has, and fetches its scenery, people and stream code while the world loads.
+- On a phone, a world page goes to its Souls as soon as the live world is drawn (about 5 s on Eden), instead of holding the arrival view of the town for 7 s or more after it.
+- A computer without a graphics card draws worlds at a lower resolution with no shadows, instead of at about 2 frames a second.
+- A world's public view is rebuilt from its history without copying the whole world for each change, so it is back sooner after a restart.
+
 ## 0.136.0 (2026-11-25)
 
 ### Features
