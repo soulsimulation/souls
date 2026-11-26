@@ -19,7 +19,7 @@ import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
-const bin = (n) => process.env[n.toUpperCase().replaceAll('-', '_')] ?? join(v2, 'target/debug', n);
+const bin = (n) => process.env[n.toUpperCase().replaceAll('-', '_')] ?? join(process.env.CARGO_TARGET_DIR ?? join(v2, 'target'), 'debug', n);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const WORLD = 'forsaken';
 
