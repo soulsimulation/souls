@@ -253,7 +253,7 @@ Package the **existing public Eden template**, with serving support made by the 
 
 ```sh
 worldd seed --facts <approved-public-facts> --entries <existing-public-entries> --souls 0 --dir <support>
-templates <approved-public-facts> <catalogue> --support <support>
+templates <approved-public-facts> <catalogue> --name eden-2026 --support <support>
 bash v2/tools/ops/install.sh bundle <out> <binaries> <page> <catalogue>
 ```
 
@@ -262,8 +262,16 @@ The catalogue is built from Eden's facts (X6's export of a backup), which are no
 
 ```sh
 /usr/local/lib/souls/worldd seed --facts <facts> --entries <existing-public-entries> --souls 0 --dir <support>
-/usr/local/lib/souls/publish-template <facts> /usr/local/lib/souls/templates --support <support>
+/usr/local/lib/souls/publish-template <facts> <scratch> --name <name> --support <support>
+install -d -m 755 /usr/local/lib/souls/templates/<name> && cp -a <scratch>/<name>/. /usr/local/lib/souls/templates/<name>/
 ```
+
+`publish-template` builds the tree with the support's entries, as `worldd` builds a world from them, so a kind whose
+entry joins parts (a rack bay, a shade site) is pinned by its entry; it writes `<out>/<name>` and its source checkpoint
+`<out>/<name>.source`, and refuses either if it exists. Dry-run each template before the directory reads it (at its
+start): `worldd fork --from <template>/ckpt --template <template> --to <scratch>/fork --through <32 hex>:1` with the
+build in `/etc/souls/placement.json`. A template is checked against that build's pins, so it is published again with
+each build the placement pin moves to.
 
 Only allowlisted facts, public entry/move data, entry coordinates and exact runtime pin/hash metadata are packaged.
 Creator metadata, tokens, logs and seeded state are excluded. The published filtered checkpoint remains the world;

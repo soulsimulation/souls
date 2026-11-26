@@ -29,6 +29,8 @@ testworld = { path = "../../tools/testworld" }
 hold-load = []
 
 [dev-dependencies]
+# A template published from a seed forks with this build (tests/template_publish.rs).
+templates = { path = "../../tools/templates" }
 # O20b (#3523): a served world's shipped stores read back by O20's restore, as O12's restore runs it.
 backup = { path = "../../tools/ops/backup" }
 # G1e (#3532): a served world's creator edits it through a real gateway (tests/edit_served.rs).
