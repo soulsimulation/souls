@@ -132,8 +132,10 @@
 //   off when the other one went comes back by itself and never takes the Soul from a live one.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
-//   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
-//   build (`wire*`).
+//   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered for
+//   10 s) is let go at once, and acts wait for the next sign-in (#4980). A `wait` under way is told when a signed-in
+//   socket is lost (`{"kind":"disconnected","say":..}`) and when the next is current (`{"kind":"reconnected",
+//   "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
