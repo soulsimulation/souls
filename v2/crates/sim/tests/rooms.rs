@@ -478,7 +478,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         .filter(|u| !architecture(u))
         .collect();
     println!(
-        "not reached at the footprint: {} windows and the library's dome, {} else {left:?}",
+        "not reached at the footprint: {} architecture (windows and the library's dome), {} else {left:?}",
         unreached_named.len() - left.len(),
         left.len()
     );
