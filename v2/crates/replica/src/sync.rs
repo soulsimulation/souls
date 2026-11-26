@@ -29,7 +29,7 @@ use crate::effects::Refusal;
 use crate::encode::{Value, decode, encode};
 use crate::ids::{Hash, Id, Purpose, Version};
 use crate::tree::{Sealed, Tree};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 type R<T> = Result<T, Refusal>;
 
@@ -248,6 +248,9 @@ pub struct Synced {
     pub sent: u64,
     pub got: u64,
     pub held: usize,
+    /// Names the let go looked at ([`Copy::finish`]): the scope's old hashes and what each record let go named, so a
+    /// sync that changed little looks at little, however much the copy holds.
+    pub walked: usize,
 }
 
 /// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, the count,
@@ -267,9 +270,15 @@ pub struct Descent {
 pub struct Copy {
     roots: BTreeMap<Id, Vec<u8>>,
     records: BTreeMap<Vec<u8>, Vec<u8>>,
-    /// The hashes each held record names below it, as [`check`] gave them when it was taken: what the let go walks,
+    /// The hashes each held record names below it, as [`check`] gave them when it was taken: what the let go follows,
     /// without decoding or hashing a record again (#4713).
     below: BTreeMap<Vec<u8>, Vec<Vec<u8>>>,
+    /// How many times each hash is named: once for each scope node at it, and once by each held record that names it
+    /// below. A record named by nothing is let go, with what only it named: a sync's let go follows what the sync
+    /// changed, not every record held (Eden's 9,588, walked at each confirm, held a daemon's loop for half a second).
+    named: HashMap<Vec<u8>, u32>,
+    /// The bytes of every record held.
+    bytes: u64,
 }
 
 /// Checks a record against the hash that named it (rule 3) and gives the hashes it names below it: its big fields'
@@ -437,37 +446,92 @@ impl Copy {
             }
             d.s.got += bytes.len() as u64;
             d.s.fetched += 1;
-            self.records.insert(h.clone(), bytes);
+            if self.holds(h) {
+                continue; // held already: a hash names the same record for ever
+            }
+            // Withheld before (an empty record, naming nothing), or not held: kept as it came.
+            for c in &below {
+                *self.named.entry(c.clone()).or_default() += 1;
+            }
+            self.bytes += bytes.len() as u64;
+            if let Some(old) = self.records.insert(h.clone(), bytes) {
+                self.bytes -= old.len() as u64;
+            }
             self.below.insert(h.clone(), below);
             d.taken.push(h.clone());
         }
         Ok(())
     }
 
-    /// Rule 3's let go, once [`Copy::ask`] gives nothing more: the scope's new hashes become the copy's.
-    /// Each record was checked when taken, so this walks what each names below it as then given, hashing nothing.
+    /// Rule 3's let go, once [`Copy::ask`] gives nothing more: the scope's new hashes become the copy's, and a record
+    /// no longer named is let go with what only it named. A record held before this sync holds everything below it
+    /// (the copy is whole after each finish), so the scope is whole when each new hash and everything named by a
+    /// record taken now is held: nothing else is looked at, and nothing is decoded or hashed again.
     pub fn finish(&mut self, mut d: Descent) -> R<Synced> {
-        let reached = match self.reach_taken(&d.roots) {
-            Ok(r) => r,
-            Err(e) => {
-                self.abandon(d);
-                return Err(e);
+        let missing = d
+            .roots
+            .values()
+            .chain(d.taken.iter().flat_map(|t| self.below.get(t).into_iter().flatten()))
+            .find(|h| !self.below.contains_key(*h))
+            .cloned();
+        if let Some(h) = missing {
+            self.abandon(d);
+            return refuse("sync-missing", crate::encode::to_hex(&h));
+        }
+        let old = std::mem::replace(&mut self.roots, std::mem::take(&mut d.roots));
+        for h in self.roots.values() {
+            *self.named.entry(h.clone()).or_default() += 1;
+        }
+        let mut stack: Vec<Vec<u8>> = old.into_values().collect();
+        while let Some(h) = stack.pop() {
+            d.s.walked += 1;
+            if !self.unname(&h) {
+                continue;
             }
-        };
-        self.roots = std::mem::take(&mut d.roots);
-        self.records.retain(|h, _| reached.contains(h));
-        self.below.retain(|h, _| reached.contains(h));
-        d.s.held = reached.len();
+            if let Some(below) = self.below.remove(&h) {
+                self.bytes -= self.records.remove(&h).map_or(0, |b| b.len() as u64);
+                stack.extend(below);
+            }
+        }
+        d.s.held = self.below.len();
         Ok(d.s)
+    }
+
+    /// One name of `h` gone; whether it is named no more.
+    fn unname(&mut self, h: &[u8]) -> bool {
+        match self.named.get_mut(h) {
+            Some(n) if *n > 1 => {
+                *n -= 1;
+                false
+            }
+            Some(_) => {
+                self.named.remove(h);
+                true
+            }
+            None => true,
+        }
     }
 
     /// A sync that will not finish (its socket closed, or an answer was refused): the records it took are let go and
     /// the copy is as it was. Compare only descends from a hash it does not hold, so it must never hold a record
-    /// without the records below it, or the next sync would stop short of them (`sync-missing`, #3424).
+    /// without the records below it, or the next sync would stop short of them (`sync-missing`, #3424). A record it
+    /// took that something held before still names was withheld before (only those are asked for again), and is
+    /// withheld again.
     pub fn abandon(&mut self, d: Descent) {
+        for h in &d.taken {
+            let Some(below) = self.below.remove(h) else {
+                continue;
+            };
+            self.bytes -= self.records.remove(h).map_or(0, |b| b.len() as u64);
+            for c in &below {
+                self.unname(c);
+            }
+        }
         for h in d.taken {
-            self.records.remove(&h);
-            self.below.remove(&h);
+            if self.named.contains_key(&h) && !self.below.contains_key(&h) {
+                self.records.insert(h.clone(), Vec::new());
+                self.below.insert(h, Vec::new());
+            }
         }
     }
 
@@ -500,30 +564,12 @@ impl Copy {
 
     /// The bytes of every record held: what a snapshot of the scope (a sync from nothing) would fetch.
     pub fn held_bytes(&self) -> u64 {
-        self.records.values().map(|b| b.len() as u64).sum()
+        self.bytes
     }
 
     /// The hashes the scope reaches, each record held and checked; refused by name if one is missing.
     pub fn reach(&self) -> R<BTreeSet<Vec<u8>>> {
         self.reach_from(&self.roots)
-    }
-
-    /// [`Copy::reach`] from `roots` over what each record named below it when it was taken (`below`): no record is
-    /// decoded or hashed again.
-    fn reach_taken(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
-        let mut seen = BTreeSet::new();
-        let mut stack: Vec<&[u8]> = roots.values().map(Vec::as_slice).collect();
-        while let Some(h) = stack.pop() {
-            if seen.contains(h) {
-                continue;
-            }
-            let Some(below) = self.below.get(h) else {
-                return refuse("sync-missing", crate::encode::to_hex(h));
-            };
-            stack.extend(below.iter().map(Vec::as_slice));
-            seen.insert(h.to_vec());
-        }
-        Ok(seen)
     }
 
     fn reach_from(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
