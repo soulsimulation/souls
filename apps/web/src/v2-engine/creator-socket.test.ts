@@ -68,7 +68,7 @@ test('a refusal is answered by name; a stale weather is sent once more against t
 test('edits are numbered by the clock, never below the last, so the creator\'s agent (also by the clock) and the page never lock each other out', async () => {
   const sent: Uint8Array[] = [];
   let now = 5_000;
-  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
+  const s = new CreatorSession({ send: (b) => sent.push(b as Uint8Array) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100, () => now);
   s.frame(encode(new Map([[1, 2]]))); s.frame(encode(new Map([[4, 'stream.started']])));
   void s.edit({ undo: 'undo' });
   assert.equal(dec(sent.at(-1)!).get(5), 5_000, 'the clock, above the first');
