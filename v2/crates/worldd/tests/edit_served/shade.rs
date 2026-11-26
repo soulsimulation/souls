@@ -516,6 +516,98 @@ fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stoo
     );
 }
 
+/// The same cache, one crew (the review's case): a crew's id outlives its carry. A crew of two takes bent 1, carries
+/// it 3 m west and sets it down there (`carry:set-down`, which changes no walker's map either), then takes bent 2,
+/// held 400 mm south of its faces as above, and carries it 1.2 m north across where it stood: bent 2 rides the crew,
+/// its carry never stopped by its own posts where it stood.
+#[test]
+fn shade_one_crew_sets_one_bent_down_then_carries_the_other_across_where_it_stood() {
+    let d = scratch("shade1crew");
+    let (facts, _) = shade_world(&d, true);
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        2,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let bents = [im.nodes["timber-bent-1"], im.nodes["timber-bent-2"]];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let at = |dx: i64, dz: i64| v3((x + dx) * 1000, 0, (z + dz) * 1000);
+    let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
+
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(0, 700)), (1, at(0, -3_700))],
+        "the crew to bent 1's faces",
+    );
+    let c = crew_of_all(&w, &mut hands, 0, &[1]);
+    done(
+        hands[0].act("part:take", c, part(bents[0])),
+        "the crew takes bent 1",
+    );
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(-3_000, 700)), (1, at(-3_000, -3_700))],
+        "bent 1 carried 3 m west",
+    );
+    done(
+        hands[0].act("carry:set-down", c, BTreeMap::new()),
+        "bent 1 set down",
+    );
+    assert_eq!(where_is(&w, bents[0]).0, Some(g), "bent 1 on the ground");
+
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(0, 4_100)), (1, at(0, -300))],
+        "the crew 400 mm south of bent 2's faces",
+    );
+    let (p, q) = (
+        body_at(&w, body_of(&w, w.souls[0])),
+        body_at(&w, body_of(&w, w.souls[1])),
+    );
+    assert!(
+        (p.z + q.z) / 2 - 50_000 > (z + 1_550 + 100) * 1000,
+        "the crew stands clear of bent 2's posts: {p:?} {q:?}"
+    );
+    done(
+        hands[0].act("part:take", c, part(bents[1])),
+        "the same crew takes bent 2",
+    );
+    walk_all(
+        &mut hands,
+        g,
+        &[(0, at(0, 2_900)), (1, at(0, -1_500))],
+        "bent 2 carried across where it stood",
+    );
+    let set_down = set_downs(&w);
+    println!("set down: {set_down:?}");
+    assert_eq!(
+        where_is(&w, bents[1]).0,
+        Some(c),
+        "bent 2 rides the crew; set down: {set_down:?}"
+    );
+    assert!(
+        !set_down.iter().any(|why| why == "souls:carry-blocked"),
+        "no carry blocked: {set_down:?}"
+    );
+    let held = where_is(&w, c).2;
+    println!("the crew holds bent 2 at {held:?}");
+    assert!(
+        held.z < (z + 1_000) * 1000,
+        "bent 2 carried past where it stood: {held:?}"
+    );
+}
+
 /// PR #5033's run 1 (the take-down by four): a rail's carriers stood at its ends on its own line, which is its bents'
 /// posts' line, so the rail they unseated came down at their middle against a post, and its carry out was stopped
 /// `souls:carry-blocked`. A part is unseated to its carriers' middle; carriers who stand 0.9 m outside the posts'
