@@ -20,6 +20,7 @@ use replica::time::Micros;
 use sim::host::Runner;
 use sim::links::Doors;
 use sim::mover::Body;
+use sim::walk::World as _;
 use sim::walk::town::Town;
 use skills::route::{Leg, Route};
 use std::collections::BTreeMap;
@@ -100,7 +101,7 @@ fn town_of(im: Import) -> Result<Town, String> {
         (6, Value::Array(Vec::new())),
         (7, Value::Array(Vec::new())),
     ]));
-    let header = Header::read(&encode(&v).map_err(|e| e.name.to_string())?)
+    let header = Header::read(&encode(&v).map_err(|e| format!("{e:?}"))?)
         .map_err(|e| format!("{}: {}", e.name, e.detail))?;
     let next = tree.to_state().next;
     Town::new(tree, nodes["ground"], Doors::new(header, rules, next))
@@ -163,7 +164,7 @@ fn walk(r: &mut Runner, t: &mut Town, body: Body, node: Id, goal: Vec3, new: boo
         r.tick(t).map_err(|e| format!("the tick refused {}", e.name))?;
         match r.ended.get(&body.id) {
             Some((_, Progress::Done)) => return Ok(()),
-            Some((_, Progress::Failed(n))) => return Err(format!("ended {n}")),
+            Some((_, Progress::Failed(n))) => return Err(format!("ended {}", n.as_str())),
             _ => {}
         }
     }
@@ -214,7 +215,7 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         ..Ways::default()
     };
     for (k, (label, node, at)) in targets.into_iter().enumerate() {
-        let who = Id::new(Scope([0xee; 16]), k as u64 + 1).map_err(|e| e.name.to_string())?;
+        let who = Id::new(Scope([0xee; 16]), k as u64 + 1).ok_or("a walker's id")?;
         let start = t.surfaces[&ground]
             .place(who, Frame { node: ground, slot: None }, arrival, Quat::IDENTITY)
             .map_err(|e| format!("the arrival point: {}: {}", e.name, e.detail))?;
