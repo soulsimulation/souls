@@ -197,8 +197,15 @@ fn one_track(name: &str, dir: &Path, node: Id, (t0, t1): (i64, i64)) -> Vec<(i64
 
 /// A lift of `load` by carry `activity` from where it lay at `lay`, read from the log and checked: the world said
 /// `souls:lift` and `souls:lifted` with the track's times; the track's first sample holds the load exactly where it
-/// lay; its last is at carrying height between the carriers (whose feet are on the floor at y 0). The track's times.
-fn lifted(name: &str, dir: &Path, activity: Id, load: Id, lay: (Vec3, Quat)) -> (i64, i64) {
+/// lay; no sample takes a corner of it into the floor (y 0); its last is at carrying height between the carriers
+/// (whose feet are on the floor). The track's times.
+fn lifted(
+    name: &str,
+    dir: &Path,
+    (activity, load): (Id, Id),
+    entry: &json::Value,
+    lay: (Vec3, Quat),
+) -> (i64, i64) {
     let ws = words(dir, activity);
     let lift = ws.iter().find(|w| w.phase == "souls:lift").expect("souls:lift");
     let up = ws
@@ -224,6 +231,7 @@ fn lifted(name: &str, dir: &Path, activity: Id, load: Id, lay: (Vec3, Quat)) -> 
         d <= 1_000 && q <= 1 << 16,
         "{name}: the lift starts where the load lay"
     );
+    above_the_floor(name, entry, &ss, &held);
     let end = ss.last().unwrap().1.position.y;
     assert!(
         (end - sim::activity::carry::HEIGHT).abs() <= 60_000,
@@ -277,11 +285,14 @@ fn set_down(
         assert_eq!(p.orientation, before.orientation, "{name}: its turn kept");
     }
     assert!(
-        ss.windows(2)
-            .all(|w| w[1].1.position.y <= w[0].1.position.y),
+        !straight
+            || ss
+                .windows(2)
+                .all(|w| w[1].1.position.y <= w[0].1.position.y),
         "{name}: only down"
     );
     let held = held_in(dir, load, activity);
+    above_the_floor(name, entry, &ss, &held);
     let last = moves_of(dir, load).last().copied().expect("set down");
     let at = (last.position, last.orientation);
     let (d, q) = apart_by(composed(&ss.last().unwrap().1, &held), at);
@@ -293,6 +304,17 @@ fn set_down(
     );
     assert!(low.abs() <= 2_000, "{name}: on the floor, not in it: {low}");
     at
+}
+
+/// No sample of a track takes a corner of the load riding at `held` into the floor (y 0).
+fn above_the_floor(name: &str, entry: &json::Value, ss: &[(i64, Pose)], held: &Pose) {
+    let low = ss
+        .iter()
+        .map(|(_, p)| lowest(entry, composed(p, held)))
+        .min()
+        .unwrap();
+    println!("{name}: the load's lowest corner on its track at y {low} µm");
+    assert!(low >= -2_000, "{name}: a corner through the floor: {low}");
 }
 
 /// The crew `crew` (its first the front, then the back, then its sides) walks to `places`, the front offers the carry
@@ -462,7 +484,7 @@ async fn hoist_crews_of_two_four_and_six_lift_and_set_down_on_tracks() {
         let lay = lies(&dir, &facts, load);
         let carry = crewed(&mut crew[..n], &dir, ground, &places).await;
         lift_and_set_down(&mut crew[..n], &dir, carry, load).await;
-        let (t0, t1) = lifted(name, &dir, carry, load, lay);
+        let (t0, t1) = lifted(name, &dir, (carry, load), &entry, lay);
         let rest = set_down(name, &dir, carry, load, &entry, t1, None, true);
         let m = rest.1.rotate(l.middle).unwrap();
         println!(

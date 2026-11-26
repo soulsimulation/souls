@@ -183,6 +183,10 @@ pub struct Hoist {
     pub by: Option<(Id, Id)>,
     /// The transfer id a crew's set-down was given when asked, for the load's change of parent at its end.
     pub transfer: Option<Id>,
+    /// The lowest the held load goes on the track, y µm (the open ground's frame): the lower of its lowest corner at
+    /// the track's two ends. A sample whose blended turn would take a corner lower is raised to it ([`Carry::floored`]),
+    /// so a standing frame laid flat as it is lifted never swings through the floor.
+    pub floor: i64,
 }
 
 /// The inverse turn of `q` in its one byte form (a half turn, whose w is zero, is its own inverse).
@@ -1197,6 +1201,27 @@ impl Carry {
         }
     }
 
+    /// The lowest corner of the held load with the node at `(p, q)`, y µm (#5067): its middle is the node's origin.
+    pub fn low(&self, (p, q): (Vec3, Quat)) -> R<i64> {
+        let o = q.then(self.load.turn).map_err(pose_refusal)?;
+        let h = self.load.half;
+        let mut e = 0;
+        for k in 0..8 {
+            let s = |b: i64, v: i64| if k & b == 0 { v } else { -v };
+            let c = o
+                .rotate(Vec3::new(s(1, h.x), s(2, h.y), s(4, h.z)))
+                .map_err(pose_refusal)?;
+            e = e.max(-c.y);
+        }
+        Ok(p.y - e)
+    }
+
+    /// The node's pose `(p, q)` raised, if need be, so the held load's lowest corner is no lower than `floor` (#5067).
+    pub fn floored(&self, floor: i64, (p, q): (Vec3, Quat)) -> R<(Vec3, Quat)> {
+        let low = self.low((p, q))?;
+        Ok((Vec3::new(p.x, p.y + (floor - low).max(0), p.z), q))
+    }
+
     /// Whether the node is on a lift's track (#5067).
     pub fn lifting(&self) -> bool {
         self.hoist.is_some_and(|h| h.phase == Phase::Lift)
@@ -1269,6 +1294,7 @@ impl Carry {
                     rest,
                     by: None,
                     transfer: None,
+                    floor: h.floor,
                 });
                 return Ok(Some((at, t1)));
             }
@@ -1340,6 +1366,7 @@ impl Carry {
         let drop = height - up - self.load.rest;
         let to = (Vec3::new(from.0.x, from.0.y - drop, from.0.z), from.1);
         let t1 = at + hoist_time(drop);
+        let floor = self.low(from)?.min(self.low(to)?);
         self.hoist = Some(Hoist {
             phase,
             t0: at,
@@ -1350,6 +1377,7 @@ impl Carry {
             rest: (node, position, orientation),
             by,
             transfer: None,
+            floor,
         });
         Ok((at, t1))
     }
@@ -1366,7 +1394,7 @@ impl Carry {
         let Some(h) = self.hoist.filter(|h| h.phase != Phase::Lift && (at > h.t0 || at >= h.t1)) else {
             return Ok(false);
         };
-        let (p, q) = between(h.from, h.to, (h.t0, h.t1), at)?;
+        let (p, q) = self.floored(h.floor, between(h.from, h.to, (h.t0, h.t1), at)?)?;
         let mut entries = vec![(
             self.activity,
             self.audience,
@@ -1464,6 +1492,7 @@ impl Carry {
         self.track.push((at, c, q));
         self.span = len([front.x - back.x, front.z - back.z]);
         let t1 = at + hoist_time(c.y - from.0.y);
+        let floor = self.low(from)?.min(self.low((c, q))?);
         self.hoist = Some(Hoist {
             phase: Phase::Lift,
             t0: at,
@@ -1474,6 +1503,7 @@ impl Carry {
             rest: (self.ground, lay.0, lay.1),
             by: None,
             transfer: None,
+            floor,
         });
         Ok((at, t1))
     }
@@ -1492,7 +1522,8 @@ impl Carry {
     /// One tick of the carry: the frame's sample between the carriers (µm, the open ground's frame). The way from its
     /// last sample is checked first against `fixed`, the fixed geometry of its ground (0.135 C7, [`way`]): a step
     /// that would take the load into it is refused `carry-load-blocked` and nothing is written, so the load stays at
-    /// its last sample.
+    /// its last sample. On a lift's track (#5067) the sample written is the lift's toward that frame, no corner of the
+    /// load below the track's floor ([`Hoist::floor`]); the way is checked all the same.
     pub fn step(
         &mut self,
         tree: &mut Tree,
@@ -1501,28 +1532,6 @@ impl Carry {
         back: Vec3,
         fixed: &Fixed,
     ) -> R<()> {
-        // #5067: on a lift's track the node's sample is the lift's, toward where its carriers have the frame now; the
-        // way is checked from the first step after it, as it was from an instant lift.
-        if let Some(h) = self.hoist.filter(|h| h.phase == Phase::Lift) {
-            let (c, q) = Carry::pose(front, back)?;
-            let (p, o) = between(h.from, (c, q), (h.t0, h.t1), at)?;
-            let e = (
-                self.activity,
-                self.audience,
-                EffectBody::Changes(vec![ChangeRec {
-                    change: sample(self.activity, at, self.ground, p, o),
-                    rest: Rest::new(),
-                }]),
-            );
-            self.write(tree, at, vec![e])?;
-            self.track.push((at, c, q));
-            self.hoist = (at < h.t1).then_some(Hoist {
-                to: (c, q),
-                at: (p, o),
-                ..h
-            });
-            return Ok(());
-        }
         if self.lowering() {
             return refuse("carry-setting-down", "the load is on its way down");
         }
@@ -1538,24 +1547,38 @@ impl Carry {
             return Err(r);
         }
         let (c, q) = Carry::pose(front, back)?;
+        // #5067: on a lift's track the node's sample is the lift's, toward where its carriers have the frame now.
+        let lift = self.hoist.filter(|h| h.phase == Phase::Lift);
+        let (p, o) = match lift {
+            Some(h) => self.floored(h.floor, between(h.from, (c, q), (h.t0, h.t1), at)?)?,
+            None => (c, q),
+        };
         let e = (
             self.activity,
             self.audience,
             EffectBody::Changes(vec![ChangeRec {
-                change: sample(self.activity, at, self.ground, c, q),
+                change: sample(self.activity, at, self.ground, p, o),
                 rest: Rest::new(),
             }]),
         );
         self.write(tree, at, vec![e])?;
         self.track.push((at, c, q));
+        if let Some(h) = lift {
+            self.hoist = (at < h.t1).then_some(Hoist {
+                to: (c, q),
+                at: (p, o),
+                ..h
+            });
+        }
         Ok(())
     }
 
     /// Sets the board down at rest on `node`, the node both carriers stand on, between them where they stand
     /// (`front` and `back` in that node's frame, µm), for `by`'s intent and Soul (#5067: a set-down's track, not a
     /// jump): the node goes straight down from its last sample until the held board is where it rests; at the track's
-    /// end ([`Carry::lower`]) the board's change of parent, under the transfer id `transfer`. Refused `carry-lifting` while its lift's track runs and
-    /// `carry-setting-down` while it is already on its way down. Returns the track's times.
+    /// end ([`Carry::lower`]) the board's change of parent, under the transfer id `transfer`. Refused `carry-lifting`
+    /// while its lift's track runs and `carry-setting-down` while it is already on its way down. Returns the track's
+    /// times.
     #[allow(clippy::too_many_arguments)]
     pub fn set_down(
         &mut self,
