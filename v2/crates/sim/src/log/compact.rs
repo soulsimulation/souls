@@ -166,9 +166,11 @@ pub fn prepare(log: &Path, cut: Cut, upto: At) -> R<Option<Prepared>> {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io(&tmp)(e)),
         _ => {}
     }
+    // Not in append mode: the log's writer writes at its own end, into room past it (rule 10), and Linux's `pwrite`
+    // ignores the place on a file opened to append.
     let file = OpenOptions::new()
         .read(true)
-        .append(true)
+        .write(true)
         .create_new(true)
         .open(&tmp)
         .map_err(io(&tmp))?;
@@ -182,6 +184,7 @@ pub fn prepare(log: &Path, cut: Cut, upto: At) -> R<Option<Prepared>> {
         (&file).write_all(&header)?;
         // The hole: no blocks on the disk, the same offsets after it.
         file.set_len(cut.at.offset)?;
+        (&file).seek(SeekFrom::Start(cut.at.offset))?;
         src.seek(SeekFrom::Start(cut.at.offset))?;
         let copied = std::io::copy(&mut (&src).take(upto.offset - cut.at.offset), &mut &file)?;
         if copied != upto.offset - cut.at.offset {
@@ -205,10 +208,11 @@ pub fn prepare(log: &Path, cut: Cut, upto: At) -> R<Option<Prepared>> {
     }))
 }
 
-/// Phase two, on the writer between syncs (rule 3): `from`, the log as it stands with every byte synced, gets its
-/// bytes after `p.upto` copied, then the copy replaces it. `Err` with `sync-failed` once the rename may not be durable:
-/// from then on the writer must stop, as after a failed sync (rule 6). Any other `Err` leaves the log as it was.
-pub(super) fn finish(from: &File, p: Prepared) -> Result<File, (Refusal, bool)> {
+/// Phase two, on the writer between syncs (rule 3): `from`, the log as it stands with every byte synced and ending at
+/// byte `end` (the zeros of its room after it are not copied: rule 10), gets its bytes after `p.upto` copied, then the
+/// copy replaces it. `Err` with `sync-failed` once the rename may not be durable: from then on the writer must stop,
+/// as after a failed sync (rule 6). Any other `Err` leaves the log as it was.
+pub(super) fn finish(from: &File, end: u64, p: Prepared) -> Result<File, (Refusal, bool)> {
     let Prepared {
         file,
         tmp,
@@ -220,7 +224,7 @@ pub(super) fn finish(from: &File, p: Prepared) -> Result<File, (Refusal, bool)> 
         let _ = fs::remove_file(&tmp);
         (io(&tmp)(e), false)
     };
-    let len = from.metadata().map_err(soft)?.len();
+    let len = end;
     if file.metadata().map_err(soft)?.len() != upto.offset || len < upto.offset {
         let _ = fs::remove_file(&tmp);
         return Err((
@@ -234,7 +238,14 @@ pub(super) fn finish(from: &File, p: Prepared) -> Result<File, (Refusal, bool)> 
     (|| -> std::io::Result<()> {
         let mut src = from;
         src.seek(SeekFrom::Start(upto.offset))?;
-        std::io::copy(&mut src.take(len - upto.offset), &mut &file)?;
+        (&file).seek(SeekFrom::Start(upto.offset))?;
+        let copied = std::io::copy(&mut src.take(len - upto.offset), &mut &file)?;
+        if copied != len - upto.offset {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "the log is shorter than its end",
+            ));
+        }
         file.sync_data()
     })()
     .map_err(soft)?;

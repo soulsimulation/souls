@@ -2,7 +2,10 @@
 //! lock and the epoch. The 50 process kills and the sync table are `v2/tools/log-crash`.
 //! Run with `cargo test -p sim --test log -- --nocapture` to see each power cut's seed and outcome.
 
-use sim::log::{FileStore, HEAD_LEN, HEADER_LEN, Log, Mem, Storage, Torn, crc32c, recover};
+use sim::log::{
+    FileStore, HEAD_LEN, HEADER_LEN, Header, Log, Mem, RESERVE, Storage, Torn, crc32c,
+    encode_in_batch, recover,
+};
 
 /// splitmix64: the seeded numbers the runs draw from (never the world's, never the operating system's).
 struct Rng(u64);
@@ -199,10 +202,11 @@ fn a2_after_50_power_cuts_no_acknowledged_act_is_missing_and_every_cut_record_is
 fn eight_records() -> (Vec<u8>, Vec<usize>) {
     let mem = Mem::default();
     let (mut log, _) = Log::open(mem.clone(), 3).unwrap();
+    // Each its own batch, so each is a batch's first record and damage before the last is told from a tear (rule 4).
     for i in 0..8 {
         log.append(payload(11, i)).unwrap();
+        log.wait_durable(i + 1).unwrap();
     }
-    log.wait_durable(8).unwrap();
     log.close();
     let bytes = mem.0.lock().unwrap().bytes.clone();
     (bytes, starts(11, 8))
@@ -320,4 +324,146 @@ fn a_file_log_is_locked_holds_its_epoch_and_cuts_a_torn_tail() {
     assert_eq!(found.torn.map(|t| t.dropped), Some(5));
     drop(log);
     assert_eq!(std::fs::metadata(&path).unwrap().len() as usize, found.end);
+}
+
+/// #4973: writes into room already made reach the disk in any order of their pages until their sync returns. 200
+/// power cuts during the last batch's sync: any of its 4 KiB pages lost (the room's zeros read in its place), and a
+/// run of the room's zeros after it. Recovery never refuses, keeps every record synced before, and changes none.
+/// A lost page followed by a later batch's first record is still corruption.
+#[test]
+fn i4973_a_batch_whose_later_pages_reached_the_disk_first_is_a_torn_tail() {
+    const PAGE: usize = 4096;
+    let big = |seed: u64, i: u64| {
+        let mut r = Rng(seed ^ i.wrapping_mul(0x9E37_79B9));
+        let len = 1 + r.below(3000) as usize;
+        (0..len).map(|_| r.next() as u8).collect::<Vec<u8>>()
+    };
+    let (mut torn, mut whole_batches) = (0, 0);
+    for seed in 1..=200u64 {
+        let mut r = Rng(seed);
+        let header = Header::new(1);
+        let mut bytes = header.to_bytes().to_vec();
+        let (mut prev, mut i) = (header.salt, 0u64);
+        // Synced batches.
+        for _ in 0..1 + r.below(6) {
+            for k in 0..1 + r.below(5) {
+                prev =
+                    encode_in_batch(&mut bytes, header.salt, prev, &big(seed, i), k > 0).unwrap();
+                i += 1;
+            }
+        }
+        let (synced, durable) = (i, bytes.len());
+        // The batch under way when the power went: some of its pages lost, the room's zeros after it.
+        for k in 0..1 + r.below(12) {
+            prev = encode_in_batch(&mut bytes, header.salt, prev, &big(seed, i), k > 0).unwrap();
+            i += 1;
+        }
+        let first_page = durable / PAGE;
+        let mut lost = false;
+        for page in first_page..bytes.len().div_ceil(PAGE) {
+            if r.below(2) == 0 {
+                let from = (page * PAGE).max(durable);
+                let to = ((page + 1) * PAGE).min(bytes.len());
+                bytes[from..to].fill(0);
+                lost = true;
+            }
+        }
+        bytes.resize(bytes.len() + r.below(3 * PAGE as u64) as usize, 0);
+        let found = recover(&bytes).unwrap_or_else(|e| panic!("seed {seed}: refused: {e}"));
+        assert!(
+            found.records.len() as u64 >= synced,
+            "seed {seed}: {synced} synced, {} recovered",
+            found.records.len()
+        );
+        for (k, rec) in found.records.iter().enumerate() {
+            assert_eq!(rec, &big(seed, k as u64), "seed {seed}: record {k} changed");
+        }
+        if found.torn.is_some() {
+            torn += 1;
+        }
+        if !lost {
+            whole_batches += 1;
+            assert_eq!(
+                found.records.len() as u64,
+                i,
+                "seed {seed}: a whole batch is kept"
+            );
+        }
+        let (_, again) = Log::open(Mem::with(bytes), 1).unwrap();
+        assert_eq!(again.records.len(), found.records.len(), "seed {seed}");
+    }
+    println!(
+        "200 power cuts during a batch's sync: {torn} cut a torn tail, {whole_batches} kept the whole batch"
+    );
+
+    // A lost page with a later batch's first record after it is damage, not a tear.
+    let header = Header::new(1);
+    let mut bytes = header.to_bytes().to_vec();
+    let mut prev = header.salt;
+    for b in 0..3 {
+        for k in 0..2 {
+            prev =
+                encode_in_batch(&mut bytes, header.salt, prev, &big(9, b * 2 + k), k > 0).unwrap();
+        }
+    }
+    bytes[HEADER_LEN + 100..HEADER_LEN + 200].fill(0);
+    assert_eq!(recover(&bytes).unwrap_err().name, "log-corrupt");
+}
+
+/// #4973: a file log keeps room ahead of its end, zeros on the disk, and reads stop at the end. A process killed
+/// leaves the room: it is a torn tail of zeros, cut on opening, every record kept. A clean close cuts the room off.
+#[test]
+fn i4973_a_file_log_keeps_room_ahead_a_kill_leaves_zeros_and_a_clean_close_cuts_them() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("i4973-room");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("zone.log");
+    let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), 1).unwrap();
+    for i in 0..200 {
+        log.append(payload(4, i)).unwrap();
+    }
+    log.wait_durable(200).unwrap();
+    let end = log.durable_at().offset;
+    let len = std::fs::metadata(&path).unwrap().len();
+    assert!(
+        len >= end + RESERVE / 2,
+        "room ahead: {len} long, the log ends at {end}"
+    );
+    // What a kill leaves on the disk: the file as it is now.
+    let killed = dir.join("killed.log");
+    std::fs::copy(&path, &killed).unwrap();
+    let (log2, found) = Log::open(FileStore::open(&killed).unwrap(), 1).unwrap();
+    assert_eq!(
+        found.records,
+        (0..200).map(|i| payload(4, i)).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        found.torn,
+        Some(Torn {
+            at: end as usize,
+            dropped: (len - end) as usize
+        })
+    );
+    drop(log2);
+    // A clean close: the file ends where the log does, and reopens with no tail.
+    let mut store = log.close();
+    assert_eq!(
+        store.read().unwrap().len() as u64,
+        end,
+        "reads stop at the end"
+    );
+    drop(store);
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), end);
+    let (log, found) = Log::open(FileStore::open(&path).unwrap(), 1).unwrap();
+    assert_eq!((found.records.len(), found.torn), (200, None));
+    drop(log);
+    // Without room every append grows the file, as before.
+    let plain = dir.join("plain.log");
+    let (mut log, _) = Log::open(FileStore::open_reserving(&plain, 0).unwrap(), 1).unwrap();
+    log.append(payload(4, 0)).unwrap();
+    log.wait_durable(1).unwrap();
+    assert_eq!(
+        std::fs::metadata(&plain).unwrap().len(),
+        log.durable_at().offset
+    );
 }

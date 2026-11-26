@@ -1,5 +1,6 @@
 //! The log's bytes: a header naming the epoch, then records, each `[length, previous checksum, checksum, T6 bytes]`,
 //! the checksum CRC-32C over the header's own checksum (the salt), the length, the previous checksum and the bytes.
+//! The length's top bit ([`CONT`]) marks a record that is not the first of the writer's batch (one append, one sync).
 //! Recovery reads forward and tells a torn tail from damage before it (`v2/crates/sim/src/log/mod.rs`, rules 2 to 4).
 
 use replica::effects::Refusal;
@@ -19,6 +20,9 @@ pub const HEADER_LEN: usize = 32;
 pub const HEAD_LEN: usize = 12;
 /// The longest record the log takes (`record-too-long` above it).
 pub const MAX_RECORD: usize = 64 << 20;
+/// The length's top bit: the record is not the first of its batch, so it reached the disk in the same sync as the
+/// record before it (rule 4). A log written before the bit existed has none set: each record reads as a batch of one.
+pub const CONT: u32 = 1 << 31;
 const MAGIC: &[u8; 8] = b"souls-lg";
 const VERSION: u32 = 1;
 
@@ -96,8 +100,20 @@ fn record_crc(salt: u32, len: u32, prev: u32, payload: &[u8]) -> u32 {
     crc32c(c, payload)
 }
 
-/// Appends one record to `out`, chained from `prev`; returns its checksum, the next record's `prev`.
+/// Appends one record to `out`, chained from `prev`, as the first of its batch; returns its checksum, the next
+/// record's `prev`.
 pub fn encode_record(out: &mut Vec<u8>, salt: u32, prev: u32, payload: &[u8]) -> R<u32> {
+    encode_in_batch(out, salt, prev, payload, false)
+}
+
+/// As [`encode_record`], marked [`CONT`] when `cont`: a record after the first of the batch it is written in.
+pub fn encode_in_batch(
+    out: &mut Vec<u8>,
+    salt: u32,
+    prev: u32,
+    payload: &[u8],
+    cont: bool,
+) -> R<u32> {
     if payload.is_empty() {
         return refuse("record-empty", "a record holds at least one byte");
     }
@@ -107,7 +123,7 @@ pub fn encode_record(out: &mut Vec<u8>, salt: u32, prev: u32, payload: &[u8]) ->
             format!("{} bytes over {MAX_RECORD}", payload.len()),
         );
     }
-    let len = payload.len() as u32;
+    let len = payload.len() as u32 | if cont { CONT } else { 0 };
     let crc = record_crc(salt, len, prev, payload);
     out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(&prev.to_le_bytes());
@@ -117,19 +133,20 @@ pub fn encode_record(out: &mut Vec<u8>, salt: u32, prev: u32, payload: &[u8]) ->
 }
 
 /// A record that checks by itself at `at` (its length fits and its checksum matches under `salt`):
-/// `(payload length, prev, crc)`. Its place in the chain is checked by the caller.
-fn check(b: &[u8], at: usize, salt: u32) -> Option<(usize, u32, u32)> {
+/// `(payload length, prev, crc, cont)`. Its place in the chain is checked by the caller.
+fn check(b: &[u8], at: usize, salt: u32) -> Option<(usize, u32, u32, bool)> {
     if at + HEAD_LEN > b.len() {
         return None;
     }
-    let len = u32_at(b, at) as usize;
+    let word = u32_at(b, at);
+    let len = (word & !CONT) as usize;
     if len == 0 || len > MAX_RECORD || at + HEAD_LEN + len > b.len() {
         return None;
     }
     let prev = u32_at(b, at + 4);
     let crc = u32_at(b, at + 8);
     let payload = &b[at + HEAD_LEN..at + HEAD_LEN + len];
-    (record_crc(salt, len as u32, prev, payload) == crc).then_some((len, prev, crc))
+    (record_crc(salt, word, prev, payload) == crc).then_some((len, prev, crc, word & CONT != 0))
 }
 
 /// A torn tail: the bytes from `at` to the end hold no whole record and nothing valid follows them.
@@ -172,9 +189,11 @@ pub struct At {
     pub crc: u32,
 }
 
-/// Reads a log forward. A record that does not check, with nothing valid after it, is a torn tail (reported, to be
-/// cut). A record that does not check with a valid record anywhere after it, a valid record whose chain is broken,
-/// or a damaged header, is corruption: refused by name (`log-corrupt`, `log-header-bad`) and never trimmed.
+/// Reads a log forward. A record that does not check, with nothing valid after it but records of its own batch
+/// ([`CONT`]), is a torn tail (reported, to be cut): the last batch, whose sync never returned, reached the disk only
+/// in part, its later pages perhaps before its earlier ones. A record that does not check with the first record of
+/// a batch anywhere after it, a valid record whose chain is broken, or a damaged header, is corruption: refused by
+/// name (`log-corrupt`, `log-header-bad`) and never trimmed.
 pub fn recover(b: &[u8]) -> R<Recovered> {
     let epoch =
         (b.len() >= HEADER_LEN).then(|| u64::from_le_bytes(b[16..24].try_into().expect("8 bytes")));
@@ -238,7 +257,7 @@ fn scan(b: &[u8], base: usize, from: usize, header: Header, prev: u32, first: u6
     let n = |records: &Vec<Vec<u8>>| first + records.len() as u64;
     while at < b.len() {
         match check(b, at, salt) {
-            Some((len, p, crc)) if p == prev => {
+            Some((len, p, crc, _)) if p == prev => {
                 records.push(b[at + HEAD_LEN..at + HEAD_LEN + len].to_vec());
                 prev = crc;
                 at += HEAD_LEN + len;
@@ -255,7 +274,10 @@ fn scan(b: &[u8], base: usize, from: usize, header: Header, prev: u32, first: u6
                 );
             }
             None => {
-                if let Some(q) = (at + 1..b.len()).find(|&q| check(b, q, salt).is_some()) {
+                // A later batch's first record means a sync returned after this record's: damage, not a tear.
+                if let Some(q) =
+                    (at + 1..b.len()).find(|&q| check(b, q, salt).is_some_and(|c| !c.3))
+                {
                     return refuse(
                         "log-corrupt",
                         format!(

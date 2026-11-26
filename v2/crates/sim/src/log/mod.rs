@@ -11,11 +11,14 @@
 //!    on; the writer appends what has queued and syncs once. The **durable mark** (records on the disk) moves only
 //!    after a sync returns, and it alone releases acknowledgements: an act is acknowledged once its record is under
 //!    it (T11 rule 1). A second mark, **off the machine**, is kept for the copy O3 ships.
-//! 4. **Recovery reads forward.** A record that does not check with nothing valid after it is a torn tail: it is
-//!    reported ([`Torn`]), cut back and synced. One that does not check with any valid record after it, a valid
-//!    record out of the chain, or a damaged header with bytes after it, is corruption: refused by name
-//!    (`log-corrupt`, `log-header-bad`) and never trimmed (SQLite, TigerBeetle and Redis draw the same line;
-//!    `v2/docs/tranche/K-core.md`, facts 1, 3 and 4).
+//! 4. **Recovery reads forward.** A record that does not check with nothing valid after it but records of its own
+//!    batch is a torn tail: it is reported ([`Torn`]), cut back and synced. A record after the first of its writer's
+//!    batch carries [`CONT`], so a batch whose sync never returned, and whose later pages reached the disk before its
+//!    earlier ones (writes into room already made, rule 10, are not ordered by the filesystem), is a torn tail too.
+//!    One that does not check with the first record of a batch after it, a valid record out of the chain, or a
+//!    damaged header with bytes after it, is corruption: refused by name (`log-corrupt`, `log-header-bad`) and never
+//!    trimmed (SQLite, TigerBeetle and Redis draw the same line; `v2/docs/tranche/K-core.md`, facts 1, 3 and 4).
+//!    Damage inside the last batch reads as a tear, as damage to the last record always did.
 //! 5. **One writer per log, by an exclusive lock** on the file, and by its epoch: opening a log with a lower epoch
 //!    than its header's is `epoch-stale` (T11 rule 8); a higher epoch starts a new log (`epoch-other`).
 //! 6. **A failed sync is final.** After it nothing more is acknowledged from that file, the writer stops, and the
@@ -31,6 +34,14 @@
 //! 9. **Compaction** (#3837, [`compact`]): the bytes before a place every reader has passed are given back to the
 //!    disk, the offsets after it unchanged. A compacted log is opened from its cut (or a later place), never from byte
 //!    0; a place before the cut is passed over for the cut, and a cut that does not check is `log-cut-bad`.
+//! 10. **A tick's sync waits for no other process** (#4973). A file's sync that changes its size or blocks needs a
+//!    filesystem journal commit, and on ext4 (`data=ordered`) a commit first writes every other process's pending
+//!    data: a build or a backup on the same disk held every answer for seconds. So [`FileStore`] keeps room ahead of
+//!    the log's end, zeros written and synced ([`Storage::reserve`], [`RESERVE`]), and appends write into it: a sync
+//!    writes the tick's data and flushes the drive, nothing more. The writer makes room after a sync, once less than
+//!    half is left; that sync, one in each `RESERVE / 2` of log, still commits. Readers stop at the end (the zeros
+//!    are no records: rule 4); a clean close cuts them off. What is durable, and when an act is answered, is
+//!    unchanged: after its record's sync returns.
 //!
 //! The kill and power-cut runner and the sync table are `v2/tools/log-crash`. Not here: shipping off the machine
 //! (O3), views (R3), packing (V3), a full disk (O10), checkpoints (K5).
@@ -40,10 +51,10 @@ mod record;
 mod storage;
 
 pub use record::{
-    At, HEAD_LEN, HEADER_LEN, Header, MAX_RECORD, Recovered, Torn, crc32c, encode_record, recover,
-    recover_from,
+    At, CONT, HEAD_LEN, HEADER_LEN, Header, MAX_RECORD, Recovered, Torn, crc32c, encode_in_batch,
+    encode_record, recover, recover_from,
 };
-pub use storage::{FileStore, Mem, MemDisk, Storage};
+pub use storage::{FileStore, Mem, MemDisk, RESERVE, Storage};
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
@@ -208,6 +219,8 @@ impl<S: Storage + 'static> Log<S> {
         if found.torn.is_some() || found.header.is_none() {
             storage.sync()?;
         }
+        // Room for the first ticks, before any is answered (rule 10).
+        storage.reserve()?;
         let shared = Arc::new(Shared::default());
         let next = found.first + found.records.len() as u64;
         // A new log's first record follows the header: its previous checksum is the salt.
@@ -343,7 +356,7 @@ fn write_loop<S: Storage>(
         let mut chain = at.crc;
         let mut out = Ok(());
         for bytes in std::iter::once(first).chain(rx.try_iter()) {
-            match encode_record(&mut buf, salt, chain, &bytes) {
+            match encode_in_batch(&mut buf, salt, chain, &bytes, n > 0) {
                 Ok(c) => chain = c,
                 Err(e) => {
                     out = Err(e);
@@ -400,6 +413,12 @@ fn write_loop<S: Storage>(
             if m.failed.is_some() {
                 break;
             }
+        }
+        // Rule 10: room for the next ticks (a compacted copy's included), made after the answers were released.
+        if let Err(e) = storage.reserve() {
+            shared.marks().failed = Some(e);
+            shared.moved.notify_all();
+            break;
         }
     }
     storage

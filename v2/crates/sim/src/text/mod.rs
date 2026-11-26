@@ -26,9 +26,12 @@
 //!    checksum is written again (an upload's file is deleted). A power cut between leaves a record that does not
 //!    check: on opening, a record whose reference is erased is accepted whatever its checksum, and the overwrite is
 //!    finished. The log of effects holds only references, so no byte of it changes (T8 rule 9).
-//! 7. **Opening reads both files forward.** A record that does not check and runs to the end of the file is a torn
-//!    tail: cut back and synced (bytes after the last sync, never a returned reference). One that does not check with
-//!    bytes after it is `text-corrupt`, refused and never trimmed.
+//! 7. **Opening reads both files forward.** A record that does not check, with no record after it that checks and
+//!    begins a batch, is a torn tail: cut back and synced (bytes after the last sync, never a returned reference). A
+//!    record after the first of the writer's batch carries [`CONT`] in its length, as the log's do (K4 rules 4 and
+//!    10): the `text` file is written into room made ahead of its end, so a batch whose sync never returned may have
+//!    reached the disk in any order of its pages. One that does not check with a batch's first record after it is
+//!    `text-corrupt`, refused and never trimmed.
 //!
 //! Not here: a fork opening its parent's store (T8 rule 10, K6), checking and naming uploads (G6), who may remove
 //! whose words and purging caches (W7), the view tier (R3), copies off the machine (O20).
@@ -46,7 +49,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 
-use crate::log::{FileStore, Mem, Storage, crc32c};
+use crate::log::{CONT, FileStore, Mem, Storage, crc32c};
 
 type R<T> = Result<T, Refusal>;
 
@@ -63,6 +66,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The largest sentence or upload the store takes, bytes.
 pub const MAX_TEXT: usize = 1 << 20;
+/// Room kept ahead of the `text` file's end (K4 rule 10); the redaction list keeps none (it is not synced per tick).
+pub const TEXT_RESERVE: u64 = 4 << 20;
 
 const KIND_TEXT: u8 = 1;
 const KIND_UPLOAD: u8 = 2;
@@ -119,8 +124,9 @@ fn get_id(b: &[u8]) -> Option<Id> {
     Id::new(Scope(scope), counter)
 }
 
-fn frame(out: &mut Vec<u8>, body: &[u8]) {
-    let len = (body.len() as u32).to_le_bytes();
+/// Frames `body`, marked [`CONT`] when it is not the first record of the writer's batch (rule 7).
+fn frame(out: &mut Vec<u8>, body: &[u8], cont: bool) {
+    let len = (body.len() as u32 | if cont { CONT } else { 0 }).to_le_bytes();
     let crc = crc32c(crc32c(0, &len), body);
     out.extend_from_slice(&len);
     out.extend_from_slice(&crc.to_le_bytes());
@@ -180,9 +186,22 @@ struct Raw<'a> {
     body: &'a [u8],
 }
 
+/// The record at `at` if it checks by itself: its body, and whether it carries [`CONT`].
+fn checks(b: &[u8], at: usize) -> Option<(&[u8], bool)> {
+    let head = b.get(at..at + FRAME)?;
+    let word = u32::from_le_bytes([head[0], head[1], head[2], head[3]]);
+    let crc = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
+    let len = (word & !CONT) as usize;
+    if len == 0 || len > META + MAX_TEXT {
+        return None;
+    }
+    let body = b.get(at + FRAME..at + FRAME + len)?;
+    (crc32c(crc32c(0, &head[..4]), body) == crc).then_some((body, word & CONT != 0))
+}
+
 /// Reads records forward (rule 7). A record that does not check is kept when `accept` takes its body (an erasure cut
-/// short); otherwise, running to the end of the file, it is a torn tail (`Some(at)`: cut back to `at`), and with
-/// bytes after it, `text-corrupt`.
+/// short); otherwise, with no record after it that checks and begins a batch, it is a torn tail (`Some(at)`: cut back
+/// to `at`), and with one, `text-corrupt`.
 fn scan<'a>(
     b: &'a [u8],
     name: &str,
@@ -194,20 +213,23 @@ fn scan<'a>(
         let Some(head) = b.get(at..at + FRAME) else {
             return Ok((out, Some(at)));
         };
-        let len = u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as usize;
-        let crc = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
-        let Some(body) = b.get(at + FRAME..at + FRAME + len) else {
+        let len = (u32::from_le_bytes([head[0], head[1], head[2], head[3]]) & !CONT) as usize;
+        let body = b.get(at + FRAME..at + FRAME + len);
+        let kept = match body {
+            Some(body) if checks(b, at).is_some() || accept(body) => Some(body),
+            _ => None,
+        };
+        let Some(body) = kept else {
+            if let Some(q) = (at + 1..b.len()).find(|&q| checks(b, q).is_some_and(|c| !c.1)) {
+                return refuse(
+                    "text-corrupt",
+                    format!(
+                        "{name}: the record at byte {at} does not check and a record at byte {q} follows"
+                    ),
+                );
+            }
             return Ok((out, Some(at)));
         };
-        if crc32c(crc32c(0, &head[..4]), body) != crc && !accept(body) {
-            if at + FRAME + len == b.len() {
-                return Ok((out, Some(at)));
-            }
-            return refuse(
-                "text-corrupt",
-                format!("{name}: the record at byte {at} does not check"),
-            );
-        }
         out.push(Raw { at, body });
         at += FRAME + len;
     }
@@ -245,6 +267,12 @@ impl Storage for Disk {
         match self {
             Disk::File(f) => f.truncate(len),
             Disk::Mem(m) => m.truncate(len),
+        }
+    }
+    fn reserve(&mut self) -> R<()> {
+        match self {
+            Disk::File(f) => f.reserve(),
+            Disk::Mem(m) => m.reserve(),
         }
     }
 }
@@ -373,6 +401,13 @@ fn write_loop(mut disk: Disk, shared: Arc<Shared>) {
         if q.failed.is_some() {
             return;
         }
+        drop(q);
+        // Room for the next batches (K4 rule 10), made after the writers were released.
+        if let Err(e) = disk.reserve() {
+            lock(&shared.q).failed = Some(e);
+            shared.done.notify_all();
+            return;
+        }
     }
 }
 
@@ -412,8 +447,8 @@ impl Store {
     /// reopened store goes on after the highest counter of that scope it holds.
     pub fn open_dir(dir: &Path, minter: Minter) -> R<Store> {
         fs::create_dir_all(dir.join("uploads")).map_err(io)?;
-        let text = FileStore::open(&dir.join("text"))?;
-        let list = FileStore::open(&dir.join("removed"))?;
+        let text = FileStore::open_reserving(&dir.join("text"), TEXT_RESERVE)?;
+        let list = FileStore::open_reserving(&dir.join("removed"), 0)?;
         let rw = OpenOptions::new()
             .read(true)
             .write(true)
@@ -495,6 +530,8 @@ impl Store {
             }
             None => bytes.len(),
         };
+        // Room for the first batches, before any reference is returned (K4 rule 10).
+        text.reserve()?;
         let n = raws.len() as u64;
         let shared = Arc::new(Shared {
             q: Mutex::new(Queue {
@@ -573,7 +610,9 @@ impl Store {
                 return refuse("text-failed", f.to_string());
             }
             let at = q.end;
-            frame(&mut q.buf, &body);
+            // The writer takes the whole queue as one batch: a record queued behind another is not its first.
+            let cont = !q.buf.is_empty();
+            frame(&mut q.buf, &body, cont);
             q.end += (FRAME + body.len()) as u64;
             q.queued += 1;
             let n = q.queued;
@@ -697,7 +736,7 @@ impl Store {
         body.extend_from_slice(&when_us.to_le_bytes());
         body.push(grade as u8);
         let mut rec = Vec::new();
-        frame(&mut rec, &body);
+        frame(&mut rec, &body, false);
         ix.list.append(&rec).and_then(|_| ix.list.sync())?;
         let r = Removal {
             reference,
@@ -733,10 +772,12 @@ impl Store {
                 Err(x) => Err(io(x)),
             };
         }
+        let head = self.place.read_at(e.at, FRAME)?;
+        let cont = u32::from_le_bytes([head[0], head[1], head[2], head[3]]) & CONT != 0;
         let mut body = self.place.read_at(e.at + FRAME as u64, META)?;
         body.resize(e.len as usize, 0);
         let mut rec = Vec::new();
-        frame(&mut rec, &body);
+        frame(&mut rec, &body, cont);
         self.place
             .overwrite(e.at + (FRAME + META) as u64, &rec[FRAME + META..])?;
         self.place.overwrite(e.at, &rec[..FRAME])
