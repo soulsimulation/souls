@@ -2544,7 +2544,8 @@ impl ClassGround for ClassGrounds<'_> {
             .get(&size)
             .map(|g| g.overflow_at(node, p))
             .unwrap_or_default()
-    }    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+    }
+    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         self.0.get(&size)?.start(node, p)
     }
 }
