@@ -34,10 +34,16 @@ fn grips_world(d: &Path) -> String {
     };
     let num = |v: i64| json::Value::Int(i128::from(v));
     let refs = [
-        ("testworld-timber-rail@1", "mars:timber_rail", rail_at()),
+        (
+            "testworld-timber-rail@1",
+            "mars:timber_rail",
+            "timber-rail",
+            rail_at(),
+        ),
         (
             "testworld-timber-bundle@1",
             "mars:timber_bundle",
+            "timber-bundle",
             bundle_at(),
         ),
     ];
