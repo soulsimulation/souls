@@ -3,7 +3,7 @@
 //! and the text store (K16) reuses: it drops what was not synced at a power cut, cuts writes and fails syncs.
 
 use std::fs::{File, OpenOptions};
-use std::os::unix::fs::FileExt;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -39,12 +39,6 @@ pub trait Storage: Send {
     }
     /// Cuts the storage back to `len` bytes (recovery cutting a torn tail, then syncing).
     fn truncate(&mut self, len: u64) -> R<()>;
-    /// Makes room ahead of the end, written and synced, so the appends and syncs that follow change no file metadata
-    /// (rule 10). Called by the writer after a sync, never before an acknowledgement. A failed sync here is final as
-    /// any other is; room that could not be written is not an error (the appends then grow the file themselves).
-    fn reserve(&mut self) -> R<()> {
-        Ok(())
-    }
     /// Where a compacted log starts (rule 9): none for storage that was never compacted.
     fn cut(&mut self) -> R<Option<At>> {
         Ok(None)
@@ -188,42 +182,18 @@ impl Storage for Mem {
     }
 }
 
-/// How far ahead of its end a [`FileStore::open`] keeps zeros on the disk (rule 10): refilled once less than half is
-/// left, so one refill a [`RESERVE`] / 2 of log.
-pub const RESERVE: u64 = 16 << 20;
-
-/// Zeros written a piece at a time when room is made.
-static ZEROS: [u8; 1 << 16] = [0; 1 << 16];
-
 /// A log file on the machine's disk, held by an exclusive lock for as long as this lives (one writer per log).
 /// A sync is `fdatasync` (`File::sync_data`; on macOS that is `F_FULLFSYNC`); a new file's directory is synced too.
-///
-/// Appends write at the log's own end into room already written with zeros and synced ([`Storage::reserve`]), so a
-/// sync writes data only: no size or block of the file changes, and `fdatasync` waits for no filesystem journal
-/// commit, which on ext4 would first write every other process's pending data (#4973). Reads stop at the end. A
-/// clean close (drop) cuts the zeros off; after a crash they are a torn tail, cut by recovery (rule 4).
 #[derive(Debug)]
 pub struct FileStore {
     file: File,
     path: PathBuf,
     failed: bool,
-    /// Where the next append writes: the end of what was written.
-    end: u64,
-    /// The file's length: bytes `end..len` are zeros (or, after a crash, the torn tail recovery cuts).
-    len: u64,
-    /// How much room to keep ahead of `end`; 0 keeps none.
-    reserve: u64,
 }
 
 impl FileStore {
-    /// Opens or creates the log at `path` and takes its lock (`log-locked` while another process holds it), keeping
-    /// [`RESERVE`] of room ahead of its end.
+    /// Opens or creates the log at `path` and takes its lock (`log-locked` while another process holds it).
     pub fn open(path: &Path) -> R<FileStore> {
-        FileStore::open_reserving(path, RESERVE)
-    }
-
-    /// As [`FileStore::open`], keeping `reserve` bytes of room ahead of the end (0: none, every append grows the file).
-    pub fn open_reserving(path: &Path, reserve: u64) -> R<FileStore> {
         let io = |e: std::io::Error| Refusal {
             name: "log-io",
             detail: format!("{}: {e}", path.display()),
@@ -231,9 +201,8 @@ impl FileStore {
         let existed = path.exists();
         let file = OpenOptions::new()
             .read(true)
-            .write(true)
+            .append(true)
             .create(true)
-            .truncate(false)
             .open(path)
             .map_err(io)?;
         if file.try_lock().is_err() {
@@ -251,14 +220,10 @@ impl FileStore {
                 .and_then(|d| d.sync_all())
                 .map_err(io)?;
         }
-        let len = file.metadata().map_err(io)?.len();
         Ok(FileStore {
             file,
             path: path.to_path_buf(),
             failed: false,
-            end: len,
-            len,
-            reserve,
         })
     }
 
@@ -278,12 +243,8 @@ impl Storage for FileStore {
                 "a sync failed on this file; it takes nothing more",
             );
         }
-        let at = self.end;
-        // Past the room, the write grows the file and its sync commits that, as an append always did.
-        self.end += bytes.len() as u64;
-        self.len = self.len.max(self.end);
         self.file
-            .write_all_at(bytes, at)
+            .write_all(bytes)
             .map_err(|e| self.io("write-failed", e))
     }
 
@@ -302,14 +263,19 @@ impl Storage for FileStore {
     }
 
     fn read(&mut self) -> R<Vec<u8>> {
-        self.read_from(0, usize::MAX)
+        let mut out = Vec::new();
+        self.file
+            .seek(SeekFrom::Start(0))
+            .and_then(|_| self.file.read_to_end(&mut out))
+            .map_err(|e| self.io("log-io", e))?;
+        Ok(out)
     }
 
     fn read_from(&mut self, at: u64, max: usize) -> R<Vec<u8>> {
-        let to = self.end.min(at.saturating_add(max as u64));
-        let mut out = vec![0; to.saturating_sub(at) as usize];
+        let mut out = Vec::new();
         self.file
-            .read_exact_at(&mut out, at)
+            .seek(SeekFrom::Start(at))
+            .and_then(|_| (&self.file).take(max as u64).read_to_end(&mut out))
             .map_err(|e| self.io("log-io", e))?;
         Ok(out)
     }
@@ -321,31 +287,7 @@ impl Storage for FileStore {
                 "a sync failed on this file; it takes nothing more",
             );
         }
-        self.file.set_len(len).map_err(|e| self.io("log-io", e))?;
-        (self.end, self.len) = (len, len);
-        Ok(())
-    }
-
-    fn reserve(&mut self) -> R<()> {
-        if self.failed || self.len - self.end >= self.reserve / 2 {
-            return Ok(());
-        }
-        let to = self.end + self.reserve;
-        let mut at = self.len;
-        while at < to {
-            let n = (to - at).min(ZEROS.len() as u64) as usize;
-            if self.file.write_all_at(&ZEROS[..n], at).is_err() {
-                // A full disk: no room made, and the appends grow the file as before. What was written is zeros.
-                break;
-            }
-            at += n as u64;
-        }
-        if at == self.len {
-            return Ok(());
-        }
-        self.sync()?;
-        self.len = at;
-        Ok(())
+        self.file.set_len(len).map_err(|e| self.io("log-io", e))
     }
 
     fn cut(&mut self) -> R<Option<At>> {
@@ -362,27 +304,15 @@ impl Storage for FileStore {
                 false,
             ));
         }
-        match finish(&self.file, self.end, p) {
+        match finish(&self.file, p) {
             Ok(file) => {
-                // The copy ends at the end: its room is made again after the next sync.
                 self.file = file;
-                self.len = self.end;
                 Ok(())
             }
             Err((e, fatal)) => {
                 self.failed |= fatal;
                 Err((e, fatal))
             }
-        }
-    }
-}
-
-impl Drop for FileStore {
-    /// A clean close cuts the room off, so the file ends where the log does. Best effort: after a crash, or if this
-    /// fails, the zeros are a torn tail that recovery cuts (rule 4).
-    fn drop(&mut self) {
-        if !self.failed && self.len > self.end && self.file.set_len(self.end).is_ok() {
-            let _ = self.file.sync_data();
         }
     }
 }

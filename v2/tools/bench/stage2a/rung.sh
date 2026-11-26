@@ -37,7 +37,7 @@ pin() { if [ "$CPUS" = all ]; then exec "$@"; else exec taskset -c "$CPUS" "$@";
 cat /proc/loadavg > "$D/loadavg.before"
 # Stopped or not, the rung's own processes end with it, by pid (never by name: other runs use the same programs).
 SP= VP= GP= OP= WP= TP= DP=
-stop_all() { for p in $IP $DP $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; rm -f "$INJ"; }
+stop_all() { for p in ${IP:-} $DP $SP $VP $GP $OP $TP $WP; do kill "$p" 2> /dev/null; done; [ -z "${INJ:-}" ] || rm -f "$INJ"; }
 trap stop_all EXIT
 trap 'exit 143' INT TERM HUP
 echo "world folder: ${WORLD_ROOT:-run folder}" > "$D/world-root.txt"

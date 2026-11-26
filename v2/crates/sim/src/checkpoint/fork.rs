@@ -357,8 +357,7 @@ pub fn fork_with_kinds(parent: &Path, dir: &Path, req: Request, boot_pins: &[Nam
     log.append(head_part.stored().to_vec())?;
     log.wait_durable(1)?;
     let written = checkpoints.wait()?;
-    // The log's own end: its file runs on into room kept for the next ticks (`sim::log` rule 10).
-    let log_bytes = log.durable_at().offset;
+    let log_bytes = fs::metadata(&lp).map_err(|e| io(&lp, e))?.len();
     Ok(Forked {
         tree,
         header,
