@@ -1654,6 +1654,22 @@ impl Town {
         };
     }
 
+    /// Whether `at` (µm, `node`'s frame) is dry ground no walk from `from` reaches, for a body of `size`: [`Floors::sealed`]
+    /// with `from` for the world's entry. The edit checker's copy of the town has no entry of its own: a creator's
+    /// arrival place is judged there from the served town's ([`Town::entry`], #5006).
+    ///
+    /// [`Floors::sealed`]: crate::mover::Floors::sealed
+    pub fn cut_off(&self, from: (Id, Vec3), node: Id, at: Vec3, size: Size) -> bool {
+        self.geometry(size)
+            .is_ok_and(|(m, ..)| sealed_on(m, Some(from), node, at))
+    }
+
+    /// The world's entry as [`Town::set_entry`] took it, on dry ground: where the main ground is judged from. `None`:
+    /// none known, and no ground is sealed.
+    pub fn entry(&self) -> Option<(Id, Vec3)> {
+        self.entry
+    }
+
     /// The main ground as a start prints it: how many of the standard map's dry pieces are in the entry's part (the
     /// main ground), and how many in all. `None` when no entry is known.
     pub fn main_ground(&self) -> Option<(usize, usize)> {

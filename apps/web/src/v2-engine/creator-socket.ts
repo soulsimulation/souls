@@ -25,8 +25,8 @@ export type Op =
   | { op: 'place'; name: number; kind: string; parent: string; at: Spot }
   | { op: 'move'; node: string; at: Spot; rot?: Turn; slot?: number | null }
   | { op: 'remove'; node: string };
-/** What an edit asks: a batch of sets (weather), a build batch, or an undo or a redo of the newest edit (G4). */
-export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number }[] } | { ops: Op[] };
+/** What an edit asks: a batch of sets (weather; an id or [] for where new Souls arrive, #5006), a build batch, or an undo or a redo of the newest edit (G4). */
+export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number | IdValue | [] }[] } | { ops: Op[] };
 /** An answer, as the panel reads it: a receipt maps a place's batch name to its new id (`<scope hex>.<counter>`). */
 export type Frame =
   | { t: 'outcome'; name: string }

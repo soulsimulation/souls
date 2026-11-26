@@ -140,6 +140,7 @@ use replica::effects::{
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -160,7 +161,7 @@ use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::edit::safety::{Known, Who};
 use sim::frozen::Publisher;
-use sim::life::{Birth, Life, Ring};
+use sim::life::{Birth, Life, Ring, Standing};
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
 use sim::speech;
@@ -756,6 +757,9 @@ pub struct Config {
     /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
     /// ones [`Config::bodies`] makes.
     pub join: Option<Join>,
+    /// The world's entry as its town took it, on dry ground (`Town::entry`): the main ground is the part that holds it.
+    /// A creator's arrival place is judged from it when the set is made (#5006); none, never judged cut off.
+    pub main_entry: Option<(Id, Vec3)>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
     /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
@@ -814,6 +818,129 @@ pub fn notice_key(soul: Id) -> Vec<u8> {
 }
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
+
+/// The spots births try round `at`, by `entry`: rings 1 m apart from 1 m out, eight of them and then
+/// [`sim::life::FAR_RINGS`] further (16 m in all).
+fn birth_ring(entry: Id, at: (Id, Vec3)) -> Ring {
+    Ring {
+        entries: BTreeMap::from([(entry, at)]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    }
+}
+
+/// Rings tried one after another for a birth (#5006): the first ring's own spots are its tries, and every spot of the
+/// rings after it a further place, tried once those are.
+struct Rings<'a>(Vec<&'a Ring>);
+
+impl Standing for Rings<'_> {
+    fn spot(&self, entry: Id, i: u64) -> Option<(Id, Vec3)> {
+        let (r, j) = self.at(i)?;
+        r.spot(entry, j)
+    }
+    fn tries(&self) -> u64 {
+        self.0.first().map_or(0, |r| r.tries())
+    }
+    fn beyond(&self) -> u64 {
+        let all: u64 = self.0.iter().map(|r| r.tries() + r.beyond()).sum();
+        all - self.tries()
+    }
+    fn faces(&self, entry: Id, i: u64) -> Option<Vec3> {
+        let (r, j) = self.at(i)?;
+        r.faces(entry, j)
+    }
+}
+
+impl Rings<'_> {
+    /// The ring that holds the `i`-th spot, and the spot's index on it.
+    fn at(&self, mut i: u64) -> Option<(&Ring, u64)> {
+        for r in &self.0 {
+            let n = r.tries() + r.beyond();
+            if i < n {
+                return Some((r, i));
+            }
+            i -= n;
+        }
+        None
+    }
+}
+
+/// #5006: whether Souls born round a creator's arrival `place` could walk away, on `town` (the copy before the edit):
+/// refused [`replica::arrival::CUT_OFF`] when its middle is on ground no walk from `from` (the world's entry, as the
+/// served town took it: [`sim::walk::town::Town::entry`]) reaches, a walled pen; [`replica::arrival::NO_GROUND`] when
+/// no spot births try round it is ground a Soul can stand on that a walk from `from` reaches. With no entry known, no
+/// ground is cut off. `op` is the set's index in its batch.
+fn arrival_stands(
+    copy: &Replica,
+    town: &sim::walk::town::Town,
+    from: Option<(Id, Vec3)>,
+    (op, place): (usize, Id),
+) -> Result<(), Refused> {
+    let refused = |name: &'static str, detail: String| -> Result<(), Refused> {
+        Err(Refused {
+            op: Some(op),
+            name,
+            detail,
+        })
+    };
+    let shown = replica::world_model::show(place);
+    // A place the check took is one; with none here there is nothing to stand on to judge.
+    let Some((ground, at)) = replica::arrival::point_of(copy.tree(), place) else {
+        return Ok(());
+    };
+    let size = Size::Standard;
+    let cut_off = |node: Id, p: Vec3| from.is_some_and(|f| town.cut_off(f, node, p, size));
+    if cut_off(ground, at) {
+        return refused(
+            replica::arrival::CUT_OFF,
+            format!("the middle of {shown} is on ground no walk from the world's entry reaches"),
+        );
+    }
+    let ring = birth_ring(place, (ground, at));
+    let surfaces = town.surfaces_for(size);
+    let stands = (0..ring.tries() + ring.beyond())
+        .map_while(|i| ring.spot(place, i))
+        .any(|(node, p)| {
+            // As a birth asks: placed first, and only then whether its ground is cut off.
+            surfaces.and_then(|s| s.get(&node)).is_some_and(|s| {
+                s.place_built(
+                    place,
+                    Frame { node, slot: None },
+                    p,
+                    Quat::IDENTITY,
+                    Build::STANDARD,
+                )
+                .is_ok()
+            }) && !cut_off(node, p)
+        });
+    if !stands {
+        return refused(
+            replica::arrival::NO_GROUND,
+            format!(
+                "no ground a Soul can stand on and walk from within 16 m of the middle of {shown}"
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The last set of the world's arrival in `edit` that names a place, with its index in the batch (#5006): none when
+/// it sets none, or its last clears it.
+fn arrival_named(edit: &Edit) -> Option<(usize, Id)> {
+    let (i, place) = edit
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            edit::Op::Set { field, to, .. } if *field == replica::arrival::F_ARRIVAL => {
+                Some((i, replica::arrival::read(to).ok()?))
+            }
+            _ => None,
+        })
+        .next_back()?;
+    Some((i, place?))
+}
 
 /// The births and the intents waiting for them (C3).
 struct Lives {
@@ -884,6 +1011,7 @@ impl Config {
             rate: None,
             engine: None,
             join: None,
+            main_entry: None,
             wear: None,
             hatches: Vec::new(),
             halted: None,
@@ -3432,24 +3560,47 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
-        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
-        let floor = (l.at.0 == b.town.ground)
+        // Every reach below is judged from one place, the town's own entry (`Town::entry`, on dry ground), as each spot
+        // a birth takes is (`Floors::sealed`).
+        let sealed =
+            |(node, at): (Id, Vec3)| sim::mover::Floors::sealed(&b.town, node, at, Build::STANDARD);
+        // The open ground round where the host puts Souls (`world.json`'s arrival, else its entry); then, when it holds
+        // no free place, the ground-level floor with a way out that holds that point (a world entered under a roof:
+        // verdelis-eden's dome). Both are passed over when the point is walled off from the entry (#5006).
+        let host = !sealed(l.at);
+        let floor = (host && l.at.0 == b.town.ground)
             .then(|| b.town.entry_floor(l.at.1))
-            .flatten()
-            .map(|e| Ring {
-                entries: BTreeMap::from([(l.entry, e)]),
-                radius: l.ring.radius,
-                gap: l.ring.gap,
-                rings: l.ring.rings,
-            });
-        let standing = sim::life::Then(&l.ring, floor.as_ref());
-        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
+            .flatten();
+        // Last, the town's entry itself, when it is neither of those: a host's arrival walled off from it, or with no
+        // ground round it, never keeps a world from being joined (#5006).
+        let main = b
+            .town
+            .entry()
+            .filter(|&e| e != l.at && Some(e) != floor)
+            .map(|e| birth_ring(l.entry, e));
+        let floor = floor.map(|e| birth_ring(l.entry, e));
+        // Before all of those, the place the world's creator names on its root (#5006, `replica::arrival`), read from
+        // the tree each tick a birth waits, so a new arrival holds from the next birth with no restart. Its rings are
+        // tried first and the others after them, so a place whose rings hold no free spot never keeps a birth waiting;
+        // a place whose middle no walk from the entry reaches (walled in since it was named) is passed over.
+        let arrival = replica::arrival::point(self.replica.tree())
+            .filter(|&(ground, at)| ground == l.at.0 && !sealed((ground, at)))
+            .map(|at| birth_ring(l.entry, at));
+        let standing = Rings(
+            arrival
+                .iter()
+                .chain(host.then_some(&l.ring))
+                .chain(&floor)
+                .chain(&main)
+                .collect(),
+        );
+        let build_of = |soul: Id| {
             self.birth_builds
                 .get(&soul)
                 .copied()
                 .unwrap_or(skills::wear::DEFAULT)
-        });
+        };
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &build_of);
         let mut taken = Vec::new();
         for x in &mut born {
             // The world's body kind, as its header pins it (K10 writes the plain name).
@@ -6132,12 +6283,7 @@ pub fn start<S: Storage + 'static>(
         let entry = j.entry.0;
         Lives {
             life: Life::new(scope("life"), j.per_tick),
-            ring: Ring {
-                entries: BTreeMap::from([(entry, j.entry)]),
-                radius: 1_000_000,
-                gap: 1_000_000,
-                rings: 8,
-            },
+            ring: birth_ring(entry, j.entry),
             entry,
             at: j.entry,
             family: j.family,
@@ -6189,6 +6335,8 @@ pub fn start<S: Storage + 'static>(
                 rules.kinds.clone(),
                 // Lockstep waits for the bodies with no deadline (S10c); a free-running clock at most FRESH_WAIT.
                 (!cfg.lockstep).then_some(FRESH_WAIT),
+                // A world with births judges a creator's arrival place, from the town's entry (#5006).
+                life.as_ref().map(|_| cfg.main_entry),
             )
             .map(|tx| EditQueue {
                 tx,
@@ -6733,6 +6881,9 @@ fn way_searcher(events: Sender<Event>) -> std::io::Result<Sender<engine::WayAsk>
 ///
 /// `fresh_wait` bounds its wait for the bodies at a job's tick: [`FRESH_WAIT`] on a free-running clock, none in
 /// lockstep (S10c).
+///
+/// With `arrive` (a world with births; in it, the town's entry when one is known), a set of the world's arrival naming a
+/// place Souls born at could not walk away from is refused by name (#5006, [`arrival_stands`]).
 #[allow(clippy::too_many_arguments)]
 fn edit_checker(
     mut world: Option<edit::World>,
@@ -6743,6 +6894,7 @@ fn edit_checker(
     events: Sender<Event>,
     entries: replica::rules::json::Value,
     fresh_wait: Option<Duration>,
+    arrive: Option<Option<(Id, Vec3)>>,
 ) -> R<Sender<(u64, CheckJob)>> {
     let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
@@ -7027,6 +7179,8 @@ fn edit_checker(
                     continue;
                 };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
+                // #5006: the place a set of the world's arrival names, judged once the check takes the edit.
+                let arriving = arrive.zip(arrival_named(&e));
                 // #3958: a panic in the check or the plan answers the edit by name and keeps the thread (and every
                 // edit after it) going, on a town built again.
                 let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -7058,7 +7212,12 @@ fn edit_checker(
                     };
                     checked
                         .and_then(|c| {
-                            let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                            let t = town.on(&copy, ground, false);
+                            // #5006: a creator's arrival place Souls born at could walk away from, judged on the town.
+                            if let (Some(t), Some((from, set))) = (t.as_deref(), arriving) {
+                                arrival_stands(&copy, t, from, set)?;
+                            }
+                            let known = t.map(|t| Known::of(t));
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
                             sim::edit::plan_classes(
                                 c,
