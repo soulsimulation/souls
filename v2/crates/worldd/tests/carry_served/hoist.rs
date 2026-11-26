@@ -257,6 +257,7 @@ fn lifted(
 /// down, a sample a tick, `straight` down keeping its turn (a set-down from carrying height; one from mid-lift goes
 /// back along the lift's track); the load left the slot exactly where the track's last sample held it, and lies on the
 /// floor, its lowest corner at y 0. Where it rests.
+#[allow(clippy::too_many_arguments)]
 fn set_down(
     name: &str,
     dir: &Path,
