@@ -73,3 +73,19 @@ test('free floor transitions retain their body pose beneath independent gestures
    const hands={left:[1.2,1.2,-.35]as[number,number,number],right:[1.2,1.2,.35]as[number,number,number]};draw(v,{...person(model,'stargaze','wave',.58),hands,yaw:0},clock+.58);for(const side of ['left','right']as const){const p=new THREE.Vector3();assert(v.palmOf(id,side,p));assert(p.distanceTo(new THREE.Vector3(...hands[side]))<=.001,'native hand targets keep authority');}
  }finally{v.clear();}}}finally{setHumanGround(null);}
 });
+
+test('constructed production-rig seated wave retains its seat through entry and recovery',async()=>{
+ const templates=new Map(await Promise.all((['woman','casual']as const).map(async name=>[name,await template(name)]as const)));
+ const id='seated-wave-contact',clock=50,seat=.45;
+ const fresh=()=>{const v=new HumanViews();v.setTemplates([...templates.values()]);v.setBodyTemplates(templates);return v;};
+ const sample=(model:'woman'|'casual',activity:string,age:number,released?:number):SampledHuman=>({id,p:[1,0,0],yaw:.3,walk:0,walkDist:0,bodyModel:model,activity,baseActivity:'sit',seatHeight:seat,activityAge:age,...(released===undefined?activity==='wave'?{waveSamples:[{age}],waveClock:clock+age}:{}:{prevActivity:'wave',prevBaseActivity:'sit',prevWaveDuration:2,waveSamples:[{released,duration:2}],waveClock:clock+2+released})});
+ const draw=(v:HumanViews,h:SampledHuman,time:number)=>{v.setFrame([h],time);v.render(1);const root=v.bodyObject(id)!;root.updateMatrixWorld(true);const state=(v as unknown as{views:Map<string,{seat:number;cur:{p:number[];sitW:number}} >}).views.get(id)!;assert.deepEqual(state.cur.p,[1,0,0],'stored native root is authoritative');assert.equal(state.seat,seat,'actual seated height remains native');assert.equal(state.cur.sitW,1,'seated support remains active');const skin=points(root,true);for(const side of ['L','R']){const foot=skin.filter(p=>/^Foot/.test(p.bone)&&p.bone.endsWith(side));assert(foot.length>100);assert(Math.min(...foot.map(p=>p.p.y))>=-.001,h.bodyModel+' seated foot '+side+' penetrates');}return{skin,holder:root.position.clone(),pelvis:root.getObjectByName('Body')!.getWorldPosition(new THREE.Vector3())};};
+ setHumanGround(()=>0);try{for(const model of ['woman','casual']as const){const v=fresh(),underlying=fresh();try{
+  const at=(activity:string,age:number,time:number,released?:number)=>{const a=draw(v,sample(model,activity,age,released),time),base=draw(underlying,sample(model,'sit',5),time);assert(a.holder.distanceTo(base.holder)<=1e-5,'drawn holder retains underlying seat layout');assert(a.pelvis.distanceTo(base.pelvis)<=1e-5,'drawn pelvis retains underlying seat layout');return a.skin;};
+  assert(maxDelta(at('sit',5,clock),at('wave',1e-5,clock+1e-5))<=.001,'seated wave admission is continuous');
+  for(const age of [0,.3,1,2])at('wave',age,clock+age);
+  assert(maxDelta(at('wave',2-1e-5,clock+2-1e-5),at('sit',1e-5,clock+2+1e-5,1e-5))<=.001,'seated wave completion retains attained pose');
+  for(const age of [0,.3,1,2])at('sit',age,clock+2+age,age);
+  assert(maxDelta(at('sit',2-1e-5,clock+4-1e-5,2-1e-5),at('sit',2+1e-5,clock+4+1e-5))<=.001,'seated wave returns continuously to underlying seat');
+ }finally{v.clear();underlying.clear();}}}finally{setHumanGround(null);}
+});
