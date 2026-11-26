@@ -143,7 +143,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf, wordsOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -939,10 +939,15 @@ function inBodySlot(rows) {
   return Object.values(heldKinds()[on?.entry ?? on?.kind]?.slots ?? {}).some((x) => x?.admits === 'body');
 }
 
-/** `{holding}`: the things in this Soul's body's hands (its children in the copy), by id, name and kind; `{}` for none. */
+/** `{holding}`: the things in this Soul's body's hands (its children in the copy), by id, name and kind, and the words
+ *  the world gave for each one's text fields (`words`: a book's title and first page, #4837); `{}` for none. */
 function holdingOf(rows) {
   const body = [...rows.values()].find((r) => r.soul === ME)?.id;
-  const held = body ? [...rows.values()].filter((r) => r.parent === body).map((r) => ({ id: r.id, name: r.name, kind: r.kind })) : [];
+  const kinds = body && [...rows.values()].some((r) => r.parent === body && r.words) ? heldKinds() : {};
+  const held = body ? [...rows.values()].filter((r) => r.parent === body).map((r) => {
+    const words = r.words ? wordsOf(r, kinds[r.entry ?? r.kind]) : {};
+    return { id: r.id, name: r.name, kind: r.kind, ...(Object.keys(words).length ? { words } : {}) };
+  }) : [];
   return held.length ? { holding: held } : {};
 }
 

@@ -71,6 +71,7 @@ pub(crate) fn start(
     mut kept: Records,
     (lineage, zone, epoch): (Scope, Id, u64),
     public_names: Arc<PublicNames>,
+    library_words: Arc<BTreeMap<Id, Vec<u8>>>,
     text: Arc<sim::text::Store>,
     closed: Closed,
 ) -> std::io::Result<Sender<ToSync>> {
@@ -176,8 +177,11 @@ pub(crate) fn start(
                     }
                     a.insert(wire::ASK, n);
                     names::attach(&mut a, &public_names);
-                    // #3703: the public words of the text references these records hold.
-                    names::attach_words(&mut a, &|r| text.read(r, &[]).ok());
+                    // #3703: the public words of the text references these records hold; a library row's are the
+                    // world's own (#4837).
+                    names::attach_words(&mut a, &|r| {
+                        library_words.get(&r).cloned().or_else(|| text.read(r, &[]).ok())
+                    });
                     if let Ok(frame) = encode(&Value::Map(a)) {
                         let _ = reply.send(frame);
                     }

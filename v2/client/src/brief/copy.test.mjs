@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { encode } from '../history/day.mjs';
-import { allFields, posesOf, rowsOf } from './copy.mjs';
+import { allFields, posesOf, rememberPublicWords, rowsOf, wordsOf } from './copy.mjs';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc');
@@ -63,4 +63,32 @@ test('a node\'s fields read its big field from its own record', () => {
   assert.equal(f.get(24), 64000);
   assert.deepEqual(f.get(25).map(([x, z]) => [x, z]), [[0, 0]]);
   assert.equal(allFields({ record: () => undefined }, ground).has(25), false, 'not held: left out');
+});
+
+// #4837: a book a shelf's take made holds its title and first page as references (fields 29 and 30 of eden:book), and
+// the sync answer that brings its record carries their words (key 27). Its row keeps them by field, and its entry
+// names them; field 30 is a body's name only on a body, never a book's first page.
+test('a held book\'s title and first page are the words the world gave beside its record', () => {
+  const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return { raw, h }; };
+  const ref = (n) => new Map([[21, [scope, n]]]);
+  const book = put(new Map([[1, [scope, 9]], [2, 'eden:book@1220ab'], [3, [scope, 2]], [5, new Map([[1, 1]])], [6, new Map([[28, 0], [29, ref(41)], [30, ref(42)]])], [10, []]]));
+  const body = put(new Map([[1, [scope, 2]], [2, 'souls:body'], [3, [scope, 1]], [5, new Map([[1, 1]])], [6, new Map([[30, ref(43)]])], [10, [Buffer.from(book.h, 'hex')]]]));
+  const room = put(new Map([[1, [scope, 1]], [2, 'eden:place'], [10, [Buffer.from(body.h, 'hex')]]]));
+  const copy = { roots: () => JSON.stringify({ 0: room.h }), record: (h) => held.get(h) };
+  assert.equal(rowsOf(copy).get('73636f7065-9').words, undefined, 'no words given yet');
+  rememberPublicWords(copy, encode(new Map([[22, [book.raw, body.raw]], [27, [
+    [[scope, 41], Buffer.from("The Lamplighter's Last Summer")],
+    [[scope, 42], Buffer.from('Every evening for forty-one years, Osric Vale had walked the canal path.')],
+    [[scope, 43], Buffer.from('Wren')],
+  ]]])));
+  const rows = rowsOf(copy), row = rows.get('73636f7065-9');
+  assert.equal(row.name, 'book 9', 'a book is not named by its first page');
+  assert.equal(rows.get('73636f7065-2').name, 'Wren', 'a body is named by its owner\'s words');
+  const entry = { state: { open: { n: 28, type: 'bool' }, title: { n: 29, type: 'text' }, first_page: { n: 30, type: 'text' } } };
+  assert.deepEqual(wordsOf(row, entry), {
+    title: "The Lamplighter's Last Summer",
+    first_page: 'Every evening for forty-one years, Osric Vale had walked the canal path.',
+  });
+  assert.deepEqual(wordsOf(row, undefined), {}, 'no entry: no names for them');
+  assert.ok(!Object.keys(row).includes('words'), 'kept off the printed row');
 });

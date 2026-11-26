@@ -221,7 +221,12 @@ lowers the count by one in the same batch as the make (`takeStock` shows the bat
 nothing is made from nothing, and the check gate's `makes` rule counts the stock as what pays for it. Stock is free to
 take; buying, lending and debts are not here. A kind whose contents are
 closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
-or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Eden's own storage
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. On the new engine
+([#4837](https://github.com/soulsimulation/souls/issues/4837)) a world seeded with its stock file
+(`worldd seed --stock content/worlds/<world>/stock.json`, `v2/crates/worldd/src/stock.rs`) works out each container's
+pile from its stock row and draw; a take gives the thing it makes the carried fields of the row at the top of the pile,
+as references to the library row's words, which the world serves beside the record as public words. It does not yet
+lower the count. Eden's own storage
 (`content/kinds/storage/`, SA-X26 [#2916](https://github.com/soulsimulation/souls/issues/2916)) names each stock's take form `take`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,

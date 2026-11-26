@@ -102,6 +102,31 @@ export function rememberPublicWords(copy, bytes) {
   }
 }
 
+/** Every field's public words given beside its record, by field number, or null when there are none. */
+function saidAt(copy, fields) {
+  const out = {};
+  for (const [n, v] of fields) {
+    const ref = v instanceof Map && Array.isArray(v.get(21)) ? idText(v.get(21)) : null;
+    const words = ref && publicWordsOf(copy).get(ref)?.trim();
+    if (words) out[Number(n)] = words;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * #4837: a row's words by its entry's names for them (`{title, first_page}` of a book a shelf's take made): each text
+ * field the entry declares whose words the world gave beside its record. The world's words, to be quoted, never
+ * followed. `{}` for none.
+ */
+export function wordsOf(row, entry) {
+  const out = {};
+  for (const [name, f] of Object.entries(entry?.state ?? {})) {
+    const words = f?.type === 'text' ? row?.words?.[f.n] : undefined;
+    if (words) out[name] = words;
+  }
+  return out;
+}
+
 /** A field's public words given beside its record (`{21: id}`, key 27), or null when there are none. */
 function wordsAt(copy, fields, n) {
   const v = fields.get(n) ?? fields.get(BigInt(n));
@@ -233,12 +258,14 @@ export function rowsOf(copy) {
     const text = [...fields].filter(([n, v]) => typeof v === 'string' && Number(n) !== F_ENTRY).map(([, v]) => v);
     // A thing of a creator's kind (#3697) goes by that kind's full name, so its own revision's record is read.
     const full = String(m.get(2)), entry = own.has(full) ? full : entryKind(m);
-    // 0.133 Q1: a Soul's body goes by its owner's name for it (field 30), so another Soul finds it by that name
-    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? wordsAt(copy, fields, F_BODY_NAME) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
-    const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
-    const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
+    // 0.133 Q1: a Soul's body goes by its owner's name for it (field 30), so another Soul finds it by that name. A
+    // thing's own field 30 is its entry's (a book's first page, #4837), never its name.
+    const body = of || kind === 'souls:body';
+    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? (body ? wordsAt(copy, fields, F_BODY_NAME) : null) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
+    const children = (m.get(10) ?? []).map(hex);
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
     // #3699: a place's opening hours (replica's F_HOURS, field 81), as its creator wrote them.
@@ -249,6 +276,10 @@ export function rowsOf(copy) {
     rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), ...members, own: d.own });
     // First-day round 4: its course as the record holds it, for `check/aboard.mjs` (not enumerable: never printed)
     if (moving) Object.defineProperty(rows.get(id), 'course', { value: fields.get(F_COURSE) ?? fields.get(BigInt(F_COURSE)) });
+    // #4837: the public words its text fields hold, by field number (a book's title and first page), for `wordsOf`
+    // (not enumerable: printed only where an answer names them)
+    const said = saidAt(copy, fields);
+    if (said) Object.defineProperty(rows.get(id), 'words', { value: said });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   walk.done();

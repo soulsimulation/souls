@@ -172,6 +172,18 @@ fn serve_entries(
     tag: &str,
     lineage: Scope,
 ) -> (Served, Client, PathBuf, Vec<String>) {
+    serve_seeded(facts, entries, &[], at, tag, lineage)
+}
+
+/// [`serve_entries`], `seed` given the further arguments `more` (`--stock <file>`).
+fn serve_seeded(
+    facts: &str,
+    entries: &str,
+    more: &[&str],
+    at: &str,
+    tag: &str,
+    lineage: Scope,
+) -> (Served, Client, PathBuf, Vec<String>) {
     let dir = std::env::temp_dir().join(format!("eden-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let worldd = env!("CARGO_BIN_EXE_worldd");
@@ -179,6 +191,7 @@ fn serve_entries(
         .args(["seed", "--facts", facts, "--dir"])
         .arg(&dir)
         .args(["--entries", entries, "--souls", "0", "--at", at])
+        .args(more)
         .output()
         .unwrap();
     println!("seed: {}", String::from_utf8_lossy(&seeded.stdout).trim());
@@ -5272,4 +5285,180 @@ fn every_eden_seat_is_taken_and_left_from_outside() {
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Each `eden:book` the world's log creates, in order: its node, its parent (a body's hand for a take, a table for a
+/// placed copy) and its fields.
+fn books_made(dir: &Path) -> Vec<(Id, Id, BTreeMap<u64, Value>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if let Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node,
+                        kind,
+                        pose,
+                        fields,
+                        ..
+                    } = c.change
+                        && replica::world_model::plain(kind.as_str()) == "eden:book"
+                    {
+                        out.push((node, pose.frame.node, fields));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #4837: books carry their titles and first pages as world facts, on Eden as it is served, seeded with its stock
+/// (`seed --stock content/worlds/eden/stock.json`). Souls born by the library's door each walk to a different shelf
+/// (bookcases and bookshelves) and take a book. Each book made holds, as its title and first page (eden:book's fields
+/// 29 and 30), references to one row of `content/library/books.json`: the row at the top of that shelf's pile, the
+/// same as `worldd::stock` works out from the same facts and files again here (drawn by nothing: the same world gives
+/// the same book). At least three different books are taken. The one book placed on its own (commons-reading-book)
+/// carries its row from the world's start. Every reference's words, as the world serves them beside the record, are
+/// that row's title and first page, read here from the library file itself.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn books_carry_their_titles_and_first_pages_from_their_shelves() {
+    use replica::rules::json::Value as Json;
+    let facts = facts_path();
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let stock_file = format!("{root}/content/worlds/eden/stock.json");
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let mut kinds = Vec::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut kinds);
+    let data = worldd::stock::Data::load(Path::new(&stock_file)).expect("the stock file");
+    let facts_json = replica::rules::json::parse(&text).unwrap();
+    let want = worldd::stock::World::of(&data, &facts_json, &im.nodes, &im.tree, &kinds)
+        .expect("the stock");
+    assert!(want.notes.is_empty(), "{:?}", want.notes);
+    println!(
+        "stock: {} containers stocked, {} placed copies",
+        want.stocks.len(),
+        want.placed.len()
+    );
+    // The library's own rows: a reference's row, title and first page.
+    let rows = data.libraries["books"]
+        .get("books")
+        .and_then(Json::arr)
+        .unwrap()
+        .to_vec();
+    let row_of = |fields: &BTreeMap<u64, Value>| -> Option<(usize, String, String)> {
+        let at = |n: u64| replica::audience::reference(fields.get(&n)?);
+        let (t, p) = (at(29)?, at(30)?);
+        let i =
+            (0..rows.len()).find(|&i| worldd::stock::reference("books", "title", i) == Some(t))?;
+        assert_eq!(
+            worldd::stock::reference("books", "first_page", i),
+            Some(p),
+            "the title and the first page are one row's"
+        );
+        let words = |c: &str| rows[i].get(c).and_then(Json::str).unwrap().to_owned();
+        assert_eq!(want.words.get(&t), Some(&words("title").into_bytes()));
+        assert_eq!(want.words.get(&p), Some(&words("first_page").into_bytes()));
+        Some((i, words("title"), words("first_page")))
+    };
+
+    let shelves = w10_things(
+        &facts,
+        (74.0, -1.0),
+        &[("core-bookcase@1", 3), ("core-bookshelf@1", 3)],
+    );
+    let (served, _first, dir, _) = serve_seeded(
+        &facts,
+        &format!("{root}/content/kinds"),
+        &["--stock", &stock_file],
+        "74.0,-1.0",
+        "books",
+        lineage,
+    );
+    // Its first record, the import: the placed book carries its row from the start.
+    let placed = facts_json
+        .get("things")
+        .and_then(Json::arr)
+        .unwrap()
+        .iter()
+        .find(|t| t.get("name").and_then(Json::str) == Some("commons-reading-book"))
+        .and_then(|t| im.nodes.get(t.get("id")?.str()?))
+        .copied()
+        .expect("the commons' book");
+    let made = books_made(&dir);
+    let (_, _, start) = made
+        .iter()
+        .find(|(n, ..)| *n == placed)
+        .expect("the commons' book is imported");
+    assert_eq!(Some(start), want.placed.get(&placed));
+    let (_, title, page) = row_of(start).expect("the commons' book has a title and a first page");
+    println!("BOOK commons-reading-book: \"{title}\": {page}");
+
+    let mut known: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+    let souls: Vec<(Client, Option<Id>)> = (0..shelves.len())
+        .map(|i| {
+            let soul = join(&dir, 2 + i as u64, lineage);
+            soul.0
+                .set_read_timeout(Some(Duration::from_secs(600)))
+                .unwrap();
+            let now: std::collections::BTreeSet<Id> = body_rows(&dir).into_keys().collect();
+            let body = now.difference(&known).next().copied();
+            known = now;
+            (soul, body)
+        })
+        .collect();
+    let threads: Vec<_> = souls
+        .into_iter()
+        .zip(&shelves)
+        .map(|((mut soul, body), (def, id, _))| {
+            let (shelf, def, id) = (im.nodes[id.as_str()], *def, id.clone());
+            std::thread::spawn(move || {
+                let walked =
+                    soul.act_within("eden:walk", Some(shelf), BTreeMap::new(), 300_000_000);
+                let took = soul.act_within("eden:take", Some(shelf), BTreeMap::new(), 300_000_000);
+                (def, id, shelf, body, walked, took)
+            })
+        })
+        .collect();
+    let answers: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    let made = books_made(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut titles = std::collections::BTreeSet::new();
+    for (def, id, shelf, body, walked, took) in answers {
+        println!("TAKE {def} {id}: walk {walked:?}; take {took:?}");
+        if took.is_err() {
+            continue;
+        }
+        let body = body.expect("the Soul's body");
+        let (_, _, fields) = made
+            .iter()
+            .find(|(_, held, _)| *held == body)
+            .expect("a book in the body's hand");
+        let expected = want
+            .stocks
+            .get(&shelf)
+            .expect("a stocked shelf")
+            .carried(None);
+        assert_eq!(
+            fields.get(&29),
+            expected.get(&29),
+            "{id}: the top of its pile's title"
+        );
+        assert_eq!(fields.get(&30), expected.get(&30), "{id}: its first page");
+        let (row, title, page) = row_of(fields).expect("a title and a first page");
+        println!("BOOK {def} {id}: row {row} \"{title}\": {page}");
+        titles.insert(title);
+    }
+    assert!(
+        titles.len() >= 3,
+        "three different books from three shelves, got {titles:?}"
+    );
 }

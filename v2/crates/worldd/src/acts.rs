@@ -1483,6 +1483,8 @@ pub struct Acts {
     ties: BTreeMap<Id, Tie>,
     /// Whether [`Acts::ties`] was read from the world as it stands (a restart's seated bodies), once.
     tied: bool,
+    /// The world's stocked containers (#4837, [`crate::stock`]): given again to forms read back at a restart.
+    stocks: Arc<sim::forms::Stocks>,
 }
 
 /// A form's links from a body that sat it on a seat of another thing (E14b: a lecture's listener on the hall's
@@ -2063,6 +2065,7 @@ impl Acts {
             held: None,
             ties: BTreeMap::new(),
             tied: false,
+            stocks: Arc::default(),
         }
     }
 
@@ -2187,7 +2190,15 @@ impl Acts {
         let mut forms = Forms::recover(log, now);
         forms.kinds(&loaded(&self.kinds));
         forms.zone(self.zone.clone());
+        forms.stocks(Arc::clone(&self.stocks));
         self.forms = forms;
+    }
+
+    /// The world's stocked containers (#4837, [`crate::stock`]): a take from one gives the thing it makes the fields
+    /// of the row at the top of its pile.
+    pub fn stocks(&mut self, stocks: Arc<sim::forms::Stocks>) {
+        self.forms.stocks(Arc::clone(&stocks));
+        self.stocks = stocks;
     }
 
     /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
