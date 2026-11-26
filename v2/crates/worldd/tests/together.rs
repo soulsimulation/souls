@@ -2234,12 +2234,19 @@ fn trial_a_follower_who_begins_to_talk_goes_on_following() {
     a.act("activity:accept", Some(follow), &[])
         .expect("Soul 1 accepts");
     std::thread::sleep(Duration::from_millis(300));
-    let lefts = run.lefts();
+    let started = |run: &Run| {
+        run.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == "souls:activity-started")
+            .count()
+    };
+    let (lefts, begun) = (run.lefts(), started(&run));
     let talk = run.created(&b.offer(TALK, 1).expect("Soul 2 offers to talk"));
     a.act("activity:accept", Some(talk), &[])
         .expect("Soul 1 talks while followed");
     std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(run.starts(talk).len(), 2, "both talk");
+    assert_eq!(started(&run), begun + 1, "the conversation started");
     assert_eq!(run.lefts(), lefts, "nobody left the follow");
     let from = run.rows().len();
     a.act(
