@@ -197,12 +197,14 @@ fn main() {
             Some(Err(e)) => println!("\none-way floors and seats: not walked: {e}"),
             Some(Ok(o)) => {
                 println!(
-                    "\none-way floors and seats ({}; {} walked to from the arrival point [{}, {}] mm, {} not reached):\n",
+                    "\none-way floors and seats ({}; {} walked to from the arrival point [{}, {}] mm, {} not reached; \
+                     {} s of walking):\n",
                     o.one_way.len(),
                     o.targets,
                     o.arrival[0],
                     o.arrival[1],
-                    o.unreached.len()
+                    o.unreached.len(),
+                    o.ticks / 20
                 );
                 for t in &o.one_way {
                     println!("- {}: {}", t.name, t.why);

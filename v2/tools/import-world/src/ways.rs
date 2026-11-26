@@ -62,6 +62,8 @@ pub struct Ways {
     /// counted among the one-way.
     pub unreached: Vec<OneWay>,
     pub one_way: Vec<OneWay>,
+    /// The ticks walked, every walk's together (each [`TICK`] of the world's time).
+    pub ticks: u64,
 }
 
 /// Every Soul Actions entry under `dir`, as `worldd seed --entries` reads them (`souls-entry/1`, by its kind).
@@ -148,7 +150,14 @@ fn piece_points(t: &Town, node: Id) -> Vec<Vec3> {
 
 /// How one walk ended: done, or why not.
 /// As the served world sends a walk (N9): the body asks a standing spot by the target and walks there once granted.
-fn walk(r: &mut Runner, t: &mut Town, body: Body, target: Target, order: Id) -> Result<(), String> {
+fn walk(
+    r: &mut Runner,
+    t: &mut Town,
+    body: Body,
+    target: Target,
+    order: Id,
+    ticks: &mut u64,
+) -> Result<(), String> {
     if r.controller.body(body.id).is_none() {
         r.add_body(humanoid(), body)
             .map_err(|e| format!("refused {}", e.name))?;
@@ -156,6 +165,7 @@ fn walk(r: &mut Runner, t: &mut Town, body: Body, target: Target, order: Id) -> 
     r.send(body.id, Box::new(Route::sent(SPEED, TICK)), target, order)
         .map_err(|e| format!("refused {}", e.name))?;
     for _ in 0..WAIT / TICK {
+        *ticks += 1;
         r.tick(t).map_err(|e| format!("the tick refused {}", e.name))?;
         match r.ended.get(&body.id) {
             Some((_, Progress::Done)) => return Ok(()),
@@ -238,7 +248,8 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             .map_err(|e| format!("the arrival point: {}: {}", e.name, e.detail))?;
         let mut r = Runner::new(TICK);
         let order = |n: u64| Id::new(Scope([0xed; 16]), 2 * k as u64 + n).ok_or("an order's id");
-        if let Err(why) = walk(&mut r, &mut t, start, Target::new(node, at), order(1)?) {
+        let ticks = &mut out.ticks;
+        if let Err(why) = walk(&mut r, &mut t, start, Target::new(node, at), order(1)?, ticks) {
             out.unreached.push(OneWay {
                 name: label,
                 why: format!("the walk in: {why}"),
@@ -246,7 +257,8 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             continue;
         }
         let there = *r.controller.body(who).ok_or("the walker's body")?;
-        let back = walk(&mut r, &mut t, there, Target::new(ground, arrival), order(2)?).and_then(|()| {
+        let to = Target::new(ground, arrival);
+        let back = walk(&mut r, &mut t, there, to, order(2)?, &mut out.ticks).and_then(|()| {
             // A walk that ends done ends by the arrival point, on the open ground.
             let b = r.controller.body(who).ok_or("the walker's body")?;
             let (dx, dz) = (b.pose.position.x - arrival.x, b.pose.position.z - arrival.z);
