@@ -35,7 +35,7 @@ const ctxOf = (rows, over = {}) => {
   return {
     ns: 'mars', ground: GROUND, kinds, me: ME, placeOf: at, kindOf: (n) => rows.get(n)?.kind,
     crewMiddle: () => [(ends[0][0] + ends[1][0]) / 2, (ends[0][1] + ends[1][1]) / 2], heldBy: () => GEN,
-    crewEnds: () => ends, crewSize: (c) => rows.get(c)?.members?.length,
+    crewEnds: () => ({ ids: [ME, BACK], at: ends }), crewSize: (c) => rows.get(c)?.members?.length,
     loose: () => [...rows.values()].filter((r) => r.parent === GROUND && !r.soul && !/activity|place/.test(r.kind)).map((r) => r.id), ...over,
   };
 };

@@ -68,8 +68,9 @@ const inside = (bay, p) => {
  * `carry to <crew> <spot>` with no slot named: this Soul's walk so the crew's load goes into the spot's first free bay
  * that takes it, square in it (its length along the bay's), each carrier keeping its place at the load; or a refusal by
  * name: `carry-crew-unseen` (nothing lifted), `carry-crew-too-small`, `carry-spot-wrong-load`, `carry-spot-no-fit`,
- * `carry-spot-full`. `ctx` as `carryIntents` takes it, with `heldBy(crew)`, `crewEnds(crew)` ([front, back] on the
- * plan, µm), `crewSize(crew)` and `loose()` (the ids of things on the open ground). → {point: [x, z] µm, bay} or a refusal
+ * `carry-spot-full`. `ctx` as `carryIntents` takes it, with `heldBy(crew)`, `crewEnds(crew)` (its ids, and `at`:
+ * [front, back] on the plan, µm), `crewSize(crew)` and `loose()` (the ids of things on the open ground). → {point:
+ * [x, z] µm, bay} or a refusal
  */
 export function toSpot(req, ctx, spot) {
   const { kinds, kindOf, placeOf, me } = ctx;
@@ -88,7 +89,7 @@ export function toSpot(req, ctx, spot) {
   const bay = fits.find((x) => !takenBy(x));
   if (!bay) return no('carry-spot-full', `every bay of ${spot} that takes ${kind} is taken: ${fits.map((x) => `${x.name} by ${takenBy(x).id}`).join(', ')}`);
   // The crew turned about the load's middle so its length lies along the bay (the nearer way), then moved onto it.
-  const ends = ctx.crewEnds?.(req.crew), a = ends ? unit([ends[0][0] - ends[1][0], ends[0][1] - ends[1][1]]) : null;
+  const ends = ctx.crewEnds?.(req.crew)?.at, a = ends ? unit([ends[0][0] - ends[1][0], ends[0][1] - ends[1][1]]) : null;
   let u = bay.axis;
   if (a && a[0] * u[0] + a[1] * u[1] < 0) u = [-u[0], -u[1]];
   const [c, s] = a ? [a[0] * u[0] + a[1] * u[1], a[0] * u[1] - a[1] * u[0]] : [1, 0];
