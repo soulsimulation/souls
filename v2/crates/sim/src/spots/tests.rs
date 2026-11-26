@@ -337,6 +337,59 @@ fn an_ask_from_a_body_mid_crossing_waits_for_its_landing() {
     assert_eq!(spots.of(id(1), &t), Some(Err("spot-none-free")));
 }
 
+/// [`Block`] whose start, as the town's (`Map::spot_near` within the walk's 20 mm), is the block's nearest edge for a
+/// point no more than 20 mm inside it; and a walk only from where a body stands.
+struct Edged(Block);
+
+impl Ground for Edged {
+    fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.stand(n, p)
+    }
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, n: Id, a: Vec3, m: Id, b: Vec3) -> Option<i64> {
+        self.stand(n, a)?;
+        self.0.walk(n, a, m, b)
+    }
+    fn start(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(n, p).or_else(|| {
+            let h = self.0.half;
+            (p.x.abs() <= h && p.z.abs() <= h && h - p.x.abs() <= 20_000).then(|| {
+                let q = Vec3::new(p.x.signum() * (h + 1), p.y, p.z);
+                (q, q)
+            })
+        })
+    }
+}
+
+/// The 0.137 trial: a body pressed on a stump's edge, its centre a hair inside the stump's cut, was refused every walk
+/// `spot-none-free` (where it stood is no standing point), though its walk leaves from the edge beside it. Its ask
+/// now leaves from there and is granted; a body further in is refused as before.
+#[test]
+fn an_asker_a_hair_off_the_ground_leaves_from_the_edge_beside_it() {
+    let mut g = Edged(Block { half: 1_000_000 });
+    let id = |n| Id::new(replica::ids::Scope([0x69; 16]), n).unwrap();
+    let t = target(5_000_000);
+    let ask = |from| Ask {
+        who: id(1),
+        order: id(2),
+        node: node(),
+        from,
+        target: t,
+        carried: false,
+    };
+    let pressed = Vec3::new(999_500, 0, 0);
+    assert!(g.stand(node(), pressed).is_none(), "not a standing point");
+    let mut spots = Spots::new();
+    spots.write(&mut g, &[ask(pressed)], 0).unwrap();
+    assert_eq!(spots.of(id(1), &t), Some(Ok(t.point())), "granted");
+    let inside = Vec3::new(500_000, 0, 0);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &[ask(inside)], 0).unwrap();
+    assert_eq!(spots.of(id(1), &t), Some(Err("spot-none-free")));
+}
+
 /// A 4 m bench (#4072 follow-up) against a wall: no standing behind it (z below -0.6 m), on it or within 0.2 m of it
 /// (|x| up to 2.2 m, |z| up to 0.6 m), nor in front of its middle, where a row of stools stands (|x| below 1.5 m, z
 /// up to 2 m). Every walk is straight.

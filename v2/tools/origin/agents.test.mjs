@@ -36,6 +36,8 @@ test('the front door sends the owner\'s Soul calls of a world page to the direct
   assert.equal(upstream('pairing'), '7310');
   // Retire for good on a Soul card of a new-engine world: answered 404 by today's launcher when it was not routed
   for (const p of ['/v1/account/souls', '/v1/account/souls/profile', '/v1/account/souls/retire', '/v1/account/view-token']) assert.ok(paths.includes(p), p);
+  // The card's Keep (clears the agent's ask) and Disconnect on a new-engine world: the old page's revoke has the Soul's id between
+  for (const p of ['/v1/account/souls/keep', '/v1/account/souls/revoke']) assert.ok(paths.includes(p), p);
 });
 
 let dir, gateway, relay, stats, port;

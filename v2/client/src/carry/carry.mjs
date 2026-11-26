@@ -171,7 +171,11 @@ export function byName(req, rows) {
     const v = out[k];
     if (v === undefined || ID.test(String(v)) || v === 'here' || pointOf(v)) continue;
     const want = String(v).trim().toLowerCase();
-    const hits = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    const named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    // A map's place can share a thing's name (Mars College's `rack-bay` place and its rack bay): a place is never
+    // gripped, taken or seated into, so with a thing of that name the thing is meant.
+    const things = named.filter((r) => !/:place$/.test(String(r.kind ?? '')));
+    const hits = things.length ? things : named;
     if (hits.length === 1) { out[k] = hits[0].id; continue; }
     return hits.length
       ? no('carry-name-ambiguous', `${hits.length} things go by "${v}": ${hits.map((r) => r.id).join(', ')}; name one by its id`)

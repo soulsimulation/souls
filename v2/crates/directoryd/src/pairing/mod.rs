@@ -94,6 +94,8 @@ pub struct Card {
     pub connected: Option<String>,
     /// The id today's client knew the Soul by, for a Soul X11 brought over (R18), if the request named one.
     pub former: Option<String>,
+    /// The name a new Soul's request asks for (`souls.mjs pair --name`), if it asked for one.
+    pub name: Option<String>,
 }
 
 type OwnerReader = std::sync::Arc<
@@ -390,6 +392,7 @@ impl Pairing {
             None => None,
         };
         let former = self.former_of(&code)?.map(|(_, f)| f);
+        let name = self.name_of(&code)?;
         Ok(Card {
             device,
             label,
@@ -400,6 +403,7 @@ impl Pairing {
             force,
             connected,
             former,
+            name,
         })
     }
 

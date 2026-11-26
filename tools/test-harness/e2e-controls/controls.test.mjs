@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ALLOW, badResponse, brief, siteProbes, verdict } from './controls.mjs';
+import { ALLOW, SKIPPED_AFTER_LOAD, badResponse, brief, siteProbes, verdict } from './controls.mjs';
 
 test('the allow-list is empty: every same-origin 4xx/5xx fails', () => {
   assert.deepEqual(ALLOW, []);
@@ -21,6 +21,23 @@ test('a world fails on any failed step and names it', () => {
   assert.equal(v.ok, false);
   assert.deepEqual(v.failures, ['Back 1 min: never landed | 404 GET /s/x']);
   assert.equal(verdict('eden', [{ name: 'Live', ok: true, errors: [] }]).ok, true);
+});
+
+test('steps skipped after a failed load fail the world, named in one line after the load failure', () => {
+  const skip = (name) => ({ name, ok: false, skipped: SKIPPED_AFTER_LOAD, detail: SKIPPED_AFTER_LOAD, errors: [] });
+  const v = verdict('eden', [{ name: 'load', ok: false, detail: 'no moment drawn in 60 s', errors: [] }, skip('Live'), skip('Pause')]);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.failures, ['load: no moment drawn in 60 s', '2 step(s) skipped-after-load-failure: Live, Pause']);
+  // a skipped step is never a pass, even alone
+  assert.equal(verdict('eden', [{ name: 'load', ok: true, errors: [] }, { ...skip('Live'), ok: true }]).ok, false);
+});
+
+test('release.yml: the controls job runs on the GPU runner with a hardware SHIP_GPU', () => {
+  const y = readFileSync(new URL('../../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const job = y.slice(y.indexOf('\n  controls:\n'), y.indexOf('\n  # feed_only:'));
+  assert.match(job, /runs-on: \[self-hosted, souls-timed\]/);
+  assert.match(job, /pickHardwareGl/);
+  assert.match(job, /SHIP_GPU=/);
 });
 
 test('printed errors collapse numbered paths and drop the console copy of a listed response', () => {

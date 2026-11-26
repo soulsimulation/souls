@@ -202,6 +202,15 @@ impl Load {
         Ok((Vec3::new(-m.x, -m.y, -m.z), self.turn))
     }
 
+    /// The load held turned `turn` in its crew's slot instead of [`Load::turn`] (a frame taken standing from its
+    /// stand), its [`Load::rest`] the half of it that stands upright so turned: set down, it rests on its lowest side
+    /// on the floor, not its middle (which would sink a standing frame half its height into the ground).
+    pub fn held_turned(&self, turn: Quat) -> R<Load> {
+        let mut l = Load { turn, ..*self };
+        l.rest = l.held_half()?.y;
+        Ok(l)
+    }
+
     /// Where the load rests when set down (0.135 C4): its middle over `c` (on the floor, in the floor's frame, µm)
     /// and its long axis along `q`'s +x. Its position and orientation in the floor's frame.
     pub fn resting(&self, c: Vec3, q: Quat) -> R<(Vec3, Quat)> {

@@ -33,6 +33,7 @@ pub const WAITING_WITHIN: u64 = 600;
 pub(super) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS pair_request_worlds_v1(code TEXT PRIMARY KEY, world TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS pair_request_formers_v1(code TEXT PRIMARY KEY, former TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS pair_request_names_v1(code TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS soul_profiles_v1(grant_text TEXT PRIMARY KEY, world TEXT, name TEXT, description TEXT,
       retire_asked INTEGER NOT NULL DEFAULT 0, retired_at INTEGER);
     CREATE TABLE IF NOT EXISTS soul_pictures_v1(grant_text TEXT PRIMARY KEY, format TEXT NOT NULL, hash TEXT NOT NULL,
@@ -166,15 +167,25 @@ impl Pairing {
     }
 
     /// The Soul requests still pending for `world`, asked from `from` in the last [`WAITING_WITHIN`] seconds, newest
-    /// first: `(code, device, label, soul, age, former)`. The card shows the code for the owner to match.
+    /// first: `(code, device, label, soul, age, former, name)`. The card shows the code for the owner to match.
     #[allow(clippy::type_complexity)]
     pub fn waiting(
         &self,
         world: &str,
         from: std::net::IpAddr,
         now: u64,
-    ) -> Result<Vec<(String, String, String, Option<String>, u64, Option<String>)>, &'static str>
-    {
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            String,
+            Option<String>,
+            u64,
+            Option<String>,
+            Option<String>,
+        )>,
+        &'static str,
+    > {
         let mut codes: Vec<(String, u64)> = {
             let a = self.askers.lock().expect("askers");
             a.iter()
@@ -200,8 +211,9 @@ impl Pairing {
             };
             if let Some((device, label, soul, created)) = row {
                 let former = self.former_of(&code)?.map(|(_, f)| f);
+                let name = self.name_of(&code)?;
                 let age = now.saturating_sub(created.max(0) as u64);
-                out.push((code, device, label, soul, age, former));
+                out.push((code, device, label, soul, age, former, name));
             }
         }
         Ok(out)
@@ -218,6 +230,36 @@ impl Pairing {
             params![code, world],
         ))
         .map(|_| ())
+    }
+
+    /// Keeps the name a new Soul's pending request (by its code) asks for (`souls.mjs pair --name`), for the approval
+    /// card to show (trial of 0.137: the card never showed it). A name that is not one ([`is_name`]) is not kept; the
+    /// request stands.
+    pub fn ask_name(&self, code: &str, name: &str) -> Result<(), &'static str> {
+        let name = name.trim();
+        if !is_name(name) {
+            return Ok(());
+        }
+        store(self.db.lock().expect("the store").execute(
+            "INSERT OR REPLACE INTO pair_request_names_v1(code, name) VALUES (?1, ?2)",
+            params![code, name],
+        ))
+        .map(|_| ())
+    }
+
+    /// The name a request (by its code) asks for, if it asked for one.
+    pub(super) fn name_of(&self, code: &str) -> Result<Option<String>, &'static str> {
+        store(
+            self.db
+                .lock()
+                .expect("the store")
+                .query_row(
+                    "SELECT name FROM pair_request_names_v1 WHERE code = ?1",
+                    params![code],
+                    |r| r.get(0),
+                )
+                .optional(),
+        )
     }
 
     /// Keeps the former id (R18) a pending request (by its code) names; its world is kept by [`Pairing::ask_world`].
@@ -660,6 +702,17 @@ impl Pairing {
         store(self.db.lock().expect("the store").execute(
             "INSERT INTO soul_profiles_v1(grant_text, retire_asked) VALUES (?1, 1)
              ON CONFLICT(grant_text) DO UPDATE SET retire_asked = 1",
+            params![grant],
+        ))
+        .map(|_| ())
+    }
+
+    /// The signed-in `account` keeps its Soul `grant`: its agent's ask to retire it is cleared, so the agent's
+    /// `retire wait` hears the owner kept it. Nothing else changes.
+    pub fn keep(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "UPDATE soul_profiles_v1 SET retire_asked = 0 WHERE grant_text = ?1",
             params![grant],
         ))
         .map(|_| ())

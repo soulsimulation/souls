@@ -49,10 +49,16 @@ export function brief(errors) {
   return [...counts].map(([k, n]) => (n > 1 ? `${k} (x${n})` : k));
 }
 
-/** A world's verdict from its steps and the errors seen on its own origin. */
+/** What a step not run because its world's `load` step failed is marked with. It is not a pass: the world fails. */
+export const SKIPPED_AFTER_LOAD = 'skipped-after-load-failure';
+
+/** A world's verdict from its steps and the errors seen on its own origin. Steps skipped after a failed load are named
+ *  in one line, after the load's own failure. */
 export function verdict(slug, steps) {
-  const failures = steps.filter((s) => !s.ok).map((s) => `${s.name}: ${[s.detail, ...brief(s.errors)].filter(Boolean).join(' | ')}`);
-  return { slug, ok: failures.length === 0, failures, steps };
+  const failures = steps.filter((s) => !s.ok && !s.skipped).map((s) => `${s.name}: ${[s.detail, ...brief(s.errors)].filter(Boolean).join(' | ')}`);
+  const skipped = steps.filter((s) => s.skipped);
+  if (skipped.length) failures.push(`${skipped.length} step(s) ${SKIPPED_AFTER_LOAD}: ${skipped.map((s) => s.name).join(', ')}`);
+  return { slug, ok: failures.length === 0 && skipped.length === 0, failures, steps };
 }
 
 const arg = (argv, k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
@@ -100,7 +106,15 @@ async function walkWorld(browser, origin, slug, dir) {
   const view = (p = page) => p.evaluate(() => { const d = document.querySelector('.viewer-history')?.dataset ?? {}; return { pres: d.viewerPresentation ?? null, tick: d.viewerTick ? Number(d.viewerTick) : null, camera: document.querySelector('[data-camera]')?.dataset.camera ?? null, pill: document.querySelector('.time-pill')?.textContent?.trim() ?? null, clock: document.querySelector('.time-panel-clock')?.textContent?.trim() ?? null }; }).catch(() => ({}));
   const notLoaded = (p = page) => p.evaluate(() => [...document.querySelectorAll('.warn, [role=status], .explore-note')].map((e) => e.textContent?.trim() ?? '').find((t) => /could not be loaded|temporarily unavailable/i.test(t)) ?? null).catch(() => null);
   const until = async (fn, ms, every = 250) => { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(every); } return null; };
+  // A world whose page never loaded has nothing to click: its remaining steps are skipped (and fail the world) instead
+  // of each waiting out its own timeouts, so one stuck world costs its load step, not 20 minutes.
+  let loadFailed = false;
   const step = async (name, fn) => {
+    if (loadFailed) {
+      const s = { name, ok: false, skipped: SKIPPED_AFTER_LOAD, ms: 0, detail: SKIPPED_AFTER_LOAD, errors: [] };
+      steps.push(s); console.log(`[${slug}] skip ${name}: ${SKIPPED_AFTER_LOAD}`);
+      return s;
+    }
     errs = []; const t0 = Date.now(); let detail = null, ok = true;
     try { detail = (await fn()) ?? null; } catch (e) { ok = false; detail = String(e?.message ?? e).split('\n')[0].slice(0, 240); }
     await sleep(300);
@@ -156,12 +170,13 @@ async function walkWorld(browser, origin, slug, dir) {
     return `tick ${before.tick} -> ${landed.tick} (${back.toFixed(1)} s); clock ${landed.clock}; pill "${landed.pill}"`;
   };
 
-  await step('load', async () => {
+  const load = await step('load', async () => {
     await page.goto(`${origin}/w/${slug}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
     if (!await until(async () => (await view()).tick != null, 60000)) fail('no moment drawn in 60 s');
     await sleep(3000);
     return `presentation ${(await view()).pres}`;
   });
+  loadFailed = !load.ok;
   await step('Live', async () => {
     const extra = await headerTime();
     if (extra.some((t) => /back|link|start|live|pause|play|preview|×|range|moment/i.test(t))) fail(`time controls in the header: ${extra.join(', ')}`);
@@ -268,7 +283,7 @@ async function walkWorld(browser, origin, slug, dir) {
     if (!await until(async () => (await view()).camera === 'follow', 20000)) fail(`clicking ${name} did not follow (camera ${(await view()).camera})`);
     return `following ${name}`;
   });
-  await escape();
+  if (!loadFailed) await escape();
   await step('New Soul', async () => {
     await press(page.locator('.bring-agent-open').first());
     await page.locator('section.bring-agent').waitFor({ state: 'visible', timeout: 5000 });

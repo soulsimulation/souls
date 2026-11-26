@@ -1187,6 +1187,46 @@ impl Engine {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
         }
+        // A ride that flies a loop from its stop and was seeded with no course (Eden's launch balloon on a world seeded
+        // before its rides flew) is given its course at the start's first tick: from now, at its home, so it stands
+        // there for its boarding minute first and never jumps onto its loop.
+        for (thing, mut c) in slots.courses_given() {
+            let Some(n) = live.handle(thing).and_then(|h| live.node(h)) else {
+                continue;
+            };
+            if n.fields().contains_key(&replica::schedule::F_COURSE) {
+                continue;
+            }
+            // Its course was laid from where it stood at the start. A god edit that moved it since (and gave it no
+            // seats, `import_eden::body_slots_of`) leaves it standing: the next start lays one from where it is.
+            let home = c.stations.first().map_or(Vec3::ZERO, |s| s.at);
+            if n.place().map(|p| p.position) != Some(home) {
+                eprintln!(
+                    "worldd: {} moved before its course was given: none given",
+                    show(thing)
+                );
+                continue;
+            }
+            c.t0 = now;
+            let e = slots.moving(thing, &c, home).and_then(|()| {
+                crate::carrier::entry(
+                    live,
+                    thing,
+                    vec![crate::carrier::set(
+                        thing,
+                        replica::schedule::F_COURSE,
+                        c.to_value(),
+                    )],
+                    now,
+                    Cause::World,
+                    Actor::World,
+                )
+            });
+            match e {
+                Ok(e) => self.out.push(e),
+                Err(r) => eprintln!("worldd: {}'s course is not written: {r}", show(thing)),
+            }
+        }
         // N14: the courses of the rides whose runs were registered (a start) or registered again (a god edit).
         let changed = slots.runs_changed();
         if !changed.is_empty() {
@@ -1277,7 +1317,7 @@ impl Engine {
                     n.place()?.orientation,
                 ))
             }) {
-                carry.load = Load { turn: held, ..*l };
+                carry.load = l.held_turned(held).unwrap_or(Load { turn: held, ..*l });
             }
             match break_off(
                 &mut carry,
@@ -2403,10 +2443,8 @@ impl Engine {
     fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
         let n = tree.handle(part).and_then(|h| tree.node(h))?;
         let l = self.loads.get(plain(n.kind().as_str()))?;
-        Some(Load {
-            turn: n.place()?.orientation,
-            ..*l
-        })
+        let turn = n.place()?.orientation;
+        Some(l.held_turned(turn).unwrap_or(Load { turn, ..*l }))
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
