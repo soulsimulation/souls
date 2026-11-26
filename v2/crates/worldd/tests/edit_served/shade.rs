@@ -218,7 +218,11 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     let five = crew(&mut hands, 0, &[3, 1, 2, 4], 4);
     let got = hands[0].act("part:take", five, part(rails[0]));
     refused(&got, "carry-crew-too-large", "five take rail 1");
-    assert_eq!(where_is(&w, rails[0]).0, Some(g), "rail 1 lies where it lay");
+    assert_eq!(
+        where_is(&w, rails[0]).0,
+        Some(g),
+        "rail 1 lies where it lay"
+    );
     for k in 0..5 {
         leave(&mut hands, k, five);
     }
@@ -264,7 +268,10 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     // The rails: Souls 1 and 4 at each rail's ends take it and put it across both bents (a bearing part joins the
     // site's standing parts by default).
     let mut rail = None;
-    for (k, (dx, slot)) in [(-1_350, "rail_l"), (1_350, "rail_r")].into_iter().enumerate() {
+    for (k, (dx, slot)) in [(-1_350, "rail_l"), (1_350, "rail_r")]
+        .into_iter()
+        .enumerate()
+    {
         walk(
             &mut hands,
             &[(0, at(dx, -2_200)), (3, at(dx, 2_200))],
@@ -300,7 +307,11 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     let four = crew(&mut hands, 0, &[1, 2, 3], 2);
     let got = hands[0].act("part:take", four, part(cloth));
     refused(&got, "carry-crew-too-small", "three take the cloth");
-    assert_eq!(where_is(&w, cloth).0, Some(g), "the cloth lies where it lay");
+    assert_eq!(
+        where_is(&w, cloth).0,
+        Some(g),
+        "the cloth lies where it lay"
+    );
     ok(
         hands[3].act("activity:accept", four, BTreeMap::new()),
         "Soul 4 joins",
