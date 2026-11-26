@@ -1910,7 +1910,10 @@ fn e16_a_soul_staying_in_the_only_way_is_squeezed_past_at_the_shoulder_turn() {
     let run = lockstep_with(ring_with_a_staying_body);
     let (answer, rungs) = walk_in(&run, east(), 500);
     let r = run.replay();
-    println!("E16 staying in the gap: {answer:?}; rungs {:?}", names(&rungs));
+    println!(
+        "E16 staying in the gap: {answer:?}; rungs {:?}",
+        names(&rungs)
+    );
     let when = |n: &str| rungs.iter().find(|r| r.1 == n).map(|r| r.0);
     let reroute = when("souls:reroute").expect("routed again");
     let shoulder = when("souls:shoulder-turn").expect("a shoulder turn");
@@ -1942,7 +1945,10 @@ fn e16_a_walker_ringed_in_by_souls_staying_squeezes_out() {
     let when = |n: &str| rungs.iter().find(|r| r.1 == n);
     assert!(when("souls:reroute").expect("routed again").0 >= 3_000_000);
     assert!(when("souls:shoulder-turn").expect("a shoulder turn").0 >= 9_000_000);
-    assert!(when("souls:step-aside").is_none(), "nobody moved by the world");
+    assert!(
+        when("souls:step-aside").is_none(),
+        "nobody moved by the world"
+    );
     assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
     let (p, e) = (at(&r, w1()), east());
     let off = (i128::from(p.x - e.x).pow(2) + i128::from(p.z - e.z).pow(2)).isqrt();
@@ -1967,7 +1973,9 @@ fn assert_walked(run: &Run, who: Id) {
         for e in Part::read(&rec).unwrap().effects {
             let Body::Changes(cs) = &e.body else { continue };
             for c in cs {
-                let Change::Motion(h) = &c.change else { continue };
+                let Change::Motion(h) = &c.change else {
+                    continue;
+                };
                 if h.node != who {
                     continue;
                 }
@@ -1985,7 +1993,10 @@ fn assert_walked(run: &Run, who: Id) {
     }
     println!("E16 {samples} motion samples, fastest {fastest} um/s");
     assert!(samples > 1, "it moved");
-    assert!(fastest <= 2_000_000, "never faster than walking: {fastest} um/s");
+    assert!(
+        fastest <= 2_000_000,
+        "never faster than walking: {fastest} um/s"
+    );
 }
 
 /// A point as the ladder's entries write it: `[x, y, z]` µm.

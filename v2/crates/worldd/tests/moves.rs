@@ -1566,20 +1566,25 @@ fn a_stalled_gateway_walk_ends_goal_unreachable_and_releases_its_body() {
     let (&id, l) = log.iter().next().unwrap();
     assert_eq!(l.last().unwrap().2.as_deref(), Some("goal-unreachable"));
     // E16: the ladder's ending, which its Soul reads on its body, names a next step.
-    let ended: Vec<String> = recover(&bytes)
+    let events: Vec<_> = recover(&bytes)
         .unwrap()
         .records
         .into_iter()
         .filter(|r| !sim::recorder::is_input(r))
         .flat_map(|r| Part::read(&r).unwrap().effects)
         .flat_map(|e| e.events.into_iter().flatten())
+        .collect();
+    let ended: Vec<String> = events
+        .iter()
         .filter(|ev| ev.name.as_str() == "souls:order-ended")
-        .filter_map(|ev| match ev.fields.get(&4) {
-            Some(Value::Bytes(b)) => Some(String::from_utf8_lossy(b).into_owned()),
-            _ => None,
+        .map(|ev| match ev.fields.get(&4) {
+            Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
+            other => format!("{other:?}"),
         })
         .collect();
-    println!("E16 order ended: {ended:?}");
+    let names: std::collections::BTreeSet<&str> =
+        events.iter().map(|ev| ev.name.as_str()).collect();
+    println!("E16 order ended: {ended:?}; events {names:?}");
     assert!(
         ended
             .iter()

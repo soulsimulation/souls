@@ -917,7 +917,10 @@ impl Engine {
                 // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is. A side carrier's
                 // with the load's crew left does not (C5).
                 self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
-                let lone = self.activities.members(activity).is_some_and(|m| m.len() == 1);
+                let lone = self
+                    .activities
+                    .members(activity)
+                    .is_some_and(|m| m.len() == 1);
                 let e = &mut self.activities;
                 e.next = tree.next();
                 e.leave(
@@ -2433,9 +2436,8 @@ impl Engine {
                 .filter(|(_, b)| overlap(&sweep, b))
                 .map(|(id, _)| *id)
                 .collect();
-            let clear = !walled
-                && standing.is_empty()
-                && !own.as_ref().is_some_and(|b| overlap(&rest, b));
+            let clear =
+                !walled && standing.is_empty() && !own.as_ref().is_some_and(|b| overlap(&rest, b));
             if !walled {
                 in_way.extend(standing);
             }
