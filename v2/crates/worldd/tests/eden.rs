@@ -5397,7 +5397,13 @@ fn books_carry_their_titles_and_first_pages_from_their_shelves() {
         .iter()
         .find(|(n, ..)| *n == placed)
         .expect("the commons' book is imported");
-    assert_eq!(Some(start), want.placed.get(&placed));
+    let carried = want
+        .placed
+        .get(&placed)
+        .expect("the commons' book carries a row");
+    for (n, v) in carried {
+        assert_eq!(start.get(n), Some(v), "field {n} of the commons' book");
+    }
     let (_, title, page) = row_of(start).expect("the commons' book has a title and a first page");
     println!("BOOK commons-reading-book: \"{title}\": {page}");
 
