@@ -64,12 +64,15 @@ pub struct Views {
     state: Mutex<State>,
 }
 
+/// A subscription: its subscribe frame to the world, its socket's item queue, and how an agent's socket is told at once
+/// that its queue was full (#4979).
+type Sub = (Vec<u8>, mpsc::Sender<Vec<u8>>, Option<Arc<Notify>>);
+
 #[derive(Default)]
 struct State {
     next: u64,
-    /// By number: its subscribe frame to the world, its socket's item queue, and how an agent's socket is told at once
-    /// that its queue was full (#4979).
-    subs: BTreeMap<u64, (Vec<u8>, mpsc::Sender<Vec<u8>>, Option<Arc<Notify>>)>,
+    /// By number.
+    subs: BTreeMap<u64, Sub>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
 }
 
