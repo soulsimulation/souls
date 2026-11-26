@@ -1263,7 +1263,7 @@ impl Bodies {
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
-    fn goal(&self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
+    fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
             return Ok(Target::new(node, p));
         }
@@ -1292,6 +1292,55 @@ impl Bodies {
         if tree.node(tree.root()).is_some_and(|n| n.id() == node) {
             return Err(refusal("move.whole-world", node));
         }
+        // A landform or another place on the ground (a range, a sea, a lake, a wood, a square, a path): a walk to it
+        // ends at its edge, on the open ground, wherever the walker stands (a floor too). First on it at the point of
+        // its edge nearest the walker, when its middle is ground the walker may stand on and reach: an area
+        // [`select::GAP`] inside its outline, a line on itself, so a walk to a square, a wood or a path ends on it.
+        // Where that is no place to stand or the walker's walk cannot reach it (a sea, a ridge), from the point stood back [`select::GAP`] outside its edge (a wide line's side) it steps back
+        // toward the walker a metre at a time to the first point a body may stand on that the walker's walk may reach
+        // (`View::stand_reached`, no route search): the nearest walkable point at its edge on the walker's way there.
+        // A walker already within it, or with no such point nearer it, is there.
+        if let Some((half, area)) = place_half_width(tree, node)
+            && let Some((frame, at)) = self.pose(body)
+            && let Some(ground) = tree
+                .handle(node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent())
+        {
+            let here = select::point_in(tree, frame, at, ground)?;
+            let gap = select::gap(tree, node, ground, here)?;
+            if gap <= half {
+                return Ok(Target::new(frame, at));
+            }
+            let (edge, middle) = select::nearest_in(tree, node, ground, here)?;
+            let (dx, dz) = (here.x - edge.x, here.z - edge.z);
+            let len = (i128::from(dx).pow(2) + i128::from(dz).pow(2))
+                .isqrt()
+                .max(1);
+            let along = |s: i128| {
+                let s = s.min(len);
+                let k = |d: i64| i64::try_from(i128::from(d) * s / len).unwrap_or(0);
+                Vec3::new(edge.x + k(dx), 0, edge.z + k(dz))
+            };
+            let first = i128::from(half.saturating_add(select::GAP));
+            let on = if area { -i128::from(select::GAP) } else { 0 };
+            let view = self.town.view_for(body)?;
+            let from = (frame, at);
+            // On it only when it is ground to stand on: its middle is (a square, a wood, a path), not a sea's or a
+            // mountain's (its slopes may be on the map and still no way up).
+            let walkable = view.stand_reached(ground, middle, from).is_some();
+            let mut tries = walkable
+                .then_some(on)
+                .into_iter()
+                .chain((0..).map(|k| first + k * 1_000_000));
+            while let Some(s) = tries.next().filter(|s| *s < len) {
+                if let Some(p) = view.stand_reached(ground, along(s), from) {
+                    return Ok(Target::new(ground, p));
+                }
+            }
+            // None nearer it that the walker may reach: it stands as near as it can get.
+            return Ok(Target::new(frame, at));
+        }
         let node = main_room(&self.town.tree, node).unwrap_or(node);
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
         match spot::once(&r) {
@@ -1317,7 +1366,7 @@ impl Bodies {
 
     /// The candidate of `a`'s ranked list that is taken, and its rank (C14): a sit's or a lie's through I5's
     /// selector (`sim::commit::bind`, named slots: the first free one binds), a walk's the first with somewhere to go.
-    fn bind(&self, a: &Asked) -> R<(usize, Ask)> {
+    fn bind(&mut self, a: &Asked) -> R<(usize, Ask)> {
         if a.fallbacks.is_empty() {
             return Ok((0, a.ask.clone()));
         }
@@ -1385,7 +1434,9 @@ impl Bodies {
     /// 0.135: a body whose walk to `target` is done turns to face it, as a person does on arriving: toward a thing's
     /// origin or another Soul's body (the thing it sits in, when seated), on the level. A walk to a place it ends in
     /// (the ground, a room, a building's main room, a point on one) turns it to what is there instead: the nearest
-    /// thing standing within [`NOTABLE_NEAR`] of it ([`notable_near`]), its facing kept when there is none. One ending
+    /// thing standing within [`NOTABLE_NEAR`] of it ([`notable_near`]), its facing kept when there is none. A walk to a
+    /// place on the ground that ends outside it (at a range's or a sea's edge) turns it to the nearest point of that
+    /// place's shape, or its middle when it stands right at it. One ending
     /// within [`sim::controller::FACE_NEAR`] of what it faces keeps its facing ([`sim::controller::facing_toward`], the
     /// one rule a form's walk keeps too). The turn is its legs' facing input, set by a driver of them, as a place's
     /// facing is ([`Self::take_places`]).
@@ -1405,7 +1456,19 @@ impl Bodies {
         if target == body {
             return;
         }
-        let to = if place || main_room(tree, target).is_some() {
+        // A place it walked to from outside (a range, a sea): its edge, the nearest point of it, else its middle when
+        // it stands on that edge.
+        let edge = place_half_width(tree, target)
+            .filter(|(half, _)| select::gap(tree, target, frame, at).is_ok_and(|g| g > *half))
+            .and_then(|_| select::nearest_in(tree, target, frame, at).ok());
+        let to = if let Some((near, middle)) = edge {
+            let d = i128::from(near.x - at.x).pow(2) + i128::from(near.z - at.z).pow(2);
+            Some(if d > i128::from(sim::controller::FACE_NEAR).pow(2) {
+                near
+            } else {
+                middle
+            })
+        } else if place || main_room(tree, target).is_some() {
             let c = &self.runner.controller;
             notable_near(tree, frame, at, &|id| c.body(id).is_some())
         } else {
@@ -2611,6 +2674,36 @@ fn notable_near(tree: &Tree, frame: Id, at: Vec3, body: &dyn Fn(Id) -> bool) -> 
         }
     }
     best.map(|(_, _, p)| p)
+}
+
+/// Whether `node` is a place on the open ground of its own (a landform, a water, an area, a path: a child of the ground
+/// with an outline or a line and no solids, seats or floors, nor rooms within it), which a walk goes to the edge of
+/// (`Bodies::goal`) and faces (`Bodies::face`): how far its edge lies from its shape, µm (0 for an outline, half a
+/// line's width when the walkers' tree keeps it, else 0), and whether it is an area (an outline) rather than a line.
+fn place_half_width(tree: &Tree, node: Id) -> Option<(i64, bool)> {
+    use sim::ground::scene::{F_LINE_WIDTH, GROUND};
+    let n = tree.node(tree.handle(node)?)?;
+    let on_ground = n
+        .parent()
+        .and_then(|p| tree.node(tree.handle(p)?))
+        .is_some_and(|g| g.kind().as_str().split('@').next() == Some(GROUND));
+    let f = n.fields();
+    let built = [select::F_SOLIDS, select::F_SLOTS, select::F_SURFACES]
+        .iter()
+        .any(|k| f.contains_key(k));
+    if !on_ground || built || main_room(tree, node).is_some() {
+        return None;
+    }
+    if f.contains_key(&select::F_OUTLINE) {
+        return Some((0, true));
+    }
+    f.contains_key(&select::F_LINE).then(|| {
+        let mm = match f.get(&F_LINE_WIDTH) {
+            Some(Value::Uint(w)) => i64::try_from(*w).unwrap_or(0),
+            _ => 0,
+        };
+        (mm.saturating_mul(500), false)
+    })
 }
 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with

@@ -75,6 +75,7 @@ fn wants(bodies: &[Body], to: Vec3, ask: bool, map: &Arc<crate::ground::Versions
                     at: b.pose.position,
                     waiting: None,
                     crossing: None,
+                    carried: false,
                     staying: false,
                     spot: ask.then(|| (target(b), id(ORDER))),
                 })
@@ -187,6 +188,34 @@ fn a_walk_sent_mid_stair_waits_and_is_granted_on_landing() {
         p.places[&a.id].1.as_ref().err()
     );
     println!("S13d (2a): a walk sent mid-stair: waited 40 batches, granted on landing");
+}
+
+/// (2a') A walk sent while the world still carries its Soul off a seat (a rise's step off, no link): its mark asks
+/// from the seat's point, which may be inside the bench, so it waits for the carry's end, as mid-stair, and is granted
+/// once the body stands. Before, only a link's crossing waited and the walk was refused `spot-none-free`.
+#[test]
+fn a_walk_sent_while_stepping_off_a_seat_waits_and_is_granted_once_it_stands() {
+    let t = town();
+    let a = stand(&t, id(10), Vec3::new(0, 0, 0));
+    let to = goal(&t, &a);
+    let map = Arc::new(t.versions.clone());
+    let mut planner = Planner::new(t);
+    let mut w = wants(&[a], to, true, &map);
+    w.marks.as_mut().unwrap()[0].carried = true;
+    for n in 0..5 {
+        let p = planner.answer(&w);
+        assert!(
+            !p.places.contains_key(&a.id),
+            "batch {n}: waits while carried"
+        );
+    }
+    w.marks.as_mut().unwrap()[0].carried = false;
+    let p = planner.answer(&w);
+    assert!(
+        p.places[&a.id].1.is_ok(),
+        "{:?}",
+        p.places[&a.id].1.as_ref().err()
+    );
 }
 
 /// (2b) A crowd at one target, more Souls than its own places (about 300 on its rings): those places fill, and at
