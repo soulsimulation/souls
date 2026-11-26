@@ -454,7 +454,9 @@ async fn a_creators_page_and_agent_edit_in_turn_and_each_gets_every_answer() {
     assert_eq!(got.kind, 1, "{got:?}");
     (answered, version) = (answered + 1, got.version);
 
-    // Both at once: each is answered on its own socket, and only there.
+    // Both at once: each is answered on its own socket, and only there. The world takes them in the order they reach
+    // it, one numbering for the creator: the page's lower sequence is `intent.stale-seq` only if the agent's reached
+    // the world and was answered first.
     let (p, a) = (sequence + 1, sequence + 2);
     sequence += 2;
     put(
@@ -472,11 +474,13 @@ async fn a_creators_page_and_agent_edit_in_turn_and_each_gets_every_answer() {
         (answered_sequence(&on_page), answered_sequence(&on_agent)),
         (p, a)
     );
-    for v in [&on_page, &on_agent] {
-        let got = read_answer(v);
-        assert_eq!(got.kind, 1, "{got:?}");
-        version = version.max(got.version);
-    }
+    let (got_page, got_agent) = (read_answer(&on_page), read_answer(&on_agent));
+    assert!(
+        got_page.kind == 1 || got_page.reason == "intent.stale-seq",
+        "{got_page:?}"
+    );
+    assert_eq!(got_agent.kind, 1, "{got_agent:?}");
+    version = version.max(got_page.version).max(got_agent.version);
     answered += 2;
     quiet(&mut page, "page").await;
     quiet(&mut agent, "agent").await;
