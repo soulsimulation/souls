@@ -507,7 +507,9 @@ fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stoo
         "both bents ride their crews; set down: {set_down:?}"
     );
     assert!(set_down.is_empty(), "nothing set down: {set_down:?}");
-    let at_b = where_is(&w, bents[1]).2;
+    // Bent 2 rides its crew's node, at its carriers' middle (the part has no place of its own there).
+    let at_b = where_is(&w, b).2;
+    println!("crew B holds bent 2 at {at_b:?}");
     assert!(
         at_b.z < (z + 1_000) * 1000,
         "bent 2 carried past where it stood: {at_b:?}"
