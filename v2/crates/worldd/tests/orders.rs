@@ -101,6 +101,7 @@ fn queue(body: Id, chair: Id) -> Intent {
         fallbacks: vec![],
         replaces: None,
         body: Some(body),
+        reflex: false,
     }
 }
 fn ask(b: &mut Bodies, who: Id, n: u64, ask: Ask) {
