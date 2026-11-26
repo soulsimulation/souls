@@ -1057,7 +1057,7 @@ function onEntry(e) {
     const rows = rowsOf(copy), mine = mineIn(rows), body = mine[1] ?? ME;
     keepKinds(rows);
     for (const ev of offers) {
-      const n = offerNote(ev, body);
+      const n = offerNote(ev, body, e.at);
       // Who declined, or did not answer (the event's field 3), for the offerer. One asked is told its offer's `from`,
       // and the offer's word from the offer it was told of (its node may never have been in this Soul's copy).
       const was = n?.from ? logged.findLast((x) => (x.what === 'offered' ? x.offer : x.what === 'invited' ? x.conversation : null) === n.conversation) : null;
