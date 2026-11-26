@@ -90,9 +90,10 @@ pub const REHEARSAL_ENV: [&str; 8] = [
 ];
 
 /// What `worldd serve` reads from a world's folder besides its log and checkpoints: copied into a rehearsal's scratch
-/// folder. A fork's `boot` pins its support (its facts, entries, kinds and its `bodies.json` when it has one) and
-/// `serve` refuses a fork without it; every world reads its body catalogue and the code hatches its entries name.
-const FOLDER: [&str; 9] = [
+/// folder. A fork's `boot` pins its support (its facts, entries, kinds, `moves.json`, `entry.json` and `bodies.json`)
+/// and `serve` refuses a fork without it or with any of them changed (`served-fork-support-mismatch`); every world
+/// reads its entry, its body catalogue and the code hatches its entries name.
+const FOLDER: [&str; 10] = [
     "world.json",
     "facts.json",
     "header",
@@ -100,6 +101,7 @@ const FOLDER: [&str; 9] = [
     "moves.json",
     "entries",
     "boot",
+    "entry.json",
     "bodies.json",
     "hatches",
 ];
