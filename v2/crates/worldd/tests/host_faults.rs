@@ -250,7 +250,9 @@ fn answer(s: &mut UnixStream, within: Duration) -> Option<(u64, u64, String)> {
             _ => 0,
         };
         return match (a.get(&3), a.get(&4)) {
-            (Some(Value::Uint(k)), Some(Value::Text(t))) => Some((sequence, *k, t.to_string())),
+            (Some(Value::Uint(k)), Some(Value::Text(t))) => {
+                Some((sequence, *k, t.as_str().to_owned()))
+            }
             (Some(Value::Uint(k)), _) => Some((sequence, *k, String::new())),
             _ => None,
         };
