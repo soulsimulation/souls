@@ -41,6 +41,22 @@ test('swimwall: a body in water reads Swimming / Treading water, never the idle 
   assert.equal(doingText('swim:shore-water', 'tread'), 'Treading water · '+placeName('shore-water'));
 });
 
+test('trial of 0.137: a pose the body is drawn in outranks a doing that only gives its posture (the new engine\'s card words)', () => {
+  assert.equal(doingText('standing', 'hug'), 'Hugging');
+  assert.equal(doingText('standing', 'stargaze'), 'Stargazing');
+  assert.equal(doingText('standing', 'handshake'), 'Shaking hands');
+  assert.equal(doingText('standing', 'high-five'), 'High-fiving');
+  assert.equal(doingText('standing', 'wave'), 'Waving');
+  assert.equal(doingText('sitting', 'clap'), 'Clapping');
+  assert.equal(activityWords('jumping-jacks'), 'Doing jumping jacks');
+  // a doing of its own (speaking, the wind-down words) and a plain posture stay
+  assert.equal(doingText('speaking', 'hug'), 'Speaking');
+  assert.equal(doingText('asleep', 'lie'), 'Asleep');
+  assert.equal(doingText('standing', 'idle'), 'Standing');
+  assert.equal(doingText('walking', 'walk'), 'Walking');
+  assert.equal(doingText('sitting', 'sit'), 'Sitting');
+});
+
 test('VF1: "Reconnecting" only after a lost open socket stays down past the grace', () => {
   const conn = { stats: { state: 'connecting', reconnects: 0 } };
   assert.equal(connectionLost(conn, 0), false);           // first connect is arriving

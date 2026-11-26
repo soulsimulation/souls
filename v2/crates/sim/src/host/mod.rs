@@ -1230,6 +1230,7 @@ impl Runner {
             at: b.pose.position,
             waiting: waiting(self.fields.get(&b.id)),
             crossing: self.controller.carrying(b.id),
+            carried: self.controller.carried(b.id),
             staying: self.staying.contains(&b.id),
             // An ask stands while its order lasts and the body is not held (walked out by the world).
             spot: self

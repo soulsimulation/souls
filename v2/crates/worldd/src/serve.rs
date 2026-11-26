@@ -5,7 +5,9 @@
 //!
 //! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope",
 //!   "entry": [x mm, z mm]}`. The name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>`
-//!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`. With
+//!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`, unless `"arrival": "<place>"`
+//!   (`seed --arrival`, `worldd arrival`) names a place of the facts: then they are born round the middle of its
+//!   outline, facing it (Eden: `place-region-campus-quad`, round the quad's fountain). With
 //!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
 //!   checked against its own kinds. `world.kinds` keeps the unchanged pinned kinds text and explicit
 //!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
@@ -637,9 +639,9 @@ fn served_activities(entries: &[(String, Json)], kinds: &[ActivityKind], moves: 
 /// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
 /// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
 ///
-/// With the facts' terrain when it read it (S12): the punts change no ground, so [`with_rides`] reads it from here
-/// rather than loading the facts again.
-fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> {
+/// With the facts' waters and terrain when it read them (S12): the punts change no ground, so [`with_rides`] reads them
+/// from here rather than loading the facts again.
+fn with_punts(facts: &str) -> R<(String, Option<Waters>)> {
     let im = import_eden::load(facts)?;
     let Some(&ground) = im.nodes.get("ground") else {
         return Ok((facts.to_owned(), None));
@@ -662,7 +664,7 @@ fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> 
         view.stand_near(ground, p, 0, None).is_some()
     });
     if moorings.is_empty() {
-        return Ok((facts.to_owned(), Some(terrain)));
+        return Ok((facts.to_owned(), Some((waters, terrain))));
     }
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
     let Json::Obj(top) = &mut f else {
@@ -756,7 +758,23 @@ fn with_punts(facts: &str) -> R<(String, Option<Option<sim::ground::Terrain>>)> 
             _ => return Err(format!("the facts have no '{key}' list")),
         }
     }
-    Ok((f.to_json(), Some(terrain)))
+    Ok((f.to_json(), Some((waters, terrain))))
+}
+
+/// The open ground's standing and running waters and its terrain (`sim::courses::punts::waters_of`).
+type Waters = (Vec<sim::ground::Water>, Option<sim::ground::Terrain>);
+
+/// The water speed of a boat's entry, µm a second: its `vehicle` on `deep_water` (`content/kinds/vehicles`: a rowing
+/// boat, a canoe), read from the entry's data, never its kind's name. `None` for anything else.
+fn boat_speed(entry: &Json) -> Option<i64> {
+    let v = entry.get("vehicle")?;
+    if v.get("ground").and_then(Json::str) != Some("deep_water") {
+        return None;
+    }
+    match v.get("speed_mm_s")? {
+        Json::Int(n) => i64::try_from(*n).ok()?.checked_mul(1000).filter(|s| *s > 0),
+        _ => None,
+    }
 }
 
 /// The facts with a kind for each entry kind the facts do not already name, so a creator can place a thing of any
@@ -821,28 +839,34 @@ fn with_entry_kinds(facts: &str, entries: &[(String, Json)]) -> R<String> {
 /// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
 /// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
 /// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
-/// `terrain` is the facts' ground's terrain when [`with_punts`] read it, else it is read here.
-fn with_rides(
-    facts: &str,
-    entries: &[(String, Json)],
-    terrain: Option<Option<sim::ground::Terrain>>,
-) -> R<String> {
+///
+/// Boats too: each thing on the ground whose entry has a `vehicle` on `deep_water` ([`boat_speed`]: a rowing boat, a
+/// canoe) and that floats where it stands (`sim::courses::punts::floating`) gets a course that stands at its mooring for
+/// good, run at its entry's speed. That makes it a carrier a seated rider steers over the water (`carrier:steer`,
+/// `worldd::carrier`) and lands back at that mooring, its landing, where riders board and get off. A boat on dry
+/// ground gets none. `waters` are the facts' ground's waters and terrain when [`with_punts`] read them, else they are
+/// read here.
+fn with_rides(facts: &str, entries: &[(String, Json)], waters: Option<Waters>) -> R<String> {
     let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
         .iter()
         .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
         .filter(|(_, r)| r.loops_aloft())
         .collect();
-    if rides.is_empty() {
+    let boats: BTreeMap<&str, i64> = entries
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), boat_speed(e)?)))
+        .collect();
+    if rides.is_empty() && boats.is_empty() {
         return Ok(facts.to_owned());
     }
-    let terrain = match terrain {
-        Some(t) => t,
+    let (waters, terrain) = match waters {
+        Some(w) => w,
         None => {
             let im = import_eden::load(facts)?;
             let Some(&ground) = im.nodes.get("ground") else {
                 return Ok(facts.to_owned());
             };
-            sim::ground::Terrain::of(&im.tree, ground)?
+            sim::courses::punts::waters_of(&im.tree, ground)?
         }
     };
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
@@ -880,17 +904,18 @@ fn with_rides(
             .get("entry")
             .and_then(Json::str)
             .map(|e| replica::world_model::plain(e).to_owned());
-        let Some(ride) = own
-            .or_else(|| {
-                t.get("def")
-                    .and_then(Json::str)
-                    .and_then(|d| names.get(d))
-                    .cloned()
-            })
-            .and_then(|n| rides.get(n.as_str()))
-        else {
+        let Some(entry) = own.or_else(|| {
+            t.get("def")
+                .and_then(Json::str)
+                .and_then(|d| names.get(d))
+                .cloned()
+        }) else {
             continue;
         };
+        let (ride, boat) = (rides.get(entry.as_str()), boats.get(entry.as_str()));
+        if ride.is_none() && boat.is_none() {
+            continue;
+        }
         let Some([x, y, z]) = t
             .get("world")
             .and_then(Json::arr)
@@ -902,24 +927,47 @@ fn with_rides(
             continue;
         }
         let home = Vec3::new(x * 1000, y * 1000, z * 1000);
-        let t0 = k * 60_000_000;
-        let Some(c) = sim::courses::rides::course(
-            ride,
-            home,
-            |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
-            t0,
-        ) else {
-            continue;
+        let c = if let Some(ride) = ride {
+            let t0 = k * 60_000_000;
+            let Some(c) = sim::courses::rides::course(
+                ride,
+                home,
+                |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+                t0,
+            ) else {
+                continue;
+            };
+            k += 1;
+            println!(
+                "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
+                t.get("name").and_then(Json::str).unwrap_or("?"),
+                home.x as f64 / 1e6,
+                home.z as f64 / 1e6,
+                c.load().map_or(0, |t| t.period),
+                c.t0
+            );
+            c
+        } else {
+            let speed = boat.copied().unwrap_or(sim::courses::punts::ROWING);
+            if !sim::courses::punts::floating(&waters, terrain.as_ref(), home.x, home.z) {
+                continue;
+            }
+            let Ok(c) = sim::courses::punts::once_through(home, &[], 0, speed) else {
+                continue;
+            };
+            println!(
+                "boat: {} moored at {:.3},{:.3} m",
+                t.get("name").and_then(Json::str).unwrap_or("?"),
+                home.x as f64 / 1e6,
+                home.z as f64 / 1e6
+            );
+            c
         };
-        k += 1;
-        println!(
-            "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
-            t.get("name").and_then(Json::str).unwrap_or("?"),
-            home.x as f64 / 1e6,
-            home.z as f64 / 1e6,
-            c.load().map_or(0, |t| t.period),
-            c.t0
-        );
+        let shape = match c.shape {
+            sim::courses::Shape::Loop => 1,
+            sim::courses::Shape::ThereAndBack => 2,
+            sim::courses::Shape::Once => 3,
+        };
         let stations = c
             .stations
             .iter()
@@ -930,7 +978,7 @@ fn with_rides(
             "course".to_owned(),
             Json::Obj(vec![
                 ("stations".to_owned(), Json::Arr(stations)),
-                ("shape".to_owned(), int(1)),
+                ("shape".to_owned(), int(shape)),
                 ("speed".to_owned(), int(c.speed)),
                 ("t0".to_owned(), int(c.t0)),
                 ("within".to_owned(), int(c.within)),
@@ -950,14 +998,14 @@ static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// rides' courses (`sim::courses`), or [`import_eden::kind_name`] change what they give, so a cache from before is
 /// never read as now's. The build's own hash is in the key too ([`build_id`]), so a deploy of a new build computes them
 /// again.
-const COURSES_FORMAT: &str = "souls/facts-courses/2";
+const COURSES_FORMAT: &str = "souls/facts-courses/3";
 
 /// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
 /// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
 fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
-    let (punts, terrain) = with_punts(facts)?;
+    let (punts, waters) = with_punts(facts)?;
     stamp("facts: punts");
-    let rides = with_rides(&punts, entries, terrain)?;
+    let rides = with_rides(&punts, entries, waters)?;
     stamp("facts: rides");
     with_entry_kinds(&rides, entries)
 }
@@ -1610,6 +1658,7 @@ fn humanoid() -> R<Family> {
 
 /// `worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] [--at <x m>,<z m>]`: a world
 /// folder from a loader's facts file, with `n` Souls (default 1) on the open ground from (x, z) (default 0,0).
+/// `--arrival <place>` names the place of the facts (by name or id) joining Souls arrive at ([`arrival`]).
 pub fn seed(args: &[String]) -> i32 {
     match seed_in(args) {
         Ok(name) => {
@@ -1626,7 +1675,7 @@ pub fn seed(args: &[String]) -> i32 {
 fn seed_in(args: &[String]) -> R<String> {
     let (Some(facts), Some(dir)) = (arg(args, "--facts"), arg(args, "--dir")) else {
         return Err("usage: worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] \
-                    [--at <x m>,<z m>] [--creator <32 hex>-<n>]"
+                    [--at <x m>,<z m>] [--arrival <place>] [--creator <32 hex>-<n>]"
             .into());
     };
     let dir = PathBuf::from(dir);
@@ -1671,6 +1720,14 @@ fn seed_in(args: &[String]) -> R<String> {
         }
     }
     let built = build(&text, &found)?;
+    // The place Souls arrive at (`--arrival`), checked against the facts now: a seed never names one they lack.
+    let arrival_field = match arg(args, "--arrival") {
+        Some(place) => {
+            arrival_of(&json::parse(&text)?, place)?;
+            format!(", \"arrival\": {}", Json::Str(place.clone()).to_json())
+        }
+        None => String::new(),
+    };
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
     if let Some(text) = catalogue_text {
@@ -1747,7 +1804,7 @@ fn seed_in(args: &[String]) -> R<String> {
     };
     let meta = format!(
         "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}], \
-         \"entry\": [{}, {}]{creator}}}\n",
+         \"entry\": [{}, {}]{creator}{arrival_field}}}\n",
         to_hex(&scope),
         rows.join(", "),
         (x * 1000.0) as i64,
@@ -1763,6 +1820,115 @@ fn seed_in(args: &[String]) -> R<String> {
         std::fs::write(dir.join("boot"), public_boot(&dir, &built.header)?).map_err(io(&dir))?;
     }
     Ok(name)
+}
+
+/// The point Souls arrive at in a world whose `world.json` names an `arrival` place (a place of its facts, by its
+/// `name` or its `id`): the middle of that place's outline (or line), mm. None when the world names none, and the
+/// world's `entry` stands. A named place the facts do not hold is refused by name (`seed` and `worldd arrival` refuse
+/// it; a start says so and births at the entry).
+fn arrival(meta: &Json, facts: &str) -> R<Option<(i64, i64)>> {
+    let Some(name) = meta.get("arrival") else {
+        return Ok(None);
+    };
+    let name = name.str().ok_or("world.json: arrival is a place's name")?;
+    arrival_of(&json::parse(facts)?, name).map(Some)
+}
+
+/// The middle of the outline (or line) of the place `name` (its `name` or `id`) in `facts`, mm.
+fn arrival_of(facts: &Json, name: &str) -> R<(i64, i64)> {
+    let place = facts
+        .get("places")
+        .and_then(Json::arr)
+        .unwrap_or(&[])
+        .iter()
+        .find(|p| {
+            p.get("name").and_then(Json::str) == Some(name)
+                || p.get("id").and_then(Json::str) == Some(name)
+        })
+        .ok_or_else(|| format!("arrival-unknown: the facts name no place {name:?}"))?;
+    let points: Vec<(i64, i64)> = place
+        .get("polygon")
+        .or_else(|| place.get("line"))
+        .and_then(Json::arr)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|p| match p.arr()? {
+            [Json::Int(x), Json::Int(z), ..] => {
+                Some((i64::try_from(*x).ok()?, i64::try_from(*z).ok()?))
+            }
+            _ => None,
+        })
+        .collect();
+    let (Some(x0), Some(x1), Some(z0), Some(z1)) = (
+        points.iter().map(|p| p.0).min(),
+        points.iter().map(|p| p.0).max(),
+        points.iter().map(|p| p.1).min(),
+        points.iter().map(|p| p.1).max(),
+    ) else {
+        return Err(format!("arrival-unknown: place {name:?} has no outline"));
+    };
+    Ok(((x0 + x1) / 2, (z0 + z1) / 2))
+}
+
+/// `worldd arrival --dir <world folder> --place <place>`: the world's Souls arrive at `<place>` (a place of its facts, by
+/// name or id) from its next start: `world.json`'s `arrival` set, the place checked against its facts first. Prints
+/// the point, metres. `--clear` removes it, and Souls arrive at the world's `entry` again.
+pub fn set_arrival(args: &[String]) -> i32 {
+    match set_arrival_in(args) {
+        Ok(line) => {
+            println!("{line}");
+            0
+        }
+        Err(e) => {
+            eprintln!("worldd arrival: {e}");
+            1
+        }
+    }
+}
+
+fn set_arrival_in(args: &[String]) -> R<String> {
+    let usage = "usage: worldd arrival --dir <world folder> (--place <place> | --clear)";
+    let dir = PathBuf::from(arg(args, "--dir").ok_or(usage)?);
+    let place = arg(args, "--place").cloned();
+    let clear = args.iter().any(|a| a == "--clear");
+    if place.is_some() == clear {
+        return Err(usage.into());
+    }
+    let meta_path = dir.join("world.json");
+    let parsed = json::parse(&std::fs::read_to_string(&meta_path).map_err(io(&meta_path))?)?;
+    let Json::Obj(mut meta) = parsed else {
+        return Err("world.json is not souls/world/1".into());
+    };
+    if !meta
+        .iter()
+        .any(|(k, v)| k == "format" && v.str() == Some("souls/world/1"))
+    {
+        return Err("world.json is not souls/world/1".into());
+    }
+    meta.retain(|(k, _)| k != "arrival");
+    let line = match place {
+        Some(place) => {
+            let facts = dir.join("facts.json");
+            let (x, z) = arrival_of(
+                &json::parse(&std::fs::read_to_string(&facts).map_err(io(&facts))?)?,
+                &place,
+            )?;
+            let line = format!(
+                "arrival: {place} at {:.3},{:.3} m, from the next start",
+                x as f64 / 1000.0,
+                z as f64 / 1000.0
+            );
+            meta.push(("arrival".into(), Json::Str(place)));
+            line
+        }
+        None => "arrival: cleared; Souls arrive at the entry from the next start".into(),
+    };
+    view_out::write_whole(
+        &meta_path,
+        format!("{}\n", Json::Obj(meta).to_json()).as_bytes(),
+    )
+    .map_err(refusal)?;
+    Ok(line)
 }
 
 /// The Souls `world.json` names: (body, x mm, z mm).
@@ -3551,8 +3717,8 @@ fn serve(args: &[String]) -> R<()> {
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
-    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground
-    // that holds it is the main ground: a stand point or a restart is never put in ground no walk from there reaches.
+    // The world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground that holds
+    // it is the main ground: a stand point or a restart is never put in ground no walk from there reaches.
     let int = |v: &Json| match v {
         Json::Int(n) => i64::try_from(*n).ok(),
         _ => None,
@@ -3564,6 +3730,28 @@ fn serve(args: &[String]) -> R<()> {
     .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
     .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     town.set_entry(entry);
+    // Births by the world's arrival place (`world.json`'s `arrival`, the middle of a place its facts name), else the
+    // entry. A named place the facts no longer hold never keeps the world from starting: its Souls arrive at the
+    // entry, and the start says why.
+    let arrived = match meta.get("arrival") {
+        None => None,
+        Some(_) => std::fs::read_to_string(&facts)
+            .map_err(|e| e.to_string())
+            .and_then(|text| arrival(&meta, &text))
+            .unwrap_or_else(|e| {
+                eprintln!("worldd: arrival-refused: {e}; Souls arrive at the entry");
+                None
+            }),
+    };
+    if let Some((x, z)) = arrived {
+        println!(
+            "worldd: Souls arrive at {} ({:.3},{:.3} m)",
+            meta.get("arrival").and_then(Json::str).unwrap_or(""),
+            x as f64 / 1000.0,
+            z as f64 / 1000.0
+        );
+    }
+    let birth = arrived.map_or(entry, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     match town.main_ground() {
         Some((held, dry)) => println!(
             "main ground: the entry's part holds {held} of {dry} dry pieces; the rest is sealed off from it"
@@ -3759,7 +3947,7 @@ fn serve(args: &[String]) -> R<()> {
 
     let ground = built.ground;
     cfg.join = Some(Join {
-        entry: (ground, entry),
+        entry: (ground, birth),
         family: humanoid()?,
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
@@ -4249,6 +4437,29 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A boat is read from its entry's data: a `vehicle` on `deep_water` (a rowing boat at 1.5 m/s, a canoe), never a
+    /// bicycle on level ground or a punt, whose course is its mooring's.
+    #[test]
+    fn a_boat_is_a_vehicle_on_deep_water_by_its_entry() {
+        let read = |t: &str| json::parse(t).unwrap();
+        let row = read(include_str!(
+            "../../../../content/kinds/vehicles/rowing_boat.json"
+        ));
+        let canoe = read(include_str!(
+            "../../../../content/kinds/vehicles/canoe.json"
+        ));
+        let bike = read(include_str!(
+            "../../../../content/kinds/vehicles/bicycle.json"
+        ));
+        let punt = read(include_str!(
+            "../../../../content/kinds/vehicles/rowing_punt.json"
+        ));
+        assert_eq!(boat_speed(&row), Some(1_500_000));
+        assert!(boat_speed(&canoe).is_some());
+        assert_eq!(boat_speed(&bike), None);
+        assert_eq!(boat_speed(&punt), None);
+    }
 
     /// 0.134 T1, T2 and T3: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
     /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
@@ -6949,5 +7160,45 @@ mod s10c_lockstep {
             recorded,
             "the checkpoint keeps where it last stood"
         );
+    }
+}
+
+#[cfg(test)]
+mod arrival_tests {
+    use super::*;
+
+    const FACTS: &str = r#"{"places": [
+        {"id": "e_1.area", "name": "place-region-campus-quad",
+         "polygon": [[-29000, -109000], [5000, -109000], [5000, -85000], [-29000, -85000]]},
+        {"id": "e_2.footpath", "name": "a-path", "line": [[0, 0], [10000, 4000]]},
+        {"id": "e_3.area", "name": "bare"}
+    ]}"#;
+
+    /// A world names its arrival place by name or id; Souls arrive at the middle of its outline (Eden's campus quad:
+    /// its fountain), or of its line; a place the facts lack, or one with no outline, is refused by name; a world that
+    /// names none keeps its entry.
+    #[test]
+    fn an_arrival_place_is_the_middle_of_its_outline() {
+        let facts = json::parse(FACTS).unwrap();
+        assert_eq!(
+            arrival_of(&facts, "place-region-campus-quad"),
+            Ok((-12_000, -97_000))
+        );
+        assert_eq!(arrival_of(&facts, "e_1.area"), Ok((-12_000, -97_000)));
+        assert_eq!(arrival_of(&facts, "a-path"), Ok((5_000, 2_000)));
+        assert!(
+            arrival_of(&facts, "nowhere")
+                .unwrap_err()
+                .starts_with("arrival-unknown")
+        );
+        assert!(
+            arrival_of(&facts, "bare")
+                .unwrap_err()
+                .starts_with("arrival-unknown")
+        );
+        let named = json::parse(r#"{"arrival": "a-path"}"#).unwrap();
+        assert_eq!(arrival(&named, FACTS), Ok(Some((5_000, 2_000))));
+        let none = json::parse(r#"{"entry": [1, 2]}"#).unwrap();
+        assert_eq!(arrival(&none, FACTS), Ok(None));
     }
 }

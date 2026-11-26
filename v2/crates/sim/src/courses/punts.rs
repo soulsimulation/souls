@@ -422,7 +422,7 @@ impl Steer {
 }
 
 /// Whether the hull's middle at (x, z) is on water deep enough to float it, of any of `waters`.
-fn floating(waters: &[Water], terrain: Option<&Terrain>, x: i64, z: i64) -> bool {
+pub fn floating(waters: &[Water], terrain: Option<&Terrain>, x: i64, z: i64) -> bool {
     let ground = terrain.and_then(|t| t.height_at(x, z)).unwrap_or(0);
     waters
         .iter()

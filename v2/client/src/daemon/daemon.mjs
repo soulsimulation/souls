@@ -155,6 +155,7 @@ import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check
 import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
+import { BARE, bareAct } from '../check/bare.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { folderStamp, keptOne } from '../check/kept.mjs';
@@ -1266,8 +1267,10 @@ const HANDS = { take: 'pick_up', pick: 'pick_up', grab: 'pick_up', pickup: 'pick
 /**
  * C10 (#3414): the thin command's act words as candidates, best first. A word is an offered act, `<verb>:<id>` (a
  * verb with no namespace is the world's form: `sit:<id>` is `<ns>:sit` on that thing), a bare id (walk to it), or a
- * verb with no target; a bare id or `<name>=<id>` after an act is that act's thing argument. A bare id is named by
- * its place among the thing arguments the form `takes` in the target's kind entry, held in `<home>/kinds/`.
+ * verb with no target; a bare word the body does not offer is the one act the copy offers by it (`check/bare.mjs`:
+ * `rise` is `<ns>:rise`; several or none are refused, named); a bare id or `<name>=<id>` after an act is that act's
+ * thing argument. A bare id is named by its place among the thing arguments the form `takes` in the target's kind
+ * entry, held in `<home>/kinds/`.
  */
 function actsOf(words) {
   const out = [];
@@ -1276,12 +1279,14 @@ function actsOf(words) {
   const own = () => {
     if (body) return body;
     kinds ??= heldKinds(); rows ??= rowsOf(copy);
-    const me = [...rows.values()].find((r) => r.soul === ME);
-    return (body = me ? { id: me.id, forms: kinds[me.entry ?? me.kind]?.forms ?? {} } : { id: null, forms: {} });
+    const me = [...rows.values()].find((r) => r.soul === ME) ?? rows.get(ME);
+    return (body = me ? { id: me.id, row: me, forms: kinds[me.entry ?? me.kind]?.forms ?? {} } : { id: null, row: null, forms: {} });
   };
   // a thing's forms, or null when its kind is not in the copy (then nothing is read as the body's in its place)
   const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); const k = kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]; return k ? k.forms ?? {} : null; };
-  for (const w of words.map(String)) {
+  const list = words.map(String);
+  for (let i = 0; i < list.length; i++) {
+    const w = list[i];
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
     // Q1: a bare id after a plain walk is the next fallback (a walk takes no thing), as the skill's ranked list has it
     if (out.length && ID.test(w) && out.at(-1).verb === `${NS}:walk` && !out.at(-1).form) { out.push({ verb: `${NS}:walk`, this: w }); continue; }
@@ -1324,7 +1329,12 @@ function actsOf(words) {
       // the body, its thing arguments after it as for any act
       const f = HANDS[w] ?? w.replace(/-/g, '_');
       if (/^[a-z][a-z_]*$/.test(f) && own().id && own().forms[f]) out.push({ verb: `${NS}:${f}`, this: own().id, form: f });
-      else out.push({ verb: w });
+      else if (BARE.test(w)) {
+        // A bare word the body does not offer (`rise`, a thing's `exercise`): the one act here by that word, read in
+        // its place with its defaults (`check/bare.mjs`); several or none are refused with the choices named
+        const b = bareAct(w, { rows: rows ??= rowsOf(copy), kinds: kinds ??= heldKinds(), me: own().row, ns: NS });
+        if (b.words) { list.splice(i, 1, ...b.words); i--; } else out.push({ verb: b.verb, ...(b.this ? { this: b.this } : {}) });
+      } else out.push({ verb: w });
     }
   }
   return out;
@@ -1945,7 +1955,7 @@ async function answer(req, conn = null) {
       // finishes, a standing order ends. A `souls:cancel` naming it; the world answers both.
       const which = req.sequence !== undefined ? Number(req.sequence) : going.at(-1);
       if (which === undefined || !going.includes(which)) {
-        return closing({ ok: false, code: 'nothing-to-stop', sent: false, detail: `no act of yours is going${which !== undefined ? ` as ${which}` : ''}. Seated or lying: act <ns>:rise. To end the daemon: quit` }, null, { now: true });
+        return closing({ ok: false, code: 'nothing-to-stop', sent: false, detail: `no act of yours is going${which !== undefined ? ` as ${which}` : ''}. Seated or lying: act rise. To end the daemon: quit` }, null, { now: true });
       }
       const { sequence, sent } = sendIntent(['souls:cancel'], { replaces: which, basis: shownVersion ?? state.cursor });
       return closing({ ok: true, sequence, sent, stops: which, verbs: receipts.get(which)?.verbs ?? null }, null, { now: true });
@@ -2360,7 +2370,7 @@ const server = createServer((c) => {
         op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
         return answer(req, c);
       })
-        .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
+        .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200), ...(e.choices ? { choices: e.choices } : {}), ...(e.did_you_mean ? { did_you_mean: e.did_you_mean } : {}) }))
         .then((out) => {
           // R20: a scheduler's check is not the agent: it takes nothing an answer to the agent would carry.
           const check = op === 'pending';
