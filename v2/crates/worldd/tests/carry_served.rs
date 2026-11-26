@@ -2187,9 +2187,9 @@ fn track_of(dir: &Path, body: Id) -> Vec<Vec3> {
 /// Carrying together: other walkers keep apart from a carried load (moving-group rule 3). The walkers' map learns
 /// where a load rests only when it is set down or seated, so a load being carried stands among the bodies a walker
 /// keeps apart from. Two carry the beam 6 m east of the yard by the front's walk and stand, the beam held across the
-/// way; a third Soul walks from 4 m west of the beam's middle to 4 m east of it, straight through where the beam is.
-/// It goes round: never within its own space (0.15 m) of the beam's outline as held, and it arrives. The carry is
-/// never broken off.
+/// way; a third Soul walks from 4 m west of the beam to 4 m east of it, on a line that crosses the beam 0.9 m from its
+/// middle, straight through where the beam is. It goes round: never within its own space (0.15 m) of the beam's
+/// outline as held, and it arrives. The carry is never broken off.
 #[tokio::test(flavor = "multi_thread")]
 async fn group_a_passer_by_walks_round_a_carried_load() {
     let d = scratch("cpass");
@@ -2223,12 +2223,18 @@ async fn group_a_passer_by_walks_round_a_carried_load() {
         10,
     )
     .await;
-    c.act("eden:walk", ground, point(Vec3::new(at.x - 4 * M, 0, at.z)))
-        .await
-        .expect("the passer-by stands west of the beam");
+    // Its way crosses the beam 0.9 m from its middle, toward its front's end: nearer one end, as one passes a crew.
+    let across = at.z + 900_000;
+    c.act(
+        "eden:walk",
+        ground,
+        point(Vec3::new(at.x - 4 * M, 0, across)),
+    )
+    .await
+    .expect("the passer-by stands west of the beam");
     let cb = body_of(&dir, souls[2]);
     let from = track_of(&dir, cb).len();
-    let goal = Vec3::new(at.x + 4 * M, 0, at.z);
+    let goal = Vec3::new(at.x + 4 * M, 0, across);
     let t0 = Instant::now();
     let crossed = tokio::time::timeout(
         Duration::from_secs(60),
@@ -2254,7 +2260,11 @@ async fn group_a_passer_by_walks_round_a_carried_load() {
     };
     let walked = &track_of(&dir, cb)[from..];
     let nearest = walked.iter().map(gap).fold(f64::INFINITY, f64::min);
-    let strayed = walked.iter().map(|p| (p.z - at.z).abs()).max().unwrap_or(0);
+    let strayed = walked
+        .iter()
+        .map(|p| (p.z - across).abs())
+        .max()
+        .unwrap_or(0);
     let end = now[&cb];
     let short = ((end.x - goal.x) as f64).hypot((end.z - goal.z) as f64);
     println!(
