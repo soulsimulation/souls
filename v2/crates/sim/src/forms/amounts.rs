@@ -4,13 +4,16 @@
 //!
 //! - **Amounts** are whole numbers in the field's unit, with the least and the capacity its kind gives (K3 section 3,
 //!   [`replica::kinds::Field`]). A transfer names its field, and each end finds that field by name on its own kind
-//!   (`field-unknown` when it has none). It works out one number, the least of what was asked, what the source has
-//!   above its least and the room the target has left, and writes the source's set (minus it) and the target's (plus
-//!   it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to zero. Nothing
-//!   to move is refused `nothing-to-move`. The two ends' kinds may number the field differently: the tree's balance
-//!   sums by the field's name (T6 rule 3.4, E5b). Between two fields of one thing (`into_field`, #4103: a stock into
-//!   a well) the same one number is worked out from the two fields, and written as the two plain sets of one part:
-//!   the tree balances `by`s by the field's name, and these are two names.
+//!   (`field-unknown` when it has none, or it is not an `int`); the two ends' units must be one (`units-differ`). It
+//!   works out one number, as the reference's `measure` does: the least of what was asked and what the source has
+//!   above its least (`"room"` asks the room the target has left). More than that room is refused `no-room`, never
+//!   moved in part; nothing to move for a positive ask is refused `nothing-to-move`; an ask of 0 (a caddy's blend of
+//!   no mint) moves nothing and writes both fields as they are. It writes the source's set (minus it) and the
+//!   target's (plus it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to
+//!   zero. The two ends' kinds may number the field differently: the tree's balance sums by the field's name (T6
+//!   rule 3.4, E5b). Between two fields of one thing (`into_field`, #4103: a stock into a well) the same one number
+//!   is worked out from the two fields, and written as the two plain sets of one part: the tree balances `by`s by the
+//!   field's name, and these are two names, so what keeps the total here is this one number.
 //! - **Take and put** are B4's transfer ([`crate::slots::transfer`], called, not edited): T1's leave and arrive under
 //!   one transfer id, into a free hand of the body or a slot of the node. A put moves a thing the body holds, or one
 //!   standing loose on what the body stands on (wheeled or pushed in, C12).
@@ -64,6 +67,10 @@ pub struct Limit {
     pub default: i64,
     pub min: Option<i64>,
     pub max: Option<i64>,
+    /// Its unit (`g`, `count`, ...): a transfer's two ends must share it.
+    pub unit: Option<Name>,
+    /// Whether it is an `int` (a flag or a duration also has a whole-number default; a transfer moves neither).
+    pub int: bool,
 }
 
 /// The amount fields of every kind loaded, by the kind's full name and the field's number.
@@ -103,6 +110,8 @@ pub fn limits(kinds: &Kinds) -> Limits {
                             default,
                             min: f.min,
                             max: f.max,
+                            unit: f.unit.clone(),
+                            int: matches!(f.ty, Type::Int),
                         },
                     ))
                 })
@@ -383,11 +392,23 @@ impl Cx<'_> {
     /// Field `name` of a thing of kind `kind` made with it set to `to` (#4104), read against that kind's own field
     /// of the name: its number and the value written. A whole number within its least and capacity (`out-of-range`),
     /// a flag, or one of its enum's values, written as a name in the made kind's namespace as a set writes one
-    /// (`not-allowed`). Refused `field-unknown` when the kind (or its fields) is not loaded or has no such field,
-    /// `value-type` for a value of another type.
+    /// (`not-allowed`). Refused `field-unknown` when the kind has no such field, or its fields are not loaded here (a
+    /// creator's kind, or a kind loaded only for its places, areas, stocks or rides), `value-type` for a value of
+    /// another type.
     fn init(&self, kind: &Name, name: &Name, to: &Init) -> R<(u64, Value)> {
-        let (n, f) = of_kind(self.defs, kind.as_str())
-            .and_then(|fs| fs.iter().find(|(_, f)| f.name == *name))
+        let Some(fields) = of_kind(self.defs, kind.as_str()) else {
+            return refuse(
+                "field-unknown",
+                format!(
+                    "field {} of {}: kind not loaded",
+                    name.as_str(),
+                    kind.as_str()
+                ),
+            );
+        };
+        let (n, f) = fields
+            .iter()
+            .find(|(_, f)| f.name == *name)
             .ok_or_else(|| Refusal {
                 name: "field-unknown",
                 detail: format!("field {} of {}", name.as_str(), kind.as_str()),
@@ -429,10 +450,10 @@ impl Cx<'_> {
     }
 
     /// The amount field named `name` on `node`'s own kind, with its number (E5: a transfer's two ends may be of kinds
-    /// that number it differently), refused `field-unknown` when the kind has no amount field of that name.
+    /// that number it differently), refused `field-unknown` when the kind has no `int` field of that name.
     fn named(&self, node: Id, name: &Name) -> R<(u64, &Limit)> {
         self.fields(node)
-            .and_then(|fs| fs.iter().find(|(_, l)| l.name == *name))
+            .and_then(|fs| fs.iter().find(|(_, l)| l.name == *name && l.int))
             .map(|(n, l)| (*n, l))
             .ok_or_else(|| Refusal {
                 name: "field-unknown",
@@ -562,16 +583,31 @@ impl Cx<'_> {
                     return refuse("transfer-to-itself", show(from));
                 }
                 let ((nf, src), (ni, dst)) = (self.named(from, field)?, self.named(into, lands)?);
+                if src.unit != dst.unit {
+                    return refuse(
+                        "units-differ",
+                        format!("{} into {}", field.as_str(), lands.as_str()),
+                    );
+                }
                 let there = self.view.amount(from, nf).unwrap_or(src.default);
                 let has = self.view.amount(into, ni).unwrap_or(dst.default);
                 let above = there.saturating_sub(src.min.unwrap_or(0)).max(0);
                 let room = dst.max.map_or(i64::MAX, |m| m.saturating_sub(has).max(0));
-                let asked = match amount {
-                    Amount::Units(n) => *n,
-                    Amount::Room => room,
+                // The reference's one number (`measure`, form-rules): what is asked, down to what the source has above
+                // its least. A count beyond the target's room is refused, never moved in part; `"room"` asks just that.
+                let moved = match amount {
+                    Amount::Units(n) => (*n).min(above),
+                    Amount::Room => room.min(above),
                 };
-                let moved = asked.min(above).min(room);
-                if moved <= 0 {
+                if moved > room {
+                    return refuse(
+                        "no-room",
+                        format!("{} has room for {room}, {moved} asked", show(into)),
+                    );
+                }
+                // An ask of 0 (a caddy's blend of no mint) moves nothing: both fields are written as they are, so its
+                // receipt is in the log like any other effect's.
+                if moved <= 0 && *amount != Amount::Units(0) {
                     return refuse(
                         "nothing-to-move",
                         format!(

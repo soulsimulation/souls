@@ -860,7 +860,8 @@ pub enum Place {
     Slot(u64),
 }
 
-/// How much a transfer asks: a whole number of the field's unit, above zero, or all the room the target has left.
+/// How much a transfer asks: a whole number of the field's unit (zero, as a count argument may ask, moves nothing),
+/// or all the room the target has left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Amount {
     Units(i64),
@@ -1098,7 +1099,7 @@ pub fn bind_effects_in(
 /// ([`Effect::Timed`], C24) and a `reparent` no step carries (C24). Refused: `effect-not-built` for any other change
 /// (a `create` `here` is E4's, a link not seen by everyone T8's), `field-unknown`, `slot-unknown`, `link-unknown`,
 /// `form-unknown`, `arg-missing`, `out-of-range` and `not-allowed` for a value the field does not take,
-/// `effect-malformed` for a value that is no value at all, an amount that is not a whole number above zero or
+/// `effect-malformed` for a value that is no value at all, an amount that is not a whole number (zero or more) or
 /// `"room"`, or an `into_field` whose ends are not both the node or that names the field it leaves.
 /// A `put` names its slot, or a slot argument (`{"arg": a}`). A `take` or `put` with no `what` moves the thing the
 /// form's `reparent` effect into the same place names (the actor's hand, or that slot), else the node itself; that
@@ -1266,16 +1267,19 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
     Ok(out)
 }
 
-/// What a `transfer` asks (F4): a whole number above zero, `"room"`, or a count argument's number (`{"arg": a}`, as
-/// content's spindles and caddies ask, #4103); `effect-malformed` for anything else, `arg-missing` for an argument not
-/// given.
+/// What a `transfer` asks (F4): a whole number (zero or more), `"room"`, or a count argument's number (`{"arg": a}`,
+/// as content's spindles and caddies ask, #4103; a caddy's blend may ask 0 of one leaf, which moves nothing);
+/// `effect-malformed` for anything else, `arg-missing` for an argument not given.
 fn transfer_amount(v: Option<&Value>, args: &Args) -> Result<Amount, Refusal> {
-    let units = |n: i128| match i64::try_from(n) {
-        Ok(n) if n > 0 => Ok(Amount::Units(n)),
-        _ => refuse(
+    let malformed = || {
+        refuse(
             "effect-malformed",
-            "transfer.amount: a whole number above zero or \"room\"",
-        ),
+            "transfer.amount: a whole number (zero or more) or \"room\"",
+        )
+    };
+    let units = |n: i128| match i64::try_from(n) {
+        Ok(n) if n >= 0 => Ok(Amount::Units(n)),
+        _ => malformed(),
     };
     match v {
         Some(Value::Int(n)) => units(*n),
@@ -1286,15 +1290,16 @@ fn transfer_amount(v: Option<&Value>, args: &Args) -> Result<Amount, Refusal> {
                 Some(_) => refuse("effect-malformed", format!("argument {a} is not a count")),
                 None => refuse("arg-missing", a),
             },
-            None => units(0),
+            None => malformed(),
         },
-        None => units(0),
+        None => malformed(),
     }
 }
 
 /// A `create`'s `set` (#4104): each made field by name, its value a flag, a whole number or a name as written, or a
-/// value argument's (a candle's shape and colour chosen at the bench). `effect-malformed` for anything that is not a
-/// list of `{"field", "to"}` with such a value, `arg-missing` for an argument not given.
+/// value argument's (a candle's shape and colour chosen at the bench). `effect-malformed` for a `set` that is not a
+/// list or a `to` that is not such a value, `step-malformed` for a `field` that is not a name, `arg-missing` for an
+/// argument not given.
 fn made_set(v: Option<&Value>, args: &Args) -> Result<Vec<(Name, Init)>, Refusal> {
     let Some(v) = v else {
         return Ok(Vec::new());
