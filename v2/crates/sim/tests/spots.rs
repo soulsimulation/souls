@@ -780,8 +780,10 @@ fn a_doorways_passage_is_its_ends_and_its_line_and_its_mouth_is_on_the_rooms_sid
 
 /// #1960 (#3688's class): a move at a door aimed in its wall, short of the doorway, from a room on either side. Every
 /// floor place within an arm of the aim lies within [`CLEAR`] of the doorway's ends, so the plain search finds none
-/// (the bedroom close's `out-of-reach` on served Eden, 783 mm against 600). With the move's own door, its doorway
-/// counts and each side gets a place on its own side, within the arm; another thing's id changes nothing.
+/// clear of the doorway (the bedroom close's `out-of-reach` on served Eden, 783 mm against 600): since #5003's Eden
+/// audit it finds one at the doorway's mouth, on the walker's own side, never in the doorway itself; another thing's
+/// id changes nothing. With the move's own door, its doorway counts and each side gets a place on its own side,
+/// within the arm.
 #[test]
 fn a_door_is_reached_from_a_room_on_either_side() {
     let (mut t, nodes) = town();
@@ -800,17 +802,31 @@ fn a_door_is_reached_from_a_room_on_either_side() {
         .collect();
     let (west, east) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
     let (aim, reach) = (Vec3::new((west + east) / 2, 0, -3_400_000), 600_000);
+    let (buildings, ground) = (t.buildings.clone(), t.ground);
     for (side, from) in [("west", west - 1_000_000), ("east", east + 1_000_000)] {
         let body = stand(&t, id(1), f0, Vec3::new(from, 0, -3_000_000));
         let v = t.view();
-        assert_eq!(
-            v.stand_near(f0, aim, reach, Some(&body)),
-            None,
-            "{side}: no place out of the doorway"
+        let mouth = v
+            .stand_near(f0, aim, reach, Some(&body))
+            .unwrap_or_else(|| panic!("{side}: a place at the doorway's mouth"));
+        let own_side = |p: Vec3| {
+            if side == "west" {
+                p.x <= west
+            } else {
+                p.x >= east
+            }
+        };
+        assert!(
+            flat(mouth, aim) <= reach && own_side(mouth),
+            "{side}: {mouth:?} within an arm of {aim:?}, on the walker's side of the doorway"
+        );
+        assert!(
+            sim::walk::town::in_passage(&buildings, &[], ground, f0, mouth),
+            "{side}: {mouth:?} by the doorway's end, as no place clear of it is"
         );
         assert_eq!(
             v.stand_near_door(f0, aim, reach, Some(&body), Some(f0)),
-            None,
+            Some(mouth),
             "{side}: another thing's id frees no doorway"
         );
         let p = v
