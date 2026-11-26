@@ -214,6 +214,7 @@ fn the_thirty_resolve_alike_in_client_and_server_and_bind_to_legal_spots() {
                     at: on,
                     waiting: None,
                     crossing: None,
+                    carried: false,
                     staying: false,
                     spot: Some((target, id(2_000 + i as u64))),
                 };
