@@ -1964,6 +1964,11 @@ impl Bodies {
     /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
     /// or a rise is short and runs to its end, so a seat is never left half taken ([`Cut::Finishing`]): the world
     /// ends the act when its move ends. `None`: no move is going for it.
+    /// The move `body` is making of its own (a walk, or a walk to its place), by its intent, if any.
+    pub fn moving(&self, body: Id) -> Option<Id> {
+        self.live.get(&body).map(|(id, _)| *id)
+    }
+
     pub fn cancel(&mut self, id: Id) -> Option<Cut> {
         self.waiting.retain(|w| w.id != id);
         let (&body, &(_, live)) = self.live.iter().find(|(_, (i, _))| *i == id)?;

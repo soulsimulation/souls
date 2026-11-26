@@ -115,11 +115,13 @@ pub enum What {
     /// Hold `stance` (parameter 1: 1 stand, 2 sit, 3 lie) and the hands named (parameter 2).
     Hold { stance: Stance, hands: Vec<Name> },
     /// Follow `leader` (the target) within `band` µm (parameters 1 and 2), or keep a place `beside` it, that many µm
-    /// to its side (parameter 3, 0.135 R1: walking hand in hand).
+    /// to its side (parameter 3, 0.135 R1: walking hand in hand), or a place `at` an offset from it on the plan
+    /// (parameter 4, `[x, z]` µm: carrying together, `v2/docs/moving-group.md` rule 3).
     Follow {
         leader: Id,
         band: (i64, i64),
         beside: Option<i64>,
+        at: Option<[i64; 2]>,
     },
     /// Stand in line for the slot of `slot` (the target), and take it at the head by `act` (parameter 1), if named.
     Queue { slot: Id, act: Option<Name> },
@@ -237,7 +239,7 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
             What::Hold { stance, hands }
         }
         FOLLOW => {
-            has(&[1, 2, 3])?;
+            has(&[1, 2, 3, 4])?;
             let near = p.get(&1).map_or(Some(BAND.0), read_int);
             let far = p.get(&2).map_or(Some(BAND.1), read_int);
             let beside = match p.get(&3).map(read_int) {
@@ -245,11 +247,20 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
                 Some(Some(w)) if w > 0 => Some(w),
                 Some(_) => return bad("a place beside is a width over 0, µm"),
             };
+            let at = match p.get(&4) {
+                None => None,
+                Some(Value::Array(a)) => match a.iter().map(read_int).collect::<Option<Vec<_>>>() {
+                    Some(v) if v.len() == 2 && beside.is_none() => Some([v[0], v[1]]),
+                    _ => return bad("a place at is [x, z] µm from the leader, and not beside"),
+                },
+                Some(_) => return bad("a place at is [x, z] µm from the leader"),
+            };
             match (near, far) {
                 (Some(n), Some(f)) if 0 <= n && n <= f => What::Follow {
                     leader: node()?,
                     band: (n, f),
                     beside,
+                    at,
                 },
                 _ => return bad("a band is 0 <= nearest <= furthest, µm"),
             }
@@ -467,7 +478,8 @@ impl Orders {
                 leader,
                 band,
                 beside,
-            } => Box::new(follow(*leader, *band, *beside, until)),
+                at,
+            } => Box::new(follow(*leader, *band, *beside, *at, until)),
             What::Queue { .. } => Box::new(Queue { until }),
         };
         let driver = c.claim(body, &skill.shape())?;

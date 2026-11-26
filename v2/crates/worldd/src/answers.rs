@@ -1115,6 +1115,9 @@ struct Clock {
     walks: BTreeMap<Id, acts::Walk>,
     /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
     follows: BTreeMap<Id, (Id, Id)>,
+    /// Each carrier keeping its place from its crew's front (moving-group rule 3), by (carry, carrier): the
+    /// `souls:follow` order kept for it, by intent.
+    carry_follows: BTreeMap<(Id, Id), Id>,
     /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
     /// world opened: one whose hold a restart ended is cancelled.
     besides_checked: bool,
@@ -4529,6 +4532,7 @@ impl Clock {
     /// expired, its leader gone) ends the follow for both. The orders' entries are written in the same tick.
     fn follow_orders(&mut self, now: Micros) {
         self.keep_follow_orders(now);
+        self.keep_carry_orders(now);
         // In this tick, with the follow's own entries: a stop between two ticks never finds an order without its
         // activity, or an activity without its order (0.135 G2, review R2).
         let orders = self
@@ -4578,12 +4582,14 @@ impl Clock {
                 b.orders
                     .opened()
                     .filter(|o| {
+                        // A carry does not outlast a restart either (its load is set down at the first tick), so
+                        // an order keeping a place at a crew's front goes the same way.
                         matches!(
                             o.what,
                             sim::orders::What::Follow {
                                 beside: Some(_),
                                 ..
-                            }
+                            } | sim::orders::What::Follow { at: Some(_), .. }
                         ) && !followers.contains(&o.body)
                     })
                     .cloned(),
@@ -4664,6 +4670,136 @@ impl Clock {
                     }
                 }
             }
+        }
+    }
+
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): while a lifted carry's front walks, each other carrier
+    /// that is not moving on its own (no move of its own, no order of its own) walks with it by its own `souls:follow`
+    /// order, keeping the place it stood at from the front when the order began (parameter 4, `[x, z]` µm on the
+    /// plan); the crew moves as one and does not turn. A carrier's own act ends its order (B2: it claims the legs),
+    /// and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
+    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it takes a place
+    /// again where it stands. An order is cancelled when its carrier is no longer in the carry, or the carry is over.
+    /// A carry that broke off (`souls:partner-left`, `souls:carriers-apart`, `souls:carry-blocked`) stops its front's
+    /// walk too, ended by that reason: the whole group stops with one reason. Written in the tick, with the rest.
+    fn keep_carry_orders(&mut self, now: Micros) {
+        let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) else {
+            return;
+        };
+        let over = e.led_over();
+        let running = e.carry_follows();
+        let leading = e.leading();
+        if running.is_empty() && self.carry_follows.is_empty() && over.is_empty() {
+            return;
+        }
+        let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.0, r.2)).collect();
+        let mut cancel: Vec<sim::orders::Order> = Vec::new();
+        let gone: Vec<(Id, Id)> = self
+            .carry_follows
+            .keys()
+            .filter(|k| !keep.contains(k))
+            .copied()
+            .collect();
+        for k in gone {
+            let Some(order) = self.carry_follows.remove(&k) else {
+                continue;
+            };
+            if let Some(o) = b.orders.open(k.1).filter(|o| o.intent == order) {
+                cancel.push(o.clone());
+            }
+        }
+        // An order ended by itself (the carrier's own act took its legs, or it could not keep its place) is forgotten;
+        // its carrier is still in the carry.
+        self.carry_follows
+            .retain(|(_, f), order| b.orders.open(*f).is_some_and(|o| o.intent == *order));
+        let basis = Version {
+            lineage: self.lineage,
+            zone: self.zone,
+            epoch: 1,
+            sequence: self.replica.version(),
+        }
+        .to_value();
+        for (a, front, walker, soul) in running {
+            if self.carry_follows.contains_key(&(a, walker)) {
+                continue;
+            }
+            let walk = leading.iter().find(|l| l.0 == front).map(|l| l.1);
+            let going = walk.is_some() && b.moving(front) == walk;
+            if !going || b.moving(walker).is_some() || b.orders.open(walker).is_some() {
+                continue;
+            }
+            let (Some((on, f)), Some((own, w))) = (b.pose(front), b.pose(walker)) else {
+                continue;
+            };
+            if on != own {
+                continue;
+            }
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            let int = |n: i64| match u64::try_from(n) {
+                Ok(u) => Value::Uint(u),
+                Err(_) => Value::Nint(n.unsigned_abs() - 1),
+            };
+            let order = Intent {
+                actor: Actor::Soul(soul),
+                verb: Name::new(skills::orders::FOLLOW).unwrap_or_else(|| unreachable!("a name")),
+                target: Some(Target::Node(front)),
+                parameters: BTreeMap::from([(
+                    4,
+                    Value::Array(vec![int(w.x - f.x), int(w.z - f.z)]),
+                )]),
+                sequence: 0,
+                basis: basis.clone(),
+                expiry: now.saturating_add(sim::orders::LONGEST),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+                reflex: false,
+            };
+            match crate::orders::accept(b, &order, walker, id, now) {
+                Ok(()) => {
+                    self.carry_follows.insert((a, walker), id);
+                }
+                Err(r) => eprintln!(
+                    "worldd: {}'s place in its carry was refused: {r}",
+                    replica::world_model::show(walker)
+                ),
+            }
+        }
+        for o in cancel {
+            let walker = o.body;
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            let cancel = Intent {
+                actor: o.actor,
+                verb: Name::new(replica::intents::CANCEL).unwrap_or_else(|| unreachable!("a name")),
+                target: None,
+                parameters: BTreeMap::new(),
+                sequence: o.sequence.saturating_add(1),
+                basis: basis.clone(),
+                expiry: now.saturating_add(60_000_000),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: Some(o.sequence),
+                body: None,
+                reflex: false,
+            };
+            let _ = crate::orders::accept(b, &cancel, walker, id, now);
+        }
+        // The front's walk stops where it is, ended by why its carry broke off.
+        let mut stopped = Vec::new();
+        for (_, walk, why) in over {
+            if self.open.contains_key(&walk) && b.cancel(walk) == Some(Cut::Stopped) {
+                stopped.push((walk, why));
+            }
+        }
+        for (walk, why) in stopped {
+            self.settle(walk, Err(why.to_owned()), now);
         }
     }
 
@@ -6042,6 +6178,7 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
+        carry_follows: BTreeMap::new(),
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,

@@ -70,11 +70,19 @@ impl Skill for Hold {
 }
 
 /// Follow `leader` within `band` (µm) until `until`: N13's follow, ended by the order's expiry. With `beside`, a
-/// place that many µm beside the leader instead of its trail (0.135 R1, walking hand in hand).
-pub fn follow(leader: Id, band: (i64, i64), beside: Option<i64>, until: Micros) -> Follow {
-    match beside {
-        Some(w) => Follow::beside(leader, w, Some(until)),
-        None => Follow::new(leader, band, Some(until)),
+/// place that many µm beside the leader instead of its trail (0.135 R1, walking hand in hand); with `at`, a place at
+/// that offset from the leader on the plan (x, z, µm: carrying together, moving-group rule 3).
+pub fn follow(
+    leader: Id,
+    band: (i64, i64),
+    beside: Option<i64>,
+    at: Option<[i64; 2]>,
+    until: Micros,
+) -> Follow {
+    match (beside, at) {
+        (_, Some(o)) => Follow::at(leader, o, Some(until)),
+        (Some(w), None) => Follow::beside(leader, w, Some(until)),
+        (None, None) => Follow::new(leader, band, Some(until)),
     }
 }
 
