@@ -238,7 +238,8 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
     assert.equal(typeof a.age, 'number', `${req.op}: ${JSON.stringify(a).slice(0, 200)}`);
   }
   assert.equal(typeof act.age, 'number');
-  const fresh = await ask({ op: 'look' });
+  // A drop left by the tests before (R5b's forced ones) may still be resyncing: the fresh look is the first current one.
+  const fresh = await waitFor(async () => { const a = await ask({ op: 'look' }); return !a.gap && a; }, 10_000);
   assert.equal(fresh.gap, undefined);
   assert.ok(fresh.age < 2000, `age ${fresh.age}`);
   // A2: cut off for 30 s. First a black hole (the socket stays open, nothing comes back), then the connection cut

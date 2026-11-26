@@ -13,6 +13,9 @@ const GESTURES: Readonly<Record<string, string>> = {
   // 0.134 B4: lane T's touches, aimed at the other member (the take faces it and names it the partner).
   handshake: 'handshake', hug: 'hug', high_five: 'high-five',
 };
+/** Only named upper-body moves may overlay an authoritative seat; this adapter stays independent of scene modules. */
+const WHOLE_BODY:ReadonlySet<string>=new Set(['dance','jump','stretch','jumping-jacks','yoga','pushups','situps','stargaze']);
+export const SEATED_GESTURES:ReadonlySet<string>=new Set([...Object.values(GESTURES).filter(a=>!WHOLE_BODY.has(a)),'read']);
 /** Moves drawn as the old renderer's hand hold (`human.handHold`) with the member they reach, not as a pose. */
 const HOLDS: ReadonlySet<string> = new Set(['hold_hand']);
 /** 0.134 T3: looped activities a dance on the beat repeats, one record a cycle, the next on the next whole beat after
@@ -55,13 +58,13 @@ export function endReading(gestures: Gesture[], at: number): void {
 }
 
 /** Ends the gesture of the move that started at `start` at `at` (a held move let go, 0.134 T2). */
-export function endGesture(gestures: Gesture[], start: number, at: number): void {
-  for (const g of gestures) if (g.start === start && at < g.end) g.end = Math.max(g.start, at);
+export function endGesture(gestures: Gesture[], start: number, at: number, run?: string): void {
+  for (const g of gestures) if ((run === undefined || g.run === run) && g.start === start && at < g.end) g.end = Math.max(g.start, at);
 }
 
 /** Ends a body's gesture running at `at` (its run ended early); one that has not begun or is over stays as it is. */
-export function cut(gestures: Gesture[], at: number): void {
-  for (const g of gestures) if (g.start <= at && at < g.end) g.end = at;
+export function cut(gestures: Gesture[], at: number, run?: string): void {
+  for (const g of gestures) if ((run === undefined || g.run === run) && g.start <= at && at < g.end) g.end = at;
 }
 
 /** The gesture playing at world time t (the newest begun), or null. */

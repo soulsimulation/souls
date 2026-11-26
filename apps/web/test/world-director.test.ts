@@ -22,6 +22,19 @@ test('VF1 director: the opening waits for the town views (scenery after people)'
   assert.equal(d.choose(input(8,L))?.key,'landmark:commons');
 });
 
+test('phone arrival: the opening view was shown under the lifted card, so the first choice is a busy Soul, once', () => {
+  const input=(t:number):DirectorInput=>({bodies:[body('reader',70,-5,'read'),body('w',0,30+t,'walk')],speaking:new Map(),now:t,landmarks:L});
+  const plain=new WorldDirector(1);
+  assert.equal(plain.choose(input(0))?.key,'landmark:commons','desktop: the establishing opening as before');
+  const d=new WorldDirector(1);d.openingShown=true;
+  assert.equal(d.choose(input(0))?.key,'soul:reader');
+  assert.deepEqual(run(d,input,0,6),['soul:reader'],'no cut back to the opening view');
+  d.reset();
+  assert.equal(d.choose(input(100))?.key,'landmark:commons','one opening only: a later reset opens as before');
+  const idle=new WorldDirector(1);idle.openingShown=true;
+  assert.ok(idle.choose({bodies:[body('w',0,0,'walk')],speaking:new Map(),now:0,landmarks:L})?.key.startsWith('landmark:'),'only walkers: the town, as before');
+});
+
 test('VF1 director: a conversation wins over walkers, gets a two-shot and is held', () => {
   const d=new WorldDirector();
   const input=(t:number):DirectorInput=>({bodies:[body('a',0,0,'sit'),body('b',1.5,0,'sit'),body('w',30+t*2,0,'walk'),body('v',-30,t,'walk')],

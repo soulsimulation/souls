@@ -140,6 +140,10 @@ export class WorldBroadcast {
     return this.godViews;
   }
 
+  /** Phone arrival: the opening view was on screen under the lifted card already; the first shot with Souls goes to them
+   *  (WorldDirector.openingShown). */
+  openingShown() { this.picker.openingShown = true; }
+
   /** #892: the body the current shot is about (its focus), or null for a landmark or no shot. */
   get subject(): string | null { return this.choice?.kind === 'subjects' ? this.choice.focus : null; }
 

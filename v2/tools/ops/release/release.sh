@@ -26,7 +26,16 @@
 #                                  ($LIB/client, which a world's address serves), then the directory (souls-directory)
 #                                  and the viewers' origin (souls-origin), each restarted once on the release's program
 #                                  and unit and checked healthy, else put back on its previous ones; each step done
-#                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`
+#                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`.
+#                                  Just before each world's deploy, `entries stage` for that world: its deploy rehearses
+#                                  the new build on them and swaps them in between the pin and the restart, so only the
+#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged
+#   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
+#                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
+#                                  at its commit) by this release's `worldd entries`, every world when none is named:
+#                                  plan lists per world which entries change and which change is refused and why,
+#                                  changing nothing; stage writes them as <world>/entries.next, never entries/ itself.
+#                                  A refused world, a fork (its boot pins its entries) and a world with none keep theirs
 #   bodies worlds <page.tar> [<world>...]   the page's body catalogue (assets/bodies/bodies.json) into each world's
 #                                  folder (every world when none is named) that has none, or whose own it admits
 #                                  every body of; a fork keeps its own (its boot pins it). worldd reads it at start
@@ -60,8 +69,9 @@ ARTIFACTS=(worldd gatewayd page.tar client.tar directoryd origin.tar units.tar)
 # The two services the move restarts after the worlds and the gateway; the scratch machine runs neither (scratch.sh).
 SERVICES=${RELEASE_SERVICES-directory origin}
 # What moves them, carried with the release; world-aside sets a world's store objects aside for a reseed (0.133 R13);
-# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves.
-TOOLS=(deploy gateway-upgrade world-aside assets-check)
+# assets-check, the gateway's uploads checker (#1960), goes in beside the gateway when the gateway moves; store-copy is
+# store-switch.sh's copy tool (v2/docs/runbook/store-switch.md), carried so the host need not build it.
+TOOLS=(deploy gateway-upgrade world-aside assets-check store-copy)
 # A reseed of Eden, carried under reseed/ with the kinds it seeds from (content/kinds at the release's commit).
 RESEED=(reseed-eden.sh reseed-eden-undo.sh)
 
@@ -278,6 +288,35 @@ bodies_worlds() {
   rm -rf "$tmp"
 }
 
+# One world's `worldd entries <plan|stage>`, by this release's worldd on this release's kinds; its status (3: refused).
+# A stage writes <world>/entries.next only; the world's deploy swaps it in (or a stage that finds nothing removes it).
+entries_world() {
+  local act=$1 rel=$2 w=$3 f=$WORLDS_ROOT/worlds/$3 bin out s=0
+  bin=$WORLDS_ROOT/builds/$(artifact "$rel/manifest.json" worldd)/worldd
+  if [ ! -d "$f/entries" ] || [ ! -d "$rel/reseed/kinds" ]; then
+    [ "$act" != stage ] || rm -rf "$f/entries.next"
+    if [ ! -d "$f/entries" ]; then echo "entries: $w: kept: no entries"; else echo "entries: $w: kept: this release carries no kinds (staged by an older release-v2)"; fi
+    return 0
+  fi
+  out=$("$bin" entries "$act" --dir "$f" --kinds "$rel/reseed/kinds" 2>&1) || s=$?
+  # the build's own lines (its rides, punts, stand points and header) are the world's start's to print, not this
+  grep -E '^(entries|refused|worldd entries)' <<< "$out" || true
+  [ "$s" = 0 ] || [ "$s" = 3 ] || echo "entries: $w: not upgraded: worldd entries $act exited $s"
+  return "$s"
+}
+
+# entries plan|stage <sha> [<world>...]: entries_world for each world; a refused or failed world never stops the rest.
+library() {
+  local act=${1:-} sha=${2:-} rel w
+  { [ "$act" = plan ] || [ "$act" = stage ]; } && [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "entries plan|stage <sha> [<world>...]"
+  rel=$DATA/releases/$sha
+  [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
+  shift 2
+  # shellcheck disable=SC2046 # a world's name is one word
+  if [ $# -eq 0 ]; then set -- $(worlds); fi
+  for w in "$@"; do entries_world "$act" "$rel" "$w" || true; done
+}
+
 bodies_binding() {
   local file=${SOULS_CUTOVER_BINDING:-$ETC/cutover-binding.json} dir=$LIB/web/assets/bodies
   if [ ! -f "$file" ]; then
@@ -432,10 +471,15 @@ move() {
       echo "move: $w already moved by this release"
       continue
     fi
+    # its entries staged just before its deploy, which rehearses the new build on them and swaps them in at its
+    # restart; a refused or failed stage stages none, and the world deploys on its own entries
+    entries_world stage "$rel" "$w" || true
     echo "move: deploy $w$([ "$w" = "$canary" ] && echo ' (the canary)')"
     if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}"; then
       touch "$rel/moved/$w"
     else
+      # never left for a later deploy to take
+      rm -rf "$WORLDS_ROOT/worlds/$w/entries.next"
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
     fi
   done
@@ -727,7 +771,8 @@ main() {
   case $cmd in
     checks | bundle | stage | verify | move | bodies | mailbox | rollback | reseed | news | publish | remote) "$cmd" "$@" ;;
     reseed-undo) reseed_undo "$@" ;;
-    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
+    entries) library "$@" ;;
+    *) die "checks|bundle|publish|remote|stage|verify|move|bodies|mailbox|entries|rollback|reseed|reseed-undo|news (see the top of this file)" ;;
   esac
 }
 

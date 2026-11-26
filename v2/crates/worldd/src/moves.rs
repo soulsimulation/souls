@@ -268,6 +268,8 @@ pub fn from_content(text: &str) -> R<Move> {
             Some(point) => name(&format!("souls:{}", point.replace('_', "-")))?,
             None => name("souls:surface")?,
         },
+        // #4143: made from a seat, its legs left to the slot that holds the body (a stretch, a slump)
+        seated: matches!(m.get("seated"), Some(Json::Bool(true))),
     })
 }
 

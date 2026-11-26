@@ -5,12 +5,12 @@
 // up from the back or lying down, the plank tilting up from the feet or down to them, Sitting_Enter / Sitting_Exit), and
 // a procedural activity frame eases in after it, or crossfades from the one before. It observes the record only:
 // where the body is stays the engine's; only how it is posed over the next second follows the change.
-import { ACTIVITY_OVERLAYS, FACE_DOWN, LYING, type ActivityFrame, type HandGoal } from './activity-poses.ts';
+import { activityFrame, ACTIVITY_OVERLAYS, FACE_DOWN, LYING, type ActivityFrame, type HandGoal } from './activity-poses.ts';
 
 /** The posture an activity holds the body in. */
 export type PostureKind = 'stand' | 'back' | 'front' | 'seat' | 'ground';
 const SEAT_ACTS: ReadonlySet<string> = new Set(['sit', 'sit-down', 'stand-up']);
-/** Gait: a body that moves off at once is not held in a transition (its walk is the engine's). */
+/** Locomotion retains its native trajectory while a cosmetic floor exit finishes above the current root. */
 const MOVING: ReadonlySet<string> = new Set(['walk', 'wade', 'jog', 'run']);
 
 
@@ -21,8 +21,7 @@ export const FLATTEN = 0.25, GET_UP = 1.0, LIE_DOWN = 0.9, TILT = 0.6, ACT_BLEND
 const TURN_RISE = 0.55, TURN_TILT = 0.45;
 /** The old engine's seat transitions' own lengths (clip-library.ts Sitting_Enter / Sitting_Exit fits). */
 export const SIT_DOWN = 0.9, STAND_UP = 0.8;
-/** Seconds of activity history the take replay keeps across its previous windows (take-replay.ts indexActs): the
- *  longest change drawn here with its ease after it (1.55 s), with room to spare. */
+/** Legacy live-engine transition horizon. Recorded replay retains immutable origins across adjacent windows. */
 export const ACT_HISTORY = 1.8;
 
 export function postureKind(activity: string, base?: string): PostureKind {
@@ -42,10 +41,10 @@ export function postureKind(activity: string, base?: string): PostureKind {
  * `settle`: 0–1, how far the current activity's own frame has eased in after the change (1: fully). Null: no change
  * being drawn (none, over, or the body moving).
  */
-export type PostureNow = { rise?: number; tilt?: { act: string; k: number }; flat?: { act: string; k: number }; activity?: 'sit-down' | 'stand-up'; since?: number; settle: number };
+export type PostureNow = { rise?: number; tilt?: { act: string; k: number }; flat?: { act: string; k: number; ago?: number }; frame?: ActivityFrame | null; activity?: 'sit-down' | 'stand-up'; since?: number; settle: number };
 /** A change of posture in the record: the activity (and base) before it, the activity after it, its age (s); `before`:
  *  the change before it, when that was still being drawn as this one came. */
-export type PostureChange = { from: string; fromBase?: string; to: string; age: number; before?: PostureChange };
+export type PostureChange = { from: string; fromBase?: string; to: string; age: number; fromAge?: number; fromWalk?: { weight: number; distance: number }; before?: PostureChange };
 
 const S = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 type Phase = { s: number; at: (u: number) => Omit<PostureNow, 'settle'> & { settle?: number } };
@@ -67,8 +66,8 @@ function phasesOf(c: PostureChange, base: string | undefined): Phase[] {
   if (from === 'front' && to === 'stand') return [tiltUp(TILT), settle];
   // Seats: the old engine published its own 'sit-down' / 'stand-up' phases, drawn as they are; a record without them
   // (straight from standing to 'sit', or from 'sit' to standing) draws them over their own lengths.
-  if (from === 'stand' && c.to === 'sit') return [{ s: SIT_DOWN, at: (u) => ({ activity: 'sit-down', since: u * SIT_DOWN }) }];
-  if (c.from === 'sit' && to === 'stand') return [{ s: STAND_UP, at: (u) => ({ activity: 'stand-up', since: u * STAND_UP }) }];
+  if (from === 'stand' && to === 'seat' && c.to !== 'sit-down') return [{ s: SIT_DOWN, at: (u) => ({ activity: 'sit-down', since: u * SIT_DOWN }) }];
+  if (from === 'seat' && to === 'stand' && c.from !== 'stand-up') return [{ s: STAND_UP, at: (u) => ({ activity: 'stand-up', since: u * STAND_UP }) }];
   return [];
 }
 
@@ -80,32 +79,96 @@ function drawn(c: PostureChange, base: string | undefined, age: number): Posture
   return null;
 }
 
-/** The change `c` as drawn now while the body does `act` (on `base`; `c.to` or a later activity of the same posture).
- *  A change that comes while the one before it is still being drawn waits for it to finish (lying back, a brief idle,
- *  then push-ups: up off the back first, then down onto the hands); never cut. */
-export function postureNow(c: PostureChange | undefined, act: string, base?: string): PostureNow | null {
-  if (!c || c.age < 0 || MOVING.has(act)) return null;
-  let age = c.age;
+/** Evaluate an interruption at its recorded boundary, never from the last rendered frame. A retarget starts at
+ * that attained layout, rather than finishing an unrelated queued get-up. The optional clock freezes the outgoing
+ * procedural frame (including the sit-up/push-up cycle) at that same boundary. */
+export function postureNow(c: PostureChange | undefined, act: string, base?: string, clock?: { time: number; id: string }): PostureNow | null {
+  if (!c || c.age < 0 || MOVING.has(act)&&!['back','front'].includes(postureKind(c.from,c.fromBase))) return null;
+  const frozen = (a: string, ago: number) => clock ? activityFrame(a, c.fromBase ?? 'idle', clock.time - ago, clock.id) : null;
+  const settle = (k: number): PostureNow => postureKind(c.to, base) === 'back' ? { settle: k, flat: { act: c.to, k }, ...(clock ? { frame: blendFrames(null, activityFrame(c.to, base ?? 'idle', clock.time, clock.id), k) } : {}) } : { settle: k };
   const b = c.before;
   if (b) {
-    const len = phasesOf(b, undefined).filter((p) => p.at(0).settle === undefined).reduce((s, p) => s + p.s, 0), left = len - (b.age - c.age);
-    if (left > 0) { if (age < left) return drawn(b, undefined, b.age); age -= left; }
+    const elapsed = b.age - c.age;
+    const origin = postureNow({ ...b, age: elapsed, ...(b.before ? { before: shiftAge(b.before, -c.age) } : {}) }, b.to, c.fromBase, clock ? { ...clock, time: clock.time - c.age } : undefined);
+    if (origin) {
+      const to = postureKind(c.to, base), u = S(c.age / TILT);
+      if (origin.rise !== undefined) {
+        // A partly completed LayToIdle reverses from its actual phase, not phase zero/one.
+        const target = to === 'back' ? 0 : 1, rise = origin.rise + (target - origin.rise) * u;
+        if (c.age < TILT) return { settle: 0, rise };
+        const rest = c.age - TILT;
+        if (to === 'front') return rest < TILT ? { settle: 0, tilt: { act: c.to, k: S(rest / TILT) }, frame: frozen(c.to, c.age) } : null;
+        return rest < ACT_BLEND ? settle(S(rest / ACT_BLEND)) : null;
+      }
+      if (origin.tilt) {
+        const target = to === 'front' ? 1 : 0, k = origin.tilt.k + (target - origin.tilt.k) * u;
+        const frame = origin.frame ?? frozen(origin.tilt.act, c.age);
+        if (c.age < TILT) return { settle: 0, tilt: { act: origin.tilt.act, k }, frame };
+        const rest = c.age - TILT;
+        if (to === 'back') return rest < LIE_DOWN ? { settle: 0, rise: 1 - S(rest / LIE_DOWN) } : rest < LIE_DOWN + ACT_BLEND ? settle(S((rest - LIE_DOWN) / ACT_BLEND)) : null;
+        return rest < ACT_BLEND ? { settle: S(rest / ACT_BLEND), ...(to === 'front' ? { tilt: { act: c.to, k: 1 }, frame: blendFrames(frame, clock ? activityFrame(c.to, base ?? 'idle', clock.time, clock.id) : null, S(rest / ACT_BLEND)) } : {}) } : null;
+      }
+      if (origin.flat) {
+        const frame = origin.frame ?? blendFrames(null, frozen(origin.flat.act, c.age + (origin.flat.ago ?? 0)), origin.flat.k);
+        if (to === 'back') {
+          if (c.age < ACT_BLEND) return { settle: 0, flat: { act: c.to, k: 1 }, frame: blendFrames(frame, clock ? activityFrame(c.to, base ?? 'idle', clock.time, clock.id) : null, S(c.age / ACT_BLEND)) };
+          return null;
+        }
+        if (c.age < FLATTEN) return { settle: 0, flat: { act: origin.flat.act, k: origin.flat.k * (1 - S(c.age / FLATTEN)) }, frame: blendFrames(null, frame, 1 - S(c.age / FLATTEN)) };
+        const rest = c.age - FLATTEN;
+        if (rest < GET_UP) return { settle: 0, rise: S(rest / GET_UP) };
+        if (to === 'front' && rest >= GET_UP + TILT && rest < GET_UP + TILT + ACT_BLEND) return { settle: 0, tilt: { act: c.to, k: 1 }, frame: blendFrames(frozen(c.to, c.age), clock ? activityFrame(c.to, base ?? 'idle', clock.time, clock.id) : null, S((rest - GET_UP - TILT) / ACT_BLEND)) };
+        return to === 'front' && rest < GET_UP + TILT ? { settle: 0, tilt: { act: c.to, k: S((rest - GET_UP) / TILT) }, frame: frozen(c.to, c.age) } : null;
+      }
+    }
   }
-  return drawn(c, base, age);
+  // Finish a face-down entry by blending its frozen cycle into the live cycle, at the same layout.
+  if (postureKind(c.from, c.fromBase) === 'stand' && postureKind(c.to, base) === 'front' && c.age >= TILT && c.age < TILT + ACT_BLEND) {
+    const k = S((c.age - TILT) / ACT_BLEND);
+    return { settle: k, tilt: { act: c.to, k: 1 }, ...(clock ? { frame: blendFrames(frozen(c.to, c.age), activityFrame(c.to, base ?? 'idle', clock.time, clock.id), k) } : {}) };
+  }
+  const out = drawn(c, base, c.age);
+  if (out && out.rise === undefined && !out.tilt && !out.flat && postureKind(c.to, base) === 'back') out.flat = { act: c.to, k: out.settle };
+  if (out?.flat) { out.flat.ago = out.flat.act === c.to ? 0 : c.age; if (clock) out.frame = blendFrames(null, frozen(out.flat.act, out.flat.ago), out.flat.k); }
+  if (out?.tilt && clock) out.frame = frozen(out.tilt.act, c.age);
+  return out;
+}
+/** Phase boundaries are recorded-time blend anchors too: a library clip and a procedural frame need not have
+ * identical skeletons at their nominal endpoints. Expose the exact schedule, including final return to live phase. */
+export function posturePhaseEnds(c: PostureChange, base?: string, activity = c.to): number[] {
+  const b=c.before, elapsed=b?b.age-c.age:0;
+  const origin=b?postureNow({...b,age:elapsed,...(b.before?{before:shiftAge(b.before,-c.age)}:{})},b.to,c.fromBase):null;
+  const to=postureKind(c.to,base);
+  const finish=(ends:number[])=>MOVING.has(activity)&&ends.length>1&&Math.abs(ends.at(-1)!-ends.at(-2)!-ACT_BLEND)<1e-6?ends.slice(0,-1):ends;
+  if(origin?.rise!==undefined)return finish(to==='front'?[TILT,2*TILT,2*TILT+ACT_BLEND]:[TILT,TILT+ACT_BLEND]);
+  if(origin?.tilt)return finish(to==='back'?[TILT,TILT+LIE_DOWN,TILT+LIE_DOWN+ACT_BLEND]:[TILT,TILT+ACT_BLEND]);
+  if(origin?.flat)return to==='back'?[ACT_BLEND]:to==='front'?[FLATTEN,FLATTEN+GET_UP,FLATTEN+GET_UP+TILT,FLATTEN+GET_UP+TILT+ACT_BLEND]:[FLATTEN,FLATTEN+GET_UP];
+  let end=0;const ends=phasesOf(c,base).map(p=>end+=p.s);
+  if(postureKind(c.from,c.fromBase)==='stand'&&to==='front')ends.push(TILT+ACT_BLEND);
+  return finish(ends);
 }
 
-/** The latest posture change in an activity history (change ticks `t`, activities `v`, the base at each change from
- *  `base`) at or before run `k`, with the one before it, at `tick` (seconds a tick `dt`); null when none is younger
- *  than ACT_HISTORY. Runs after a change keep its posture, so an idle tick between sit-ups and jumping jacks still gets up. */
+function shiftAge(c: PostureChange, delta: number): PostureChange {
+  return { ...c, age: c.age + delta, ...(c.before ? { before: shiftAge(c.before, delta) } : {}) };
+}
+
+/** Immutable activity history supplies every still-relevant interruption. A stable gap terminates the dependency
+ * chain; there is no max-two rule and no cutoff applied to an origin while a newer transition still uses it. */
 export function lastPostureChange(t: readonly number[], v: readonly string[], k: number, tick: number, dt: number, base: (at: number, before: boolean) => string | undefined): PostureChange | null {
   const found: PostureChange[] = [];
-  for (let j = k; j >= 1 && found.length < 2; j--) {
+  let later = Infinity;
+  for (let j = k; j >= 1; j--) {
     const age = (tick - t[j]) * dt;
-    if (age > ACT_HISTORY) break;
     const fromBase = base(t[j], true);
-    if (postureKind(v[j - 1], fromBase) !== postureKind(v[j], base(t[j], false))) found.push({ from: v[j - 1], ...(fromBase ? { fromBase } : {}), to: v[j], age });
+    if (postureKind(v[j - 1], fromBase) === postureKind(v[j], base(t[j], false))) continue;
+
+    if (later - t[j] > (FLATTEN + GET_UP + TILT + ACT_BLEND) / dt && found.length) break;
+    found.push({ from: v[j - 1], ...(fromBase ? { fromBase } : {}), to: v[j], age, fromAge: (t[j] - t[j - 1]) * dt });
+    later = t[j];
   }
-  return found[0] ? { ...found[0], ...(found[1] ? { before: found[1] } : {}) } : null;
+  let out: PostureChange | undefined;
+  for (let j = found.length - 1; j >= 0; j--) out = { ...found[j], ...(out ? { before: out } : {}) };
+  return out ?? null;
 }
 
 
@@ -117,7 +180,7 @@ export const OWN_FADE: ReadonlySet<string> = new Set(['sing', 'play-piano', 'pla
  *  look numbers are mixed; the rest is the nearer frame's. A lying `cur` eased in from nothing keeps its layout, its
  *  raise eased by `k` (0: flat on the back). */
 export function blendFrames(prev: ActivityFrame | null, cur: ActivityFrame | null, k: number): ActivityFrame | null {
-  const lying = !prev && cur?.lying ? cur.lying : null;
+  const lying = cur?.lying && (!prev || prev.lying?.face === cur.lying.face) ? cur.lying : !cur && prev?.lying ? prev.lying : null;
   if (k >= 1 || (!prev && !cur)) return cur;
   if (k <= 0 && !lying) return prev;
   k = Math.max(0, k);
@@ -129,7 +192,7 @@ export function blendFrames(prev: ActivityFrame | null, cur: ActivityFrame | nul
     else if (cg) { hands[i] = cg; w[i] = cw * k; }
     else if (pg) { hands[i] = pg; w[i] = pw * (1 - k); }
   }
-  const out: ActivityFrame = { ...near, hands: hands[0] || hands[1] ? hands : null, handW: w, rootHands: undefined, lying: lying ? { ...lying, raise: lying.raise * k } : null,
+  const out: ActivityFrame = { ...near, hands: hands[0] || hands[1] ? hands : null, handW: w, rootHands: undefined, lying: lying ? { ...lying, raise: mix(prev?.lying?.raise, cur?.lying?.raise) } : null,
     feetOut: mix(prev?.feetOut, cur?.feetOut), hop: mix(prev?.hop, cur?.hop), lean: mix(prev?.lean, cur?.lean), side: mix(prev?.side, cur?.side), look: mix(prev?.look, cur?.look) };
   if (prev?.mouth !== undefined || cur?.mouth !== undefined) out.mouth = mix(prev?.mouth, cur?.mouth);
   return out;

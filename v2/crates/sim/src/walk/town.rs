@@ -149,6 +149,10 @@ pub struct Town {
     /// Non-default classes of the current controller snapshot (also sent to the planner).
     pub body_classes: BTreeMap<Id, Size>,
     pub ground: Id,
+    /// The world's entry, where Souls are born, on dry ground ([`Town::set_entry`]): the main ground is the part of it
+    /// that holds this point, and ground no walk from there reaches is sealed off ([`crate::mover::Floors::sealed`]).
+    /// `None`: no ground is sealed.
+    entry: Option<(Id, Vec3)>,
     pub map: Map,
     /// Each node's surface for the mover: the open ground (every square), and every floor that cuts.
     pub surfaces: BTreeMap<Id, Surface>,
@@ -767,6 +771,7 @@ impl Town {
             classes: BTreeMap::new(),
             body_classes: BTreeMap::new(),
             ground,
+            entry: None,
             map,
             surfaces,
             buildings,
@@ -1627,6 +1632,44 @@ impl Town {
         })
     }
 
+    /// Sets the world's entry, where Souls are born (`at`, µm, the open ground's frame): the main ground is the part
+    /// that holds it, and dry ground no walk from there reaches is sealed off ([`crate::mover::Floors::sealed`]), for
+    /// each body size on its own map. Taken on dry ground: the open ground at `at`, else the floor that holds it
+    /// ([`Town::entry_floor`], where births go then), else the open ground's nearest dry point to it. With none, no
+    /// entry is known and no ground is sealed. Never chosen by size: a small island's dry ground in a large sea is the
+    /// main ground when the entry is on it.
+    pub fn set_entry(&mut self, at: Vec3) {
+        let ground = self.ground;
+        let dry = |node: Id, p: Vec3| self.map.spot_near(node, p, AT_EDGE).is_some();
+        self.entry = if dry(ground, at) {
+            Some((ground, at))
+        } else if let Some((node, p)) = self.entry_floor(at).filter(|&(n, p)| dry(n, p)) {
+            Some((node, p))
+        } else {
+            self.surfaces.get(&ground).and_then(|s| {
+                crate::ground::exits::nearest_where(s.pieces(), at, &|p| dry(ground, p))
+                    .map(|(_, p)| (ground, p))
+            })
+        };
+    }
+
+    /// The main ground as a start prints it: how many of the standard map's dry pieces are in the entry's part (the
+    /// main ground), and how many in all. `None` when no entry is known.
+    pub fn main_ground(&self) -> Option<(usize, usize)> {
+        let (node, at) = self.entry?;
+        let main = self.map.spot_near(node, at, AT_EDGE)?;
+        let parts = self.map.parts(crate::routes::HANDS);
+        let dry: Vec<u32> = (0..parts.len() as u32)
+            .filter(|&q| self.map.piece(q).ground == crate::gaits::Ground::Dry)
+            .collect();
+        let main_part = parts[main.piece as usize];
+        let held = dry
+            .iter()
+            .filter(|&&q| parts[q as usize] == main_part)
+            .count();
+        Some((held, dry.len()))
+    }
+
     /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands, its velocity
     /// kept; refused when it stands on none (`off-ground`).
     pub fn relocate(&self, body: &Body) -> Result<Body, Refusal> {
@@ -1678,6 +1721,7 @@ impl Town {
         )?;
         copy.prepare_classes(self.classes.keys().copied())?;
         copy.body_classes.clone_from(&self.body_classes);
+        copy.entry = self.entry;
         Ok(copy)
     }
 
@@ -1691,6 +1735,7 @@ impl Town {
             classes: self.classes.clone(),
             body_classes: self.body_classes.clone(),
             ground: self.ground,
+            entry: self.entry,
             map: self.map.clone(),
             surfaces: self.surfaces.clone(),
             buildings: self.buildings.clone(),
@@ -1745,6 +1790,7 @@ impl Town {
             classes: BTreeMap::new(),
             body_classes: BTreeMap::new(),
             ground,
+            entry: None,
             map,
             surfaces,
             buildings,
@@ -1871,6 +1917,7 @@ impl Town {
                 turns: self.turns.as_ref(),
                 meter: self.meter,
                 ground: self.ground,
+                entry: self.entry,
             },
             scratches: &mut self.scratches[..workers],
             lines: &mut self.lines,
@@ -1901,6 +1948,7 @@ pub struct Shared<'a> {
     turns: Option<&'a Turns>,
     meter: Option<fn() -> u64>,
     ground: Id,
+    entry: Option<(Id, Vec3)>,
 }
 
 impl crate::mover::Floors for Shared<'_> {
@@ -1915,6 +1963,15 @@ impl crate::mover::Floors for Shared<'_> {
     fn wet(&self, node: Id, at: Vec3) -> bool {
         wet_on(self.map, node, at)
     }
+
+    fn sealed(&self, node: Id, at: Vec3, build: replica::kinds::sizes::Build) -> bool {
+        let map = if build.size == Size::Standard {
+            Some(self.map)
+        } else {
+            self.classes.get(&build.size).map(|g| &g.map)
+        };
+        map.is_some_and(|m| sealed_on(m, self.entry, node, at))
+    }
 }
 impl crate::mover::Floors for Town {
     fn for_build(&self, build: replica::kinds::sizes::Build) -> Option<&BTreeMap<Id, Surface>> {
@@ -1924,6 +1981,22 @@ impl crate::mover::Floors for Town {
     fn wet(&self, node: Id, at: Vec3) -> bool {
         wet_on(&self.map, node, at)
     }
+
+    fn sealed(&self, node: Id, at: Vec3, build: replica::kinds::sizes::Build) -> bool {
+        self.geometry(build.size)
+            .is_ok_and(|(m, ..)| sealed_on(m, self.entry, node, at))
+    }
+}
+
+/// Whether `at` on `node` lies on dry ground of `map` (one body size's) that no walk from the world's `entry` reaches
+/// ([`Map::may_reach`]): ground sealed off from the main ground. False with no entry, with no dry ground at the entry
+/// or at `at` on this map: never sealed when unknown.
+fn sealed_on(map: &Map, entry: Option<(Id, Vec3)>, node: Id, at: Vec3) -> bool {
+    let Some(main) = entry.and_then(|(n, p)| map.spot_near(n, p, AT_EDGE)) else {
+        return false;
+    };
+    map.spot_near(node, at, AT_EDGE)
+        .is_some_and(|s| !map.may_reach(main.piece, s.piece))
 }
 
 /// Whether `at` on `node` lies on a wet piece of the map: water or wading ground (E11d).
@@ -1993,6 +2066,7 @@ impl<'a> Shared<'a> {
             spent,
             lines: RefCell::new(lines),
             ground: self.ground,
+            entry: self.entry,
         })
     }
 }
@@ -2067,6 +2141,7 @@ pub struct View<'a> {
     spent: &'a Cell<Spent>,
     lines: RefCell<Lines<'a>>,
     ground: Id,
+    entry: Option<(Id, Vec3)>,
 }
 
 /// A corner is reached within this, µm.
@@ -2974,6 +3049,13 @@ impl<'a> View<'a> {
             }
         }
         out
+    }
+
+    /// Whether `at` (µm, `node`'s frame) is dry ground sealed off from the main ground for this view's body size: a
+    /// pocket no walk from the world's entry reaches ([`crate::mover::Floors::sealed`]). Off the ground, or with no
+    /// entry known ([`Town::set_entry`]), false.
+    pub fn sealed(&self, node: Id, at: Vec3) -> bool {
+        sealed_on(self.map, self.entry, node, at)
     }
 
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):

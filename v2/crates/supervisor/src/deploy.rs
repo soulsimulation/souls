@@ -13,6 +13,10 @@
 //!    must read every schema the new one writes (T6), or the rollback is refused `rollback.schema-unread` and the
 //!    world keeps running what it runs. Otherwise the pin goes back and the world is restarted.
 //!
+//! A release's library entries for the world, when it staged them (`<state>/entries.next`, `worldd entries stage`),
+//! go with the build: the rehearsal runs on them, the restart after the pin takes them (the world's own kept as
+//! `entries.before`), and a rollback puts the world's own back only when the new build wrote nothing.
+//!
 //! A build's folder is `builds/<hash>/`; it is started as the launcher starts it, `worldd serve --dir <state>` (C1,
 //! #3365), and `worldd schemas` prints `reads <hash>` and `writes <hash>` lines. The served log is `<state>/log`; the
 //! world's socket is the placed world's `<root>/../run/<world>.sock` (`place-world.sh`), else `<state>/gateway.sock`.
@@ -94,6 +98,35 @@ const FOLDER: [&str; 6] = [
     "moves.json",
     "entries",
 ];
+
+/// A release's library entries for a world (`worldd entries stage`): `<state>/entries.next`, the world's whole
+/// `entries/` with the release's changes. When it is there, the rehearsal runs on it instead of the world's own, and
+/// the restart after the pin takes it ([`swap_entries`]); otherwise the world keeps the entries it has.
+pub const ENTRIES_NEXT: &str = "entries.next";
+/// Where a deploy that took [`ENTRIES_NEXT`] keeps the entries it replaced: `<state>/entries.before`.
+pub const ENTRIES_BEFORE: &str = "entries.before";
+
+/// Swaps `<state>/entries` for [`ENTRIES_NEXT`] (`forward`), the replaced ones kept as [`ENTRIES_BEFORE`], or back.
+/// Two renames in one folder; the world is restarted right after either, so it reads one whole set. When the second
+/// fails, the first is undone: the world is never left without `entries/`.
+pub fn swap_entries(state: &Path, forward: bool) -> std::io::Result<()> {
+    let (live, next, before) = (
+        state.join("entries"),
+        state.join(ENTRIES_NEXT),
+        state.join(ENTRIES_BEFORE),
+    );
+    // (where the live set goes, what comes in)
+    let (out, cur) = if forward {
+        let _ = std::fs::remove_dir_all(&before);
+        (&before, &next)
+    } else {
+        (&next, &before)
+    };
+    std::fs::rename(&live, out)?;
+    std::fs::rename(cur, &live).inspect_err(|_| {
+        let _ = std::fs::rename(out, &live);
+    })
+}
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     if from.is_dir() {
@@ -850,6 +883,12 @@ pub fn rehearse(
                 .map_err(|e| format!("rehearsal.scratch: {name}: {e}"))?;
         }
     }
+    // The release's entries, when it staged some: the new build is rehearsed with what its restart will read.
+    if state.join(ENTRIES_NEXT).is_dir() {
+        let _ = std::fs::remove_dir_all(scratch.join("entries"));
+        copy_tree(&state.join(ENTRIES_NEXT), &scratch.join("entries"))
+            .map_err(|e| format!("rehearsal.scratch: {ENTRIES_NEXT}: {e}"))?;
+    }
     let copy = log_path(scratch);
     let store = FileStore::open(&copy).map_err(|e| format!("rehearsal.scratch: {e}"))?;
     let (mut log, _) = Log::open(store, epoch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
@@ -1170,7 +1209,28 @@ impl Deploy<'_> {
             return (Ended::NotDeployed { why }, tl, Some(r));
         }
         note(format!("pinned {}", &to_hex(new)[..16]));
+        // The release's entries go in between the pin and the restart, so only the new build reads them. A swap that
+        // fails leaves the world its own entries, as a deploy without them.
+        let swapped = state.join(ENTRIES_NEXT).is_dir()
+            && match swap_entries(&state, true) {
+                Ok(()) => {
+                    note(format!(
+                        "entries: the release's; the world's own kept in {ENTRIES_BEFORE}"
+                    ));
+                    true
+                }
+                Err(e) => {
+                    note(format!(
+                        "entries: not swapped ({e}): the world keeps its own"
+                    ));
+                    false
+                }
+            };
         if let Err(why) = unit.restart() {
+            // Not restarted onto them: the world's own go back, as a deploy that never took them.
+            if swapped && swap_entries(&state, false).is_ok() {
+                note("entries: the world's own put back".into());
+            }
             return (Ended::NotDeployed { why }, tl, Some(r));
         }
         note("restarted: the canary watch begins".into());
@@ -1187,6 +1247,18 @@ impl Deploy<'_> {
         };
         note(format!("fault: {fault}"));
         let wrote = records(&state) > before;
+        // Code rolls back, data never: the world's own entries go back only when the new build wrote nothing under
+        // the release's (a body may already hold a slot only they declare).
+        if swapped {
+            if wrote {
+                note("entries: the release's kept: the new build wrote records under them".into());
+            } else {
+                match swap_entries(&state, false) {
+                    Ok(()) => note("entries: the world's own put back".into()),
+                    Err(e) => note(format!("entries: the release's kept, not put back: {e}")),
+                }
+            }
+        }
         match self.roll_back(&old, new, wrote, unit, probe, &mut note) {
             Ok(()) => (Ended::RolledBack { fault }, tl, Some(r)),
             Err(why) => (Ended::Refused { why }, tl, Some(r)),
@@ -1511,6 +1583,11 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The world's entries and the release's staged ones: the rehearsal runs on the release's.
+        for (d, text) in [("entries", "old"), (ENTRIES_NEXT, "new")] {
+            std::fs::create_dir_all(state.join(d)).unwrap();
+            std::fs::write(state.join(d).join("a.json"), text).unwrap();
+        }
         let mut before = BTreeMap::new();
         files(&root, &mut before);
         let d = Deploy {
@@ -1531,6 +1608,11 @@ mod tests {
         assert_eq!((r.copied, r.fed, r.ended), (1, 2, 2));
         assert!(r.served_kept, "{r:?}");
         assert!(r.scratch.starts_with(root.join("rehearsals")), "{r:?}");
+        assert_eq!(
+            std::fs::read_to_string(r.scratch.join("entries/a.json")).unwrap(),
+            "new",
+            "rehearsed on the release's entries"
+        );
         let mut after = BTreeMap::new();
         files(&root, &mut after);
         after.retain(|p, _| !p.starts_with(root.join("rehearsals")));
@@ -1541,6 +1623,39 @@ mod tests {
             "the pin never moved"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The restart's swap: the release's entries in, the world's own kept beside them, and back.
+    #[test]
+    fn the_release_s_entries_swap_in_and_back_whole() {
+        let state = std::env::temp_dir().join(format!("swap-entries-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        let read = |d: &str| std::fs::read_to_string(state.join(d).join("a.json")).unwrap();
+        for (d, text) in [
+            ("entries", "old"),
+            (ENTRIES_BEFORE, "older"),
+            (ENTRIES_NEXT, "new"),
+        ] {
+            std::fs::create_dir_all(state.join(d)).unwrap();
+            std::fs::write(state.join(d).join("a.json"), text).unwrap();
+        }
+        swap_entries(&state, true).unwrap();
+        assert_eq!(
+            (read("entries"), read(ENTRIES_BEFORE)),
+            ("new".into(), "old".into())
+        );
+        assert!(!state.join(ENTRIES_NEXT).exists());
+        swap_entries(&state, false).unwrap();
+        assert_eq!(
+            (read("entries"), read(ENTRIES_NEXT)),
+            ("old".into(), "new".into())
+        );
+        assert!(!state.join(ENTRIES_BEFORE).exists());
+        // Nothing to swap in: the second rename fails, and the first is undone.
+        std::fs::remove_dir_all(state.join(ENTRIES_NEXT)).unwrap();
+        assert!(swap_entries(&state, true).is_err());
+        assert_eq!(read("entries"), "old", "never left without entries");
+        let _ = std::fs::remove_dir_all(&state);
     }
 
     /// 0.136.0's move: 1dad restarted on the new build catching up two quiet hours, and the live watch's first operator
