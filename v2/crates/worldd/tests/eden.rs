@@ -3135,11 +3135,12 @@ fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
 /// lighthouse to its lantern room (today's e_edbbc6a7, four floors up) and a tower to its top room (e_36bd67b1, whose
 /// top floor is 8.5 m up, not the 6.1 m the kind's area names), across the stairs, by their own entries; each ends
 /// `done`. Before #3599 each ended `souls:no-way`: the area's point was carried up to the open ground, cut out under
-/// the building.
+/// the building. The lighthouse's Soul is born on its breakwater, before its door (first-day round 2 turned it to
+/// face the breakwater; before, it was born on the platform beyond it, the only ground its door then opened onto).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
-    let lantern = act_at("96.0,194.0", "e_edbbc6a7", "eden:climb", "c34lh");
+    let lantern = act_at("96.0,182.0", "e_edbbc6a7", "eden:climb", "c34lh");
     let top = act_at("69.0,26.0", "e_36bd67b1", "eden:climb", "c34tw");
     lantern.expect("the lighthouse climbed, done");
     top.expect("the tower climbed, done");
@@ -7077,6 +7078,47 @@ fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
     out
 }
 
+
+/// First-day round 2 (0.139): a Soul on the harbour boardwalk walks to the lighthouse at the end of the breakwater,
+/// as `act <id>` sends it: to the lighthouse (today's e_edbbc6a7, its main room), its entrance's floor and its
+/// entrance. Each ends `done` on the entrance's floor. Before, each was refused `spot-none-free` at once, with
+/// nobody about: the lighthouse stood across the breakwater's end (5.4 m wide over a 5.2 m deck) with its one door
+/// on the far side, over the sea, so no walk reached any place in it; turned to face the breakwater, its door opens
+/// onto it.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn the_lighthouse_is_walked_to_from_the_boardwalk() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let floor = im.nodes["e_edbbc6a7/floor-0"];
+    let targets = ["e_edbbc6a7", "e_edbbc6a7/floor-0", "e_edbbc6a7/entrance"];
+    let (served, first, dir) = serve(&facts, "90.0,139.0", "lighthouse", lineage);
+    drop(first);
+    let mut walked = Vec::new();
+    for (k, key) in targets.iter().enumerate() {
+        let mut soul = join(&dir, 2 + k as u64, lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(400)))
+            .unwrap();
+        let r = soul.act_within("eden:walk", Some(im.nodes[*key]), BTreeMap::new(), 300_000_000);
+        println!("from the boardwalk to {key}: {r:?}");
+        walked.push(r);
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    // The world mints each Soul's body as it joins: by id, the first Soul's, then the walkers' in order.
+    let ends: Vec<_> = last_poses(&dir).into_values().skip(1).collect();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for ((key, r), end) in targets.iter().zip(&walked).zip(&ends) {
+        println!("  {key}: ends at {:?} on {:?}", end.position, end.frame.node);
+        assert!(r.is_ok(), "{key}: {r:?}");
+        assert_eq!(end.frame.node, floor, "{key}: in the lighthouse");
+    }
+    assert_eq!(ends.len(), targets.len());
+}
+
 /// Each body's last logged pose in the world's log in `dir`, by body id.
 fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
     let bytes = std::fs::read(dir.join("log")).unwrap();
@@ -7092,60 +7134,4 @@ fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
         }
     }
     out
-}
-
-/// First-day round 2 (0.139, harbour): from `HARBOUR_FROM` (default the boardwalk west of the fish market), one fresh
-/// Soul per target walks to it by a plain walk, as `act <id>` sends it. Prints each answer and where it ended.
-#[test]
-#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
-fn harbour_walks_repro() {
-    let facts = facts_path();
-    let text = std::fs::read_to_string(&facts).unwrap();
-    let im = import_eden::load(&text).expect("Eden loads");
-    let lineage = im.nodes["world"].scope();
-    let from = std::env::var("HARBOUR_FROM").unwrap_or_else(|_| "5.0,139.0".to_owned());
-    let mut keys: Vec<String> = [
-        "e_edbbc6a7",
-        "e_edbbc6a7/floor-0",
-        "e_edbbc6a7/entrance",
-        "e_503a2c3b",
-        "e_503a2c3b/floor-0",
-        "e_503a2c3b/shop",
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect();
-    for n in [
-        "place-region-harbour",
-        "place-region-harbour-boardwalk",
-        "land-lighthouse-breakwater",
-    ] {
-        keys.push(facts_id(&text, n));
-    }
-    let names: BTreeMap<Id, String> = im.nodes.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let (served, first, dir) = serve(&facts, &from, "harbour-repro", lineage);
-    drop(first);
-    let mut ran = Vec::new();
-    for (k, key) in keys.iter().enumerate() {
-        let mut soul = join(&dir, 2 + k as u64, lineage);
-        soul.0.set_read_timeout(Some(Duration::from_secs(400))).unwrap();
-        let t = answers::now();
-        let r = soul.act_within("eden:walk", Some(im.nodes[key]), BTreeMap::new(), 300_000_000);
-        let secs = (answers::now() - t) as f64 / 1e6;
-        ran.push((key.clone(), r, secs));
-    }
-    std::thread::sleep(Duration::from_secs(1));
-    let poses: Vec<_> = last_poses(&dir).into_values().collect();
-    drop(served);
-    let _ = std::fs::remove_dir_all(&dir);
-    for ((key, r, secs), pose) in ran.iter().zip(poses.iter().skip(1)) {
-        let p = pose.position;
-        println!(
-            "from {from} to {key}: {r:?} in {secs:.0} s; ends on {} at ({:.1}, {:.2}, {:.1})",
-            names.get(&pose.frame.node).cloned().unwrap_or_else(|| format!("{:?}", pose.frame.node)),
-            p.x as f64 / 1e6,
-            p.y as f64 / 1e6,
-            p.z as f64 / 1e6
-        );
-    }
 }
