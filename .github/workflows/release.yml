@@ -756,30 +756,63 @@ jobs:
   controls:
     needs: [preflight, ship, v2-move]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && (inputs.eyes_only || (needs.ship.result == 'success' && (needs.v2-move.result == 'success' || (!inputs.v2 && needs.v2-move.result == 'skipped')))) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45   # 2 worlds at a time, about 4 min each on a hosted runner
+    # The souls-timed runner's GPU, as the eyes: on a hosted runner the page draws at about 2 fps in SwiftShader and the
+    # walk never finished inside its timeout. A hardware GL renderer or nothing (SHIP_GPU, picked as eyes.mjs --gpu does).
+    runs-on: [self-hosted, souls-timed]
+    timeout-minutes: 45   # 2 worlds at a time, about 4 min each; a world whose page never loads stops after its load step
     permissions:
       contents: read
     steps:
+      # Before anything can print them: the runner's paths, host name and user name never reach the public log.
+      - name: Mask host-identifying values
+        run: |
+          for v in "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_WORKSPACE" "$RUNNER_TEMP" "$RUNNER_TOOL_CACHE" "$(hostname)" "$(id -un)"; do
+            if [ "${#v}" -ge 4 ]; then echo "::add-mask::$v"; fi
+          done
+      # A persistent runner: everything this job installs or writes stays in its own directory, removed at the end.
+      - name: Per-run directory
+        run: |
+          d="$RUNNER_TEMP/controls-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"; mkdir -p "$d/tmp" "$d/home"
+          {
+            echo "PER_RUN=$d"
+            echo "TMPDIR=$d/tmp"
+            echo "npm_config_store_dir=$d/pnpm-store"
+            echo "npm_config_cache_dir=$d/pnpm-cache"
+            echo "npm_config_state_dir=$d/pnpm-state"
+            echo "npm_config_cache=$d/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$d/pw-browsers"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: '${{ needs.preflight.outputs.sha }}', persist-credentials: false }
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with: { dest: '${{ env.PER_RUN }}/setup-pnpm' }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
-      - name: Playwright's Chromium
+      - name: Playwright's Chromium and a hardware GL renderer
         run: |
-          pnpm install --frozen-lockfile --filter mars-campus-viewer
-          pnpm --filter mars-campus-viewer exec playwright install --with-deps chromium 2>&1 | grep -v "%" | tail -4
+          pnpm install --frozen-lockfile --filter mars-campus-viewer --store-dir "$npm_config_store_dir"
+          # this Playwright no longer names Ubuntu 20.04; its Ubuntu 22.04 build runs there (as the eyes job's)
+          if grep -q 'VERSION_ID="20.04"' /etc/os-release; then echo "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64" >> "$GITHUB_ENV"; export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64; fi
+          pnpm --filter mars-campus-viewer exec playwright install chromium 2>&1 | grep -v "%" | tail -4
+          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || echo "nvidia-smi: not available"
+          node --input-type=module -e '
+            import { pickHardwareGl } from "./tools/world-launcher/deploy/ship/browser.mjs";
+            const g = await pickHardwareGl();
+            for (const t of g.tried) console.log(`gl: ${t.label}: ${t.renderer ?? t.error ?? "no WebGL"}`);
+            if (!g.label) { console.log("::error::no hardware GL renderer on this runner (SwiftShader refused)"); process.exit(1); }
+            console.log(`gl renderer: ${g.vendor} / ${g.renderer} (hardware, ${g.label})`);
+            (await import("node:fs")).appendFileSync(process.env.GITHUB_ENV, `SHIP_GPU=${g.label}\n`);'
       - name: Every header control on every moved world
         env:
           SHA: ${{ needs.preflight.outputs.sha }}
           DRY_RUN: ${{ inputs.dry_run }}
           EYES_ONLY: ${{ inputs.eyes_only }}
         run: |
+          export HOME="$PER_RUN/home"
           set +e
-          node tools/test-harness/e2e-controls/controls.mjs --origin "$SIM_ORIGIN" --out "$RUNNER_TEMP/controls"
+          node tools/test-harness/e2e-controls/controls.mjs --origin "$SIM_ORIGIN" --out "$PER_RUN/controls"
           rc=$?
-          [ -f "$RUNNER_TEMP/controls/summary.json" ] && { echo '```json'; cat "$RUNNER_TEMP/controls/summary.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ -f "$PER_RUN/controls/summary.json" ] && { echo '```json'; cat "$PER_RUN/controls/summary.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           [ "$rc" = 0 ] && exit 0
           if [ "$DRY_RUN" = false ] && [ "$EYES_ONLY" != true ]; then
             { echo "The release IS live and its header controls fail (above): nothing is published. Decide; to roll back, the"
@@ -793,8 +826,11 @@ jobs:
         if: always()
         with:
           name: controls-${{ needs.preflight.outputs.label }}
-          path: ${{ runner.temp }}/controls
+          path: ${{ env.PER_RUN }}/controls
           if-no-files-found: ignore
+      - name: Remove the per-run directory
+        if: always()
+        run: '[ -z "$PER_RUN" ] || rm -rf "$PER_RUN"'
 
   # feed_only: the feed item of a release already live and tagged, by itself (A3 of the 0.127 follow-up). The tag's tree
   # with this workflow's release-client.mjs, which compares with the release before the tag. Idempotent: the item's link
