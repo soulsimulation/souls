@@ -1573,7 +1573,10 @@ fn six_grips(d: &Path) {
                     format!("grip_{n}"),
                     json::Value::Obj(vec![
                         ("role".into(), json::Value::s("grip")),
-                        ("at_mm".into(), json::Value::Arr([0, *y, 0].map(num).to_vec())),
+                        (
+                            "at_mm".into(),
+                            json::Value::Arr([0, *y, 0].map(num).to_vec()),
+                        ),
                     ]),
                 ));
             }
@@ -1642,10 +1645,7 @@ async fn front_only(
         .act("carry:lift", carry, BTreeMap::from([(1, load.to_value())]))
         .await
         .expect("lifted");
-    let ahead: Vec<Vec3> = places
-        .iter()
-        .map(|p| Vec3::new(p.x + by, 0, p.z))
-        .collect();
+    let ahead: Vec<Vec3> = places.iter().map(|p| Vec3::new(p.x + by, 0, p.z)).collect();
     crew[0]
         .act("eden:walk", ground, point(ahead[0]))
         .await
@@ -1739,7 +1739,11 @@ async fn group_only_the_front_walks_and_crews_of_two_four_and_six_arrive_togethe
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     drop(served);
-    assert!(broke(&dir).is_empty(), "nothing broke off: {:?}", broke(&dir));
+    assert!(
+        broke(&dir).is_empty(),
+        "nothing broke off: {:?}",
+        broke(&dir)
+    );
     // Each load where its last crew took it: its middle within 0.6 m.
     for (name, id, entry, to) in [
         ("the upright", tall, entry, upright_at()),
@@ -1754,7 +1758,11 @@ async fn group_only_the_front_walks_and_crews_of_two_four_and_six_arrive_togethe
         let last = *moves_of(&dir, id).last().expect("moved");
         let m = last.orientation.rotate(l.middle).unwrap();
         let (x, z) = (last.position.x + m.x, last.position.z + m.z);
-        println!("{name}: set down with its middle at ({}, {}) mm", x / 1000, z / 1000);
+        println!(
+            "{name}: set down with its middle at ({}, {}) mm",
+            x / 1000,
+            z / 1000
+        );
         assert!(
             (x - to.x).abs() < 600_000 && (z - to.z).abs() < 600_000,
             "{name}: set down where its crew took it"
@@ -1813,7 +1821,10 @@ async fn group_a_carrier_lets_go_mid_walk() {
             BTreeMap::from([
                 (1, carry_kind(&dir)),
                 (2, Value::Text(Name::new(FRONT).unwrap())),
-                (3, Value::Array(vec![bodies[1].to_value(), bodies[2].to_value()])),
+                (
+                    3,
+                    Value::Array(vec![bodies[1].to_value(), bodies[2].to_value()]),
+                ),
             ]),
         )
         .await
@@ -1893,9 +1904,7 @@ async fn group_a_carrier_lets_go_mid_walk() {
         "both stopped short of where the front was going"
     );
     for k in [0, 2] {
-        let _ = crew[k]
-            .act("activity:leave", carry, BTreeMap::new())
-            .await;
+        let _ = crew[k].act("activity:leave", carry, BTreeMap::new()).await;
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
     drop(served);
@@ -1971,7 +1980,10 @@ async fn group_a_blocked_way_stops_the_whole_group() {
         f.x,
         k.x
     );
-    assert!((f.x - k.x).abs() < 500_000, "the back stopped with the front");
+    assert!(
+        (f.x - k.x).abs() < 500_000,
+        "the back stopped with the front"
+    );
     let down = b.act("carry:set-down", carry, BTreeMap::new()).await;
     assert_eq!(down, Err("not-carried".to_owned()), "the carry had stopped");
     for s in [&mut a, &mut b] {
