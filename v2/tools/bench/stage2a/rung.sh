@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One rung of stage 2a's ladder (#4154): Eden with N test Souls under `worldd serve`, its gatewayd and the viewers'
 # origin (tools/origin/origin.mjs) over the world's public stream, driven by the driver with the real Soul Actions mix
-# (loads.mjs `mix-<n>-<even|uneven>-<every4|burst>`), act wait read to the public stream (--stream), on Linux.
+# (loads.mjs `mix-<n>-<even|uneven>-<rate>`, a rate of its RATES), act wait read to the public stream (--stream), on Linux.
 #
-#   v2/tools/bench/stage2a/rung.sh <n> <even|uneven> <every4|burst> <world cpus|all> [seconds] [out folder]
+#   v2/tools/bench/stage2a/rung.sh <n> <even|uneven> <every4|burst|gene17|gene42> <world cpus|all> [seconds] [out folder]
 #
 # <world cpus> (taskset's list, e.g. 16-23) holds every world process (worldd, gatewayd, the origin); `all` leaves
 # them on every core. The driver runs on DRIVER_CPUS (default 40-47), apart from them. Needs: the release worldd,
@@ -14,7 +14,8 @@
 # VIEWERS=<m> (0.133 P3) adds m viewers on the world's public stream while the agents act (viewers.mjs; its arm is
 # this rung's), on VIEWER_CPUS (default DRIVER_CPUS); they need replica's wasm-bindgen package at REPLICA_PKG
 # (default $CARGO_TARGET_DIR/wasm-load/pkg). The rung's own processes are stopped by pid when it ends or is stopped,
-# and it refuses a folder under /var/lib/souls or /etc/souls (a served machine's worlds).
+# and it refuses a folder under /var/lib/souls or /etc/souls (a served machine's worlds). TRACE=1 has the driver write
+# its trace (run/trace.txt), whose `sent`, `first`, `ack` and `end` lines time each act to its first answer and its end.
 set -u
 N=$1 ARM=$2 RATE=$3 CPUS=$4 SECS=${5:-120}
 V2=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -108,7 +109,7 @@ SP=$!
 sleep 1
 date +%s > "$D/win.txt"
 taskset -c "$DRIVER_CPUS" "$B/driver" --schedule "$D/schedule.txt" --dir "$D/run" --tokens "$W/souls.tokens" \
-  --remote "ws://$ADDR" --speech --stream "$STREAM_URL" > "$D/driver.out" 2>&1 &
+  --remote "ws://$ADDR" --speech --stream "$STREAM_URL" ${TRACE:+--trace "$D/run/trace.txt"} > "$D/driver.out" 2>&1 &
 # In the background and waited for, so a stop's trap runs at once rather than after the driver's end.
 DP=$!
 if [ "${INJECT:-0}" -gt 0 ]; then inject & IP=$!; fi

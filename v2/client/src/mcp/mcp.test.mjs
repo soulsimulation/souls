@@ -147,7 +147,7 @@ test('A1: a host given the URL and a token lists the six tools and uses each on 
   if (process.env.R21_REPORT) console.log(JSON.stringify(transcript, null, 1));
 });
 
-const VOLATILE = ['age', 'stale', 'gap', 'asleep', 'rssBytes', 'heapBytes', 'upMs', 'started'];
+const VOLATILE = ['age', 'stale', 'gap', 'unchangedMs', 'rssBytes', 'heapBytes', 'upMs', 'started'];
 /** An answer without what moves between two calls a moment apart: its age and the process's memory and uptime. */
 function steady(answer) {
   const o = structuredClone(answer);

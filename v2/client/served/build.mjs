@@ -110,7 +110,7 @@ export function vendored(name, from, { strict = false } = {}) {
 export function stampSkill(text, version) {
   if (!/^---\n[\s\S]*?^name: souls$/m.test(text)) throw new Error('the skill must keep `name: souls`');
   return text.replace(/^(\s*version:\s*)"?[0-9][0-9.]*"?\s*$/m, `$1"${version}"`)
-    .replace(/(souls\.mjs )\d+\.\d+\.\d+/g, `$1${version}`)
+    .replace(/((?:eden|souls)\.mjs )\d+\.\d+\.\d+/g, `$1${version}`)
     .replace(/(skill )\d+\.\d+\.\d+/, `$1${version}`);
 }
 
