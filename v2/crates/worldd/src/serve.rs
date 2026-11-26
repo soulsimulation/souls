@@ -561,6 +561,10 @@ fn not_on_things(tree: &replica::tree::Tree, kinds: &[(String, Json)]) -> Vec<No
         next.extend(tree.children(h).unwrap_or(&[]));
         let Some(n) = tree.node(h) else { continue };
         let entry = import_eden::entry_name(n.kind().as_str(), n.fields());
+        // A thing of its entry's own kind borrows nothing: every slot its entry declares is offered.
+        if entry == plain(n.kind().as_str()) {
+            continue;
+        }
         let all = declared.entry(entry.to_owned()).or_insert_with(|| {
             import_eden::body_slots_of(n.id(), entry, &BTreeMap::new(), kinds)
                 .iter()
