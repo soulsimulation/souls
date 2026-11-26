@@ -1563,10 +1563,21 @@ impl Bodies {
 
     /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
     /// A ranked list is bound first, the move taken is checked as a client checks it (`replica::move_check`), then
-    /// started (C14). A walk starts now (its place and legs come from the planner, asked now and read at the next
-    /// tick, #4974); a sit or a rise waits for its reach, and comes back from the first call after the planner found it
-    /// (K18b).
+    /// started (C14). A walk starts now (its place and legs come from the planner, asked at its next body tick); a sit
+    /// or a rise waits for its reach, and comes back from the first call after the planner found it (K18b).
     pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+        self.start_with(asks, false)
+    }
+
+    /// The world's commit of one tick's gateway moves (step 4, after the bodies stepped): as [`Bodies::start`], and
+    /// the new walks' place questions go to the planner now, with the bodies as the tick left them (#4974): the next
+    /// tick reads their place and legs, so each walk is planned and its act answered a tick after it starts, not two.
+    /// Moves started inside a body step (the wind-down's walks) are asked with that step's own wants already.
+    pub fn start_committed(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+        self.start_with(asks, true)
+    }
+
+    fn start_with(&mut self, asks: Vec<(Id, Asked)>, ask_now: bool) -> Vec<(Id, R<()>)> {
         let mut out = Vec::new();
         let mut asked = Vec::new();
         let mut walked = Vec::new();
@@ -1643,9 +1654,12 @@ impl Bodies {
             .collect();
         self.reached
             .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
-        // The new walks' place questions go with them, now (#4974): their place and legs are read at the next tick,
-        // which plans each walk and answers its act a tick after it starts rather than two.
-        let mut wants = self.runner.ask_places(&walked, self.sent);
+        // Committed by the world's step 4, the new walks' place questions go with them, now (#4974).
+        let mut wants = if ask_now {
+            self.runner.ask_places(&walked, self.sent)
+        } else {
+            Wants::default()
+        };
         if !pairs.is_empty() || !wants.places.is_empty() {
             if wants.places.is_empty() {
                 wants.classes = self.town.body_classes.clone();

@@ -4712,7 +4712,7 @@ impl Clock {
                     .map(|s| (*id, s))
             })
             .collect();
-        let started = b.start(asks);
+        let started = b.start_committed(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
