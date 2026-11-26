@@ -3671,15 +3671,22 @@ fn serve(args: &[String]) -> R<()> {
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
-    // Births by the world's arrival place (`world.json`'s `arrival`, the middle of a place its facts name), else its
-    // entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground that holds it is the main
-    // ground: a stand point or a restart is never put in ground no walk from there reaches.
+    // The world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul. The ground that holds
+    // it is the main ground: a stand point or a restart is never put in ground no walk from there reaches.
     let int = |v: &Json| match v {
         Json::Int(n) => i64::try_from(*n).ok(),
         _ => None,
     };
-    // A named place the facts no longer hold never keeps the world from starting: its Souls arrive at the entry, and
-    // the start says why.
+    let entry = match meta.get("entry").and_then(Json::arr) {
+        Some([x, z]) => int(x).zip(int(z)),
+        _ => None,
+    }
+    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
+    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    town.set_entry(entry);
+    // Births by the world's arrival place (`world.json`'s `arrival`, the middle of a place its facts name), else the
+    // entry. A named place the facts no longer hold never keeps the world from starting: its Souls arrive at the
+    // entry, and the start says why.
     let arrived = match meta.get("arrival") {
         None => None,
         Some(_) => std::fs::read_to_string(&facts)
@@ -3698,14 +3705,7 @@ fn serve(args: &[String]) -> R<()> {
             z as f64 / 1000.0
         );
     }
-    let entry = arrived
-        .or_else(|| match meta.get("entry").and_then(Json::arr) {
-            Some([x, z]) => int(x).zip(int(z)),
-            _ => None,
-        })
-        .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
-        .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
-    town.set_entry(entry);
+    let birth = arrived.map_or(entry, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     match town.main_ground() {
         Some((held, dry)) => println!(
             "main ground: the entry's part holds {held} of {dry} dry pieces; the rest is sealed off from it"
@@ -3881,7 +3881,7 @@ fn serve(args: &[String]) -> R<()> {
 
     let ground = built.ground;
     cfg.join = Some(Join {
-        entry: (ground, entry),
+        entry: (ground, birth),
         family: humanoid()?,
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
