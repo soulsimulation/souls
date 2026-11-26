@@ -1,6 +1,6 @@
 // release.sh's release-head checks, the reseed it carries (0.133 R13) and its move of the directory and the origin,
 // with stand-ins for gh and the machine's programs: the merge queue's green ci run counts for ci-ok and the v2 legs, a
-// staged release runs Eden's reseed pre-check with its own world-aside and kinds, and the move restarts the directory
+// staged release runs Eden's reseed pre-check with its own kinds on a fresh store generation, and the move restarts the directory
 // and the origin once, after the worlds and the gateway, on the release's programs and units, and puts each back on its
 // previous ones when it does not answer as healthy.
 //   node --test v2/tools/ops/release/release.test.mjs
@@ -41,21 +41,22 @@ test('checks: the merge queue\'s green ci run at the head counts for ci-ok and t
   assert.match(noScrub.stdout, /release.missing-check: scrub-guard /);
 });
 
-test('a staged release carries the reseed, and its pre-check uses that release\'s world-aside and kinds', () => {
+test('a staged release carries the reseed, and its pre-check uses that release\'s kinds and a fresh store generation', () => {
   const bins = join(dir, 'bins'), page = join(dir, 'page'), pkg = join(dir, 'pkg'), out = join(dir, 'bundle');
   const data = join(dir, 'data'), etc = join(dir, 'etc'), lib = join(dir, 'lib');
   for (const d of [page, pkg, etc, lib]) mkdirSync(d, { recursive: true });
   const world = `${'c'.repeat(32)}-${'c'.repeat(32)}-0`;
-  // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; world-aside lists 3 objects.
-  exe(join(bins, 'worldd'), 'exit 0');
+  // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; both read a store generation
+  // (#4954: they carry its refusal, 'generation-bad: '), and so does the installed supervisor.
+  exe(join(bins, 'worldd'), '# generation-bad: \nexit 0');
   exe(join(bins, 'gatewayd'), 'exit 0');
   exe(join(bins, 'directoryd'), 'exit 0');
-  exe(join(bins, 'deploy'), 'echo 1220' + '0'.repeat(64));
+  exe(join(bins, 'deploy'), '# generation-bad: \necho 1220' + '0'.repeat(64));
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'echo "dry run: 3 objects of $1 would move; nothing changed"');
   exe(join(bins, 'assets-check'), 'exit 0');
   exe(join(bins, 'store-copy'), 'exit 0');
-  exe(join(lib, 'supervisor'), 'if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
+  exe(join(lib, 'supervisor'), 'if [ "$1" = generation ]; then echo none; exit 0; fi; if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -78,12 +79,11 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   const check = run(['reseed', sha, 'check'], env);
   assert.equal(check.status, 0, check.stdout + check.stderr);
   const rel = join(data, 'releases', sha);
-  assert.match(check.stdout, new RegExp(`world-aside +the release's own, ${rel}/bin/world-aside`));
   assert.match(check.stdout, new RegExp(`kind entries +${rel}/reseed/kinds \\(\\d+ entries\\)`));
   // #4837: Eden's stock and its libraries go with the release, as a world folder keeps them, and the reseed seeds with them
   assert.match(check.stdout, new RegExp(`stock +${rel}/reseed/stock/stock\\.json`));
   for (const f of ['stock.json', 'library/books.json', 'library/garments.json']) assert.ok(existsSync(join(rel, 'reseed/stock', f)), f);
-  assert.match(check.stdout, /3 of the world's objects at their keys/);
+  assert.match(check.stdout, /generation +the fresh world's objects under g\/\d{8}T\d{6}Z\/; the old world's \(at their keys\) stay where they are: none moves/);
   assert.match(check.stdout, /check only; nothing changed/);
   // a fresh reseed refuses while a reseed to this build is not undone, and names the label to resume
   const manifest = readFileSync(join(rel, 'manifest.json'), 'utf8');
@@ -372,4 +372,28 @@ test('entries: plan lists each world\'s changes and changes nothing; the move st
   assert.deepEqual(read(deployed).trim().split('\n'), ['up rehearsed new', 'none rehearsed own']);
   assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'new\n', 'the deploy took them');
   assert.equal(read(worlds, 'up/entries.before/eden.humanoid.json'), 'old\n', 'the world\'s own kept beside them');
+});
+
+test('rollback refuses a build from before #4954 for a world on a store generation, and takes back every other world', () => {
+  const m = join(dir, 'rollback'), data = join(m, 'data'), root = join(data, 'worlds'), log = join(m, 'log');
+  const [from, to, toOld] = ['f', '7', '0'].map((c) => `1220${c.repeat(64)}`);
+  const [fresh, kept] = ['c', 'd'].map((c) => `${c.repeat(32)}-${c.repeat(32)}-0`);
+  // The release that brought <from>, its deploy a stand-in that logs; <to> reads store generations, <toOld> does not.
+  exe(join(data, 'releases', sha, 'bin/deploy'), `echo "deploy $*" >> ${log}`);
+  writeFileSync(join(data, 'releases', sha, 'manifest.json'),
+    `{"commit":"${sha}","version":"0.135.1","files":[]}\n{"name":"worldd","hash":"${from}","path":"bin/worldd"}\n`);
+  exe(join(root, 'builds', to, 'worldd'), '# generation-bad: ');
+  exe(join(root, 'builds', toOld, 'worldd'), '# a build from before #4954');
+  for (const w of [fresh, kept]) mkdirSync(join(root, 'worlds', w), { recursive: true });
+  writeFileSync(join(root, 'worlds', fresh, 'generation'), '20261125T010000Z\n');
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: root, RELEASE_ETC: join(m, 'etc') };
+
+  const old = run(['rollback', toOld, from, fresh, kept], env);
+  assert.equal(old.status, 3, old.stdout + old.stderr);
+  assert.match(old.stdout, new RegExp(`refused: rollback\\.generation: ${fresh} is on store generation g/20261125T010000Z/, which 1220000000000000… cannot read`));
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${kept} ${toOld} --from ${from}`], 'only the world on no generation');
+  rmSync(log);
+  const ok = run(['rollback', to, from, fresh], env);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${fresh} ${to} --from ${from}`]);
 });

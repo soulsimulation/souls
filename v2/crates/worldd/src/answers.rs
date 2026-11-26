@@ -140,6 +140,7 @@ use replica::effects::{
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -160,7 +161,7 @@ use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::edit::safety::{Known, Who};
 use sim::frozen::Publisher;
-use sim::life::{Birth, Life, Ring};
+use sim::life::{Birth, Life, Ring, Standing};
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
 use sim::speech;
@@ -719,6 +720,10 @@ pub struct Config {
     /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
     /// its settings keeps them. `None`: a world without settings has no sky.
     pub sky: Option<daylight::Config>,
+    /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`), by
+    /// pin: written at this start's first tick as definitions in the world's history ([`Clock::put_kinds`]), so things
+    /// and activities of them are made and every copy applies them.
+    pub define: Definitions,
     /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
@@ -752,6 +757,9 @@ pub struct Config {
     /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
     /// ones [`Config::bodies`] makes.
     pub join: Option<Join>,
+    /// The world's entry as its town took it, on dry ground (`Town::entry`): the main ground is the part that holds it.
+    /// A creator's arrival place is judged from it when the set is made (#5006); none, never judged cut off.
+    pub main_entry: Option<(Id, Vec3)>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
     /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
@@ -811,6 +819,129 @@ pub fn notice_key(soul: Id) -> Vec<u8> {
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
 
+/// The spots births try round `at`, by `entry`: rings 1 m apart from 1 m out, eight of them and then
+/// [`sim::life::FAR_RINGS`] further (16 m in all).
+fn birth_ring(entry: Id, at: (Id, Vec3)) -> Ring {
+    Ring {
+        entries: BTreeMap::from([(entry, at)]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    }
+}
+
+/// Rings tried one after another for a birth (#5006): the first ring's own spots are its tries, and every spot of the
+/// rings after it a further place, tried once those are.
+struct Rings<'a>(Vec<&'a Ring>);
+
+impl Standing for Rings<'_> {
+    fn spot(&self, entry: Id, i: u64) -> Option<(Id, Vec3)> {
+        let (r, j) = self.at(i)?;
+        r.spot(entry, j)
+    }
+    fn tries(&self) -> u64 {
+        self.0.first().map_or(0, |r| r.tries())
+    }
+    fn beyond(&self) -> u64 {
+        let all: u64 = self.0.iter().map(|r| r.tries() + r.beyond()).sum();
+        all - self.tries()
+    }
+    fn faces(&self, entry: Id, i: u64) -> Option<Vec3> {
+        let (r, j) = self.at(i)?;
+        r.faces(entry, j)
+    }
+}
+
+impl Rings<'_> {
+    /// The ring that holds the `i`-th spot, and the spot's index on it.
+    fn at(&self, mut i: u64) -> Option<(&Ring, u64)> {
+        for r in &self.0 {
+            let n = r.tries() + r.beyond();
+            if i < n {
+                return Some((r, i));
+            }
+            i -= n;
+        }
+        None
+    }
+}
+
+/// #5006: whether Souls born round a creator's arrival `place` could walk away, on `town` (the copy before the edit):
+/// refused [`replica::arrival::CUT_OFF`] when its middle is on ground no walk from `from` (the world's entry, as the
+/// served town took it: [`sim::walk::town::Town::entry`]) reaches, a walled pen; [`replica::arrival::NO_GROUND`] when
+/// no spot births try round it is ground a Soul can stand on that a walk from `from` reaches. With no entry known, no
+/// ground is cut off. `op` is the set's index in its batch.
+fn arrival_stands(
+    copy: &Replica,
+    town: &sim::walk::town::Town,
+    from: Option<(Id, Vec3)>,
+    (op, place): (usize, Id),
+) -> Result<(), Refused> {
+    let refused = |name: &'static str, detail: String| -> Result<(), Refused> {
+        Err(Refused {
+            op: Some(op),
+            name,
+            detail,
+        })
+    };
+    let shown = replica::world_model::show(place);
+    // A place the check took is one; with none here there is nothing to stand on to judge.
+    let Some((ground, at)) = replica::arrival::point_of(copy.tree(), place) else {
+        return Ok(());
+    };
+    let size = Size::Standard;
+    let cut_off = |node: Id, p: Vec3| from.is_some_and(|f| town.cut_off(f, node, p, size));
+    if cut_off(ground, at) {
+        return refused(
+            replica::arrival::CUT_OFF,
+            format!("the middle of {shown} is on ground no walk from the world's entry reaches"),
+        );
+    }
+    let ring = birth_ring(place, (ground, at));
+    let surfaces = town.surfaces_for(size);
+    let stands = (0..ring.tries() + ring.beyond())
+        .map_while(|i| ring.spot(place, i))
+        .any(|(node, p)| {
+            // As a birth asks: placed first, and only then whether its ground is cut off.
+            surfaces.and_then(|s| s.get(&node)).is_some_and(|s| {
+                s.place_built(
+                    place,
+                    Frame { node, slot: None },
+                    p,
+                    Quat::IDENTITY,
+                    Build::STANDARD,
+                )
+                .is_ok()
+            }) && !cut_off(node, p)
+        });
+    if !stands {
+        return refused(
+            replica::arrival::NO_GROUND,
+            format!(
+                "no ground a Soul can stand on and walk from within 16 m of the middle of {shown}"
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The last set of the world's arrival in `edit` that names a place, with its index in the batch (#5006): none when
+/// it sets none, or its last clears it.
+fn arrival_named(edit: &Edit) -> Option<(usize, Id)> {
+    let (i, place) = edit
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            edit::Op::Set { field, to, .. } if *field == replica::arrival::F_ARRIVAL => {
+                Some((i, replica::arrival::read(to).ok()?))
+            }
+            _ => None,
+        })
+        .next_back()?;
+    Some((i, place?))
+}
+
 /// The births and the intents waiting for them (C3).
 struct Lives {
     life: Life,
@@ -837,6 +968,9 @@ pub struct Synced {
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
 pub type Offer = Box<dyn FnMut(u64, Vec<u8>) + Send>;
+/// Kinds a start defines in the world's history (#4954, [`Config::define`]), by pin.
+pub type Definitions = Vec<Name>;
+
 /// See [`Config::follow`].
 pub type Follow = Box<dyn FnOnce(Durable) -> Offer + Send>;
 
@@ -866,6 +1000,7 @@ impl Config {
             planner_wait: None,
             planned: BTreeMap::new(),
             sky: None,
+            define: Vec::new(),
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
@@ -876,6 +1011,7 @@ impl Config {
             rate: None,
             engine: None,
             join: None,
+            main_entry: None,
             wear: None,
             hatches: Vec::new(),
             halted: None,
@@ -1121,6 +1257,10 @@ struct Clock {
     /// Each walk taken since the last tick that names a carry's heading at its goal (its parameter 3, moving-group
     /// rule 3), by intent: read when it starts, if it leads a carry.
     headings: BTreeMap<Id, [i64; 2]>,
+    /// Carriers that walked their own way during their front's walk, by (the front's walk, carrier): each keeps its
+    /// own legs until the front walks again, so it stays where its own walk ended (a scripted crew's place), and no
+    /// turn of that walk moves it.
+    carry_own: BTreeSet<(Id, Id)>,
     /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
     /// world opened: one whose hold a restart ended is cancelled.
     besides_checked: bool,
@@ -1190,6 +1330,8 @@ struct Clock {
     put_off: BTreeMap<Id, u64>,
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
+    /// The kinds this start defines at its first tick ([`Config::define`]), and the minter of their nodes' ids.
+    define: Option<(Definitions, Minter)>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
@@ -1221,6 +1363,8 @@ struct Clock {
 /// Dropped as the clock thread ends, for any reason: the checker is woken and refuses what it waits on.
 struct EditQueue {
     tx: Sender<(u64, CheckJob)>,
+    /// The most ids each building kind's place mints with its parts (#5006, `buildsafe::ids_most`): reserved at intake.
+    parts: BTreeMap<String, u64>,
     walkers: Arc<buildsafe::Moving>,
     /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
     offered: std::cell::Cell<u64>,
@@ -1406,23 +1550,35 @@ impl Heavens {
     }
 }
 
-/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds.
-fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, Refused> {
+/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
+/// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
+/// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
+fn reserve_edit(
+    edit: &Edit,
+    lineage: Scope,
+    next: &mut u64,
+    parts: u64,
+) -> Result<Minter, Refused> {
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
-    for op in &edit.ops {
-        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
-        if matches!(
-            op,
-            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
-        ) {
-            end.mint().map_err(|e| Refused {
-                op: None,
-                name: "edit.ids-exhausted",
-                detail: e.to_string(),
-            })?;
-            *next = end.next();
-        }
+    // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+    let own = edit
+        .ops
+        .iter()
+        .filter(|op| {
+            matches!(
+                op,
+                edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+            )
+        })
+        .count() as u64;
+    for _ in 0..own.saturating_add(parts) {
+        end.mint().map_err(|e| Refused {
+            op: None,
+            name: "edit.ids-exhausted",
+            detail: e.to_string(),
+        })?;
+        *next = end.next();
     }
     Ok(reserved)
 }
@@ -2386,7 +2542,14 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
-            Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
+            Taken::Edit(e) => match reserve_edit(
+                &e,
+                self.lineage,
+                &mut self.next_intent,
+                self.edits
+                    .as_ref()
+                    .map_or(0, |q| buildsafe::parts_ids(&e, &q.parts)),
+            ) {
                 Ok(reserved) => {
                     if let Some(tx) = &self.edits
                         && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
@@ -2659,11 +2822,11 @@ impl Clock {
                         })
                     })
             });
-            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2); so is
-            // any take or seating whose prepared map another commit changed first (two crews seating at once).
-            let stale = done.as_ref().err().map(|e| e.name);
-            if (stale == Some("edit.stale")
-                || (r.step == crate::assembly::Step::Retired && stale == Some("edit.body-stale")))
+            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
+            if r.step == crate::assembly::Step::Retired
+                && done
+                    .as_ref()
+                    .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
                 && let Some(e) = self.engine.as_mut()
                 && e.retry(r.clone())
             {
@@ -3411,24 +3574,47 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
-        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
-        let floor = (l.at.0 == b.town.ground)
+        // Every reach below is judged from one place, the town's own entry (`Town::entry`, on dry ground), as each spot
+        // a birth takes is (`Floors::sealed`).
+        let sealed =
+            |(node, at): (Id, Vec3)| sim::mover::Floors::sealed(&b.town, node, at, Build::STANDARD);
+        // The open ground round where the host puts Souls (`world.json`'s arrival, else its entry); then, when it holds
+        // no free place, the ground-level floor with a way out that holds that point (a world entered under a roof:
+        // verdelis-eden's dome). Both are passed over when the point is walled off from the entry (#5006).
+        let host = !sealed(l.at);
+        let floor = (host && l.at.0 == b.town.ground)
             .then(|| b.town.entry_floor(l.at.1))
-            .flatten()
-            .map(|e| Ring {
-                entries: BTreeMap::from([(l.entry, e)]),
-                radius: l.ring.radius,
-                gap: l.ring.gap,
-                rings: l.ring.rings,
-            });
-        let standing = sim::life::Then(&l.ring, floor.as_ref());
-        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
+            .flatten();
+        // Last, the town's entry itself, when it is neither of those: a host's arrival walled off from it, or with no
+        // ground round it, never keeps a world from being joined (#5006).
+        let main = b
+            .town
+            .entry()
+            .filter(|&e| e != l.at && Some(e) != floor)
+            .map(|e| birth_ring(l.entry, e));
+        let floor = floor.map(|e| birth_ring(l.entry, e));
+        // Before all of those, the place the world's creator names on its root (#5006, `replica::arrival`), read from
+        // the tree each tick a birth waits, so a new arrival holds from the next birth with no restart. Its rings are
+        // tried first and the others after them, so a place whose rings hold no free spot never keeps a birth waiting;
+        // a place whose middle no walk from the entry reaches (walled in since it was named) is passed over.
+        let arrival = replica::arrival::point(self.replica.tree())
+            .filter(|&(ground, at)| ground == l.at.0 && !sealed((ground, at)))
+            .map(|at| birth_ring(l.entry, at));
+        let standing = Rings(
+            arrival
+                .iter()
+                .chain(host.then_some(&l.ring))
+                .chain(&floor)
+                .chain(&main)
+                .collect(),
+        );
+        let build_of = |soul: Id| {
             self.birth_builds
                 .get(&soul)
                 .copied()
                 .unwrap_or(skills::wear::DEFAULT)
-        });
+        };
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &build_of);
         let mut taken = Vec::new();
         for x in &mut born {
             // The world's body kind, as its header pins it (K10 writes the plain name).
@@ -4065,6 +4251,79 @@ impl Clock {
         self.write_own(effects, "the clock's mapping");
     }
 
+    /// Step 1 for the kinds the release added (#4954, [`Config::define`]): at this start's first tick, each its world
+    /// neither pins in its header nor defines yet is defined, as a creator's kind is (#3697): a `souls:kind` node at the
+    /// zone's root, for everyone, its name the pin, all in one entry of the world's own. The record is left empty: the
+    /// world's rules for the kind come from its entries, which keep the entry, and a copy needs only the name, so the
+    /// checkpoints and the stream's snapshots do not carry each entry's bytes. The world's log before it is unchanged,
+    /// and every copy (a replay, the public stream, a fork) learns the kinds from the entry. When the world refuses the
+    /// one entry, each kind is written in an entry of its own, and each refused one is said by name and stays refused
+    /// per act (`kind-not-in-header`), as before.
+    fn put_kinds(&mut self, now: Micros) {
+        let Some((define, mut mint)) = self.define.take() else {
+            return;
+        };
+        let tree = self.replica.tree();
+        let Some(root) = tree.node(tree.root()).map(|n| n.id()) else {
+            return;
+        };
+        let header = self.replica.header();
+        let mut creates = Vec::new();
+        let mut names = Vec::new();
+        for pin in define {
+            if header.kinds.contains(&pin) || replica::kinds::defined::defines(tree, &pin) {
+                continue;
+            }
+            let Ok(node) = mint.mint() else {
+                eprintln!("worldd: the kinds added were not defined: no id left");
+                return;
+            };
+            names.push(pin.as_str().to_owned());
+            creates.push(Change::Create {
+                node,
+                kind: Name::new(&replica::kinds::defined::kind().0).expect("souls:kind's name"),
+                pose: Pose {
+                    frame: Frame {
+                        node: root,
+                        slot: None,
+                    },
+                    position: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    support: Support::None,
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::from([
+                    (replica::kinds::defined::NAME, Value::Text(pin)),
+                    (replica::kinds::defined::ENTRY, Value::Bytes(Vec::new())),
+                ]),
+            });
+        }
+        if creates.is_empty() {
+            return;
+        }
+        let effect = |creates: Vec<Change>| Effect {
+            envelope: Clock::own(root, now),
+            body: Body::Changes(recs_of(creates)),
+            events: None,
+            rest: Rest::new(),
+        };
+        if self.try_own(vec![effect(creates.clone())]).is_ok() {
+            println!("kinds defined: {} [{}]", names.len(), names.join(", "));
+            return;
+        }
+        let mut written = Vec::new();
+        for (create, name) in creates.into_iter().zip(names) {
+            match self.try_own(vec![effect(vec![create])]) {
+                Ok(()) => written.push(name),
+                Err(r) => eprintln!(
+                    "worldd: the kind added {name} was not defined ({}: {}): it is refused per act",
+                    r.name, r.detail
+                ),
+            }
+        }
+        println!("kinds defined: {} [{}]", written.len(), written.join(", "));
+    }
+
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
     /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
     /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
@@ -4501,9 +4760,9 @@ impl Clock {
     }
 
     /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29). The progress answer
-    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted within a tick or two of
-    /// its arrival rather than at its arrival deadline (W11, #4087), and the act is due at its run's own deadline from
-    /// here on. One whose act ends in this tick is dropped, as its answer says more.
+    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted the tick after its commit
+    /// (its place asked as it starts, #4974) rather than at its arrival deadline (W11, #4087), and the act is due at
+    /// its run's own deadline from here on. One whose act ends in this tick is dropped, as its answer says more.
     fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
         let Some(o) = self.open.get(&id) else {
             return;
@@ -4699,9 +4958,11 @@ impl Clock {
     /// names the goal and the offset there too (parameter 5): the place swings with the front, so one walk turns the
     /// load square. When that walk ends, wherever the front stood (a spot short of its goal), the order is replaced by
     /// one that turns from the load's heading then to the turned one, its goal where the front stands, so the turn is
-    /// finished there (as a pivot, at the skill's swing pace). A carrier's own act ends its order (B2: it claims the legs), and the carrier stays in the carry,
-    /// walking its own way, as every carrier did before: a late carrier's own `carry to` does not fight the group, and
-    /// once its own walk ends while the front's still goes, it takes a place again where the frame has it. A new walk
+    /// finished there (as a pivot, at the skill's swing pace). A carrier's own act ends its order (B2: it claims the
+    /// legs), and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
+    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it stays where it
+    /// chose (a scripted crew's carrier arriving first is not dragged on past its place), turned by none of that walk;
+    /// it takes a place again at the front's next walk, where the frame has it then, turned as the frame is. A new walk
     /// of the front replaces the orders when it or the walk before turns the crew. An order is cancelled when its
     /// carrier is no longer in the carry, or the carry is over. A carry that broke off (`souls:partner-left`,
     /// `souls:carriers-apart`, `souls:carry-blocked`) stops its front's walk too, ended by that reason: the whole
@@ -4713,6 +4974,7 @@ impl Clock {
         let over = e.led_over();
         let running = e.carry_follows();
         if running.is_empty() && self.carry_follows.is_empty() && over.is_empty() {
+            self.carry_own.clear();
             return;
         }
         let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.activity, r.walker)).collect();
@@ -4735,6 +4997,12 @@ impl Clock {
         // its carrier is still in the carry.
         self.carry_follows
             .retain(|(_, f), (order, _, _)| b.orders.open(*f).is_some_and(|o| o.intent == *order));
+        // Walking its own way lasts as long as the front's walk it began during.
+        self.carry_own.retain(|(walk, _)| {
+            running
+                .iter()
+                .any(|k| k.led.walk == *walk && b.moving(k.front) == Some(*walk))
+        });
         let basis = Version {
             lineage: self.lineage,
             zone: self.zone,
@@ -4749,6 +5017,15 @@ impl Clock {
         for k in running {
             let (a, walker, walk) = (k.activity, k.walker, k.led.walk);
             let going = b.moving(k.front) == Some(walk);
+            // A carrier walking its own way during the front's walk keeps its own legs for the rest of that walk: no
+            // order, and no turn of that walk moves it; it rejoins at the front's next walk.
+            if going && b.moving(walker).is_some() {
+                self.carry_own.insert((walk, walker));
+                continue;
+            }
+            if self.carry_own.contains(&(walk, walker)) {
+                continue;
+            }
             let (replaces, finish) = match self.carry_follows.get(&(a, walker)).copied() {
                 // The walk that turns the crew has ended, wherever the front stood (a spot short of its goal, say):
                 // the turn is finished there, each place its turned one.
@@ -4921,7 +5198,7 @@ impl Clock {
                 headings.insert(*id, h);
             }
         }
-        let started = b.start(asks);
+        let started = b.start_committed(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
@@ -5128,6 +5405,8 @@ impl Clock {
         // in this tick, each at its due time (E6, #3369).
         self.put_clock(now);
         self.fire_sky(now);
+        // 1. The kinds the release added since the world's header, defined at this start's first tick (#4954).
+        self.put_kinds(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
         at[3] = mark();
@@ -6078,16 +6357,13 @@ pub fn start<S: Storage + 'static>(
         Scope(s)
     };
     let (forms_scope, engine_scope) = (scope("forms"), scope("engine"));
+    // The nodes of the kinds this start defines (#4954, [`Clock::put_kinds`]).
+    let kinds_scope = scope("kinds");
     let life = cfg.join.take().map(|j| {
         let entry = j.entry.0;
         Lives {
             life: Life::new(scope("life"), j.per_tick),
-            ring: Ring {
-                entries: BTreeMap::from([(entry, j.entry)]),
-                radius: 1_000_000,
-                gap: 1_000_000,
-                rings: 8,
-            },
+            ring: birth_ring(entry, j.entry),
             entry,
             at: j.entry,
             family: j.family,
@@ -6125,6 +6401,7 @@ pub fn start<S: Storage + 'static>(
     let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
         .then(|| Arc::new(buildsafe::Moving::default()));
     let creator = cfg.creator.take();
+    let building_ids = buildsafe::ids_most(&rules.kinds);
     let edits = walkers
         .clone()
         .map(|m| {
@@ -6138,9 +6415,12 @@ pub fn start<S: Storage + 'static>(
                 rules.kinds.clone(),
                 // Lockstep waits for the bodies with no deadline (S10c); a free-running clock at most FRESH_WAIT.
                 (!cfg.lockstep).then_some(FRESH_WAIT),
+                // A world with births judges a creator's arrival place, from the town's entry (#5006).
+                life.as_ref().map(|_| cfg.main_entry),
             )
             .map(|tx| EditQueue {
                 tx,
+                parts: building_ids,
                 walkers: m,
                 offered: std::cell::Cell::new(0),
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
@@ -6222,6 +6502,7 @@ pub fn start<S: Storage + 'static>(
         })
         .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
+    let define = Some((std::mem::take(&mut cfg.define), Minter::new(kinds_scope)));
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let hatches = std::mem::take(&mut cfg.hatches);
@@ -6257,6 +6538,7 @@ pub fn start<S: Storage + 'static>(
         follows: BTreeMap::new(),
         carry_follows: BTreeMap::new(),
         headings: BTreeMap::new(),
+        carry_own: BTreeSet::new(),
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
@@ -6307,6 +6589,7 @@ pub fn start<S: Storage + 'static>(
         tick: last.unwrap_or(-1),
         measures: clock_measures,
         sky,
+        define,
         tick_us,
         text,
         put_off: BTreeMap::new(),
@@ -6679,6 +6962,9 @@ fn way_searcher(events: Sender<Event>) -> std::io::Result<Sender<engine::WayAsk>
 ///
 /// `fresh_wait` bounds its wait for the bodies at a job's tick: [`FRESH_WAIT`] on a free-running clock, none in
 /// lockstep (S10c).
+///
+/// With `arrive` (a world with births; in it, the town's entry when one is known), a set of the world's arrival naming a
+/// place Souls born at could not walk away from is refused by name (#5006, [`arrival_stands`]).
 #[allow(clippy::too_many_arguments)]
 fn edit_checker(
     mut world: Option<edit::World>,
@@ -6689,6 +6975,7 @@ fn edit_checker(
     events: Sender<Event>,
     entries: replica::rules::json::Value,
     fresh_wait: Option<Duration>,
+    arrive: Option<Option<(Id, Vec3)>>,
 ) -> R<Sender<(u64, CheckJob)>> {
     let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
@@ -6973,6 +7260,8 @@ fn edit_checker(
                     continue;
                 };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
+                // #5006: the place a set of the world's arrival names, judged once the check takes the edit.
+                let arriving = arrive.zip(arrival_named(&e));
                 // #3958: a panic in the check or the plan answers the edit by name and keeps the thread (and every
                 // edit after it) going, on a town built again.
                 let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -6989,8 +7278,11 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             let mut e = e;
-                            buildsafe::stand_as_kinds(&mut e, &entries, &structure);
-                            edit::check(e, &copy, world)
+                            buildsafe::with_buildings(&mut e, &entries, &world.kinds)
+                                .and_then(|parts| {
+                                    buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    edit::check(e, &copy, world)
+                                })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {
@@ -7001,7 +7293,12 @@ fn edit_checker(
                     };
                     checked
                         .and_then(|c| {
-                            let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                            let t = town.on(&copy, ground, false);
+                            // #5006: a creator's arrival place Souls born at could walk away from, judged on the town.
+                            if let (Some(t), Some((from, set))) = (t.as_deref(), arriving) {
+                                arrival_stands(&copy, t, from, set)?;
+                            }
+                            let known = t.map(|t| Known::of(t));
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
                             sim::edit::plan_classes(
                                 c,
@@ -7261,8 +7558,12 @@ mod tests {
             claim: None,
         };
         let mut next = 5;
-        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 0).unwrap();
         assert_eq!(next, 6, "the link's id is reserved");
+        // #5006: a placed building's parts, which the edit checker adds after intake, are reserved with it.
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 19).unwrap();
+        assert_eq!(next, 25, "the link's id and the parts' ids are reserved");
     }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
@@ -8088,6 +8389,7 @@ mod tests {
         let (tx, _rx) = channel();
         let queue = EditQueue {
             tx,
+            parts: BTreeMap::new(),
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),

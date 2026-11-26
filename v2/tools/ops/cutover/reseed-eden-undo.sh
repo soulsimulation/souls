@@ -2,18 +2,22 @@
 # 0.132: undo reseed-eden.sh <time>: Eden's new-engine world back to the folder, bucket objects and pin it had, from
 # wherever that reseed stopped.
 #
-# In plain words: it stops the world and its gateway. If the reseed moved the world's bucket objects aside, it sets the
-# fresh world's objects aside in their turn and moves the old ones back (each object copied, read back and compared
-# before its original is deleted). If the reseed stopped before that move finished, the old objects never left their
-# keys and are left as they are; any copies it made stay under aside/<time>/. It puts the old folder back (the fresh
-# one, if any, goes aside), pins the build the world had and starts both. Nothing is deleted without a verified copy.
-# Release-v2 must not run while this runs.
+# In plain words: it stops the world and its gateway, puts the old folder back (the fresh one, if any, goes aside) and
+# starts both. A reseed on a fresh store generation (#4954, its receipt's `store=g/<time>/`) moved nothing in the
+# store and never wrote the old world's record, so that is the whole undo: the old folder names the old world's place
+# again, its record, pin and history with it, exactly as they were; the fresh world's objects stay under g/<time>/.
+# For a reseed before #4954 (its receipt says `bucket=moved`, or nothing), the store objects it moved come back too:
+# the fresh world's objects are set aside in their turn and the old ones moved back (each copied, read back and
+# compared before its original is deleted), and the pin is set to the build the world had; a move that never finished
+# left the old objects at their keys. Nothing is deleted without a verified copy. Release-v2 must not run while this
+# runs.
 #
 #   bash reseed-eden-undo.sh <time> check    reads and prints every value and what it would do; changes nothing
 #   bash reseed-eden-undo.sh <time> run      the check, then the steps above
 #
 # <time> is the label reseed-eden.sh printed (YYYYMMDDTHHMMSSZ). Root on the production host. rollback-v2.yml runs it
-# (input reseed) with the world-aside of the release the reseed moved Eden to (release.sh reseed-undo).
+# (input reseed) with the world-aside of the release the reseed moved Eden to (release.sh reseed-undo), which only a
+# reseed before #4954 uses.
 set -euo pipefail
 
 DATA=${RESEED_DATA:-/var/lib/souls}
@@ -40,7 +44,7 @@ patient() {
 STAMP=${1:-}
 mode=${2:-}
 [[ "$STAMP" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$mode" = check ] || [ "$mode" = run ]; } || {
-  sed -n 2,16p "$0"
+  sed -n 2,20p "$0"
   exit 2
 }
 [ -n "${RESEED_DATA:-}" ] || [ "$(id -u)" = 0 ] || die "run as root"
@@ -63,23 +67,29 @@ if [ -r "$ETC/secrets.env" ]; then
 fi
 export WORLDS_ROOT=$ROOT
 
-RECEIPT=$(ls "$ROOT"/aside/*-"$STAMP".reseed 2> /dev/null | head -1)
+# `|| true`: under pipefail a probe that finds nothing would end the script before its refusal says why (#4954).
+RECEIPT=$(ls "$ROOT"/aside/*-"$STAMP".reseed 2> /dev/null | head -1 || true)
 [ -f "$RECEIPT" ] || die "no reseed receipt for $STAMP in $ROOT/aside"
 WORLD=$(sed -n 's/^world=//p' "$RECEIPT")
 OLD=$(sed -n 's/^old=//p' "$RECEIPT")
 [[ "$WORLD" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] && [[ "$OLD" =~ ^1220[0-9a-f]{64}$ ]] || die "the receipt $RECEIPT is not whole"
 [ -f "$ROOT/builds/$OLD/worldd" ] || die "the old build $OLD is not on this machine"
-[ -x "$TOOL" ] || die "world-aside is not at $TOOL"
 ASIDE_DIR=$ROOT/aside/$WORLD-$STAMP
 FRESH=$STAMP-fresh
 FRESH_DIR=$ROOT/aside/$WORLD-$FRESH
 LIVE_DIR=$ROOT/worlds/$WORLD
 [ ! -e "$FRESH_DIR" ] || die "$FRESH_DIR exists"
-count() { "$TOOL" "$WORLD" "$@" --dry-run | sed -n 's/^dry run: \([0-9]*\) objects.*/\1/p'; }
-IN_PLACE=$(count --label "$FRESH")
-COPIED=$(count --back "$STAMP")
-MOVED=no
-if grep -qx 'bucket=moved' "$RECEIPT" || { [ "$IN_PLACE" = 0 ] && [ "$COPIED" -gt 0 ]; }; then MOVED=yes; fi
+# A reseed on a fresh store generation (#4954) moved nothing in the store; one before it moved the world's objects.
+FRESH_STORE=no
+grep -qx "store=g/$STAMP/" "$RECEIPT" && FRESH_STORE=yes
+MOVED=no IN_PLACE=0 COPIED=0
+if [ "$FRESH_STORE" = no ]; then
+  [ -x "$TOOL" ] || die "world-aside is not at $TOOL"
+  count() { "$TOOL" "$WORLD" "$@" --dry-run | sed -n 's/^dry run: \([0-9]*\) objects.*/\1/p'; }
+  IN_PLACE=$(count --label "$FRESH")
+  COPIED=$(count --back "$STAMP")
+  if grep -qx 'bucket=moved' "$RECEIPT" || { [ "$IN_PLACE" = 0 ] && [ "$COPIED" -gt 0 ]; }; then MOVED=yes; fi
+fi
 if [ -d "$ASIDE_DIR" ]; then
   FOLDER="the old folder $ASIDE_DIR back to $LIVE_DIR"
   if [ -e "$LIVE_DIR" ]; then FOLDER="$FOLDER; the fresh one to $FRESH_DIR"; fi
@@ -91,13 +101,18 @@ fi
 echo "reseed-undo: world          $WORLD"
 echo "reseed-undo: label          $STAMP"
 echo "reseed-undo: folders        $FOLDER"
-echo "reseed-undo: bucket         $IN_PLACE of the world's objects at their keys; $COPIED under aside/$STAMP/"
-if [ "$MOVED" = yes ]; then
-  echo "reseed-undo: bucket move    the reseed moved them: the $IN_PLACE at their keys (the fresh world's) go to aside/$FRESH/, the $COPIED come back"
+if [ "$FRESH_STORE" = yes ]; then
+  echo "reseed-undo: store          nothing moves: the reseed put the fresh world's objects under g/$STAMP/ and never wrote the old world's, which the old folder names again"
+  echo "reseed-undo: pin            $OLD, still in the old world's record (never written by the reseed)"
 else
-  echo "reseed-undo: bucket move    none: the reseed's move did not finish, so the $IN_PLACE at their keys are the old world's and stay; the $COPIED copies stay under aside/$STAMP/"
+  echo "reseed-undo: bucket         $IN_PLACE of the world's objects at their keys; $COPIED under aside/$STAMP/"
+  if [ "$MOVED" = yes ]; then
+    echo "reseed-undo: bucket move    the reseed moved them: the $IN_PLACE at their keys (the fresh world's) go to aside/$FRESH/, the $COPIED come back"
+  else
+    echo "reseed-undo: bucket move    none: the reseed's move did not finish, so the $IN_PLACE at their keys are the old world's and stay; the $COPIED copies stay under aside/$STAMP/"
+  fi
+  echo "reseed-undo: pin            $OLD"
 fi
-echo "reseed-undo: pin            $OLD"
 echo "reseed-undo: units          worldd@ $(systemctl is-active "worldd@$WORLD" || true), souls-gateway@ $(systemctl is-active "souls-gateway@$WORLD" || true); both started at the end"
 [ "$mode" = run ] || {
   echo "reseed-undo: check only; nothing changed"
@@ -106,7 +121,9 @@ echo "reseed-undo: units          worldd@ $(systemctl is-active "worldd@$WORLD" 
 
 echo "reseed-undo: 1. stop the world and its gateway"
 systemctl stop "souls-gateway@$WORLD" "worldd@$WORLD"
-if [ "$MOVED" = yes ]; then
+if [ "$FRESH_STORE" = yes ]; then
+  echo "reseed-undo: 2. the store: nothing to move (the fresh world's objects stay under g/$STAMP/)"
+elif [ "$MOVED" = yes ]; then
   echo "reseed-undo: 2. the fresh world's bucket objects aside, the old world's back"
   "$TOOL" "$WORLD" --label "$FRESH"
   "$TOOL" "$WORLD" --back "$STAMP"
@@ -120,8 +137,12 @@ if [ -d "$ASIDE_DIR" ]; then
 else
   echo "reseed-undo: 3. the folder: never moved"
 fi
-echo "reseed-undo: 4. pin the old build"
-patient "$LIB/supervisor" pin "$WORLD" "$OLD"
+if [ "$FRESH_STORE" = yes ]; then
+  echo "reseed-undo: 4. the pin: the old world's record still holds $OLD"
+else
+  echo "reseed-undo: 4. pin the old build"
+  patient "$LIB/supervisor" pin "$WORLD" "$OLD"
+fi
 echo "reseed-undo: 5. start the world and its gateway"
 systemctl start "worldd@$WORLD" "souls-gateway@$WORLD"
 echo "undone=$(date -u +%Y%m%dT%H%M%SZ)" >> "$RECEIPT"

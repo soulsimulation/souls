@@ -71,7 +71,11 @@
 //! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
 //! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
-//! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
+//! <bare> on things with no slots of their own; <beyond> past a thing's own slots; <moved> stand points moved to clear
+//! ground`: every declared slot is registered or counted under one reason (#4092). A thing that borrows another kind's
+//! entry sits at its own slots of those numbers, so the entry's seats its def has no slot for are not offered (a Mars
+//! toilet whose def bakes no slots, a one-seat tier naming the two-seat `eden:bench`); each such thing is printed
+//! before the line, `body slot not on the thing: <thing> slot <n> of <entry>; its own slots: <n>|none`. A stand point a body cannot stand on is moved to the nearest clear ground
 //! within a form's reach (C15's rule), so a rise sets the body down where it can stand. So is one in a doorway's
 //! clearance, where the spot tables never stop a walker (a bed beside its room's door): moved to the nearest place out
 //! of it, no nearer the seat, so a walk to the seat ends within the sit's or the lie's reach.
@@ -143,7 +147,7 @@ use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
-use supervisor::bucket::{Patient, Under, patiently};
+use supervisor::bucket::{Generation, Patient, Under, patiently};
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
@@ -347,6 +351,8 @@ pub(crate) struct Built {
     activities: Vec<ActivityKind>,
     /// The world's stock (#4837): its stocked containers and its libraries' words, from its folder's `stock.json`.
     stock: worldd::stock::World,
+    /// The kinds this build pins that the world's header does not, as [`adopt`] left them unpaired (#4954).
+    anew: Vec<String>,
 }
 
 /// The conversation's kind (E26, #3329), as its fixture writes it.
@@ -527,6 +533,76 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         );
     }
     Ok(by_kind.into_values().collect())
+}
+
+/// Seats a thing's entry declares that its own shape has none of (#4092): a thing that borrows another kind's entry (a
+/// Mars tier names `eden:bench`, a toilet `eden:toilet`) sits at its own slots of those numbers (field 13, its def's
+/// geometry), so an entry seat it has no slot for is not offered (`import_eden::body_slots`).
+#[derive(Debug, PartialEq, Eq)]
+struct NotOnThing {
+    thing: Id,
+    /// The entry the thing names.
+    entry: String,
+    /// The entry's slots the thing does not offer, by number.
+    slots: Vec<u64>,
+    /// The thing's own slots, by number: none when its def has no slots at all.
+    own: Vec<u64>,
+}
+
+/// Every [`NotOnThing`] in `tree`, by thing: the body slots `import_eden::body_slots` counts as declared and leaves
+/// out, so `serve`'s seats line accounts for every declared slot.
+fn not_on_things(tree: &replica::tree::Tree, kinds: &[(String, Json)]) -> Vec<NotOnThing> {
+    let (found, _) = import_eden::body_slots(tree, kinds);
+    let offered: std::collections::BTreeSet<(Id, u64)> =
+        found.iter().map(|s| (s.thing, s.slot)).collect();
+    // Each entry's body slots by number, read once: the entry read as its own kind's, so nothing is borrowed.
+    let mut declared: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+    let mut out = Vec::new();
+    let mut next = vec![tree.root()];
+    while let Some(h) = next.pop() {
+        next.extend(tree.children(h).unwrap_or(&[]));
+        let Some(n) = tree.node(h) else { continue };
+        let entry = import_eden::entry_name(n.kind().as_str(), n.fields());
+        // A thing of its entry's own kind borrows nothing: every slot its entry declares is offered.
+        if entry == plain(n.kind().as_str()) {
+            continue;
+        }
+        let all = declared.entry(entry.to_owned()).or_insert_with(|| {
+            import_eden::body_slots_of(n.id(), entry, &BTreeMap::new(), kinds)
+                .iter()
+                .map(|s| s.slot)
+                .collect()
+        });
+        let slots: Vec<u64> = all
+            .iter()
+            .copied()
+            .filter(|s| !offered.contains(&(n.id(), *s)))
+            .collect();
+        if slots.is_empty() {
+            continue;
+        }
+        let own = match n.fields().get(&import_eden::F_SLOTS) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .filter_map(|r| match r {
+                    Value::Array(r) => match r.first() {
+                        Some(Value::Uint(u)) => Some(*u),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        out.push(NotOnThing {
+            thing: n.id(),
+            entry: entry.to_owned(),
+            slots,
+            own,
+        });
+    }
+    out.sort_by_key(|t| t.thing);
+    out
 }
 
 /// The served activities' file in a world's folder, beside `world.kinds`: `gatewayd --entries` serves it with the
@@ -1278,6 +1354,7 @@ fn build_from(
         public_names: Arc::new(im.texts),
         activities,
         stock,
+        anew: Vec::new(),
     })
 }
 
@@ -1418,6 +1495,37 @@ pub(crate) fn adopt(
         build.remove(plain(ours));
         world.remove(plain(theirs));
     }
+    renamed(built, &renames);
+    let list =
+        |m: &BTreeMap<String, Vec<String>>| m.values().flatten().cloned().collect::<Vec<_>>();
+    let (anew, unknown) = (list(&build), list(&world));
+    built.anew.clone_from(&anew);
+    let taken: Vec<String> = renames
+        .iter()
+        .map(|(ours, theirs)| format!("{theirs} as {ours}"))
+        .collect();
+    println!(
+        "header: the world's own {}, not this build's {}; {} kinds taken at the world's revision [{}]; {} this build \
+         pins that the world cannot make until it is reseeded [{}]; {} of the world's with no definition here [{}]",
+        to_hex(&header.hash().to_bytes()),
+        to_hex(&built.header.hash().to_bytes()),
+        taken.len(),
+        taken.join(", "),
+        anew.len(),
+        anew.join(", "),
+        unknown.len(),
+        unknown.join(", ")
+    );
+    built.header = header;
+    unknown
+}
+
+/// The activity and body kinds the engine makes, and `world.kinds`' boot activity lines, by the world's pin of each
+/// kind `renames` takes at the world's revision (this build's pin to the world's).
+fn renamed(built: &mut Built, renames: &BTreeMap<String, String>) {
+    if renames.is_empty() {
+        return;
+    }
     for a in &mut built.activities {
         if let Some(k) = renames.get(a.name.as_str()).and_then(|k| Name::new(k)) {
             a.name = k;
@@ -1442,27 +1550,91 @@ pub(crate) fn adopt(
             }
         })
         .collect();
-    let list =
-        |m: &BTreeMap<String, Vec<String>>| m.values().flatten().cloned().collect::<Vec<_>>();
-    let (anew, unknown) = (list(&build), list(&world));
+}
+
+/// The kinds the release added to a running world (#4954): those of its entries (an entry's kind, or its activity's,
+/// `<kind>_activity`) that this build pins and the world's header does not, by any revision ([`Built::anew`]), because
+/// the release's entries upgrade added the entry after the world was seeded (`entries_upgrade`). A new revision of a
+/// kind the header pins is not one: [`adopt`] pairs it or leaves it unpaired on purpose (another owner, or none kept),
+/// and it stays unmade here (`kind-not-in-header`, per act). The header is fixed for the world's life, so an added kind
+/// is pinned the way a creator's is (#3697): by a definition in the world's history, a `souls:kind` node at the zone's
+/// root naming the pin, which the engine writes at this start's first tick (`answers::Config::define`) and every copy
+/// then applies things and activities of. Its rules are the entry's, which the world's entries keep.
+///
+/// `tree` is the world as its log leaves it. A kind it defines already (an earlier start wrote it) is not written
+/// again. One whose entry the release changed since (a pin of the same plain name an earlier start defined, with no
+/// other pinned here) is taken at the world's revision, as [`adopt`] takes a header's: its rules are this build's
+/// definition under the world's pin, and its activity is made by that pin, so a member of one open across the restart
+/// keeps its rules. A creator's definition is never taken so. Returns the pins to define, in pin order.
+pub(crate) fn added_kinds(
+    built: &mut Built,
+    tree: &replica::tree::Tree,
+    entries: &[(String, Json)],
+) -> answers::Definitions {
+    use replica::kinds::defined;
+    let entry_of = |pin: &str| {
+        let p = plain(pin);
+        entries
+            .iter()
+            .find(|(k, _)| k == p || p.strip_suffix("_activity") == Some(k.as_str()))
+            .map(|(_, e)| e)
+    };
+    // Each definition's name, and whether a start wrote it (a creator's reads as a creator's record).
+    let defined: Vec<(String, bool)> = defined::nodes(tree)
+        .into_iter()
+        .map(|(_, n, bytes)| {
+            let started = defined::stored(&n, &bytes).is_none();
+            (n, started)
+        })
+        .collect();
+    let mut renames = BTreeMap::new();
+    let mut out = Vec::new();
+    for ours in std::mem::take(&mut built.anew) {
+        let in_header = built
+            .header
+            .kinds
+            .iter()
+            .any(|k| plain(k.as_str()) == plain(&ours));
+        if in_header || entry_of(&ours).is_none() {
+            built.anew.push(ours);
+            continue;
+        }
+        if defined.iter().any(|(d, _)| *d == ours) {
+            continue;
+        }
+        let theirs: Vec<&String> = defined
+            .iter()
+            .filter(|(d, started)| {
+                *started && plain(d) == plain(&ours) && !built.rules.kinds.contains_key(d.as_str())
+            })
+            .map(|(d, _)| d)
+            .collect();
+        if let [theirs] = theirs.as_slice()
+            && let Some(kind) = built.rules.kinds.get(&ours).cloned()
+        {
+            built.rules.kinds.insert((*theirs).clone(), kind);
+            renames.insert(ours, (*theirs).clone());
+            continue;
+        }
+        let Some(name) = Name::new(&ours) else {
+            continue;
+        };
+        out.push(name);
+    }
+    renamed(built, &renames);
     let taken: Vec<String> = renames
         .iter()
         .map(|(ours, theirs)| format!("{theirs} as {ours}"))
         .collect();
     println!(
-        "header: the world's own {}, not this build's {}; {} kinds taken at the world's revision [{}]; {} this build \
-         pins that the world cannot make until it is reseeded [{}]; {} of the world's with no definition here [{}]",
-        to_hex(&header.hash().to_bytes()),
-        to_hex(&built.header.hash().to_bytes()),
+        "kinds added since the world's header: {} to define at the first tick [{}]; {} defined already, taken at the \
+         world's revision [{}]",
+        out.len(),
+        out.iter().map(Name::as_str).collect::<Vec<_>>().join(", "),
         taken.len(),
-        taken.join(", "),
-        anew.len(),
-        anew.join(", "),
-        unknown.len(),
-        unknown.join(", ")
+        taken.join(", ")
     );
-    built.header = header;
-    unknown
+    out
 }
 
 /// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
@@ -1952,6 +2124,10 @@ pub fn set_arrival(args: &[String]) -> i32 {
     }
 }
 
+/// What `worldd arrival` says of the creator's own arrival (#5006): this file's is overridden while the creator names one.
+const CREATOR_FIRST: &str = "; while the world's creator names a place (`souls-god arrival`), Souls arrive there \
+                             instead, and the world's start says so";
+
 fn set_arrival_in(args: &[String]) -> R<String> {
     let usage = "usage: worldd arrival --dir <world folder> (--place <place> | --clear)";
     let dir = PathBuf::from(arg(args, "--dir").ok_or(usage)?);
@@ -1980,14 +2156,16 @@ fn set_arrival_in(args: &[String]) -> R<String> {
                 &place,
             )?;
             let line = format!(
-                "arrival: {place} at {:.3},{:.3} m, from the next start",
+                "arrival: {place} at {:.3},{:.3} m, from the next start{CREATOR_FIRST}",
                 x as f64 / 1000.0,
                 z as f64 / 1000.0
             );
             meta.push(("arrival".into(), Json::Str(place)));
             line
         }
-        None => "arrival: cleared; Souls arrive at the entry from the next start".into(),
+        None => format!(
+            "arrival: cleared; Souls arrive at the entry from the next start{CREATOR_FIRST}"
+        ),
     };
     view_out::write_whole(
         &meta_path,
@@ -2348,8 +2526,19 @@ fn recorded_body(
     Ok((moved, build))
 }
 
-/// The world's store; its reads at the start are made [`patiently`] (#1960).
-type Bucket = Shared<Patient<supervisor::bucket::Bucket>>;
+/// The world's store; its reads at the start are made [`patiently`] (#1960), and its own objects are under the store
+/// generation its folder names (#4954, [`placed`]).
+type Bucket = Shared<Patient<Generation<supervisor::bucket::Bucket>>>;
+
+/// The world by its name, and the store generation its folder names (`generation`, #4954): a rebuilt world's own
+/// objects are under `g/<label>/` in the store, so it starts on an empty place and nothing of the old world's moves. A
+/// `generation` file that cannot be read refuses the start: a world never ships to a place it did not name.
+fn placed(name: &str, dir: &Path) -> R<(supervisor::World, Option<String>)> {
+    Ok((
+        supervisor::World::parse(name)?,
+        supervisor::generation(dir)?,
+    ))
+}
 
 /// Public navigation only: the same restored header/root as the live writer, beside the history export.
 fn public_history_live(dir: &Path, name: &str, header: &Header, key: &Key) -> R<()> {
@@ -3243,12 +3432,21 @@ fn off_machine(
         text,
     } = source;
     let (first, records) = (recovered.first, recovered.records.as_slice());
-    let store: Bucket = Shared(Arc::new(Patient::new(
+    let (world, generation) = placed(name, dir)?;
+    let store: Bucket = Shared(Arc::new(Patient::new(Generation::new(
         supervisor::bucket::Bucket::from_spec(spec)
             .map_err(refusal)?
             .for_world(),
-    )));
-    println!("store: {}", store.0.store.what());
+        world,
+        generation.as_deref(),
+    ))));
+    println!(
+        "store: {}{}",
+        store.0.store.store.what(),
+        generation
+            .as_deref()
+            .map_or_else(String::new, |g| format!(", its own objects under g/{g}/"))
+    );
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
     // A fork's archive base decides how its records go to the archive, so it is read before the world listens: tried
     // until the store answers, never an exit on a slow one (R17). An unforked world reads nothing here.
@@ -3792,7 +3990,14 @@ fn serve(args: &[String]) -> R<()> {
         }
     };
     // `resumed` is the engine's starting point (a checkpoint's tree and record) when it differs from the stream's.
-    let (initial, resumed, stream_mapping, checkpoint, (mut town, planner)) = started;
+    let (initial, resumed, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    // New Soul Actions (#4954): the kinds the release's entries upgrade added since the header, defined in the world's
+    // history at the first tick; before the activities are served and the rules handed to the engine. The town and the
+    // planner commit the edits that change the ground (BUILDSAFE) under their doors' rules, made before: each takes the
+    // rules as they are now, a changed added kind at the world's revision included.
+    let define = added_kinds(&mut built, &town.tree, &kinds);
+    town.doors.rules.clone_from(&built.rules);
+    planner.doors.rules.clone_from(&built.rules);
     let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     // The body classes' grounds were cut with the towns (S12), each once, the planner given a copy.
     stamp("body classes");
@@ -3828,6 +4033,20 @@ fn serve(args: &[String]) -> R<()> {
             meta.get("arrival").and_then(Json::str).unwrap_or(""),
             x as f64 / 1000.0,
             z as f64 / 1000.0
+        );
+    }
+    // The creator's own arrival place (#5006) comes first: an operator's `worldd arrival` is told it is overridden.
+    if let Some((_, at)) = replica::arrival::point(&town.tree) {
+        println!(
+            "worldd: the world's creator names where Souls arrive ({:.3},{:.3} m): it overrides world.json's {} while \
+             it names one",
+            at.x as f64 / 1e6,
+            at.z as f64 / 1e6,
+            if arrived.is_some() {
+                "arrival"
+            } else {
+                "entry"
+            }
         );
     }
     let birth = arrived.map_or(entry, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
@@ -3873,9 +4092,33 @@ fn serve(args: &[String]) -> R<()> {
         );
     }
     let closed_kinds = worldd::closed::Closed::of(&kinds);
+    // The declared seats a thing's own shape has none of (#4092), each named, so the line accounts for every one.
+    let not_on = not_on_things(&town.tree, &kinds);
+    let count = |bare: bool| -> usize {
+        not_on
+            .iter()
+            .filter(|t| t.own.is_empty() == bare)
+            .map(|t| t.slots.len())
+            .sum()
+    };
+    let (bare, beyond) = (count(true), count(false));
+    for t in &not_on {
+        let nums = |v: &[u64]| v.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+        println!(
+            "body slot not on the thing: {} slot {} of {}; its own slots: {}",
+            replica::world_model::show(t.thing),
+            nums(&t.slots),
+            t.entry,
+            if t.own.is_empty() {
+                "none".to_owned()
+            } else {
+                nums(&t.own)
+            }
+        );
+    }
     println!(
-        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
-         moved to clear ground",
+        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {bare} on \
+         things with no slots of their own; {beyond} past a thing's own slots; {moved} stand points moved to clear ground",
         places.len(),
         things
     );
@@ -4001,6 +4244,7 @@ fn serve(args: &[String]) -> R<()> {
     cfg.hatches = hatches(&dir.join("hatches"))?;
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
+    cfg.define = define;
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the
     // standalone seeded-world fallback. A lookup refused above ended the start; one the store did not answer (R17)
     // left no creator known until it does, so edits fail closed meanwhile.
@@ -4033,6 +4277,8 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
+    // Every reach a birth or a creator's arrival is judged by starts from the town's own entry (#5006).
+    cfg.main_entry = town.entry();
     cfg.wear = Some(answers::Wearing {
         catalogue,
         born,
@@ -4074,18 +4320,40 @@ fn serve(args: &[String]) -> R<()> {
         .as_deref()
         .map(str::to_owned)
         .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()));
-    let stream_store = Patient::new(
+    // The world's own objects under the store generation its folder names (#4954), as the shipper's.
+    let (stream_world, generation) = placed(&name, &dir)?;
+    let stream_store = Patient::new(Generation::new(
         supervisor::bucket::Bucket::from_spec(&stream_spec)
             .map_err(refusal)?
             .for_world(),
-    );
+        stream_world,
+        generation.as_deref(),
+    ));
     // R15: the stream's backup to the store, on its own thread with its own client.
-    let backup_store = supervisor::bucket::Bucket::from_spec(&stream_spec)
-        .map_err(refusal)?
-        .for_world();
-    // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address, so a
-    // store moved to another bucket is learned again rather than fenced on.
-    let backup_identity = replica::encode::to_hex(&replica::ids::sha256(stream_spec.as_bytes()));
+    let backup_store = Generation::new(
+        supervisor::bucket::Bucket::from_spec(&stream_spec)
+            .map_err(refusal)?
+            .for_world(),
+        stream_world,
+        generation.as_deref(),
+    );
+    // ... and its clean-up of old generations, on another thread with another client (#4954): a slow delete holds
+    // back no put. It deletes under the same generation the backup puts under.
+    let cleanup_store = Generation::new(
+        supervisor::bucket::Bucket::from_spec(&stream_spec)
+            .map_err(refusal)?
+            .for_world(),
+        stream_world,
+        generation.as_deref(),
+    );
+    // ... and the store's identity, kept with the head its backup last confirmed there: a digest of its address (and
+    // its generation's place), so a store moved to another bucket or place is learned again rather than fenced on.
+    let backup_identity = replica::encode::to_hex(&replica::ids::sha256(
+        generation
+            .as_deref()
+            .map_or_else(|| stream_spec.clone(), |g| format!("{stream_spec} g/{g}/"))
+            .as_bytes(),
+    ));
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -4294,6 +4562,7 @@ fn serve(args: &[String]) -> R<()> {
                 measures::BACKUP.backup(&view_out::BackupState::Current);
                 writer.back_up(
                     backup_store,
+                    cleanup_store,
                     Box::new(|state| measures::BACKUP.backup(&state)),
                 )?;
                 // ... and a stop (SIGTERM, SIGINT) gives it up to 8 s to hold the spool's head first, inside the
@@ -4518,6 +4787,89 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4092: every body slot the entries declare is registered or counted under one reason. A one-seat tier naming
+    /// the two-seat bench entry offers its slot 1, not 2; a toilet whose def has no slots offers none of its entry's; a
+    /// pew with both slots offers both. Each kind is named unlike its entry (`core:toilet` would be `eden:toilet`'s own).
+    #[test]
+    fn every_declared_seat_is_offered_or_named_with_its_reason() {
+        let thing = |id: &str, r: &str, entry: &str, slots: &str| {
+            format!(
+                r#"{{"id": "{id}", "def": "{r}", "ref": "{r}", "parent": null, "pose": [0, 0, 0, 0],
+                "world": [0, 0, 0, 0], "scale_ppm": 1000000, "entry": "{entry}", "slots": [{slots}]}}"#
+            )
+        };
+        let slot = |n: u8, x: i32| {
+            format!(r#"{{"n": {n}, "id": "s{n}", "kind": "sit", "at": [{x}, 450, 0], "yaw": 0}}"#)
+        };
+        let facts = format!(
+            r#"{{"format": "souls/import-eden/1",
+            "kinds": [{{"ref": "core-tier@2", "hash": "aa", "name": "core:mars_tier", "form": "point"}},
+                      {{"ref": "core-toilet@1", "hash": "bb", "name": "core:mars_toilet", "form": "point"}},
+                      {{"ref": "core-pew@1", "hash": "cc", "name": "core:mars_pew", "form": "point"}}],
+            "things": [{}, {}, {}],
+            "doors": [], "places": [], "bake": {{}}, "byRef": {{}}}}"#,
+            thing("e_tier", "core-tier@2", "eden:bench", &slot(1, 0)),
+            thing("e_toilet", "core-toilet@1", "eden:toilet", ""),
+            thing(
+                "e_pew",
+                "core-pew@1",
+                "eden:bench",
+                &format!("{}, {}", slot(1, -300), slot(2, 300))
+            ),
+        );
+        let im = import_eden::load(&facts).expect("loads");
+        let entry = |text: &str| json::parse(text).expect("an entry");
+        let kinds = vec![
+            (
+                "eden:bench".to_owned(),
+                entry(
+                    r#"{"kind": "eden:bench", "slots": {
+                    "left": {"admits": "body", "posture": "sit", "at_mm": [-300, 450, 0], "stand": "fl"},
+                    "right": {"admits": "body", "posture": "sit", "at_mm": [300, 450, 0], "stand": "fr"}},
+                  "points": {"fl": {"role": "stand", "at_mm": [-300, 0, 600]},
+                             "fr": {"role": "stand", "at_mm": [300, 0, 600]}}}"#,
+                ),
+            ),
+            (
+                "eden:toilet".to_owned(),
+                entry(
+                    r#"{"kind": "eden:toilet", "slots": {
+                    "s": {"admits": "body", "posture": "sit", "at_mm": [0, 420, 0], "stand": "f"}},
+                  "points": {"f": {"role": "stand", "at_mm": [0, 0, 600]}}}"#,
+                ),
+            ),
+        ];
+        let (found, all) = import_eden::body_slots(&im.tree, &kinds);
+        let mut offered: Vec<_> = found.iter().map(|s| (s.thing, s.slot)).collect();
+        offered.sort();
+        let (tier, toilet, pew) = (im.nodes["e_tier"], im.nodes["e_toilet"], im.nodes["e_pew"]);
+        let mut want = vec![(tier, 1u64), (pew, 1), (pew, 2)];
+        want.sort();
+        assert_eq!(offered, want);
+        let mut not_on = not_on_things(&im.tree, &kinds);
+        not_on.sort_by_key(|t| t.thing != tier);
+        assert_eq!(
+            not_on,
+            vec![
+                NotOnThing {
+                    thing: tier,
+                    entry: "eden:bench".into(),
+                    slots: vec![2],
+                    own: vec![1],
+                },
+                NotOnThing {
+                    thing: toilet,
+                    entry: "eden:toilet".into(),
+                    slots: vec![1],
+                    own: vec![],
+                },
+            ]
+        );
+        // Every declared slot is offered or named: 5 declared, 3 offered, 2 named.
+        let named: usize = not_on.iter().map(|t| t.slots.len()).sum();
+        assert_eq!((all, found.len() + named), (5, 5));
+    }
 
     /// A boat is read from its entry's data: a `vehicle` on `deep_water` (a rowing boat at 1.5 m/s, a canoe), never a
     /// bicycle on level ground or a punt, whose course is its mooring's.
@@ -5129,7 +5481,7 @@ mod tests {
             .for_world();
         let again = Again {
             store: Under {
-                store: Shared(Arc::new(Patient::new(bucket))),
+                store: Shared(Arc::new(Patient::new(bucket.into()))),
                 prefix: "h/w/".into(),
             },
             public: dir.join("history"),
@@ -5328,7 +5680,8 @@ mod tests {
                 &format!("folder:{}", dir.join("store").display()),
                 |_| String::new(),
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
         )));
         let public = dir.join("public");
         let adapter = Again {
@@ -5448,7 +5801,8 @@ mod tests {
                 &format!("folder:{}", dir.join("store").display()),
                 |_| String::new(),
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
         )));
         let public = dir.join("public");
         let adapter = Again {
@@ -6454,6 +6808,45 @@ mod header_tests {
         );
         // Everything else, kind lines and boot targets included, is as this build wrote it.
         assert_eq!(b.kinds_text, text.replace(&ours, &theirs));
+    }
+
+    /// #4954: a kind the release added (the header pins no revision of it) is defined; a new revision of a kind the
+    /// header pins, which `adopt` leaves unpaired (owned otherwise), is not, though an entry names it: defining it would
+    /// write a second revision of the header's kind into the world's history for good.
+    #[test]
+    fn only_a_kind_the_header_pins_no_revision_of_is_defined_as_added() {
+        let (mut b, _, h2) = with_two_halls(built());
+        let wave = pin("eden:wave", 5);
+        let place = b.rules.kinds[&h2].clone();
+        b.rules.kinds.insert(wave.clone(), place);
+        b.header = kinds_of(&b.header, |k| k.push(wave.clone()));
+        let h3 = pin("eden:hall", 3);
+        let world = kinds_of(&b.header, |k| {
+            k.retain(|k| *k != h2 && *k != wave);
+            k.push(h3.clone());
+        });
+        adopt(&mut b, world.clone(), &owners_of(&[(&h3, "thing")]));
+        assert_eq!(b.anew, vec![h2.clone(), wave.clone()], "both unpaired");
+        let copy = Replica::start(world.stored()).unwrap();
+        let entry = |k: &str| {
+            (
+                k.to_owned(),
+                json::parse(&format!("{{\"kind\": \"{k}\"}}")).unwrap(),
+            )
+        };
+        let define = added_kinds(
+            &mut b,
+            copy.tree(),
+            &[entry("eden:hall"), entry("eden:wave")],
+        );
+        let names: Vec<&str> = define.iter().map(Name::as_str).collect();
+        assert_eq!(names, [wave.as_str()], "the added kind alone");
+        assert_eq!(
+            b.anew,
+            vec![h2],
+            "the header's kind's revision stays unmade"
+        );
+        assert!(!b.rules.kinds.contains_key(&h3));
     }
 }
 

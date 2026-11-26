@@ -32,6 +32,7 @@
 #![allow(clippy::disallowed_types)]
 
 pub mod json;
+pub mod placed;
 
 use json::Json;
 use replica::effects::{
