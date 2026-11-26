@@ -67,6 +67,22 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
+/// A crew member's leave refused because what it holds up would then stand or hang unheld (B18's `support.none`,
+/// `support.holders`), with the next step that frees it (E16): a lone holder lays the part down (`part:unseat`, beside
+/// its bay); one of a crew takes it down with the others first, or leaves once another Soul holds it too. Any other
+/// refusal is returned as it is.
+fn held_up(r: Refusal, lone: bool) -> Refusal {
+    if !matches!(r.name, "support.none" | "support.holders") {
+        return r;
+    }
+    let next = if lone {
+        "lay it down first (part:unseat), then leave"
+    } else {
+        "take it down together first (part:unseat), or leave once another Soul holds it"
+    };
+    refusal(r.name, format!("{}; next: {next}", r.detail))
+}
+
 /// An engine act's verb.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verb {
@@ -901,6 +917,7 @@ impl Engine {
                 // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is. A side carrier's
                 // with the load's crew left does not (C5).
                 self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
+                let lone = self.activities.members(activity).is_some_and(|m| m.len() == 1);
                 let e = &mut self.activities;
                 e.next = tree.next();
                 e.leave(
@@ -912,7 +929,8 @@ impl Engine {
                     ask,
                     a.body,
                     activity,
-                )?;
+                )
+                .map_err(|r| held_up(r, lone))?;
                 // A carry ends with its activity: what it carried stays where the last sample put it.
                 if self.activities.members(activity).is_none() {
                     self.carries.remove(&activity);
@@ -2319,9 +2337,12 @@ impl Engine {
             }
             match id == holder {
                 true => own = Some(square(p)),
-                false => bodies.push(square(p)),
+                false => bodies.push((id, square(p))),
             }
         }
+        // The bodies alone in the way of a side no wall or part blocks (E16): named in the refusal, so the holder
+        // can ask them to stand clear.
+        let mut in_way: BTreeSet<Id> = BTreeSet::new();
         // The part's own footprint where it stands, and its own fixed outlines, which it leaves.
         let (lx, lz) = (
             load.half_length.max(load.half_width),
@@ -2406,14 +2427,39 @@ impl Engine {
                 .into_iter()
                 .filter(|q| !mine(q))
                 .any(|q| overlap(&sweep, q));
-            let clear = !fixed_hit
-                && !others.iter().any(|q| overlap(&sweep, q))
-                && !bodies.iter().any(|b| overlap(&sweep, b))
+            let walled = fixed_hit || others.iter().any(|q| overlap(&sweep, q));
+            let standing: Vec<Id> = bodies
+                .iter()
+                .filter(|(_, b)| overlap(&sweep, b))
+                .map(|(id, _)| *id)
+                .collect();
+            let clear = !walled
+                && standing.is_empty()
                 && !own.as_ref().is_some_and(|b| overlap(&rest, b));
+            if !walled {
+                in_way.extend(standing);
+            }
             clear.then_some((c0, along))
         });
         let Some((c0, along)) = free else {
-            return Err(refusal("laydown.no-room", show(part)));
+            // E16: a refusal names a next step. Bodies standing where it would lie are named (they may be asked to
+            // stand clear); with every side walled, another Soul joining the crew can take it down with this one.
+            let detail = if in_way.is_empty() {
+                format!(
+                    "{}: no side clear of walls and parts; next: ask another Soul to join this crew, then take it \
+                     down together (part:unseat)",
+                    show(part)
+                )
+            } else {
+                let who: Vec<String> = in_way.iter().map(|b| show(*b)).collect();
+                format!(
+                    "{}: {} stand{} where it would lie; next: ask them to stand clear, then lay it down again",
+                    show(part),
+                    who.join(" and "),
+                    if who.len() == 1 { "s" } else { "" }
+                )
+            };
+            return Err(refusal("laydown.no-room", detail));
         };
         // At the ground's height where it rests (raised or sloped terrain), as C4's set-down rests a load at its
         // carriers' feet; read near its bay's base (its own, out of a bay), never near a far-off holder's feet.

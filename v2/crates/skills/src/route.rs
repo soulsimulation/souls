@@ -9,7 +9,9 @@
 //!   below a tenth of free speed, and sideways; the sum never exceeds free speed.
 //! - **Its own space** (#4215). Under the push, a hard guard: over a tick a walker closes on each body near it by at
 //!   most half the gap beyond two radii ([`ROOM`] each), and not at all when already inside; the other keeps its own
-//!   half, so no step ends inside another body's space. A step the guard holds is a wait, never a jump.
+//!   half, so no step ends inside another body's space. A step the guard holds is a wait, never a jump. Under the
+//!   ladder's shoulder turn a body at rest is no longer guarded (E16), so one standing in the only way never walls a
+//!   walker in.
 //! - **A way round** (A2-2). Held [`DETOUR_AFTER`] ticks by a body standing ahead (seen at rest [`STANDING`] ticks),
 //!   it walks first to a point beside that body, or sideways past the end of a row of them, that a straight walk
 //!   reaches clear of every body; hemmed in, it steps back and looks again from there. A standing body never pushes it
@@ -35,7 +37,7 @@
 //!   copy; through the host the skill sees each result a tick later, T1). For [`SLID`] ticks after the mover slid it,
 //!   the part of its step along that edge keeps within the guard's bounds too (#4215, A2-2).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
-//!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
+//!   pushes it, and it squeezes past one at rest), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
 //!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
 //!   the walk leaves its count alone in [`F_ROUTE`] (`[count, []]`), so a read of the body copies no legs.
 //! - **Sent to a point** (N9, [`Route::sent`]). The world's spot tables grant the walker a standing spot near the
@@ -759,11 +761,30 @@ impl Skill for Route {
             }
             _ => self.slide.and_then(|(t, k)| (k > 1).then_some((t, k - 1))),
         };
+        // The shoulder turn (N10's rung, E16): a body at rest no longer holds it either, so one standing in the only
+        // way (a doorway, the one gap, by its own order to stay) never walls it in: it squeezes past. Bodies on the
+        // move keep their space.
+        let passing: Vec<Near>;
+        let guarded: &[Near] = if shoulder {
+            passing = near
+                .iter()
+                .filter(|n| {
+                    !self
+                        .resting
+                        .iter()
+                        .any(|(i, k)| *i == n.id && *k >= STANDING)
+                })
+                .copied()
+                .collect();
+            &passing
+        } else {
+            &near
+        };
         let step = guard(
             [p.x, p.z],
             want,
             self.tick,
-            &near,
+            guarded,
             room,
             self.slide.map(|(t, _)| t),
         );

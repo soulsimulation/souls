@@ -1901,14 +1901,16 @@ fn n1_a_still_body_in_the_only_way_is_stepped_aside_and_the_walker_arrives() {
     run.world.stop();
 }
 
-/// 0.133 N1: the same ring, the second body staying by its own order. Nothing makes way: routed again at 3 s, then a
-/// shoulder turn at 9 s; the staying body is never moved.
+/// E16 (#2787), a Soul staying in a doorway: the same ring, the second body in its only gap staying by its own order.
+/// Nothing makes way: routed again at 3 s, then a shoulder turn at 9 s, and the walker squeezes past it and arrives
+/// (before E16 the guard of #4215 held it there, and its order ended `goal-unreachable` at 15 s). The staying body is
+/// never moved, and no step of the walker's is longer than its speed allows.
 #[test]
-fn n1_a_staying_body_is_never_moved_and_the_walker_turns_its_shoulder_at_9_s() {
+fn e16_a_soul_staying_in_the_only_way_is_squeezed_past_at_the_shoulder_turn() {
     let run = lockstep_with(ring_with_a_staying_body);
     let (answer, rungs) = walk_in(&run, east(), 500);
     let r = run.replay();
-    println!("N1 shoulder: {answer:?}; rungs {:?}", names(&rungs));
+    println!("E16 staying in the gap: {answer:?}; rungs {:?}", names(&rungs));
     let when = |n: &str| rungs.iter().find(|r| r.1 == n).map(|r| r.0);
     let reroute = when("souls:reroute").expect("routed again");
     let shoulder = when("souls:shoulder-turn").expect("a shoulder turn");
@@ -1918,32 +1920,72 @@ fn n1_a_staying_body_is_never_moved_and_the_walker_turns_its_shoulder_at_9_s() {
         when("souls:step-aside").is_none(),
         "a staying body is never moved"
     );
+    assert!(
+        when("souls:order-ended").is_none(),
+        "not ended: {:?}",
+        names(&rungs)
+    );
+    assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
     assert_eq!(at(&r, w2()), in_the_gap(), "never moved");
+    assert_walked(&run, w1());
     run.world.stop();
 }
 
-/// 0.133 N1: a walker in a closed ring of bodies staying by their own orders gets nowhere: routed again at 3 s, a
-/// shoulder turn at 9 s, and at 15 s its order ends by name, `goal-unreachable`, the entry naming how far it is from
-/// its leg's end; the walk's receipt is that refusal.
+/// E16 (#2787): a walker walled in by a closed ring of Souls each staying by its own order is not trapped: routed
+/// again at 3 s, then at the shoulder turn (9 s) it squeezes out between them and arrives; none of them is moved.
 #[test]
-fn n1_a_walker_that_gets_nowhere_ends_goal_unreachable_at_15_s() {
+fn e16_a_walker_ringed_in_by_souls_staying_squeezes_out() {
     let run = lockstep_with(ring_closed);
     let (answer, rungs) = walk_in(&run, east(), 500);
-    println!("N1 unreachable: {answer:?}; rungs {:?}", names(&rungs));
-    assert_eq!(answer, (1, Err("goal-unreachable".to_owned())));
+    let r = run.replay();
+    println!("E16 closed ring: {answer:?}; rungs {:?}", names(&rungs));
     let when = |n: &str| rungs.iter().find(|r| r.1 == n);
     assert!(when("souls:reroute").expect("routed again").0 >= 3_000_000);
     assert!(when("souls:shoulder-turn").expect("a shoulder turn").0 >= 9_000_000);
-    let ended = when("souls:order-ended").expect("its order ended");
-    assert!(ended.0 >= 15_000_000, "at 15 s: {}", ended.0);
-    assert_eq!(ended.3[&3], Value::Bytes(b"goal-unreachable".to_vec()));
-    let Value::Bytes(why) = &ended.3[&4] else {
-        panic!("what it waited for")
-    };
-    let why = String::from_utf8_lossy(why);
-    println!("N1 unreachable: {why}");
-    assert!(why.contains("no progress for"), "{why}");
+    assert!(when("souls:step-aside").is_none(), "nobody moved by the world");
+    assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
+    let (p, e) = (at(&r, w1()), east());
+    let off = (i128::from(p.x - e.x).pow(2) + i128::from(p.z - e.z).pow(2)).isqrt();
+    assert!(
+        off <= i128::from(skills::route::AT_SPOT),
+        "the walker arrived: {off} µm off"
+    );
+    assert_eq!(at(&r, w2()), at2(), "the second body where it stood");
+    assert_walked(&run, w1());
     run.world.stop();
+}
+
+/// Every move `who` made in the log, sample to sample, is at most walking speed: nothing teleports (E16).
+fn assert_walked(run: &Run, who: Id) {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut last: Option<(i64, Vec3)> = None;
+    let (mut fastest, mut samples) = (0i128, 0);
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            let Body::Changes(cs) = &e.body else { continue };
+            for c in cs {
+                let Change::Motion(h) = &c.change else { continue };
+                if h.node != who {
+                    continue;
+                }
+                let p = h.pose.position;
+                if let Some((t, q)) = last
+                    && h.at > t
+                {
+                    let d = (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt();
+                    fastest = fastest.max(d * 1_000_000 / i128::from(h.at - t));
+                }
+                last = Some((h.at, p));
+                samples += 1;
+            }
+        }
+    }
+    println!("E16 {samples} motion samples, fastest {fastest} um/s");
+    assert!(samples > 1, "it moved");
+    assert!(fastest <= 2_000_000, "never faster than walking: {fastest} um/s");
 }
 
 /// A point as the ladder's entries write it: `[x, y, z]` µm.

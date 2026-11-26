@@ -20,8 +20,9 @@
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
 //!   again once from where it stands; at 5 s each still body in its way (within [`NEAR`] of it, or within [`ROOM`]
 //!   of the far end of the link it waits for) that has no order to stay there is sent `make-way`, and the world steps
-//!   it aside ([`Rung::StepAside`]); at 9 s it passes with a shoulder turn (no neighbour pushes it); at 15 s its order
-//!   ends by name, `goal-unreachable`, naming what it waited for. Each is a [`Record`] in [`Ladder::log`].
+//!   it aside ([`Rung::StepAside`]); at 9 s it passes with a shoulder turn (no neighbour pushes it, and it squeezes
+//!   past a body at rest: `skills::route`, E16); at 15 s its order ends by name, `goal-unreachable`, naming what it
+//!   waited for and a next step ([`UNREACHABLE_NEXT`]). Each is a [`Record`] in [`Ladder::log`].
 //! - **Still bodies** (Gene's decision, 0.132 A2-3: no Soul is left stuck). When the only way is blocked, the world
 //!   moves a still body aside by the smallest step that clears the walker's line: across that line, to
 //!   [`CLEAR`] from it, onto legal ground and clear of every other body, the nearer side first, at walking speed and
@@ -79,6 +80,9 @@ pub const REROUTE: Micros = 3_000_000;
 pub const MAKE_WAY: Micros = 5_000_000;
 /// Then it passes with a shoulder turn.
 pub const SHOULDER: Micros = 9_000_000;
+/// The next step a `goal-unreachable` ending names (E16): what its Soul can do that the ladder has not.
+pub const UNREACHABLE_NEXT: &str =
+    "next: ask those in the way to make way, then walk again, or walk by another way";
 /// Then its order ends by name. The design's 20 s is a bound; 15 s ends a jam that starts within 5 s of a walk's
 /// start inside 20 s of it.
 pub const END: Micros = 15_000_000;
@@ -852,14 +856,15 @@ impl Ladder {
             }
             let idle = c.idle;
             if idle >= END {
+                // E16: the ending names a next step, as every refusal does.
                 let detail = match waits {
                     Some((l, _)) => format!(
-                        "no progress for {} ms, waiting for {}",
+                        "no progress for {} ms, waiting for {}; {UNREACHABLE_NEXT}",
                         idle / 1000,
                         replica::world_model::show(l)
                     ),
                     None => format!(
-                        "no progress for {} ms, {} um from its leg's end",
+                        "no progress for {} ms, {} um from its leg's end; {UNREACHABLE_NEXT}",
                         idle / 1000,
                         gap
                     ),

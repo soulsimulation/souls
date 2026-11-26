@@ -1565,6 +1565,27 @@ fn a_stalled_gateway_walk_ends_goal_unreachable_and_releases_its_body() {
     let log = logged(&bytes);
     let (&id, l) = log.iter().next().unwrap();
     assert_eq!(l.last().unwrap().2.as_deref(), Some("goal-unreachable"));
+    // E16: the ladder's ending, which its Soul reads on its body, names a next step.
+    let ended: Vec<String> = recover(&bytes)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .flat_map(|r| Part::read(&r).unwrap().effects)
+        .flat_map(|e| e.events.into_iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:order-ended")
+        .filter_map(|ev| match ev.fields.get(&4) {
+            Some(Value::Bytes(b)) => Some(String::from_utf8_lossy(b).into_owned()),
+            _ => None,
+        })
+        .collect();
+    println!("E16 order ended: {ended:?}");
+    assert!(
+        ended
+            .iter()
+            .any(|d| d.ends_with(sim::unstick::UNREACHABLE_NEXT)),
+        "the ending names a next step: {ended:?}"
+    );
     let ticks = ticks(&bytes);
     let (end, _, _) = tick_of(&ticks, id, MOVE_ENDED);
     assert!(
