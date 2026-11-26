@@ -312,3 +312,135 @@ pub fn assign(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use replica::ids::Scope;
+    use replica::rules::json;
+
+    fn entry(family: &str, kind: &str) -> Json {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds")
+            .join(family)
+            .join(format!("{kind}.json"));
+        json::parse(&std::fs::read_to_string(p).expect("the entry")).expect("json")
+    }
+
+    fn id(n: u64) -> Id {
+        Id::new(Scope([7; 16]), n).expect("an id")
+    }
+
+    /// Every load the crews carry (racks, the shade, the loading spot's): its grips in `Load::of`'s order.
+    const LOADS: [(&str, &str); 9] = [
+        ("construction", "rack_beam"),
+        ("construction", "rack_upright"),
+        ("construction", "rack_upright_6m"),
+        ("construction", "timber_bundle"),
+        ("construction", "generator"),
+        ("construction", "pallet_crates"),
+        ("carpentry", "timber_rail"),
+        ("carpentry", "timber_bent"),
+        ("carpentry", "shade_cloth"),
+    ];
+
+    #[test]
+    fn a_loads_grips_are_in_its_carrys_order() {
+        for (family, kind) in LOADS {
+            let e = entry(family, kind);
+            let load = Load::of(&e).expect("a load");
+            let g = grips_of(&e).expect("its grips");
+            assert_eq!(g.first().map(|g| g.along), Some(load.grips[0]), "{kind}");
+            assert_eq!(g.last().map(|g| g.along), Some(load.grips[1]), "{kind}");
+            let inner: Vec<i64> = g[1..g.len() - 1].iter().map(|g| g.along).collect();
+            let kept: Vec<i64> = load.inner.iter().flatten().copied().collect();
+            assert_eq!(inner, kept, "{kind}");
+        }
+    }
+
+    fn names(h: &[Hold]) -> Vec<&str> {
+        h.iter().map(|h| h.grip.as_str()).collect()
+    }
+
+    #[test]
+    fn the_back_holds_the_grip_at_the_carrys_back_either_way_round() {
+        let e = entry("construction", "rack_beam");
+        let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+        let (front, back, side) = (id(1), id(2), id(3));
+        let sides = [(side, [0, -400_000])];
+        let h = assign(&g, &load, load.held().unwrap(), front, back, &sides).unwrap();
+        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_mid"]);
+        // Lifted the other way round, its + end behind: the front takes the other end.
+        let r = load.reversed().unwrap();
+        let h = assign(&g, &load, r.held().unwrap(), front, back, &sides).unwrap();
+        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_mid"]);
+        for hold in &h {
+            let [a, b] = hold.hands;
+            // Its hands either side of its grip along the beam's length (its z), 0.4 m apart.
+            assert_eq!((a.x, a.y, b.x, b.y), (0, 51_000, 0, 51_000));
+            assert_eq!((a.z - b.z).abs(), 2 * HAND_HALF, "{}", hold.grip);
+            assert_eq!(a.z + b.z, 2 * hold.at.z);
+        }
+        // The side stands on the beam's − side across the carry: its hands are on that edge, not through the beam.
+        let held = r.held().unwrap();
+        let across = |p: Vec3| held.1.rotate(p).unwrap().z + held.0.z;
+        let mid = h.iter().find(|h| h.body == side).unwrap();
+        assert!(across(mid.hands[0]) <= across(mid.at));
+    }
+
+    #[test]
+    fn a_crew_of_six_holds_each_grip_once_in_join_order_hands_within_its_length() {
+        for (family, kind) in [
+            ("construction", "timber_bundle"),
+            ("carpentry", "shade_cloth"),
+        ] {
+            let e = entry(family, kind);
+            let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+            let places = load.side_places();
+            let sides: Vec<(Id, [i64; 2])> =
+                places.iter().enumerate().map(|(k, p)| (id(3 + k as u64), *p)).collect();
+            let held = load.held().unwrap();
+            let h = assign(&g, &load, held, id(1), id(2), &sides).unwrap();
+            assert_eq!(h.len(), 6, "{kind}");
+            let mut grips: Vec<&str> = names(&h);
+            grips.sort_unstable();
+            grips.dedup();
+            assert_eq!(grips.len(), 6, "{kind}: each grip held once");
+            // The sides in join order, from the back toward the front.
+            let x = |p: Vec3| held.1.rotate(p).unwrap().x;
+            let along: Vec<i64> = h[2..].iter().map(|h| x(h.at)).collect();
+            assert!(along.windows(2).all(|w| w[0] < w[1]), "{kind}: {along:?}");
+            for hold in &h {
+                // Back to front, and within its length.
+                assert!(x(hold.hands[0]) <= x(hold.hands[1]), "{kind}");
+                for p in hold.hands {
+                    assert!(x(p).abs() <= load.half_length, "{kind} {}", hold.grip);
+                }
+            }
+            // Each side's hands at the load's edge on the side it stands (the shade cloth is 1.9 m wide).
+            let z = |p: Vec3| held.1.rotate(p).unwrap().z + held.0.z;
+            for (hold, (_, place)) in h[2..].iter().zip(&sides) {
+                let edge = z(hold.hands[0]);
+                assert_eq!(edge.signum(), place[1].signum(), "{kind} {}", hold.grip);
+                assert_eq!(edge.abs(), load.half_width, "{kind} {}", hold.grip);
+            }
+        }
+    }
+
+    #[test]
+    fn holds_read_back_as_written() {
+        let e = entry("carpentry", "timber_rail");
+        let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+        let sides = [(id(3), [-500_000, 400_000]), (id(4), [500_000, -400_000])];
+        let holds = Holds {
+            load: id(9),
+            phase: SET_IN.into(),
+            since: 1_500_000,
+            until: Some(3_500_000),
+            holds: assign(&g, &load, load.held().unwrap(), id(1), id(2), &sides).unwrap(),
+        };
+        let v = Value::Map(holds.fields(id(8)).unwrap());
+        assert_eq!(Holds::read(&v), Some(holds.clone()));
+        assert_eq!(holds.of(id(4)).map(|h| h.grip.as_str()), Some("grip_r"));
+    }
+}
