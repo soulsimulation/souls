@@ -76,6 +76,15 @@ export async function followSoul(page, { press, until, camera }) {
     if (await search.isVisible() && !await page.locator('.explore-soul').count()) return NO_SOUL_TO_FOLLOW;
     throw e;
   }
+  // Explore searches its locations again each time it opens. When they come, the centred dialog grows and its Soul rows
+  // move up, so a click aimed before that lands where the row was (release 0.138 on Eden: Explore stayed open, the camera
+  // free). Click once the search is done and the row has held still for 250 ms; a row that never settles is clicked anyway.
+  const searching = page.locator('.explore-modal [aria-live=polite]').first();
+  await until(async () => {
+    if (/searching/i.test(await searching.textContent({ timeout: 1000 }).catch(() => '') ?? '')) return false;
+    const a = await soul.boundingBox(); await sleep(250); const b = await soul.boundingBox();
+    return !!a && !!b && a.x === b.x && a.y === b.y;
+  }, 10000);
   const name = (await soul.locator('b').first().textContent())?.trim();
   await press(soul);
   if (!await until(async () => (await camera()) === 'follow', 20000)) throw Error(`clicking ${name} did not follow (camera ${await camera()})`);

@@ -46,8 +46,9 @@ test('printed errors collapse numbered paths and drop the console copy of a list
 });
 
 // A page as followSoul reads it: Explore open or not, the Soul rows it lists, the camera a click leaves.
-function fakePage({ open = true, souls = [], follows = true } = {}) {
-  const st = { open, camera: 'free', pressed: [] };
+// `ys`: where the first row is at each read (Explore's dialog grows when its location search comes in).
+function fakePage({ open = true, souls = [], follows = true, ys = [], searching = 0 } = {}) {
+  const st = { open, camera: 'free', pressed: [], y: 0, clickedAt: null };
   const loc = (sel) => ({
     sel,
     first: () => loc(sel),
@@ -55,9 +56,16 @@ function fakePage({ open = true, souls = [], follows = true } = {}) {
     isVisible: async () => (sel === 'input.explore-search' ? st.open : false),
     count: async () => (sel === '.explore-soul' && st.open ? souls.length : 0),
     waitFor: async () => { if (!(sel === '.explore-soul' && st.open && souls.length)) throw Error('locator.waitFor: Timeout 10000ms exceeded.'); },
+    boundingBox: async () => { if (ys.length) st.y = ys.shift(); return { x: 10, y: st.y }; },
+    textContent: async () => (searching-- > 0 ? 'Searching locations…' : '100 of 340 locations'),
   });
-  const press = async (l) => { st.pressed.push(l.sel); if (l.sel === '.explore-open') st.open = true; if (l.sel === '.explore-soul' && follows) st.camera = 'follow'; };
-  return { st, page: { locator: loc }, helpers: { press, until: async (fn) => (await fn()) || null, camera: async () => st.camera } };
+  const press = async (l) => {
+    st.pressed.push(l.sel);
+    if (l.sel === '.explore-open') st.open = true;
+    if (l.sel === '.explore-soul') { st.clickedAt = st.y; if (follows) st.camera = 'follow'; }
+  };
+  const until = async (fn, ms) => { for (let i = 0; i < 50; i++) { const v = await fn(); if (v) return v; } return null; };
+  return { st, page: { locator: loc }, helpers: { press, until, camera: async () => st.camera } };
 }
 
 test('Follow a Soul: a listed Soul is followed by its name; none listed passes and says so; a dead row fails', async () => {
@@ -73,6 +81,13 @@ test('Follow a Soul: a listed Soul is followed by its name; none listed passes a
   await assert.rejects(followSoul(f.page, { ...f.helpers, press: async () => {} }), /Timeout 10000ms/);
   f = fakePage({ souls: ['Fern'], follows: false });
   await assert.rejects(followSoul(f.page, f.helpers), /clicking Fern did not follow \(camera free\)/);
+});
+
+test('Follow a Soul clicks the row once Explore has its locations and the row holds still (release 0.138 on Eden)', async () => {
+  // the dialog grows as the locations come and the row moves up: the click waits for it to stop
+  const f = fakePage({ souls: ['Fern'], searching: 2, ys: [410, 300, 300] });
+  assert.equal(await followSoul(f.page, f.helpers), 'following Fern');
+  assert.equal(f.st.clickedAt, 300);
 });
 
 test('release.yml: publish needs the controls job, which runs after the engine move', () => {
