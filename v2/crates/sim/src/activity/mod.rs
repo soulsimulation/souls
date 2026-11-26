@@ -325,6 +325,21 @@ impl Activities {
             .is_some_and(|l| l.node.state == State::Started)
     }
 
+    /// Why `activity`, not started, is not: the refusal its accepted pair's last start met (a member held by another
+    /// activity, say), or that no one has accepted its offer yet. None once it has started, or when it is not live.
+    pub fn unstarted_why(&self, activity: Id) -> Option<String> {
+        if self.started(activity) || !self.live.contains_key(&activity) {
+            return None;
+        }
+        Some(match self.offers.why.get(&activity) {
+            Some(r) => format!("its start was refused {}: {}", r.name, r.detail),
+            None if self.offers.pairs.contains_key(&activity) => {
+                "its pair waits behind its asker's earlier one".to_owned()
+            }
+            None => "no one has accepted its offer yet".to_owned(),
+        })
+    }
+
     /// The started activity holding `body`, if any.
     pub fn holder(&self, body: Id) -> Option<Id> {
         self.holding.get(&body).copied()
@@ -1100,6 +1115,7 @@ impl Activities {
                 q.retain(|p| *p != activity);
             }
         }
+        self.offers.why.remove(&activity);
         self.offers.timers.retain(|_, a| *a != activity);
         self.beats.remove(&activity);
         self.ending.remove(&activity);

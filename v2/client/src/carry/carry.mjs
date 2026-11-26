@@ -257,6 +257,8 @@ export function carryIntents(req, ctx) {
         // beam's length), each carrier at its end of the line and as far from the middle as it is now: so the part
         // goes in square, not turned by however its carriers happened to stand.
         const at = placeOf(req.where), s = slotPoint(at, kinds[kindOf(req.where)], req.slot);
+        const crossed = crossedOnTheWay(req, ctx, at, s, mid);
+        if (crossed) return crossed;
         const z = turn(times(at.rot ?? [ONE, 0, 0, 0], yawQuat(s.yaw)), [0, 0, M]), zf = Math.hypot(z[0], z[2]) || 1, u = [z[0] / zf, z[2] / zf];
         const d = Math.hypot(...off) * (off[0] * u[0] + off[1] * u[1] < 0 ? -1 : 1);
         return [walk(ns, ground, [dest[0] + u[0] * d, dest[1] + u[1] * d])];
@@ -265,6 +267,57 @@ export function carryIntents(req, ctx) {
     }
     default: return usage;
   }
+}
+
+/** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
+export const HEIGHT = 900_000;
+
+/**
+ * A part already seated in another slot of the bay a crew carries its load into, met on the straight way there at the
+ * height the load is carried (0.135 C7: the world stops that carry, `souls:carry-blocked`, and sets its load down
+ * under the part): a refusal naming it, before anyone moves; else null. On the bay's plan, the load lined up on the
+ * slot's z as it goes in, its middle from `mid` to the slot; each seated part where its slot holds it. `ctx.seated(id)`
+ * the parts in a node's slots ({id, slot}), `ctx.heldBy(crew)` the part a crew holds; without them nothing is read.
+ */
+function crossedOnTheWay(req, ctx, bay, s, mid) {
+  const { kinds, kindOf, placeOf } = ctx, held = ctx.heldBy?.(req.crew), entry = kinds[kindOf(req.where)];
+  const box = (id) => { const b = kinds[kindOf(id)]?.geometry?.bounds_mm; return Array.isArray(b) && b.length === 3 ? b.map((v) => v * 500) : null; };
+  const hb = held && box(held), hp = held && placeOf(held);
+  if (!hb || !hp || !ctx.seated) return null;
+  // The load's half extents as it is held now (its turn in the copy), up and on the plan.
+  const corners = [-1, 1].flatMap((a) => [-1, 1].flatMap((b) => [-1, 1].map((c) => turn(hp.rot ?? [ONE, 0, 0, 0], [a * hb[0], b * hb[1], c * hb[2]]))));
+  const ext = [0, 1, 2].map((k) => Math.max(...corners.map((v) => Math.abs(v[k]))));
+  const band = [HEIGHT - ext[1], HEIGHT + ext[1]], long = Math.max(ext[0], ext[2]), across = Math.min(ext[0], ext[2]);
+  // Into the bay's frame (its turn about y only): x across the slots, z along them.
+  const inv = [...(bay.rot ?? [ONE, 0, 0, 0])]; inv[1] = -inv[1]; inv[2] = -inv[2]; inv[3] = -inv[3];
+  const local = ([x, z]) => { const p = turn(inv, [x - bay.pos[0], 0, z - bay.pos[2]]); return [p[0], p[2]]; };
+  const [from, to] = [local(mid), local(s.point)];
+  const names = Object.keys(entry?.slots ?? {});
+  for (const p of ctx.seated(req.where)) {
+    const name = names[p.slot - 1], at = entry?.slots?.[name]?.at_mm, pb = box(p.id);
+    // A part with solids (a frame: its posts, at the slots' ends) is met as those, by the world's own check.
+    if (p.id === held || name === s.name || !Array.isArray(at) || !pb || kinds[kindOf(p.id)]?.geometry?.solids_mm) continue;
+    const q = [at[0] * 1000, at[2] * 1000], quarter = Math.abs((entry.slots[name].yaw_mdeg ?? 0) % 180_000) === 90_000;
+    const [hx, hz] = quarter ? [pb[2], pb[0]] : [pb[0], pb[2]], up = [at[1] * 1000, at[1] * 1000 + 2 * pb[1]];
+    if (up[0] >= band[1] || up[1] <= band[0]) continue;   // wholly under or over the load as it is carried
+    if (meets(from, to, q, [across + hx, long + hz])) {
+      return no('carry-way-crossed', `on the way to ${s.name}, the load meets the part in ${name} (${p.id}), seated ${Math.round(up[0] / 1000)} to ${Math.round(up[1] / 1000)} mm up, at the height it is carried (${Math.round(band[0] / 1000)} to ${Math.round(band[1] / 1000)} mm): bring it in from the bay's other side, or seat ${s.name} before ${name} (and take ${name} out first)`);
+    }
+  }
+  return null;
+}
+
+/** Whether a point going straight from `a` to `b` comes inside the box of half sides `h` about `c` (touching is not). */
+function meets(a, b, c, h) {
+  let t0 = 0, t1 = 1;
+  for (const k of [0, 1]) {
+    const d = b[k] - a[k];
+    if (d === 0) { if (Math.abs(a[k] - c[k]) >= h[k]) return false; continue; }
+    const u = (c[k] - h[k] - a[k]) / d, v = (c[k] + h[k] - a[k]) / d;
+    t0 = Math.max(t0, Math.min(u, v)); t1 = Math.min(t1, Math.max(u, v));
+    if (t0 >= t1) return false;
+  }
+  return true;
 }
 
 /** The crews in the copy: each carry activity, where it is and what it holds (its children). `rows`: the copy's rows. */

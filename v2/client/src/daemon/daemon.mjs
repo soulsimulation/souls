@@ -2321,7 +2321,10 @@ async function carry(req) {
     return p ? [p.pos[0], p.pos[2]] : null;
   };
   const ground = groundIn(rows);
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, served: activitiesServed(home, seat.world) });
+  // The parts in a node's slots, and the part a crew holds: a carry into a bay's slot is checked against the rest.
+  const seated = (id) => all.filter((r) => r.parent === id && poses.get(r.id)?.slot != null).map((r) => ({ id: r.id, slot: poses.get(r.id).slot }));
+  const heldBy = (crew) => all.find((r) => r.parent === crew && !r.soul)?.id ?? null;
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   const basis = shownVersion ?? state.cursor;
   // An offer makes the crew's node: the crews already in the copy, so the command can name the new one once it is done.

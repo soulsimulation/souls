@@ -823,8 +823,10 @@ impl Engine {
                 if !members.iter().any(|m| m.body == a.body) {
                     return Err(refusal("not-a-member", show(a.body)));
                 }
+                // A crew of any size the carry takes (0.135 C5): its first two are its front and back, its sides
+                // walk beside the part.
                 let (front, back) = match members {
-                    [f, b] => (f.body, b.body),
+                    [f, b, ..] => (f.body, b.body),
                     _ => {
                         return Err(refusal(
                             "crew.size",
@@ -933,7 +935,12 @@ impl Engine {
                 // where they stand: a set-down never waits on a side whose body is gone.
                 let side_bodies: Vec<Id> = members[2..].iter().map(|m| m.body).collect();
                 if !self.activities.started(activity) {
-                    return Err(refusal("activity-not-started", show(activity)));
+                    // Never without its reason: a member held by another activity, say, or no accept yet.
+                    let why = self.activities.unstarted_why(activity).unwrap_or_default();
+                    return Err(refusal(
+                        "activity-not-started",
+                        format!("{}: {why}", show(activity)),
+                    ));
                 }
                 let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
                 let transfer = self
