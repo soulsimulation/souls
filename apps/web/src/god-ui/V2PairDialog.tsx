@@ -6,7 +6,9 @@
 // requests asked from the same network as this page in the last ten minutes (a new Soul, or one of the person's own).
 // The card shows the request's code to match against the code the person's own terminal shows (RFC 8628 §5.4, as the
 // linked /pair card does), and approves only after that box is ticked. Decline closes it in this tab; the agent's own
-// link (/pair?code=…) still answers it.
+// link (/pair?code=…) still answers it. #5006: the request of this world's creator's agent (`souls-god.mjs pair <world>
+// --creator <grant>`) comes up the same way, for the world's owner alone: the directory lists it only to the account
+// holding the grant, and this page only when the grant is its own world's.
 import { useEffect, useRef, useState } from 'react';
 import { userAuthHeaders } from '../auth-session.ts';
 import { worldKey, worldPath } from '../world-path.ts';
@@ -14,6 +16,7 @@ import { requestFollowSoul, soulPresent } from '../follow-soul-request.ts';
 import { closeApproval, closedApprovals, WINDOW_POLL_MS } from './window-approvals.ts';
 import { countPairing } from '../visitor-counts.ts';
 import { OWNED_CHANGED_EVENT, v2WorldName } from '../v2-engine/owner-mailbox.ts';
+import { v2Creator } from './god-api.ts';
 import './approval-card.css';
 
 /** `name`: the name a new Soul's agent asked for (`souls.mjs pair --name`), when it asked for one. */
@@ -40,8 +43,16 @@ export function waitingOf(body: unknown): WaitingPair[] {
     && (w.name === null || w.name === undefined || typeof w.name === 'string'));
 }
 
+/** A request of a world's creator's agent: its grant is a creator grant (directoryd `is_creator_grant`). */
+export const isCreatorRequest = (w: WaitingPair) => !!w.soul && /^creator-[0-9a-f]{32}-\d+$/.test(w.soul);
+/** The request to show: the newest not closed in this tab, a creator's only when its grant is this world's creator grant
+ *  (`creator`, the signed-in owner's; null for anyone else). */
+export function nextWaiting(list: readonly WaitingPair[], closed: ReadonlySet<string>, creator: string | null): WaitingPair | null {
+  return list.find((w) => !closed.has(w.code) && (!isCreatorRequest(w) || (!!creator && w.soul === creator))) ?? null;
+}
+
 /** The newest waiting request this tab has not closed, polled while `enabled` and the page is visible. */
-export function useV2WaitingPair(place: Directory | null, enabled: boolean): WaitingPair | null {
+export function useV2WaitingPair(place: Directory | null, enabled: boolean, creator: string | null = null): WaitingPair | null {
   const [shown, setShown] = useState<WaitingPair | null>(null);
   useEffect(() => {
     if (!place || !enabled) { setShown(null); return; }
@@ -55,8 +66,7 @@ export function useV2WaitingPair(place: Directory | null, enabled: boolean): Wai
         if (!live) return;
         if (r && r.status === 404) return;   // a directory without the list: stop asking
         const list = r?.ok ? waitingOf(await r.json().catch(() => null)) : [];
-        const closed = closedApprovals();
-        const next = list.find((w) => !closed.has(w.code)) ?? null;
+        const next = nextWaiting(list, closedApprovals(), creator);
         setShown((prev) => (prev?.code === next?.code ? prev : next));
       } catch { /* the directory is unreachable now: ask again */ } finally { asking = false; }
       if (live) timer = setTimeout(() => void tick(), WINDOW_POLL_MS);
@@ -65,7 +75,7 @@ export function useV2WaitingPair(place: Directory | null, enabled: boolean): Wai
     document.addEventListener('visibilitychange', onVisible);
     void tick();
     return () => { live = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [place?.directory, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [place?.directory, enabled, creator]); // eslint-disable-line react-hooks/exhaustive-deps
   return shown;
 }
 
@@ -89,6 +99,7 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
   // trial of 0.137: the Name field starts with the name the agent asked for
   const asked = request.soul || request.former ? '' : (request.name ?? '').trim().slice(0, 40);
   const [name, setName] = useState(asked), [soul, setSoul] = useState<string | null>(null), [late, setLate] = useState(false);
+  const creator = isCreatorRequest(request), [built, setBuilt] = useState(false);
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof node.showModal !== 'function') return;
@@ -112,7 +123,8 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
     try {
       const r = await directoryPost(place, '/v1/pair/approve', { code: request.code, confirm: true });
       const body = await r?.json().catch(() => ({})) as { approved?: boolean; soul?: string; refused?: string; device?: string } | undefined;
-      if (r?.ok && body?.approved === true && typeof body.soul === 'string') {
+      if (r?.ok && body?.approved === true && creator) setBuilt(true);   // no Soul to wait for: the agent builds
+      else if (r?.ok && body?.approved === true && typeof body.soul === 'string') {
         countPairing('pair:' + request.code);
         const given = name.trim();
         if (given && !request.soul && !request.former) {
@@ -125,16 +137,19 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
     } catch { setSaid('The directory could not be reached. Try again.'); } finally { setBusy(false); }
   };
   const fresh = !request.soul && !request.former;
-  const what = request.soul ? 'reconnect your Soul' : request.former ? 'bring over your Soul from the old client' : 'make a new Soul';
+  const what = creator ? 'build this world as its creator: place, change and remove things in it' : request.soul ? 'reconnect your Soul and control it' : request.former ? 'bring over your Soul from the old client and control it' : 'make a new Soul and control it';
   return <dialog ref={ref} className="ap-dialog" data-pair-dialog={request.code} aria-label="Approve your agent" tabIndex={-1}
     onCancel={(e) => { e.preventDefault(); close(); }}>
-    <div className="ap-card" data-pair-request={request.code} data-pair-state={soul ? 'arriving' : 'pending'}>
+    <div className="ap-card" data-pair-request={request.code} data-pair-scope={creator ? 'creator' : 'soul'} data-pair-state={built ? 'approved' : soul ? 'arriving' : 'pending'}>
       <button type="button" className="ap-close" aria-label="Close" onClick={close}>×</button>
       <div className="ap-head"><div className="ap-who">
-        <span className="ap-kicker">{request.soul ? 'Connect your Soul' : 'New Soul'}</span>
+        <span className="ap-kicker">{creator ? 'Connect your agent' : request.soul ? 'Connect your Soul' : 'New Soul'}</span>
         <b className="ap-name">{(soul || asked) && name.trim() ? clip(name, 'Your Soul') : agentWords(request.label)}</b>
       </div></div>
-      {soul ? <>
+      {built ? <>
+        <p className="ap-line" role="status" data-pair-approved="creator">Approved. Your agent can build this world once it connects; the command box in God Mode then opens.</p>
+        <div className="ap-actions"><button type="button" className="ap-btn ap-primary" onClick={close}>Close</button></div>
+      </> : soul ? <>
         <p className="ap-line ap-wait" role="status" data-pair-arriving={soul}><span className="ap-spinner" aria-hidden="true" />Approved. Your Soul is arriving…</p>
         {late && <p className="ap-ask">It appears once its agent joins it to the world; that can take a little longer.</p>}
         <div className="ap-actions">
@@ -144,7 +159,7 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
       </> : <>
         <p className="ap-state"><span className="ap-pairing"><i aria-hidden="true" />Pairing</span><span className="ap-dim">asked {ago(request.age)}</span></p>
         <p className="ap-ask ap-code" data-pair-code={request.code}>Code <b>{request.code}</b>: check it matches the one your terminal shows.</p>
-        <p className="ap-ask"><b>{agentWords(request.label)}</b> asks to {what} and control it.</p>
+        <p className="ap-ask"><b>{agentWords(request.label)}</b> asks to {what}.</p>
         <p className="ap-warn">Approve only if you started it yourself, just now.</p>
         {fresh && <label className="ap-ask">Name (optional) <input type="text" data-pair-name="1" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} placeholder="its agent can name it later" /></label>}
         <label className="ap-ask ap-check"><input type="checkbox" data-pair-match="1" checked={match} onChange={(e) => setMatch(e.target.checked)} /> The code matches the one on my screen</label>
@@ -162,7 +177,14 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
  *  stays while it is answered (an approved request leaves the waiting list at once). */
 export function V2PairApprovals({ place }: { place: Directory }) {
   const [active, setActive] = useState<WaitingPair | null>(null);
-  const waiting = useV2WaitingPair(place, true);
+  // the world's creator grant, when the signed-in person is its creator: its agent's request shows here too (#5006)
+  const [creator, setCreator] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void v2Creator()?.then((c) => c.who()).then((w) => { if (live && w.creator) setCreator(w.grant); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const waiting = useV2WaitingPair(place, true, creator);
   useEffect(() => { if (!active && waiting && !closedApprovals().has(waiting.code)) setActive(waiting); }, [waiting, active]);
   return active ? <V2PairDialog key={active.code} place={place} request={active} onDone={() => setActive(null)} /> : null;
 }

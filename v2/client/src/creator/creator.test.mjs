@@ -359,6 +359,13 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const d2 = await god('describe');
   assert.equal(d2.nodes.find((n) => n.id === lampId)?.parent, roomId, 'the copy holds the new thing in the new room');
   assert.equal((await god('move', lampId, '--at', '2,0,1')).ok, true);
+  // #5006 finding 5: where, clear and free read the creator's copy, with no browser.
+  const where = await god('where', lampId);
+  assert.deepEqual([where.ok, where.from, where.of?.id], [true, 'copy', lampId], JSON.stringify(where));
+  const clear = await god('clear', lampId, '--size', '1x1');
+  assert.deepEqual([clear.ok, clear.from], [true, 'copy'], JSON.stringify(clear));
+  const free = await god('free', '1x1', '--near', where.at.join(','));
+  assert.deepEqual([free.ok, free.from, free.at === null], [true, 'copy', false], JSON.stringify(free));
   // #3699: the room's opening hours, published as E7's field and read back from the copy as written.
   const hours = await god('hours', roomId, '--open', '09:00-17:00@mon-fri', '--open', '10:00-14:00@sat,sun');
   assert.equal(hours.ok, true, JSON.stringify(hours));
