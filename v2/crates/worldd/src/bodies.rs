@@ -1350,33 +1350,24 @@ impl Bodies {
             };
             let first = i128::from(half.saturating_add(select::GAP));
             let on = if area { -i128::from(select::GAP) } else { 0 };
-            let view = self.town.view_for(body)?;
             let from = (frame, at);
             // On it only when it is ground to stand on: its middle is (a square, a wood, a path), not a sea's or a
             // mountain's (its slopes may be on the map and still no way up).
-            let walkable = view.stand_reached(ground, middle, from).is_some();
+            let walkable = self
+                .town
+                .view_for(body)?
+                .stand_reached(ground, middle, from)
+                .is_some();
             // First-day round 2 (0.139): a district round water (a harbour, its middle the sea between its piers) is
             // walked into by the nearest area it holds whose middle the walker may stand on and reach (its
             // boardwalk), the same way; stood back from, it ended over its border, in the park beside it.
-            if area && !walkable {
-                let inner = tree
-                    .handle(ground)
-                    .and_then(|g| tree.children(g).ok())
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|c| tree.node(*c).map(|n| n.id()))
-                    .filter(|c| *c != node && place_half_width(tree, *c) == Some((0, true)))
-                    .filter(|c| select::within(tree, *c, node).unwrap_or(false))
-                    .filter_map(|c| {
-                        let (_, mid) = select::nearest_in(tree, c, ground, here).ok()?;
-                        view.stand_reached(ground, mid, from)?;
-                        Some((select::gap(tree, c, ground, here).ok()?, c))
-                    })
-                    .min();
-                if let Some((_, inner)) = inner {
-                    return self.goal(body, inner, None);
-                }
+            if area
+                && !walkable
+                && let Some(inner) = inner_ground(&mut self.town, body, node, ground, here, from)?
+            {
+                return self.goal(body, inner, None);
             }
+            let view = self.town.view_for(body)?;
             let mut tries = walkable
                 .then_some(on)
                 .into_iter()
@@ -2749,6 +2740,42 @@ fn place_half_width(tree: &Tree, node: Id) -> Option<(i64, bool)> {
         };
         (mm.saturating_mul(500), false)
     })
+}
+
+/// The area within area `node` (a child of `ground` too, [`place_half_width`]) whose middle the walker at `from` may
+/// stand on and reach, nearest the walker's point `here` (`ground`'s frame), the first by id on a tie; none when no
+/// such area lies within it. Read off the tree first, then checked on the walker's map.
+fn inner_ground(
+    town: &mut Town,
+    body: Id,
+    node: Id,
+    ground: Id,
+    here: Vec3,
+    from: (Id, Vec3),
+) -> R<Option<Id>> {
+    let tree = &town.tree;
+    let within: Vec<(i64, Id, Vec3)> = tree
+        .handle(ground)
+        .and_then(|g| tree.children(g))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| tree.node(*c).map(|n| n.id()))
+        .filter(|c| *c != node && place_half_width(tree, *c) == Some((0, true)))
+        .filter(|c| select::within(tree, *c, node).unwrap_or(false))
+        .filter_map(|c| {
+            let (_, middle) = select::nearest_in(tree, c, ground, here).ok()?;
+            Some((select::gap(tree, c, ground, here).ok()?, c, middle))
+        })
+        .collect();
+    if within.is_empty() {
+        return Ok(None);
+    }
+    let view = town.view_for(body)?;
+    Ok(within
+        .into_iter()
+        .filter(|(.., middle)| view.stand_reached(ground, *middle, from).is_some())
+        .min_by_key(|(gap, c, _)| (*gap, *c))
+        .map(|(_, c, _)| c))
 }
 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with

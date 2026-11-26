@@ -1,0 +1,28 @@
+{
+ "schema": "souls-named-batch/1",
+ "world": "eden-2026",
+ "note": "First-day round 2 (0.139): no walk reached the harbour lighthouse (refused spot-none-free with nobody about). It stands across the end of its breakwater, 5.4 m wide over a 5.2 m deck, with its one door on the far side, over the sea. Turned a half turn in place, its door opens onto the breakwater; its door thing moves with it. World x and z in metres, r in radians about the thing's own origin. worlds/templates/eden-2026.json carries the same change.",
+ "counts": {
+  "turn": 1,
+  "move-to-ground": 1
+ },
+ "ops": [
+  {
+   "op": "turn",
+   "node": "region-harbour-lighthouse",
+   "def": "core/lighthouse@3",
+   "at_ground": [96, 188],
+   "from_r": 0,
+   "r": 3.1416
+  },
+  {
+   "op": "move-to-ground",
+   "node": "region-harbour-lighthouse-door-1",
+   "def": "core/door@2",
+   "from_ground": [96, 190.792],
+   "at_ground": [96, 185.208],
+   "from_r": 0,
+   "r": 3.1416
+  }
+ ]
+}
