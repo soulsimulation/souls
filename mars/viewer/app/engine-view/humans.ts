@@ -2546,7 +2546,8 @@ function fitFreeGround(v: View, h: THREE.Object3D, floor: number) {
       const low = lowestY(v.surf.hand.get(arm.side));
       if (low >= support + .002 || !Number.isFinite(low)) return;
       const q = arm.hand.getWorldQuaternion(new THREE.Quaternion());
-      armTo(arm, at.setY(at.y + support + .002 - low), 1, BODY_MODEL.maxExtension, h, V().copy(_right).multiplyScalar(-arm.side * .5).add(UP));
+      const pole = arm.lower.getWorldPosition(V()).sub(arm.upper.getWorldPosition(V()));
+      armTo(arm, at.setY(at.y + support + .002 - low), 1, BODY_MODEL.maxExtension, h, pole);
       setWorldQuat(arm.hand, q);
     });
   }
