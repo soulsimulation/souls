@@ -20,12 +20,22 @@ fn without_roles(json: &str) -> String {
     e.to_json()
 }
 
-/// The construction entries (the rack's four parts and the carry), loaded with their `roles` set aside; panics on any refusal.
+/// The rack's four kinds and the carry its crews are (0.135 C4), and the 6.1 m upright four carry (C6), by name: other
+/// construction kinds in the folder (the camp's loads and loading spot) are not the rack's.
+const RACK: [&str; 6] = [
+    "carry.json",
+    "frame_stand.json",
+    "rack_bay.json",
+    "rack_beam.json",
+    "rack_upright.json",
+    "rack_upright_6m.json",
+];
+
+/// The rack's construction entries, loaded with their `roles` set aside; panics on any refusal.
 fn loaded() -> Kinds {
-    let mut files: Vec<(String, String)> = std::fs::read_dir(folder())
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+    let mut files: Vec<(String, String)> = RACK
+        .iter()
+        .map(|n| folder().join(n))
         .map(|p| {
             let text = entry_to_kind(&without_roles(&std::fs::read_to_string(&p).unwrap()))
                 .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
@@ -40,8 +50,7 @@ fn loaded() -> Kinds {
         .collect();
     let names = kinds.load(&sources);
     assert!(kinds.refused().is_empty(), "refused: {:?}", kinds.refused());
-    // The rack's four kinds and the carry its crews are (0.135 C4), and the 6.1 m upright four carry (C6).
-    assert_eq!(names.len(), 6);
+    assert_eq!(names.len(), RACK.len());
     kinds
 }
 

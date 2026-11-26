@@ -6,6 +6,7 @@
 // A word scores 5 in the name, 4 in the id or an alias, 2 in the kind, 1 in what the row says it is, and a row
 // missing any word scores nothing. The full name scores 100 more, a whole name standing in the words 50 more.
 
+const byName = new Intl.Collator('en', { numeric: true }).compare;
 const STOP = new Set(['the', 'a', 'an', 'to', 'into', 'onto', 'of', 'in', 'at', 'on', 'for', 'and', 'some', 'somewhere', 'place', 'go', 'walk', 'find', 'near', 'nearest', 'closest', 'me']);
 export const tokensOf = (s) => String(s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 export const stem = (w) => (w.length > 4 && w.endsWith('ies') ? w.slice(0, -3) + 'y' : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
@@ -70,7 +71,7 @@ export function find(rows, words, { limit = 8, within, metres, kinds } = {}) {
     const s = full ? 100 + score(q, w) : inside ? 50 + inside : score(q, w);
     if (s) out.push({ s, row, m: metres?.(row) ?? Infinity });
   }
-  out.sort((a, b) => b.s - a.s || a.m - b.m || String(a.row.name).localeCompare(String(b.row.name), 'en', { numeric: true }));
+  out.sort((a, b) => b.s - a.s || a.m - b.m || byName(String(a.row.name), String(b.row.name)));
   const found = out.slice(0, limit).map(({ row, m }) => ({ id: row.id, name: row.name, kind: row.kind, ...(row.soul ? { soul: row.soul, parent: row.parent } : {}), ...(row.path?.length ? { in: placeName(row.path) } : {}), ...(Number.isFinite(m) ? { metres: Math.round(m) } : {}) }));
   return { found, ...(out.length > limit ? { more: out.length - limit } : {}) };
 }

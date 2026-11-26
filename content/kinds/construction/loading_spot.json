@@ -1,0 +1,239 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:loading_spot",
+ "owner": "thing",
+ "slots": {
+  "bay_1": {
+   "admits": "thing",
+   "kinds": [
+    "mars:pallet_crates",
+    "mars:generator",
+    "mars:timber_bundle"
+   ],
+   "most": 1,
+   "at_mm": [
+    3600,
+    0,
+    0
+   ],
+   "fits_mm": [
+    2000,
+    2000,
+    5400
+   ]
+  },
+  "bay_2": {
+   "admits": "thing",
+   "kinds": [
+    "mars:pallet_crates",
+    "mars:generator",
+    "mars:timber_bundle"
+   ],
+   "most": 1,
+   "at_mm": [
+    1200,
+    0,
+    0
+   ],
+   "fits_mm": [
+    2000,
+    2000,
+    5400
+   ]
+  },
+  "bay_3": {
+   "admits": "thing",
+   "kinds": [
+    "mars:pallet_crates",
+    "mars:generator",
+    "mars:timber_bundle"
+   ],
+   "most": 1,
+   "at_mm": [
+    -1200,
+    0,
+    0
+   ],
+   "fits_mm": [
+    2000,
+    2000,
+    5400
+   ]
+  },
+  "bay_4": {
+   "admits": "thing",
+   "kinds": [
+    "mars:pallet_crates",
+    "mars:generator",
+    "mars:timber_bundle"
+   ],
+   "most": 1,
+   "at_mm": [
+    -3600,
+    0,
+    0
+   ],
+   "fits_mm": [
+    2000,
+    2000,
+    5400
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   9800,
+   50,
+   5800
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 0,
+   "palette": {
+    "pad": "#8e8a83",
+    "line": "#f2c230"
+   },
+   "tags": [
+    "loading",
+    "yard",
+    "dock"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      20,
+      0
+     ],
+     "size": [
+      9800,
+      40,
+      5800
+     ],
+     "tint": "pad"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -4800,
+      45,
+      0
+     ],
+     "size": [
+      100,
+      10,
+      5600
+     ],
+     "tint": "line"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -2400,
+      45,
+      0
+     ],
+     "size": [
+      100,
+      10,
+      5600
+     ],
+     "tint": "line"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      45,
+      0
+     ],
+     "size": [
+      100,
+      10,
+      5600
+     ],
+     "tint": "line"
+    },
+    {
+     "kind": "box",
+     "at": [
+      2400,
+      45,
+      0
+     ],
+     "size": [
+      100,
+      10,
+      5600
+     ],
+     "tint": "line"
+    },
+    {
+     "kind": "box",
+     "at": [
+      4800,
+      45,
+      0
+     ],
+     "size": [
+      100,
+      10,
+      5600
+     ],
+     "tint": "line"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      45,
+      2850
+     ],
+     "size": [
+      9700,
+      10,
+      100
+     ],
+     "tint": "line"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      45,
+      -2850
+     ],
+     "size": [
+      9700,
+      10,
+      100
+     ],
+     "tint": "line"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "The loading spot: four marked bays where crews set heavy loads down.",
+  "howto_load": "Lift the load as a crew, then each carrier sends carry to <crew> the loading spot (the first free bay it fits); one of you then sends carry set-down <crew>.",
+  "construction": "construction",
+  "loading": "loading spot",
+  "dock": "loading dock"
+ },
+ "card": {
+  "text": "card",
+  "category": "construction",
+  "synonyms": [
+   "loading",
+   "dock"
+  ]
+ }
+}
