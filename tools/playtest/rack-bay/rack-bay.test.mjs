@@ -36,16 +36,20 @@ test('a staged yard names each thing by its title, never by a field of plain tex
   assert.ok(ops.every((o) => o.fields === undefined));
 });
 
-test('spareFrame sends signed fractional metre coordinates unchanged to the creator CLI', async () => {
-  const creatorCalls = [], soulCalls = [], at = { spare: [-3.275, 17.625] };
+test('spareFrame keeps fractional metres and refreshes each participant before naming a new frame', async () => {
+  const creatorCalls = [], soulCalls = [], refreshed = new Set(), queried = new Set(), at = { spare: [-3.275, 17.625] };
   const god = async (...words) => {
     creatorCalls.push(words);
     if (words[0] === 'describe') return { ok: true, nodes: [{ id: 'ground-copy', kind: 'souls:ground' }] };
     assert.deepEqual(words, ['place', 'mars:rack_upright', '--in', 'ground-copy', '--at', '-3.275,0,17.625', '--title', SPARE]);
     return { ok: true };
   };
-  const run = async (...words) => { soulCalls.push(words); return { ok: true, ...(words[1] === 'carry' && words[2] === 'offer' ? { crew: 'crew-copy' } : {}) }; };
-  const seats = { ada: { cli: async () => ({ answers: [{ found: [{ id: 'spare-copy', name: SPARE, kind: 'mars:rack_upright' }] }] }) } };
+  const run = async (...words) => { soulCalls.push(words); if (words[1] === 'look') refreshed.add(words[0]); if (words[1] === 'carry' && words[2] === 'grip') assert.deepEqual([...queried].sort(), ['ada', 'bo'], 'both carriers must see the new frame before either grips it'); return { ok: true, ...(words[1] === 'carry' && words[2] === 'offer' ? { crew: 'crew-copy' } : {}) }; };
+  const seats = Object.fromEntries(['ada', 'bo'].map((label) => [label, { cli: async () => {
+    assert(refreshed.has(label), 'a stale participant copy must be refreshed before querying');
+    queried.add(label);
+    return { answers: [{ found: [{ id: 'spare-copy', name: SPARE, kind: 'mars:rack_upright' }] }] };
+  } }]));
   const result = await spareFrame(god, { run, both: async (...calls) => Promise.all(calls.map((c) => run(...c))) }, seats, { bo: 'bo-body-copy' }, at);
   assert.equal(creatorCalls.length, 2);
   assert.equal(result.seen[0].id, 'spare-copy');

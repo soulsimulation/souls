@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Corrects the rack-bay playtest's creator placement coordinates to metres, keeping spare frames at the intended location instead of multiplying their displacement by 1,000.
+Corrects rack-bay test placement to metres and refreshes both carriers' copies before they name a newly placed frame.
