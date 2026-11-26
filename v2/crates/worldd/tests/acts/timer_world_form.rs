@@ -37,6 +37,8 @@ fn timer_due(run: &Run) -> Option<i64> {
 }
 
 /// Waits up to `within` of real time for the flag to clear; how long it took.
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
 fn faded(run: &Run, within: Duration) -> Duration {
     let t0 = std::time::Instant::now();
     while ringing(run) == 1 && t0.elapsed() < within {
@@ -64,6 +66,8 @@ fn i3991_a_timer_set_at_a_moves_contact_runs_its_world_form_on_a_served_world() 
 /// its due time and its world form clears the flag. Before #3991's fix the started world never fired it, so the bell
 /// rang for good. The world counts the timer in its next due time too, so a still world never sleeps past it.
 #[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
 fn i3991_a_forms_timer_pending_at_a_restart_runs_its_world_form() {
     let store = Mem::with(Vec::new());
     let (run, mut a, _) = serve_on("i3991-ra", store.clone());
