@@ -8,7 +8,9 @@
 //! - **A tick later.** After each tick the clock hands over that tick's [`Wants`] (`sim::host::Runner::tick_planned`):
 //!   every body's mark, the walks waiting for their place, the walkers that need a new line (#3167: a new leg, pushed
 //!   off their line, at a line's end, a refused check) and whose straight way was not clear, and the world's reach
-//!   questions. The planner writes the spot tables from the marks, then answers each: a walk's place and legs
+//!   questions; and in a tick that starts walks, those walks' places with every body's mark as the tick left them
+//!   (#4974), so a walk is planned at the next tick. The planner writes the spot tables from the marks, then answers
+//!   each: a walk's place and legs
 //!   ([`Town::plan`]), a walker's line ([`Town::line`], #3167's planning call `View::search`) and a straight distance
 //!   for each reach question. The next tick reads the answers ([`Planned`]); a walker keeps its line until it needs a
 //!   new one, as on one thread.

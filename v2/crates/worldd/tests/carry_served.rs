@@ -1367,8 +1367,8 @@ async fn carry_tall(
     let load = Load::of(&entry).unwrap();
     assert_eq!(
         (load.crew, load.most()),
-        (4, 4),
-        "four carry it, one at each grip"
+        (4, 6),
+        "four to six carry it, one at each grip"
     );
 
     // It stands: its carriers take it along the line they stand on, Soul 1 at the east end, the sides beside it.

@@ -1001,9 +1001,12 @@ fn walk_planned_late(late: i64) -> (i64, i64, String) {
     cfg.lockstep = true;
     cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
         let mut b = bodies()?;
-        // Body ticks 1..=late take none of the planner's batches: the route arrives after them.
-        for t in 1..=late {
-            b.schedule.insert(t * 50_000, 0);
+        // Body ticks 0..=late take none of the planner's batches: the route arrives after them. The walk's place is
+        // asked in the tick it starts (#4974), so body tick 0 would take it.
+        if late > 0 {
+            for t in 0..=late {
+                b.schedule.insert(t * 50_000, 0);
+            }
         }
         Ok(b)
     }));

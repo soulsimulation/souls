@@ -14,7 +14,7 @@
 //!   other Soul with words. The world reads it at its start and on each change (`worldd::directory`): it retires
 //!   the body, or gives it the words as its own describe.
 
-use super::{Pairing, is_name, is_soul_grant};
+use super::{Pairing, is_creator_grant, is_name, is_soul_grant};
 use replica::encode::to_hex;
 use replica::ids::sha256;
 use rusqlite::{OptionalExtension, params};
@@ -168,12 +168,15 @@ impl Pairing {
 
     /// The Soul requests still pending for `world`, asked from `from` in the last [`WAITING_WITHIN`] seconds, newest
     /// first: `(code, device, label, soul, age, former, name)`. The card shows the code for the owner to match.
+    /// A creator's request (G7) is listed too, its creator grant as `soul`, but only to the account that `holds` that
+    /// grant (the world's owner, who alone can approve it) and only when it names this world or none (#5006 row 3).
     #[allow(clippy::type_complexity)]
     pub fn waiting(
         &self,
         world: &str,
         from: std::net::IpAddr,
         now: u64,
+        holds: impl Fn(&str) -> bool,
     ) -> Result<
         Vec<(
             String,
@@ -196,20 +199,29 @@ impl Pairing {
         codes.sort_by(|a, b| b.1.cmp(&a.1));
         let mut out = Vec::new();
         for (code, _) in codes {
-            let row: Option<(String, String, Option<String>, i64)> = {
+            let row: Option<(String, String, Option<String>, i64, String)> = {
                 let db = self.db.lock().expect("the store");
                 store(
                     db.query_row(
-                        "SELECT r.device, r.label, r.soul, r.created_at FROM pair_requests_v1 r
-                           JOIN pair_request_worlds_v1 w ON w.code = r.code
-                          WHERE r.code = ?1 AND w.world = ?2 AND r.state = 'pending' AND r.scope = 'soul'",
+                        "SELECT r.device, r.label, r.soul, r.created_at, r.scope FROM pair_requests_v1 r
+                           LEFT JOIN pair_request_worlds_v1 w ON w.code = r.code
+                          WHERE r.code = ?1 AND r.state = 'pending'
+                            AND ((r.scope = 'soul' AND w.world = ?2)
+                              OR (r.scope = 'creator' AND (w.world IS NULL OR w.world = ?2)))",
                         params![code, world],
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
                     )
                     .optional(),
                 )?
             };
-            if let Some((device, label, soul, created)) = row {
+            // A creator's request only for the account holding its grant: nobody else could approve it.
+            let row = row.filter(|(.., soul, _, scope)| {
+                scope != "creator"
+                    || soul
+                        .as_deref()
+                        .is_some_and(|g| is_creator_grant(g) && holds(g))
+            });
+            if let Some((device, label, soul, created, _)) = row {
                 let former = self.former_of(&code)?.map(|(_, f)| f);
                 let name = self.name_of(&code)?;
                 let age = now.saturating_sub(created.max(0) as u64);
