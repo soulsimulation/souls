@@ -17,8 +17,8 @@
 //! A terrain edit (G5's [`terrain`]) is guarded the same way: planned off the clock, its Souls and resting things
 //! judged on the commit tick before the safety rule. A creator's weather is set through [`weather`].
 //!
-//! Each effect carries the named events that say what the edit did (#5006 row 14, [`events_of`]): `souls:placed`,
-//! `souls:moved`, `souls:changed` and `souls:removed`, each naming the changes it explains. With the envelope's actor
+//! Each effect carries the named events that say what the edit did (#5006 row 14, [`events_of`]): `souls:placed`
+//! (one a thing), `souls:moved`, `souls:changed` and `souls:removed`, each naming the changes it explains. With the envelope's actor
 //! (the creator) and world time, they are the edit's public event index rows (`replica::history::events::rows`), from
 //! which God Mode's panel lists the creator's edits. They add no state.
 
@@ -55,8 +55,9 @@ pub const EV_MOVED: &str = "souls:moved";
 pub const EV_REMOVED: &str = "souls:removed";
 pub const EV_CHANGED: &str = "souls:changed";
 
-/// The named events of one effect of a creator's edit: one per kind of change it holds, in the order of first use,
-/// each naming the changes it explains. None for an effect with no changes.
+/// The named events of one effect of a creator's edit, in the order of first use, each naming the changes it explains:
+/// one for each thing placed (a place's effect is written by the parent, so its index row names the parent, and one
+/// row a thing counts them), and one for each other kind of change it holds. None for an effect with no changes.
 pub fn events_of(changes: &[Change]) -> Option<Vec<Event>> {
     let mut events: Vec<Event> = Vec::new();
     for (i, change) in changes.iter().enumerate() {
@@ -66,7 +67,11 @@ pub fn events_of(changes: &[Change]) -> Option<Vec<Event>> {
             Change::Remove { .. } => EV_REMOVED,
             _ => EV_CHANGED,
         };
-        match events.iter_mut().find(|e| e.name.as_str() == name) {
+        let grouped = name != EV_PLACED;
+        match events
+            .iter_mut()
+            .find(|e| grouped && e.name.as_str() == name)
+        {
             Some(e) => e.changes.push(i as u64),
             None => events.push(Event {
                 name: Name::new(name).expect("a constant name"),

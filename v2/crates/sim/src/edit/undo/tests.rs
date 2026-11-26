@@ -728,22 +728,20 @@ fn row14_edits_undos_and_redos_are_named_and_give_the_creators_rows() {
 }
 
 /// An effect that holds more than one kind of change has an event for each, in the order of first use, each naming
-/// its own changes.
+/// its own changes; each thing placed has its own, so the index's rows count them.
 #[test]
 fn row14_an_effect_with_two_kinds_of_change_names_each() {
     use crate::edit::{EV_CHANGED, EV_PLACED, events_of};
-    let (a, b) = (
-        Id::new(Scope([1; 16]), 1).expect("an id"),
-        Id::new(Scope([1; 16]), 2).expect("an id"),
-    );
+    let id = |n| Id::new(Scope([1; 16]), n).expect("an id");
+    let (a, b, c) = (id(1), id(2), id(3));
     let set = |node| Change::Set {
         node,
         field: FIELD,
         to: Value::Uint(1),
         by: None,
     };
-    let create = Change::Create {
-        node: b,
+    let create = |node| Change::Create {
+        node,
         kind: Name::new("souls:key").expect("a name"),
         pose: replica::pose::Pose {
             frame: replica::pose::Frame {
@@ -757,14 +755,18 @@ fn row14_an_effect_with_two_kinds_of_change_names_each() {
         audience: Audience::Everyone,
         fields: BTreeMap::new(),
     };
-    let events = events_of(&[set(a), create, set(a)]).expect("named");
+    let events = events_of(&[set(a), create(b), set(a), create(c)]).expect("named");
     let names: Vec<(&str, &[u64])> = events
         .iter()
         .map(|e| (e.name.as_str(), e.changes.as_slice()))
         .collect();
     assert_eq!(
         names,
-        vec![(EV_CHANGED, &[0, 2][..]), (EV_PLACED, &[1][..])]
+        vec![
+            (EV_CHANGED, &[0, 2][..]),
+            (EV_PLACED, &[1][..]),
+            (EV_PLACED, &[3][..])
+        ]
     );
     assert_eq!(events_of(&[]), None);
 }
