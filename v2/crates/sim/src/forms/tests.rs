@@ -95,9 +95,14 @@ struct Snap {
     no_way: bool,
     /// The thing every move aims at, when set (worldd's thing argument).
     aimed: Option<Id>,
+    /// Every thing is within a hand's reach of every body, when set (worldd's `Sight::within_reach`).
+    within: bool,
 }
 
 impl Geometry for Snap {
+    fn within_reach(&self, _: Id, _: Id) -> Option<bool> {
+        self.within.then_some(true)
+    }
     fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
         if self.defer_walk {
             replica::host::WalkPlan::Pending
@@ -1760,6 +1765,69 @@ fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
     );
 }
 
+/// Eden indoor audit (26 Nov): a body seated in a seat of one thing, asked a form at another thing that walks (the
+/// lamp across the room, asked from the sofa), rises from its seat first and does it, as a person gets up to go; it
+/// was refused `resource-held`, the seat holding its legs.
+#[test]
+fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // A lamp 2 m off, with its switch: the form walks to the switch, then waits as its move would.
+    let other = b.mint.mint().expect("id");
+    let at = Vec3::new(stand.x, stand.y, stand.z + 2_000_000);
+    b.snap.things.insert(
+        other,
+        (at, BTreeMap::from([("switch".to_owned(), Vec3::ZERO)])),
+    );
+    let walk = Step::WalkTo {
+        point: Name::new("switch").expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        other,
+        vec![walk, Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(
+        e.how.as_str(),
+        "done",
+        "risen and walked, not resource-held"
+    );
+    assert_eq!(
+        b.slots.as_ref().and_then(|s| s.held_by(body)),
+        None,
+        "out of the chair"
+    );
+    assert!(
+        matches!(
+            b.c.body(body).expect("a body").pose.support,
+            replica::pose::Support::Surface { .. }
+        ),
+        "on its feet"
+    );
+}
+
 /// Trial 0.137: a seated body asked a form at another thing (a book stack's `take`, 3 m off) rises first by itself,
 /// out of its seat by the rise move, and then walks: never refused `resource-held` by its seat's hold on its legs.
 #[test]
@@ -1810,6 +1878,56 @@ fn trial_0137_a_seated_bodys_form_at_another_thing_rises_first() {
     assert!(
         matches!(p.support, replica::pose::Support::Surface { .. }),
         "on its feet"
+    );
+}
+
+/// Review of the rise-first change: a bare take of a thing already within reach of the seat (a cup by the chair) is
+/// done from the seat, its approach skipped by the runner, so no rise is added: the body is still seated after it.
+#[test]
+fn a_seated_body_takes_a_thing_within_reach_from_its_seat() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    let other = b.mint.mint().expect("id");
+    b.snap.things.insert(
+        other,
+        (Vec3::new(stand.x, stand.y, stand.z), BTreeMap::new()),
+    );
+    b.snap.within = true;
+    let approach = Step::WalkTo {
+        point: Name::new(skills::form_runner::TO_THING).expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        other,
+        vec![approach, Step::Hand],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(e.how.as_str(), "done");
+    assert_eq!(
+        b.slots.as_ref().and_then(|s| s.held_by(body)),
+        Some(chair),
+        "taken without rising, still in the chair"
     );
 }
 

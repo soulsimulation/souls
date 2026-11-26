@@ -1430,17 +1430,23 @@ impl Forms {
                 _ => true,
             });
         }
-        // Trial 0.137: a form at another thing by a body a seat, a bed or a standing slot holds (a seated Soul's
-        // `take` of a book stack) walks there first, on legs the slot holds, which its hold refused `resource-held`.
-        // It rises first instead, by the rise move (as a form that moves the actor does, `rises_out`), as a sit at a
-        // seat walks there by itself. A form with a rise, a sit or a settle of its own keeps its steps; a walk the
-        // runner would skip (an approach to a hand step's thing already within reach, #4086) needs no rise, so that
-        // take is made from the seat.
+        // A body held by a seat, a bed or a standing slot of another thing, asked to do a form here that walks (the
+        // lamp across the room asked from the sofa, Eden indoor audit; a seated Soul's `take` of a book stack, trial
+        // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
+        // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
+        // moves (a ride, a boat): its seats are left by its own forms. Asked while a sit or rise is still under way, it
+        // waits behind that run and rises first when it starts (#4187). A form with a rise, a sit or a settle of its
+        // own keeps its steps (a sit at a seat walks there by itself), and a walk the runner would skip (an approach to
+        // a hand step's thing already within reach, a cup by the chair, #4086) needs no rise, so that take is made
+        // from the seat.
+        let held_in = w.places.as_ref().and_then(|p| {
+            p.slots
+                .held_by(body)
+                .filter(|s| *s != node && !p.slots.moves(*s))
+        });
         let rises_elsewhere = node != body
             && !in_its_slot
-            && w.places
-                .as_ref()
-                .is_some_and(|p| p.slots.held_by(body).is_some())
+            && held_in.is_some()
             && !steps
                 .iter()
                 .any(|s| matches!(s, Step::Rise | Step::Sit { .. } | Step::Settle { .. }))
