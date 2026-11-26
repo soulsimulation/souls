@@ -36,6 +36,9 @@ export type Frame =
 type Cbor = { encode(v: unknown): Uint8Array; decode(b: Uint8Array, o: { useMaps: true }): unknown };
 
 export const VERB = 'souls:edit';
+/** Refusals an edit is sent again once for: planned against a version since changed, or numbered under a sequence the
+ *  creator's agent has out at that moment (gatewayd `SEQUENCE_IN_USE`, #5006). */
+const AGAIN = new Set(['edit.stale', 'intent.seq-in-use']);
 /** The gateway's protocol version (v2/web/src/source/socket.ts `PROTOCOL`). */
 const PROTOCOL = 2;
 const EXPIRY = 9223372036854775807n;
@@ -121,7 +124,9 @@ export type Sock = { send(b: Uint8Array): void };
  *  message, its outcome, then edits in and answers out. A stale edit (`edit.stale`: planned against a version older than
  *  a node it sets) is sent again once, against the version the refusal carried. Each edit is numbered by `clock` (the
  *  page's: µs), never below the last: the world keeps one sequence per creator, and the creator's agent numbers its
- *  edits by the clock too (v2/client daemon `editOnce`), so neither locks the other out (`intent.stale-seq`). */
+ *  edits by the clock too (v2/client daemon `editOnce`), so neither locks the other out (`intent.stale-seq`). The
+ *  gateway keeps this socket beside the agent's and answers each on its own (gatewayd `shared`, #5006); a sequence the
+ *  agent's socket has out at that moment (`intent.seq-in-use`) is sent again once, under the next. */
 export class CreatorSession {
   latest: Version = ZERO;
   state: 'hello' | 'signing-in' | 'open' | 'refused' = 'hello';
@@ -160,7 +165,7 @@ export class CreatorSession {
     const w = this.waiting.get(f.sequence);
     if (!w) return;
     this.waiting.delete(f.sequence);
-    if (f.t === 'refused' && f.reason === 'edit.stale' && w.again) return void this.send(w.asked, false, w.done);
+    if (f.t === 'refused' && AGAIN.has(f.reason) && w.again) return void this.send(w.asked, false, w.done);
     w.done(f);
   }
 
@@ -170,8 +175,8 @@ export class CreatorSession {
     return new Promise((done) => this.send(asked, true, done));
   }
 
-  /** The socket closed: every edit still waiting is answered `creator.closed`, so no press waits for ever (the gateway
-   *  lets one connection hold a creator's grant; the creator's agent signing in takes it over). */
+  /** The socket closed: every edit still waiting is answered `creator.closed`, so no press waits for ever (the edit may
+   *  still have been made: its answer is the world's, kept for a resume this page does not make). */
   closed(): void {
     for (const [sequence, w] of this.waiting) w.done({ t: 'refused', sequence, version: null, reason: CLOSED });
     this.waiting.clear();
@@ -312,7 +317,7 @@ export const BUILDSAFE: Record<string, string> = {
 /** What a press answered when the creator's socket closed before the world answered it (`CreatorSession.closed`). */
 export const CLOSED = 'creator.closed';
 export const refusalText = (reason: string) => reason === CLOSED
-  ? 'The world\'s answer did not reach this page (your agent, signed in as this world\'s creator, may hold its connection): look at the world before you press again.'
+  ? 'The world\'s answer did not reach this page (its connection closed): look at the world before you press again.'
   : `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
 
 /** The creator's grant among a view token's grants (directoryd `view.rs`: `creator-<scope hex>-<counter>`): the box the

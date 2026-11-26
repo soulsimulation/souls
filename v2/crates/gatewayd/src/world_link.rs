@@ -195,6 +195,9 @@ pub const TIMED_OUT: &str = "act.timed-out";
 /// Asks for the sleeping world to be woken; it must not block.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+/// A sync answer for a socket: the actor's bytes, the asking socket's session, and the frame under its number.
+type Synced = (Vec<u8>, u64, Vec<u8>);
+
 /// What became of an intent handed to the link.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sent {
@@ -500,7 +503,7 @@ impl Link {
     /// A sync answer from the world (key 20): the actor it is for, the asking socket's session and the frame under
     /// the client's number, or `Some(None)` for one answering a request not kept. `None` if the frame is not a sync
     /// answer.
-    fn sync_answered(&self, frame: &[u8]) -> Option<Option<(Vec<u8>, u64, Vec<u8>)>> {
+    fn sync_answered(&self, frame: &[u8]) -> Option<Option<Synced>> {
         let Value::Map(mut m) = decode(frame).ok()?.value else {
             return None;
         };
