@@ -648,3 +648,123 @@ fn a5_the_kept_before_values_are_bounded() {
     assert_eq!(w.undo(&mut ok()).expect_err("dropped").name, "undo.nothing");
     println!("kept per batch {kept:?} bytes; bound {KEPT_MOST} bytes; oldest dropped first");
 }
+
+// --- #5006 row 14: each edit, undo and redo is named ------------------------------------------------------------------
+
+/// Each effect of a creator's edit carries the named event that says what it did (a place, a move, a set, a remove;
+/// an undo, a redo), naming its changes, and so gives the creator's row in the public event index at the edit's world
+/// time. The parts pass the canonical reader, and the events add no state: the log with every event stripped, applied
+/// from the same start, leaves the same state hash.
+#[test]
+fn row14_edits_undos_and_redos_are_named_and_give_the_creators_rows() {
+    use crate::edit::{EV_CHANGED, EV_MOVED, EV_PLACED, EV_REMOVED};
+    use replica::history::events::{Row, rows};
+    use replica::views::Redactions;
+    let mut w = W::new(KEPT_MOST);
+    let (_room, krate, key, placed) = w.furnish(None);
+    let moved = w.edit(
+        vec![Op::Move {
+            node: Ref::Node(krate),
+            at: spot(4, None),
+        }],
+        None,
+    );
+    let set = w.set(krate, 2, None);
+    let removed = w.edit(
+        vec![Op::Remove {
+            node: Ref::Node(key),
+        }],
+        None,
+    );
+    let undone = w.undo(&mut ok()).expect("undone");
+    let redone = w.redo().expect("redone");
+    let parts = [
+        (placed.part, EV_PLACED),
+        (moved.part, EV_MOVED),
+        (set.part, EV_CHANGED),
+        (removed.part, EV_REMOVED),
+        (undone.part, EV_UNDONE),
+        (redone.part, EV_REDONE),
+    ];
+    let creator = w.creator();
+    let mut bare =
+        Replica::start(&fixture_bytes(FIXTURE_HEADER).expect("bytes")).expect("a replica");
+    for (part, kind) in &parts {
+        assert_eq!(
+            &Part::read(part.stored()).expect("the canonical reader takes it"),
+            &**part
+        );
+        assert!(!part.effects.is_empty(), "{kind}");
+        for e in &part.effects {
+            let events = e.events.as_deref().expect("named");
+            assert_eq!(events.len(), 1, "{kind}: one kind of change in each");
+            assert_eq!(events[0].name.as_str(), *kind);
+            assert_eq!(
+                events[0].changes,
+                (0..e.changes().len() as u64).collect::<Vec<_>>(),
+                "{kind}: it names every change"
+            );
+            assert_eq!(
+                rows(e, &Redactions::default()),
+                vec![Row {
+                    at: e.envelope.at,
+                    kind: Name::new(kind).expect("a name"),
+                    node: e.envelope.node,
+                    actor: creator,
+                }],
+                "{kind}: the creator's row"
+            );
+        }
+        bare.apply(&part.strip_events().expect("stripped"))
+            .expect("applies without its events");
+    }
+    // A place writes one effect a parent: the room by the root, the crate by the room, the key by the crate.
+    assert_eq!(parts[0].0.effects.len(), 3);
+    assert_eq!(
+        state_hash(bare.tree()).expect("a hash"),
+        w.state(),
+        "the events add no state"
+    );
+}
+
+/// An effect that holds more than one kind of change has an event for each, in the order of first use, each naming
+/// its own changes.
+#[test]
+fn row14_an_effect_with_two_kinds_of_change_names_each() {
+    use crate::edit::{EV_CHANGED, EV_PLACED, events_of};
+    let (a, b) = (
+        Id::new(Scope([1; 16]), 1).expect("an id"),
+        Id::new(Scope([1; 16]), 2).expect("an id"),
+    );
+    let set = |node| Change::Set {
+        node,
+        field: FIELD,
+        to: Value::Uint(1),
+        by: None,
+    };
+    let create = Change::Create {
+        node: b,
+        kind: Name::new("souls:key").expect("a name"),
+        pose: replica::pose::Pose {
+            frame: replica::pose::Frame {
+                node: a,
+                slot: None,
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let events = events_of(&[set(a), create, set(a)]).expect("named");
+    let names: Vec<(&str, &[u64])> = events
+        .iter()
+        .map(|e| (e.name.as_str(), e.changes.as_slice()))
+        .collect();
+    assert_eq!(
+        names,
+        vec![(EV_CHANGED, &[0, 2][..]), (EV_PLACED, &[1][..])]
+    );
+    assert_eq!(events_of(&[]), None);
+}

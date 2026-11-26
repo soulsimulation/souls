@@ -16,6 +16,11 @@
 //!
 //! A terrain edit (G5's [`terrain`]) is guarded the same way: planned off the clock, its Souls and resting things
 //! judged on the commit tick before the safety rule. A creator's weather is set through [`weather`].
+//!
+//! Each effect carries the named events that say what the edit did (#5006 row 14, [`events_of`]): `souls:placed`,
+//! `souls:moved`, `souls:changed` and `souls:removed`, each naming the changes it explains. With the envelope's actor
+//! (the creator) and world time, they are the edit's public event index rows (`replica::history::events::rows`), from
+//! which God Mode's panel lists the creator's edits. They add no state.
 
 pub mod safety;
 pub mod terrain;
@@ -28,7 +33,7 @@ use crate::structure::Structure;
 use crate::walk::town::{Basis, Rebuilt};
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
-use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
+use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Part, Rest};
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter, Scope};
 use replica::kinds::sizes::Size;
@@ -42,6 +47,37 @@ use std::sync::Arc;
 
 /// The scope of the ids a plan gives placed nodes on the copy: never minted for a node of a zone.
 pub const PROVISIONAL: Scope = Scope([0xff; 16]);
+
+/// The named events of a creator's edit (#5006 row 14), by the change each explains: a create, a reparent, a remove,
+/// and any other change (a set, a link, an unlink).
+pub const EV_PLACED: &str = "souls:placed";
+pub const EV_MOVED: &str = "souls:moved";
+pub const EV_REMOVED: &str = "souls:removed";
+pub const EV_CHANGED: &str = "souls:changed";
+
+/// The named events of one effect of a creator's edit: one per kind of change it holds, in the order of first use,
+/// each naming the changes it explains. None for an effect with no changes.
+pub fn events_of(changes: &[Change]) -> Option<Vec<Event>> {
+    let mut events: Vec<Event> = Vec::new();
+    for (i, change) in changes.iter().enumerate() {
+        let name = match change {
+            Change::Create { .. } => EV_PLACED,
+            Change::Reparent { .. } => EV_MOVED,
+            Change::Remove { .. } => EV_REMOVED,
+            _ => EV_CHANGED,
+        };
+        match events.iter_mut().find(|e| e.name.as_str() == name) {
+            Some(e) => e.changes.push(i as u64),
+            None => events.push(Event {
+                name: Name::new(name).expect("a constant name"),
+                fields: BTreeMap::new(),
+                changes: vec![i as u64],
+                rest: Rest::new(),
+            }),
+        }
+    }
+    (!events.is_empty()).then_some(events)
+}
 
 /// A committed edit: its part, for the log and the views, and the receipt's map from each temporary name to the id
 /// the engine minted for it.
@@ -708,6 +744,7 @@ fn effects(
                 audience,
                 node,
             },
+            events: events_of(&changes),
             body: Body::Changes(
                 changes
                     .into_iter()
@@ -717,7 +754,6 @@ fn effects(
                     })
                     .collect(),
             ),
-            events: None,
             rest: Rest::new(),
         })
         .collect()
