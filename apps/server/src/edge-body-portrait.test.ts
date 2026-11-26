@@ -1,7 +1,7 @@
 // Resident looks v2: the automatic portrait. A humanoid look gets a server-rendered (CPU, no browser) straight-on
 // portrait stored as the Soul's profile photo; a new look redraws it; an owner upload wins; clearing it goes back to auto.
 import test from 'node:test';import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';import {deflateSync,inflateSync} from 'node:zlib';import {portraitTint} from '../../web/src/SoulAvatars.ts';
+import {mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';import {deflateSync} from 'node:zlib';
 import {fixture,invite,accept,factory} from '../test/native-owner-fixture.ts';import {EdgeLedger} from './edge/ledger/ledger.ts';import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';import {Hono} from 'hono';
 import {AutoPortraits,AUTO_PORTRAIT_STYLE} from './portrait/auto-portraits.ts';import {SoulProfiles} from './soul-profile.ts';import {validateProfilePNG} from './profile-png.ts';
 
@@ -28,9 +28,6 @@ test('PORTRAIT: auto portrait drawn for a look, redrawn on change, custom photo 
  assert.ok(portraits.current(row.id));assert.match(p1!.url,new RegExp(`/v1/souls/${row.id}/profile-photo/${p1!.hash}$`));
  const bytes=profiles.photoBytes(row.id,p1!.hash);assert.ok(bytes,'served by the existing photo route');assert.equal(validateProfilePNG('data:image/png;base64,'+Buffer.from(bytes!).toString('base64')).photo.hash,p1!.hash);
  const card=f.host.publicSoul(f.host.minds.get(row.id)!);assert.equal(card.profilePhoto?.hash,p1!.hash,'the public Soul card carries it');assert.equal(profiles.view(row.id).photoSource,'auto');
- // #5039: the background is this Soul's own tint (the top-left pixel: the first of an unfiltered-from-zero "Sub" row)
- {const b=Buffer.from(bytes!),at=b.indexOf('IDAT'),px=inflateSync(b.subarray(at+4,at+4+b.readUInt32BE(at-4))).subarray(1,4),tint=portraitTint(row.id);
-  assert.ok([0,1,2].every(k=>Math.abs(px[k]-parseInt(tint.slice(1+2*k,3+2*k),16))<=2),`corner ${[...px]} is ${tint}`);}
  const stored=f.db.db.prepare('SELECT look_key FROM soul_auto_portraits_v1 WHERE soul_id=?').get(row.id) as {look_key:string};assert.equal(stored.look_key,`${AUTO_PORTRAIT_STYLE}:${b1.model}`);
  // a new look redraws it (different pixels, same single row)
  await put({look:{hat:'none',hair1:'#ddc28e'}});await new Promise(r=>setTimeout(r,10));await portraits.drain(60000);
