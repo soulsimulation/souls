@@ -1408,7 +1408,7 @@ impl Forms {
         // seat walks there by itself. A form with a rise, a sit or a settle of its own keeps its steps; a walk the
         // runner would skip (an approach to a hand step's thing already within reach, #4086) needs no rise, so that
         // take is made from the seat.
-        if node != body
+        let rises_elsewhere = node != body
             && !in_its_slot
             && w.places
                 .as_ref()
@@ -1423,8 +1423,8 @@ impl Forms {
                         && w.geometry.within_reach(body, node) == Some(true))
                 }
                 _ => false,
-            })
-        {
+            });
+        if rises_elsewhere {
             steps.insert(0, Step::Rise);
         }
         // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
@@ -1435,7 +1435,7 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
-        let rises_first = in_its_slot && !stays;
+        let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
             if let form_runner::Effect::Unlink { ty, .. } = e {

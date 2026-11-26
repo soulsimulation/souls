@@ -130,17 +130,22 @@ pub(crate) struct Walk {
     speed: i64,
 }
 
-/// A gateway walk's time once its route is planned: the route at its gait's `speed` (µm a second: a run is told less
-/// time than a walk for the same way, trial 0.137), plus half again for bends and yielding (at least 5 s), plus 5 s per
-/// crossing or door. No total cap: a long walk that keeps moving ends done, never by the clock; C21's watch ends one
-/// that stalls, and the intent's expiry still bounds it.
+/// A gateway walk's time once its route is planned: the route at its gait's `speed` (µm a second), plus half again for
+/// bends and yielding (at least 5 s), but never less than the route at walking speed, plus 5 s per crossing or door. So
+/// a run is told less time than a walk for the same way (trial 0.137), and a run held to walking pace (behind walkers,
+/// at a door) still ends done, never by the clock. No total cap: a long walk that keeps moving ends done; C21's watch
+/// ends one that stalls, and the intent's expiry still bounds it.
 fn walk_span(length_mm: u64, links: usize, speed: i64) -> Micros {
-    let speed = i128::from(speed.max(1));
-    let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
-    let travel = i64::try_from(travel).unwrap_or(i64::MAX);
-    // Half the free walking time for bends and yielding, at least 5 s, plus 5 s per crossing/door.
-    travel
-        .saturating_add((travel / 2).max(5_000_000))
+    let travel = |speed: i64| {
+        let speed = i128::from(speed.max(1));
+        i64::try_from((i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed)
+            .unwrap_or(i64::MAX)
+    };
+    let at_gait = travel(speed);
+    // Half the free time at the gait for bends and yielding, at least 5 s; at least the walking time; 5 s per link.
+    at_gait
+        .saturating_add((at_gait / 2).max(5_000_000))
+        .max(travel(crate::bodies::WALK))
         .saturating_add(
             i64::try_from(links)
                 .unwrap_or(i64::MAX)
@@ -3055,11 +3060,16 @@ mod gateway_walk_tests {
 
     #[test]
     fn trial_0137_a_run_is_told_less_time_than_a_walk_for_the_same_way() {
-        // 140 m: 100 s walking, 50 s margin, 15 s ladder; at a run's 4 m/s, 35 s, 17.5 s and 15 s.
+        // 140 m: 100 s walking, 50 s margin, 15 s ladder. A run's 35 s and 17.5 s margin are under the walking time,
+        // so it is given the 100 s a run held to walking pace takes, and the ladder's 15 s.
         let span = |gait: Option<&str>| walk_span(140_000, 0, crate::bodies::speed(gait));
         assert_eq!(span(None), 165_000_000);
-        assert_eq!(span(Some("run")), 67_500_000);
-        assert!(span(Some("jog")) < span(None) && span(Some("run")) < span(Some("jog")));
+        assert_eq!(span(Some("run")), 115_000_000);
+        assert!(span(Some("jog")) < span(None) && span(Some("run")) <= span(Some("jog")));
+        assert!(
+            span(Some("wade")) > span(None),
+            "a slower gait is given more"
+        );
     }
 }
 
