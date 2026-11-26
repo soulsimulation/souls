@@ -162,3 +162,15 @@ test('trial 0.137: on open ground of thousands, the brief names what is near the
   assert.ok(!NO_COORDINATES.test(JSON.stringify(b)), 'no coordinates');
   assert.equal(brief(rows, { me: 'soul-1', holding: [] }).holding, 'nothing', 'empty hands said plainly');
 });
+
+test('group work: the Souls near are named nearest first (25 m, five at most), the work near is shown, and the brief stays under 2,000 bytes', () => {
+  const souls = [{ name: 'Bo', m: 2 }, { name: 'Cy', m: 6.04 }, { name: 'Di', m: 30 }];
+  const work = ['Ada offers you a place in a carry crew near rack frame 1 (c1): carry accept Ada'];
+  const b = brief(hall(1000, 3), { me: 'me', souls, work });
+  assert.deepEqual(b.souls_near, ['Bo (2 m)', 'Cy (6 m)']);
+  assert.deepEqual(b.work, work);
+  assert.ok(bytes(b) < BRIEF_MOST, `${bytes(b)} bytes`);
+  const none = brief(hall(3, 0), { me: 'me' });
+  assert.equal(none.souls_near, undefined);
+  assert.equal(none.work, undefined);
+});

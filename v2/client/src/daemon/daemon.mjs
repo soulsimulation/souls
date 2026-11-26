@@ -175,7 +175,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
-import { byName, carryIntents, crewsIn, placer } from '../carry/carry.mjs';
+import { NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -964,6 +964,29 @@ function meNow(rows) {
   return { now, holding: holdingOf(rows).holding ?? [], metres: metresFrom(rows, body.id, { placed: true }) ?? undefined };
 }
 
+/** The other Souls' bodies in the copy with their metres from this Soul (`metres`: meNow's), nearest first. */
+function soulsAround(rows, metres) {
+  const me = [...rows.values()].find((r) => r.id === ME || r.soul === ME);
+  if (!me || !metres) return [];
+  return [...rows.values()].filter((r) => r !== me && r.soul !== undefined && r.kind === me.kind)
+    .map((r) => ({ id: r.id, name: r.name, m: metres(r) })).filter((b) => Number.isFinite(b.m)).sort((a, b) => a.m - b.m);
+}
+
+/** "Who needs help?" (`look`'s `work`): the crew offers to this Soul still open and the crews near it, as lines
+ *  (`../carry/carry.mjs` `workLines`); a crew holding nothing is named by the load nearest its first member. */
+function groupWork(rows, metres) {
+  if (!metres) return [];
+  const mine = mineIn(rows), kinds = heldKinds(), entryOf = (id) => kinds[rows.get(id)?.entry ?? rows.get(id)?.kind];
+  const loads = [...rows.values()].filter((r) => r.parent && !isCrew(rows.get(r.parent)?.kind) && loadOf(kinds[r.entry ?? r.kind]));
+  const nearest = (crew) => {
+    const first = rows.get(crew)?.members?.[0]?.body, from = first && metresFrom(rows, first, { placed: true });
+    const best = from ? loads.map((r) => ({ r, d: from(r) })).filter((x) => x.d <= 6).sort((a, b) => a.d - b.d)[0] : null;
+    return best?.r.name ?? null;
+  };
+  return workLines({ crews: crewsIn(rows), rows, mine, offers: openCrewOffers(logged, rows, mine), nameOf: (id) => nameIn(rows, id, mine),
+    metres: (id) => (rows.get(id) ? metres(rows.get(id)) : undefined), needs: (id) => crewNeeds(entryOf(id)), nearest });
+}
+
 /** The copy brought current unless `now`, and its age fields (R10). */
 async function ageAfter({ now = false } = {}) {
   // A gateway that does not answer leaves the copy as it is, and the answer says it is stale, since when and why.
@@ -1642,8 +1665,8 @@ async function answer(req, conn = null) {
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
-      const heard = named(rows, heardSince.splice(0));
-      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...meNow(rows), ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const heard = named(rows, heardSince.splice(0)), mn = meNow(rows);
+      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...mn, souls: soulsAround(rows, mn.metres), work: groupWork(rows, mn.metres), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
       const away = (arrive(), arrival());
@@ -2344,14 +2367,26 @@ async function carry(req) {
   for (const until = Date.now() + 10_000; !groundIn(rowsOf(copy)) && Date.now() < until;) { await new Promise((ok) => setTimeout(ok, 250)); age = await ageAfter(); }
   const rows = rowsOf(copy), all = [...rows.values()], kinds = heldKinds(), poses = posesOf(copy);
   const me = all.find((r) => r.soul === ME)?.id ?? null;
-  // A Soul named by its name (a body's name in the copy), as `together offer` takes it.
+  const crews = crewsIn(rows), mine = mineIn(rows);
+  // A Soul named by its name (a body's name in the copy), as `together offer` takes it; `anyone` asks every Soul near.
   if (req.do === 'offer' && Array.isArray(req.to)) {
-    const to = req.to.map((w) => soulNamed(w, 'carry-names-a-soul', 'carry offer <name or body id> [...]')), bad = to.find((t) => t.code);
-    if (bad) return closing({ ok: false, code: bad.code, detail: bad.detail }, null, { age });
-    req = { ...req, to: to.map((t) => t.id) };
+    if (req.to.length === 1 && NEAR_WORDS.has(String(req.to[0]).toLowerCase())) {
+      const near = offerNear(soulsAround(rows, me ? metresFrom(rows, me, { placed: true }) : null));
+      if (near.code) return closing({ ok: false, code: near.code, detail: near.detail }, null, { age });
+      req = { ...req, to: near };
+    } else {
+      const to = req.to.map((w) => soulNamed(w, 'carry-names-a-soul', 'carry offer <name or body id> [...] | carry offer anyone')), bad = to.find((t) => t.code);
+      if (bad) return closing({ ok: false, code: bad.code, detail: bad.detail }, null, { age });
+      req = { ...req, to: to.map((t) => t.id) };
+    }
+  }
+  // An offer accepted (or declined) by its offerer's name, or the newest open one with no word.
+  if (req.kind !== 'part' && (req.do === 'accept' || req.do === 'decline')) {
+    const o = crewOffered(req.crew, openCrewOffers(logged, rows, mine), (id) => nameIn(rows, id, []));
+    if (o.code) return closing({ ok: false, code: o.code, detail: o.detail }, null, { age });
+    req = { ...req, crew: o.crew };
   }
   // Who is in each crew: its members as the world's node holds them in the copy (0.135), front and back first.
-  const crews = crewsIn(rows), mine = mineIn(rows);
   const ends = (crew) => ['front', 'back'].map((end) => rows.get(crew)?.members?.find((m) => m.role.endsWith(`:${end}`))?.body);
   if (req.do === 'list') {
     return closing({ ok: true, crews: crews.map((c) => ({ ...c, with: (rows.get(c.id)?.members ?? []).map((m) => ({ name: nameIn(rows, m.body, mine), role: m.role.replace(/^[^:]*:/, ''), body: m.body })), started: Boolean(rows.get(c.id)?.started) })) }, null, { age });
@@ -2381,7 +2416,9 @@ async function carry(req) {
   const before = req.do === 'offer' ? crews.map((c) => c.id) : null;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
   const walked = intents.find((i) => /:walk$/.test(i.verb));
-  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}) }, null, { now: true });
+  // What to do next, plainly; the command drops it when the step is refused.
+  const next = nextStep(req, { load: rows.get(req.load ?? req.part)?.name ?? null });
+  return closing({ ok: true, sequence: sent.at(-1).sequence, sent, basis: sequenceOf(basis), ...(req.crew ? { crew: req.crew } : {}), ...(before ? { before } : {}), ...(walked ? { to: walked.params[1].filter((_, k) => k !== 1).map((v) => Math.round(v / 1000) / 1000) } : {}), ...(next ? { next } : {}) }, null, { now: true });
 }
 
 /**
