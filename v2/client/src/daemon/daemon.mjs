@@ -134,12 +134,15 @@
 //   off when the other one went comes back by itself and never takes the Soul from a live one.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
-//   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered for
-//   10 s) is let go at once, and acts wait for the next sign-in (#4980). One the gateway let go for a full queue is
-//   closed as `agent.behind` (1013): it signs in again at once, and answers say `gap.why` `behind` until its copy is
-//   current again (#4979). A `wait` under way is told when a signed-in socket is lost (`{"kind":"disconnected",
-//   "say":..}`, with `"why":"behind"` then) and when the next is current (`{"kind":"reconnected", "gap_ms":..}`),
-//   once each a gap (#4977). Every frame is built and read by replica's WASM build (`wire*`).
+//   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered and
+//   nothing received for 10 s) is let go at once, and acts wait for the next sign-in (#4980). One whose frames still
+//   arrive while a sync's answer is late is behind, not gone: it stays, says `gap.why` `behind`, and its acts go on
+//   it (#4979: on a link slower than the world's speech, reconnecting only fell behind again). One the gateway let go
+//   for a full queue is closed as `agent.behind` (1013): it signs in again at once, and answers say `gap.why` `behind`
+//   until its copy is current again (#4979). A `wait` under way is told when a signed-in socket is lost
+//   (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is current
+//   (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by replica's WASM
+//   build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -344,6 +347,7 @@ let stopped = 0; // acts stopped locally, for the trace
 // (and why) it has not been known current; null while it is.
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
+let laggingAt = null; // when the socket, frames still arriving, was found behind on a sync's answer (#4979)
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
@@ -578,10 +582,27 @@ function startSync(sock, kind) {
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
 }
 
-/** The sync's next answer is due within SYNC_WITHIN. */
+/**
+ * The sync's next answer is due within SYNC_WITHIN of the last frame the socket received, not of the ask (#4979): a
+ * socket whose frames keep arriving is alive, only behind (a link slower than what the world sends, the speech it
+ * hears included, which is never dropped), and says so (`gap.why` `behind`) instead of reconnecting in a loop, where
+ * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980).
+ */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
-  syncing.timer = setTimeout(() => sock.giveUp('sync: no answer; reconnecting'), SYNC_WITHIN);
+  const due = () => {
+    if (!syncing) return;
+    const quiet = performance.now() - sock.heardAt;
+    if (quiet >= SYNC_WITHIN) { sock.giveUp('sync: no answer; reconnecting'); return; }
+    if (laggingAt === null) {
+      laggingAt = performance.now();
+      cutAt ??= laggingAt;
+      cutWhy = 'behind';
+      log('sync: no answer yet while frames still arrive; behind, not reconnecting');
+    }
+    syncing.timer = setTimeout(due, SYNC_WITHIN - quiet);
+  };
+  syncing.timer = setTimeout(due, SYNC_WITHIN);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -600,6 +621,8 @@ function syncAnswer(sock, n, refused, bytes) {
   copyVersion = syncing.version;
   confirmedAt = t;
   cutAt = null;
+  if (laggingAt !== null) log(`caught up: the sync answered ${Math.round(t - laggingAt)} ms after it was found behind`);
+  laggingAt = null;
   const { waiters } = syncing;
   syncing = null;
   hearing();
@@ -702,7 +725,9 @@ function connect() {
     try { sock.close(); } catch { /* ignored from here */ }
   };
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
+  sock.heardAt = performance.now();
   sock.onmessage = (m) => {
+    sock.heardAt = performance.now(); // progress: what keeps a socket alive while a sync's answer is behind (#4979)
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
     if (typeof m.data === 'string') { onText(m.data); return; }
     const bytes = new Uint8Array(m.data);
@@ -792,6 +817,7 @@ function connect() {
     clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
+      laggingAt = null;
       cutAt ??= performance.now();
       cutWhy = behind ? 'behind' : 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
