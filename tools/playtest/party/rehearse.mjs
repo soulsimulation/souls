@@ -169,7 +169,7 @@ export async function rehearse({ directory, mode = 'jukebox', startFile = null, 
       for (const until = Date.now() + 300000; !existsSync(startFile);) { assert(Date.now() < until, 'the recorder did not start'); await sleep(100); }
     }
     report.demonstrationStart = Date.now(); save();
-    report.result = await performParty({ seats, jukebox, mode = 'jukebox', record });
+    report.result = await performParty({ seats, jukebox, mode, record });
     report.complete = true; report.demonstrationEnd = Date.now(); save();
     await sleep(2000);
     return report;
