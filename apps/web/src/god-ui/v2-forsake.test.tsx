@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 Object.assign(globalThis, { location: { origin: 'https://soul.example', pathname: '/w/hamlet/', search: '', hash: '', href: 'https://soul.example/w/hamlet/' } });
 const F = await import('./v2-forsake.ts');
-const { V2ForsakeWorld } = await import('./WorldOwnerOps.tsx');
+const { V2ForsakeWorld } = await import('./V2ForsakeWorld.tsx');
 const { OfferCard } = await import('./OfferCard.tsx');
 
 const DIRECTORY = 'https://soul.example';

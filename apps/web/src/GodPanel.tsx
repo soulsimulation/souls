@@ -19,7 +19,7 @@ import { OwnerGod, ago as since } from './god-ui/GodModal.tsx';
 import { closeGod, openGod, useGod, watchInbox } from './god-ui/god-store.ts';
 import { agentPaired } from './god-ui/god-agent-state.ts';
 import { ConstitutionBody } from './god-ui/Constitution.tsx';
-import { ForsakeWorld, V2ForsakeWorld } from './god-ui/WorldOwnerOps.tsx';
+import { ForsakeWorld } from './god-ui/WorldOwnerOps.tsx';
 import { PrayersWaiting, soulIdOf, type PrayerSource } from './god-ui/Prayers.tsx';
 import { godFeature } from './god-ui/features.ts';
 import { approvalFromHash, landingHash } from './god-ui/join-api.ts';
@@ -36,6 +36,8 @@ const landingPreviewKey = typeof location === 'undefined' ? null : takePreviewKe
 const PAIRED_KEY = `sim.godPaired:${worldKey}`;
 // 0.133 item 6: loaded when the creator opens Build, not with the panel
 const BuildBar = lazy(() => import('./god-ui/BuildBar.tsx').then((m) => ({ default: m.BuildBar })));
+// #5006: Forsake on a new-engine world is loaded when the creator opens it, not with the panel
+const V2ForsakeWorld = lazy(() => import('./god-ui/V2ForsakeWorld.tsx').then((m) => ({ default: m.V2ForsakeWorld })));
 const PHONE = () => typeof matchMedia === 'function' && matchMedia(SMALL_SCREEN).matches;  // P6: landscape phones (coarse pointer) too
 // Phones keep their own remembered choice and start compact: the open panel covers most of a small screen.
 const openKey = () => 'sim.godPanel.open' + (PHONE() ? '.phone' : '');
@@ -330,7 +332,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt, soulName }: { flagM
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting source={prayerSource} />} more={more}
-      forsake={v2 ? <V2ForsakeWorld name={name} /> : <ForsakeWorld name={name} />} />}
+      forsake={v2 ? <Suspense fallback={null}><V2ForsakeWorld name={name} /></Suspense> : <ForsakeWorld name={name} />} />}
   </>;
 }
 

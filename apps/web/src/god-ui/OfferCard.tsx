@@ -7,8 +7,8 @@ import { useEffect, useState } from 'react';
 import { BASE } from '../base-path.ts';
 import { worldKey } from '../world-path.ts';
 import { userAuthHeaders } from '../auth-session.ts';
-import { acceptHandoff, forsakeHere } from './v2-forsake.ts';
-import { v2PageWorldName } from '../v2-engine/owner-mailbox.ts';
+import type { ForsakePlace } from './v2-forsake.ts';
+import { v2MailboxPlace, v2PageWorldName, v2WorldName } from '../v2-engine/owner-mailbox.ts';
 import { worldTitle } from '../world-title.ts';
 
 export type OfferLink = { kind: 'worldoffer' | 'cobuildpair'; code: string };
@@ -25,7 +25,11 @@ async function send(sub: string, body: unknown) {
 }
 
 type Offer = { kind: 'cobuild' | 'transfer'; world: { name: string } } | 'gone' | 'off' | null;
-export function OfferCard({ link, signedIn, onDone, here = forsakeHere() }: { link: OfferLink; signedIn: boolean; onDone: () => void; here?: ReturnType<typeof forsakeHere> }) {
+type Here = { place: ForsakePlace; world: string } | null;
+/** This page's world and its directory on a world the new engine runs (as v2-forsake.ts `forsakeHere`, which loads
+ *  only with Forsake or an acceptance); null on an old-engine world. */
+const pageWorld = (): Here => { const place = v2MailboxPlace(), world = v2WorldName(); return place && world ? { place, world } : null; };
+export function OfferCard({ link, signedIn, onDone, here = pageWorld() }: { link: OfferLink; signedIn: boolean; onDone: () => void; here?: Here }) {
   // a world the new engine runs: the directory holds the offer, and has no read of it before acceptance
   const [offer, setOffer] = useState<Offer>(() => (!here ? null : link.kind === 'worldoffer' ? { kind: 'transfer', world: { name: worldTitle(v2PageWorldName(), here.world) } } : 'off'));
   const [state, setState] = useState<{ busy?: boolean; done?: string; err?: string }>({});
@@ -37,7 +41,7 @@ export function OfferCard({ link, signedIn, onDone, here = forsakeHere() }: { li
   const act = async () => {
     setState({ busy: true });
     try {
-      if (here) { await acceptHandoff(here.place, here.world, link.code); setState({ done: 'This world is yours now. Reload to open God Mode.' }); }
+      if (here) { const { acceptHandoff } = await import('./v2-forsake.ts'); await acceptHandoff(here.place, here.world, link.code); setState({ done: 'This world is yours now. Reload to open God Mode.' }); }
       else if (link.kind === 'cobuildpair') { const d = await send('cobuild/pair/approve', { code: link.code }); setState({ done: `Approved. ${d.agent} now builds here as your co-builder agent; it finishes on its own.` }); }
       else { const d = await send('offer/accept', { code: link.code }); setState({ done: d.kind === 'transfer' ? 'This world is yours now. Reload to open God mode.' : 'You are a co-builder now. Ask your agent to pair with this world as a co-builder.' }); }
     } catch (e) { setState({ err: (e as Error).message }); }
