@@ -1334,6 +1334,7 @@ impl Bodies {
                 .chain((0..).map(|k| first + k * 1_000_000));
             while let Some(s) = tries.next().filter(|s| *s < len) {
                 if let Some(p) = view.stand_reached(ground, along(s), from) {
+                    eprintln!("DBG place goal {p:?} at {s} walkable {walkable} from {here:?}");
                     return Ok(Target::new(ground, p));
                 }
             }
