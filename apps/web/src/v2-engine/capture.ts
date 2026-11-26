@@ -29,8 +29,9 @@ export type CapturePage = {
   nodes(): Nodes | null;
   /** A body node as drawn now, or null when the page does not draw it. */
   body(n: CaptureNode): Drawn | null;
-  /** Holds the camera at `eye`, looking at `target`, until the picture; answers the camera it set. */
-  pin(eye: V3, target: V3): Aim;
+  /** Holds the camera at `eye`, looking at `target`, until the picture; answers the camera it set. With `clear`, the
+   *  eye first comes in front of anything drawn between it and the target (a wall round a thing indoors). */
+  pin(eye: V3, target: V3, clear: boolean): Aim;
 };
 
 const plainKind = (k: string) => k.replace(/@.*$/, '');
@@ -122,7 +123,8 @@ export function installCapture(host: Host, page: CapturePage): { retire(): void 
       if (!hit) return null;
       const { also: _, ...spot } = hit;
       const a = aimAt(nodes, page.body, spot, eyes);
-      return a ? { spot, aim: page.pin(a.eye, a.target) } : null;
+      // a place is seen from above its corner over its own roof; a thing or a Soul from in front of what hides it
+      return a ? { spot, aim: page.pin(a.eye, a.target, spot.role !== 'place' && !eyes) } : null;
     },
   };
   // The world as the client's page reads (`where`/`clear`/`free --page`, `view`: v2/web's WorldView): its nodes, and

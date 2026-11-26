@@ -500,7 +500,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // #5022: `shoot` and a creator's `look` (v2/client shoot.mjs) wait for `v2.capture` on a ?shot=1 page, then aim it at a name (v2-engine/capture.ts)
     const shotCapture=shotMode&&newWorld?installCapture(window as unknown as {v2?:unknown},{ready:()=>!!(window as unknown as {__shotReady?:boolean}).__shotReady,t:()=>{const dt=shown.current.take?.dt;return dt?Math.round(shown.current.tick*dt*1e6):null;},nodes:buildNodes,
       body:n=>{const s=context.current.sim.conn.replica.souls.get(soulIdOf(n.soul??n.id)),base=entityOf(n.id),es=shown.current.entities,e=es[s?.entityId??base]??es[base+'_a']??es[base+'_b']??es[base+'_c'];return e?{name:s?.name??null,p:e.p,yaw:e.yaw}:null;},  // a resident figure with no Soul: its look's entity (bridge.ts bodies)
-      pin:(eye,at)=>{const p=shotCamera(eye,at);return{eye:[p.eye[0],p.eye[1],p.eye[2]],target:[p.at[0],p.at[1],p.at[2]]};}}):null;
+      pin:(eye,at,clear)=>{let e:readonly number[]=eye;if(clear){const o=new THREE.Vector3(...at),d=new THREE.Vector3(...eye).sub(o),len=d.length();d.normalize();const ray=new THREE.Raycaster(o,d,.5,len),hit=ray.intersectObjects(visualObstructionRoots() as THREE.Object3D[],true)[0];if(hit)e=o.addScaledVector(d,Math.max(.8,hit.distance-.3)).toArray();}  // a thing indoors: the eye in front of the wall between
+        const p=shotCamera(e,at);return{eye:[p.eye[0],p.eye[1],p.eye[2]],target:[p.at[0],p.at[1],p.at[2]]};}}):null;
     const games=new WorldGames();scene.add(games.group);
     const platformDraw=new WorldPlatforms();scene.add(platformDraw.group);
     const placeActivity=new WorldPlaceActivity();scene.add(placeActivity.group);

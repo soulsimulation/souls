@@ -53,7 +53,7 @@ test('a thing\'s camera looks at it through its frames; a place\'s over what it 
 test('`v2.capture` waits for the page, aims through its pin and says what it shot; retire takes it off', () => {
   let ready = false, pinned: unknown = null;
   const page: CapturePage = { ready: () => ready, t: () => (ready ? 1_250_000 : null), nodes: () => NODES, body,
-    pin: (eye, target) => { pinned = { eye, target }; return { eye: [eye[0], eye[1] + 1, eye[2]], target }; } };
+    pin: (eye, target, clear) => { pinned = { eye, target, clear }; return { eye: [eye[0], eye[1] + 1, eye[2]], target }; } };
   const host: { v2?: { capture: { ready(): boolean; where(): { name: string }[]; aim(n: string, e?: boolean): { spot: { id: string; role: string }; aim: { eye: number[] } } | null }; director: { t: number | null } } } = {};
   const { retire } = installCapture(host, page);
   assert.equal(host.v2!.capture.ready(), false);
@@ -63,8 +63,10 @@ test('`v2.capture` waits for the page, aims through its pin and says what it sho
   assert.equal(host.v2!.director.t, 1_250_000);
   const shot = host.v2!.capture.aim('presenter-desk')!;
   assert.deepEqual(shot.spot, { id: 'w.4', name: 'presenter-desk', role: 'thing' });
-  assert.ok(pinned, 'the camera went through the page\'s pin');
+  assert.deepEqual((pinned as { clear: boolean }).clear, true, 'a thing\'s eye is cleared of what hides it');
   assert.equal(+shot.aim.eye[1].toFixed(3), 4.3, 'the camera the pin set (lifted), not the one asked for');
+  host.v2!.capture.aim('lab-presentation-hall');
+  assert.equal((pinned as { clear: boolean }).clear, false, 'a place is seen over its own roof');
   assert.equal(host.v2!.capture.aim('nothing here'), null);
   assert.ok(host.v2!.capture.where().some((s) => s.name === 'Ada'));
   // the world as the client's `where --page` and `view` read it: a node's frame places its own points in the world
