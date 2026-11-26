@@ -1214,7 +1214,17 @@ fn w16_scoped_handoff_revokes_creator_preserves_souls_other_world_and_reopens() 
         Err("world-authority-required"),
         "no registry: no handoff can be published"
     );
+    assert_eq!(p.world_keys("garden"), Ok(vec!["garden".to_owned()]));
     p.authority_file = Some(registry.clone());
+    let mut keys = p.world_keys("garden").unwrap();
+    keys.sort();
+    let mut named = vec![
+        "garden".to_owned(),
+        "old-garden".to_owned(),
+        instance.clone(),
+    ];
+    named.sort();
+    assert_eq!(keys, named, "the world's name, instance and alias");
     assert_eq!(p.can_hand_on("garden"), Ok(()));
     assert_eq!(p.can_hand_on("forest"), Ok(()));
     for unnamed in ["meadow", "old-garden", instance.as_str()] {
@@ -2083,17 +2093,20 @@ fn a_removal_write_is_tried_again_after_a_short_failure() {
 }
 
 #[test]
-fn others_living_counts_unretired_souls_of_the_world_held_by_other_accounts() {
-    let (p, _) = store();
+fn others_living_counts_other_peoples_souls_by_every_name_of_the_world_and_unpaired_imports() {
+    let (p, tokens) = store();
+    let instance = format!("{}-{}-0", "04".repeat(16), "03".repeat(16));
     {
         let db = p.db.lock().unwrap();
         for (grant, account, world, retired) in [
             ("soul-aa-0", "acct_cid", Some("garden"), None),
-            ("soul-bb-0", "acct_dee", Some("garden"), None),
+            ("soul-bb-0", "acct_dee", Some("old-garden"), None),
+            ("soul-b2-0", "acct_dee", Some(instance.as_str()), None),
             ("soul-cc-0", "acct_bea", Some("garden"), None),
             ("soul-dd-0", "acct_cid", Some("garden"), Some(5)),
             ("soul-ee-0", "acct_cid", Some("forest"), None),
             ("soul-ff-0", "acct_cid", None, None),
+            ("soul-op-0", "operator:test-souls", Some("garden"), None),
             ("creator-gg-0", "acct_cid", Some("garden"), None),
         ] {
             db.execute(
@@ -2107,10 +2120,62 @@ fn others_living_counts_unretired_souls_of_the_world_held_by_other_accounts() {
             )
             .unwrap();
         }
+        // An imported Soul retired before it paired.
+        db.execute(
+            "INSERT INTO soul_profiles_v1(grant_text, retired_at) VALUES ('soul-i3-0', 7)",
+            [],
+        )
+        .unwrap();
     }
-    // Bea's own Soul, a retired one, another world's, one with no world and a creator grant do not count.
-    assert_eq!(p.others_living("garden", "acct_bea"), Ok(2));
-    assert_eq!(p.others_living("garden", "acct_cid"), Ok(2));
-    assert_eq!(p.others_living("forest", "acct_cid"), Ok(0));
-    assert_eq!(p.others_living("meadow", "acct_bea"), Ok(0));
+    let keys: Vec<String> = ["garden", "old-garden", instance.as_str()]
+        .map(str::to_owned)
+        .to_vec();
+    // Brought over and not paired yet: Eve's counts (once, though listed twice), Bea's own does not, one already
+    // paired is counted by its profile, and one retired does not.
+    let imported: Vec<(String, String)> = [
+        ("soul-i1-0", "acct_eve"),
+        ("soul-i1-0", "acct_eve"),
+        ("soul-i2-0", "acct_bea"),
+        ("soul-aa-0", "acct_cid"),
+        ("soul-i3-0", "acct_eve"),
+    ]
+    .map(|(g, a)| (g.to_owned(), a.to_owned()))
+    .to_vec();
+    // Cid's, Dee's under the alias and under the instance, and Eve's import. Not: Bea's own Soul, a retired one,
+    // another world's, one with no world, the operator's test Soul, a creator grant.
+    assert_eq!(p.others_living(&keys, "acct_bea", &imported), Ok(4));
+    assert_eq!(
+        p.others_living(&keys[..1], "acct_bea", &[]),
+        Ok(1),
+        "the name alone misses the Souls paired under the world's alias and instance"
+    );
+    assert_eq!(p.others_living(&["forest".into()], "acct_cid", &[]), Ok(0));
+    assert_eq!(p.others_living(&["meadow".into()], "acct_bea", &[]), Ok(0));
+
+    // The import tables as X11 left them in the account store: the Souls brought over for any of the world's names.
+    let accounts = tokens.with_file_name("accounts.sqlite");
+    {
+        let db = rusqlite::Connection::open(&accounts).unwrap();
+        db.execute_batch("CREATE TABLE imported_souls_v1(world TEXT,old_soul TEXT,soul TEXT); CREATE TABLE souls_v1(soul TEXT,account_id TEXT,name TEXT,description TEXT);").unwrap();
+        for (world, soul, account) in [
+            ("old-garden", format!("{}:0", "05".repeat(16)), "acct_eve"),
+            ("forest", format!("{}:0", "06".repeat(16)), "acct_eve"),
+        ] {
+            db.execute(
+                "INSERT INTO imported_souls_v1 VALUES(?1,'s_old',?2)",
+                rusqlite::params![world, soul],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO souls_v1 VALUES(?1,?2,'Imported','')",
+                rusqlite::params![soul, account],
+            )
+            .unwrap();
+        }
+    }
+    let store = crate::accounts::store::Store::open(&accounts).unwrap();
+    assert_eq!(
+        store.imported_in(&keys).unwrap(),
+        vec![(format!("soul-{}-0", "05".repeat(16)), "acct_eve".to_owned())]
+    );
 }

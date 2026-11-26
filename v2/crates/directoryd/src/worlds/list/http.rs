@@ -296,19 +296,19 @@ pub fn archive(req: &Request, app: &App) -> Answer {
     }
     // While Souls of other people live in the world, archiving would stop them with it: refused by name with their
     // count (the coordinator's default for #5006); the creator hands the world on, or waits until they have left. The
-    // creator's own Souls do not count. Asked only of an active world, and before the world list is locked (pairing's
-    // owner reader takes that lock while it reads).
-    match worlds.is_creator(world, account.principal) {
-        Ok(true) => {}
-        Ok(false) => return refuse(403, "not-the-creator"),
-        Err(e) => return world_refusal(e),
-    }
-    let active = {
+    // creator's own Souls do not count. Counted only for the current creator's exactly confirmed archive of an active
+    // world (anything else goes on to `begin`, which refuses it by the same names and codes as before), and before
+    // the world list is locked (pairing's owner reader takes that lock while it reads).
+    let count = confirm == world && worlds.is_creator(world, account.principal) == Ok(true) && {
         let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
         super::archive::get(&inner.dir.store, world).is_ok_and(|p| p.state == "active")
     };
-    if active && let Some(pairing) = &app.pairing {
-        match pairing.others_living(world, &account.account) {
+    if count && let Some(pairing) = &app.pairing {
+        let counted = pairing.world_keys(world).and_then(|keys| {
+            let imported = app.store.imported_in(&keys).map_err(|_| "store")?;
+            pairing.others_living(&keys, &account.account, &imported)
+        });
+        match counted {
             Ok(0) => {}
             Ok(souls) => {
                 return (
@@ -317,7 +317,7 @@ pub fn archive(req: &Request, app: &App) -> Answer {
                     "archive-others-live-here".into(),
                 );
             }
-            Err(_) => return refuse(503, "store"),
+            Err(name) => return refuse(503, name),
         }
     }
     let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());

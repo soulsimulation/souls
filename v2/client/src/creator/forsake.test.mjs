@@ -140,31 +140,32 @@ test('the creator hands the world on with a one-use link; a signed-in person acc
   assert.ok(await listed(), 'the world stays on the list');
 });
 
-test('archiving waits while other people\'s Souls live in the world; the creator\'s own do not count', async () => {
+test('archive waits while other people\'s Souls live in the world, and goes through once they have left', async () => {
   const cids = await soulOf('Cid');
   await soulOf('Bea');
+  // refusals as before, ahead of the count: a former creator, a wrong name
+  assert.deepEqual(await page('/v1/worlds/archive', 'Ada', { world: WORLD, confirm: WORLD }), { status: 403, body: { refused: 'not-the-creator' } }, 'a former creator cannot');
+  assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: 'Forsaken' }), { status: 409, body: { refused: 'archive-confirmation' } });
+  // Cid's Soul lives here; Bea's own does not count
   assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: WORLD }), { status: 409, body: { refused: 'archive-others-live-here', souls: 1 } });
-  assert.deepEqual(readdirSync(inbox), [], 'nothing is queued');
+  assert.deepEqual(readdirSync(inbox), [], 'a refused archive queues nothing');
   assert.ok(await listed(), 'the world stays on the list');
   // the creator's other way out is still open: an offer can be made (and cancelled)
   assert.equal((await page('/v1/worlds/handoff/offer', 'Bea', { world: WORLD })).status, 200);
   assert.equal((await page('/v1/worlds/handoff/cancel', 'Bea', { world: WORLD })).status, 200);
-  // once Cid's Soul has left (its owner retires it), nothing else of anyone else's lives here
+
+  // once Cid's Soul has left (its owner retires it), the archive goes through
   const left = await fetch(`http://${directory}/v1/account/souls/retire`, { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ soul: cids, confirm: true, test_person: 'Cid' }) }).then((r) => r.json());
   assert.equal(left.ok, true, JSON.stringify(left));
-});
-
-test('the creator archives the world: the stop is queued once, it leaves the list, and nothing is deleted', async () => {
-  assert.deepEqual(await page('/v1/worlds/archive', 'Ada', { world: WORLD, confirm: WORLD }), { status: 403, body: { refused: 'not-the-creator' } }, 'a former creator cannot');
-  assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: 'Forsaken' }), { status: 409, body: { refused: 'archive-confirmation' } });
-  assert.deepEqual(readdirSync(inbox), [], 'a refused archive queues nothing');
-
   const asked = await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: WORLD });
   assert.deepEqual(asked, { status: 202, body: { pending: true, world: WORLD } });
   const queued = readdirSync(inbox);
   assert.equal(queued.length, 1);
   assert.match(queued[0], /^[0-9a-f]{64}$/);
+
+  // asking again reads the same request, even with someone else's Soul here again (a count above zero)
+  await soulOf('Dee');
   assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: WORLD }), asked, 'asking again reads the same request');
   assert.deepEqual(readdirSync(inbox), queued);
 

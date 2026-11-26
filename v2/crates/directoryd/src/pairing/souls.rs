@@ -120,17 +120,43 @@ impl Pairing {
         store(rows.collect())
     }
 
-    /// How many unretired Souls paired for `world` are held by an account other than `account` (#5006: a creator
-    /// archives a world only while no one else's Souls live there; their own Souls do not count).
-    pub fn others_living(&self, world: &str, account: &str) -> Result<u64, &'static str> {
+    /// How many Souls of other people live in the world that `keys` name (its name, instance and aliases: #5006, a
+    /// creator archives a world only while no one else's Souls live there): unretired Souls paired for it and held by an
+    /// account other than `account`, and Souls brought over for it (`imported`: grant and owning account) that have
+    /// neither paired nor retired. The creator's own Souls and the operator's test Souls do not count.
+    pub fn others_living(
+        &self,
+        keys: &[String],
+        account: &str,
+        imported: &[(String, String)],
+    ) -> Result<u64, &'static str> {
         let db = self.db.lock().expect("the store");
-        store(db.query_row(
-            "SELECT COUNT(*) FROM soul_profiles_v1 p JOIN paired_souls_v1 ps ON ps.grant_text = p.grant_text
-              WHERE p.world = ?1 AND p.retired_at IS NULL AND p.grant_text LIKE 'soul-%' AND ps.account <> ?2",
-            params![world, account],
-            |r| r.get::<_, i64>(0),
-        ))
-        .map(|n| n.max(0) as u64)
+        let mut n = 0u64;
+        for key in keys {
+            let here = store(db.query_row(
+                "SELECT COUNT(*) FROM soul_profiles_v1 p JOIN paired_souls_v1 ps ON ps.grant_text = p.grant_text
+                  WHERE p.world = ?1 AND p.retired_at IS NULL AND p.grant_text LIKE 'soul-%'
+                    AND ps.account <> ?2 AND ps.account <> ?3",
+                params![key, account, super::operator::OWNER],
+                |r| r.get::<_, i64>(0),
+            ))?;
+            n += here.max(0) as u64;
+        }
+        let waiting: std::collections::BTreeSet<&str> = imported
+            .iter()
+            .filter(|(_, owner)| owner != account)
+            .map(|(grant, _)| grant.as_str())
+            .collect();
+        for grant in waiting {
+            let gone: bool = store(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM paired_souls_v1 WHERE grant_text = ?1)
+                     OR EXISTS(SELECT 1 FROM soul_profiles_v1 WHERE grant_text = ?1 AND retired_at IS NOT NULL)",
+                params![grant],
+                |r| r.get(0),
+            ))?;
+            n += u64::from(!gone);
+        }
+        Ok(n)
     }
 
     /// The world the request with this poll `secret` named, if it named one (#3702: its welcome goes with the token).
