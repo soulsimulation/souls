@@ -42,6 +42,9 @@ pub struct Mark {
     pub at: Vec3,
     pub waiting: Option<(Id, i64)>,
     pub crossing: Option<Id>,
+    /// The world carries it: across `crossing`, or with no link (a rise's step off its seat, a climb out). Until the
+    /// carry ends it may stand on no floor's ground (part way off a bench), so a standing spot it asks waits for that.
+    pub carried: bool,
     pub staying: bool,
     pub spot: Option<(Target, Id)>,
 }

@@ -208,8 +208,9 @@ pub struct Table {
 }
 
 /// An asker, as its mark of the last tick says: where it stands (µm, its node's frame), what it asks, for which order,
-/// and whether the world is carrying it across a link (a stair, a doorway): then it stands on no floor's ground until
-/// it lands, and a new ask waits for that instead of being refused (#4171).
+/// and whether the world is carrying it, across a link (a stair, a doorway, #4171) or off a seat (a rise's step off, a
+/// climb out): then it may stand on no floor's ground until it lands, and a new ask waits for that instead of being
+/// refused.
 #[derive(Clone, Copy, Debug)]
 pub struct Ask {
     pub who: Id,
@@ -1102,8 +1103,9 @@ impl Spots {
             if self.held.contains_key(&a.who) || self.refused.contains_key(&a.who) {
                 continue;
             }
-            // Mid-crossing (part way up a stair) the asker is on no piece of ground, and every place would be refused
-            // `spot-none-free` though none is held (#4171). It is asked again each tick and answered once it lands.
+            // Carried by the world (part way up a stair, #4171; stepping off a bench, still at the seat's point) the
+            // asker may be on no piece of ground, and every place would be refused `spot-none-free` though none is
+            // held. It is asked again each tick and answered once it lands.
             if a.carried {
                 continue;
             }

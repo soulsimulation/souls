@@ -2635,7 +2635,7 @@ impl World for Town {
                             node: m.node,
                             from: m.at,
                             target,
-                            carried: m.crossing.is_some(),
+                            carried: m.carried || m.crossing.is_some(),
                         },
                         self.size_of(m.who),
                     )
@@ -3354,11 +3354,17 @@ impl Town {
         // ([`Town::landing`]), or the crossing is refused before the body moves.
         let mut arrive = None;
         if here == self.ground || to == self.ground {
-            let place = buildings
+            let b = buildings
                 .iter()
                 .find(|b| b.link(link).is_some())
-                .map(|b| b.place)
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
+            let place = b.place;
+            // A body on a thing's own floor (a roof terrace on a hotel), not one of the building's, follows the line in
+            // that floor's frame, as a step between two things' floors does below: in the building's frame it was
+            // metres off its near end, and every walk down to the ground was refused `link-not-here`.
+            let own = (here != self.ground && !b.floors.contains_key(&here))
+                .then(|| self.frame_of(here))
+                .flatten();
             let out = |e: String| refusal("out-of-range", e);
             if let Some(e) = far {
                 // Where the map stands it, else the end's middle; then on the mover's surface (#3168).
@@ -3383,10 +3389,15 @@ impl Town {
                         .pose
                         .position;
                 }
-                let last = if to == self.ground {
-                    back(&place, stand).map_err(out)?
-                } else {
-                    stand
+                // The far end in the building's frame: the ground's point taken back into it, a thing's own floor's
+                // (the roof terrace, the walk up) through that floor's frame; a building's floor is in it already.
+                let last = match (to == self.ground, b.floors.contains_key(&to)) {
+                    (true, _) => back(&place, stand).map_err(out)?,
+                    (false, false) => match self.frame_of(to) {
+                        Some(pt) => pt.point(stand).and_then(|w| back(&place, w)).map_err(out)?,
+                        None => stand,
+                    },
+                    (false, true) => stand,
                 };
                 if let Some(p) = line.last_mut() {
                     *p = last;
@@ -3396,6 +3407,10 @@ impl Town {
             if here == self.ground {
                 for p in &mut line {
                     *p = place.point(*p).map_err(out)?;
+                }
+            } else if let Some(ph) = &own {
+                for p in &mut line {
+                    *p = place.point(*p).and_then(|w| back(ph, w)).map_err(out)?;
                 }
             }
         } else if let Some(b) = buildings.iter().find(|b| b.link(link).is_some())
