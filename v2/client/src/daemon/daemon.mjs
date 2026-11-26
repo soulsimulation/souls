@@ -1171,7 +1171,11 @@ async function editOnce(req) {
     defines = v.defines;
   }
   if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
-  state.sequence++;
+  // The world keeps one sequence per creator, and the creator's page (its Build, Undo and weather) numbers its edits by
+  // the clock in µs (apps/web creator-socket.ts): counted from 1 here, every edit after one from the page would be
+  // `intent.stale-seq` for good. So a creator's edit is numbered by the clock too, and never below the last.
+  const before = state.sequence;
+  state.sequence = Math.max(state.sequence + 1, Date.now() * 1000);
   // Planned at the copy's version: its sequence is the version the world checks the batch's nodes against.
   let bytes;
   try {
@@ -1179,7 +1183,7 @@ async function editOnce(req) {
       ? wire.wireEditAsked(scope, seat.grant.counter, BigInt(state.sequence), unhex(copyVersion), undo ? req.op : 'step', batch ?? '', step?.build ?? '', step?.step ?? '')
       : wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
   } catch (e) {
-    state.sequence--;
+    state.sequence = before;
     return closing({ ok: false, code: 'edit.batch', sent: false, detail: String(e.message ?? e).slice(0, 200) }, null, { age });
   }
   save();
