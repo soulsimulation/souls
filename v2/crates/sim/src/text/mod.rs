@@ -220,7 +220,9 @@ fn scan<'a>(
             _ => None,
         };
         let Some(body) = kept else {
-            if let Some(q) = (at + 1..b.len()).find(|&q| checks(b, q).is_some_and(|c| !c.1)) {
+            // None starts after the last byte that is not 0 (a length is never 0): the room's zeros are not read.
+            let last = b.iter().rposition(|&x| x != 0).map_or(at, |l| l + 1);
+            if let Some(q) = (at + 1..last).find(|&q| checks(b, q).is_some_and(|c| !c.1)) {
                 return refuse(
                     "text-corrupt",
                     format!(

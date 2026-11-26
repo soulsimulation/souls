@@ -274,10 +274,10 @@ fn scan(b: &[u8], base: usize, from: usize, header: Header, prev: u32, first: u6
                 );
             }
             None => {
-                // A later batch's first record means a sync returned after this record's: damage, not a tear.
-                if let Some(q) =
-                    (at + 1..b.len()).find(|&q| check(b, q, salt).is_some_and(|c| !c.3))
-                {
+                // A later batch's first record means a sync returned after this record's: damage, not a tear. A
+                // record's length is never 0, so none starts after the last byte that is not (the room's zeros).
+                let last = b.iter().rposition(|&x| x != 0).map_or(at, |l| l + 1);
+                if let Some(q) = (at + 1..last).find(|&q| check(b, q, salt).is_some_and(|c| !c.3)) {
                     return refuse(
                         "log-corrupt",
                         format!(

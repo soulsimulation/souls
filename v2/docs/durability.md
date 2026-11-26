@@ -120,7 +120,12 @@ ignores the same. The modelled store refuses the stale writer.
     - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
       are all on the disk.
 
-    A tick never waits for a sync, so a busy disk delays answers, never the world. A tick's words read as
+    A tick never waits for a sync, so a busy disk delays answers, never the world. Nor does a sync wait for another
+    process's writes (#4973): both files are written into room kept ahead of their ends, zeros already written and
+    synced (`sim::log` rule 10), so a sync writes the batch's data and flushes the drive, and needs no journal commit,
+    which on ext4 first writes every other process's pending data. A batch's records after its first are marked, so
+    a batch whose sync never returned reads as a torn tail whatever order its pages reached the disk in (`sim::log`
+    rule 4). The promise is unchanged: an act is answered only once its words and records are on the disk. A tick's words read as
     `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
     the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
     every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
