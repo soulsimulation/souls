@@ -222,7 +222,7 @@
   "ever": true
  },
  "text": {
-  "card": "The loading spot: a marked pad of four bays where crews set heavy loads down, the far bay first.",
+  "card": "The loading spot: four marked bays where crews set heavy loads down.",
   "howto_load": "Lift the load as a crew, then each carrier sends carry to <crew> the loading spot (the first free bay it fits); one of you then sends carry set-down <crew>.",
   "construction": "construction",
   "loading": "loading spot",

@@ -43,7 +43,11 @@ export async function carryToSpot({ run, both }, bodies, load, [front, back, ...
   const { crew } = await run(front, 'carry', 'offer', bodies[back], ...sides.map(([who]) => bodies[who]));
   for (const who of [back, ...sides.map(([w]) => w)]) await run(who, 'carry', 'accept', crew);
   await run(front, 'carry', 'lift', crew, load);
-  const went = await both(...[front, back, ...sides.map(([w]) => w)].map((who) => [who, 'carry', 'to', crew, SPOT]));
+  // Every carrier's copy current first, so their walks start together: the world breaks a carry off when a carrier
+  // drifts more than 1 m from its place (sim::activity::carry::STRETCH), and a walk sent 1.5 s ahead of the rest does.
+  const all = [front, back, ...sides.map(([w]) => w)];
+  await both(...all.map((who) => [who, 'look']));
+  const went = await both(...all.map((who) => [who, 'carry', 'to', crew, SPOT]));
   await run(front, 'carry', 'set-down', crew);
   await both(...[front, back, ...sides.map(([w]) => w)].map((who) => [who, 'carry', 'leave', crew]));
   return { crew, bay: went[0].bay ?? null };
