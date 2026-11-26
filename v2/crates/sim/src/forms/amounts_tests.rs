@@ -1162,50 +1162,85 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }
 
+/// Form `form` of the bench's entry, done by body 2 at thing 100 as intent `n` with value arguments `vals`, run to its
+/// end through the tree's commit: how it ended, or the binder's refusal.
+fn run_at(b: &mut Bench, form: &str, vals: &[(&str, Arg)], n: u64) -> Result<String, String> {
+    let entry = b.entry.clone();
+    start(b, &entry, id(2), id(100), form, id(100), vals, n)?;
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    Ok(b.p.forms.ended.pop().expect("ended").how.as_str().to_owned())
+}
+
+/// Form `form` asked again as intent `n`, as [`run_at`] asked it, then the bench run until nothing runs: the forms'
+/// answer.
+fn ask_again(b: &mut Bench, form: &str, vals: &[(&str, Arg)], n: u64) -> Option<Asked> {
+    let entry = b.entry.clone();
+    let mut args: Args = vals
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), v.clone()))
+        .collect();
+    args.insert("other".to_owned(), Arg::Node(id(100)));
+    let effects = bind_effects_args(&entry, form, &args).expect("binds");
+    let steps = bind(&entry, form).expect("binds");
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    let asked = forms.start(
+        &mut w,
+        id(2),
+        id(100),
+        intent(id(2), n),
+        steps,
+        effects,
+        Limits::default(),
+        now,
+    );
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    asked.ok()
+}
+
+/// A fresh observer: `b`'s log replayed part by part onto a fresh bench, which must give the same tree.
+fn replayed(b: &Bench, amounts: &[i64]) -> Bench {
+    let mut fresh = Bench::new(1, 1, amounts);
+    let mut from = b.parts[0];
+    for &len in &b.parts[1..] {
+        fresh.commit(b.log[from..from + len].to_vec());
+        from += len;
+    }
+    assert_eq!(fresh.tree.to_state(), b.tree.to_state());
+    fresh
+}
+
 /// #4103: a transfer between two fields of one thing (`into_field`, both ends `"this"`) moves the least of what it
 /// asks, what the source has above its least and the room the other field has left, as two sets in one part, through
 /// the tree's commit; with nothing to move it is refused by name and writes nothing. An amount given by a count
-/// argument binds as that number. #4104: a `create` with `set` makes the thing with those fields, read against the
-/// made kind's own (by name, its bounds, its enum's values), or is refused by name and makes nothing; a resend of the
-/// intent, before and after a restart, makes no second thing; the log replayed onto a fresh tree gives the same tree.
+/// argument binds as that number. A resend after a restart moves nothing again, and a fresh observer sees the same.
 #[test]
-fn own_field_transfers_and_a_made_things_fields_commit_once_and_replay() {
+fn a_transfer_between_two_fields_of_one_thing_moves_once_in_one_part() {
     const WELL: u64 = 4;
     let mut b = Bench::new(1, 1, &[400]);
-    let entry = b.entry.clone();
-    let (body, a) = (id(2), id(100));
-    let ns = b.full.split(':').next().expect("a namespace").to_owned();
     let n = std::cell::Cell::new(0);
     let run = |b: &mut Bench, form: &str, vals: &[(&str, Arg)]| {
         n.set(n.get() + 1);
-        start(b, &entry, body, a, form, a, vals, n.get())?;
-        while !b.p.forms.is_empty() {
-            b.tick();
-            b.flush();
-        }
-        let e = b.p.forms.ended.pop().expect("ended");
-        Ok::<String, String>(e.how.as_str().to_owned())
+        run_at(b, form, vals, n.get())
     };
     let amounts = |b: &Bench| {
-        let n = b.tree.node(b.tree.handle(a).expect("a")).expect("a node");
+        let n = b
+            .tree
+            .node(b.tree.handle(id(100)).expect("a"))
+            .expect("a node");
         let int = |f: u64| match n.fields().get(&f) {
             Some(Value::Uint(u)) => i64::try_from(*u).expect("small"),
             _ => 0,
         };
         (int(AMOUNT), int(WELL))
     };
-    let held = |b: &Bench| -> Vec<(Id, BTreeMap<u64, Value>)> {
-        let h = b.tree.handle(body).expect("the body");
-        b.tree
-            .children(h)
-            .unwrap_or(&[])
-            .iter()
-            .filter_map(|c| b.tree.node(*c))
-            .map(|n| (n.id(), n.fields().clone()))
-            .collect()
-    };
 
-    // #4103: between two fields of one thing, as one part the tree takes.
     assert_eq!(run(&mut b, "to_well", &[]), Ok("done".into()));
     assert_eq!(amounts(&b), (370, 30));
     // A count argument's amount, up to the room the well has left (70 of the 80 asked).
@@ -1228,8 +1263,41 @@ fn own_field_transfers_and_a_made_things_fields_commit_once_and_replay() {
         Err("effect-malformed".into())
     );
     println!("own-field transfers: amount and well {:?}", amounts(&b));
+    // A resend after a restart is the first receipt: nothing moves again.
+    let forms = Forms::recover(&b.log, b.now);
+    b.restart(forms);
+    let (before, logged) = (amounts(&b), b.log.len());
+    assert!(matches!(
+        ask_again(&mut b, "to_well", &[], 1),
+        Some(Asked::Applied(_))
+    ));
+    assert_eq!((amounts(&b), b.log.len()), (before, logged));
+    assert_eq!(amounts(&replayed(&b, &[400])), (400, 0));
+}
 
-    // #4104: made with its fields, or refused by name with nothing made.
+/// #4104: a `create` with `set` makes the thing with those fields, read against the made kind's own (by name, its
+/// bounds, its enum's values), or is refused by name and makes nothing; a resend of the intent, before and after a
+/// restart, makes no second thing; a fresh observer replaying the log sees the made thing's fields.
+#[test]
+fn a_made_thing_has_the_fields_its_create_sets_or_is_not_made() {
+    let mut b = Bench::new(1, 1, &[400]);
+    let body = id(2);
+    let ns = b.full.split(':').next().expect("a namespace").to_owned();
+    let n = std::cell::Cell::new(0);
+    let run = |b: &mut Bench, form: &str, vals: &[(&str, Arg)]| {
+        n.set(n.get() + 1);
+        run_at(b, form, vals, n.get())
+    };
+    let held = |b: &Bench| -> Vec<(Id, BTreeMap<u64, Value>)> {
+        let h = b.tree.handle(body).expect("the body");
+        b.tree
+            .children(h)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|c| b.tree.node(*c))
+            .map(|n| (n.id(), n.fields().clone()))
+            .collect()
+    };
     let sad = Value::Text(replica::encode::Name::new(&format!("{ns}:sad")).expect("a name"));
     assert_eq!(
         run(&mut b, "make_overfilled", &[]),
@@ -1252,52 +1320,22 @@ fn own_field_transfers_and_a_made_things_fields_commit_once_and_replay() {
     assert_eq!(fields.get(&2), Some(&sad));
 
     // A resend of the intent is its first receipt, before and after a restart: never a second thing.
-    let resend = |b: &mut Bench| {
-        let args: Args = BTreeMap::from([
-            ("m".to_owned(), Arg::Name("sad".into())),
-            ("other".to_owned(), Arg::Node(a)),
-        ]);
-        let effects = bind_effects_args(&entry, "make_filled", &args).expect("binds");
-        let steps = bind(&entry, "make_filled").expect("binds");
-        let now = b.now;
-        let (mut w, forms) = b.world();
-        let asked = forms.start(
-            &mut w,
-            body,
-            a,
-            intent(body, made_at),
-            steps,
-            effects,
-            Limits::default(),
-            now,
-        );
-        while !b.p.forms.is_empty() {
-            b.tick();
-            b.flush();
-        }
-        asked
-    };
-    assert!(matches!(resend(&mut b), Ok(Asked::Applied(_))));
+    let sad_arg = [("m", Arg::Name("sad".into()))];
+    let resend = |b: &mut Bench| ask_again(b, "make_filled", &sad_arg, made_at);
+    assert!(matches!(resend(&mut b), Some(Asked::Applied(_))));
     let forms = Forms::recover(&b.log, b.now);
     b.restart(forms);
-    assert!(matches!(resend(&mut b), Ok(Asked::Applied(_))));
+    assert!(matches!(resend(&mut b), Some(Asked::Applied(_))));
     assert_eq!(held(&b).len(), 1, "one thing made");
 
-    // A fresh observer: the log replayed onto a fresh tree gives the same tree, the made thing's fields in it.
-    let mut fresh = Bench::new(1, 1, &[400]);
-    let mut from = b.parts[0];
-    for &len in &b.parts[1..] {
-        fresh.commit(b.log[from..from + len].to_vec());
-        from += len;
-    }
-    assert_eq!(fresh.tree.to_state(), b.tree.to_state());
+    // A fresh observer: the made thing's fields are in the replayed tree.
+    let fresh = replayed(&b, &[400]);
     let seen = fresh
         .tree
         .node(fresh.tree.handle(child).expect("replayed"))
         .expect("a node");
     assert_eq!(seen.fields().get(&AMOUNT), Some(&Value::Uint(300)));
     assert_eq!(seen.fields().get(&2), Some(&sad));
-    assert_eq!(amounts(&fresh), (400, 0));
 }
 
 /// E5's kinds: linen (dirt 1, soap 2), a board (soap 1, dirt 2), a tub (soap 2, as linen numbers it) and a funnel
