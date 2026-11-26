@@ -1790,14 +1790,14 @@ fn walks_from_the_town_to_each_landform_end_at_it() {
                                 soul.0
                                     .set_read_timeout(Some(Duration::from_secs(960)))
                                     .unwrap();
-                                let t = std::time::Instant::now();
+                                let t = answers::now();
                                 let r = soul.act_within(
                                     "eden:walk",
                                     Some(place),
                                     BTreeMap::new(),
                                     900_000_000,
                                 );
-                                let secs = t.elapsed().as_secs_f64();
+                                let secs = (answers::now() - t) as f64 / 1e6;
                                 println!(
                                     "walked from the {from}: Soul {} {r:?} in {secs:.0} s",
                                     soul.1.counter()
