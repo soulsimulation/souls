@@ -92,7 +92,8 @@ fn the_clock_never_waits_on_the_auditors_prints() {
     let mut numbers = None;
     for line in BufReader::new(c.stdout.take().expect("its stdout")).lines() {
         let line = line.expect("a line");
-        if let Some(n) = line.strip_prefix("audit-print: ") {
+        // The harness writes the test's name on the same line, before its output.
+        if let Some((_, n)) = line.split_once("audit-print: ") {
             numbers = Some(n.to_string());
             fast.store(true, Ordering::Relaxed);
         }
