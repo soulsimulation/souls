@@ -3085,7 +3085,8 @@ fn a_forms_walk_ends_facing_the_way_its_stand_point_says() {
 /// A form that only goes to its thing and waits there ([`super::only_there`]: Eden's campfire `warm`, a bridge's
 /// `cross`) holds nothing. Seen on a served Eden: while one Soul warmed at the campfire, three asked to sit on its logs
 /// were refused `thing-reserved`. Here, while Ada's wait at the bench runs, the bench is held by nobody; Bea's wait
-/// and then her sit on it start, not refused; every run ends `done`, Bea in her seat.
+/// and then her sit on it start, not refused (her sit replaces her wait, which ends `left`); Ada's wait and Bea's sit
+/// end `done`, Bea in her seat.
 #[test]
 fn a_form_that_only_waits_at_a_thing_holds_nothing() {
     use skills::form_runner::Step;
