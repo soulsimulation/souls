@@ -909,10 +909,15 @@ impl Pairing {
         self.authority_file.is_some()
     }
 
-    /// Whether a handoff of `world` can be published here: the registry names it (#5006). Read from the registry file
-    /// alone, before an acceptance writes anything, so a directory that could never publish one refuses at once.
-    pub fn can_hand_on(&self, world: &str) -> bool {
-        self.authority_file.is_some() && self.placed(world).is_ok()
+    /// Whether a handoff of `world` can be published here: the registry names it by its own name (#5006), not an
+    /// alias or instance, as the world's row is named. Read from the registry file alone, before an acceptance writes
+    /// anything, so a directory that could never publish one refuses at once, by the registry's own reason.
+    pub fn can_hand_on(&self, world: &str) -> Result<(), &'static str> {
+        match self.registry()? {
+            None => Err("world-authority-required"),
+            Some(rows) if rows.get(world).is_some_and(|a| a.world == world) => Ok(()),
+            Some(_) => Err("world-unplaced"),
+        }
     }
 
     /// Every world's files, from each world's owner (read before the pairing store is locked, so a slow world store

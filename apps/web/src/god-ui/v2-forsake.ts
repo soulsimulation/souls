@@ -36,7 +36,7 @@ const WORDS: Record<string, string> = {
   'archive-handoff-pending': 'Cancel the open handoff link first.',
   'archive-world-starting': 'The world is still being made. Try again once it is running.',
   'archive-pending': 'A restore of this world is under way.',
-  'archive-unavailable': 'Archiving is not available here now. Nothing was changed.',
+  'archive-unavailable': 'Archiving is not available here now. Try again later.',
   'handoff-unknown': 'This link is not valid: it was cancelled, replaced by a newer link, or mistyped.',
   'handoff-invalid': 'This link is not valid.',
   'handoff-used': 'This link has already been used.',
@@ -45,7 +45,8 @@ const WORDS: Record<string, string> = {
   'handoff-already-owner': 'You already own this world.',
   'handoff-stale': 'Whoever made this link no longer owns the world.',
   'handoff-pending': 'The handoff is still being finished. Select Accept again in a moment.',
-  'world-authority-required': 'This server cannot hand worlds on. Nothing was changed.',
+  'world-authority-required': 'This server cannot hand worlds on.',
+  'world-unplaced': 'This world is not placed on this server, so it cannot be handed on here.',
 };
 /** The plain words for a refusal's name. */
 export const refusalText = (name: string): string => WORDS[name] ?? `Refused (${name}).`;

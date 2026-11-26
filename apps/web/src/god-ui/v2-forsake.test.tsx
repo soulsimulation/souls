@@ -49,7 +49,7 @@ test('accept: the signed-in recipient sends the world and the code; a refusal is
   assert.equal(a.sent[0].url, `${DIRECTORY}/v1/worlds/handoff/accept`);
   assert.deepEqual(JSON.parse(String(a.sent[0].init.body)), { world: 'hamlet', code: CODE });
   for (const [status, name, words] of [[409, 'handoff-used', /already been used/], [409, 'handoff-expired', /expired/], [403, 'handoff-not-for-you', /another account/],
-    [503, 'world-authority-required', /Nothing was changed/], [409, 'something-new', /Refused \(something-new\)/]] as const) {
+    [503, 'world-authority-required', /cannot hand worlds on/], [409, 'world-unplaced', /not placed on this server/], [409, 'something-new', /Refused \(something-new\)/]] as const) {
     const err = await F.acceptHandoff(page, 'hamlet', CODE, { token: token('x'), post: answering(status, { refused: name }).post }).catch((e) => e);
     assert.ok(err instanceof F.Refused, name);
     assert.equal(err.refused, name);

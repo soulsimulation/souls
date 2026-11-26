@@ -220,9 +220,13 @@ pub fn handoff(req: &Request, app: &App) -> Answer {
         "/v1/worlds/handoff/accept" => {
             // Acceptance fences the row (no creator) until the new one is published; a directory that cannot publish
             // this world's authority would leave it so for good, so it refuses before writing anything (#5006).
-            if !app.pairing.as_ref().is_some_and(|p| p.can_hand_on(world)) {
+            let placed = app
+                .pairing
+                .as_ref()
+                .map_or(Err("world-authority-required"), |p| p.can_hand_on(world));
+            if let Err(name) = placed {
                 return crate::directory::store::refuse(
-                    "world-authority-required",
+                    name,
                     "this directory cannot publish the world's authority",
                 );
             }

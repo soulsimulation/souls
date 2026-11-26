@@ -193,7 +193,7 @@ offer replaces the last; the link is the world page's `#worldoffer/<code>`), `/v
 `/v1/worlds/handoff/accept {world, code}` (the signed-in recipient becomes the creator; asking again is safe), and
 `POST /v1/worlds/archive {world, confirm}` → `{archived}` or 202 `{pending}`. A directory that could not finish one
 refuses it before anything changes: archive with no archive initializer (`503 archive-unavailable`), acceptance with no
-world authority naming the world (`503 world-authority-required`).
+world-authority map (`503 world-authority-required`) or one that does not name the world (`409 world-unplaced`).
 
 **Operator commands.** `node tools/world-launcher/op.mjs <command>` posts to `<B>/__sim/op/<command>`, accepted only
 from loopback on the launcher's machine: `create-world`, `set-claimable` (`--claimable false` makes a godless world
