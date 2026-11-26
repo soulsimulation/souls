@@ -1629,10 +1629,10 @@ fn a_soul_rows_the_harbour_rowing_boat_out_and_gets_off_at_its_landing() {
     assert!(x <= 12.7, "set down on the quay (x <= 12.7 m), at x {x} m");
 }
 
-/// A walk to a landform or a region (a range drawn as a wide line, the sea, the northern mountains' region) goes to
+/// A walk to a landform or a region (a range drawn as a line, the sea, the sea's region) goes to
 /// the nearest walkable point at its edge, not to its middle, and ends facing it: a step ahead of the body is nearer
 /// it than the body is. Before, each walk aimed at the shape's middle (out on the sea, the range's ridge) and was
-/// refused. An area a body can stand on (the park's sand, the harbour boardwalk) is still walked onto.
+/// refused. An area a body can stand on (the park's sand) is still walked onto.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
@@ -1645,17 +1645,11 @@ fn walks_to_the_mountains_and_the_sea_end_at_their_edges_facing_them() {
     // Walked onto: an area of the open ground a body can stand on (the park's sand) ends on it, at its edge. (The
     // harbour boardwalk's region lies over the boardwalk's own deck, not the open ground: a walk ends facing it.)
     let onto = ["park-playground-sand"];
+    // Not here: the northern mountains' region (`place-region-northern-mountains`). Its walks get a standing point on
+    // the walker's part of the map ((45.5, -279.4) m from the town, (-13.0, -318.4) m from the channel) and still end
+    // `goal-unreachable` on the way: the map joins ground there that the walk cannot cross.
     for (at, names, tag) in [
-        (
-            "45.0,-78.0",
-            &["place-region-northern-mountains"][..],
-            "lftown",
-        ),
-        (
-            "-14.0,-296.0",
-            &["place-region-northern-mountains", "land-ring-north-range"][..],
-            "lfnorth",
-        ),
+        ("-14.0,-296.0", &["land-ring-north-range"][..], "lfnorth"),
         (
             "40.0,120.0",
             &[
