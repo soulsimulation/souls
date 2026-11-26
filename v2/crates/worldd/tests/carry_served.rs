@@ -1612,6 +1612,7 @@ async fn front_only(
     load: Id,
     places: &[Vec3],
     by: i64,
+    late: Option<usize>,
     what: &str,
 ) -> (Id, Duration) {
     for (s, p) in crew.iter_mut().zip(places) {
@@ -1646,8 +1647,19 @@ async fn front_only(
         .await
         .expect("lifted");
     let ahead: Vec<Vec3> = places.iter().map(|p| Vec3::new(p.x + by, 0, p.z)).collect();
+    crew[0].send("eden:walk", ground, point(ahead[0])).await;
+    // A late carrier sends its own walk to its place 2 s after the front set off: it takes its legs back and walks its
+    // own way, still in the carry, and the group is not broken.
+    if let Some(k) = late {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        crew[k].send("eden:walk", ground, point(ahead[k])).await;
+        crew[k]
+            .answer()
+            .await
+            .unwrap_or_else(|r| panic!("{what}: the late carrier's own walk: {r}"));
+    }
     crew[0]
-        .act("eden:walk", ground, point(ahead[0]))
+        .answer()
         .await
         .unwrap_or_else(|r| panic!("{what}: the front carries it: {r}"));
     let late = together(dir, &bodies, &ahead, 3).await;
@@ -1680,6 +1692,24 @@ fn broke(dir: &Path) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// The `souls:follow` orders accepted and not ended, by the log: none is left open once a carry is over.
+fn open_follows(dir: &Path) -> usize {
+    use sim::host::restart::{ORDER, ORDER_ENDED};
+    let mut open = std::collections::BTreeSet::new();
+    for ev in effects(dir).iter().flat_map(|e| e.events.iter().flatten()) {
+        match (ev.name.as_str(), ev.fields.get(&1), ev.fields.get(&2)) {
+            (n, Some(i), Some(Value::Text(v))) if n == ORDER && v.as_str() == "souls:follow" => {
+                open.insert(format!("{i:?}"));
+            }
+            (n, Some(i), _) if n == ORDER_ENDED => {
+                open.remove(&format!("{i:?}"));
+            }
+            _ => {}
+        }
+    }
+    open.len()
 }
 
 /// Carrying together (moving-group rule 3): a crew moves as one when only its front walks. Separate agents each take
@@ -1717,7 +1747,7 @@ async fn group_only_the_front_walks_and_crews_of_two_four_and_six_arrive_togethe
 
     // Six, 25 m east, along its length.
     let six = crew_places(upright_at(), &load, 6);
-    let (_, late6) = front_only(&mut crew, &dir, ground, tall, &six, 25 * M, "six").await;
+    let (_, late6) = front_only(&mut crew, &dir, ground, tall, &six, 25 * M, None, "six").await;
 
     // Four, 25 m back west: the front, at its east end, walks backwards. Souls 5 and 6 step out of the way first.
     let east = Vec3::new(upright_at().x + 25 * M, 0, upright_at().z);
@@ -1729,13 +1759,33 @@ async fn group_only_the_front_walks_and_crews_of_two_four_and_six_arrive_togethe
             .expect("steps aside");
     }
     let four = crew_places(east, &load, 4);
-    let (_, late4) = front_only(&mut crew[..4], &dir, ground, tall, &four, -25 * M, "four").await;
+    let (_, late4) = front_only(
+        &mut crew[..4],
+        &dir,
+        ground,
+        tall,
+        &four,
+        -25 * M,
+        Some(1),
+        "four, the back 2 s late",
+    )
+    .await;
 
     // Two, the beam 25 m east: it lies along z, so they carry it sideways, the front at its +z end.
     let bl = Load::of(&construction("rack_beam.json")).unwrap();
     let [back, front] = bl.places();
     let two = [spot(beam_at(), front, true), spot(beam_at(), back, true)];
-    let (_, late2) = front_only(&mut crew[..2], &dir, ground, beam, &two, 25 * M, "two").await;
+    let (_, late2) = front_only(
+        &mut crew[..2],
+        &dir,
+        ground,
+        beam,
+        &two,
+        25 * M,
+        None,
+        "two",
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     drop(served);
@@ -1744,6 +1794,7 @@ async fn group_only_the_front_walks_and_crews_of_two_four_and_six_arrive_togethe
         "nothing broke off: {:?}",
         broke(&dir)
     );
+    assert_eq!(open_follows(&dir), 0, "every carrier's follow order ended");
     // Each load where its last crew took it: its middle within 0.6 m.
     for (name, id, entry, to) in [
         ("the upright", tall, entry, upright_at()),
@@ -1906,6 +1957,53 @@ async fn group_a_carrier_lets_go_mid_walk() {
     for k in [0, 2] {
         let _ = crew[k].act("activity:leave", carry, BTreeMap::new()).await;
     }
+
+    // The front lets go itself, 3 s into a walk: the carry breaks off and the beam is set down, and the front's own
+    // walk goes on to where it was going.
+    let again = crew[0]
+        .act(
+            "activity:offer",
+            ground,
+            BTreeMap::from([
+                (1, carry_kind(&dir)),
+                (2, Value::Text(Name::new(FRONT).unwrap())),
+                (3, Value::Array(vec![bodies[1].to_value()])),
+            ]),
+        )
+        .await
+        .expect("offered again");
+    let third = carry_made(&dir, &again);
+    crew[1]
+        .act("activity:accept", third, BTreeMap::new())
+        .await
+        .expect("the back accepts again");
+    crew[0]
+        .act("carry:lift", third, BTreeMap::from([(1, beam.to_value())]))
+        .await
+        .expect("lifted where it lies");
+    let on = Vec3::new(f.x + 14 * M, 0, f.z);
+    crew[0].send("eden:walk", ground, point(on)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    crew[0]
+        .act("activity:leave", third, BTreeMap::new())
+        .await
+        .expect("the front lets go");
+    crew[0]
+        .answer()
+        .await
+        .expect("the front's own walk goes on when it lets go itself");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let at = stood(&dir);
+    println!(
+        "the front let go: it walked on to x {} mm; the back stopped at x {} mm",
+        at[&bodies[0]].x / 1000,
+        at[&bodies[1]].x / 1000
+    );
+    assert!(
+        at[&bodies[1]].x < on.x - 5 * M,
+        "the back, no longer led, stopped"
+    );
+    let _ = crew[1].act("activity:leave", third, BTreeMap::new()).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     drop(served);
     let words = |name: &str| -> Vec<Value> {
@@ -1923,9 +2021,13 @@ async fn group_a_carrier_lets_go_mid_walk() {
     );
     assert_eq!(
         broke(&dir),
-        vec!["souls:partner-left".to_owned()],
-        "the back's leave broke it off, once"
+        vec![
+            "souls:partner-left".to_owned(),
+            "souls:partner-left".to_owned()
+        ],
+        "the back's leave broke it off, then the front's"
     );
+    assert_eq!(open_follows(&dir), 0, "every carrier's follow order ended");
 }
 
 /// Carrying together: a blocked way stops the whole group with one reason. The beam is carried east by its front's
@@ -1994,4 +2096,5 @@ async fn group_a_blocked_way_stops_the_whole_group() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     drop(served);
     assert_eq!(broke(&dir), vec!["souls:carry-blocked".to_owned()]);
+    assert_eq!(open_follows(&dir), 0, "the back's follow order ended");
 }

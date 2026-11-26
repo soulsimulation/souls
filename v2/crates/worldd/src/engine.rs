@@ -1228,7 +1228,11 @@ impl Engine {
             Some(by),
         )?;
         // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
-        if self.led.get(&activity).is_some_and(|(front, _)| *front != body) {
+        if self
+            .led
+            .get(&activity)
+            .is_some_and(|(front, _)| *front != body)
+        {
             self.broke.insert(activity, "souls:partner-left");
         }
         if let Some(s) = self.asm.as_mut() {
