@@ -65,8 +65,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const PITCH: i64 = 700_000;
 /// Rings round the target (ring 0 is the target).
 pub const RINGS: i64 = 10;
-/// No place within this of a link's end, nor within half the link's width and half this of its line, µm: the engine
-/// never stops a walker in a doorway or on a stair.
+/// No place within this of a link's end, nor within half this of its line (a flight's: and half its width; a
+/// doorway's between its ends: and half its widest end), µm: the engine never stops a walker in a doorway or on a
+/// stair (`walk::town::in_passage`).
 pub const CLEAR: i64 = 700_000;
 /// How far round a crowded target its overflow points lie, µm (A2-5): a walker is refused `spot-none-free` only when
 /// no free standing point is within this.
@@ -93,7 +94,8 @@ pub trait Ground {
     /// Whether `p` on `node` lies in a doorway or on a stair.
     fn passage(&self, node: Id, p: Vec3) -> bool;
     /// Whether `p` on `node`, in a passage ([`Ground::passage`]), lies only at a doorway's mouth: within [`CLEAR`] of
-    /// a doorway's end, on the room's side of it, off every line and every other end (`walk::town::in_mouth_indexed`).
+    /// a doorway's end, on the room's side of it, off every line and every end but a doorway's
+    /// (`walk::town::in_mouth_indexed`).
     /// A brief act may stand there when no place clear of every passage is reached ([`within`]). A ground that cannot
     /// tell says `false`.
     fn mouth(&self, _node: Id, _p: Vec3) -> bool {
@@ -644,17 +646,31 @@ pub fn within(
     reach: i64,
     from: Option<(Id, Vec3)>,
 ) -> Option<Vec3> {
+    within_by(g, target, reach, from, false).or_else(|| within_by(g, target, reach, from, true))
+}
+
+/// [`within`]'s two passes: without `mouths`, the target itself or the places clear of every passage; with `mouths`,
+/// a walker's places at a doorway's mouth, else the target when a body may stand on it, though no walk reaches it.
+fn within_by(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3)>,
+    mouths: bool,
+) -> Option<Vec3> {
     let t = target.point();
     let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
     // A point a body may stand on is its own place, unless the asker's walk cannot reach it (a pocket under a desk,
     // walled in by its legs and the chairs round it, #4072): then the rings are tried, and the point is kept only
     // when none of them is reached either.
     let standable = g.stand(target.node, t).is_some();
-    if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
-        return Some(t);
+    if !mouths {
+        if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
+            return Some(t);
+        }
+        return rings(g, target, reach, from, false);
     }
-    let found = rings(g, target, reach, from, false)
-        .or_else(|| from.and_then(|_| rings(g, target, reach, from, true)));
+    let found = from.and_then(|_| rings(g, target, reach, from, true));
     if found.is_none() && standable {
         return Some(t);
     }
@@ -855,10 +871,13 @@ pub fn within_footprint(
             }
         }
     };
-    let best = pick(g, order).or_else(|| pick(g, mouths));
-    // None found (the bands are sampled, and a search gives up after [`MISSES_MOST`] misses): [`within`] at the middle,
-    // so a thing reached before is still reached. A target cut off from the asker costs it lookups, not searches.
-    best.or_else(|| within(g, target, reach, from))
+    // None clear found (the bands are sampled, and a search gives up after [`MISSES_MOST`] misses): [`within`] at the
+    // middle, so a thing reached before is still reached; then a doorway's mouth, on the bands and at the middle. A
+    // target cut off from the asker costs it lookups, not searches.
+    pick(g, order)
+        .or_else(|| within_by(g, target, reach, from, false))
+        .or_else(|| pick(g, mouths))
+        .or_else(|| within_by(g, target, reach, from, true))
 }
 
 /// Whether a body goes onto a thing to be at it (#4072), by its entry: it is a place (`owner: place`: a deck, a pier, a

@@ -244,9 +244,9 @@ fn inside(p: Vec3, r: [i64; 4]) -> bool {
 }
 
 /// A3's check on every table a town holds: no place within `CLEAR` of a link's end on its node, nor within half the
-/// link's width and half `CLEAR` of its line (#4072: a step's or a doorway's line within half `CLEAR`, its ends holding
-/// its width; on a building's floor, a flight's line where it lies from a step below the place to a body's height
-/// above it).
+/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; a
+/// doorway's between its ends within half its widest end and half `CLEAR`, past them within half `CLEAR`; on a
+/// building's floor, a flight's line where it lies from a step below the place to a body's height above it).
 /// Returns how many places it checked.
 fn no_place_in_a_passage(t: &Town) -> usize {
     let mut n = 0;
@@ -271,10 +271,30 @@ fn no_place_in_a_passage(t: &Town) -> usize {
                                 "A3: a place at a link's end"
                             );
                         }
-                        let reach = if matches!(l.kind, Kind::Step | Kind::Doorway) {
-                            CLEAR / 2
-                        } else {
-                            l.width / 2 + CLEAR / 2
+                        // A doorway's band between its ends is as wide as its widest end; past them, half CLEAR.
+                        let framed = |q: Vec3| {
+                            if *node == t.ground {
+                                b.place.point(q).unwrap()
+                            } else {
+                                q
+                            }
+                        };
+                        let between = match (l.line.first(), l.line.last()) {
+                            (Some(&a), Some(&c)) => {
+                                let (a, c) = (framed(a), framed(c));
+                                let (ex, ez) = (i128::from(c.x - a.x), i128::from(c.z - a.z));
+                                let k =
+                                    i128::from(p.at.x - a.x) * ex + i128::from(p.at.z - a.z) * ez;
+                                k > 0 && k < ex * ex + ez * ez
+                            }
+                            _ => false,
+                        };
+                        let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
+                        let reach = match l.kind {
+                            Kind::Step => CLEAR / 2,
+                            Kind::Doorway if between => held.unwrap_or(0) + CLEAR / 2,
+                            Kind::Doorway => CLEAR / 2,
+                            _ => l.width / 2 + CLEAR / 2,
                         };
                         let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
                         for s in l.line.windows(2) {
@@ -766,6 +786,30 @@ fn a_doorways_passage_is_its_ends_and_its_line_and_its_mouth_is_on_the_rooms_sid
         "in the doorway"
     );
     assert!(!mouth(&t.buildings, inside), "in the doorway: no mouth");
+    // Between the ends 0.2 m in from the wider one, 0.1 m to the side of the band: at that end, in the doorway, no mouth.
+    let halves: Vec<i64> = l
+        .ends
+        .iter()
+        .flatten()
+        .map(|e| flat(e.a, e.b) / 2)
+        .collect();
+    let held = *halves.iter().max().expect("its ends");
+    let on_line = if halves[0] >= halves[1] {
+        along(200_000)
+    } else {
+        along(len - 200_000)
+    };
+    let side = held + CLEAR / 2 + 100_000;
+    let aside = Vec3::new(
+        on_line.x - (i128::from(c.z - a.z) * i128::from(side) / i128::from(len)) as i64,
+        a.y,
+        on_line.z + (i128::from(c.x - a.x) * i128::from(side) / i128::from(len)) as i64,
+    );
+    assert!(
+        in_passage(&t.buildings, &[], t.ground, f0, aside),
+        "beside the band, at an end, between the ends"
+    );
+    assert!(!mouth(&t.buildings, aside), "between the ends: no mouth");
     let out = along(-1_500_000);
     let mut wide = t.buildings.clone();
     wide[bi].links[li].width = 11_600_000;

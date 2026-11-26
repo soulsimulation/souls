@@ -438,7 +438,7 @@ impl Planner {
                     .and_then(|(floor, at, _)| {
                         // A ring is given on the floor itself (`node` is the floor).
                         let ring = ring.as_ref().filter(|_| floor == node);
-                        let near = |at| {
+                        let near = |at, mouths| {
                             view.stand_near_shape(
                                 floor,
                                 at,
@@ -446,14 +446,20 @@ impl Planner {
                                 reach,
                                 Some(&body),
                                 door,
+                                mouths,
                             )
                         };
-                        // An aim, like a ring, is given on the floor itself.
-                        let to = aim
-                            .filter(|_| floor == node)
-                            .and_then(near)
-                            .or_else(|| near(at))
-                            .or_else(|| (floor == crate::walk::node_of(&body)).then_some(at))?;
+                        // An aim, like a ring, is given on the floor itself. Every place clear of a passage, at the
+                        // aim or at the thing, before one at a doorway's mouth.
+                        let aim = aim.filter(|_| floor == node);
+                        let to = match aim {
+                            Some(aim) => near(aim, false)
+                                .or_else(|| near(at, false))
+                                .or_else(|| near(aim, true))
+                                .or_else(|| near(at, true)),
+                            None => near(at, true),
+                        }
+                        .or_else(|| (floor == crate::walk::node_of(&body)).then_some(at))?;
                         view.plan(&body, floor, to).ok()
                     })
                     .unwrap_or_default();
