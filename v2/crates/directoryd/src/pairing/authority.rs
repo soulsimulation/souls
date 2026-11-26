@@ -909,9 +909,6 @@ impl Pairing {
         self.authority_file.is_some()
     }
 
-    /// Whether a handoff of `world` can be published here: the registry names it by its own name (#5006), not an
-    /// alias or instance, as the world's row is named. Read from the registry file alone, before an acceptance writes
-    /// anything, so a directory that could never publish one refuses at once, by the registry's own reason.
     /// Every key the world-authority map names `world` by (its own name, its instance and its aliases), and the name
     /// itself; the name alone with no map. A Soul's profile names its world by whichever its request used (#5006).
     pub fn world_keys(&self, world: &str) -> Result<Vec<String>, &'static str> {
@@ -929,6 +926,9 @@ impl Pairing {
         Ok(keys)
     }
 
+    /// Whether a handoff of `world` can be published here: the registry names it by its own name (#5006), not an
+    /// alias or instance, as the world's row is named. Read from the registry file alone, before an acceptance writes
+    /// anything, so a directory that could never publish one refuses at once, by the registry's own reason.
     pub fn can_hand_on(&self, world: &str) -> Result<(), &'static str> {
         match self.registry()? {
             None => Err("world-authority-required"),

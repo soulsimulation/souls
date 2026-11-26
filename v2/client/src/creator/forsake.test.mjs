@@ -150,8 +150,10 @@ test('archive waits while other people\'s Souls live in the world, and goes thro
   assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: WORLD }), { status: 409, body: { refused: 'archive-others-live-here', souls: 1 } });
   assert.deepEqual(readdirSync(inbox), [], 'a refused archive queues nothing');
   assert.ok(await listed(), 'the world stays on the list');
-  // the creator's other way out is still open: an offer can be made (and cancelled)
+  // the creator's other way out is still open: an offer can be made (and cancelled); while it is open, the archive is
+  // refused for the open offer first, as before, though Cid's Soul is still here
   assert.equal((await page('/v1/worlds/handoff/offer', 'Bea', { world: WORLD })).status, 200);
+  assert.deepEqual(await page('/v1/worlds/archive', 'Bea', { world: WORLD, confirm: WORLD }), { status: 409, body: { refused: 'archive-handoff-pending' } });
   assert.equal((await page('/v1/worlds/handoff/cancel', 'Bea', { world: WORLD })).status, 200);
 
   // once Cid's Soul has left (its owner retires it), the archive goes through

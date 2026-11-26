@@ -301,7 +301,7 @@ pub fn archive(req: &Request, app: &App) -> Answer {
     // the world list is locked (pairing's owner reader takes that lock while it reads).
     let count = confirm == world && worlds.is_creator(world, account.principal) == Ok(true) && {
         let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
-        super::archive::get(&inner.dir.store, world).is_ok_and(|p| p.state == "active")
+        super::archive::would_begin(&inner.dir.store, world)
     };
     if count && let Some(pairing) = &app.pairing {
         let counted = pairing.world_keys(world).and_then(|keys| {
