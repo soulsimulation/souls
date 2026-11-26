@@ -350,6 +350,7 @@ const joinsOf = new Set(); // own join sequences: only a successful receipt requ
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
 let replacedAt = null; // when another client of this Soul took it, while this daemon waits for its next command
 let retryTimer = null, gaveUpAt = -Infinity; // the next sign-in (or ask whether the Soul is free); a sign-in given up
+let lostAt = null; // #4977: when a signed-in socket was lost, until the next is current
 
 let sentAt = -Infinity; // when an intent last went, on the steady clock
 function send(bytes, sequence, ranked) {
@@ -415,6 +416,12 @@ async function sendBulk(bytes, sequence) {
 function current() {
   if (!signedIn) signedInAt = Date.now();
   signedIn = true;
+  // #4977: a `wait` under way is told the connection is back, and how long it was gone.
+  if (lostAt !== null) {
+    const gap = Date.now() - lostAt;
+    lostAt = null;
+    note({ kind: 'reconnected', gap_ms: gap, say: `The client is connected to the world again after ${Math.round(gap / 100) / 10} s; acts held meanwhile go now.` });
+  }
   attempt = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
@@ -785,6 +792,11 @@ function connect() {
     // Signed in, this socket held the Soul and a newer client took it. Not signed in, it asked only if free and a live
     // client holds it; unless its agent asked meanwhile (`takeBack`): then it falls through, and the Soul is taken.
     const held = step === 'stream';
+    // #4977: a `wait` under way is told at once that the connection is gone, once a gap (replaced says so itself).
+    if (held && lostAt === null) {
+      lostAt = Date.now();
+      if (code !== REPLACED) note({ kind: 'disconnected', say: 'The client lost its connection to the world and is reconnecting; acts are held until it is back.' });
+    }
     if (code === REPLACED && (held || replacedAt !== null)) {
       cutWhy = 'replaced';
       if (held) {
