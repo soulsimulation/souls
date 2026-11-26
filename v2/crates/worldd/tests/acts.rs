@@ -342,9 +342,16 @@ fn entries() -> Json {
     let rack = parse(
         &r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
       "state": { "ringing": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
-      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
+      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] }, "stand": { "role": "stand", "at_mm": [0, 0, -430] } },
       "slots": { "rest": { "admits": "thing" } },
       "forms": {
+        "ring_by_hand": { "who": "anyone", "starts": "act", "steps": [{ "step": "walk_to", "point": "stand" },
+            { "step": "move", "move": "press", "at": "edge" }],
+          "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
+            { "change": "timer", "form": "fade", "after_us": 1000000, "event": "will_fade" }] },
+        "ring_long": { "who": "anyone", "starts": "act", "steps": [],
+          "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
+            { "change": "timer", "form": "fade", "after_us": 2000000, "event": "will_fade" }] },
         "ring": { "who": "anyone", "starts": "act", "steps": [],
           "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
             { "change": "timer", "form": "fade", "after_us": 1000000, "event": "will_fade" }] },

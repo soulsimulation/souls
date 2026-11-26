@@ -62,3 +62,28 @@ fn i3991_a_forms_timer_runs_its_world_form_with_no_steps_on_a_served_world() {
 fn i3991_a_timer_set_at_a_runs_end_runs_its_world_form_on_a_served_world() {
     rings_then_fades("i3991-late", "test:ring_late");
 }
+
+#[test]
+fn i3991_a_timer_set_at_a_moves_contact_runs_its_world_form_on_a_served_world() {
+    rings_then_fades("i3991-hand", "test:ring_by_hand");
+}
+
+/// The world stops a moment after the ring, its timer pending, and starts again from its log: the timer fires at its
+/// due time and its world form clears the flag.
+#[test]
+fn i3991_a_forms_timer_pending_at_a_restart_runs_its_world_form() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("i3991-ra", store.clone());
+    let rung = a.act("test:ring_long", Some(rack()), BTreeMap::new());
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    assert_eq!(ringing(&run), 1, "ringing once the act is answered");
+    run.world.stop();
+    let (run, _, _) = serve_on("i3991-rb", store);
+    let t0 = std::time::Instant::now();
+    while ringing(&run) == 1 && t0.elapsed() < Duration::from_secs(6) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    println!("#3991 restart: after {:?}, events {:?}", t0.elapsed(), events(&run));
+    assert_eq!(ringing(&run), 0, "the timer fired after the restart");
+    run.stop();
+}
