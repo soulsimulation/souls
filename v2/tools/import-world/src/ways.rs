@@ -54,8 +54,11 @@ pub struct OneWay {
 pub struct Ways {
     /// Targets walked to: floors' pieces and seats' stand points.
     pub targets: usize,
-    /// Of those, the ones a walk from the arrival point did not reach (refused or ended short): not counted below.
-    pub unreached: usize,
+    /// The point on the open ground every walk started from and came back to, mm.
+    pub arrival: [i64; 2],
+    /// Of those, the ones a walk from the arrival point did not reach (refused or ended short), with why: not
+    /// counted among the one-way.
+    pub unreached: Vec<OneWay>,
     pub one_way: Vec<OneWay>,
 }
 
@@ -209,9 +212,31 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
         }
     }
 
-    let arrival = Vec3::new(opts.arrival[0] * 1000, 0, opts.arrival[1] * 1000);
+    // The arrival point, or the nearest point of the open ground by it a body stands on (on a 0.5 m grid, within
+    // 20 m), as a birth there takes the ring round it.
+    let ground_at = |x: i64, z: i64| {
+        t.surfaces[&ground]
+            .place(
+                Id::new(Scope([0xee; 16]), 1).expect("an id"),
+                Frame { node: ground, slot: None },
+                Vec3::new(x, 0, z),
+                Quat::IDENTITY,
+            )
+            .is_ok()
+    };
+    let [ax, az] = opts.arrival.map(|v| v * 1000);
+    let mut near: Vec<(i64, i64, i64)> = (-40..=40_i64)
+        .flat_map(|i| (-40..=40_i64).map(move |j| (i * i + j * j, i * 500_000, j * 500_000)))
+        .collect();
+    near.sort_unstable();
+    let arrival = near
+        .into_iter()
+        .find(|&(_, dx, dz)| ground_at(ax + dx, az + dz))
+        .map(|(_, dx, dz)| Vec3::new(ax + dx, 0, az + dz))
+        .ok_or("the arrival point: no open ground within 20 m")?;
     let mut out = Ways {
         targets: targets.len(),
+        arrival: [arrival.x / 1000, arrival.z / 1000],
         ..Ways::default()
     };
     for (k, (label, node, at)) in targets.into_iter().enumerate() {
@@ -220,8 +245,11 @@ pub fn ways(text: &str, opts: &Opts) -> Result<Ways, String> {
             .place(who, Frame { node: ground, slot: None }, arrival, Quat::IDENTITY)
             .map_err(|e| format!("the arrival point: {}: {}", e.name, e.detail))?;
         let mut r = Runner::new(TICK);
-        if walk(&mut r, &mut t, start, node, at, true).is_err() {
-            out.unreached += 1;
+        if let Err(why) = walk(&mut r, &mut t, start, node, at, true) {
+            out.unreached.push(OneWay {
+                name: label,
+                why: format!("the walk in: {why}"),
+            });
             continue;
         }
         let there = *r.controller.body(who).ok_or("the walker's body")?;

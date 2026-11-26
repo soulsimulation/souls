@@ -63,7 +63,7 @@ fn json(w: &World) -> String {
             format!(
                 "{{\"targets\": {}, \"unreached\": {}, \"oneWay\": [{}]}}",
                 o.targets,
-                o.unreached,
+                o.unreached.len(),
                 ones.join(", ")
             )
         }
@@ -197,12 +197,18 @@ fn main() {
             Some(Err(e)) => println!("\none-way floors and seats: not walked: {e}"),
             Some(Ok(o)) => {
                 println!(
-                    "\none-way floors and seats ({}; {} walked to from the arrival point, {} not reached):\n",
+                    "\none-way floors and seats ({}; {} walked to from the arrival point [{}, {}] mm, {} not reached):\n",
                     o.one_way.len(),
                     o.targets,
-                    o.unreached
+                    o.arrival[0],
+                    o.arrival[1],
+                    o.unreached.len()
                 );
                 for t in &o.one_way {
+                    println!("- {}: {}", t.name, t.why);
+                }
+                println!("\nnot reached ({}):\n", o.unreached.len());
+                for t in &o.unreached {
                     println!("- {}: {}", t.name, t.why);
                 }
             }
