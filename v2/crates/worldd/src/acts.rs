@@ -3055,13 +3055,13 @@ impl Acts {
     }
 
     /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
-    /// its walk.
+    /// its walk, or for a step the world refused, the refusal's words (a move out of reach: how far, what reach).
     pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
         std::mem::take(&mut self.forms.ended)
             .into_iter()
             .filter_map(|e| {
                 let why = self.blocked.remove(&e.body);
-                let why = why.filter(|_| e.how.as_str() == BLOCKED);
+                let why = why.filter(|_| e.how.as_str() == BLOCKED).or(e.why);
                 Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
             })
             .collect()

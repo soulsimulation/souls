@@ -4587,11 +4587,15 @@ impl Clock {
     }
 
     /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
-    /// answer, a receipt when `done`.
+    /// answer, a receipt when `done`, else a refusal with `why` as its words (what blocked the walk; a move out of
+    /// reach: how far and the reach, #5019 follow-up), which only a blocked walk's entry carries too.
     fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        let noted = match &why {
+            Some(w) if how == acts::BLOCKED => format!("{how}: {w}"),
+            _ => how.clone(),
+        };
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -4602,7 +4606,13 @@ impl Clock {
                 names: BTreeMap::new(),
             });
         } else {
-            self.end(id, |c| c.refusal(actor, sequence, &how));
+            self.end(id, |c| {
+                let mut a = c.refusal(actor, sequence, &how);
+                if let Answer::Refused { detail, .. } = &mut a {
+                    *detail = why.as_deref().and_then(replica::intents::answer_detail);
+                }
+                a
+            });
         }
     }
 

@@ -196,7 +196,13 @@ fn a_move_beyond_reach_is_refused_with_the_distance() {
             )
             .expect_err("refused");
         assert_eq!(r.name, "out-of-reach");
-        assert!(r.detail.contains(&format!("{far} µm")), "{r}");
+        // In whole mm, rounded up, so one µm over still reads over (#5019 follow-up).
+        let (mm, reach) = (far.div_euclid(1000) + 1, mv.reach / 1000);
+        assert!(
+            r.detail.contains(&format!("{mm} mm"))
+                && r.detail.ends_with(&format!("reach {reach} mm")),
+            "{r}"
+        );
         assert!(r.detail.starts_with(mv.name.as_str()), "{r}");
         println!("{r}");
         assert!(

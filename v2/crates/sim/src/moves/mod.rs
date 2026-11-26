@@ -228,15 +228,24 @@ impl Moves {
                 ),
             );
         };
+        // The answer's words (#5019 follow-up): how far, in whole mm rounded up, and the reach, so an agent and a bench
+        // can tell a far target from a reach measured wrong; a move at a thing argument names that thing.
         if d > mv.reach {
+            let to = match geo.aimed(body, &mv.contact) {
+                Some(t) => replica::world_model::show(t),
+                None => format!(
+                    "{} of {}",
+                    mv.contact.as_str(),
+                    replica::world_model::show(target)
+                ),
+            };
             return refuse(
                 "out-of-reach",
                 format!(
-                    "{}: {d} µm to {} of {}, reach {} µm",
+                    "{}: {} mm to {to}, reach {} mm",
                     mv.name.as_str(),
-                    mv.contact.as_str(),
-                    replica::world_model::show(target),
-                    mv.reach
+                    d.saturating_add(999) / 1000,
+                    mv.reach / 1000
                 ),
             );
         }

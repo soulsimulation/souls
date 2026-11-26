@@ -379,6 +379,12 @@ impl Client {
 
     /// The next answer: (its sequence, a receipt's entries or a refusal's reason).
     fn answer(&mut self) -> (u64, Result<Vec<u64>, String>) {
+        let (seq, r, _) = self.answer_why();
+        (seq, r)
+    }
+
+    /// The next answer, with a refusal's words (field 8), if it has any.
+    fn answer_why(&mut self) -> (u64, Result<Vec<u64>, String>, Option<String>) {
         // A progress answer (C20, sent as a run starts) is read past.
         let frame = loop {
             let mut len = [0u8; 4];
@@ -413,7 +419,11 @@ impl Client {
             },
             other => panic!("an answer: {other:?}"),
         };
-        (seq, r)
+        let why = match a.get(&8) {
+            Some(Value::Bytes(b)) => Some(String::from_utf8_lossy(b).into_owned()),
+            _ => None,
+        };
+        (seq, r, why)
     }
 
     fn act(
