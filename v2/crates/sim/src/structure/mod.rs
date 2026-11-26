@@ -98,7 +98,7 @@ pub struct Structure {
 struct Bay {
     gone: bool,
     parts: BTreeMap<Id, (Role, Option<u64>)>,
-    /// link → (bearing part, standing part)
+    /// link → (bearing part, standing part), or (resting part, bearing part)
     joints: BTreeMap<Id, (Id, Id)>,
     /// activity → (the part it holds, started, membership links)
     acts: BTreeMap<Id, (Id, bool, BTreeSet<Id>)>,
@@ -279,15 +279,22 @@ impl Structure {
                 );
             }
         }
-        // A bay: a kind whose slots admit a standing kind and a bearing one (a stand that holds frames is not a bay).
-        let of = |standing: bool| -> BTreeSet<&str> {
+        // A bay: a kind whose slots admit a standing kind and a bearing one (a stand that holds frames is not a bay; a
+        // resting kind alone does not make one).
+        let of = |bearing: bool| -> BTreeSet<&str> {
             s.roles
                 .iter()
-                .filter(|(_, r)| matches!(r, Role::Standing { .. }) == standing)
+                .filter(|(_, r)| {
+                    if bearing {
+                        matches!(r, Role::Bearing { .. })
+                    } else {
+                        matches!(r, Role::Standing { .. })
+                    }
+                })
                 .map(|(n, _)| plain(n))
                 .collect()
         };
-        let (standing, bearing) = (of(true), of(false));
+        let (standing, bearing) = (of(false), of(true));
         let admits = |k: &&replica::kinds::KindDef, set: &BTreeSet<&str>| {
             k.slots
                 .values()

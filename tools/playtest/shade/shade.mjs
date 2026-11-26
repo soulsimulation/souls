@@ -43,6 +43,9 @@ export const AT = {
   rails: [[11.5, 15], [17.5, 15]],
   cloth: [19, 15],
   railIn: [[12.25, 15], [15.75, 15]],
+  // the cloth comes in from the east in two legs: to beside the site, then square between the bents (within a metre of
+  // its slot), so its four to six carriers stay in line past the posts
+  clothIn: [[17.5, 15], [14.6, 15]],
 };
 /** The fixed camera on the yard for the clip, from the south. */
 export const CAMERA = { position: [14, 5.5, 25], target: [14, 1.2, 15], fov: 50 };
@@ -80,7 +83,7 @@ async function seatRail(r, bodies, ids, rail, slot, stop, a, b, crew = null) {
 }
 
 /** The cloth by a crew of four or six: the first at its back, the second at its front, the rest beside it. Taken from
- *  where it lies (`take`) or off the rails (`unseat`), carried to `to` (the site, or where it lay), put there. */
+ *  where it lies (`take`) or off the rails (`unseat`), carried through the points `to` in turn, put `into`. */
 async function cloth(r, bodies, ids, who, how, to, into) {
   const [a, b, ...sides] = who;
   await Promise.all([
@@ -90,7 +93,7 @@ async function cloth(r, bodies, ids, who, how, to, into) {
   ]);
   const crew = await crewOf(r, bodies, a, [b, ...sides]);
   await r.run(a, 'part', how, crew, ids.cloth);
-  await Promise.all(who.map((s) => r.run(s, 'carry', 'to', crew, xz(to))));
+  for (const leg of to) await Promise.all(who.map((s) => r.run(s, 'carry', 'to', crew, xz(leg))));
   await r.run(a, 'part', 'put', crew, ...into);
   await Promise.all(who.map((s) => r.run(s, 'carry', 'leave', crew)));
 }
@@ -105,7 +108,7 @@ export async function buildFour(r, bodies, ids) {
   await r.run('bo', 'carry', 'leave', holdA);
   await r.run('cy', 'carry', 'leave', holdB);
   await r.both(['ada', 'carry', 'leave', crew], ['di', 'carry', 'leave', crew]);
-  await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di'], 'take', AT.site, [ids.site, 'cloth']);
+  await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di'], 'take', AT.clothIn, [ids.site, 'cloth']);
 }
 
 /** Six build it: both bents at once, both rails at once, then all six lift the cloth. */
@@ -120,13 +123,13 @@ export async function buildSix(r, bodies, ids) {
   ]);
   await r.both(['bo', 'carry', 'leave', holdA], ['di', 'carry', 'leave', holdB]);
   await Promise.all([['ada', 'eve'], ['cy', 'fay']].flatMap(([a, b], k) => [r.run(a, 'carry', 'leave', crews[k]), r.run(b, 'carry', 'leave', crews[k])]));
-  await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di', 'eve', 'fay'], 'take', AT.site, [ids.site, 'cloth']);
+  await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di', 'eve', 'fay'], 'take', AT.clothIn, [ids.site, 'cloth']);
 }
 
 /** Take-down by four: the cloth off to where it lay, a holder on each bent, the rails out to where they lay, each bent
  *  carried back to where it stood. */
 export async function takeDown(r, bodies, ids) {
-  await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di'], 'unseat', AT.cloth, [xz(AT.cloth)]);
+  await cloth(r, bodies, ids, ['ada', 'bo', 'cy', 'di'], 'unseat', [AT.clothIn[0], AT.cloth], [xz(AT.cloth)]);
   const holds = [];
   for (const [bent, a, b] of [[ids.bents[0], 'cy', 'di'], [ids.bents[1], 'ada', 'bo']]) {
     await r.both([a, 'carry', 'grip', bent, 'right'], [b, 'carry', 'grip', bent, 'left']);

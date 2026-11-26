@@ -15,9 +15,11 @@
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
 //! - **Seating parts** (0.135 A2, [`crate::assembly`]): `part:take`, `part:unseat` and `part:put`, the target the crew's
-//!   activity (its two members, the first in front). Take and unseat: 1 the part. Seat: 1 the node it goes in, 2 its
+//!   activity (its members, the first in front). Take and unseat: 1 the part, by at least its kind's carry crew and no
+//!   more than its grips take (`carry-crew-too-small`, `carry-crew-too-large`). Seat: 1 the node it goes in, 2 its
 //!   slot, or 3 a point `[x, y, z]` µm in that node's frame, 4 the parts it joins (ids; by default a bearing part
-//!   joins the bay's standing parts). Their commits go through the walkers' maps, so they are answered then.
+//!   joins the bay's standing parts, a resting one its bearing parts). Their commits go through the walkers' maps, so
+//!   they are answered then.
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by

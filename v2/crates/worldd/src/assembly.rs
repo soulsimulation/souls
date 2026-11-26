@@ -378,7 +378,8 @@ impl Assembly {
 
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
     /// part to `to`'s slot `slot` (or to `point` in `to`'s frame), joined to `joins` (by default, a bearing part to the
-    /// bay's standing parts). Refused before anyone moves; else the set-in track is written on `tree` and the seating
+    /// bay's standing parts, a resting part to its bearing ones). Refused before anyone moves; else the set-in track is
+    /// written on `tree` and the seating
     /// waits for its end ([`Assembly::due`]).
     #[allow(clippy::too_many_arguments)]
     pub fn put(
