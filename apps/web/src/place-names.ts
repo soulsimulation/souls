@@ -44,7 +44,15 @@ export function placeName(raw:string,known?:(id:string)=>string|null|undefined):
 }
 const POSES:Record<string,string>={sit:'Sitting',walk:'Walking',idle:'Standing around',settle:'Settling',stand:'Standing',sleep:'Sleeping',warm:'Warming up',tread:'Swimming',swim:'Swimming',eat:'Eating',lie:'Lying down',nap:'Napping',read:'Reading',dance:'Dancing','sit-ground':'Sitting on the grass',talk:'Talking',listen:'Listening',wave:'Waving',paint:'Painting',chalk:'Drawing in chalk',write:'Writing',cook:'Cooking',drink:'Drinking',browse:'Browsing the shelves',yoga:'Doing yoga',stretch:'Stretching',
  /* D1: a body on a carrier (ferris wheel, balloon, punt) is riding, rowing, boarding or stepping out, never the idle doing */
- ride:'Riding',row:'Rowing',board:'Boarding',alight:'Stepping out'};
+ ride:'Riding',row:'Rowing',board:'Boarding',alight:'Stepping out',
+ /* trial of 0.137: each gesture the new engine's body plays (v2-engine/take-gestures.ts), so its label is what it does */
+ hug:'Hugging',handshake:'Shaking hands','high-five':'High-fiving',stargaze:'Stargazing','jumping-jacks':'Doing jumping jacks',
+ pushups:'Doing push-ups',situps:'Doing sit-ups',bow:'Bowing',clap:'Clapping',nod:'Nodding','shake-head':'Shaking their head',
+ cheer:'Cheering',point:'Pointing',jump:'Jumping',shrug:'Shrugging','look-around':'Looking around',slump:'Slumping',look:'Looking',
+ touch:'Touching',operate:'Pressing',sing:'Singing','tell-story':'Telling a story'};
+/** Doings that only say the body's posture (the server's idle doing, and the new engine's card words: bridge.ts `doingOf`);
+ * a named pose the body is drawn in outranks them (trial of 0.137: "Standing" during a hug, while stargazing, at a gesture). */
+const POSTURE_DOINGS=new Set([IDLE_DOING,'standing','sitting','walking']);
 /** The body's activity in words ("sit" → "Sitting"); ids become plain words, never raw. */
 export function activityWords(activity:string|undefined|null,soulId?:string){
  if(!activity)return '';
@@ -59,7 +67,7 @@ function namedPose(activity:string|undefined|null){const a=(activity??'').replac
  * ("Sitting · East bench, Commons gathering lawn"). */
 export function doingText(doing:string|undefined|null,activity:string|undefined|null,soulId?:string,known?:(id:string)=>string|null|undefined){
  const d=(doing??'').trim(),pose=activityWords(activity,soulId);
- if(d.toLowerCase()===IDLE_DOING&&namedPose(activity))return pose;
+ if(POSTURE_DOINGS.has(d.toLowerCase())&&namedPose(activity)&&(d.toLowerCase()===IDLE_DOING||(activity??'').replace(/^mars:/,'')!=='idle'))return pose;
  if(d&&looksLikeId(d)){
   const verb=d.includes(':')?d.slice(0,d.indexOf(':')):'';
   const act=pose||(verb?activityWords(verb,soulId):'');

@@ -142,6 +142,9 @@ CREATOR=$(sed -n 's/.*"creator": *"\([0-9a-f]\{32\}-[0-9]*\)".*/\1/p' "$SRC_DIR/
 ENTRY=$(sed -n 's/.*"entry": *\[\(-\{0,1\}[0-9]*\), *\(-\{0,1\}[0-9]*\)\].*/\1 \2/p' "$SRC_DIR/world.json")
 [ -n "$ENTRY" ] || ENTRY="0 0"
 AT=$(awk -v e="$ENTRY" 'BEGIN { split(e, p, " "); printf "%.3f,%.3f", p[1] / 1000, p[2] / 1000 }')
+# The place its Souls arrive at, when world.json names one (`worldd arrival`): kept by the fresh seed.
+ARRIVAL=$(sed -n 's/.*"arrival": *"\([A-Za-z0-9_.:-]*\)".*/\1/p' "$SRC_DIR/world.json")
+if grep -q '"arrival"' "$SRC_DIR/world.json" && [ -z "$ARRIVAL" ]; then die "world.json names an arrival place this cannot read"; fi
 BODIES=''
 [ -f "$SRC_DIR/bodies.json" ] && BODIES=bodies.json
 if [ -n "${DIRECTORY_STORE_URL:-}${DIRECTORY_STORE_ENDPOINT:-}" ]; then STORE_WHAT="the directory's bucket (DIRECTORY_STORE_*)"; else STORE_WHAT="the folder $ROOT/directory"; fi
@@ -175,6 +178,7 @@ echo "reseed-world: kind entries     $ENTRIES ($KINDS entries)"
 # whether it has one, not its account id: this line may reach a public log
 echo "reseed-world: creator          $([ -n "$CREATOR" ] && echo "kept (from world.json)" || echo none)"
 echo "reseed-world: entry point      $AT m"
+echo "reseed-world: arrival place    ${ARRIVAL:-none (the entry point)}"
 echo "reseed-world: bodies           ${BODIES:-none}"
 echo "reseed-world: units            worldd@ $(systemctl is-active "worldd@$WORLD" || true), souls-gateway@ $(systemctl is-active "souls-gateway@$WORLD" || true); at the end the gateway starts$([ "$RUNNING" = yes ] && echo ', and the world (it was running)')"
 echo "reseed-world: bucket           $IN_PLACE of the world's objects at their keys; $COPIED already copied under aside/$STAMP/"
@@ -204,6 +208,7 @@ if [ "$done5" = yes ]; then echo "reseed-world: 4-5. the fresh seed: already in 
   if [ -e "$SEED_DIR" ]; then mv "$SEED_DIR" "$SEED_DIR.stopped-$(date -u +%Y%m%dT%H%M%SZ)"; fi
   args=(seed --facts "$ASIDE_DIR/facts.json" --dir "$SEED_DIR" --entries "$ENTRIES" --souls 0 --at "$AT")
   if [ -n "$CREATOR" ]; then args+=(--creator "$CREATOR"); fi
+  if [ -n "$ARRIVAL" ]; then args+=(--arrival "$ARRIVAL"); fi
   if [ -n "$BODIES" ]; then args+=(--bodies "$ASIDE_DIR/bodies.json"); fi
   SEEDED=$("$NEW_WORLDD" "${args[@]}" | sed -n 's/^seeded //p')
   [ "$SEEDED" = "$WORLD" ] || die "the seed is '$SEEDED', not $WORLD (left at $SEED_DIR); undo: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check"

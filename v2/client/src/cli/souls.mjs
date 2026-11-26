@@ -15,8 +15,10 @@
 //                                             the owner, and returns; the pairing finishes in the background (W2),
 //                                             and once approved the Soul joins the world by itself, named
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
-//                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
-//                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
+//                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; a
+//                                             word alone (rise, dance) is the body's act or the one act here by it
+//                                             (several or none are refused, named); ids or <name>=<id> after an act
+//                                             are its thing arguments (C10); a walk's
 //                                             gait=walk|jog|run sets its pace (0.135 G1). An activity (dance, yoga,
 //                                             push_ups...) goes on unbroken until the next act or `stop`; for=<s>
 //                                             (90s, 2m, 1h) sets its time, and keeps a gesture (wave, clap) up that long
@@ -51,7 +53,7 @@
 //                                             accept after it is refused offer-withdrawn
 //   souls.mjs carry grip|offer|accept|decline|lift|to|set-down|leave|list ...   carrying a load together, as a crew
 //   souls.mjs part take|put|unseat <crew id> ...   a crew building with parts: `help carry` lists every step (0.135)
-//   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
+//   souls.mjs lie <id>                        lies down on that bed (stand again with act rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
 //   souls.mjs now "<line>"                    sets the Soul's public status line, shown on its page beside its
