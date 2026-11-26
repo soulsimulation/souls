@@ -153,9 +153,11 @@ target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every o
 stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Within 20 m distance alone is
 checked; a wall between does not block an aim. Beyond it, up to `SIGHT` (60 m, the client's sight), an aim at a thing
 the body sees is made from afar (#5063): the geometry's `Reach::seen` says so (worldd: both on the open ground, or the
-thing on the body's own storey of the same building), and the act's end says `from afar`. A thing in a closed
-container, behind a wall, on another storey or past 60 m is refused `out-of-reach`, its words saying which. The move
-does not turn the body in the world; the page draws the standing body turned toward its target.
+thing on the body's own storey of the same building), and the act's end says `from afar`. A thing inside a building
+seen from outside it (or the reverse), on another storey or past 60 m is refused `out-of-reach`, its words adding `not
+in sight` or `sight 60000 mm`; one in a closed container is refused without its distance or its name (#4339). On the
+open ground a building standing between the two is not checked yet. A form's move toward its thing turns the standing
+body to face it first (worldd's `face_to`), near or far; the page draws that turn and the move's pose.
 
 ## Postures and seats (B3)
 
