@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CreatorSession, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, refusalText, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
 const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
 const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
@@ -115,4 +115,19 @@ test('the exchange is asked only for an account the directory lists a creator gr
   assert.equal(await mayCreate(place, owning(`soul-${'ab'.repeat(16)}-1`)), false, 'an owner of Souls only is not');
   assert.equal(await mayCreate(place, async () => { throw new NothingOwned(); }), false, 'a new person, owning nothing, is not');
   assert.equal(await mayCreate(place, async () => { throw new Error('no view: the directory said 500'); }), true, 'a view the directory cannot give leaves it to the exchange');
+});
+
+test('#5006: the panel\'s inbox says the creator\'s agent is connected only while the gateway says so', async () => {
+  const sock = { onText: null as ((t: string) => void) | null, start() {}, stop() {}, sendText() { return true; } };
+  const creator = new V2Creator('stream');
+  // the creator's mailbox, as mailbox() attaches it once the view token is held
+  Object.assign(creator, { box: new V2OwnerMailbox(async (self) => self.attach(new MailBox(), sock, CREATOR)) });
+  const said = async () => { const i = await creator.inbox(); return [i.connected, i.presence]; };
+  assert.deepEqual(await said(), [false, 'away'], 'not told yet: not connected, so the panel shows the line for the agent');
+  sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: true } }));
+  assert.deepEqual(await said(), [true, 'listening'], 'its agent signed in for the grant');
+  sock.onText!(JSON.stringify({ agent: { grant: `soul-${SCOPE}-2`, connected: false } }));
+  assert.deepEqual(await said(), [true, 'listening'], 'another grant\'s agent is not the creator\'s');
+  sock.onText!(JSON.stringify({ agent: { grant: CREATOR, connected: false } }));
+  assert.deepEqual(await said(), [false, 'away'], 'gone again: the line comes back');
 });

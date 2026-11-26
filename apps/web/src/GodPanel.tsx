@@ -17,6 +17,7 @@ import { ApprovalDialog } from './god-ui/ApprovalDialog.tsx';
 import { offerApproval, useCardIsOpen } from './pairing-slot.ts';
 import { OwnerGod, ago as since } from './god-ui/GodModal.tsx';
 import { closeGod, openGod, useGod, watchInbox } from './god-ui/god-store.ts';
+import { agentPaired } from './god-ui/god-agent-state.ts';
 import { ConstitutionBody } from './god-ui/Constitution.tsx';
 import { ForsakeWorld } from './god-ui/WorldOwnerOps.tsx';
 import { PrayersWaiting } from './god-ui/Prayers.tsx';
@@ -250,7 +251,9 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     await G.approve(code); countEvent('god connected'); try { localStorage.setItem(PAIRED_KEY, '1'); } catch { /* storage disabled */ }
     if (hashCode === code) history.replaceState(null, '', location.pathname + location.search);
   }, () => `Approved. Your agent is now this world's god.`);
-  const agentsPaired = (status.agents ?? 0) > 0;
+  // until the agent is connected (never paired, paired and away, or its inbox not known yet): the gateway, naming this world's creator guide
+  const connected = !!god.inbox?.connected;
+  const agentsPaired = agentPaired(status.agents, god.inbox);
   const fly = (x: number, y: number, z: number, distance: number) => { closeGod(); flyTo(x, y, z, { distance }); };
   const banner = <>
     {hashCode && !status.pending.some((p) => p.code === hashCode) && <p className="gm-banner gp-bad">Pairing request <code>{hashCode}</code> is not pending (expired, or already approved).</p>}
@@ -267,8 +270,6 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     )}
     {note && <p className={'gm-banner gm-note ' + (note.bad ? 'gp-bad' : 'gp-ok')} role="status">{note.text}</p>}
   </>;
-  // until the agent is connected (never paired, paired and away, or its inbox not known yet): the gateway, naming this world's creator guide
-  const connected = !!god.inbox?.connected;
   const connectUrl = !agentsPaired || !connected ? G.creatorGuide(status.base) : null;
   const tools = <>
     <div className="gm-tool-group" role="group" aria-label="Undo and redo">
@@ -319,7 +320,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     {approvalModal}
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
-    {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
+    {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
       forsake={v2 ? null : <ForsakeWorld name={name} />} />}
   </>;
 }

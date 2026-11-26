@@ -11,6 +11,7 @@ import { copyText } from '../clipboard.ts';
 import './god-modal.css';
 import { useDraft } from '../input-draft.ts';
 import { worldKey } from '../world-path.ts';
+import { creatorPrompt } from './god-api.ts';
 
 const BOLT = <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 2 4.5 11.2h4.6L8 18l7.5-9.6h-4.7z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/></svg>;
 const GO = <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" strokeWidth="1.4"/><circle cx="8" cy="8" r="1.6" fill="currentColor"/><path d="M8 .8v2.6M8 12.6v2.6M.8 8h2.6M12.6 8h2.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
@@ -46,7 +47,7 @@ function Head({ title = 'God Mode', right, back }: { title?: string; right?: Rea
 }
 
 /** The owner's God Mode: one view, or the Forsake danger zone over it. */
-export function OwnerGod({ banner, connectUrl, tools, prayers, more, forsake, paired }: { banner?: ReactNode; connectUrl: string | null; tools: ReactNode; prayers?: ReactNode; more?: ReactNode; forsake: ReactNode | null; paired: boolean }) {
+export function OwnerGod({ banner, connectUrl, grant, tools, prayers, more, forsake, paired }: { banner?: ReactNode; connectUrl: string | null; grant?: string | null; tools: ReactNode; prayers?: ReactNode; more?: ReactNode; forsake: ReactNode | null; paired: boolean }) {
   const { section, inbox } = useGod();
   const connected = !!inbox?.connected;
   if (section === 'forsake' && forsake) return <Frame label="Forsake world" wide>
@@ -63,7 +64,7 @@ export function OwnerGod({ banner, connectUrl, tools, prayers, more, forsake, pa
     <Head right={pill} />
     <div className="gm-scroll" data-god-panel="1" data-section="agent" data-gateway={live ? undefined : '1'}>
       {banner}
-      {!live && connectUrl && <Connect url={connectUrl} state={!paired ? 'not-paired' : 'connecting'} />}
+      {!live && connectUrl && <Connect url={connectUrl} grant={grant ?? null} state={grant ? 'not-connected' : !paired ? 'not-paired' : 'connecting'} />}
       {live && <GodConsole paired={paired} tools={tools} prayers={prayers} />}
       {live && more}
       {forsake && <footer className="gm-foot"><button type="button" className="gm-forsake-open" data-forsake-open="1" onClick={() => showSection('forsake')}>Forsake world</button></footer>}
@@ -71,10 +72,12 @@ export function OwnerGod({ banner, connectUrl, tools, prayers, more, forsake, pa
   </Frame>;
 }
 
-const STATE_WORD = { 'not-paired': 'Not paired', connecting: 'Connecting' } as const;
-/** Until the agent is connected: its state, the one line to give it, and the steps after it. */
-function Connect({ url, state }: { url: string; state: keyof typeof STATE_WORD }) {
-  const line = `Read ${url} and follow it to build this world as its god.`;
+const STATE_WORD = { 'not-paired': 'Not paired', connecting: 'Connecting', 'not-connected': 'Not connected' } as const;
+/** Until the agent is connected: its state, the one line to give it, and the steps after it. With `grant` (a world the
+ *  new engine runs, #5006) the line names the creator grant the agent pairs with, and the request it makes comes up on
+ *  this page as an approval card (V2PairDialog.tsx); the state is only whether the agent is connected now. */
+export function Connect({ url, grant = null, state }: { url: string; grant?: string | null; state: keyof typeof STATE_WORD }) {
+  const line = grant ? creatorPrompt(url, grant) : `Read ${url} and follow it to build this world as its god.`;
   const [copied, setCopied] = useState(false), [manual, setManual] = useState(false);
   useEffect(() => { if (!copied) return; const t = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(t); }, [copied]);
   const copy = async () => { if (await copyText(line)) setCopied(true); else setManual(true); };
@@ -85,14 +88,18 @@ function Connect({ url, state }: { url: string; state: keyof typeof STATE_WORD }
       <li className={state === 'not-paired' ? 'now' : 'done'}>Give your agent this line:</li>
     </ol>
     <div className="gm-connect-line">
-      <p data-connect-line={line}>Read <a href={url} target="_blank" rel="noreferrer" data-skill-link="1">{url}<span className="gm-out">{OUT}</span></a> and follow it to build this world as its god.</p>
+      <p data-connect-line={line}>Read <a href={url} target="_blank" rel="noreferrer" data-skill-link="1">{url}<span className="gm-out">{OUT}</span></a> and follow it to build this world as its {grant
+        ? <>creator, pairing with <code className="gm-grant" data-creator-grant={grant}>--creator {grant}</code>.</> : 'god.'}</p>
       <button type="button" className="gm-copy" data-connect-copy="1" onClick={() => void copy()} aria-label="Copy the line for your agent">{copied ? 'Copied' : 'Copy'}</button>
     </div>
     {manual && <input className="gm-prompt" aria-label="Line for your agent" value={line} readOnly autoFocus onFocus={(e) => e.target.select()} />}
-    <ol className="gm-steps" start={2}>
+    {grant ? <ol className="gm-steps" start={2}>
+      <li>Approve the request it makes: a card comes up on this page. Check its code matches the one your agent shows.</li>
+      <li>Wait for it to connect. The command box appears once it is connected.</li>
+    </ol> : <ol className="gm-steps" start={2}>
       <li className={state === 'not-paired' ? '' : 'done'}>Approve the pairing request it makes; it shows here, above.</li>
       <li className={state === 'connecting' ? 'now' : ''}>Wait for it to start listening. Prayers and the command box appear once it is connected.</li>
-    </ol>
+    </ol>}
   </section>;
 }
 

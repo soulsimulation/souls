@@ -216,17 +216,18 @@ export class V2Creator {
   private readonly stream: string;
   constructor(stream: string) { this.stream = stream; }
 
-  /** Whether the signed-in person is this world's creator (the exchange answers), or the refusal's name. */
-  who(): Promise<{ creator: true } | { creator: false; refused: string }> {
+  /** Whether the signed-in person is this world's creator (the exchange answers) and its creator grant, the one its
+   *  agent pairs with (`souls-god.mjs pair <world> --creator <grant>`), or the refusal's name. */
+  who(): Promise<{ creator: true; grant: string } | { creator: false; refused: string }> {
     this.whoAsked ??= (async () => {
       const place = placeNow(this.stream);
       if (!place) return { creator: false as const, refused: 'no-gateway' };
       if (!(await mayCreate(place))) return { creator: false as const, refused: 'not-the-creator' };
-      try { await creatorToken(place); return { creator: true as const }; } catch (e) { return { creator: false as const, refused: (e as Error).message }; }
+      try { return { creator: true as const, grant: (await creatorToken(place)).grant }; } catch (e) { return { creator: false as const, refused: (e as Error).message }; }
     })();
     return this.whoAsked;
   }
-  private whoAsked: Promise<{ creator: true } | { creator: false; refused: string }> | null = null;
+  private whoAsked: Promise<{ creator: true; grant: string } | { creator: false; refused: string }> | null = null;
 
   private open(): Promise<CreatorSession> {
     this.session ??= (async () => {
@@ -271,10 +272,11 @@ export class V2Creator {
   }
 
   /** The old command box's inbox (god-store.ts `GodInbox`) from the creator's mailbox: `text` sent first when given.
-   *  Connected while the mailbox answers; it gives no presence, so none is claimed. */
-  async inbox(text?: string): Promise<{ v2: true; connected: boolean; lastSeenAt: null; latest: NonNullable<ReturnType<typeof ticketOf>> | null; log: NonNullable<ReturnType<typeof ticketOf>>[]; queued: number }> {
+   *  Connected while the gateway says a socket is signed in for the creator's grant (#5006 rows 2 and 5: it said
+   *  connected always, so the panel never showed the line to give the agent); listening then, away otherwise. */
+  async inbox(text?: string): Promise<{ v2: true; connected: boolean; presence: 'listening' | 'away'; lastSeenAt: null; latest: NonNullable<ReturnType<typeof ticketOf>> | null; log: NonNullable<ReturnType<typeof ticketOf>>[]; queued: number }> {
     const box = this.mailbox(), a = text === undefined ? await box.read() : await box.send(text), t = ticketOf(a);
-    return { v2: true, connected: true, lastSeenAt: null, latest: t, log: t ? [t] : [], queued: a.queued ?? 0 };
+    return { v2: true, connected: a.connected, presence: a.connected ? 'listening' : 'away', lastSeenAt: null, latest: t, log: t ? [t] : [], queued: a.queued ?? 0 };
   }
 
   /** The creator's mailbox: the command box's words to the creator's agent (its `listen` prints them). */
