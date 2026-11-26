@@ -2330,7 +2330,8 @@ fn trial_a_follower_who_begins_to_talk_goes_on_following() {
 fn off(q: Quat, from: Vec3, to: Vec3) -> f64 {
     let (f, d) = (ahead(q), (to.x - from.x, to.z - from.z));
     let len = ((i128::from(d.0).pow(2) + i128::from(d.1).pow(2)).isqrt()) as f64;
-    let cos = (i128::from(f.0) * i128::from(d.0) + i128::from(f.1) * i128::from(d.1)) as f64 / (len * 1e6);
+    let cos = (i128::from(f.0) * i128::from(d.0) + i128::from(f.1) * i128::from(d.1)) as f64
+        / (len * 1e6);
     cos.clamp(-1.0, 1.0).acos().to_degrees()
 }
 
@@ -2398,7 +2399,11 @@ fn a_member_left_where_it_stands_faces_its_groups_middle() {
         let (p, q) = run.last(n);
         let d = off(q, p, middle);
         println!("#423: Soul {n}, left where it stands, is off the middle by {d:.1} degrees");
-        assert_eq!((p.x, p.z), (at(n).x, at(n).z), "Soul {n} stays where it stands");
+        assert_eq!(
+            (p.x, p.z),
+            (at(n).x, at(n).z),
+            "Soul {n} stays where it stands"
+        );
         assert!(d <= 5.0, "Soul {n} faces the middle: {d:.1} degrees off");
     }
     run.stop();

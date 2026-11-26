@@ -474,7 +474,11 @@ fn face_middle(
         let Some(m) = c.body(body).filter(|m| m.pose.frame.slot.is_none()) else {
             continue;
         };
-        let (node, at, frame) = (sim::index::place_of(m).0, m.pose.position, m.pose.frame.node);
+        let (node, at, frame) = (
+            sim::index::place_of(m).0,
+            m.pose.position,
+            m.pose.frame.node,
+        );
         let to = match middle {
             Some((n, p)) => (n == node).then_some(p),
             None => {
