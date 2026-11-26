@@ -4697,7 +4697,8 @@ impl Clock {
     /// where it stood at the lift) as an offset from the front on the plan (parameter 4, `[x, z]` µm). When the front's
     /// walk turns the crew (its heading at the goal named, or a pose of the carry's way, [`engine::Led`]) the order
     /// names the goal and the offset there too (parameter 5): the place swings with the front, so one walk turns the
-    /// load square. A carrier's own act ends its order (B2: it claims the legs), and the carrier stays in the carry,
+    /// load square. When that walk ends, wherever the front stood (a spot short of its goal), the order is replaced by
+    /// one at the turned place, so the turn is finished there. A carrier's own act ends its order (B2: it claims the legs), and the carrier stays in the carry,
     /// walking its own way, as every carrier did before: a late carrier's own `carry to` does not fight the group, and
     /// once its own walk ends while the front's still goes, it takes a place again where the frame has it. A new walk
     /// of the front replaces the orders when it or the walk before turns the crew. An order is cancelled when its
@@ -4747,7 +4748,10 @@ impl Clock {
         for k in running {
             let (a, walker, walk) = (k.activity, k.walker, k.led.walk);
             let going = b.moving(k.front) == Some(walk);
-            let replaces = match self.carry_follows.get(&(a, walker)).copied() {
+            let (replaces, finish) = match self.carry_follows.get(&(a, walker)).copied() {
+                // The walk that turns the crew has ended, wherever the front stood (a spot short of its goal, say):
+                // the turn is finished there, each place its turned one.
+                Some((_, made_for, true)) if made_for == walk && !going => (true, true),
                 Some((_, made_for, _)) if made_for == walk => continue,
                 // The front's new walk: a turn either way takes the places again; a straight one keeps them.
                 Some((order, _, turned)) => {
@@ -4757,11 +4761,11 @@ impl Clock {
                         }
                         continue;
                     }
-                    true
+                    (true, false)
                 }
-                None => false,
+                None => (false, false),
             };
-            if !going
+            if (!going && !finish)
                 || b.moving(walker).is_some()
                 || (!replaces && b.orders.open(walker).is_some())
             {
@@ -4777,9 +4781,12 @@ impl Clock {
                 continue;
             };
             self.next_intent += 1;
-            let at = engine::on_plan(k.place, k.heading);
+            let (at, turn) = match (finish, k.led.turn) {
+                (true, Some((_, h))) => (engine::on_plan(k.place, h), None),
+                (_, turn) => (engine::on_plan(k.place, k.heading), turn),
+            };
             let mut parameters = BTreeMap::from([(4, Value::Array(vec![int(at[0]), int(at[1])]))]);
-            if let Some((goal, h)) = k.led.turn {
+            if let Some((goal, h)) = turn {
                 let end = engine::on_plan(k.place, h);
                 parameters.insert(
                     5,
@@ -4804,7 +4811,7 @@ impl Clock {
             match crate::orders::accept(b, &order, walker, id, now) {
                 Ok(()) => {
                     self.carry_follows
-                        .insert((a, walker), (id, walk, k.led.turn.is_some()));
+                        .insert((a, walker), (id, walk, turn.is_some()));
                 }
                 Err(r) => eprintln!(
                     "worldd: {}'s place in its carry was refused: {r}",
