@@ -17,7 +17,8 @@
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
 import { KIT_ROLES } from '@souls/generators';
-import { drawnState, layerDraws, placedOf, thingState, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
+import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
+import { layerDraws } from './layer-draws.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
 

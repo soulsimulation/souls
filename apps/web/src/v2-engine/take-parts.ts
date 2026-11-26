@@ -19,7 +19,7 @@
 // Such a bay's record carries no slot points either (an imported bay's does), so the parts in it would all stand at its
 // origin: it is handed to CreatorKinds with its kind's slot points (`slotPoints`: the entry's slots in order, from 1).
 
-import { layerDraws, OLD_ENTITY } from './world-state.ts';
+import { layerDraws, OLD_ENTITY } from './layer-draws.ts';
 
 /** A node record, the fields read here (the reader's NodeRec). */
 export type PartNode = { id: string; kind: string; parent: string | null; slot?: number | null; pos?: [number, number, number];
