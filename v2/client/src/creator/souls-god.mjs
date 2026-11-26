@@ -259,6 +259,8 @@ export const FIX = {
   'undo.conflict': 'something the undo would change was changed since: describe, then put it back by hand',
   'edit.arrival-unknown': 'name a place of the world: an area or a line on the open ground (describe lists them), or --clear',
   'arrival.unknown-place': 'name a place of the world: an area or a line on the open ground (its id from describe, or its facts id), or --clear',
+  'edit.arrival-cut-off': 'that place is walled in: Souls born there could not leave. Open a way in from the entry, or name another place',
+  'edit.arrival-no-ground': 'there is no ground to stand on within 16 m of that place\'s middle: name another place',
   'undo.no-inverse': 'that edit cannot be undone (it added a field or moved a thing in motion): change it back by hand',
   'undo.not-the-build': 'undo --build undoes only while the newest edit is one of that build\'s steps: undo the others first',
   'edit.would-bury': 'a Soul stands there now: wait until it has moved, or choose another place',
