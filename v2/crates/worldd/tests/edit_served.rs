@@ -5387,7 +5387,11 @@ fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
 async fn put_part(a: &mut GwSoul, c: Id, to: BTreeMap<u64, Value>) -> Got {
     for _ in 0..10 {
         let got = a.act("part:put", c, to.clone()).await;
-        if !(got.kind == 2 && matches!(got.reason.as_str(), "edit.body-stale" | "part.setting-in"))
+        if !(got.kind == 2
+            && matches!(
+                got.reason.as_str(),
+                "edit.body-stale" | "edit.stale" | "part.setting-in"
+            ))
         {
             return got;
         }
