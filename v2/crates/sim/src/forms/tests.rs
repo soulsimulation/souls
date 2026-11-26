@@ -2645,8 +2645,8 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
     b.until_moving(body, 1);
     let sent = b.now;
     let take = bind(&entry, &form).expect("binds");
-    // Asked while its seat still holds the body, the take is given a rise first (trial 0.137), done at once standing.
-    let span = super::span(&[&[Step::Rise][..], &take[..]].concat(), &limits);
+    // Asked mid-rise, the take is decided when it starts: standing by then, it walks with no rise first (#4187).
+    let span = super::span(&take, &limits);
     let Asked::Started(new) = b
         .steps(body, thing, take, intent(body, 1), limits)
         .expect("accepted")
