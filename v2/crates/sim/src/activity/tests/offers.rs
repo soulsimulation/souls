@@ -535,7 +535,7 @@ fn crew_of_six_accepting_15_s_apart_forms_past_the_kinds_minute() {
             .stream
             .iter()
             .rev()
-            .map(event)
+            .filter_map(|e| e.events.as_ref().and_then(|v| v.first()))
             .find(|e| e.name.as_str() == "souls:activity-joined")
             .expect("a join");
         let renewed = if who < 5 { uint(at + LASTS) } else { None };
