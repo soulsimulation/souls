@@ -235,9 +235,9 @@ pub struct Bodies {
     pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
-    /// Each started walk's target, kept to its end however it ends (0.133): how far from it a done walk ended is
-    /// measured then.
-    walked_to: BTreeMap<Id, Id>,
+    /// Each started walk's target, and the point on it when it was sent to one, kept to its end however it ends
+    /// (0.133): how far from it a done walk ended is measured then.
+    walked_to: BTreeMap<Id, (Id, Option<Vec3>)>,
     /// How far from its target each done walk ended, mm, until its end is written ([`Bodies::away`]).
     away_of: BTreeMap<Id, u64>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
@@ -1444,6 +1444,15 @@ impl Bodies {
         self.walked_to.len() + self.away_of.len()
     }
 
+    /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
+    /// another frame.
+    fn gap_to(&self, body: Id, node: Id, p: Vec3) -> Option<u64> {
+        let (frame, at) = self.pose(body)?;
+        (frame == node)
+            .then(|| (i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2)).isqrt() / 1000)
+            .and_then(|mm| u64::try_from(mm).ok())
+    }
+
     /// The gap from where `body` stands to `target`'s shape (0 inside its area), or to a body it walked to, mm; none
     /// when the two are in different frames and `target` is a body.
     fn gap_of(&self, target: Id, body: Id) -> Option<u64> {
@@ -1598,8 +1607,8 @@ impl Bodies {
                 continue;
             }
             self.took.insert(id, (rank, ask.target()));
-            if let (Ask::Walk { .. }, Some(t)) = (&ask, ask.target()) {
-                self.walked_to.insert(id, t);
+            if let (Ask::Walk { point, .. }, Some(t)) = (&ask, ask.target()) {
+                self.walked_to.insert(id, (t, *point));
             }
             match ask {
                 Ask::Walk { node, point, gait } => {
@@ -1898,8 +1907,13 @@ impl Bodies {
                 self.live.remove(&body);
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
-                if let Some(t) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
-                    if let Some(mm) = self.gap_of(t, body) {
+                if let Some((t, point)) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
+                    // From the point it was sent to (a grip's place on the ground), not from the ground's origin.
+                    let gap = match point {
+                        Some(p) => self.gap_to(body, t, p),
+                        None => self.gap_of(t, body),
+                    };
+                    if let Some(mm) = gap {
                         self.away_of.insert(id, mm);
                     }
                     self.face(body, t);
