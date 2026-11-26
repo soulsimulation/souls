@@ -318,6 +318,34 @@ impl Pairing {
         .map(|_| ())
     }
 
+    /// At an approval: the Soul `grant` takes the name its request (by its code) asked for, unless it already has one
+    /// or another unretired Soul of its world is called that (first day, 26 Nov: the account's list said no name
+    /// until the world had the body, so the navbar showed "Your new Soul"). The world hears it as an owner's name.
+    pub(super) fn note_name(&self, code: &str, grant: &str) -> Result<(), &'static str> {
+        let Some(name) = self.name_of(code)? else {
+            return Ok(());
+        };
+        if self.name_taken(grant, &name)? {
+            return Ok(());
+        }
+        let db = self.db.lock().expect("the store");
+        let named = store(db.execute(
+            "INSERT INTO soul_profiles_v1(grant_text, name) VALUES (?1, ?2)
+             ON CONFLICT(grant_text) DO UPDATE SET name = excluded.name
+               WHERE soul_profiles_v1.name IS NULL AND soul_profiles_v1.retired_at IS NULL",
+            params![grant, name],
+        ))?;
+        if named == 0 {
+            return Ok(());
+        }
+        let worlds = Self::worlds_of(&db, grant)?;
+        // A file not written now never undoes the approval: the name is kept, and the next write of the file has it.
+        let _ = self.publish(&db, &worlds, || {
+            self.write_souls(&db).map_err(|_| "souls-file")
+        });
+        Ok(())
+    }
+
     /// Whether the Soul `grant` was retired.
     pub(super) fn retired(&self, grant: &str) -> Result<bool, &'static str> {
         store(
