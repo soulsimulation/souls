@@ -253,7 +253,7 @@ Package the **existing public Eden template**, with serving support made by the 
 
 ```sh
 worldd seed --facts <approved-public-facts> --entries <existing-public-entries> --souls 0 --dir <support>
-templates <approved-public-facts> <catalogue> --support <support>
+templates <approved-public-facts> <catalogue> --name eden-2026 --support <support>
 bash v2/tools/ops/install.sh bundle <out> <binaries> <page> <catalogue>
 ```
 
@@ -262,8 +262,23 @@ The catalogue is built from Eden's facts (X6's export of a backup), which are no
 
 ```sh
 /usr/local/lib/souls/worldd seed --facts <facts> --entries <existing-public-entries> --souls 0 --dir <support>
-/usr/local/lib/souls/publish-template <facts> /usr/local/lib/souls/templates --support <support>
+/usr/local/lib/souls/publish-template <facts> <scratch> --name <name> --support <support>
+W=/usr/local/lib/souls/worldd T=/usr/local/lib/souls/templates
+cp -a <scratch>/<name> $T/.<name>.new
+$W fork --from $T/.<name>.new/ckpt --template $T/.<name>.new --to <scratch>/fork --through <32 hex>:1
+install -d -m 755 $T/.aside && { [ ! -e $T/<name> ] || mv $T/<name> $T/.aside/<name>.<date>; } && mv $T/.<name>.new $T/<name>
+systemctl restart souls-directory
 ```
+
+`publish-template` builds the tree with the entries the seed kept, so a kind whose entry joins parts (a rack bay, a
+shade site) is pinned by its entry. It does not yet run worldd's courses step, so a template of a world with punts or
+rides (Eden) has neither. It writes `<out>/<name>` (renamed into place when whole) and its source checkpoint
+`<out>/<name>.source`, and refuses either if it exists. The dry-run fork uses `/usr/local/lib/souls/worldd`, the
+build `/etc/souls/placement.json` pins, against the copy beside the catalogue; the swap is a rename, so a create never
+reads a half-copied template. The directory reads the catalogue only at its start, every folder with a `template`
+file directly in it (so `.aside/` is not read, but a `.<name>.new` left behind would be), so it is restarted after the
+swap; until then it creates from the lineage it read, which the initializer refuses. A template is checked against the forking build's pins, so it is
+published again each time the placement pin moves to a new build.
 
 Only allowlisted facts, public entry/move data, entry coordinates and exact runtime pin/hash metadata are packaged.
 Creator metadata, tokens, logs and seeded state are excluded. The published filtered checkpoint remains the world;
