@@ -455,7 +455,7 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
   writeFileSync(join(clientDir, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
   // eden is the newest world, so a start's wake-recent and the keep-alive would pick it first
-  const worlds = [{ slug: 'eden', createdAt: 2 }, { slug: 'other', createdAt: 1 }].map(w => ({ ...w, name: w.slug, template: 'empty', owner: 'synthetic-owner' }));
+  const worlds = [{ slug: 'eden', createdAt: 2, souls: 23 }, { slug: 'other', createdAt: 1 }].map(w => ({ ...w, name: w.slug, template: 'empty', owner: 'synthetic-owner' }));
   writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: [], worlds }));
   writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:1', stream: '/s/eden/', canonical: true } } }));
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname, asked = [];
@@ -489,6 +489,8 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   // the site's own pages and the world list need no world process
   const listed = (await (await fetch(`${base}/__sim/worlds.json`)).json()).worlds.find(w => w.slug === 'eden');
   assert.deepEqual([listed?.status, listed?.engine], ['running', 'new'], 'listed as live on the new engine, not asleep');
+  // 26 Nov: the registry's 23 is the old engine's count (the homepage showed "Eden 2026 · 23 Souls" while Explore listed 4)
+  assert.equal(listed.souls, null, 'no Soul count from the old engine for a world the new engine runs');
   // wake-recent at start and the keep-alive have had their turns: they keep other living, never eden
   for (let i = 0; i < 100 && launcher.pool.status('other').status !== 'running'; i++) await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 200));
