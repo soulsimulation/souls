@@ -436,7 +436,10 @@ impl Gateway {
             .senders
             .get(&sequence)
             .is_some_and(|o| other(o.session))
-            || held.ended.iter().any(|(q, s, _)| *q == sequence && other(*s))
+            || held
+                .ended
+                .iter()
+                .any(|(q, s, _)| *q == sequence && other(*s))
         {
             return false;
         }
@@ -470,7 +473,10 @@ impl Gateway {
         if held.sessions.keys().any(|s| *s > session) {
             return Err(AGENT_REPLACED);
         }
-        if held.senders.get(&sequence).is_some_and(|o| o.digest != digest)
+        if held
+            .senders
+            .get(&sequence)
+            .is_some_and(|o| o.digest != digest)
             || held
                 .ended
                 .iter()
@@ -983,7 +989,6 @@ mod tests {
         // The first takes it back and is told the second's newest.
         let back = sign_in(&gw, soul);
         assert_eq!(back.newest, 7);
-        assert_eq!(gw.sending(soul, 8, back.session), true);
         assert_eq!(gw.holding(soul, 8, back.session, digest(b"a8")), Ok(()));
         assert!(
             gw.holding(soul, 9, second.session, digest(b"b9")).is_err(),

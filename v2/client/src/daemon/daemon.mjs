@@ -131,7 +131,11 @@
 //   is woken by a `replaced` event, and its agent's next command (not a wait, a read, a status or a stop) signs it in
 //   again. Meanwhile it asks every REPLACED_RETRY_MS (5 min) whether the Soul is free (`?free=1`): the gateway closes
 //   that sign-in as `agent.held` while a live socket holds the Soul, and signs it in once none does, so a client left
-//   off when the other one went comes back by itself and never takes the Soul from a live one.
+//   off when the other one went comes back by itself and never takes the Soul from a live one. The two share the
+//   world's one numbering of the Soul's intents (#4978): each sign-in's outcome names the newest sequence sent for the
+//   Soul, and one that took it from the other numbers after it (`numberAfter`); the other's answers, replayed on a
+//   resume, are not taken for its own. An act it held for a sign-in the other then took, or sent after the gateway
+//   last read its socket, is refused here as `agent.replaced`; one the gateway reads after is refused there.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered for
