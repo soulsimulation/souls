@@ -1712,7 +1712,9 @@ export class HumanViews {
     // their full immutable drawn origin, not merely the last named clip or the last rendered frame.
     const origin = v.clipOrigin;
     const originFrame = origin ? activityFrame(origin.sample.activity ?? 'idle', origin.sample.baseActivity ?? 'idle', tSec - origin.age, h.name, { since: origin.sample.activityAge }) : null;
+    // A re-entering Wave already reconstructs its released tail; freezing it again double-blends that owner.
     const clipBoundary = !!origin && origin.age >= 0 && origin.age < CLIP_FADE && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.transfer && !v.watering && !v.cup && !v.letGo && !v.lastHandActuator && !v.handHold && !v.rps && !v.propWanted && !v.prop?.obj.visible && !v.instrument && !v.speaking && !v.formPress?.length && !v.shore && !waterFrom && sitW === 0 && w < .01
+      && !(v.activity==='wave'&&origin.history?.length===0&&(origin.sample.activityAge??0)>=CLIP_FADE&&origin.sample.waveSamples?.some(s=>s.released!==undefined))
       && !act?.pairedContact && !originFrame?.pairedContact && (!act?.hop || ACTIVITY_OVERLAYS.has(v.activity)) && (!originFrame?.hop || ACTIVITY_OVERLAYS.has(origin.sample.activity ?? 'idle')) && !act?.ride && !originFrame?.ride && !lib.posture && !lib.still
       && postureKind(v.activity, v.base) === 'stand' && postureKind(origin.sample.activity ?? 'idle', origin.sample.baseActivity) === 'stand'
       && origin.sample.walk < .01 && !origin.sample.instrument;

@@ -253,3 +253,44 @@ test('epoch-clock procedural exits stay within their authored lift and recorded 
     }finally{people.dispose();setHumanGround(null);}
   }
 });
+
+
+test('recorded wave overlap keeps its dedicated owner when the earlier tail expires',async t=>{
+  const [{TakePeople},{Runtime},{Spatial},{emptyWorld,human},{TakeRecorder},{openGround}]=await Promise.all([
+    import('./take-replay.ts'),import('../../engine/runtime/runtime.ts'),import('../../engine/spatial/service.ts'),
+    import('../../engine/world/factory.ts'),import('../../engine/take/recorder.ts'),import('../../engine/test/frame-fixtures.ts')]);
+  for(const name of ['casual','woman'])for(const gap of [16,21]){
+    const scene=openGround(),world=emptyWorld('wave-owned-overlap',scene),id='wave_boundary',body=human(id,0,0);world.entities[id]=body;
+    const runtime=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),recorder=new TakeRecorder(runtime,{rulesVersion:'wave-owned-overlap'});
+    for(let tick=0;tick<220;tick++){body.human!.activity=tick>=17&&tick<65||tick>=65+gap&&tick<113+gap?'wave':'idle';runtime.step();}
+    const take=recorder.finish(),people=new TakePeople(take),rig=await template(name);people.setTemplates([rig]);let previous:number[][]|undefined,max=0;
+    try{
+      for(let tick=10;tick<210;tick++){
+        people.show(tick*take.dt,tick*take.dt);const palms=people.bones(id)[id].arms.map(a=>a.palm);
+        if(previous)for(let arm=0;arm<2;arm++)max=Math.max(max,Math.hypot(...palms[arm].map((n,j)=>n-previous![arm][j])));previous=palms;
+        if(tick>=65+gap&&tick<=65+gap+8){
+          const fresh=new TakePeople(take);fresh.setTemplates([rig]);
+          try{fresh.show(tick*take.dt,tick*take.dt);assert(palms.every((p,i)=>Math.hypot(...p.map((n,j)=>n-fresh.bones(id)[id].arms[i].palm[j]))<.0003),'a fresh seek preserves the same wave-owned overlap through expiry');}finally{fresh.dispose();}
+        }
+      }
+      assert(max<=.08,'existing wave owner keeps the unchanged 80 mm / 50 ms palm bound');t.diagnostic(JSON.stringify({rig:name,gap:gap*take.dt,maxPalmStep:max}));
+    }finally{people.dispose();}
+  }
+});
+
+
+test('nod then short wave and short idle retains the drawn pose on a second wave entry',async t=>{
+  const [{TakePeople},{Runtime},{Spatial},{emptyWorld,human},{TakeRecorder},{openGround}]=await Promise.all([
+    import('./take-replay.ts'),import('../../engine/runtime/runtime.ts'),import('../../engine/spatial/service.ts'),
+    import('../../engine/world/factory.ts'),import('../../engine/take/recorder.ts'),import('../../engine/test/frame-fixtures.ts')]);
+  const scene=openGround(),world=emptyWorld('short-wave-chain',scene),id='short-wave-chain',body=human(id,0,0);world.entities[id]=body;
+  const runtime=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),recorder=new TakeRecorder(runtime,{rulesVersion:'short-wave-chain'});
+  for(let tick=0;tick<100;tick++){body.human!.activity=tick<40?'idle':tick<50?'nod':tick<52?'wave':tick<54?'idle':tick<84?'wave':'idle';runtime.step();}
+  const take=recorder.finish(),people=new TakePeople(take);people.setTemplates([await template('woman')]);const views=(people as unknown as {humans:HumanViews}).humans;
+  const deltas:number[]=[];try{
+    for(const [tick] of take.changes.filter(c=>c[1]===id&&c[2]==='activity')){
+      if(tick<1)continue;const boundary=tick*take.dt;people.show(boundary-1e-5,boundary);const before=views.meshPoints(id,1);people.show(boundary+1e-5,boundary);deltas.push(distance(before,views.meshPoints(id,1)));
+    }
+    t.diagnostic('short wave chain whole-pose boundary deltas metres '+JSON.stringify(deltas));assert(deltas.every(d=>d<.001),'all whole-pose boundaries retain the unchanged 1 mm limit');
+  }finally{people.dispose();}
+});
