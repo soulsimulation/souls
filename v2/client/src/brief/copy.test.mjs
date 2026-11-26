@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { encode } from '../history/day.mjs';
-import { allFields, posesOf, rememberPublicWords, rowsOf, wordsOf } from './copy.mjs';
+import { allFields, posesOf, rememberPublicWords, rowsOf, shapesOf, takeRecords, wordsOf } from './copy.mjs';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc');
@@ -52,6 +52,38 @@ test('rows read after every step of a walk keep the heap flat', () => {
   assert.deepEqual(posesOf(copy).get('73636f7065-101').at, [1, 0, 0]);
 });
 
+// 26 Nov 2026: the daemon read Eden's 9,588 rows afresh for every command, follow and hearing, and its loop was held for
+// seconds at a time (`schedule: no beat for 25 s`, commands answered `daemon-not-answering`). An unchanged copy gives
+// the rows it gave; a step reads again only the nodes it re-hashed, and a sync's records are decoded as they come.
+test('rows are read again only where the copy changed', () => {
+  const copy = walkingCopy(2000), record = copy.record;
+  let reads = 0;
+  copy.record = (h) => { reads++; return record(h); };
+  copy.step(0);
+  const first = rowsOf(copy);
+  assert.equal(rowsOf(copy), first, 'an unchanged copy: the same rows, nothing read');
+  copy.step(1);
+  reads = 0;
+  const after = rowsOf(copy);
+  assert.equal(reads, 2, 'the body a step on and its room; no chair read again');
+  assert.equal(after.get('73636f7065-100'), first.get('73636f7065-100'), 'a chair\'s row is the one read before');
+  assert.notEqual(after.get('73636f7065-2'), first.get('73636f7065-2'));
+  assert.deepEqual(after.get('73636f7065-2').pos, [1, 0, 0]);
+  assert.equal(after.size, 2002);
+});
+
+test('a sync\'s records taken as they come are not decoded again when the rows are read', () => {
+  const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return h; };
+  const chairs = Array.from({ length: 50 }, (_, i) => put(new Map([[1, [scope, 100 + i]], [2, 'eden:chair'], [10, []]])));
+  const room = put(new Map([[1, [scope, 1]], [2, 'eden:place'], [10, chairs.map((h) => Buffer.from(h, 'hex'))]]));
+  let reads = 0;
+  const copy = { roots: () => JSON.stringify({ 0: room }), record: (h) => { reads++; return held.get(h); } };
+  const asked = encode(new Map([[20, 1], [22, [room, ...chairs].map((h) => Buffer.from(h, 'hex'))]]));
+  takeRecords(copy, encode(new Map([[22, [room, ...chairs].map((h) => held.get(h))]])), asked);
+  assert.equal(rowsOf(copy).size, 51);
+  assert.equal(reads, 0, 'every record was decoded as the sync took it');
+});
+
 // #4713: the open ground's terrain tiles are a record of their own, named by the ground's key 0.
 test('a node\'s fields read its big field from its own record', () => {
   const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return h; };
@@ -63,6 +95,20 @@ test('a node\'s fields read its big field from its own record', () => {
   assert.equal(f.get(24), 64000);
   assert.deepEqual(f.get(25).map(([x, z]) => [x, z]), [[0, 0]]);
   assert.equal(allFields({ record: () => undefined }, ground).has(25), false, 'not held: left out');
+});
+
+// #5006 finding 5: a creator's where, clear and free read each node's shape from the copy, with no browser.
+test('a node\'s shape: its slot, outline, solids, slots, line and scale, mm in its own frame', () => {
+  const held = new Map(), put = (m) => { const raw = encode(m), h = hashOf(raw); held.set(h, raw); return Buffer.from(h, 'hex'); };
+  const cup = put(new Map([[1, [scope, 3]], [2, 'eden:cup'], [3, [scope, 2]], [4, 1], [10, []]]));
+  const table = put(new Map([[1, [scope, 2]], [2, 'eden:table'], [3, [scope, 1]], [6, new Map([[12, [[0, 0, 500, 250, 0, 0, 700]]], [13, [[1, 500, 0, 0, 90000, 1]]], [23, 2_000_000]])], [10, [cup]]]));
+  const path = put(new Map([[1, [scope, 4]], [2, 'eden:footpath'], [3, [scope, 1]], [6, new Map([[16, [[0, 0], [5000, 0]]]])], [10, []]]));
+  const room = put(new Map([[1, [scope, 1]], [2, 'eden:room'], [6, new Map([[11, [[0, 0], [4000, 0], [4000, 2000]]]])], [10, [table, path]]]));
+  const s = shapesOf({ roots: () => JSON.stringify({ 0: room.toString('hex') }), record: (h) => held.get(h) });
+  assert.deepEqual(s.get('73636f7065-1'), { outline: [[0, 0], [4000, 0], [4000, 2000]] });
+  assert.deepEqual(s.get('73636f7065-2'), { solids: [[0, 0, 500, 250, 0, 0, 700]], slots: [[1, 500, 0, 0, 90000, 1]], scale: 2_000_000 });
+  assert.deepEqual(s.get('73636f7065-3'), { slot: 1 });
+  assert.deepEqual(s.get('73636f7065-4'), { line: [[0, 0], [5000, 0]] });
 });
 
 // #4837: a book a shelf's take made holds its title and first page as references (fields 29 and 30 of eden:book), and

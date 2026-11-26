@@ -293,6 +293,59 @@ fn g7b_a1_the_creator_account_pairs_the_grant_it_holds_and_others_are_refused() 
     );
 }
 
+/// #5006 row 3: the world page lists a pending creator request from its address, but only to the account holding
+/// its creator grant (the owner, who alone can approve it), and not one that names another world.
+#[test]
+fn the_world_page_lists_its_creators_request_only_to_the_grant_holder() {
+    let (p, _) = store();
+    let creator = "creator-0123456789abcdef0123456789abcdef-1";
+    let here: std::net::IpAddr = "192.0.2.7".parse().expect("an address");
+    let asked = |scope: &str, soul: Option<&str>, at: u64| {
+        let a = Ask {
+            secret_hash: sha256(to_hex(&random::<32>()).as_bytes()),
+            device: "studio laptop".into(),
+            label: "souls-god.mjs".into(),
+            soul: soul.map(str::to_string),
+            scope: scope.into(),
+            force: false,
+        };
+        let code = p.ask(&a, at).expect("asked").code;
+        p.ask_from(&code, here, at);
+        code
+    };
+    let soul = asked("soul", None, T0);
+    p.ask_world(&soul, "eden").expect("its world");
+    let mine = asked("creator", Some(creator), T0 + 1);
+    let codes = |holds: &dyn Fn(&str) -> bool| -> Vec<(String, Option<String>)> {
+        p.waiting("eden", here, T0 + 2, holds)
+            .expect("the list")
+            .into_iter()
+            .map(|(code, _, _, soul, ..)| (code, soul))
+            .collect()
+    };
+    assert_eq!(
+        codes(&|g| g == creator),
+        vec![
+            (mine.clone(), Some(creator.to_string())),
+            (soul.clone(), None)
+        ],
+        "the holder sees its agent's creator request, newest first, with the Soul's"
+    );
+    assert_eq!(
+        codes(&|_| false),
+        vec![(soul.clone(), None)],
+        "anyone else sees only the Soul's"
+    );
+    let elsewhere = asked("creator", Some(creator), T0 + 2);
+    p.ask_world(&elsewhere, "elsewhere").expect("its world");
+    assert!(
+        !codes(&|g| g == creator)
+            .iter()
+            .any(|(c, _)| *c == elsewhere),
+        "a creator request naming another world is not this page's"
+    );
+}
+
 /// G7 (#2796): a creator pairs like a Soul, for a world's creator grant its account holds, and is handed a creator
 /// token, which the gateway's tokens file then lists.
 #[test]

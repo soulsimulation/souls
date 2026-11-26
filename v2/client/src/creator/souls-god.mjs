@@ -102,12 +102,15 @@
 //   souls-god.mjs taxonomy                       categories with counts, and what kinds offer (the --has names)
 //                                                these four read the world's kinds in the home; no daemon, no server;
 //                                                --lines prints them as lines instead of JSON
-//   souls-god.mjs look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
+//   souls-god.mjs look <place|thing|soul|id|x,z> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
 //                                                a picture of it, drawn here from the public stream (souls.mjs shoot);
-//                                                with no browser here, the copy's words for it instead
-//   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id>
+//                                                with no browser here, or a page that draws nothing, it in words from
+//                                                the copy: its id, kind and spot, its room and areas, what is in it and
+//                                                the nearest things, each with its id and metres (space.mjs)
+//   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id> [--page <url>]
 //                                                the room, areas and nearest things there; whether a footprint is free
-//                                                of things and buildings; the nearest free one (world metres, space.mjs)
+//                                                of things and buildings; the nearest free one (world metres, read from
+//                                                the copy with no browser; --page reads the page drawn here, space.mjs)
 //   souls-god.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]   what happened
 //                                                there, from the world's public history, a day by default (R8c)
 //   souls-god.mjs trace [n]                      the creator's last n commands here (20, at most 200), newest first:
@@ -142,8 +145,8 @@ import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { kitEntry } from './kit.mjs';
 import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
-import { parseShoot, runShoot } from '../shoot/shoot.mjs';
-import { parseSpace, runSpace } from './space.mjs';
+import { parseShoot } from '../shoot/shoot.mjs';
+import { parseSpace, runLook, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
 import { describeThing } from './thing.mjs';
 import { mapOf } from './map.mjs';
@@ -326,6 +329,8 @@ export const FIX = {
   'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
   'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
   'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
+  'name-ambiguous': 'give one of the ids in choices',
+  'unknown-op': 'your daemon is older than this command: run quit, then the command again',
   'when.no-calendar': 'the copy has no world clock yet: run status until connected is true, or give --when <world µs>us',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
@@ -1011,15 +1016,15 @@ if (isMain(import.meta.url)) {
     // 0.133 Q2: a creator's pairing adds to a home, so it never takes a parent folder's
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: asked.pair !== undefined });
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
-    if (asked.look) {
-      // The picture needs no creator; the words without a browser come from the creator's daemon when there is one.
+    if (asked.look || asked.space) {
+      // The picture needs no creator. The words with no picture, and where, clear and free, come from the creator's
+      // copy (the daemon's `space`) when the home has a creator, with no browser (#5006 finding 5).
       const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
       const who = asked.creator ?? (creators.length === 1 ? creators[0] : null);
-      const ask = who ? (r) => call(home, who, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
-      out(await runShoot(asked.look, { home, env: process.env, ask }));
+      const ask = who ? (r) => call(home, who, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 30_000 }) : null;
+      out(asked.look ? await runLook(asked.look, { home, env: process.env, ask }) : await runSpace(asked.space, asked.args, { home, env: process.env, ask }));
       process.exit(0);
     }
-    if (asked.space) { out(await runSpace(asked.space, asked.args, { home, env: process.env })); process.exit(0); }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (asked.library) {
@@ -1090,7 +1095,7 @@ if (isMain(import.meta.url)) {
     out(withFix({ ...answer, ...(asked.say ?? {}), ...(req?.build !== undefined && answer.build === undefined ? { build: req.build, step: req.step } : {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
-    out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));
+    out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200), ...(e.choices ? { choices: e.choices } : {}) }));
     process.exitCode = 1;
   }
 }
