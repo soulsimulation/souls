@@ -21,9 +21,11 @@
 //           it and its `part put` is not refused `part.not-held`.
 //           With --crew 6 six Souls build two bays side by side in a run, from a yard the creator places live (two
 //           stands of two frames, eight beams, the two bays, and a 6.1 m frame): each bay's frames by two, its four
-//           beams (low, then high) by three, a front, a back and a side beside the middle grip; then all six carry the
-//           6.1 m frame together, one at each of its six grips (`buildTwoBays`).
-//             node tools/playtest/rack-bay/rack-bay.mjs local --crew 6 [--record 900]
+//           beams by three, a front, a back and a side beside the middle grip, each beam from the side of the bay its
+//           slot is on (two lie west of each bay, two east), lined up outside and set in by its put; then all six carry
+//           the 6.1 m frame together, one at each of its six grips (`buildTwoBays`); then both bays come down, the
+//           second first, each beam laid back where it lay and each frame back in its stand (`takeDownTwoBays`).
+//             node tools/playtest/rack-bay/rack-bay.mjs local --crew 6 [--record 1800]
 //   stage   the creator's `souls-god.mjs` lines that place the same yard live in a staged world (printed, not run):
 //             node tools/playtest/rack-bay/rack-bay.mjs stage
 //   run     the steps against four Souls already paired and standing in a world (soul.game's staged test world):
@@ -57,17 +59,21 @@ export const CAMERA = { position: [0, 6, 31], target: [0, 1, 20.5], fov: 50 };
 /** The title the creator gives the frame it places live; the Souls name it only by this. */
 export const SPARE = 'spare frame';
 const LABELS = ['ada', 'bo', 'cy', 'di'];
-/** Six Souls' yard (--crew 6), south of the template's own: two stands of two frames, eight beams lying along z in two
- *  rows, two bays beside each other in a run (the second's first frame 0.7 m from the first's last), and the 6.1 m
- *  frame, standing, which all six carry `tall.to`. Metres. */
+/** Six Souls' yard (--crew 6), south of the template's own: two stands of two frames, two bays beside each other in a
+ *  run (the second's first frame 0.7 m from the first's last), each bay's four beams lying along z level with it, two
+ *  west of it for its _l slots and two east for its _r slots (a beam goes in from its own side), and the 6.1 m frame,
+ *  standing, which all six carry `tall.to`. Metres. */
 export const AT6 = {
   stands: [[-6, 26], [-6, 30]],
-  beams: [-3.6, -2.8, -2, -1.2].flatMap((x) => [[x, 26]]).concat([-3.6, -2.8, -2, -1.2].map((x) => [x, 30])),
   bays: [[6, 26], [6, 29.6]],
+  beams: [26, 29.6].flatMap((z) => [[-3.6, z], [-2.8, z], [9.6, z], [10.4, z]]),
   tall: { at: [-2, 35], to: [5, 35] },
 };
-/** The camera for six: farther back and higher, both bays and the 6.1 m frame in view. */
-export const CAMERA6 = { position: [0, 11, 46], target: [0, 1, 29], fov: 50 };
+/** Each bay's beams in `AT6.beams`' order, by the slot each goes in. */
+const BEAM_SLOTS = ['beam_low_l', 'beam_high_l', 'beam_low_r', 'beam_high_r'];
+/** The camera for six: south-east of the bays and above the crews, near enough (10 to 14 m) that a seated beam can be
+ *  told by eye, with the stands, both rows of beams and the 6.1 m frame's carry in view. */
+export const CAMERA6 = { position: [9, 5.5, 39.5], target: [4, 0.8, 28.5], fov: 50 };
 const SIX = ['ada', 'bo', 'cy', 'di', 'ed', 'fy'];
 /** Where a beam's carriers stand from its middle (m): outside the bay's frames, which stand at its slots' ends. */
 const BEAM_FROM = '1.8';
@@ -197,8 +203,16 @@ export async function spareFrame(god, { run, both }, seats, bodies, at = AT, log
   return { placed, seen };
 }
 
-/** A runner over seats: `run(who, ...words)` logs and returns the answer; a refused step throws with the refusal. */
-export function runner(seats, log = console.log, t0 = Date.now()) {
+/** How long before the moment it names a carry's `--go` is said, ms: on a loaded laptop a command reaches its send 5 to
+ *  12 s after it starts, and carriers that set off a second apart break their carry off (carriers-apart). */
+export const GO_LEAD_MS = 12_000;
+
+/**
+ * A runner over seats: `run(who, ...words)` logs and returns the answer; a refused step throws with the refusal.
+ * `both(...steps)` runs steps at once; each `carry to` among them carries the same `--go` moment (`go()`), so its
+ * carriers set off together, as a leader saying "on go" has them.
+ */
+export function runner(seats, log = console.log, t0 = Date.now(), { go = () => String(Date.now() + GO_LEAD_MS) } = {}) {
   const lines = [];
   const run = async (who, ...words) => {
     const at = (Date.now() - t0) / 1000;
@@ -208,7 +222,10 @@ export function runner(seats, log = console.log, t0 = Date.now()) {
     if (!ans.ok) throw Object.assign(new Error(`${who}: ${words.join(' ')} refused ${ans.code} ${ans.detail ?? ''}`), { answer: ans });
     return ans;
   };
-  const both = (...steps) => Promise.all(steps.map((s) => run(...s)));
+  const both = (...steps) => {
+    const at = steps.some((s) => s[1] === 'carry' && s[2] === 'to') ? go() : null;
+    return Promise.all(steps.map((s) => run(...(at && s[1] === 'carry' && s[2] === 'to' ? [...s, '--go', at] : s))));
+  };
   return { run, both, lines };
 }
 
@@ -291,53 +308,85 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
 /** Six Souls' ids by the titles the creator gave (`stageBatch6`), as Ada's copy names them. */
 export async function findIds6(seat) {
   // one find for each kind of part: a find names a dozen things at most
-  const a = await seat.cli('query', JSON.stringify([{ find: 'rack frame' }, { find: 'rack beam' }, { find: 'rack bay' }, { find: 'tall frame' }]));
+  const a = await seat.cli('query', JSON.stringify([{ find: 'rack frame' }, { find: 'rack beam' }, { find: 'rack bay' }, { find: 'tall frame' }, { find: 'frame stand' }]));
   const found = (a.answers ?? []).flatMap((x) => x.found ?? []);
   const named = (want) => { const f = found.find((x) => x.name === want && /^mars:/.test(x.kind ?? '')); if (!f) throw new Error(`Ada's copy finds no "${want}" (found: ${found.map((x) => x.name).join(', ')})`); return f.id; };
   return {
     bays: [1, 2].map((k) => ({ bay: named(`rack bay ${k}`), fa: named(`rack frame ${2 * k - 1}`), fb: named(`rack frame ${2 * k}`), beams: [1, 2, 3, 4].map((b) => named(`rack beam ${4 * (k - 1) + b}`)) })),
     tall: named('tall frame'),
+    stands: [1, 2].map((k) => named(`frame stand ${k}`)),
   };
 }
+
+/** Where each of the six's beams lay (`AT6.beams`, by title), as `carry to` and `part put` take a point; and each
+ *  frame's stand and slot. */
+export function homes6(ids, at = AT6) {
+  const homes = {}, stands = {};
+  ids.bays.forEach(({ fa, fb, beams }, k) => {
+    beams.forEach((b, j) => { homes[b] = at.beams[4 * k + j].join(','); });
+    stands[fa] = [ids.stands[k], 'frame_1']; stands[fb] = [ids.stands[k], 'frame_2'];
+  });
+  return { homes, stands };
+}
+
+/** A crew offered by `a` to `others` (on a part, to hold it where it stands), each accepting in order: the back, then
+ *  each side. → its id */
+const crewOf = ({ run }, bodies) => async (a, others, on = null) => {
+  const { crew: c } = await run(a, 'carry', 'offer', ...others.map((o) => bodies[o]), ...(on ? ['--on', on] : []));
+  for (const o of others) await run(o, 'carry', 'accept', c);
+  return c;
+};
+/**
+ * A take or unseat (`part <verb> <crew> <part>`) once its crew has gripped it: when the world refuses it
+ * `part.out-of-reach` (a carrier's walk to its grip ended short of it), the crew walks to its grips again (`grips`, run
+ * at once) and takes it once more, as an agent reading that refusal does.
+ */
+const takeAfter = ({ run, both }) => async (who, verb, c, part, grips) => {
+  try { return await run(who, 'part', verb, c, part); } catch (e) {
+    if (e.answer?.code !== 'part.out-of-reach') throw e;
+    await both(...grips);
+    return run(who, 'part', verb, c, part);
+  }
+};
+/** Who does what in each of the six's bays: its frames' carriers (back, front: the front holds it), and its beams'. */
+const TEAMS = [
+  { a: ['ada', 'bo'], b: ['cy', 'di'], beams: ['ada', 'cy', 'ed'] },
+  { a: ['ed', 'fy'], b: ['bo', 'di'], beams: ['ada', 'cy', 'ed'] },
+];
 
 /**
  * Six Souls build two bays beside each other, each Soul by its own commands, then all six carry the 6.1 m frame. Each
  * bay: its first frame by two into upright_a, the front holding it; its second by two into upright_b, the front holding
- * it; its four beams by three (a front, a back, and a side beside the beam's middle grip), the low ones and then the
- * high ones, each pair right then left so none is carried past one seated at its height; then the holders let go and
- * the bay stands. The 6.1 m frame: its front, its back and four sides each at a grip, offered by the front to the
- * other five, lifted, carried `to` and set down.
+ * it; its four beams by three (a front, a back, and a side beside the beam's middle grip), low before high on each
+ * side, each from its own side of the bay: the crew stops it lined up outside the bay and its put sets it in, so no
+ * beam is carried between the frames' posts; then the holders let go and the bay stands. The 6.1 m frame: its front,
+ * its back and four sides each at a grip, offered by the front to the other five, lifted, carried `to` and set down.
  */
 export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = AT6.tall.to) {
-  const all = (...steps) => Promise.all(steps.map((s) => run(...s)));
-  const crew = async (a, others, on = null) => {
-    const { crew: c } = await run(a, 'carry', 'offer', ...others.map((o) => bodies[o]), ...(on ? ['--on', on] : []));
-    for (const o of others) await run(o, 'carry', 'accept', c);   // in order: the back, then each side
-    return c;
-  };
+  const all = both;
+  const crew = crewOf({ run }, bodies);
+  const take = takeAfter({ run, both });
   const frame = async (f, back, front, bay, slot) => {
     await both([back, 'carry', 'grip', f, 'back'], [front, 'carry', 'grip', f, 'front']);
     const c = await crew(front, [back]);
-    await run(front, 'part', 'take', c, f);
+    await take(front, 'take', c, f, [[back, 'carry', 'grip', f, 'back'], [front, 'carry', 'grip', f, 'front']]);
     await both([back, 'carry', 'to', c, bay, slot], [front, 'carry', 'to', c, bay, slot]);
     await run(front, 'part', 'put', c, bay, slot);
     await run(back, 'carry', 'leave', c);   // the front holds it standing in its slot
     return c;
   };
-  const teams = [
-    { a: ['ada', 'bo'], b: ['cy', 'di'], beams: ['ada', 'cy', 'ed'] },
-    { a: ['ed', 'fy'], b: ['bo', 'di'], beams: ['ada', 'cy', 'ed'] },
-  ];
   const built = [];
   for (const [k, { bay, fa, fb, beams }] of bays.entries()) {
-    const t = teams[k];
+    const t = TEAMS[k];
     const holdA = await frame(fa, t.a[0], t.a[1], bay, 'upright_a');
     const holdB = await frame(fb, t.b[0], t.b[1], bay, 'upright_b');
     const [front, back, side] = t.beams;
     const c = await crew(front, [back, side]);
-    for (const [beam, slot] of [[beams[0], 'beam_low_r'], [beams[1], 'beam_low_l'], [beams[2], 'beam_high_r'], [beams[3], 'beam_high_l']]) {
-      await all([back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']);
-      await run(front, 'part', 'take', c, beam);
+    for (const k of [0, 2, 1, 3]) {   // low left, low right, high left, high right
+      const [beam, slot] = [beams[k], BEAM_SLOTS[k]];
+      const grips = [[back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']];
+      await all(...grips);
+      await take(front, 'take', c, beam, grips);
       await all([back, 'carry', 'to', c, bay, slot], [front, 'carry', 'to', c, bay, slot], [side, 'carry', 'to', c, bay, slot]);
       await run(front, 'part', 'put', c, bay, slot);
     }
@@ -355,7 +404,51 @@ export async function buildTwoBays({ run, both }, bodies, { bays, tall }, to = A
   await all(...[...ends, ...sides].map((s) => [s, 'carry', 'to', c, where]));
   await run('bo', 'carry', 'set-down', c);
   await all(...[...ends, ...sides].map((s) => [s, 'carry', 'leave', c]));
-  return { built };
+  return { built, tall: Date.now() };
+}
+
+/**
+ * Six Souls take both bays down, the second first, each Soul by its own commands. Each bay: a holder on each frame (two
+ * grip it either side, a crew offered on it, one lets go); its beams out by three, high before low on each side, each
+ * unseated, carried out to its own side and laid where it lay (`homes`, by beam id); then each frame out by two, its
+ * holder letting go, back into its stand's slot (`stands`: [stand id, slot] by frame id).
+ */
+export async function takeDownTwoBays({ run, both }, bodies, { bays }, homes, stands) {
+  const all = both;
+  const crew = crewOf({ run }, bodies), take = takeAfter({ run, both });
+  const down = [];
+  for (const k of [1, 0]) {
+    const { bay, fa, fb, beams } = bays[k], t = TEAMS[k];
+    const hold = async (f, keeps, other) => {
+      await both([keeps, 'carry', 'grip', f, 'right'], [other, 'carry', 'grip', f, 'left']);
+      const h = await crew(keeps, [other], f);
+      await run(other, 'carry', 'leave', h);
+      return h;
+    };
+    const holdA = await hold(fa, t.a[1], t.a[0]), holdB = await hold(fb, t.b[1], t.b[0]);
+    const [front, back, side] = t.beams, c = await crew(front, [back, side]);
+    for (const j of [1, 3, 0, 2]) {   // high left, high right, low left, low right
+      const beam = beams[j], home = homes[beam];
+      const grips = [[back, 'carry', 'grip', beam, 'back', '--from', BEAM_FROM], [front, 'carry', 'grip', beam, 'front', '--from', BEAM_FROM], [side, 'carry', 'grip', beam, 'side', '1']];
+      await all(...grips);
+      await take(front, 'unseat', c, beam, grips);
+      await all([back, 'carry', 'to', c, home], [front, 'carry', 'to', c, home], [side, 'carry', 'to', c, home]);
+      await run(front, 'part', 'put', c, home);
+    }
+    await all([front, 'carry', 'leave', c], [back, 'carry', 'leave', c], [side, 'carry', 'leave', c]);
+    for (const [f, h, holder, [back2, front2]] of [[fb, holdB, t.b[1], t.b], [fa, holdA, t.a[1], t.a]]) {
+      const [stand, slot] = stands[f];
+      await both([back2, 'carry', 'grip', f, 'back'], [front2, 'carry', 'grip', f, 'front']);
+      const out = await crew(front2, [back2], f);
+      await run(holder, 'carry', 'leave', h);
+      await take(front2, 'unseat', out, f, [[back2, 'carry', 'grip', f, 'back'], [front2, 'carry', 'grip', f, 'front']]);
+      await both([back2, 'carry', 'to', out, stand, slot], [front2, 'carry', 'to', out, stand, slot]);
+      await run(front2, 'part', 'put', out, stand, slot);
+      await both([back2, 'carry', 'leave', out], [front2, 'carry', 'leave', out]);
+    }
+    down.push(Date.now());
+  }
+  return { down };
 }
 
 /** The steps as a person types them: a recording runner that answers each command with a named placeholder. */
@@ -366,7 +459,7 @@ export async function printLines() {
     return words[0] === 'carry' && words[1] === 'offer' ? { ok: true, crew: `<crew${++n}>` } : { ok: true };
   } }]));
   const ids = { bay: '<bay>', stand: '<stand>', fa: '<frame1>', fb: '<frame2>', beams: ['<beam1>', '<beam2>'] };
-  await buildAndTakeDown(runner(seats, () => {}), Object.fromEntries(LABELS.map((l) => [l, `<${l}-body>`])), ids);
+  await buildAndTakeDown(runner(seats, () => {}, Date.now(), { go: () => '<hh:mm:ss>' }), Object.fromEntries(LABELS.map((l) => [l, `<${l}-body>`])), ids);
 }
 
 /** Where each part is, in Ada's copy; once the last crew has let go (its activity ends a moment later), up to 10 s. */
@@ -431,7 +524,11 @@ async function main() {
     log(`page ${world.page}`);
     const play = six ? async () => {
       const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
-      try { const v = await buildTwoBays(r, bodies, out.ids); out.builtAtS = v.built.map((b) => (b - t0) / 1000); out.ok = true; } catch (e) { out.ok = false; out.failed = e.message; }
+      try {
+        const v = await buildTwoBays(r, bodies, out.ids); out.builtAtS = v.built.map((b) => (b - t0) / 1000); out.tallAtS = (v.tall - t0) / 1000; save();
+        const { homes, stands } = homes6(out.ids), d = await takeDownTwoBays(r, bodies, out.ids, homes, stands);
+        out.downAtS = d.down.map((b) => (b - t0) / 1000); out.ok = true;
+      } catch (e) { out.ok = false; out.failed = e.message; }
       out.ms = Date.now() - t0; save();
     } : async () => {
       const t0 = Date.now(), r = runner(seats, log, t0); out.steps = r.lines;
@@ -448,7 +545,10 @@ async function main() {
       let done = null;
       const camera = six ? CAMERA6 : CAMERA;
       out.clip = { file: join(dir, 'rack-bay.mp4'), camera };
-      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: camera }, record, 16 / 9), log, onPlay: () => { done = play(); } });
+      // a long take (six Souls run half an hour) ends when the run does, at 30 fps, and is encoded fast
+      let ended = null; const end = new Promise((r) => { ended = r; });
+      out.clip.sidecar = await capture({ url: world.page, out: out.clip.file, seconds: record, size: '1280x720', hour: '12:00', shot: cameraShot({ fixed: camera }, record, 16 / 9), log,
+        ...(six ? { fps: 30, mbps: 8, preset: 'veryfast', until: end } : {}), onPlay: () => { done = play().finally(() => setTimeout(ended, 5000)); } });
       await done;
     } else await play();
     if (!six) out.after = await partsWhere(seats.ada, out.ids);

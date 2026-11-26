@@ -914,6 +914,34 @@
    "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
    "kind": "mars:timber_bundle",
    "forms": "own"
+  },
+  {
+   "def": "mars-shade-site@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:shade_site",
+   "forms": "own"
+  },
+  {
+   "def": "mars-timber-bent@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:timber_bent",
+   "forms": "own"
+  },
+  {
+   "def": "mars-timber-rail@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:timber_rail",
+   "forms": "own"
+  },
+  {
+   "def": "mars-shade-cloth@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
+   "kind": "mars:shade_cloth",
+   "forms": "own"
   }
  ]
 }

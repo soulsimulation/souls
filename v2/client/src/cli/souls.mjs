@@ -149,7 +149,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
 import { clientUpdate } from '../upgrade/served.mjs';
-import { nextStep } from '../carry/carry.mjs';
+import { goTime, nextStep } from '../carry/carry.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -425,7 +425,8 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from');
+    const on = flag('--on'), from = flag('--from'), go = flag('--go');
+    if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
     if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
@@ -433,8 +434,8 @@ export function requestOf(argv) {
     else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
     // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
-    else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' ') });
-    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}) });
+    else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
+    else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does !== 'list') req.crew = a;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
   }
@@ -729,7 +730,7 @@ export const CARRY_HELP = [
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
   'carry lift <crew id> <load id>   lift a loose load together',
-  'carry to <crew id> <x,z | thing id> [<slot>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once',
+  'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); every carrier sends its own, at once: the leader names the moment (UTC) and each sends it with --go, which sets off then. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
   'carry to <crew id> the loading spot   every carrier at once: the load goes into the spot\'s first free bay (the answer names it); then one sends carry set-down',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
@@ -747,7 +748,7 @@ export const BUILD_HELP = [
   'frames first: two carry a frame from its stand (carry grip <frame> back | front, carry offer, carry accept, part take <crew> <frame>, both carry to <crew> <bay id> upright_a, part put <crew> <bay id> upright_a)',
   'a seated frame must stay held until beams join it: one of its crew stays (the other carry leave <crew>); a new holder takes over with carry grip <frame> left|right, carry offer <name> --on <frame>, and the old crew leaves',
   'then the second frame into upright_b, held the same way',
-  'beams: two carry each (carry grip <beam> back --from 2.2 | front --from 2.2), part take, both carry to <crew> <bay id> beam_low_l, part put; then beam_low_r (high beams the same)',
+  'beams: two carry each (carry grip <beam> back --from 2.2 | front --from 2.2), part take, both carry to <crew> <bay id> beam_low_l, part put; then beam_low_r (high beams the same). Bring each beam from its slot\'s side of the bay (_l from the bay\'s -x, _r from its +x): it stops outside, lined up, and its put sets it in',
   'when inspect shows no slot left, the bay stands: every crew lets go (carry leave <crew>)',
   'taking it down is the reverse: hold each frame, unseat the beams (part unseat <crew> <beam>) and lay them down (part put <crew> <x,z>), then the frames back into their stand',
 ];

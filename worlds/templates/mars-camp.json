@@ -3885,6 +3885,526 @@
           ]
         }
       ]
+    },
+    {
+      "note": "the shade yard: the parts of a timber shade (two bents standing, two rails and a shade cloth lying) beside its marked site, east of the rack yard; a crew of four to six builds it (content/kinds/carpentry; content/worlds/mars/map.json names each copy's kind)",
+      "group": "shade",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-shade-site",
+            "version": 1,
+            "description": "A marked site for a timber shade: stakes and string where two bents stand 3 m apart, a rail across their tops on each side and a shade cloth on the rails.",
+            "tags": [
+              "build",
+              "shade",
+              "site",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.85,
+                      0.15,
+                      -1.5
+                    ],
+                    "size": [
+                      0.04,
+                      0.3,
+                      0.04
+                    ],
+                    "tint": "stake"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.85,
+                      0.15,
+                      -1.5
+                    ],
+                    "size": [
+                      0.04,
+                      0.3,
+                      0.04
+                    ],
+                    "tint": "stake"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.85,
+                      0.15,
+                      1.5
+                    ],
+                    "size": [
+                      0.04,
+                      0.3,
+                      0.04
+                    ],
+                    "tint": "stake"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.85,
+                      0.15,
+                      1.5
+                    ],
+                    "size": [
+                      0.04,
+                      0.3,
+                      0.04
+                    ],
+                    "tint": "stake"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.005,
+                      -1.5
+                    ],
+                    "size": [
+                      1.7,
+                      0.01,
+                      0.02
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.005,
+                      1.5
+                    ],
+                    "size": [
+                      1.7,
+                      0.01,
+                      0.02
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.85,
+                      0.005,
+                      0
+                    ],
+                    "size": [
+                      0.02,
+                      0.01,
+                      3.0
+                    ],
+                    "tint": "line"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.85,
+                      0.005,
+                      0
+                    ],
+                    "size": [
+                      0.02,
+                      0.01,
+                      3.0
+                    ],
+                    "tint": "line"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "stake": {
+                "type": "color",
+                "default": "#c9a46a",
+                "doc": "stake colour"
+              },
+              "line": {
+                "type": "color",
+                "default": "#e8632b",
+                "doc": "string colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.9,
+                2.03,
+                3.1
+              ]
+            },
+            "palette": {
+              "stake": "#c9a46a",
+              "line": "#e8632b"
+            },
+            "slots": [
+              {
+                "id": "bent_a",
+                "kind": "socket",
+                "p": [
+                  0,
+                  0,
+                  -1.5
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "bent_b",
+                "kind": "socket",
+                "p": [
+                  0,
+                  0,
+                  1.5
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "rail_l",
+                "kind": "socket",
+                "p": [
+                  -0.85,
+                  1.9,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "rail_r",
+                "kind": "socket",
+                "p": [
+                  0.85,
+                  1.9,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "cloth",
+                "kind": "socket",
+                "p": [
+                  0,
+                  2.0,
+                  0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              }
+            ],
+            "layer": "decor"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-timber-bent",
+            "version": 1,
+            "description": "A timber bent: two 1.8 m posts and the tie beam across their tops; two people carry it.",
+            "tags": [
+              "build",
+              "shade",
+              "timber",
+              "bent",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.85,
+                      0.9,
+                      0
+                    ],
+                    "size": [
+                      0.1,
+                      1.8,
+                      0.1
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.85,
+                      0.9,
+                      0
+                    ],
+                    "size": [
+                      0.1,
+                      1.8,
+                      0.1
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      1.85,
+                      0
+                    ],
+                    "size": [
+                      1.8,
+                      0.1,
+                      0.1
+                    ],
+                    "tint": "end"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "timber": {
+                "type": "color",
+                "default": "#9b6b3f",
+                "doc": "post colour"
+              },
+              "end": {
+                "type": "color",
+                "default": "#7a5230",
+                "doc": "tie colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.8,
+                1.9,
+                0.1
+              ]
+            },
+            "palette": {
+              "timber": "#9b6b3f",
+              "end": "#7a5230"
+            },
+            "layer": "solid"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-timber-rail",
+            "version": 1,
+            "description": "A 3.1 m timber rail; two to four people carry it.",
+            "tags": [
+              "build",
+              "shade",
+              "timber",
+              "rail",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.05,
+                      0
+                    ],
+                    "size": [
+                      0.1,
+                      0.1,
+                      3.1
+                    ],
+                    "tint": "timber"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "timber": {
+                "type": "color",
+                "default": "#a87a4a",
+                "doc": "rail colour"
+              }
+            },
+            "size": {
+              "box": [
+                0.1,
+                0.1,
+                3.1
+              ]
+            },
+            "palette": {
+              "timber": "#a87a4a"
+            },
+            "layer": "solid"
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-shade-cloth",
+            "version": 1,
+            "description": "A shade-cloth roof panel on two battens; four to six people carry it.",
+            "tags": [
+              "build",
+              "shade",
+              "cloth",
+              "roof",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.04,
+                      0
+                    ],
+                    "size": [
+                      1.9,
+                      0.012,
+                      2.4
+                    ],
+                    "tint": "cloth"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.85,
+                      0.025,
+                      0
+                    ],
+                    "size": [
+                      0.06,
+                      0.05,
+                      2.4
+                    ],
+                    "tint": "batten"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.85,
+                      0.025,
+                      0
+                    ],
+                    "size": [
+                      0.06,
+                      0.05,
+                      2.4
+                    ],
+                    "tint": "batten"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "params": {
+              "cloth": {
+                "type": "color",
+                "default": "#e2cfa6",
+                "doc": "cloth colour"
+              },
+              "batten": {
+                "type": "color",
+                "default": "#8a5d36",
+                "doc": "batten colour"
+              }
+            },
+            "size": {
+              "box": [
+                1.9,
+                0.05,
+                2.4
+              ]
+            },
+            "palette": {
+              "cloth": "#e2cfa6",
+              "batten": "#8a5d36"
+            },
+            "layer": "solid"
+          }
+        },
+        {
+          "op": "place",
+          "def": "mars-timber-bent@1",
+          "name": "timber-bent-1",
+          "p": [
+            10,
+            13.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-timber-bent@1",
+          "name": "timber-bent-2",
+          "p": [
+            10,
+            16.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-timber-rail@1",
+          "name": "timber-rail-1",
+          "p": [
+            11.5,
+            15
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-timber-rail@1",
+          "name": "timber-rail-2",
+          "p": [
+            17.5,
+            15
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-shade-cloth@1",
+          "name": "shade-cloth",
+          "p": [
+            19,
+            15
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-shade-site@1",
+          "name": "shade-site",
+          "p": [
+            14,
+            15
+          ]
+        }
+      ]
     }
   ]
 }

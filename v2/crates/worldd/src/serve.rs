@@ -71,7 +71,11 @@
 //! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
 //! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
-//! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
+//! <bare> on things with no slots of their own; <beyond> past a thing's own slots; <moved> stand points moved to clear
+//! ground`: every declared slot is registered or counted under one reason (#4092). A thing that borrows another kind's
+//! entry sits at its own slots of those numbers, so the entry's seats its def has no slot for are not offered (a Mars
+//! toilet whose def bakes no slots, a one-seat tier naming the two-seat `eden:bench`); each such thing is printed
+//! before the line, `body slot not on the thing: <thing> slot <n> of <entry>; its own slots: <n>|none`. A stand point a body cannot stand on is moved to the nearest clear ground
 //! within a form's reach (C15's rule), so a rise sets the body down where it can stand. So is one in a doorway's
 //! clearance, where the spot tables never stop a walker (a bed beside its room's door): moved to the nearest place out
 //! of it, no nearer the seat, so a walk to the seat ends within the sit's or the lie's reach.
@@ -529,6 +533,76 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         );
     }
     Ok(by_kind.into_values().collect())
+}
+
+/// Seats a thing's entry declares that its own shape has none of (#4092): a thing that borrows another kind's entry (a
+/// Mars tier names `eden:bench`, a toilet `eden:toilet`) sits at its own slots of those numbers (field 13, its def's
+/// geometry), so an entry seat it has no slot for is not offered (`import_eden::body_slots`).
+#[derive(Debug, PartialEq, Eq)]
+struct NotOnThing {
+    thing: Id,
+    /// The entry the thing names.
+    entry: String,
+    /// The entry's slots the thing does not offer, by number.
+    slots: Vec<u64>,
+    /// The thing's own slots, by number: none when its def has no slots at all.
+    own: Vec<u64>,
+}
+
+/// Every [`NotOnThing`] in `tree`, by thing: the body slots `import_eden::body_slots` counts as declared and leaves
+/// out, so `serve`'s seats line accounts for every declared slot.
+fn not_on_things(tree: &replica::tree::Tree, kinds: &[(String, Json)]) -> Vec<NotOnThing> {
+    let (found, _) = import_eden::body_slots(tree, kinds);
+    let offered: std::collections::BTreeSet<(Id, u64)> =
+        found.iter().map(|s| (s.thing, s.slot)).collect();
+    // Each entry's body slots by number, read once: the entry read as its own kind's, so nothing is borrowed.
+    let mut declared: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+    let mut out = Vec::new();
+    let mut next = vec![tree.root()];
+    while let Some(h) = next.pop() {
+        next.extend(tree.children(h).unwrap_or(&[]));
+        let Some(n) = tree.node(h) else { continue };
+        let entry = import_eden::entry_name(n.kind().as_str(), n.fields());
+        // A thing of its entry's own kind borrows nothing: every slot its entry declares is offered.
+        if entry == plain(n.kind().as_str()) {
+            continue;
+        }
+        let all = declared.entry(entry.to_owned()).or_insert_with(|| {
+            import_eden::body_slots_of(n.id(), entry, &BTreeMap::new(), kinds)
+                .iter()
+                .map(|s| s.slot)
+                .collect()
+        });
+        let slots: Vec<u64> = all
+            .iter()
+            .copied()
+            .filter(|s| !offered.contains(&(n.id(), *s)))
+            .collect();
+        if slots.is_empty() {
+            continue;
+        }
+        let own = match n.fields().get(&import_eden::F_SLOTS) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .filter_map(|r| match r {
+                    Value::Array(r) => match r.first() {
+                        Some(Value::Uint(u)) => Some(*u),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        out.push(NotOnThing {
+            thing: n.id(),
+            entry: entry.to_owned(),
+            slots,
+            own,
+        });
+    }
+    out.sort_by_key(|t| t.thing);
+    out
 }
 
 /// The served activities' file in a world's folder, beside `world.kinds`: `gatewayd --entries` serves it with the
@@ -3978,9 +4052,33 @@ fn serve(args: &[String]) -> R<()> {
         );
     }
     let closed_kinds = worldd::closed::Closed::of(&kinds);
+    // The declared seats a thing's own shape has none of (#4092), each named, so the line accounts for every one.
+    let not_on = not_on_things(&town.tree, &kinds);
+    let count = |bare: bool| -> usize {
+        not_on
+            .iter()
+            .filter(|t| t.own.is_empty() == bare)
+            .map(|t| t.slots.len())
+            .sum()
+    };
+    let (bare, beyond) = (count(true), count(false));
+    for t in &not_on {
+        let nums = |v: &[u64]| v.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+        println!(
+            "body slot not on the thing: {} slot {} of {}; its own slots: {}",
+            replica::world_model::show(t.thing),
+            nums(&t.slots),
+            t.entry,
+            if t.own.is_empty() {
+                "none".to_owned()
+            } else {
+                nums(&t.own)
+            }
+        );
+    }
     println!(
-        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
-         moved to clear ground",
+        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {bare} on \
+         things with no slots of their own; {beyond} past a thing's own slots; {moved} stand points moved to clear ground",
         places.len(),
         things
     );
@@ -4630,6 +4728,89 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4092: every body slot the entries declare is registered or counted under one reason. A one-seat tier naming
+    /// the two-seat bench entry offers its slot 1, not 2; a toilet whose def has no slots offers none of its entry's; a
+    /// pew with both slots offers both. Each kind is named unlike its entry (`core:toilet` would be `eden:toilet`'s own).
+    #[test]
+    fn every_declared_seat_is_offered_or_named_with_its_reason() {
+        let thing = |id: &str, r: &str, entry: &str, slots: &str| {
+            format!(
+                r#"{{"id": "{id}", "def": "{r}", "ref": "{r}", "parent": null, "pose": [0, 0, 0, 0],
+                "world": [0, 0, 0, 0], "scale_ppm": 1000000, "entry": "{entry}", "slots": [{slots}]}}"#
+            )
+        };
+        let slot = |n: u8, x: i32| {
+            format!(r#"{{"n": {n}, "id": "s{n}", "kind": "sit", "at": [{x}, 450, 0], "yaw": 0}}"#)
+        };
+        let facts = format!(
+            r#"{{"format": "souls/import-eden/1",
+            "kinds": [{{"ref": "core-tier@2", "hash": "aa", "name": "core:mars_tier", "form": "point"}},
+                      {{"ref": "core-toilet@1", "hash": "bb", "name": "core:mars_toilet", "form": "point"}},
+                      {{"ref": "core-pew@1", "hash": "cc", "name": "core:mars_pew", "form": "point"}}],
+            "things": [{}, {}, {}],
+            "doors": [], "places": [], "bake": {{}}, "byRef": {{}}}}"#,
+            thing("e_tier", "core-tier@2", "eden:bench", &slot(1, 0)),
+            thing("e_toilet", "core-toilet@1", "eden:toilet", ""),
+            thing(
+                "e_pew",
+                "core-pew@1",
+                "eden:bench",
+                &format!("{}, {}", slot(1, -300), slot(2, 300))
+            ),
+        );
+        let im = import_eden::load(&facts).expect("loads");
+        let entry = |text: &str| json::parse(text).expect("an entry");
+        let kinds = vec![
+            (
+                "eden:bench".to_owned(),
+                entry(
+                    r#"{"kind": "eden:bench", "slots": {
+                    "left": {"admits": "body", "posture": "sit", "at_mm": [-300, 450, 0], "stand": "fl"},
+                    "right": {"admits": "body", "posture": "sit", "at_mm": [300, 450, 0], "stand": "fr"}},
+                  "points": {"fl": {"role": "stand", "at_mm": [-300, 0, 600]},
+                             "fr": {"role": "stand", "at_mm": [300, 0, 600]}}}"#,
+                ),
+            ),
+            (
+                "eden:toilet".to_owned(),
+                entry(
+                    r#"{"kind": "eden:toilet", "slots": {
+                    "s": {"admits": "body", "posture": "sit", "at_mm": [0, 420, 0], "stand": "f"}},
+                  "points": {"f": {"role": "stand", "at_mm": [0, 0, 600]}}}"#,
+                ),
+            ),
+        ];
+        let (found, all) = import_eden::body_slots(&im.tree, &kinds);
+        let mut offered: Vec<_> = found.iter().map(|s| (s.thing, s.slot)).collect();
+        offered.sort();
+        let (tier, toilet, pew) = (im.nodes["e_tier"], im.nodes["e_toilet"], im.nodes["e_pew"]);
+        let mut want = vec![(tier, 1u64), (pew, 1), (pew, 2)];
+        want.sort();
+        assert_eq!(offered, want);
+        let mut not_on = not_on_things(&im.tree, &kinds);
+        not_on.sort_by_key(|t| t.thing != tier);
+        assert_eq!(
+            not_on,
+            vec![
+                NotOnThing {
+                    thing: tier,
+                    entry: "eden:bench".into(),
+                    slots: vec![2],
+                    own: vec![1],
+                },
+                NotOnThing {
+                    thing: toilet,
+                    entry: "eden:toilet".into(),
+                    slots: vec![1],
+                    own: vec![],
+                },
+            ]
+        );
+        // Every declared slot is offered or named: 5 declared, 3 offered, 2 named.
+        let named: usize = not_on.iter().map(|t| t.slots.len()).sum();
+        assert_eq!((all, found.len() + named), (5, 5));
+    }
 
     /// A boat is read from its entry's data: a `vehicle` on `deep_water` (a rowing boat at 1.5 m/s, a canoe), never a
     /// bicycle on level ground or a punt, whose course is its mooring's.

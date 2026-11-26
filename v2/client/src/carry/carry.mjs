@@ -12,8 +12,9 @@
 //                                     or to the n-th side carrier's place, beside a grip between its ends
 //   carry grip <load> left|right <n>  beside its n-th grip between its ends, from its back: a side carrier's (spot.mjs)
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
-//   carry to <crew id> <x,z | thing id> [<slot>]   walks this Soul so the crew's load reaches there (its middle, or a
-//                                     bay's slot), keeping this Soul's place at the load: each carrier sends its own
+//   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
+//                                     middle, or a bay's slot), keeping this Soul's place at the load: each carrier
+//                                     sends its own, at the moment --go names when it names one
 //   carry to <crew id> the loading spot   into the spot's first free bay that takes the load (spot.mjs)
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
@@ -40,7 +41,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -292,20 +293,26 @@ export function carryIntents(req, ctx) {
         // now: so the part goes in square, not turned by however its carriers happened to stand. A side keeps its place
         // along and across the line, beside its grip.
         const at = placeOf(req.where), s = slotPoint(at, kinds[kindOf(req.where)], req.slot);
-        const crossed = crossedOnTheWay(req, ctx, at, s, mid);
-        if (crossed) return crossed;
         const q = times(at.rot ?? [ONE, 0, 0, 0], yawQuat(s.yaw)), flat = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
         const sz = flat(turn(q, [0, 0, M])), sx = flat(turn(q, [M, 0, 0])), dot = (a, b) => a[0] * b[0] + a[1] * b[1];
         // The crew's line now, from its back to its front (`ctx.crewEnds`: their ids and places); without it, z.
         const ends = ctx.crewEnds?.(req.crew) ?? null, line = ends && [ends.at[0][0] - ends.at[1][0], ends.at[0][1] - ends.at[1][1]];
         const lf = line ? Math.hypot(...line) : 0;
-        if (!lf) {
+        const w = lf ? [line[0] / lf, line[1] / lf] : null;
+        let u = !w || Math.abs(dot(sz, w)) >= Math.abs(dot(sx, w)) ? sz : sx;
+        if (w && dot(u, w) < 0) u = [-u[0], -u[1]];
+        // A slot off the bay's middle across that line (a beam's, at the frames' posts) is reached from its own side:
+        // the load stops lined up on the slot's axis outside the bay, and `part put` sets it in on the world's straight
+        // track. Walks end within 0.3 m of their goal, so a beam carried in between two frames' posts (a few cm to
+        // spare at each end) met a post whenever its crew had drifted (0.135, PR #4993's second bay).
+        const mouth = mouthOf(ctx, req, at, s, u, mid);
+        if (mouth) dest = mouth;
+        const crossed = crossedOnTheWay(req, ctx, at, s, mid, mouth);
+        if (crossed) return crossed;
+        if (!w) {
           const d = Math.hypot(...off) * (dot(off, sz) < 0 ? -1 : 1);
           return [walk(ns, ground, [dest[0] + sz[0] * d, dest[1] + sz[1] * d])];
         }
-        const w = [line[0] / lf, line[1] / lf];
-        let u = Math.abs(dot(sz, w)) >= Math.abs(dot(sx, w)) ? sz : sx;
-        if (dot(u, w) < 0) u = [-u[0], -u[1]];
         const end = ends.ids.includes(me);
         const along = end ? Math.hypot(...off) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
         return [walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across])];
@@ -318,6 +325,52 @@ export function carryIntents(req, ctx) {
 
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
 export const HEIGHT = 900_000;
+/** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
+export const GO_MOST_MS = 20_000;
+
+/** A `--go` word as Unix ms: digits are Unix ms; hh:mm:ss[.s] is today's time in UTC; else an ISO time. NaN when it is
+ *  none of these. */
+export function goTime(word, now = Date.now()) {
+  const w = String(word ?? '');
+  if (/^\d{10,}$/.test(w)) return Number(w);
+  const t = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)Z?$/.exec(w);
+  if (t) { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), +t[1], +t[2]) + Math.round(+t[3] * 1000); }
+  return /T/.test(w) ? Date.parse(w) : NaN;
+}
+
+/** How far outside a bay's bounds a load lined up on its slot stops, µm: within worldd's PUT_REACH (1 m) of the slot,
+ *  however short of its goal a walk ends (0.3 m). */
+export const MOUTH_CLEAR = 200_000;
+
+/** The part a crew holds and its half extents as it is held now (its turn in the copy): `ext` [x, up, z], the heights
+ *  it spans as carried (`band`), and its half length and half width on the plan. Null when the copy cannot say. */
+function heldExtent(ctx, crew) {
+  const { kinds, kindOf, placeOf } = ctx, id = ctx.heldBy?.(crew), b = id && kinds[kindOf(id)]?.geometry?.bounds_mm, hp = id && placeOf(id);
+  if (!Array.isArray(b) || b.length !== 3 || !hp) return null;
+  const hb = b.map((v) => v * 500);
+  const corners = [-1, 1].flatMap((a) => [-1, 1].flatMap((c) => [-1, 1].map((e) => turn(hp.rot ?? [ONE, 0, 0, 0], [a * hb[0], c * hb[1], e * hb[2]]))));
+  const ext = [0, 1, 2].map((k) => Math.max(...corners.map((v) => Math.abs(v[k]))));
+  return { id, ext, band: [HEIGHT - ext[1], HEIGHT + ext[1]], long: Math.max(ext[0], ext[2]), across: Math.min(ext[0], ext[2]) };
+}
+
+/**
+ * Where a crew carrying into a bay's slot stops, on the plan, µm, when that slot is off the bay's middle across the
+ * crew's line `u` (a beam's, at the frames' posts) and the crew is on the slot's side of the bay: on the slot's axis,
+ * the load's middle `MOUTH_CLEAR` beyond the bay's bounds and its own half width, so `part put` sets it in from there.
+ * Null for a slot on the bay's middle (a frame's, entering by its open end) or a crew across the bay from the slot,
+ * which carries it straight in as before.
+ */
+function mouthOf(ctx, req, bay, s, u, mid) {
+  const b = ctx.kinds[ctx.kindOf(req.where)]?.geometry?.bounds_mm;
+  if (!Array.isArray(b) || b.length !== 3) return null;
+  const a = [-u[1], u[0]], dot = (p, q) => p[0] * q[0] + p[1] * q[1], c = [bay.pos[0], bay.pos[2]];
+  const o = dot([s.point[0] - c[0], s.point[1] - c[1]], a);
+  if (Math.abs(o) < 100_000 || dot([mid[0] - c[0], mid[1] - c[1]], a) * o <= 0) return null;
+  const flat = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
+  const rot = bay.rot ?? [ONE, 0, 0, 0], half = Math.abs(dot(a, flat(turn(rot, [M, 0, 0])))) * b[0] * 500 + Math.abs(dot(a, flat(turn(rot, [0, 0, M])))) * b[2] * 500;
+  const out = Math.sign(o) * (half + (heldExtent(ctx, req.crew)?.across ?? 0) + MOUTH_CLEAR) - o;
+  return [s.point[0] + a[0] * out, s.point[1] + a[1] * out];
+}
 
 /**
  * A part already seated in another slot of the bay a crew carries its load into, met on the straight way there at the
@@ -326,24 +379,20 @@ export const HEIGHT = 900_000;
  * slot's z as it goes in, its middle from `mid` to the slot; each seated part where its slot holds it. `ctx.seated(id)`
  * the parts in a node's slots ({id, slot}), `ctx.heldBy(crew)` the part a crew holds; without them nothing is read.
  */
-function crossedOnTheWay(req, ctx, bay, s, mid) {
-  const { kinds, kindOf, placeOf } = ctx, held = ctx.heldBy?.(req.crew), entry = kinds[kindOf(req.where)];
+function crossedOnTheWay(req, ctx, bay, s, mid, mouth = null) {
+  const { kinds, kindOf } = ctx, held = heldExtent(ctx, req.crew), entry = kinds[kindOf(req.where)];
   const box = (id) => { const b = kinds[kindOf(id)]?.geometry?.bounds_mm; return Array.isArray(b) && b.length === 3 ? b.map((v) => v * 500) : null; };
-  const hb = held && box(held), hp = held && placeOf(held);
-  if (!hb || !hp || !ctx.seated) return null;
-  // The load's half extents as it is held now (its turn in the copy), up and on the plan.
-  const corners = [-1, 1].flatMap((a) => [-1, 1].flatMap((b) => [-1, 1].map((c) => turn(hp.rot ?? [ONE, 0, 0, 0], [a * hb[0], b * hb[1], c * hb[2]]))));
-  const ext = [0, 1, 2].map((k) => Math.max(...corners.map((v) => Math.abs(v[k]))));
-  const band = [HEIGHT - ext[1], HEIGHT + ext[1]], long = Math.max(ext[0], ext[2]), across = Math.min(ext[0], ext[2]);
+  if (!held || !ctx.seated) return null;
+  const { band, long, across } = held;
   // Into the bay's frame (its turn about y only): x across the slots, z along them.
   const inv = [...(bay.rot ?? [ONE, 0, 0, 0])]; inv[1] = -inv[1]; inv[2] = -inv[2]; inv[3] = -inv[3];
   const local = ([x, z]) => { const p = turn(inv, [x - bay.pos[0], 0, z - bay.pos[2]]); return [p[0], p[2]]; };
-  const [from, to] = [local(mid), local(s.point)];
+  const [from, to] = [local(mid), local(mouth ?? s.point)];
   const names = Object.keys(entry?.slots ?? {});
   for (const p of ctx.seated(req.where)) {
     const name = names[p.slot - 1], at = entry?.slots?.[name]?.at_mm, pb = box(p.id);
     // A part with solids (a frame: its posts, at the slots' ends) is met as those, by the world's own check.
-    if (p.id === held || name === s.name || !Array.isArray(at) || !pb || kinds[kindOf(p.id)]?.geometry?.solids_mm) continue;
+    if (p.id === held.id || name === s.name || !Array.isArray(at) || !pb || kinds[kindOf(p.id)]?.geometry?.solids_mm) continue;
     const q = [at[0] * 1000, at[2] * 1000], quarter = Math.abs((entry.slots[name].yaw_mdeg ?? 0) % 180_000) === 90_000;
     const [hx, hz] = quarter ? [pb[2], pb[0]] : [pb[0], pb[2]], up = [at[1] * 1000, at[1] * 1000 + 2 * pb[1]];
     if (up[0] >= band[1] || up[1] <= band[0]) continue;   // wholly under or over the load as it is carried
