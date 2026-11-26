@@ -4589,6 +4589,8 @@ impl Clock {
                 }
                 acts.extend(e.way_back(ask, way));
             }
+            // #5067: acts held while a carry's lift or set-down ran, whose track has ended: run again, answered now.
+            acts.extend(e.reruns());
         }
         // The way thread ended: every lift still waiting for a way is refused by name, and none waits again.
         if std::mem::take(&mut self.ways_gone) {

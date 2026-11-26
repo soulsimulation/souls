@@ -18,9 +18,15 @@
 //! - **Fixed geometry** ([`Fixed`]): every box N3 cuts for a walking body (a height span within [`BODY_LOW`] to
 //!   [`BODY_HIGH`] of its floor), on the open ground and on the lowest floor of each building, on the open ground's
 //!   plan. The board's outline is its 2 m by [`HALF_WIDTH`] times two; touching is not overlapping.
-//! - **Lift and set down are one change of parent each** ([`Carry::lift`], [`Carry::set_down`]): T1's leave and
-//!   arrive under one transfer id, in one part with the frame's first or last sample. Setting down puts the board, at
-//!   rest, on the node it is in (the floor both carriers stand on, or the open ground), in that node's frame.
+//! - **Lift and set down are short tracks** (#5067, [`Hoist`]): one change of parent each (T1's leave and arrive under
+//!   one transfer id) where the load already is, and a track of the node, one motion sample a tick, with the load in
+//!   its slot all the while. A lift ([`Carry::lift`]) puts the load in the slot with the node's first sample where the
+//!   held load lies exactly as it lay ([`Load::lying`]); the node then goes up into its carriers' hands, its position
+//!   in a straight line and its turn blended ([`between`]), toward where they have the frame at each tick. A set-down
+//!   ([`Carry::set_down`], [`Carry::lower`]) takes the node straight down from its last sample until the held load is
+//!   where it rests, then puts it at rest on the node it is in (the floor both carriers stand on, or the open ground),
+//!   in that node's frame. Each takes [`hoist_time`] of its rise: 0.6 s to 1.2 s in whole ticks. worldd's engine says
+//!   each track's start and end (`souls:carry-track`, `Activities::carry_track`).
 //!
 //! - **A load from its own entry (0.135 C2).** A load whose kind has an entry is carried as the entry states it
 //!   ([`Load::of`]): its longest side is carried lengthways, its width on the plan is the larger of its other two
@@ -41,7 +47,8 @@
 //! - **A carry that breaks off sets its load down where it is (0.135 C3).** A partner's leave, carriers drifted more
 //!   than [`STRETCH`] from their span at the lift (one stopped, or its connection is gone, while the other walked
 //!   on), and a restart (a carry is not stored, so the load found riding is set down at the first tick) each set
-//!   the load down at its last sample, at rest on the ground ([`Carry::set_down_here`]); the world says why
+//!   the load down at its last sample, at rest on the ground, on a set-down's track ([`Carry::release`]: a lift's
+//!   broken off goes back along its track to where the load lay); the world says why
 //!   (`souls:carry-set-down`, worldd's engine).
 //!
 //! - **Carriers at every grip (0.135 C5).** The front and the back are the carry's ends as above; each member after
@@ -126,6 +133,123 @@ pub const GRIP_REACH: i64 = 700_000;
 /// How many grips a load has between its ends, at most, that carriers take (0.135 C5): a crew of six, less its front
 /// and its back.
 pub const INNER: usize = 4;
+/// The world's tick, µs (20 a second): a lift's or a set-down's track lasts whole ticks (#5067).
+pub const HOIST_TICK: Micros = 50_000;
+/// How fast a crew raises or lowers a load, µm a second (#5067): from the floor to carrying height in about a second.
+pub const HOIST_PACE: i64 = 1_000_000;
+/// The fewest and the most ticks a lift's or a set-down's track lasts (#5067): 0.6 s to 1.2 s, what a crew can do.
+pub const HOIST_LEAST: i64 = 12;
+pub const HOIST_MOST: i64 = 24;
+
+/// How long a lift or a set-down that raises or lowers the carry's node `rise` µm takes (#5067): at [`HOIST_PACE`],
+/// in whole ticks, from [`HOIST_LEAST`] to [`HOIST_MOST`].
+pub fn hoist_time(rise: i64) -> Micros {
+    let us = i128::from(rise.unsigned_abs()) * 1_000_000 / i128::from(HOIST_PACE);
+    let tick = i128::from(HOIST_TICK);
+    let ticks = i64::try_from((us + tick - 1) / tick).unwrap_or(HOIST_MOST);
+    ticks.clamp(HOIST_LEAST, HOIST_MOST) * HOIST_TICK
+}
+
+/// Which track a carry's node is on (#5067, [`Hoist`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// Raised from where its load lay into its carriers' hands, at carrying height between them.
+    Lift,
+    /// Lowered by its crew (`carry:set-down`) to rest where they stand.
+    SetDown,
+    /// Lowered as the carry broke off, the world's word why (`souls:partner-left`, `souls:carriers-apart`,
+    /// `souls:carry-blocked`, `souls:world-restarted`): from carrying height to rest under it, or, a lift broken off,
+    /// back along its track to where its load lay.
+    Release(&'static str),
+}
+
+/// A lift's or a set-down's track (#5067): the carry's node goes from `from` at `t0` to `to` at `t1` (the open ground's
+/// frame, µm), written as one motion sample a tick ([`Carry::step`], [`Carry::lower`]), its position in a straight
+/// line and its turn between the two. A lift's `to` is where its carriers have the node at each tick, so a crew that
+/// walks as it lifts takes the load with it. The load rides the node's slot all the while, so it has one motion owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hoist {
+    pub phase: Phase,
+    pub t0: Micros,
+    pub t1: Micros,
+    pub from: (Vec3, Quat),
+    pub to: (Vec3, Quat),
+    /// The node's last sample.
+    pub at: (Vec3, Quat),
+    /// Where the load lies, on which node, its position and turn in that node's frame: a lift's where it lay at `t0`
+    /// (a lift broken off sets it back there), a set-down's where it comes to rest at `t1`.
+    pub rest: (Id, Vec3, Quat),
+    /// The intent and Soul a set-down's entries are written for; none for the world's.
+    pub by: Option<(Id, Id)>,
+    /// The transfer id a crew's set-down was given when asked, for the load's change of parent at its end.
+    pub transfer: Option<Id>,
+}
+
+/// The inverse turn of `q` in its one byte form (a half turn, whose w is zero, is its own inverse).
+fn inverse(q: Quat) -> R<Quat> {
+    let [w, x, y, z] = q.parts();
+    if w == 0 {
+        return Ok(q);
+    }
+    Quat::new(w, -x, -y, -z).map_err(pose_refusal)
+}
+
+/// The turn `n / d` of the way from `a` to `b` (#5067): the two blended and scaled back to unit length (rule 4's one
+/// byte form), the shorter way round. Integers only; on the rare blend whose form a reader would refuse, the nearer end.
+fn blend(a: Quat, b: Quat, n: i128, d: i128) -> R<Quat> {
+    if a == b || n <= 0 {
+        return Ok(a);
+    }
+    if n >= d {
+        return Ok(b);
+    }
+    let (pa, mut pb) = (a.parts(), b.parts());
+    let dot: i128 = (0..4).map(|i| i128::from(pa[i]) * i128::from(pb[i])).sum();
+    if dot < 0 {
+        pb = pb.map(|v| -v);
+    }
+    let raw: [i128; 4] =
+        std::array::from_fn(|i| i128::from(pa[i]) * (d - n) + i128::from(pb[i]) * n);
+    let root = raw.iter().map(|v| v * v).sum::<i128>().isqrt();
+    if root == 0 {
+        return Ok(if 2 * n < d { a } else { b });
+    }
+    let unit = i128::from(replica::pose::UNIT);
+    let mut q = raw.map(|v| {
+        let s = v * unit;
+        (2 * s + s.signum() * root) / (2 * root)
+    });
+    if q.iter().find(|v| **v != 0).is_some_and(|v| *v < 0) {
+        q = q.map(|v| -v);
+    }
+    let part = |v: i128| i64::try_from(v).unwrap_or(0);
+    Ok(Quat::new(part(q[0]), part(q[1]), part(q[2]), part(q[3]))
+        .unwrap_or(if 2 * n < d { a } else { b }))
+}
+
+/// The pose `at` of the way from `from` at `t0` to `to` at `t1` (#5067): its position in a straight line, its turn
+/// blended ([`blend`]); `from` before `t0`, `to` from `t1`.
+pub fn between(
+    from: (Vec3, Quat),
+    to: (Vec3, Quat),
+    (t0, t1): (Micros, Micros),
+    at: Micros,
+) -> R<(Vec3, Quat)> {
+    if at >= t1 {
+        return Ok(to);
+    }
+    if at <= t0 {
+        return Ok(from);
+    }
+    let (n, d) = (i128::from(at - t0), i128::from(t1 - t0));
+    let l = |a: i64, b: i64| a + i64::try_from(i128::from(b - a) * n / d).unwrap_or(0);
+    let p = Vec3::new(
+        l(from.0.x, to.0.x),
+        l(from.0.y, to.0.y),
+        l(from.0.z, to.0.z),
+    );
+    Ok((p, blend(from.1, to.1, n, d)?))
+}
 
 /// A load as its kind's entry states it (0.135 C2), µm along and across the carry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,6 +341,15 @@ impl Load {
         let o = q.then(self.turn).map_err(pose_refusal)?;
         let m = o.rotate(self.middle).map_err(pose_refusal)?;
         Ok((Vec3::new(c.x - m.x, c.y + self.rest - m.y, c.z - m.z), o))
+    }
+
+    /// The pose of the carry's node with the load held in its slot ([`Load::held`]) exactly where it lies at `lay` (its
+    /// position and turn in the node's frame): its middle, turned so the held load keeps its turn (#5067: where a
+    /// lift's track starts).
+    pub fn lying(&self, lay: (Vec3, Quat)) -> R<(Vec3, Quat)> {
+        let m = lay.1.rotate(self.middle).map_err(pose_refusal)?;
+        let q = lay.1.then(inverse(self.turn)?).map_err(pose_refusal)?;
+        Ok((Vec3::new(lay.0.x + m.x, lay.0.y + m.y, lay.0.z + m.z), q))
     }
 
     /// A load from its kind's entry (`souls-entry/1`): `geometry.bounds_mm`, the `grip` points and
@@ -982,8 +1115,10 @@ pub struct Carry {
     pub ground: Id,
     pub audience: Audience,
     pub log: Log,
-    /// Every sample written of the activity's node: the board's track (at, its centre in the open ground's frame,
-    /// µm, and its turn).
+    /// The carry's frame at each sample of the activity's node (at, its centre between its carriers at carrying
+    /// height in the open ground's frame, µm, and its turn): the board's track. While the node is on a lift's or a
+    /// set-down's track ([`Carry::hoist`]) the sample written is the hoist's, and this is still where its carriers have
+    /// the frame.
     pub track: Vec<(Micros, Vec3, Quat)>,
     /// How far apart its carriers stood at the lift, µm on the plan (0.135 C3).
     pub span: i64,
@@ -1005,6 +1140,8 @@ pub struct Carry {
     /// stand at each pose, `(front, back)` on the open ground's plan, µm, said to its audience at the lift
     /// (`souls:carry-way`). Empty for a straight way.
     pub way: Vec<turn::Ends>,
+    /// The lift's or the set-down's track the node is on, if any (#5067).
+    pub hoist: Option<Hoist>,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -1056,7 +1193,19 @@ impl Carry {
             began_in: None,
             raise: 0,
             way: Vec::new(),
+            hoist: None,
         }
+    }
+
+    /// Whether the node is on a lift's track (#5067).
+    pub fn lifting(&self) -> bool {
+        self.hoist.is_some_and(|h| h.phase == Phase::Lift)
+    }
+
+    /// Whether the node is on a set-down's track, the crew's or a release's (#5067): the load goes down to rest and
+    /// leaves the crew's slot at its end ([`Carry::lower`]).
+    pub fn lowering(&self) -> bool {
+        self.hoist.is_some_and(|h| h.phase != Phase::Lift)
     }
 
     /// Where a carrier at `at` stands in the frame of a carry between `front` and `back` (0.135 C5): `[along,
@@ -1092,21 +1241,135 @@ impl Carry {
         (d - self.span).abs() > STRETCH
     }
 
-    /// Sets the board down where the carry last had it (its last sample, or `at` the frame's pose `here` when it has
-    /// none: a carry found riding after a restart), at rest on `node` (0.135 C3: a carry that breaks off).
-    pub fn set_down_here(
+    /// The carry broke off (0.135 C3) at `at`, the world's word `why`: its load is set down where the carry last had
+    /// it, on a set-down's track (#5067, [`Phase::Release`]) from where the node is now, never dropped. Carried, it goes
+    /// straight down to rest on `node` under its last sample (or under `here`, the frame's pose, when it has none: a
+    /// carry found riding after a restart, `here`'s second its carriers' floor when known); on a lift's track, back along
+    /// it to where it lay. Already on a set-down's track, it keeps to it. Returns the track's times when one begins.
+    pub fn release(
+        &mut self,
+        tree: &Tree,
+        at: Micros,
+        node: Id,
+        here: Option<((Vec3, Quat), Option<i64>)>,
+        why: &'static str,
+    ) -> R<Option<(Micros, Micros)>> {
+        match self.hoist {
+            Some(h) if h.phase != Phase::Lift => return Ok(None),
+            Some(h) => {
+                let (to, rest) = (h.from, h.rest);
+                let t1 = at + hoist_time(h.at.0.y - to.0.y);
+                self.hoist = Some(Hoist {
+                    phase: Phase::Release(why),
+                    t0: at,
+                    t1,
+                    from: h.at,
+                    to,
+                    at: h.at,
+                    rest,
+                    by: None,
+                    transfer: None,
+                });
+                return Ok(Some((at, t1)));
+            }
+            None => {}
+        }
+        let (from, height) = match (self.track.last(), here) {
+            (Some(&(_, c, q)), _) => ((c, q), HEIGHT),
+            (None, Some((p, floor))) => (p, floor.map_or(HEIGHT, |f| p.0.y - f)),
+            (None, None) => return refuse("carry-set-down-nowhere", "no sample of the carry"),
+        };
+        let under = Vec3::new(from.0.x, from.0.y - height, from.0.z);
+        self.lower_from(
+            tree,
+            at,
+            node,
+            from,
+            height,
+            (under, from.1),
+            Phase::Release(why),
+            None,
+        )
+        .map(Some)
+    }
+
+    /// Starts a set-down's track (#5067) at `at` from the node's pose `from` (the open ground's frame), `height` above
+    /// its carriers' floor: the node keeps its turn and goes straight down until the held load is where it rests on
+    /// `node`, its middle over `rest`'s point on the floor turned `rest`'s turn (in `node`'s frame, [`Carry::rests_on`],
+    /// [`Load::resting`]). Returns the track's times.
+    #[allow(clippy::too_many_arguments)]
+    fn lower_from(
+        &mut self,
+        tree: &Tree,
+        at: Micros,
+        node: Id,
+        from: (Vec3, Quat),
+        height: i64,
+        rest: (Vec3, Quat),
+        phase: Phase,
+        by: Option<(Id, Id)>,
+    ) -> R<(Micros, Micros)> {
+        if tree.handle(node).is_none() {
+            return refuse("carry-set-down-nowhere", replica::world_model::show(node));
+        }
+        let (c, q) = rest;
+        let up = self.rests_on(tree, node, c, q)?;
+        let (position, orientation) = self.load.resting(Vec3::new(c.x, c.y + up, c.z), q)?;
+        let drop = height - up - self.load.rest;
+        let to = (Vec3::new(from.0.x, from.0.y - drop, from.0.z), from.1);
+        let t1 = at + hoist_time(drop);
+        self.hoist = Some(Hoist {
+            phase,
+            t0: at,
+            t1,
+            from,
+            to,
+            at: from,
+            rest: (node, position, orientation),
+            by,
+            transfer: None,
+        });
+        Ok((at, t1))
+    }
+
+    /// One tick `at` of a set-down's track (#5067): the node's sample on it; at its end, the node's last sample and the
+    /// load's change of parent to where it rests, under the transfer id `transfer` (asked only then: `transfer` is
+    /// called once). Returns whether the track has ended, the load set down.
+    pub fn lower(
         &mut self,
         tree: &mut Tree,
         at: Micros,
-        node: Id,
-        here: Option<(Vec3, Quat)>,
-        transfer: Id,
-    ) -> R<()> {
-        let Some((mut c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
-            return refuse("carry-set-down-nowhere", "no sample of the carry");
+        transfer: impl FnOnce() -> R<Id>,
+    ) -> R<bool> {
+        let Some(h) = self.hoist.filter(|h| h.phase != Phase::Lift) else {
+            return Ok(false);
         };
-        c.y -= HEIGHT;
-        self.put(tree, at, node, c, q, transfer)
+        let (p, q) = between(h.from, h.to, (h.t0, h.t1), at)?;
+        let mut entries = vec![(
+            self.activity,
+            self.audience,
+            EffectBody::Changes(vec![ChangeRec {
+                change: sample(self.activity, at, self.ground, p, q),
+                rest: Rest::new(),
+            }]),
+        )];
+        let done = at >= h.t1;
+        if done {
+            let (node, position, orientation) = h.rest;
+            let t = match h.transfer {
+                Some(t) => t,
+                None => transfer()?,
+            };
+            entries.extend(self.put_entries(tree, node, position, orientation, t)?);
+        }
+        self.write(tree, at, entries)?;
+        if let Some(k) = self.hoist.as_mut() {
+            k.at = (p, q);
+        }
+        if done {
+            self.hoist = None;
+        }
+        Ok(done)
     }
 
     fn write(&mut self, tree: &mut Tree, at: Micros, entries: Vec<Entry>) -> R<()> {
@@ -1124,18 +1387,23 @@ impl Carry {
         Ok((c, yaw_toward([front.x - back.x, front.z - back.z])?))
     }
 
-    /// Lifts the board: the frame's first sample, between the carriers, and the board's change of parent to the
-    /// frame's slot, in one part, under the transfer id `transfer`.
+    /// Lifts the board (#5067: a lift's track, not a jump): the board's change of parent to the frame's slot, under
+    /// the transfer id `transfer`, with the frame's first sample where the held board is exactly where it lies at `lay`
+    /// (its position and turn on the open ground, [`Load::lying`]), in one part. From there the node is on a lift's
+    /// track ([`Hoist`], [`Carry::step`]) up into its carriers' hands, between them at carrying height, for
+    /// [`hoist_time`] of the rise. Returns the track's times.
     pub fn lift(
         &mut self,
         tree: &mut Tree,
         at: Micros,
         front: Vec3,
         back: Vec3,
+        lay: (Vec3, Quat),
         transfer: Id,
-    ) -> R<()> {
+    ) -> R<(Micros, Micros)> {
         let (c, q) = Carry::pose(front, back)?;
         let (position, orientation) = self.load.held()?;
+        let from = self.load.lying(lay)?;
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,
@@ -1156,7 +1424,7 @@ impl Carry {
                 self.activity,
                 self.audience,
                 EffectBody::Changes(vec![ChangeRec {
-                    change: sample(self.activity, at, self.ground, c, q),
+                    change: sample(self.activity, at, self.ground, from.0, from.1),
                     rest: Rest::new(),
                 }]),
             ),
@@ -1173,7 +1441,19 @@ impl Carry {
         self.write(tree, at, entries)?;
         self.track.push((at, c, q));
         self.span = len([front.x - back.x, front.z - back.z]);
-        Ok(())
+        let t1 = at + hoist_time(c.y - from.0.y);
+        self.hoist = Some(Hoist {
+            phase: Phase::Lift,
+            t0: at,
+            t1,
+            from,
+            to: (c, q),
+            at: from,
+            rest: (self.ground, lay.0, lay.1),
+            by: None,
+            transfer: None,
+        });
+        Ok((at, t1))
     }
 
     /// Where its carriers were at its last sample, `(front, back)` on the open ground's plan, µm: its span apart along
@@ -1199,6 +1479,31 @@ impl Carry {
         back: Vec3,
         fixed: &Fixed,
     ) -> R<()> {
+        // #5067: on a lift's track the node's sample is the lift's, toward where its carriers have the frame now; the
+        // way is checked from the first step after it, as it was from an instant lift.
+        if let Some(h) = self.hoist.filter(|h| h.phase == Phase::Lift) {
+            let (c, q) = Carry::pose(front, back)?;
+            let (p, o) = between(h.from, (c, q), (h.t0, h.t1), at)?;
+            let e = (
+                self.activity,
+                self.audience,
+                EffectBody::Changes(vec![ChangeRec {
+                    change: sample(self.activity, at, self.ground, p, o),
+                    rest: Rest::new(),
+                }]),
+            );
+            self.write(tree, at, vec![e])?;
+            self.track.push((at, c, q));
+            self.hoist = (at < h.t1).then_some(Hoist {
+                to: (c, q),
+                at: (p, o),
+                ..h
+            });
+            return Ok(());
+        }
+        if self.lowering() {
+            return refuse("carry-setting-down", "the load is on its way down");
+        }
         let to = ([front.x, front.z], [back.x, back.z]);
         let from = self.ends()?.unwrap_or(to);
         let (plan, _) = self.load.as_held()?;
@@ -1225,19 +1530,34 @@ impl Carry {
     }
 
     /// Sets the board down at rest on `node`, the node both carriers stand on, between them where they stand
-    /// (`front` and `back` in that node's frame, µm): one change of parent, under the transfer id `transfer`.
+    /// (`front` and `back` in that node's frame, µm), for `by`'s intent and Soul (#5067: a set-down's track, not a
+    /// jump): the node goes straight down from its last sample until the held board is where it rests; at the track's
+    /// end ([`Carry::lower`]) the board's change of parent, under the transfer id `transfer`. Refused `carry-lifting` while its lift's track runs and
+    /// `carry-setting-down` while it is already on its way down. Returns the track's times.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_down(
         &mut self,
-        tree: &mut Tree,
+        tree: &Tree,
         at: Micros,
         node: Id,
         front: Vec3,
         back: Vec3,
+        by: Option<(Id, Id)>,
         transfer: Id,
-    ) -> R<()> {
-        let (mut c, q) = Carry::pose(front, back)?;
-        c.y -= HEIGHT;
-        self.put(tree, at, node, c, q, transfer)
+    ) -> R<(Micros, Micros)> {
+        match self.hoist.map(|h| h.phase) {
+            Some(Phase::Lift) => return refuse("carry-lifting", "the load is on its way up"),
+            Some(_) => return refuse("carry-setting-down", "the load is on its way down"),
+            None => {}
+        }
+        let (c, q) = Carry::pose(front, back)?;
+        let from = self.track.last().map_or((c, q), |t| (t.1, t.2));
+        let floor = Vec3::new(c.x, c.y - HEIGHT, c.z);
+        let times = self.lower_from(tree, at, node, from, HEIGHT, (floor, q), Phase::SetDown, by)?;
+        if let Some(h) = self.hoist.as_mut() {
+            h.transfer = Some(transfer);
+        }
+        Ok(times)
     }
 
     /// How far above the floor at `c` its load comes to rest, set down there turned `q` on `node` (0.135 C7, every
@@ -1269,18 +1589,19 @@ impl Carry {
         )
     }
 
-    /// The board, at rest at `c` turned `q`, on `node`: its leave and its arrival under `transfer`.
-    fn put(
-        &mut self,
-        tree: &mut Tree,
-        at: Micros,
+    /// The board's leave and its arrival at rest on `node`, at `position` turned `orientation` in its frame, under
+    /// `transfer`.
+    fn put_entries(
+        &self,
+        tree: &Tree,
         node: Id,
-        c: Vec3,
-        q: Quat,
+        position: Vec3,
+        orientation: Quat,
         transfer: Id,
-    ) -> R<()> {
-        let c = Vec3::new(c.x, c.y + self.rests_on(tree, node, c, q)?, c.z);
-        let (position, orientation) = self.load.resting(c, q)?;
+    ) -> R<Vec<Entry>> {
+        if tree.handle(node).is_none() {
+            return refuse("carry-set-down-nowhere", replica::world_model::show(node));
+        }
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,
@@ -1296,10 +1617,7 @@ impl Carry {
                 },
             },
         };
-        if tree.handle(node).is_none() {
-            return refuse("carry-set-down-nowhere", replica::world_model::show(node));
-        }
-        let entries = vec![
+        Ok(vec![
             (self.board, self.audience, EffectBody::Transfer(leave)),
             (
                 node,
@@ -1309,7 +1627,6 @@ impl Carry {
                     carried: Vec::new(),
                 }),
             ),
-        ];
-        self.write(tree, at, entries)
+        ])
     }
 }
