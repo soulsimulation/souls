@@ -87,14 +87,14 @@ test('the edit is checked under its claim: a piece the check refuses is dropped,
   }
 });
 
-// #5006 row 22: a cottage bedroom of the Hello Hamlet template's size, 2.23 × 2.72 m, its door to the landing halfway
-// along a long wall. Its double bed (1.47 × 2.06 m) leaves at most 0.72 m to that wall, and a body needs 0.93 m.
+// #5006 row 22: the Hello Hamlet cottage's bedroom as its world has it (`describe`): 2.23 × 2.72 m, its 1.2 m door to
+// the next room halfway along a long wall. Its double bed (1.47 × 2.06 m) leaves at most 0.72 m to that wall.
 const smallBedroom = (width = 2230) => [
   { id: `${S}-1`, kind: 'eden:ground@1', parent: null, fields: {} },
   { id: `${S}-2`, kind: 'eden:cottage@1', parent: `${S}-1`, fields: { 2: hex('core-cottage@3') }, pose: pose(`${S}-1`) },
   { id: `${S}-3`, kind: 'eden:floor@1', parent: `${S}-2`, fields: { 5: 0 }, pose: pose(`${S}-2`) },
   { id: `${S}-4`, kind: 'eden:room@1', parent: `${S}-3`, pose: pose(`${S}-3`),
-    fields: { 1: hex('e_1/bedroom'), 11: [[-width / 2, -1360], [width / 2, -1360], [width / 2, 1360], [-width / 2, 1360]], 22: [[{ id: `${S}-9` }, 'eden:door', width / 2, 0, 90000, 800, 2100]] },
+    fields: { 1: hex('e_1/bedroom'), 11: [[-width / 2, -1360], [width / 2, -1360], [width / 2, 1360], [-width / 2, 1360]], 22: [[{ id: `${S}-9` }, 'eden:door', width / 2 + 60, -25, 90012, 1200, 2100]] },
     links: [{ id: `${S}-9`, type: 'eden:doorway', ends: [`${S}-4`, `${S}-5`], owner: 0 }] },
   { id: `${S}-5`, kind: 'eden:room@1', parent: `${S}-3`, pose: pose(`${S}-3`, [3_000_000, 0, 0]), fields: { 1: hex('e_1/landing'), 11: [[-800, -1360], [800, -1360], [800, 1360], [-800, 1360]] } },
 ];
@@ -106,14 +106,12 @@ const beds = (single) => ({
 test('#5006 row 22: a double bed that leaves no room to reach it gives way to a single bed, and the answer says so', () => {
   const out = furnishOps(smallBedroom(), `${S}-4`, beds(true));
   assert.deepEqual(out.placed.map((p) => [p.name, p.kind]), [['e_1/bedroom-bed', 'eden:bunk']], JSON.stringify(out));
-  assert.equal(out.ops[0].kind, 'eden:bunk@1');
-  // the bunk stands along the far wall, its length along it, with 0.93 m or more between it and the door's wall
-  const [x] = out.ops[0].at, along = Math.abs(out.ops[0].orientation[2]) > 0;
-  assert.ok(along && 1115 - (x + 505) >= 930, JSON.stringify(out.ops[0]));
-  assert.deepEqual(out.instead, [{ name: 'e_1/bedroom-bed', kind: 'eden:bunk', for: 'eden:bed', why: 'would cut the way to its doors or another piece' }]);
-  assert.match(out.says, /1 pieces in 1 rooms, 0 dropped; e_1\/bedroom-bed is a single bed \(eden:bunk\): a double \(eden:bed\) does not fit with room to reach it/);
+  // where the world's own furnish put it on that cottage: against the back wall, west of the doorway's way
+  assert.deepEqual([out.ops[0].kind, out.ops[0].at, out.ops[0].orientation], ['eden:bunk@1', [-228, 0, -315], [1 << 30, 0, 0, 0]]);
+  assert.deepEqual(out.instead, [{ name: 'e_1/bedroom-bed', kind: 'eden:bunk', for: 'eden:bed', why: 'in a doorway' }]);
+  assert.match(out.says, /1 pieces in 1 rooms, 4 dropped; e_1\/bedroom-bed is a single bed \(eden:bunk\): a double \(eden:bed\) does not fit with room to reach it/);
   const sent = checkedFurnish(out, () => ({ ok: true }));
-  assert.match(sent.says, /^furnish \S+ \(cottage, front s\): 1 pieces in 1 rooms, 0 dropped; e_1\/bedroom-bed is a single bed \(eden:bunk\)/);
+  assert.match(sent.says, /^furnish \S+ \(cottage, front s\): 1 pieces in 1 rooms, 4 dropped; e_1\/bedroom-bed is a single bed \(eden:bunk\): .+; dropped: e_1\/bedroom-rug \(no kind/);
   // a check that refuses the single bed drops it, and the answer no longer says it was placed
   const refused = checkedFurnish(furnishOps(smallBedroom(), `${S}-4`, beds(true)), (ops) => (ops.length ? { ok: false, code: 'edit.admits', op: 0 } : { ok: true }));
   assert.equal(refused.code, 'furnish.nothing');
