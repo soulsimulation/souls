@@ -125,7 +125,7 @@ export function placeShotKeeper({ shots, dir, worlds, page, run = drawRun, log =
         last = { slug, at: new Date(started).toISOString(), ms: now() - started, drawn: Math.max(0, want.length - left), left, code: r?.code ?? null, ...(r?.signal ? { signal: r.signal } : {}), ...(r?.error ? { error: r.error } : {}) };
         missing.set(slug, left);
         // a run that tried every place, or drew none, is not repeated for the same ones; one ended early that drew some goes on
-        if (left && (r?.code === 0 || !last.drawn)) tried.set(slug, { sig: signature(still), at: now() });
+        if (left && ((r?.code === 0 && !r?.ended) || !last.drawn)) tried.set(slug, { sig: signature(still), at: now() });
         log(`place-shots: ${slug}: drew ${last.drawn} in ${Math.round(last.ms / 1000)} s${left ? `, ${left} still missing (the page draws those meanwhile; log ${join(dir, slug, 'draw.log')})` : ''}`);
         running = null;
         if (!closed) setImmediate(check);   // the next world, if any
@@ -152,14 +152,14 @@ export function drawRun({ page, out, deadlineMs, signal }) {
   closeSync(fd);
   try { if (child.pid) setPriority(child.pid, 19); } catch { /* a host may not allow it: the CLI asks again */ }
   return new Promise((done) => {
-    let kill = null;
-    const end = () => { if (kill) return; child.kill('SIGTERM'); kill = setTimeout(() => child.kill('SIGKILL'), 10_000); kill.unref?.(); };
+    let kill = null, ended = false;
+    const end = () => { if (kill) return; ended = true; child.kill('SIGTERM'); kill = setTimeout(() => child.kill('SIGKILL'), 10_000); kill.unref?.(); };
     const deadline = setTimeout(end, deadlineMs);
     deadline.unref?.();
     signal?.addEventListener('abort', end, { once: true });
     const settle = (r) => { clearTimeout(deadline); clearTimeout(kill); signal?.removeEventListener('abort', end); done(r); };
     child.once('error', (e) => settle({ code: null, error: e.message }));
-    child.once('exit', (code, sig) => settle({ code, signal: sig }));
+    child.once('exit', (code, sig) => settle({ code, signal: sig, ended }));   // `ended`: cut short, whatever its exit code
   });
 }
 
@@ -187,6 +187,7 @@ export async function makeShots({ page, out, chromium, args = [], plan = false, 
       await tab.waitForFunction(() => window.__placeShots?.ready(), null, { timeout: 600_000, polling: 1000 })
         .catch(() => { throw Error(`${url.href}: the page never offered window.__placeShots (a build from before #4792, or the world did not load)`); });
       for (const t of missing) {
+        if (!browser.isConnected()) break;   // ended (SIGTERM: Playwright closes its browser); what was drawn is saved below
         // the page's 320 × 224 shot, kept at Explore's card size (256 wide) and WebP quality 0.72: a few KB
         const shot = await tab.evaluate(async (target) => {
           const url = await window.__placeShots.draw(target);

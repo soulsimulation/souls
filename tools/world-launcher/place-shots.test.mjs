@@ -100,7 +100,7 @@ test('#5038: the keeper draws a moved world\'s missing pictures ahead of visitor
   // a run ended at its deadline that drew some goes on with the rest; one that drew none waits
   worlds.splice(1, 1); rmSync(join(dir, 'eden'), { recursive: true, force: true });
   const ended = [], cut = placeShotKeeper({ shots, dir, worlds: () => worlds, page: (s) => s, firstMs: 1e9, everyMs: 1e9, now: () => at.t,
-    run: async (o) => { const r = await run(o); ended.push(1); skip = new Set(['e_new']); return ended.length === 1 ? { code: null, signal: 'SIGTERM' } : r; } });
+    run: async (o) => { const r = await run(o); ended.push(1); skip = new Set(['e_new']); return ended.length === 1 ? { code: 0, signal: null, ended: true } : r; } });
   try {
     skip = new Set(['e_moved', 'e_new']);
     await cut.check();
@@ -118,9 +118,9 @@ test('#5038: a drawing run is its own process, ended at its deadline', async () 
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
   try {
     const t0 = Date.now(), r = await drawRun({ page: `http://127.0.0.1:${server.address().port}/w/eden/`, out: join(dir, 'eden'), deadlineMs: 1500 });
-    assert.equal(r.signal, 'SIGTERM'); assert.ok(Date.now() - t0 < 12_000);
+    assert.equal(r.ended, true); assert.ok(Date.now() - t0 < 12_000);
     const stop = new AbortController(), running = drawRun({ page: `http://127.0.0.1:${server.address().port}/w/eden/`, out: join(dir, 'eden'), deadlineMs: 60_000, signal: stop.signal });
     setTimeout(() => stop.abort(), 300);
-    assert.equal((await running).signal, 'SIGTERM', 'a closing launcher ends its run');
+    assert.equal((await running).ended, true, 'a closing launcher ends its run');
   } finally { server.closeAllConnections(); server.close(); }
 });
