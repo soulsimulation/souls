@@ -308,6 +308,17 @@ fn ask(
     (began.elapsed().as_millis(), None)
 }
 
+/// When the line holding `part` came, ms, from [`Run::said`]'s lines.
+fn at_of(said: &str, part: &str) -> Option<u128> {
+    said.lines()
+        .find(|l| l.contains(part))?
+        .split(" ms")
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
 /// A3: the host clock stepped back and forward two minutes, while the world runs and before a restart. World time
 /// never goes back, the world never waits for the host clock, and every walk is answered.
 // A real process on the real clock: the steps are a file the world's clock reads; the waits are real time.
@@ -344,7 +355,15 @@ fn o10_a_stepped_host_clock_never_freezes_a_world() {
         ("running, stepped forward 120 s", 120),
     ] {
         std::fs::write(&step, (by * 1_000_000i64).to_string()).unwrap();
-        std::thread::sleep(Duration::from_millis(500));
+        let named = world.line_within(
+            "clock.stepped: the machine's clock moved",
+            Duration::from_secs(2),
+        );
+        println!("A3 {label}: named {named:?}");
+        assert!(
+            named.is_some(),
+            "{label}: clock.stepped is named within 2 s"
+        );
         let ms = next(&mut c, label, Duration::from_secs(10));
         assert!(ms < 2_000, "{label}: {ms} ms");
     }
@@ -469,7 +488,7 @@ while :; do "$3" serve --dir "$1/w" --socket "$4" --checkpoint-every 2048; echo 
         println!("A1: filled at {filled_at} ms with {n} MB");
     }
     let mut answered_full = Vec::new();
-    for k in 0..12 {
+    for k in 0..5 {
         let a = ask_one(&mut c, "full", Duration::from_secs(3));
         answered_full.push(a);
         if k % 4 == 0 {
@@ -501,8 +520,18 @@ while :; do "$3" serve --dir "$1/w" --socket "$4" --checkpoint-every 2048; echo 
         let a = answer(&mut s, Duration::from_secs(10));
         assert_eq!(a.as_ref().map(|a| a.1), Some(*kind), "walk {n}: {a:?}");
     }
-    let restarts = world.said().matches("o10: exited").count();
-    println!("A1: {restarts} restarts; full answers {answered_full:?}");
+    let said = world.said();
+    let restarts = said.matches("o10: exited").count();
+    let (failed, named) = (at_of(&said, "disk-failed:"), at_of(&said, "disk.full:"));
+    println!(
+        "A1: {restarts} restarts; disk-failed at {failed:?} ms, disk.full named at {named:?} ms; full answers \
+         {answered_full:?}"
+    );
+    assert!(restarts <= 1, "restarts at most once: {restarts}");
+    assert!(
+        failed.zip(named).is_some_and(|(f, n)| n - f < 2_000),
+        "disk.full named within 2 s of the failure"
+    );
     assert!(
         back.is_some_and(|ms| ms < 5_000),
         "accepted within 5 s of the clear: {back:?}"

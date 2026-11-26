@@ -7,7 +7,7 @@ description = "The world process (Engine v2, #2635): its clock and watchdog (K7,
 
 [dependencies]
 replica = { path = "../replica" }
-rustix = { version = "1", default-features = false, features = ["time", "std"] }
+rustix = { version = "1", default-features = false, features = ["fs", "time", "std"] }
 # D6: a SIGTERM or SIGINT says so before the world ends (src/stopped.rs).
 libc = "0.2"
 sim = { path = "../sim" }

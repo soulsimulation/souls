@@ -176,6 +176,54 @@ fn stamp(stage: &str) {
         crate::progress();
     }
 }
+/// O10 (#2806): the room a start needs on its world's disk beyond a checkpoint (the newest one's size): the files it
+/// writes before it listens and the log's first ticks.
+const START_ROOM: u64 = 16 << 20;
+
+/// O10 (#2806): a start waits until its world's disk has room. A full disk ended the running world once
+/// (`disk-failed`, exit 87: nothing unwritten is acknowledged) and then every start, at its first write (exit 1), and
+/// the unit restarted it into the same full disk: 200 restarts in 36 s at its first delay, then one each 29 s, so a
+/// world came back up to 29 s after the disk cleared. Now the one start waits, says `disk.full` by name, tells its
+/// service manager it makes progress, and goes on within half a second of the room coming back; the world's time owed
+/// meanwhile is paid at its first ticks, exactly (K7's catch-up). A disk whose room cannot be read is not waited for.
+fn room_to_start(dir: &Path) {
+    let checkpoint = std::fs::read_dir(dir.join("checkpoints"))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok()?.metadata().ok())
+        .map(|m| m.len())
+        .max()
+        .unwrap_or(0);
+    let need = START_ROOM + checkpoint;
+    let mut said = false;
+    loop {
+        let Ok(s) = rustix::fs::statvfs(dir) else {
+            return;
+        };
+        let free = s.f_bavail.saturating_mul(s.f_frsize);
+        if free >= need {
+            if said {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "worldd: disk.full cleared: {free} bytes free, the start goes on"
+                );
+            }
+            return;
+        }
+        if !said {
+            let _ = writeln!(
+                std::io::stderr(),
+                "worldd: disk.full: {free} bytes free under the world, {need} to start; the start waits for room"
+            );
+            said = true;
+        }
+        for _ in 0..5 {
+            crate::progress();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+}
+
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// How long a world with no public pointer waits for its stream's first flush before it listens with the stream still
@@ -3405,6 +3453,7 @@ fn serve(args: &[String]) -> R<()> {
          [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>] \
          [--sleep <alarm socket> [--world-name <name>]]",
     )?);
+    room_to_start(&dir);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("WORLDD_SOCKET").map(PathBuf::from))
