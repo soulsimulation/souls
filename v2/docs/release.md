@@ -111,11 +111,13 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    state may no longer fit is refused by name and nothing of that world is staged: a state field gone or retyped, an
    enum value gone, an int's range narrowed, a slot gone, renumbered or admitting less, a role gone, another owner, a
    world that would not build or would leave a pinned revision with no definition (`entries.<name>`). A fork keeps its
-   entries (its boot pins them); an entry only the world has is kept. An entry only the release has is added (#4954),
-   so a new Soul Action reaches every running world with the release, no reseed: `entries plan` lists each as
-   `add <kind>`, and the world's next start defines its kinds in the world's history at its first tick (`kinds
-   defined: ...`), as a creator's kinds are, since the header a world's log names never changes; its log before them
-   replays unchanged. The library's names are every world's: a world's own entry of the same name in its own
+   entries (its boot pins them), so a world made from a template gets no new Soul Action yet; an entry only the world
+   has is kept. An entry only the release has is added to every other world (#4954), so a new Soul Action reaches it
+   with the release, no reseed: `entries plan` lists each as `add <kind>`, and the world's next start defines its
+   kinds in the world's history at its first tick (`kinds defined: ...`, each a `souls:kind` node naming the pin; the
+   entry stays in the world's entries), as a creator's kinds are, since the header a world's log names never changes;
+   its log before them replays unchanged. A kind the header pins by another revision is not one of these: it is paired
+   as before or stays unmade. The library's names are every world's: a world's own entry of the same name in its own
    namespace overrides one, which is then not added. A later `rollback-v2.yml` moves code only: the release's
    entries stay, the world's earlier ones are in `entries.before` for a hand put-back while the world is stopped.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
