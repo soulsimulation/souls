@@ -17,6 +17,9 @@
 //!   their straight gap plus a pitch. A target that is not (in a box, a wall, a doorway, on a stair, on water, off the
 //!   ground) is bound to the nearest clear place beside it the same way, and so is a clear target the asker's walk
 //!   does not reach (a pocket of ground walled in by a desk's legs and the chairs round it, #4072).
+//! - **From where its walk leaves** (0.137 trial): an asker not on a standing point (a body left a little inside an
+//!   obstacle's cut, over a stump or against a basin) asks from the nearest point of the ground its walk leaves from
+//!   ([`Ground::start`]), so it is never refused every target for where it stands.
 //! - **Recorded as the engine's.** Each grant is an [`Entry::Grant`] with the actor the world and the cause the
 //!   asker's order; the same marks give the same grants every run (integers, id order, no hashing).
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
@@ -98,6 +101,12 @@ pub trait Ground {
     fn overflow_at(&self, _node: Id, _p: Vec3) -> Vec<(Id, Vec3)> {
         Vec::new()
     }
+    /// Where an asker at `p` on `node` leaves from: where it stands, else the nearest point of the walkable ground
+    /// within the walk's own reach of it (a body pressed on an obstacle's edge, its centre a hair off the ground), as
+    /// [`Ground::stand`] gives it; `None` when there is none. The default: [`Ground::stand`].
+    fn start(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(node, p)
+    }
 }
 
 /// The same geometry questions selected for one admitted footprint. Reservations are never stored here.
@@ -110,6 +119,9 @@ pub trait ClassGround {
     }
     fn overflow_at(&self, _size: Size, _node: Id, _p: Vec3) -> Vec<(Id, Vec3)> {
         Vec::new()
+    }
+    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(size, node, p)
     }
 }
 struct Selected<'a> {
@@ -132,6 +144,9 @@ impl Ground for Selected<'_> {
     fn overflow_at(&self, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
         self.ground.overflow_at(self.size, node, p)
     }
+    fn start(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.ground.start(self.size, node, p)
+    }
 }
 struct Standard<'a>(&'a mut dyn Ground);
 impl ClassGround for Standard<'_> {
@@ -153,6 +168,11 @@ impl ClassGround for Standard<'_> {
     }
     fn overflow_at(&self, _size: Size, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
         self.0.overflow_at(node, p)
+    }
+    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        (size == Size::Standard)
+            .then(|| self.0.start(node, p))
+            .flatten()
     }
 }
 
@@ -1111,6 +1131,16 @@ impl Spots {
             let mut g = Selected {
                 ground: grounds,
                 size: *size,
+            };
+            // An asker a hair off the ground (pressed on a stump's or a basin's edge, its centre rounded just off the
+            // piece) leaves from the nearest point of the ground, as its walk does: never refused every target for
+            // where it stands (0.137 trial).
+            let a = &match g.stand(a.node, a.from) {
+                Some(_) => *a,
+                None => Ask {
+                    from: g.start(a.node, a.from).map_or(a.from, |s| s.0),
+                    ..*a
+                },
             };
             let tb = if *size == Size::Standard {
                 self.owners
