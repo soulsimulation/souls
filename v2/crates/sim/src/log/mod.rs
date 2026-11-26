@@ -35,13 +35,13 @@
 //!    disk, the offsets after it unchanged. A compacted log is opened from its cut (or a later place), never from byte
 //!    0; a place before the cut is passed over for the cut, and a cut that does not check is `log-cut-bad`.
 //! 10. **A tick's sync waits for no other process** (#4973). A file's sync that changes its size or blocks needs a
-//!    filesystem journal commit, and on ext4 (`data=ordered`) a commit first writes every other process's pending
-//!    data: a build or a backup on the same disk held every answer for seconds. So [`FileStore`] keeps room ahead of
-//!    the log's end, zeros written and synced ([`Storage::reserve`], [`RESERVE`]), and appends write into it: a sync
-//!    writes the tick's data and flushes the drive, nothing more. The writer makes room after a sync, once less than
-//!    half is left; that sync, one in each `RESERVE / 2` of log, still commits. Readers stop at the end (the zeros
-//!    are no records: rule 4); a clean close cuts them off. What is durable, and when an act is answered, is
-//!    unchanged: after its record's sync returns.
+//!     filesystem journal commit, and on ext4 (`data=ordered`) a commit first writes every other process's pending
+//!     data: a build or a backup on the same disk held every answer for seconds. So [`FileStore`] keeps room ahead of
+//!     the log's end, zeros written and synced ([`Storage::reserve`], [`RESERVE`]), and appends write into it: a sync
+//!     writes the tick's data and flushes the drive, nothing more. The writer makes room after a sync, once less than
+//!     half is left; that sync, one in each `RESERVE / 2` of log, still commits. Readers stop at the end (the zeros
+//!     are no records: rule 4); a clean close cuts them off. What is durable, and when an act is answered, is
+//!     unchanged: after its record's sync returns.
 //!
 //! The kill and power-cut runner and the sync table are `v2/tools/log-crash`. Not here: shipping off the machine
 //! (O3), views (R3), packing (V3), a full disk (O10), checkpoints (K5).

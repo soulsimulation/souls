@@ -125,10 +125,11 @@ ignores the same. The modelled store refuses the stale writer.
     synced (`sim::log` rule 10), so a sync writes the batch's data and flushes the drive, and needs no journal commit,
     which on ext4 first writes every other process's pending data. A batch's records after its first are marked, so
     a batch whose sync never returned reads as a torn tail whatever order its pages reached the disk in (`sim::log`
-    rule 4). The promise is unchanged: an act is answered only once its words and records are on the disk. A tick's words read as
-    `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
-    the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
-    every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
+    rule 4). The promise is unchanged: an act is answered only once its words and records are on the disk.
+    A tick's words read as `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a
+    tick at a time, for the words queued when that Soul was first put off, its own birth's name among them. A lockstep
+    run waits for every queued word before each tick, so whether such a Soul waits or is taken is the same in every
+    run.
 
 ## What would quietly break this
 

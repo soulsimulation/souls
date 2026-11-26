@@ -193,7 +193,7 @@ impl Storage for Mem {
 pub const RESERVE: u64 = 16 << 20;
 
 /// Zeros written a piece at a time when room is made.
-const ZEROS: [u8; 1 << 16] = [0; 1 << 16];
+static ZEROS: [u8; 1 << 16] = [0; 1 << 16];
 
 /// A log file on the machine's disk, held by an exclusive lock for as long as this lives (one writer per log).
 /// A sync is `fdatasync` (`File::sync_data`; on macOS that is `F_FULLFSYNC`); a new file's directory is synced too.
