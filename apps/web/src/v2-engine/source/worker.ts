@@ -130,11 +130,14 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
 
 /** B2's move record (`replica::moves::MoveRecord::to_value`, its texts as bytes): `{1: body, 2: move, 5: target, 7: start,
  * 8: [phase end, ...]}`. */
-function moveRec(m: Map<number, unknown>): MoveRec {
+function runKey(run: unknown): string | undefined {
+  return run === undefined ? undefined : typeof run === 'number' || typeof run === 'bigint' ? String(run) : key(run as IdValue);
+}
+function moveRec(m: Map<number, unknown>, run?: unknown): MoveRec {
   const ends = (m.get(8) as unknown[]).map(num), raw = m.get(2), start = num(m.get(7));
   const name = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
   if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
-  return { body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
+  return { ...(run === undefined ? {} : { run: runKey(run) }), body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
 }
 
 type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
@@ -335,8 +338,8 @@ async function run(stream: URL) {
       if (e.get(1) === MOVED || e.get(1) === RUN_ENDED) {
         const f = e.get(2) as Map<number, unknown>;
         try {
-          if (e.get(1) === RUN_ENDED) runEnds.push({ body: key(f.get(2) as IdValue), at: num(e.get(4)), how: text.decode(f.get(3) as Uint8Array) });
-          else moves.push(moveRec(f.get(3) as Map<number, unknown>));
+          if (e.get(1) === RUN_ENDED) runEnds.push({ body: key(f.get(2) as IdValue), at: num(e.get(4)), how: text.decode(f.get(3) as Uint8Array), ...(f.has(1) ? { run: runKey(f.get(1)) } : {}) });
+          else moves.push(moveRec(f.get(3) as Map<number, unknown>, f.get(1)));
         } catch { /* a record the page cannot read is not drawn */ }
         continue;
       }
