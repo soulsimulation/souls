@@ -134,10 +134,11 @@ and its own gatewayd.
   again and each agent's last act naming a place is checked by where its body is: within 4 m of the place, positions
   in micrometres composed with each frame's turn, or seated in it (#4193; #4154 read micrometres as millimetres)); `refusedOnly` those that acted for 60 s or more with nothing but
   refusals back; `stallMaxMs` and the last answer's age at the end of the schedule.
-- **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst|gene17>`, n of the ladder's counts, 20 for the
+- **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst|gene17|gene42>`, n of the ladder's counts, 20 for the
   position check's rung, or `5000x500`): every act's kind is
   drawn from `MIX` (say 22 %, walk 14, gesture 10, take 10, go_to 8, sit 8, look_at 7, point 6, touch 6, lean_on 5,
-  wait_by 4). `every4` is each agent every 4 s (125 acts a second at 500), `burst` every 1.5 s; even is `uniform`,
+  wait_by 4). `every4` is each agent every 4 s (125 acts a second at 500), `burst` every 1.5 s, and Gene's 2 to 5 acts a
+  minute a Soul `gene17` (every 29.4 s, 17 a second at 500) and `gene42` (every 12 s, 42 a second); even is `uniform`,
   uneven the `event` shape with every agent present, its time scaled to intend as many acts. The driver sends a
   gesture as the body family's argument-free forms in turn (wave, clap, cheer, bow, shrug, stretch, jump, dance,
   look_around), the one-thing forms on the Soul's body with a thing of the copy as their argument (C2's

@@ -1,0 +1,1084 @@
+{
+ "schema": "souls-named-batch/1",
+ "world": "eden-2026",
+ "issue": 4083,
+ "note": "Eden things no walk reached (#4083). Each tower floor lamp moves from the room's corner, over the stairwell or behind the spiral stair, to the floor's central landing: same room, room frame, metres. Each planter or pot on a roof with no way up moves to the ground beside its building's door: world x and z in metres, standing on the terrain, turned r radians. A node is named by its path, <building>/<thing>, as the template names it. worlds/templates/eden-2026.json carries the same change.",
+ "counts": {
+  "move": 38,
+  "move-to-ground": 35
+ },
+ "ops": [
+  {
+   "op": "move",
+   "node": "eden-tower-house/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "eden-tower-house/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "eden-tower-house/room-2-lamp",
+   "room": "room-2",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "eden-tower-house/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-old-town-bell-tower/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-old-town-bell-tower/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-old-town-bell-tower/room-2-lamp",
+   "room": "room-2",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-old-town-bell-tower/room-3-lamp",
+   "room": "room-3",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-old-town-bell-tower/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-vineyard-villa-tower/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-vineyard-villa-tower/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-vineyard-villa-tower/room-2-lamp",
+   "room": "room-2",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-vineyard-villa-tower/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-botanic-garden-pagoda/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-botanic-garden-pagoda/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-botanic-garden-pagoda/room-2-lamp",
+   "room": "room-2",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-botanic-garden-pagoda/room-3-lamp",
+   "room": "room-3",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-botanic-garden-pagoda/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-campus-clock-tower/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-campus-clock-tower/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-campus-clock-tower/room-2-lamp",
+   "room": "room-2",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-campus-clock-tower/room-3-lamp",
+   "room": "room-3",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "region-campus-clock-tower/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-keep/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -3.02,
+    0,
+    -3.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-keep/room-lamp",
+   "room": "room",
+   "from": [
+    -3.02,
+    0,
+    -3.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-keep/room-2-lamp",
+   "room": "room-2",
+   "from": [
+    -3.02,
+    0,
+    -3.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-keep/top-lamp",
+   "room": "top",
+   "from": [
+    -3.02,
+    0,
+    -3.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-1/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-1/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-1/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-2/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-2/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-2/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-3/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-3/room-lamp",
+   "room": "room",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-3/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-4/entrance-lamp",
+   "room": "entrance",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move",
+   "node": "castle-tower-4/top-lamp",
+   "room": "top",
+   "from": [
+    -2.02,
+    0,
+    -2.02
+   ],
+   "at": [
+    0.8,
+    0,
+    -0.8
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "canal-west-home-6/canal-west-home-6-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.5,
+    0,
+    3.3
+   ],
+   "at_ground": [
+    125.99,
+    5.82
+   ],
+   "r": 1.571
+  },
+  {
+   "op": "move-to-ground",
+   "node": "canal-east-home-2/canal-east-home-2-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.5,
+    0,
+    3.3
+   ],
+   "at_ground": [
+    147.01,
+    -20.83
+   ],
+   "r": 4.7122
+  },
+  {
+   "op": "move-to-ground",
+   "node": "canal-east-home-6/canal-east-home-6-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.5,
+    0,
+    3.3
+   ],
+   "at_ground": [
+    147.01,
+    3.47
+   ],
+   "r": 4.7122
+  },
+  {
+   "op": "move-to-ground",
+   "node": "market-street-shop-3/market-street-shop-3-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.75,
+    0,
+    3.2
+   ],
+   "at_ground": [
+    123.2,
+    100.61
+   ],
+   "r": 3.142
+  },
+  {
+   "op": "move-to-ground",
+   "node": "market-street-shop-3/market-street-shop-3-roof-pot",
+   "def": "core/flower-pot@1",
+   "from_roof": [
+    1.65,
+    0,
+    -3.1
+   ],
+   "at_ground": [
+    128.2,
+    100.61
+   ],
+   "r": 3.142
+  },
+  {
+   "op": "move-to-ground",
+   "node": "market-street-shop-9/market-street-shop-9-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.75,
+    0,
+    3.2
+   ],
+   "at_ground": [
+    161,
+    100.61
+   ],
+   "r": 3.142
+  },
+  {
+   "op": "move-to-ground",
+   "node": "market-street-shop-9/market-street-shop-9-roof-pot",
+   "def": "core/flower-pot@1",
+   "from_roof": [
+    1.65,
+    0,
+    -3.1
+   ],
+   "at_ground": [
+    166,
+    100.61
+   ],
+   "r": 3.142
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-2/cliff-house-2-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -2.11,
+    0,
+    1.42
+   ],
+   "at_ground": [
+    259.84,
+    109.86
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-4/cliff-house-4-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.2,
+    0,
+    1.78
+   ],
+   "at_ground": [
+    257.78,
+    132.37
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-5/cliff-house-5-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.47,
+    0,
+    1.42
+   ],
+   "at_ground": [
+    260.87,
+    102.87
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-7/cliff-house-7-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.16,
+    0,
+    1.21
+   ],
+   "at_ground": [
+    266.33,
+    111.59
+   ],
+   "r": 1.571
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-8/cliff-house-8-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.43,
+    0,
+    1.58
+   ],
+   "at_ground": [
+    266.38,
+    118.28
+   ],
+   "r": 1.571
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-12/cliff-house-12-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.54,
+    0,
+    1.49
+   ],
+   "at_ground": [
+    273.77,
+    118.26
+   ],
+   "r": 1.571
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-13/cliff-house-13-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.84,
+    0,
+    1.78
+   ],
+   "at_ground": [
+    268.24,
+    130.65
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-15/cliff-house-15-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -2.11,
+    0,
+    1.26
+   ],
+   "at_ground": [
+    276.39,
+    117.14
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-18/cliff-house-18-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.73,
+    0,
+    1.32
+   ],
+   "at_ground": [
+    280.45,
+    96.74
+   ],
+   "r": 4.7122
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-19/cliff-house-19-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.39,
+    0,
+    1.75
+   ],
+   "at_ground": [
+    286.74,
+    118.65
+   ],
+   "r": 1.571
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-21/cliff-house-21-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.71,
+    0,
+    1.73
+   ],
+   "at_ground": [
+    294.44,
+    110.71
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-24/cliff-house-24-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.89,
+    0,
+    1.72
+   ],
+   "at_ground": [
+    297.09,
+    103.17
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-25/cliff-house-25-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.73,
+    0,
+    1.55
+   ],
+   "at_ground": [
+    301.76,
+    116.47
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "cliff-house-27/cliff-house-27-roof-planter",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.85,
+    0,
+    1.22
+   ],
+   "at_ground": [
+    296.21,
+    129.53
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-3/eden-house-3-roof-planter-1",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -4.2,
+    0,
+    0.6
+   ],
+   "at_ground": [
+    34,
+    39.89
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-3/eden-house-3-roof-planter-2",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    4.2,
+    0,
+    0.6
+   ],
+   "at_ground": [
+    32.5,
+    39.89
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-3/eden-house-3-roof-pot",
+   "def": "core/flower-pot@1",
+   "from_roof": [
+    -1.6,
+    0,
+    -0.9
+   ],
+   "at_ground": [
+    35.5,
+    39.89
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-3-kitchen/eden-house-3-kitchen-roof-planter-1",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -3.8,
+    0,
+    -0.6
+   ],
+   "at_ground": [
+    27,
+    27.59
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-3-kitchen/eden-house-3-kitchen-roof-planter-2",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.6,
+    0,
+    -0.6
+   ],
+   "at_ground": [
+    41,
+    27.59
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-3-kitchen/eden-house-3-kitchen-roof-planter-3",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    2.4,
+    0,
+    -0.6
+   ],
+   "at_ground": [
+    27,
+    26.09
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-4/eden-house-4-roof-planter-1",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -4.2,
+    0,
+    0.6
+   ],
+   "at_ground": [
+    54,
+    39.89
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-4/eden-house-4-roof-planter-2",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    4.2,
+    0,
+    0.6
+   ],
+   "at_ground": [
+    52.5,
+    39.89
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-4/eden-house-4-roof-pot",
+   "def": "core/flower-pot@1",
+   "from_roof": [
+    -1.6,
+    0,
+    -0.9
+   ],
+   "at_ground": [
+    55.5,
+    39.89
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-4-kitchen/eden-house-4-kitchen-roof-planter-1",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -3.8,
+    0,
+    -0.6
+   ],
+   "at_ground": [
+    47,
+    27.59
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-4-kitchen/eden-house-4-kitchen-roof-planter-2",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -1.6,
+    0,
+    -0.6
+   ],
+   "at_ground": [
+    47.25,
+    24.09
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-house-4-kitchen/eden-house-4-kitchen-roof-planter-3",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    2.4,
+    0,
+    -0.6
+   ],
+   "at_ground": [
+    46.5,
+    26.09
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-library-1/library-roof-planter-1",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    -3.5,
+    0,
+    -3
+   ],
+   "at_ground": [
+    72,
+    -1.91
+   ]
+  },
+  {
+   "op": "move-to-ground",
+   "node": "eden-library-1/library-roof-planter-2",
+   "def": "core/planter-box@1",
+   "from_roof": [
+    3.5,
+    0,
+    -3
+   ],
+   "at_ground": [
+    76,
+    -1.91
+   ]
+  }
+ ]
+}

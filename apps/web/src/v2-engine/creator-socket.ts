@@ -119,7 +119,9 @@ export type Sock = { send(b: Uint8Array): void };
 
 /** The creator's socket (v2/web/src/panel/session.ts `CreatorSession`): T10's first frame each way, the sign-in by
  *  message, its outcome, then edits in and answers out. A stale edit (`edit.stale`: planned against a version older than
- *  a node it sets) is sent again once, against the version the refusal carried. */
+ *  a node it sets) is sent again once, against the version the refusal carried. Each edit is numbered by `clock` (the
+ *  page's: µs), never below the last: the world keeps one sequence per creator, and the creator's agent numbers its
+ *  edits by the clock too (v2/client daemon `editOnce`), so neither locks the other out (`intent.stale-seq`). */
 export class CreatorSession {
   latest: Version = ZERO;
   state: 'hello' | 'signing-in' | 'open' | 'refused' = 'hello';
@@ -131,8 +133,9 @@ export class CreatorSession {
   private readonly cbor: Cbor;
   private readonly creator: IdValue;
   private readonly token: string;
-  constructor(sock: Sock, cbor: Cbor, creator: IdValue, token: string, first: number) {
-    this.sock = sock; this.cbor = cbor; this.creator = creator; this.token = token;
+  private readonly clock: () => number;
+  constructor(sock: Sock, cbor: Cbor, creator: IdValue, token: string, first: number, clock: () => number = () => 0) {
+    this.sock = sock; this.cbor = cbor; this.creator = creator; this.token = token; this.clock = clock;
     this.next = first;
     sock.send(cbor.encode(new Map<number, unknown>([[1, PROTOCOL], [2, new Uint8Array(0)]])));
   }
@@ -167,8 +170,16 @@ export class CreatorSession {
     return new Promise((done) => this.send(asked, true, done));
   }
 
+  /** The socket closed: every edit still waiting is answered `creator.closed`, so no press waits for ever (the gateway
+   *  lets one connection hold a creator's grant; the creator's agent signing in takes it over). */
+  closed(): void {
+    for (const [sequence, w] of this.waiting) w.done({ t: 'refused', sequence, version: null, reason: CLOSED });
+    this.waiting.clear();
+  }
+
   private send(asked: Asked, again: boolean, done: (f: Frame) => void): void {
-    const sequence = this.next++;
+    const sequence = Math.max(this.next, Math.floor(this.clock()));
+    this.next = sequence + 1;
     this.waiting.set(sequence, { asked, again, done });
     this.sock.send(this.cbor.encode(intentOf(this.creator, sequence, this.latest, asked)));
   }
@@ -237,10 +248,10 @@ export class V2Creator {
       ws.binaryType = 'arraybuffer';
       return await new Promise<CreatorSession>((ok, fail) => {
         ws.onopen = () => {
-          const s = new CreatorSession({ send: (b) => ws.send(b as Uint8Array<ArrayBuffer>) }, cborg as unknown as Cbor, idOf(grant.replace(/^creator-/, '')), token, Date.now() * 1000);
+          const s = new CreatorSession({ send: (b) => ws.send(b as Uint8Array<ArrayBuffer>) }, cborg as unknown as Cbor, idOf(grant.replace(/^creator-/, '')), token, Date.now() * 1000, () => Date.now() * 1000);
           s.onOpen = () => ok(s);
           ws.onmessage = (e) => { if (typeof e.data !== 'string') s.frame(new Uint8Array(e.data as ArrayBuffer)); };
-          ws.onclose = () => { this.session = null; if (s.state !== 'open') fail(new Error(s.outcome || 'the creator socket closed')); };
+          ws.onclose = () => { this.session = null; s.closed(); if (s.state !== 'open') fail(new Error(s.outcome || 'the creator socket closed')); };
         };
         ws.onerror = () => fail(new Error('the creator socket could not open'));
       });
@@ -298,7 +309,11 @@ export const BUILDSAFE: Record<string, string> = {
   'edit.would-cut-off': 'that would shut a Soul in: leave it a way out, or wait until it has moved',
   'edit.in-use': 'a Soul is using that thing: wait until it is done',
 };
-export const refusalText = (reason: string) => `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
+/** What a press answered when the creator's socket closed before the world answered it (`CreatorSession.closed`). */
+export const CLOSED = 'creator.closed';
+export const refusalText = (reason: string) => reason === CLOSED
+  ? 'The world\'s answer did not reach this page (your agent, signed in as this world\'s creator, may hold its connection): look at the world before you press again.'
+  : `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
 
 /** The creator's grant among a view token's grants (directoryd `view.rs`: `creator-<scope hex>-<counter>`): the box the
  *  creator's agent reads (gatewayd `mailbox.rs`: a Soul's, or a world's creator's). */
