@@ -26,7 +26,8 @@
 //!    (worldd's count of the Souls embodied there, written every 2 s), under [`SOULS_ROOT_ENV`]'s folder of world
 //!    folders. The files are read at most every [`SOULS_EVERY`] seconds, outside the directory's lock, so the list
 //!    still asks no world anything. A world with no such file here (on another machine, never started, or the
-//!    variable unset) lists `souls: null`. The home page's card shows it.
+//!    variable unset), or one written more than [`SOULS_FRESH`] seconds ago (not running here now), lists
+//!    `souls: null`. The home page's card shows it.
 
 pub mod archive;
 pub mod handoff;
@@ -64,6 +65,8 @@ pub const WELCOME_MOST: usize = 500;
 pub const SOULS_ROOT_ENV: &str = "DIRECTORYD_WORLDS_ROOT";
 /// How old, in seconds, the Souls the list gives may be (rule 9).
 pub const SOULS_EVERY: u64 = 30;
+/// A world's `health.json` written longer ago than this, in seconds, gives no Souls (rule 9).
+pub const SOULS_FRESH: u64 = 120;
 
 /// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
 /// bytes as a `data:` URL, or the refusal's name.
@@ -244,13 +247,17 @@ fn folder_of(row: &Json) -> Option<String> {
     Some(format!("{lineage}-{scope}-{counter}"))
 }
 
-/// The Souls a world's `health.json` says are embodied in it (rule 9), if it says.
-fn souls_in(root: &Path, folder: &str) -> Option<u64> {
+/// The Souls a world's `health.json` says are embodied in it (rule 9), if it says and was written within
+/// [`SOULS_FRESH`] seconds of `now`: an older file is a world not running here (asleep, stopped or moved away), whose
+/// count may no longer hold.
+fn souls_in(root: &Path, folder: &str, now: u64) -> Option<u64> {
     let text = std::fs::read(root.join(folder).join("health.json")).ok()?;
-    serde_json::from_slice::<Json>(&text)
-        .ok()?
-        .get("souls")?
-        .as_u64()
+    let health = serde_json::from_slice::<Json>(&text).ok()?;
+    let at = health.get("at_unix_ms")?.as_u64()? / 1000;
+    if at.saturating_add(SOULS_FRESH) < now {
+        return None;
+    }
+    health.get("souls")?.as_u64()
 }
 
 fn row_creator(row: &Json) -> Option<&str> {
@@ -275,19 +282,19 @@ impl<S: Store> Worlds<S> {
         }
     }
 
-    /// Rule 9: each folder's Souls, read again once [`SOULS_EVERY`] seconds have passed since the last read (a folder
-    /// not read before is read now).
+    /// Rule 9: each folder's Souls, read again once [`SOULS_EVERY`] seconds have passed since the last read, or the
+    /// clock went back past it (a folder not read before is read now).
     fn souls_of(&self, folders: &[String], now: u64) -> BTreeMap<String, Option<u64>> {
         let Some(root) = &self.souls_root else {
             return BTreeMap::new();
         };
         let mut read = self.souls_read.lock().unwrap_or_else(|e| e.into_inner());
-        if now.saturating_sub(read.0) >= SOULS_EVERY {
+        if now < read.0 || now - read.0 >= SOULS_EVERY {
             *read = (now, BTreeMap::new());
         }
         for f in folders {
             if !read.1.contains_key(f) {
-                read.1.insert(f.clone(), souls_in(root, f));
+                read.1.insert(f.clone(), souls_in(root, f, now));
             }
         }
         folders

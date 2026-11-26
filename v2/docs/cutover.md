@@ -118,8 +118,9 @@ The Souls on a new-engine world's card (26 Nov): `/__sim/worlds.json` gives ever
 with no old twin, the `souls` of its row in `GET /v1/worlds`, and no `entities` ("things"): the registry's figures are
 the old engine's. The directory reads that count from the world's `health.json` (worldd's `souls`, the Souls embodied
 as its last tick left them, written every 2 s) under `DIRECTORYD_WORLDS_ROOT` (the unit's
-`/var/lib/souls/worlds/worlds`), at most every 30 s, outside its lock; a world with no such file on that machine lists
-`souls: null`, and its card shows no number.
+`/var/lib/souls/worlds/worlds`), at most every 30 s, outside its lock; a world with no such file on that machine, or
+one not written for 2 minutes (not running there now), lists `souls: null`, and its card shows no number. The homepage
+keeps the list's order (featured, then the most Souls, then the newest); it no longer re-sorts by "things".
 
 Locally (fake minds; never against production): a launcher started with `SOULS_CUTOVER_BINDING=<abs file>`, a v2 world
 from `worldd seed` and `worldd serve`, `v2/tools/origin/origin.mjs` serving its stream, and Caddy on one port sending

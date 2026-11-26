@@ -773,18 +773,34 @@ fn the_souls_in_each_world_come_from_its_health_file() {
     let root = std::env::temp_dir().join(format!("directoryd-souls-{}", std::process::id()));
     let busy = row(&w, "busy");
     let folder = folder_of(&busy).expect("a folder name");
+    // worldd's instance name, as the folder is named: `<32 hex>-<32 hex>-<counter>`, the row's lineage and zone
+    let parts: Vec<&str> = folder.split('-').collect();
+    let hex = |p: &str| p.len() == 32 && p.bytes().all(|b| b.is_ascii_hexdigit());
     assert!(
-        folder.starts_with(busy["lineage"].as_str().expect("a lineage")),
+        parts.len() == 3
+            && hex(parts[0])
+            && hex(parts[1])
+            && !parts[2].is_empty()
+            && parts[2].bytes().all(|b| b.is_ascii_digit()),
         "{folder}"
     );
+    assert_eq!(parts[0], busy["lineage"].as_str().expect("a lineage"));
+    assert_eq!(
+        format!("{}:{}", parts[1], parts[2]),
+        busy["zone"].as_str().expect("a zone")
+    );
     std::fs::create_dir_all(root.join(&folder)).expect("a world folder");
-    let health = |n: u64| {
+    let health_at = |n: u64, at_s: u64| {
         std::fs::write(
             root.join(&folder).join("health.json"),
-            format!("{{\"at_unix_ms\":1,\"written\":3,\"souls\":{n}}}\n"),
+            format!(
+                "{{\"at_unix_ms\":{},\"written\":3,\"souls\":{n}}}\n",
+                at_s * 1000
+            ),
         )
         .expect("written")
     };
+    let health = |n: u64| health_at(n, crate::accounts::serve::now());
     health(4);
     w.souls_root = Some(root.clone());
     assert_eq!(row(&w, "busy")["souls"], 4);
@@ -803,5 +819,11 @@ fn the_souls_in_each_world_come_from_its_health_file() {
         "within {SOULS_EVERY} s: the count read before"
     );
     assert_eq!(at(t + SOULS_EVERY), Some(5));
+    // A clock gone back reads again rather than hold the old count.
+    health(6);
+    assert_eq!(at(t - 2), Some(6));
+    // A file not written for more than SOULS_FRESH seconds is a world not running here: none.
+    health_at(7, t - SOULS_FRESH - 5);
+    assert_eq!(at(t + 2 * SOULS_EVERY), None, "a stale file gives no count");
     let _ = std::fs::remove_dir_all(root);
 }
