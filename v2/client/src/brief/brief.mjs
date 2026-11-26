@@ -18,8 +18,9 @@
 import { asName, wordsOf } from './copy.mjs';
 
 export const BRIEF_MOST = 2000;
-/** Names in the order a person reads them: cup 9 before cup 10. */
-export const byName = (a, b) => a.localeCompare(b, 'en', { numeric: true });
+/** Names in the order a person reads them: cup 9 before cup 10. One collator for every compare: `localeCompare` with
+ *  options makes one each call, and sorting Eden's 9,588 names that way held the daemon's loop for seconds. */
+export const byName = new Intl.Collator('en', { numeric: true }).compare;
 const CHANGED_SHOWN = 12, CARDS_SHOWN = 6, HEARD_SHOWN = 5, WORDS_SHOWN = 120, WORK_SHOWN = 4, SOULS_SHOWN = 5;
 /** How far another Soul may be for `souls_near` to name it, metres. */
 export const SOULS_NEAR_M = 25;
