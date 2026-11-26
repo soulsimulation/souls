@@ -605,12 +605,17 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
         hands[0].act("part:unseat", rail, part(rails[0])),
         "rail 1 unseated",
     );
-    let out = where_is(&w, rails[0]);
-    println!("rail 1 unseated: {out:?}");
-    assert_eq!(out.0, Some(rail), "rail 1 rides its crew");
+    // The rail rides its crew's node, which stands at its carriers' middle (the part has no place of its own there).
+    assert_eq!(
+        where_is(&w, rails[0]).0,
+        Some(rail),
+        "rail 1 rides its crew"
+    );
+    let held = where_is(&w, rail).2;
+    println!("rail 1 unseated, held at {held:?}");
     assert!(
-        ((x - 850) * 1000 - out.2.x) > 800_000,
-        "rail 1 came down clear of its posts' line: {out:?}"
+        ((x - 850) * 1000 - held.x) > 800_000,
+        "rail 1 came down clear of its posts' line: {held:?}"
     );
     walk_all(
         &mut hands,

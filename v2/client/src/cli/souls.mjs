@@ -425,13 +425,13 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from'), go = flag('--go');
+    const on = flag('--on'), from = flag('--from'), out = flag('--out'), go = flag('--go');
     if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
     if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
-    else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}) });
+    else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}), ...(out !== undefined ? { out } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
     // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
     else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
@@ -725,7 +725,7 @@ async function schedule(home, named, { sub, args, until, missed }) {
 
 /** 0.135 C, A: `help carry`, every step of carrying together and building with parts (carry/carry.mjs). */
 export const CARRY_HELP = [
-  'carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walk to that end of a load (left/right: beside a part, to hold it; side 1 to 4: beside a grip between its ends, a third to sixth carrier\'s place)',
+  'carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walk to that end of a load (left/right: beside a part, to hold it; side 1 to 4: beside a grip between its ends, a third to sixth carrier\'s place); front|back --out <m>: that far outside what the part is seated in, so it comes down there when unseated',
   'carry grip <load> left|right <n>   a crew\'s third and later carrier: beside the load\'s n-th grip between its ends, from its back (the n-th to accept takes grip n)',
   'carry offer <name or body id> [...] [--on <part id>]   a crew, you in front; --on a part to hold it where it stands; the answer names the crew',
   'carry accept|decline <crew id>   join the crew you were offered (`wait` shows it), or not',
@@ -735,7 +735,7 @@ export const CARRY_HELP = [
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
-  'part unseat <crew id> <part id>   take it out of its bay',
+  'part unseat <crew id> <part id>   take it out of its bay: it comes down at its carriers\' middle, so its front and back stand outside the bay first (carry grip <part> back --out 0.9), clear of its posts',
   'carry leave <crew id>   let go (always taken); carry list   the crews you can see',
   'carry offer anyone   a crew offered to every Soul within 20 m (five at most, nearest first)',
   'carry accept [<name>]   join the crew that Soul offered you, or with no name the newest offer to you',

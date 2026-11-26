@@ -75,6 +75,21 @@ test('a grip is the load\'s place from its entry; a standing part\'s 2.2 m along
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
 });
 
+test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
+  // The beam along z at (2, 6) as if seated in the bay at (12, 6): its ends 0.9 m off its line, on the side away from the
+  // bay (west), both ends the same side; unseated, it comes down at their middle, clear of the bay's posts.
+  const seated = { ...ctx, parentOf: (n) => (n === id(2) ? id(5) : rows.get(n)?.parent ?? null) };
+  const walk = (req) => carryIntents(req, seated)[0].params[1];
+  near(walk({ do: 'grip', thing: id(2), end: 'back', from: '2.2', out: '0.9' }), [1.1e6, 0, 3.8e6], 'its back, outside');
+  near(walk({ do: 'grip', thing: id(2), end: 'front', from: '2.2', out: '0.9' }), [1.1e6, 0, 8.2e6], 'its front, the same side');
+  near(gripSpot({ pos: [2e6, 0, 6e6] }, loadOf(kinds['mars:rack_beam']), 'back', 2_200_000, { by: 900_000, from: [-5e6, 6e6] }), [2.9e6, 3.8e6], 'away from a bay to its west: east');
+  const loose = carryIntents({ do: 'grip', thing: id(2), end: 'back', out: '0.9' }, { ...ctx, parentOf: (n) => rows.get(n)?.parent ?? null });
+  assert.equal(loose.code, 'carry-out-unseated', 'a part on the open ground is seated in nothing');
+  assert.equal(carryIntents({ do: 'grip', thing: id(2), end: 'right', out: '0.9' }, seated).code, 'carry-usage', 'front or back only');
+  assert.equal(carryIntents({ do: 'grip', thing: id(2), end: 'back', out: '9' }, seated).code, 'carry-usage', 'under 5 m');
+  assert.deepEqual(requestOf(['carry', 'grip', id(2), 'back', '--from', '2.2', '--out', '0.9']).req, { op: 'carry', do: 'grip', thing: id(2), end: 'back', from: '2.2', out: '0.9' });
+});
+
 test('a crew of six takes the 6.1 m frame at its six grips: front, back, and four sides beside the grips between', () => {
   const tall = loadOf(kinds['mars:rack_upright_6m']);
   assert.deepEqual(tall.inner, [-1_649_000, -550_000, 550_000, 1_649_000], 'four grips between its ends');

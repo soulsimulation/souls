@@ -2516,7 +2516,9 @@ async function carry(req) {
   // A loading spot (carry/spot.mjs): the crew's ends and size, and the things on the open ground that may fill a bay.
   const crewSize = (crew) => rows.get(crew)?.members?.length;
   const loose = () => all.filter((r) => r.parent === ground && !r.soul && !isCrew(r.kind) && !/:(place|humanoid|body)$/.test(String(r.kind ?? '').split('@')[0])).map((r) => r.id);
-  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, crewMiddle, crewEnds, crewSize, loose, seated, heldBy, served: activitiesServed(home, seat.world) });
+  // What a part is seated in (its parent): `carry grip <part> back --out <m>` stands outside it.
+  const parentOf = (id) => rows.get(id)?.parent ?? null;
+  const intents = carryIntents(req, { ns: NS, ground, kinds, me, placeOf: at, kindOf, parentOf, crewMiddle, crewEnds, crewSize, loose, seated, heldBy, served: activitiesServed(home, seat.world) });
   if (intents.code) return closing({ ok: false, code: intents.code, detail: intents.detail }, null, { age });
   // `--go <time>`: sent at the moment the crew's leader named, so every carrier sets off together. Carriers that set off
   // a second apart (each its own command, on a busy machine) drift past the world's 1 m stretch and the carry breaks off.

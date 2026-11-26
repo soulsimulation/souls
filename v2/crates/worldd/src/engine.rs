@@ -166,8 +166,11 @@ pub struct Engine {
     riding: Vec<(Id, Id)>,
     /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
     retried: BTreeMap<Id, u8>,
-    /// Each carrying ground's fixed geometry, with the walkers' ground versions it was read at (0.135 C7).
-    fixed: BTreeMap<Id, (sim::ground::Versions, Fixed)>,
+    /// Each carrying ground's fixed geometry, with what it was read at (0.135 C7): the walkers' ground versions and the
+    /// carries then. A take, a lift or a set-down moves a load off or onto its ground without changing a walker's map
+    /// (`crate::assembly::Ready::town_part`), so the versions alone would keep a part just taken where it stood, and a
+    /// load just set down out of the geometry, until the next seating (two crews taking two bents at once).
+    fixed: BTreeMap<Id, (sim::ground::Versions, Vec<Id>, Fixed)>,
     /// The way searches lifts asked since the last call to [`Engine::ways_asked`], in order.
     asked: Vec<WayAsk>,
     /// Each lift waiting for its way, by intent: the act, run again when the way comes back ([`Engine::way_back`]).
@@ -1529,8 +1532,10 @@ impl Engine {
                 }
             }
             // 0.135 C7: every step is checked against its ground's fixed geometry, read again only when the walkers'
-            // ground has changed since (`versions`, G3's); a step into it stops the carry, its load set down where its
-            // last sample had it.
+            // ground has changed since (`versions`, G3's) or a carry has started or ended (a load taken, lifted or set
+            // down, which no walker's map sees); a step into it stops the carry, its load set down where its last
+            // sample had it.
+            let carried: Vec<Id> = self.carries.keys().copied().collect();
             let mut blocked = Vec::new();
             for (activity, f, k) in step {
                 let Some(carry) = self.carries.get_mut(&activity) else {
@@ -1539,11 +1544,12 @@ impl Engine {
                 let fresh = self
                     .fixed
                     .get(&carry.ground)
-                    .is_some_and(|(v, _)| v == versions);
+                    .is_some_and(|(v, c, _)| v == versions && *c == carried);
                 if !fresh {
                     match Fixed::of(tr, carry.ground) {
                         Ok(g) => {
-                            self.fixed.insert(carry.ground, (versions.clone(), g));
+                            let read = (versions.clone(), carried.clone(), g);
+                            self.fixed.insert(carry.ground, read);
                         }
                         Err(e) => {
                             self.fixed.remove(&carry.ground);
@@ -1554,7 +1560,7 @@ impl Engine {
                     }
                 }
                 let done = match self.fixed.get(&carry.ground) {
-                    Some((_, g)) => carry.step(tr, now, f, k, g),
+                    Some((_, _, g)) => carry.step(tr, now, f, k, g),
                     None => Err(refusal("carry-geometry", show(carry.ground))),
                 };
                 match done {
