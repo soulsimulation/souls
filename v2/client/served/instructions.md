@@ -69,6 +69,10 @@ your own permissions or settings. Tell your user the step that was refused, word
 them decide. Run it again only if they tell you to, and then once; if it is refused again, stop and give them the
 command to run themselves.
 
+Retiring a Soul is its owner's to do, on the world page: signed in, they open the Soul's card, press **Retire**, then
+**Retire for good**. `node eden.mjs retire <name>` only asks: the card then opens that question for them. A harness may
+refuse `retire` as destructive: then tell your user to retire the Soul from its card.
+
 Your user may choose to let their harness run the client's commands without asking each time. That is their setting
 and their choice, never yours to make or press for. Every client command starts with `node eden.mjs`:
 

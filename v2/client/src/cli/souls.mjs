@@ -675,11 +675,15 @@ export async function runViews(args, shootOne) {
   return { ok: views.some((v) => v.ok !== false), views, source: 'drawn here from the public stream, as a visitor sees it' };
 }
 
-function help(home, named, topic) {
+/** `help <topic>`'s topics. */
+export const HELP_TOPICS = ['schedule-wake', 'safety', 'account', 'carry', 'build'];
+/** First day (26 Nov): `help` with no topic lists the commands, as a newcomer expects; it had answered an error. */
+export function help(home, named, topic) {
+  if (topic === undefined) return { ok: true, commands: [...new Set([...OPS, ...LOCAL, ...HOME_COMMANDS, 'shoot', 'view', 'views', 'map', 'upgrade'])].sort(), topics: HELP_TOPICS.map((t) => `help ${t}`), note: 'Each command is taught in the souls skill (.souls/bin/skill.md).' };
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic === 'carry') return { ok: true, commands: CARRY_HELP, note: CARRY_NOTE };
   if (topic === 'build') return { ok: true, steps: BUILD_HELP, note: BUILD_NOTE };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account | carry | build'), { code: 'help-topics' });
+  if (topic !== 'schedule-wake') throw Object.assign(new Error(`help | ${HELP_TOPICS.map((t) => `help ${t}`).join(' | ')}`), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
