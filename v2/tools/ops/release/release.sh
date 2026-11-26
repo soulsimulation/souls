@@ -659,7 +659,7 @@ rollback() {
   [ $# -gt 0 ] || die "rollback <to> <from> <world>..."
   [ "$to" != "$from" ] || refuse "rollback.same: to and from are one build"
   # The release that brought <from> carries the deploy tool that knows its schemas.
-  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$from\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1)
+  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$from\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1 || true)
   [ -n "$rel" ] || refuse "rollback.from-unknown: no staged release has worldd $from"
   rel=$(dirname "$rel")
   [ -f "$WORLDS_ROOT/builds/$to/worldd" ] || refuse "rollback.to-missing: $to is not on this machine"
@@ -692,10 +692,11 @@ reseed() {
 reseed_undo() {
   local label=$1 act=${2:-} receipt new rel
   [[ $label =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$act" = check ] || [ "$act" = run ]; } || die "reseed-undo <label> check|run"
-  receipt=$(ls "$WORLDS_ROOT"/aside/*-"$label".reseed 2> /dev/null | head -1)
+  # `|| true`: under pipefail a probe that finds nothing would end the script before its refusal says why (#4954).
+  receipt=$(ls "$WORLDS_ROOT"/aside/*-"$label".reseed 2> /dev/null | head -1 || true)
   [ -f "$receipt" ] || refuse "release.no-reseed: no reseed receipt for $label"
   new=$(sed -n 's/^new=//p' "$receipt")
-  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$new\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1)
+  rel=$(grep -l "\"name\":\"worldd\",\"hash\":\"$new\"" "$DATA"/releases/*/manifest.json 2> /dev/null | head -1 || true)
   [ -n "$rel" ] && [ -f "$(dirname "$rel")/reseed/reseed-eden-undo.sh" ] || refuse "release.no-reseed: no staged release carries the undo for $label"
   RESEED_TOOL=${RESEED_TOOL:-$(dirname "$rel")/bin/world-aside} bash "$(dirname "$rel")/reseed/reseed-eden-undo.sh" "$label" "$act"
 }
@@ -729,7 +730,9 @@ publish() {
     echo "publish: tagged $tag at ${sha:0:12}"
   fi
   branch=release/changelog-$version
-  if git show origin/main:CHANGELOG.md 2> /dev/null | grep -q "^## $version "; then
+  # Read whole, not piped into grep -q: under pipefail git show, cut off when grep stops at the first match, would fail
+  # the test and the changelog would be opened again (#4954).
+  if grep -q "^## $version " <<< "$(git show origin/main:CHANGELOG.md 2> /dev/null || true)"; then
     echo "publish: CHANGELOG.md on main already has $version"
   elif [ -n "$(git ls-remote --heads origin "$branch")" ]; then
     echo "publish: the changelog's branch $branch is already there"

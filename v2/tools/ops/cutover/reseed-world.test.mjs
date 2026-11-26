@@ -1,8 +1,9 @@
 // reseed-world.sh (0.133): any moved world fresh from its own facts on a release's build, with stand-ins for the
-// host's programs (systemctl, supervisor, deploy, world-aside, worldd) under a scratch folder: the check changes
-// nothing, a run sets the old folder and bucket objects aside (nothing deleted), seeds the same facts, pins the build
-// (here the one the world is on already, as after an importer fix ships) and brings the world back as it was; a second
-// fresh reseed to the same build refuses, and reseed-eden-undo.sh puts the old world back.
+// host's programs (systemctl, supervisor, deploy, worldd) under a scratch folder: the check changes nothing, a run sets
+// the old folder aside, seeds the same facts on a fresh store generation (#4954: not one store object moves), pins the
+// build in the fresh world's own record (here the one the world is on already, as after an importer fix ships) and
+// brings the world back as it was; a second fresh reseed to the same build refuses, and reseed-eden-undo.sh puts the
+// old world back by its folder alone, exactly.
 //   node --test v2/tools/ops/cutover/reseed-world.test.mjs
 
 import { strict as assert } from 'node:assert';
@@ -29,19 +30,19 @@ for (const d of [etc, state, join(bucket, 'live', world), join(rel, 'reseed/kind
 // systemctl: units' states are files; stop and start change them, and every call is logged.
 exe(join(bin, 'systemctl'), `S=${state}; echo "$*" >> $S/systemctl.log; act=$1; shift
 for u in "$@"; do case $act in is-active) cat "$S/$u" 2>/dev/null || echo inactive; [ "$(cat "$S/$u" 2>/dev/null)" = active ] || exit 3 ;; stop) echo inactive > "$S/$u" ;; start) echo active > "$S/$u" ;; esac; done`);
-// supervisor: a build's hash is 1220 and its sha256; a pin is a file deploy reads.
-exe(join(lib, 'supervisor'), `case $1 in hash) if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)" ;; pin) echo "$3" > ${state}/pin ;; esac`);
-exe(join(rel, 'bin/deploy'), `cat ${state}/pin`);
-// world-aside: the bucket's objects of a world are files under live/<world>; --label moves them under aside/<label>/,
-// --back moves them home; --dry-run counts.
-exe(join(rel, 'bin/world-aside'), `B=${bucket}; w=$1 mode=$2 l=$3
-case $mode in --label) from=$B/live/$w to=$B/aside/$l/$w ;; --back) from=$B/aside/$l/$w to=$B/live/$w ;; esac
-n=$(ls "$from" 2>/dev/null | wc -l | tr -d ' ')
-if [ "\${4:-}" = --dry-run ]; then echo "dry run: $n objects of $w would move; nothing changed"; exit 0; fi
-mkdir -p "$to"; for f in $(ls "$from" 2>/dev/null); do cp "$from/$f" "$to/$f" && cmp -s "$from/$f" "$to/$f" && rm "$from/$f"; done
-echo "moved $n objects"`);
+// supervisor and deploy: a build's hash is 1220 and its sha256; a world's pin is its record, a file in the bucket at the
+// place its folder's store generation names (#4954): live/<world>/record, or g/<label>/live/<world>/record.
+const place = `g=$(cat ${root}/worlds/$2/generation 2>/dev/null); if [ -n "$g" ]; then P=${bucket}/g/$g/live/$2; else P=${bucket}/live/$2; fi`;
+exe(join(lib, 'supervisor'), `case $1 in hash) if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)" ;;
+pin) ${place}; mkdir -p "$P"; echo "$3" > "$P/record"; echo "$2" >> ${state}/pins ;;
+generation) ${place}; cat ${root}/worlds/$2/generation 2>/dev/null || echo none ;; *) exit 2 ;; esac`);
+// (a release's deploy and worldd from #4954 on carry 'generation-bad: ', the refusal of a bad generation file)
+exe(join(rel, 'bin/deploy'), `# generation-bad: \n${place}; cat "$P/record"`);
+// world-aside, for a reseed before #4954 only: here it must never run.
+exe(join(rel, 'bin/world-aside'), `echo "world-aside ran: $*" >> ${state}/aside.log; exit 1`);
 // worldd seed: a fresh folder from the facts, named for the world, with the arguments it was given.
-const worldd = `a="$*"; while [ $# -gt 0 ]; do case $1 in --dir) d=$2; shift ;; esac; shift; done
+const worldd = `# generation-bad: 
+a="$*"; while [ $# -gt 0 ]; do case $1 in --dir) d=$2; shift ;; esac; shift; done
 mkdir -p "$d"; printf '{"format": "souls/world/1", "name": "${world}", "fresh": true}' > "$d/world.json"; echo "$a" > "$d/args"
 echo "seeded ${world}"`;
 const built = `1220${createHash('sha256').update(`#!/bin/sh\n${worldd}\n`).digest('hex')}`;
@@ -60,8 +61,13 @@ writeFileSync(join(folder, 'log'), 'the old log');
 writeFileSync(join(folder, 'stock.json'), '{"format": "souls-world-stock/1", "libraries": {"books": "content/library/books.json"}}');
 mkdirSync(join(folder, 'library'));
 writeFileSync(join(folder, 'library/books.json'), '{"library": "books", "books": []}');
-for (const k of ['record', 'checkpoint-1', 'part-1']) writeFileSync(join(bucket, 'live', world, k), k);
-writeFileSync(join(state, 'pin'), `${built}\n`);
+// The world's objects in the bucket: its record (its pin) and, standing in for Eden's 36,500, a few hundred more.
+writeFileSync(join(bucket, 'live', world, 'record'), `${built}\n`);
+for (let i = 0; i < 300; i++) writeFileSync(join(bucket, 'live', world, `part-${i}`), `part ${i}`);
+// Every object in the bucket and its bytes, to show that none moved or changed.
+const objects = (d = bucket, at = '') => readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory()
+  ? objects(join(d, e.name), `${at}${e.name}/`) : [[`${at}${e.name}`, readFileSync(join(d, e.name), 'utf8')]]);
+const old = new Map(objects());
 writeFileSync(join(state, `worldd@${world}`), 'active\n');
 writeFileSync(join(state, `souls-gateway@${world}`), 'active\n');
 
@@ -69,7 +75,7 @@ const env = { PATH: `${bin}:${process.env.PATH}`, RESEED_DATA: data, RESEED_ETC:
 const run = (script, args, extra = {}) => spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...env, ...extra } });
 const unit = u => readFileSync(join(state, `${u}@${world}`), 'utf8').trim();
 
-test('a moved world reseeds fresh from its facts on the build it is on, with everything old set aside', () => {
+test('a moved world reseeds fresh from its facts on the build it is on, on a fresh store generation: nothing in the store moves, and the undo is its folder', () => {
   assert.equal(run('reseed-world.sh', ['eden', sha, 'check']).status, 2, 'a world is named by its folder');
   assert.equal(run('reseed-world.sh', [world, sha]).status, 2);
 
@@ -79,7 +85,7 @@ test('a moved world reseeds fresh from its facts on the build it is on, with eve
   assert.match(check.stdout, /creator +kept \(from world\.json\)/);
   assert.match(check.stdout, /entry point +1\.500,-2\.500 m/);
   assert.match(check.stdout, /stock +the world's own \(stock\.json, library\/\)/);
-  assert.match(check.stdout, /3 of the world's objects at their keys/);
+  assert.match(check.stdout, /generation +the fresh world's objects under g\/20261124T200000Z\/; the old world's \(at their keys\) stay where they are: none moves/);
   assert.match(check.stdout, /and the world \(it was running\)/);
   assert.match(check.stdout, /check only; nothing changed/);
   assert.ok(existsSync(join(folder, 'log')) && !existsSync(join(root, 'aside')), 'the check changes nothing');
@@ -89,20 +95,25 @@ test('a moved world reseeds fresh from its facts on the build it is on, with eve
   const aside = join(root, 'aside', `${world}-20261124T200000Z`);
   assert.equal(readFileSync(join(aside, 'log'), 'utf8'), 'the old log', 'the old folder is aside, whole');
   assert.equal(readFileSync(join(aside, 'facts.json'), 'utf8'), '{"format": "souls/import-eden/1"}');
-  assert.deepEqual(readdirSync(join(bucket, 'aside/20261124T200000Z', world)).sort(), ['checkpoint-1', 'part-1', 'record']);
-  assert.deepEqual(readdirSync(join(bucket, 'live', world)), [], 'the old objects are aside, not deleted');
   assert.match(readFileSync(join(folder, 'world.json'), 'utf8'), /"fresh": true/, 'the fresh seed is in place');
+  assert.equal(readFileSync(join(folder, 'generation'), 'utf8'), '20261124T200000Z\n', 'on its own store generation');
+  assert.ok(!existsSync(join(aside, 'generation')), 'the old folder names the old place: the keys as they are');
+  // #4954: not one object moved or changed; the only new one is the fresh world's record, under g/<label>/.
+  const after = new Map(objects());
+  for (const [k, v] of old) assert.equal(after.get(k), v, `${k} stayed, with its bytes`);
+  assert.deepEqual([...after.keys()].filter(k => !old.has(k)), [`g/20261124T200000Z/live/${world}/record`]);
+  assert.ok(!existsSync(join(state, 'aside.log')), 'world-aside never ran');
   assert.ok(!existsSync(join(folder, 'log')));
   assert.equal(
     readFileSync(join(folder, 'args'), 'utf8').trim(),
     `seed --facts ${aside}/facts.json --dir ${join(root, 'aside', `.seed-${world}-20261124T200000Z`)} --entries ${rel}/reseed/kinds --souls 0 --at 1.500,-2.500 --creator ${'f'.repeat(32)}-1 --stock ${aside}/stock.json`,
     'seeded from the same facts, with its creator, entry point and stock (its library beside it)',
   );
-  assert.equal(readFileSync(join(state, 'pin'), 'utf8').trim(), built);
+  assert.equal(readFileSync(join(bucket, `g/20261124T200000Z/live/${world}/record`), 'utf8').trim(), built, 'pinned in its own record');
   assert.equal(unit('worldd'), 'active', 'the world was running, and runs again');
   assert.equal(unit('souls-gateway'), 'active');
   const receipt = readFileSync(join(root, 'aside', `${world}-20261124T200000Z.reseed`), 'utf8');
-  assert.match(receipt, new RegExp(`^world=${world}\nold=${built}\nnew=${built}\nlabel=20261124T200000Z\nrunning=yes\nbucket=moved\n$`));
+  assert.match(receipt, new RegExp(`^world=${world}\nold=${built}\nnew=${built}\nlabel=20261124T200000Z\nrunning=yes\nstore=g/20261124T200000Z/\n$`));
   assert.match(done.stdout, /undo: bash .*reseed-eden-undo\.sh 20261124T200000Z check/);
 
   // A second fresh reseed to this build is one to resume or undo, not to start again.
@@ -111,16 +122,40 @@ test('a moved world reseeds fresh from its facts on the build it is on, with eve
   assert.match(again.stderr, /reseed 20261124T200000Z to this build is not undone: resume it/);
   const resumed = run('reseed-world.sh', [world, sha, 'resume', '20261124T200000Z', 'check']);
   assert.equal(resumed.status, 0, resumed.stdout + resumed.stderr);
-  assert.match(resumed.stdout, /steps done +1 stop: no; 2 folder aside: yes; 3 bucket aside: yes; 4-5 fresh seed in place: yes/);
+  assert.match(resumed.stdout, /steps done +1 stop: no; 2 folder aside: yes; 3-5 fresh seed in place on g\/20261124T200000Z\/: yes/);
 
-  // The undo (Eden's, which reads the world from the receipt) puts the old world back and sets the fresh one aside.
+  // The undo (Eden's, which reads the world from the receipt) is one step: the old folder back, the fresh one aside,
+  // and nothing in the store moved or written; the old world's record and pin are as they were.
+  const pins = readFileSync(join(state, 'pins'), 'utf8');
+  const undoCheck = run('reseed-eden-undo.sh', ['20261124T200000Z', 'check'], { RESEED_TOOL: join(rel, 'bin/world-aside') });
+  assert.equal(undoCheck.status, 0, undoCheck.stdout + undoCheck.stderr);
+  assert.match(undoCheck.stdout, /store +nothing moves: the reseed put the fresh world's objects under g\/20261124T200000Z\//);
   const undo = run('reseed-eden-undo.sh', ['20261124T200000Z', 'run'], { RESEED_TOOL: join(rel, 'bin/world-aside') });
   assert.equal(undo.status, 0, undo.stdout + undo.stderr);
   assert.equal(readFileSync(join(folder, 'log'), 'utf8'), 'the old log');
+  assert.ok(!existsSync(join(folder, 'generation')));
   assert.match(readFileSync(join(root, 'aside', `${world}-20261124T200000Z-fresh`, 'world.json'), 'utf8'), /"fresh": true/);
-  assert.deepEqual(readdirSync(join(bucket, 'live', world)).sort(), ['checkpoint-1', 'part-1', 'record']);
+  const undone = new Map(objects());
+  for (const [k, v] of old) assert.equal(undone.get(k), v, `${k} is as it was`);
+  assert.equal(undone.size, old.size + 1, 'only the fresh record, left under g/<label>/');
+  assert.equal(readFileSync(join(state, 'pins'), 'utf8'), pins, 'the undo pins nothing: the old record holds the old pin');
+  assert.ok(!existsSync(join(state, 'aside.log')), 'world-aside never ran');
   assert.match(readFileSync(join(root, 'aside', `${world}-20261124T200000Z.reseed`), 'utf8'), /\nundone=\d{8}T\d{6}Z\n$/);
   assert.equal(unit('worldd'), 'active');
   // and an undone reseed no longer blocks a fresh one
   assert.equal(run('reseed-world.sh', [world, sha, 'check'], { RESEED_STAMP: '20261124T220000Z' }).status, 0);
+});
+
+test('a reseed refuses, changing nothing, when the installed launcher or the release reads no store generation', () => {
+  const oldLib = join(dir, 'old-lib');
+  exe(join(oldLib, 'supervisor'), `case $1 in hash) ${'exec'} ${join(lib, 'supervisor')} "$@" ;; *) echo "usage: supervisor launch|..." >&2; exit 2 ;; esac`);
+  const refused = run('reseed-world.sh', [world, sha, 'check'], { RESEED_LIB: oldLib, RESEED_STAMP: '20261124T230000Z' });
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /the installed supervisor .* reads no store generation \(#4954\): install-v2/);
+});
+
+test('an undo of a label with no receipt says so (a probe that finds nothing no longer ends it silently under pipefail)', () => {
+  const none = run('reseed-eden-undo.sh', ['20990101T000000Z', 'check']);
+  assert.equal(none.status, 1, none.stdout + none.stderr);
+  assert.match(none.stderr, /no reseed receipt for 20990101T000000Z/);
 });
