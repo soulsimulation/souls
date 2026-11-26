@@ -1760,6 +1760,69 @@ fn e17_a_form_walk_from_inside_a_slot_is_done_from_inside_or_rises_first() {
     );
 }
 
+/// Eden indoor audit (26 Nov): a body seated in a seat of one thing, asked a form at another thing that walks (the
+/// lamp across the room, asked from the sofa), rises from its seat first and does it, as a person gets up to go; it
+/// was refused `resource-held`, the seat holding its legs.
+#[test]
+fn a_seated_body_asked_a_form_elsewhere_that_walks_rises_first() {
+    use skills::form_runner::Step;
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+        on: None,
+    };
+    b.steps(body, chair, vec![sit], intent(body, 0), Limits::default())
+        .expect("started");
+    b.run(30_000_000);
+    assert_eq!(
+        b.forms.ended.pop().map(|e| e.how.as_str().to_owned()),
+        Some("done".into())
+    );
+    // A lamp 2 m off, with its switch: the form walks to the switch, then waits as its move would.
+    let lamp = b.mint.mint().expect("id");
+    let at = Vec3::new(stand.x, stand.y, stand.z + 2_000_000);
+    b.snap.things.insert(
+        lamp,
+        (at, BTreeMap::from([("switch".to_owned(), Vec3::ZERO)])),
+    );
+    let walk = Step::WalkTo {
+        point: Name::new("switch").expect("a name"),
+        at: Vec3::ZERO,
+        on: None,
+        approach: true,
+        face: None,
+    };
+    b.steps(
+        body,
+        lamp,
+        vec![walk, Step::Wait(200_000)],
+        intent(body, 1),
+        Limits::default(),
+    )
+    .expect("started");
+    b.run(30_000_000);
+    let e = b.forms.ended.pop().expect("ended");
+    assert_eq!(
+        e.how.as_str(),
+        "done",
+        "risen and walked, not resource-held"
+    );
+    assert_eq!(
+        b.slots.as_ref().and_then(|s| s.held_by(body)),
+        None,
+        "out of the chair"
+    );
+    assert!(
+        matches!(
+            b.c.body(body).expect("a body").pose.support,
+            replica::pose::Support::Surface { .. }
+        ),
+        "on its feet"
+    );
+}
+
 /// 0.135 E14: a form done at one thing takes a seat of another (a lecture's `attend` takes a bench's seat, the hall's
 /// chairs) through the same places: the sit's hand-off puts the body in the chair, another body is refused the taken
 /// seat by name, and the rise of the lecture's `leave` gives it back. A Soul that leaves mid-walk or mid-sit keeps no
