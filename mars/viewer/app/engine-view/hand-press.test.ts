@@ -37,6 +37,11 @@ test('production rig press is continuous, uses its recorded free hand and retain
   const beforeWalk=draw(.2-1e-6),afterWalk=draw(.2+1e-6,{activity:'walk',activityAge:1e-6,walkAge:1e-6,walk:0,formPress:[interrupted]});
   assert.ok(delta(beforeWalk,afterWalk)<.015,'immediate locomotion returns from the attained press without moving the native root');
   for(const activity of ['sit','nod']){const extra={baseActivity:activity==='sit'?'sit':undefined,activity,seatHeight:.45};assert.ok(delta(draw(.55-1e-6,extra),draw(.55+1e-6,extra))<.015,'return to '+activity);}
+  const legacy=draw(.25,{},false),legacyIdle=draw(.25,{activity:'idle'},false);assert.ok(distance(hand(legacy,'right'),hand(legacyIdle,'right'))>.2,'metadata-free operate retains its generic right-hand fallback');
+  const oldEndpoint={...press,current:false};
+  assert.ok(distance(hand(draw(.6,{activity:'operate',activityAge:.1,formPress:[oldEndpoint]}),'right'),hand(draw(.6,{activity:'idle'},false),'right'))>.2,'retained endpoint cannot hide a newer metadata-free operate');
+  const legacyFade=draw(.1,{activity:'idle',activityAge:.1,prevActivity:'operate'},false);assert.ok(distance(hand(legacyFade,'right'),hand(draw(.1,{activity:'idle'},false),'right'))>.1,'metadata-free operate retains its existing shared return crossfade');
+  for(const age of [.56,.65,.849,.851]){const extra={activity:'idle',activityAge:age-.55,prevActivity:'operate',formPress:age<.85?[press]:undefined};assert.ok(distance(hand(draw(age,extra),'right'),hand(draw(age,{activity:'idle'},false),'right'))<.015,'old generic right arm never reappears after a recorded press '+age);}
   const fixed={hands:{left:[2.3,1,1] as [number,number,number]}};assert.ok(delta(draw(.25,fixed),draw(.25,{...fixed,activity:'idle'},false))<1e-5,'explicit native hand wins');
   for(const extra of [{prop:'cup'},{handHold:{with:'other',hand:'left',since:2000} as SampledHuman['handHold']},{partner:'other'}])assert.ok(delta(draw(.25,extra),draw(.25,{...extra,activity:'idle'},false))<.015,'held/paired hand ownership wins');
   views.clear();setHumanGround(null);

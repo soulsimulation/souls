@@ -39,7 +39,7 @@ export function propFor(activity: string, prop?: string, instrument?:string): Pr
 /** Extra inputs of a frame: seconds since the activity began (one-shot gestures; undefined = cycle on take time) and
  *  the distance to the partner of a paired gesture (body points; undefined = the contract gap). */
 /** Recorded press phases; world µs, not a new action clock. An early cut gets only cosmetic recovery. */
-export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number };
+export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
 export function formPresses(value: unknown): readonly FormPress[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const valid = value.filter((p): p is FormPress => !!p && (p.hand === 'left' || p.hand === 'right') && [p.start,p.contact,p.end,p.cut ?? p.end].every(Number.isFinite) && p.start < p.contact && p.contact < p.end && (p.cut === undefined || p.cut >= p.start && p.cut <= p.end));

@@ -173,7 +173,7 @@ export function lastPostureChange(t: readonly number[], v: readonly string[], k:
 
 
 /** Activities with their own fade in and out (or whose frame rides on something): never crossfaded here. */
-export const OWN_FADE: ReadonlySet<string> = new Set(['operate', 'sing', 'play-piano', 'play-music', 'wave', 'bow', 'point', 'ride', 'row', 'swing', 'seesaw', 'rps', 'cycle']);
+export const OWN_FADE: ReadonlySet<string> = new Set(['sing', 'play-piano', 'play-music', 'wave', 'bow', 'point', 'ride', 'row', 'swing', 'seesaw', 'rps', 'cycle']);
 
 /** Two standing activity frames mixed, `k` 0 (all `prev`) to 1 (all `cur`); either may be null (standing plain). Each
  *  hand goes from one goal to the other, or eases on (off) from the plain posture by its arm weight; leg, lean, hop and

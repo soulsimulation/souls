@@ -29,7 +29,7 @@ export const LOOP_HOLD = 700_000;
  *  activity id (null for a hold); the body it is aimed at, if any, and (0.134 B1's aimed moves) where its target stood
  *  when it began, world x and z in mm; whether it holds that body's hand. */
 /** The existing humanoid resource names, with the move’s authoritative phase times in world µs. */
-export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number };
+export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
 export type Gesture = { press?: FormPress; start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
@@ -92,10 +92,14 @@ export function gestureAt(gestures: readonly Gesture[] | undefined, t: number): 
 /** Keep only the recorded free-hand recovery after an early run end; never extend the activity itself. */
 export function pressAt(gestures: readonly Gesture[] | undefined, t: number): FormPress[] | null {
   const out: FormPress[] = [];
+  const latest = (gestures ?? []).filter(g=>g.start<=t).at(-1);
   for (const g of gestures ?? []) {
     const p = g.press; if (!p || g.start > t) continue;
-    const cut = g.end < p.end ? g.end : undefined, end = cut === undefined ? p.end : cut + p.end - p.contact;
-    if (t < end) out.push({ ...p, ...(cut === undefined ? {} : { cut }) });
+    const cut = g.end < p.end ? g.end : undefined;
+    // Retain a zero-weight normal endpoint through the renderer's 0.3s generic fade window.
+    // This is metadata only: gestureAt still ends at the native end.
+    const end = cut === undefined ? p.end + 300_000 : cut + Math.max(300_000,p.end-p.contact);
+    if (t < end) out.push({ ...p, current:g===latest, ...(cut === undefined ? {} : { cut }) });
   }
   return out.length ? out : null;
 }

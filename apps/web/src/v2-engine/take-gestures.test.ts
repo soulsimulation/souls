@@ -198,6 +198,8 @@ test('press keeps the actual hand and phase times, including cosmetic cancellati
   assert.equal(gestureAt([g],t0+300_000),null,'cosmetic recovery does not extend the native activity');
   assert.equal(pressAt([g],t0+300_000)![0].cut,t0+250_000);
   assert.equal(pressAt([g],t0+550_000),null);
+  const fallback=gestureFrom({...move,start:t0+300_000,limbs:[]})!;
+  assert.equal(pressAt([g,fallback],t0+350_000)![0].current,false,'old recovery cannot own the newer generic operate');
   const b:Body={entity:'press-body',node:'press-node',soul:'press-soul',name:'Press test',heading:0,samples:[{at:t0-1_000_000,p:[0,0,0]}],gestures:[g]};
   const take=chunkOf([b],FROM,frame).take as unknown as Take;
   const at=(s:number)=>sampleTake(take,s).entities[b.entity];
