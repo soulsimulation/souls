@@ -376,7 +376,7 @@ export class TakePeople {
     let at=tick;
     // Keep the contributing chain flat. A stable, fully completed fade ends it; rapid changes do not
     // truncate a visible origin. The renderer collapses these immutable boundaries iteratively.
-    for(let k=this.runAt(a,tick);k>=1;k--){
+    for(let k=index;k>=1;k--){
       const age=(at-a.t[k])*this.take.dt;if(age<0||age>=CLIP_FADE||this.clipOwnerTicks.get(id)?.some(owner=>owner>=a.t[k]-CLIP_FADE/this.take.dt&&owner<=at))break;
       const before=a.t[k]-1e-5,activity=a.v[k-1];
       const take=before>=0?this.take:this.history.find(t=>{const offset=t.startTick-this.take.startTick;return before>=offset&&before<offset+t.ticks;});
