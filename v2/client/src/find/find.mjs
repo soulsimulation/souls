@@ -61,14 +61,32 @@ export function placeName(path) {
  * in any field, so a find scores only the rows its words can hit, not every row (Eden's 9,588 scored at each find held
  * the daemon's loop 0.1 to 0.4 s, 26 Nov 2026). A row's words count its kind's (`kindWordsOf`) as what it is. Kept per
  * kind entries; a changed copy's Map is followed by its rows that changed (`rowsOf` gives the same row for a node
- * that did not), so an index is built once and then changed by what a sync changed.
+ * that did not), so an index is built once, a slice a turn, and then changed by what a sync changed. A Map given is
+ * never changed after (`rowsOf` gives a new one).
  */
 const INDEXES = new WeakMap(), NO_KINDS = {};
+/** Rows indexed in one turn of the loop while an index is first built: Eden's whole copy at once held it for 0.3 s on
+ *  a quiet machine and 1 s on a loaded one, right as its first sync ended. */
+export const INDEX_SLICE = 1000;
+/** The index of `rows`, or null while it is first built, a slice a turn (`find` then reads the rows one by one). */
 function indexOf(rows, kinds) {
   const slot = kinds ?? NO_KINDS;
   let x = INDEXES.get(slot);
   if (x?.rows === rows) return x;
-  if (!x) INDEXES.set(slot, (x = { rows: new Map(), byStem: new Map(), words: new Map(), of: new Map(), kindWords: new Map() }));
+  if (!x) {
+    INDEXES.set(slot, (x = { rows: null, byStem: new Map(), words: new Map(), of: new Map(), kindWords: new Map() }));
+    const list = [...rows.values()];
+    let i = 0;
+    const slice = () => {
+      for (const end = Math.min(list.length, i + INDEX_SLICE); i < end; i++) add(x, list[i], kinds);
+      if (i < list.length) setImmediate(slice);
+      else x.rows = rows;
+    };
+    if (list.length <= INDEX_SLICE) { slice(); return x; }
+    setImmediate(slice);
+    return null;
+  }
+  if (x.rows === null) return null; // still being built
   const was = x.rows;
   for (const [id, row] of rows) {
     const old = was.get(id);
@@ -115,10 +133,9 @@ export function find(rows, words, { limit = 8, within, metres, kinds } = {}) {
   // the rows no word hits score nothing, and are passed by without reading them.
   let x = null, hits = null, list = rows;
   if (rows instanceof Map) {
-    x = indexOf(rows, kinds);
-    hits = new Set();
-    for (const w of q) rowsHit(x, w, hits);
     list = rows.values();
+    x = indexOf(rows, kinds);
+    if (x) { hits = new Set(); for (const w of q) rowsHit(x, w, hits); }
   }
   for (const row of list) {
     if (hits && !hits.has(row)) continue;
