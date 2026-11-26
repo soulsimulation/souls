@@ -17,9 +17,9 @@
 //!   outside) it leads to, its row in the owning room's field 22 and its door naming it; each stair a link between
 //!   two floors, its row in the lower floor's field 21.
 //!
-//! Every place has no support of its own (as a creator's place without one), and each node's origin (field 1) is
-//! `<def>/<key>`, the import's `<thing id>/<key>` with the def for the thing, so a room's kind reads as a template
-//! room's (`furnish`). A window with no room, a doorway to itself or to nothing there, and a flight within one storey
+//! Every place has no support of its own (as a creator's place without one), and each floor's, room's and window's
+//! origin (field 1) is `<def>/<key>`, the import's `<thing id>/<key>` with the def for the thing, so a room's kind reads
+//! as a template room's (`furnish`). A door has none, so the page draws it as a thing placed live. A window with no room, a doorway to itself or to nothing there, and a flight within one storey
 //! are left out, as the import leaves them (it has no such building at a def's defaults).
 
 use super::json::{self, Json};
@@ -59,6 +59,22 @@ fn need_section(entry: &replica::rules::json::Value) -> R<&replica::rules::json:
     entry
         .get("building")
         .ok_or_else(|| "the entry keeps no building section".to_owned())
+}
+
+/// The most new ids a place of a kind of this entry can mint with its parts ([`ops`]: each floor, room, window and door
+/// placed, each doorway and stair linked), or none for an entry with no building section. The world reserves them
+/// when it takes the edit in, before the edit checker expands it, so no later intent or edit is given one of them.
+pub fn ids_most(entry: &replica::rules::json::Value) -> Option<u64> {
+    let t = entry.get("building")?;
+    let n = |k: &str| {
+        t.get(k)
+            .and_then(replica::rules::json::Value::arr)
+            .map_or(0, |a| a.len() as u64)
+    };
+    // A floor per level its rooms, floors and stairs name: at most one each, and two for a stair.
+    let floors = n("rooms") + n("floors") + 2 * n("stairs");
+    // Each opening is a window placed or a doorway linked; each door is placed; each stair linked.
+    Some(floors + n("rooms") + n("openings") + n("doors") + n("stairs"))
 }
 
 fn kind(full: &str) -> R<Name> {
@@ -213,13 +229,12 @@ pub fn ops(
         for d in t.get("doors").map(Json::arr).unwrap_or(&[]) {
             let n = fresh();
             let opening = s(d, "opening")?;
-            let mut df = BTreeMap::from([
-                (F_ORIGIN, origin(&format!("door-{opening}"))),
-                (
-                    F_OPEN,
-                    Value::Uint(u64::from(d.get("open").and_then(Json::bool) != Some(false))),
-                ),
-            ]);
+            // No origin: the page draws a thing placed live (one with no origin) as a thing of its kind, and leaves
+            // a node with an origin to the world's own scene, which has none for this one.
+            let mut df = BTreeMap::from([(
+                F_OPEN,
+                Value::Uint(u64::from(d.get("open").and_then(Json::bool) != Some(false))),
+            )]);
             if let Some(dd) = d.get("def").and_then(Json::str) {
                 df.insert(F_DEF, Value::Bytes(dd.as_bytes().to_vec()));
             }

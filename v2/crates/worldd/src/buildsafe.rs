@@ -128,8 +128,10 @@ pub fn stand_as_kinds(
 /// as one edit, and one undo takes it all back.
 ///
 /// Left as it is: a place that gives its own solids (a clone's or an import's copy, which brings its own rooms in its
-/// next edits), one whose batch already places a floor in it, a kind the world does not let hold a floor, and every
-/// place in a world that pins no floor or room kind. A plan the mapping cannot read refuses the edit
+/// next edits), one whose batch already places a floor in it, a kind the world does not let hold a floor, every place
+/// in a world that pins no floor or room kind, and a helper's edit under a build claim. The world reserved the parts'
+/// ids when it took the edit in ([`parts_ids`]); a batch its parts would take over `OPS_MOST` is refused at the
+/// building's place, saying so. A plan the mapping cannot read refuses the edit
 /// (`edit.building-plan`), never placing a shell. Gives the batch names of the parts it placed, which
 /// [`stand_as_kinds`] leaves as the plan has them (a structural window is no furniture window's box).
 pub fn with_buildings(
@@ -150,7 +152,12 @@ pub fn with_buildings(
             k.children.contains(child) || category.is_some_and(|c| k.children.contains(c))
         })
     };
-    let mut next = 1 + edit
+    // A helper's edit under a build claim keeps its places as they are: an outside doorway's far end, the open ground,
+    // is judged at the world's origin, outside every claim, so its building would be refused whole.
+    if edit.claim.is_some() {
+        return Ok(BTreeSet::new());
+    }
+    let Some(mut next) = edit
         .ops
         .iter()
         .filter_map(|op| match op {
@@ -160,7 +167,11 @@ pub fn with_buildings(
             _ => None,
         })
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .checked_add(1)
+    else {
+        return Ok(BTreeSet::new());
+    };
     let floored: BTreeSet<u64> = edit
         .ops
         .iter()
@@ -174,6 +185,7 @@ pub fn with_buildings(
         })
         .collect();
     let mut added = Vec::new();
+    let edit_len = edit.ops.len();
     for (k, op) in edit.ops.iter_mut().enumerate() {
         let Op::Place {
             name,
@@ -215,6 +227,18 @@ pub fn with_buildings(
                     ),
                 }
             })?;
+        if edit_len + added.len() + more.len() > replica::edit::OPS_MOST {
+            return Err(replica::edit::Refused {
+                op: Some(k),
+                name: "edit.too-many-operations",
+                detail: format!(
+                    "{} brings {} parts (floors, rooms, doors and their ways), which takes this batch over {}: place fewer buildings in one batch",
+                    plain(kind.as_str()),
+                    more.len(),
+                    replica::edit::OPS_MOST
+                ),
+            });
+        }
         added.extend(more);
     }
     let parts = added
@@ -226,6 +250,34 @@ pub fn with_buildings(
         .collect();
     edit.ops.extend(added);
     Ok(parts)
+}
+
+/// The most new ids each building kind's place can mint with its parts, by entry name
+/// (`import_eden::placed::ids_most`): what the world reserves for each such place when it takes an edit in.
+pub fn ids_most(entries: &Json) -> BTreeMap<String, u64> {
+    entries
+        .obj()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|(k, e)| Some((k.clone(), import_eden::placed::ids_most(e)?)))
+        .collect()
+}
+
+/// How many ids `edit`'s places of building kinds may mint with their parts beyond its own operations' ([`ids_most`]),
+/// as [`with_buildings`] would add them.
+pub fn parts_ids(edit: &replica::edit::Edit, most: &BTreeMap<String, u64>) -> u64 {
+    if edit.claim.is_some() {
+        return 0;
+    }
+    edit.ops
+        .iter()
+        .filter_map(|op| match op {
+            replica::edit::Op::Place { kind, fields, .. } => most
+                .get(import_eden::entry_name(kind.as_str(), fields))
+                .copied(),
+            _ => None,
+        })
+        .fold(0, u64::saturating_add)
 }
 
 /// Whether a kind's entry has a slot that takes a part `structure` reads (one that stands or one that bears): a bay's,
