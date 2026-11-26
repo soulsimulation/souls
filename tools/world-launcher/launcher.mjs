@@ -2084,7 +2084,7 @@ export async function openLauncher(cfg = {}) {
     const w = slug && !closing.has(slug) && registry.get(slug);
     // 26 Nov: a world with no old twin: its agents' socket goes to its own gatewayd (cutover.mjs `agent`), at /v2/ws
     const only = !w && /^\/w\/([a-z0-9][a-z0-9-]{0,62})\/v2\/ws(\?free=1)?$/.exec(rel);
-    const agent = only && !registry.get(only[1]) ? cutover?.agent(only[1], '/v2/ws') : null;
+    const agent = only && routeOnlyWorld(only[1]) ? cutover?.agent(only[1], '/v2/ws') : null;
     if (agent?.port) { req.url = `/v2/ws${only[2] ?? ''}`; pipeUpgrade(req, socket, head, agent.port); return; }
     if (!w) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
     // lane L1: WebSockets count toward the address's concurrent ceiling

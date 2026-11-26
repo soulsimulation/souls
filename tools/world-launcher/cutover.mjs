@@ -183,7 +183,7 @@ function withRouteOnly(fence, bindings) {
   const agent = (slug, path) => {
     const bootstrap = path === '/v1/bootstrap' || path === '/views/world.json';
     if (!bootstrap && !AGENT_PATH.test(path)) return null;
-    const r = Object.hasOwn(table(), slug) ? table()[slug] : null;
+    const worlds = table(), r = Object.hasOwn(worlds, slug) ? worlds[slug] : null;
     if (!routed(slug, r)) return null;
     const base = `/w/${slug}`;
     if (bootstrap) return { bootstrap: { world: slug, stream: r.stream, ...(publicStream(r.history) ? { history: r.history } : {}), directory: '/', gateway: `${base}/v2/ws`, creatorToken: `${base}/v2/creator-token` } };
