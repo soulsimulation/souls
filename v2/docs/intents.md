@@ -44,7 +44,8 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 ## Orders, and what the engine never holds
 
 5. **The orders are a closed list of four:** ranked fallbacks (any act's field 9), a held stance (`souls:hold`, its
-   stance a parameter), follow (`souls:follow`, its target; a band behind it, or a place beside it, as parameters) and standing in a queue (`souls:queue`, its target, and
+   stance a parameter), follow (`souls:follow`, its target; a band behind it, a place beside it, or a place at an offset from it on the
+   plan, `[x, z]` µm, parameter 4, as a carry's crew keeps its places from its front; a place at most 20 m away) and standing in a queue (`souls:queue`, its target, and
    the act taken at its head as a parameter: "queue for this seat and sit"). Each expires, can be cancelled, and is
    recorded as the agent's; an order is in the log, so it survives a restart.
 6. **Fallbacks are ranked and bounded:** at most 4, each another act `{2: verb, 3: target, 4: parameters, 8:

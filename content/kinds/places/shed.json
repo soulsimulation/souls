@@ -108,7 +108,85 @@
       ]
     }
   },
+  "building": {
+    "def": "core-shed@3",
+    "solids": [
+      [-1000, -1190, 500, 110, 0, 0, 2500, 1, 0],
+      [1000, -1190, 500, 110, 0, 0, 2500, 1, 0],
+      [0, -1190, 500, 110, 0, 0, 1000, 1, 0],
+      [0, -1190, 500, 110, 0, 2200, 2500, 1, 0],
+      [-1050, 1190, 450, 110, 0, 0, 2500, 1, 0],
+      [1050, 1190, 450, 110, 0, 0, 2500, 1, 0],
+      [0, 1190, 600, 110, 0, 2200, 2500, 1, 0],
+      [-1390, 0, 1190, 110, 270000, 0, 2500, 1, 0],
+      [1390, 0, 1190, 110, 270000, 0, 2500, 1, 0]
+    ],
+    "slots": [
+      {"n": 2, "id": "ground", "kind": "floor", "at": [0, 100, 0], "yaw": 0, "capacity": 256},
+      {"n": 3, "id": "front", "kind": "stand", "at": [0, 0, 2390], "yaw": 179977, "capacity": 8},
+      {"n": 4, "id": "wall-w-1", "kind": "wall", "at": [-1520, 1700, 0], "yaw": 269988, "capacity": 1},
+      {"n": 5, "id": "wall-e-1", "kind": "wall", "at": [1520, 1700, 0], "yaw": 90012, "capacity": 1},
+      {"n": 6, "id": "opening-front-door", "kind": "wall", "at": [0, 100, 1320], "yaw": 0, "capacity": 1},
+      {"n": 7, "id": "opening-window-1", "kind": "wall", "at": [0, 1000, -1320], "yaw": 180023, "capacity": 1},
+      {"n": 8, "id": "facade-f0-n-1", "kind": "wall", "at": [0, 1250, -1320], "yaw": 180023, "capacity": 1},
+      {"n": 9, "id": "facade-f0-s-1", "kind": "wall", "at": [0, 1250, 1320], "yaw": 0, "capacity": 1},
+      {"n": 10, "id": "facade-f0-w-1", "kind": "wall", "at": [-1520, 1250, 0], "yaw": 269988, "capacity": 1},
+      {"n": 11, "id": "facade-f0-e-1", "kind": "wall", "at": [1520, 1250, 0], "yaw": 90012, "capacity": 1}
+    ],
+    "floors": [{"level": 0, "y": 100, "polygon": [[-1280, -1080], [1280, -1080], [1280, 1080], [-1280, 1080]], "tag": "shed"}],
+    "rooms": [
+      {
+        "id": "shed",
+        "name": "room_shed",
+        "floor": 0,
+        "pose": [0, 100, 0, 0],
+        "height": 2320,
+        "polygon": [[-1280, -1080], [1280, -1080], [1280, 1080], [-1280, 1080]]
+      }
+    ],
+    "openings": [
+      {
+        "id": "front-door",
+        "kind": "door",
+        "at": [0, 1190],
+        "yaw": 0,
+        "width": 1200,
+        "height": 2100,
+        "level": 0,
+        "from": "shed",
+        "to": "outside",
+        "exterior": true,
+        "state": "open",
+        "inRoom": [0, 0, 1190, 0]
+      },
+      {
+        "id": "window-1",
+        "kind": "window",
+        "at": [0, -1190],
+        "yaw": 180023,
+        "width": 1000,
+        "height": 1200,
+        "sill": 900,
+        "level": 0,
+        "from": "shed",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [0, 0, -1190, 180023]
+      }
+    ],
+    "doors": [
+      {
+        "opening": "front-door",
+        "def": "core-door@2",
+        "pose": [0, 0, 1190, 0],
+        "solids": [[-566, 0, 20, 60, 0, 27, 2007, 0, 0], [566, 0, 20, 60, 0, 27, 2007, 0, 0]],
+        "params": "{\"sx\":1.01,\"sy\":0.9,\"frame\":\"#f2ead8\",\"leaf\":\"#3f6b5c\",\"trim\":\"#36594d\",\"glass\":\"#bcd9e0\",\"brass\":\"#b8913f\",\"sz\":1,\"vary\":0,\"condition\":\"new\",\"variant\":\"panel\"}",
+        "open": true
+      }
+    ]
+  },
   "text": {
+    "room_shed": "Shed",
     "card": "A garden shed: one room, one door and a small window.",
     "building": "building",
     "hut": "hut",

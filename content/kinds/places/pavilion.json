@@ -141,7 +141,100 @@
       ]
     }
   },
+  "building": {
+    "def": "core-pavilion@3",
+    "solids": [
+      [-2850, -2850, 120, 120, 0, 0, 2800, 4, 0],
+      [-2850, 2850, 120, 120, 0, 0, 2800, 4, 0],
+      [0, -2850, 120, 120, 0, 0, 2800, 4, 0],
+      [0, 2850, 120, 120, 0, 0, 2800, 4, 0],
+      [2850, -2850, 120, 120, 0, 0, 2800, 4, 0],
+      [2850, 2850, 120, 120, 0, 0, 2800, 4, 0],
+      [-2850, 0, 120, 120, 0, 0, 2800, 4, 0],
+      [2850, 0, 120, 120, 0, 0, 2800, 4, 0]
+    ],
+    "slots": [
+      {"n": 2, "id": "ground", "kind": "floor", "at": [0, 100, 0], "yaw": 0, "capacity": 256},
+      {"n": 3, "id": "front", "kind": "stand", "at": [0, 0, 4200], "yaw": 179977, "capacity": 8},
+      {"n": 4, "id": "opening-open-s", "kind": "wall", "at": [0, 100, 3130], "yaw": 0, "capacity": 1},
+      {"n": 5, "id": "opening-open-n", "kind": "wall", "at": [0, 100, -3130], "yaw": 180023, "capacity": 1},
+      {"n": 6, "id": "opening-open-e", "kind": "wall", "at": [3130, 100, 0], "yaw": 90012, "capacity": 1},
+      {"n": 7, "id": "opening-open-w", "kind": "wall", "at": [-3130, 100, 0], "yaw": 269988, "capacity": 1},
+      {"n": 8, "id": "ridge", "kind": "roof", "at": [0, 4914, 0], "yaw": 0, "capacity": 1}
+    ],
+    "floors": [{"level": 0, "y": 100, "polygon": [[-2890, -2890], [2890, -2890], [2890, 2890], [-2890, 2890]], "tag": "pavilion"}],
+    "rooms": [
+      {
+        "id": "pavilion",
+        "name": "room_pavilion",
+        "floor": 0,
+        "pose": [0, 100, 0, 0],
+        "height": 2620,
+        "polygon": [[-2890, -2890], [2890, -2890], [2890, 2890], [-2890, 2890]]
+      }
+    ],
+    "openings": [
+      {
+        "id": "open-s",
+        "kind": "arch",
+        "at": [0, 3000],
+        "yaw": 0,
+        "width": 5600,
+        "height": 2500,
+        "level": 0,
+        "from": "pavilion",
+        "to": "outside",
+        "exterior": true,
+        "state": "always",
+        "inRoom": [0, 0, 3000, 0]
+      },
+      {
+        "id": "open-n",
+        "kind": "arch",
+        "at": [0, -3000],
+        "yaw": 180023,
+        "width": 5600,
+        "height": 2500,
+        "level": 0,
+        "from": "pavilion",
+        "to": "outside",
+        "exterior": true,
+        "state": "always",
+        "inRoom": [0, 0, -3000, 180023]
+      },
+      {
+        "id": "open-e",
+        "kind": "arch",
+        "at": [3000, 0],
+        "yaw": 90012,
+        "width": 5600,
+        "height": 2500,
+        "level": 0,
+        "from": "pavilion",
+        "to": "outside",
+        "exterior": true,
+        "state": "always",
+        "inRoom": [3000, 0, 0, 90012]
+      },
+      {
+        "id": "open-w",
+        "kind": "arch",
+        "at": [-3000, 0],
+        "yaw": 269988,
+        "width": 5600,
+        "height": 2500,
+        "level": 0,
+        "from": "pavilion",
+        "to": "outside",
+        "exterior": true,
+        "state": "always",
+        "inRoom": [-3000, 0, 0, 269988]
+      }
+    ],
+    "doors": []
+  },
   "text": {
+    "room_pavilion": "Pavilion",
     "card": "An open pavilion: a roof on posts over a deck.",
     "building": "building",
     "gazebo": "gazebo",

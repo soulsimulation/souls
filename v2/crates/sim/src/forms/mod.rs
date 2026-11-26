@@ -131,7 +131,7 @@ use crate::timers::{DueList, Timer};
 /// its kind: an entry naming a kind's plain name is refused (`name-not-pinned`). `None` for any other effect, a kind
 /// already pinned, or one the header does not pin (its create is then refused by name, as before).
 fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_runner::Effect> {
-    let form_runner::Effect::Make { kind, into } = e else {
+    let form_runner::Effect::Make { kind, into, set } = e else {
         return None;
     };
     if kind.as_str().contains('@') {
@@ -144,6 +144,7 @@ fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_run
     Some(form_runner::Effect::Make {
         kind: pinned.clone(),
         into: *into,
+        set: set.clone(),
     })
 }
 
@@ -605,6 +606,8 @@ pub struct Forms {
     shared: BTreeSet<Id>,
     /// The kinds' amount fields (F4).
     limits: amounts::Limits,
+    /// Every kind's state fields, which a made thing's fields are read against (#4104).
+    defs: amounts::Defs,
     /// The zone's header, for B4's transfer.
     header: Option<Header>,
     /// The crossings the walks asked for this tick (C17): the caller carries them (`crate::host::carry`) and clears
@@ -1748,10 +1751,12 @@ impl Forms {
         other_slots(w, &self.slots_of, body, entry, form, args)
     }
 
-    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
-    /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
+    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read, and every
+    /// state field, which a made thing's fields are read against (#4104). Called after [`Forms::new`] or
+    /// [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
         self.limits = amounts::limits(kinds);
+        self.defs = amounts::defs(kinds);
         self.postures = kinds
             .admits()
             .keys()
@@ -1892,6 +1897,7 @@ impl Forms {
                     out: &self.out,
                 },
                 limits: &self.limits,
+                defs: &self.defs,
                 header: self.header.as_ref(),
                 body: fr.body,
                 soul: match fr.intent.actor {

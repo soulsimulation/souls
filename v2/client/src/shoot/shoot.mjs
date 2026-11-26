@@ -156,7 +156,8 @@ export async function withWorld({ address, profile, size, pw }, f) {
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   const { ctx, page } = await launch(pw, profile, size);
   try {
-    await page.goto(anonymous(address), { waitUntil: 'domcontentloaded', timeout: READY_MS });
+    await page.goto(anonymous(address), { waitUntil: 'domcontentloaded', timeout: READY_MS })
+      .catch((e) => { throw fail('page-not-reachable', `the page did not load: ${String(e.message ?? e).split('\n')[0].slice(0, 120)}`); });
     await page.waitForFunction(() => globalThis.v2?.capture?.ready(), null, { timeout: READY_MS, polling: 100 })
       .catch(() => { throw fail('page-not-drawing', `the page drew no world within ${READY_MS / 1000} s`); });
     return await f(page);

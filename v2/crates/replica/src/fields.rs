@@ -85,6 +85,7 @@ const RESERVED: &[Reserved] = &[
     r(crate::sky::F_RAIN, "sky::F_RAIN", On::World),
     r(crate::sky::F_WIND, "sky::F_WIND", On::World),
     r(crate::sky::F_WEATHER_NEXT, "sky::F_WEATHER_NEXT", On::World),
+    r(crate::arrival::F_ARRIVAL, "arrival::F_ARRIVAL", On::World),
     r(crate::schedule::F_COURSE, "schedule::F_COURSE", On::Thing),
     r(crate::schedule::F_HOURS, "schedule::F_HOURS", On::Thing),
     r(crate::schedule::F_PLACE, "schedule::F_PLACE", On::Thing),

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as G from './god-api.ts';
 import { openGod, toggleGod, useGod, watchInbox } from './god-store.ts';
-import { godAgentState } from './god-agent-state.ts';
+import { agentPaired, godAgentState } from './god-agent-state.ts';
 
 /** ⌘G / Ctrl+G opens God (see team/lanes/t4-g4.md "Key"): browsers let a page take it (it is only find-next), unlike ⌘L. */
 export const GOD_KEY = 'g';
@@ -39,7 +39,7 @@ export function GodButton() {
   // U3 (Gene 2026-10-20b): "god mode button at top should only be there if you are actually god": visitors, signed-out
   // people and a godless world's claimant get no God button (nor ⌘G); claiming stays on the claim card (GodPanel).
   if (!status || !owner) return null;
-  const paired = (status.agents ?? 0) > 0;
+  const paired = agentPaired(status.agents, inbox);
   // the owner's agent: 'on' (green border) only when the inbox says it is connected (godAgentState)
   const { live, words } = godAgentState(paired, inbox, inboxError, status.pending.length);
   const title = `God mode: your agent and this world (${godKeyLabel()})`;

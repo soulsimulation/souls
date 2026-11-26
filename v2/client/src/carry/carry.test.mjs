@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { activityPin, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
+import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
 import { nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
@@ -106,10 +106,32 @@ test('into a slot the crew lines up on the slot\'s axis nearest its line; a side
   const side = { ...posts, me: id(12), placeOf: (n) => (n === id(12) ? { pos: [-500_000, 0, 7e6] } : posts.placeOf(n)) };
   near(carryIntents({ do: 'to', crew: id(8), where: id(5), slot: 'upright_a' }, side)[0].params[1],
     [12e6 - 500_000, 0, 6e6 - 1_448_000 + 1e6], 'a side keeps its place along and across the line');
-  // A beam's crew along z lines up on the slot's z, as before.
+  // A beam's crew along z lines up on the slot's z, outside the bay on the slot's side (the bay is 1.219 m across).
   const beamEnds = { ...ctx, crewEnds: () => ({ ids: [id(7), id(6)], at: [[0, 8.05e6], [0, 3.65e6]] }) };
   near(carryIntents({ do: 'to', crew: id(8), where: id(5), slot: 'beam_low_l' }, { ...beamEnds, crewMiddle: () => [0, 5.85e6] })[0].params[1],
-    [12e6 - 572_000, 0, 6e6 - 2.2e6], 'the beam\'s back on the slot\'s z');
+    [12e6 - 609_500 - MOUTH_CLEAR, 0, 6e6 - 2.2e6], 'the beam\'s back on the slot\'s z, outside the bay');
+});
+
+test('a beam slot is reached from its own side: the load stops lined up outside the bay, within put\'s reach of it', () => {
+  // The crew holds a beam (along z, as taken) whose middle is at (4, 6.3) m, west of the bay at (12, 6); this Soul is
+  // its back, 2.2 m behind; its side stands 0.4 m west of the middle.
+  const crew = id(8), held = id(10), r = new Map(rows);
+  r.set(held, { id: held, kind: 'mars:rack_beam', parent: crew, pos: [4e6, 0, 6.3e6] });
+  const place = placer(r, () => null, (x) => kinds[x?.kind]);
+  const c = { ...ctx, placeOf: (n) => (n === id(6) ? { pos: [4e6, 0, 4.1e6] } : place(n)), kindOf: (n) => r.get(n)?.kind, heldBy: () => held, seated: () => [],
+    crewMiddle: () => [4e6, 6.3e6], crewEnds: () => ({ ids: [id(7), id(6)], at: [[4e6, 8.5e6], [4e6, 4.1e6]] }) };
+  const out = 609_500 + 25_500 + MOUTH_CLEAR;   // the bay's half width, the beam's half width lying, the clearance
+  const go = (slot, me = c) => carryIntents({ do: 'to', crew, where: id(5), slot }, me)[0].params[1];
+  near(go('beam_low_l'), [12e6 - out, 0, 6e6 - 2.2e6], 'the back, on the slot\'s z, west of the bay');
+  assert.ok(out - 572_000 + 300_000 < 1_000_000, 'a walk 0.3 m short of it still puts within reach (worldd PUT_REACH)');
+  const side = { ...c, me: id(12), placeOf: (n) => (n === id(12) ? { pos: [3.6e6, 0, 6.3e6] } : c.placeOf(n)) };
+  near(go('beam_high_l', side), [12e6 - out - 400_000, 0, 6e6], 'the side keeps its place beside the middle');
+  // From the bay's other side the slot across it is carried straight in, as before; a frame's slot (the bay's open end)
+  // is carried into directly.
+  const east = { ...c, crewMiddle: () => [20e6, 6.3e6], crewEnds: () => ({ ids: [id(7), id(6)], at: [[20e6, 8.5e6], [20e6, 4.1e6]] }), placeOf: (n) => (n === id(6) ? { pos: [20e6, 0, 4.1e6] } : place(n)) };
+  near(go('beam_low_l', east), [12e6 - 572_000, 0, 6e6 - 2.2e6], 'from the east, into the slot');
+  near(go('beam_low_r', east), [12e6 + out, 0, 6e6 - 2.2e6], 'the east slot from the east: outside it');
+  near(go('upright_a'), [12e6, 0, 6e6 - 1_448_000 - 2.2e6], 'a frame\'s slot: into it');
 });
 
 test('carry to walks this Soul so the load reaches the point or the slot, keeping its place at it', () => {
@@ -139,10 +161,22 @@ test('a beam carried into a slot past a beam seated at the height it is carried 
   assert.match(r.detail, /beam_high_l/);
   assert.equal(to('beam_high_r', [20e6, 6e6])[0].verb, 'eden:walk', 'from the east it does not pass it');
   assert.equal(to('beam_high_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'a beam seated low is carried over');
-  assert.equal(to('beam_low_l', [4e6, 6e6]).code, 'carry-way-crossed', 'under a high beam already seated, at the height it is carried');
+  assert.equal(to('beam_low_l', [20e6, 6e6]).code, 'carry-way-crossed', 'across the bay, under a high beam already seated, at the height it is carried');
+  assert.equal(to('beam_low_l', [4e6, 6e6])[0].verb, 'eden:walk', 'from its own side it stops outside, under nothing');
   assert.equal(to('beam_low_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'past a low beam to the far low slot');
   // Without the copy's slots (an older daemon), nothing is read and the walk is sent.
   assert.equal(carryIntents({ do: 'to', crew, where: id(5), slot: 'beam_high_r' }, { ...ctx, crewMiddle: () => [4e6, 6e6] })[0].verb, 'eden:walk');
+});
+
+test('carry to --go names the moment every carrier sets off: hh:mm:ss in UTC, an ISO time or Unix ms', () => {
+  const now = Date.UTC(2026, 10, 26, 12, 0, 0);
+  assert.equal(goTime('12:00:07', now), now + 7000);
+  assert.equal(goTime('12:00:07.5Z', now), now + 7500);
+  assert.equal(goTime('2026-11-26T12:00:09Z', now), now + 9000);
+  assert.equal(goTime(String(now + 3000), now), now + 3000);
+  assert.ok(Number.isNaN(goTime('soon', now)));
+  assert.equal(requestOf(['carry', 'to', id(8), '2,6', '--go', String(now)]).req.go, now);
+  assert.equal(requestOf(['carry', 'to', id(8), '2,6', '--go', 'soon']).refused, 'carry-go');
 });
 
 test('a part is taken, seated in a slot by name or number, laid on the ground, or taken out', () => {
@@ -257,8 +291,8 @@ test('each step says what comes next; a seated part says what is left of its bay
   const crew = id(8);
   assert.match(nextStep({ do: 'grip' }), /carry offer <name>.*carry accept/);
   assert.match(nextStep({ do: 'offer', crew }), new RegExp(`part take ${crew}`));
-  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*at the same moment/);
-  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes and when; every carrier sends the same carry to ${crew}`));
+  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*you walk with it, keeping your place/);
+  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes; the front sends carry to ${crew}`));
   assert.match(nextStep({ do: 'to', crew }), /part put/);
   assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a']) }), /1 of 6 slots filled; still to fill: upright_b: a rack upright/);
   assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a', 'upright_b', 'beam_high_l', 'beam_high_r', 'beam_low_l', 'beam_low_r']) }), /6 of 6 slots filled, so it is built/);

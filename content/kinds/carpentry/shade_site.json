@@ -1,0 +1,79 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:shade_site",
+ "owner": "thing",
+ "slots": {
+  "bent_a": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_bent"
+   ],
+   "most": 1,
+   "at_mm": [0, 0, -1500]
+  },
+  "bent_b": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_bent"
+   ],
+   "most": 1,
+   "at_mm": [0, 0, 1500]
+  },
+  "rail_l": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_rail"
+   ],
+   "most": 1,
+   "at_mm": [-850, 1900, 0]
+  },
+  "rail_r": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_rail"
+   ],
+   "most": 1,
+   "at_mm": [850, 1900, 0]
+  },
+  "cloth": {
+   "admits": "thing",
+   "kinds": [
+    "mars:shade_cloth"
+   ],
+   "most": 1,
+   "at_mm": [0, 2000, 0]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [1900, 2030, 3100]
+ },
+ "looks": {
+  "shape": {
+   "round": 4,
+   "palette": {"stake": "#c9a46a", "line": "#e8632b"},
+   "tags": ["shade", "site", "build", "marked"],
+   "shapes": [
+    {"kind": "box", "at": [-850, 150, -1500], "size": [40, 300, 40], "tint": "stake"},
+    {"kind": "box", "at": [850, 150, -1500], "size": [40, 300, 40], "tint": "stake"},
+    {"kind": "box", "at": [-850, 150, 1500], "size": [40, 300, 40], "tint": "stake"},
+    {"kind": "box", "at": [850, 150, 1500], "size": [40, 300, 40], "tint": "stake"},
+    {"kind": "box", "at": [0, 5, -1500], "size": [1700, 10, 20], "tint": "line"},
+    {"kind": "box", "at": [0, 5, 1500], "size": [1700, 10, 20], "tint": "line"},
+    {"kind": "box", "at": [-850, 5, 0], "size": [20, 10, 3000], "tint": "line"},
+    {"kind": "box", "at": [850, 5, 0], "size": [20, 10, 3000], "tint": "line"}
+   ]
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A timber shade site: two bents 3 m apart, a rail on each side, a cloth on top."
+ },
+ "card": {
+  "text": "card"
+ }
+}

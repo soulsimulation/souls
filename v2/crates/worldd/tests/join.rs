@@ -1192,12 +1192,16 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// left out (`settle_with(.., None, ..)`) the run writes the previous pin (85d9b198...), so it is the whole difference.
 /// Re-pinned by the arrival fix: a body is born facing its entry's point, not +x (same 905 records, 2,342 motion
 /// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
-/// difference. Re-pinned by the #5019 follow-up: a move refused out of reach says how far in whole mm, not µm, in its
+/// difference. Re-pinned by #4974: a gateway walk's place is asked in the tick the walk starts, so it is planned,
+/// answered and walking a tick sooner (904 records, 2,331 motion samples); main without that one change writes the
+/// previous pin (aafd0a80...), so it is the whole difference.
+/// Re-pinned by the #5019 follow-up: a move refused out of reach says how far in whole mm, not µm, in its
 /// logged answer (a sit refused as it starts; same 905 records, 2,342 motion samples); the branch's first commit alone
 /// (the words) writes this pin, and its later ones (sits and rises answered as they start) leave it, so the words are
 /// the whole difference.
+/// MERGEPIN_NOTE
 const PINNED_MOTION_HISTORY: &str =
-    "4c81bf204b5c2efa83daa2718905e844536f4634200f337ae43fca0f8972c6d2";
+    "f7b20d34002b6b05b9ed86605a1e940eca51750dabd4656ad3f255f9d2030bd1";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

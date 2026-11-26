@@ -1,11 +1,12 @@
 // 0.133 item 6: Build in the creator's panel on a world the new engine runs. Place: pick one of the world's kinds and
-// click the ground. Select: click a thing; drag it, or move it with the arrow keys; Delete (or Remove) removes it.
+// click the ground. Select: click a thing; drag it, or move it with the arrow keys; Delete (or Remove) removes it. Click
+// an area on the open ground (a place) where no thing is, and "New Souls arrive here" names it the world's arrival (#5006).
 // Every change is one creator edit on the creator socket (creator-socket.ts, creator-build.ts); nothing moves on the
 // page until the world's stream says so, and a refusal (build safety's among them) is shown by its name.
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { Op, V2Creator } from '../v2-engine/creator-socket.ts';
-import { buildKinds, buildNodes, moveOp, placeOp, placedAt, removeOp, setBuildClicks, shortKind, thingNear, thingOf } from '../v2-engine/creator-build.ts';
+import type { Asked, Op, V2Creator } from '../v2-engine/creator-socket.ts';
+import { arrivalSet, buildKinds, buildNodes, isPlace, isThing, moveOp, placeMiddle, placeOp, placeUnder, placedAt, removeOp, setBuildClicks, shortKind, thingNear, thingOf } from '../v2-engine/creator-build.ts';
 
 type Entity = { layer?: { group?: THREE.Object3D; terrainMeshes?(): THREE.Object3D[] }; camera?: THREE.Camera; scene?: THREE.Scene;
   renderer?: { domElement: HTMLCanvasElement }; controls?: { enabled: boolean } };
@@ -41,9 +42,9 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
     return () => clearInterval(t);
   }, [selected]);
 
-  const send = useRef(async (ops: Op[], done: string) => {
+  const send = useRef(async (ops: Op[] | Asked, done: string) => {
     setBusy(true); setNote(null);
-    try { const r = await (await creator).answer({ ops }, done); setNote({ text: r.said }); return r.names; }
+    try { const r = await (await creator).answer(Array.isArray(ops) ? { ops } : ops, done); setNote({ text: r.said }); return r.names; }
     catch (e) { setNote({ text: (e as Error).message, bad: true }); return null; }
     finally { setBusy(false); }
   }).current;
@@ -96,15 +97,20 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
     let press: { x: number; y: number; drag: boolean } | null = null, dragTo: THREE.Vector3 | null = null;
     const follow = setInterval(() => {
       if (press?.drag) return;
-      const id = live.current.selected, nodes = buildNodes(), p = id && nodes ? placedAt(nodes, id) : null;
+      const id = live.current.selected, nodes = buildNodes(), n = id ? nodes?.get(id) : undefined;
+      // a place is ringed at its middle, where new Souls named to it arrive
+      const mid = n && nodes && isPlace(nodes, n) ? placeMiddle(n) : null;
+      const p = mid ? [mid[0], 0, mid[1]] as const : id && nodes ? placedAt(nodes, id) : null;
       ring.visible = !!p; if (p) ring.position.set(p[0], (heightAt(p[0], p[2]) ?? p[1]) + 0.05, p[2]);
     }, 100);
+    /** Whether the selected node is a thing (a place is not dragged, moved or removed here). */
+    const thingSelected = () => { const s = live.current.selected, n = s ? buildNodes()?.get(s) : undefined; return !!n && isThing(n); };
 
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0 || e.target !== canvas) return;
       press = { x: e.clientX, y: e.clientY, drag: false }; dragTo = null;
       const { mode: m, selected: s, busy: b } = live.current;
-      if (m === 'select' && s && !b && onThing(s, e.clientX, e.clientY)) {
+      if (m === 'select' && s && !b && thingSelected() && onThing(s, e.clientX, e.clientY)) {
         // a drag of the selected thing: the camera does not orbit while it is held
         press.drag = true; e.stopPropagation(); e.preventDefault(); if (w.controls) w.controls.enabled = false;
       }
@@ -132,13 +138,15 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
         void send([op], `Placed a ${shortKind(k)} at (${g.x.toFixed(1)}, ${g.z.toFixed(1)}).`).then((names) => { const id = names?.get(1); if (id) setSelected(id); });
         return;
       }
-      setSelected(pick(e.clientX, e.clientY));
+      // a thing, else the place there (the smallest area on the open ground holding the point)
+      const nodes = buildNodes(), g = groundAt(e.clientX, e.clientY);
+      setSelected(pick(e.clientX, e.clientY) ?? (nodes && g ? placeUnder(nodes, [g.x, g.z]) : null));
     };
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target)) return;
       if (e.key === 'Escape') { e.stopPropagation(); if (live.current.selected) setSelected(null); else live.current.onClose(); return; }
       const s = live.current.selected;
-      if (!s || live.current.busy) return;
+      if (!s || live.current.busy || !thingSelected()) return;
       if (e.key === 'Delete' || e.key === 'Backspace') { e.stopPropagation(); e.preventDefault(); const k = buildNodes()?.get(s)?.kind; void send([removeOp(s)], `Removed the ${k ? shortKind(k) : 'thing'}.`); return; }
       const arrow = ({ ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] } as Record<string, [number, number]>)[e.key];
       if (!arrow) return;
@@ -183,12 +191,21 @@ export function BuildBar({ creator, start, onClose }: { creator: Promise<V2Creat
         </select>
         <span className="gp-dim">{kinds.length ? 'then click the ground' : 'loading the world\'s kinds…'}</span>
       </div>
+      : sel && nodes && isPlace(nodes, sel)
+        ? <div className="gp-row" data-build-selected={selected!} data-build-place="1">
+          <span><b>{sel.placeName || shortKind(sel.kind)}</b> <span className="gp-dim">a place</span></span>
+          <button className="gp-btn gp-small" data-build-arrival="1" disabled={busy} onClick={() => {
+            const s = selected!, set = arrivalSet(nodes, s);
+            if ('why' in set) { setNote({ text: set.why, bad: true }); return; }
+            void send(set, `New Souls arrive at ${sel.placeName || 'this place'} from the next one born.`);
+          }}>New Souls arrive here</button>
+        </div>
       : sel
         ? <div className="gp-row" data-build-selected={selected!}>
           <span><b>{shortKind(sel.kind)}</b> <span className="gp-dim">drag it, or arrow keys</span></span>
           <button className="gp-btn gp-small" data-build-remove="1" disabled={busy} onClick={() => { const s = selected!; void send([removeOp(s)], `Removed the ${shortKind(sel.kind)}.`); }}>Remove</button>
         </div>
-        : <p className="gp-dim">Click a thing to select it.</p>}
+        : <p className="gp-dim">Click a thing, or a place, to select it.</p>}
     {busy && <p className="gp-dim">Sending…</p>}
     {note && <p className={note.bad ? 'gp-bad' : 'gp-ok'} data-build-note={note.bad ? 'refused' : 'done'} role="status">{note.text}</p>}
   </div>;
