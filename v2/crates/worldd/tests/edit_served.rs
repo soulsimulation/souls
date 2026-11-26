@@ -7801,7 +7801,8 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
 /// of the slot's line, naming the load's heading there, parameter 3). On N2's test world with a bay at its build
 /// site, two crews first seat its frames (each walk sent by both, as A3's), one holder left on each. Then:
 ///
-/// - **A crew of four** (a front, a back and two sides west of the beam) takes beam 1, its length along z. Only the
+/// - **A crew of four** (a front, a back and two sides west of the beam; the beam's entry given two grips between its
+///   ends, so four may take it) takes beam 1, its length along z. Only the
 ///   front's Soul walks: to a point west of the bay with the load turned 60 degrees, then to its end of `beam_low_l`'s
 ///   line with the heading along it. Each time the other three walk with it by their own follow orders, turning with
 ///   it, and stand at their places (within 0.3 m), the back and the front on the slot's line; the front seats the beam.
@@ -7813,6 +7814,31 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
     const ALONG: i64 = 2_200_000;
     let d = scratch("hgturn");
     let (facts, slots) = yard_world(&d);
+    // The beam with four grips, two between its ends, so a crew of four takes it (0.135 C5: no more than its grips).
+    let p = d.join("entries").join("rack_beam.json");
+    let mut e = json::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    let json::Value::Obj(top) = &mut e else {
+        panic!("an entry")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("points", json::Value::Obj(points)) = (k.as_str(), v) {
+            points.retain(|(_, p)| p.get("role").and_then(json::Value::str) != Some("grip"));
+            for (n, z) in [-1_097, -400, 400, 1_097].iter().enumerate() {
+                points.push((
+                    format!("grip_{n}"),
+                    json::Value::Obj(vec![
+                        ("role".into(), json::Value::s("grip")),
+                        (
+                            "at_mm".into(),
+                            json::Value::Arr([0, 51, *z].map(num).to_vec()),
+                        ),
+                    ]),
+                ));
+            }
+        }
+    }
+    std::fs::write(&p, e.to_json()).unwrap();
     let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
     let socket = d.join("s");
     let s = serve_with(&w, &socket, None);
