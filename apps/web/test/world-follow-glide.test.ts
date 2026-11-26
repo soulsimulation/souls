@@ -90,6 +90,11 @@ test('#1316: zooming in keeps Follow coupled; zooming out decouples it', () => {
   for(let i=0;i<60;i++)offset=follow.resolve(target,offset,[],1/60);
   const farther=offset.clone().multiplyScalar(1.25);follow.userInput(offset,farther);follow.resolve(target,farther,[],1/60);
   assert.equal(follow.held,true,'a zoom out is the viewer pulling out');
+  // trial of 0.137: a zoom out keeps following the Soul at that distance; only a drag round tells the page the view is held
+  assert.equal(follow.turnedAway,false,'a zoom out still says Following');
+  const round=offset.clone().applyAxisAngle(new THREE.Vector3(0,1,0),.6);follow.userInput(farther,round);follow.resolve(target,round,[],1/60);
+  assert.equal(follow.turnedAway,true,'a drag round holds the view');
+  follow.reset();assert.equal(follow.turnedAway,false,'Follow again');
 });
 
 test('#1316: a pull out counts over the whole gesture: a slow trackpad zoom out or a slow drag decouples, click jitter does not', () => {
