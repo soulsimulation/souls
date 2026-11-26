@@ -888,6 +888,34 @@
    "forms": "own"
   },
   {
+   "def": "mars-loading-spot@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:loading_spot",
+   "forms": "own"
+  },
+  {
+   "def": "mars-pallet-crates@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:pallet_crates",
+   "forms": "own"
+  },
+  {
+   "def": "mars-generator@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:generator",
+   "forms": "own"
+  },
+  {
+   "def": "mars-timber-bundle@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its loading spot), not mars-two",
+   "kind": "mars:timber_bundle",
+   "forms": "own"
+  },
+  {
    "def": "mars-shade-site@1",
    "placed": 1,
    "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",

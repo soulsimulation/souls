@@ -2124,6 +2124,10 @@ pub fn set_arrival(args: &[String]) -> i32 {
     }
 }
 
+/// What `worldd arrival` says of the creator's own arrival (#5006): this file's is overridden while the creator names one.
+const CREATOR_FIRST: &str = "; while the world's creator names a place (`souls-god arrival`), Souls arrive there \
+                             instead, and the world's start says so";
+
 fn set_arrival_in(args: &[String]) -> R<String> {
     let usage = "usage: worldd arrival --dir <world folder> (--place <place> | --clear)";
     let dir = PathBuf::from(arg(args, "--dir").ok_or(usage)?);
@@ -2152,14 +2156,16 @@ fn set_arrival_in(args: &[String]) -> R<String> {
                 &place,
             )?;
             let line = format!(
-                "arrival: {place} at {:.3},{:.3} m, from the next start",
+                "arrival: {place} at {:.3},{:.3} m, from the next start{CREATOR_FIRST}",
                 x as f64 / 1000.0,
                 z as f64 / 1000.0
             );
             meta.push(("arrival".into(), Json::Str(place)));
             line
         }
-        None => "arrival: cleared; Souls arrive at the entry from the next start".into(),
+        None => format!(
+            "arrival: cleared; Souls arrive at the entry from the next start{CREATOR_FIRST}"
+        ),
     };
     view_out::write_whole(
         &meta_path,
@@ -4029,6 +4035,20 @@ fn serve(args: &[String]) -> R<()> {
             z as f64 / 1000.0
         );
     }
+    // The creator's own arrival place (#5006) comes first: an operator's `worldd arrival` is told it is overridden.
+    if let Some((_, at)) = replica::arrival::point(&town.tree) {
+        println!(
+            "worldd: the world's creator names where Souls arrive ({:.3},{:.3} m): it overrides world.json's {} while \
+             it names one",
+            at.x as f64 / 1e6,
+            at.z as f64 / 1e6,
+            if arrived.is_some() {
+                "arrival"
+            } else {
+                "entry"
+            }
+        );
+    }
     let birth = arrived.map_or(entry, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
     match town.main_ground() {
         Some((held, dry)) => println!(
@@ -4257,6 +4277,8 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
+    // Every reach a birth or a creator's arrival is judged by starts from the town's own entry (#5006).
+    cfg.main_entry = town.entry();
     cfg.wear = Some(answers::Wearing {
         catalogue,
         born,

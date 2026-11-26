@@ -491,6 +491,39 @@ test('#4980: a socket given up over a stalled network is let go at once; an act 
   console.log(JSON.stringify({ issue: 4980, letGoMs, backMs: Math.round(backMs), givenUpAfter, finals: finals.length }));
 });
 
+test('#4977: a wait under way is told at once when the connection is lost, and when it is back with the gap', async () => {
+  await waitFor(async () => { const s = await status(); return s.connected && !s.syncing && s; });
+  await request(rt.socket, { op: 'read' }); // what came before is not this test's
+  const waitOnce = () => { const t = performance.now(); return request(rt.socket, { op: 'wait', seconds: 30 }, 40_000).then((w) => ({ ...w, ms: performance.now() - t })); };
+  const first = waitOnce();
+  await sleep(500);
+  relay.refuse = true;
+  relay.cut();
+  const t0 = performance.now();
+  let lost;
+  try {
+    lost = await first;
+    outputs.push(JSON.stringify(lost));
+    const gone = lost.events.find((e) => e.kind === 'disconnected');
+    assert.ok(gone, `told: ${JSON.stringify(lost).slice(0, 400)}`);
+    assert.ok(performance.now() - t0 < 2000, `told ${Math.round(performance.now() - t0)} ms after the drop`);
+    assert.match(gone.say, /reconnecting/);
+    assert.match(gone.say, /acts are held/);
+    // A wait begun while it is off returns when it is back, with the gap's length.
+    const second = waitOnce();
+    await sleep(2000);
+    relay.refuse = false;
+    const back = await second;
+    outputs.push(JSON.stringify(back));
+    const again = back.events.find((e) => e.kind === 'reconnected');
+    assert.ok(again, `told: ${JSON.stringify(back).slice(0, 400)}`);
+    assert.ok(again.gap_ms >= 2000 && again.gap_ms < 15_000, `gap ${again.gap_ms} ms`);
+    console.log(JSON.stringify({ issue: 4977, toldMs: Math.round(lost.ms - 500), gapMs: again.gap_ms, backWaitMs: Math.round(back.ms) }));
+  } finally {
+    relay.refuse = false;
+  }
+});
+
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {
   const { pid } = await status();
   const args = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' }).stdout;

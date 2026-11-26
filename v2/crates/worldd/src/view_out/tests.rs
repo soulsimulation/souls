@@ -4097,6 +4097,182 @@ fn t_late_run(incremental: bool) -> (Vec<u8>, u64) {
     (all, out.whole_cuts - whole)
 }
 
+/// A remove (a gesture's end, a thing taken away) is published from its rows, not as a whole cut (about 0.6 s of the
+/// writer's time a part on Eden's 10,000 nodes): a node taken out with the nodes under it (one private), the links at
+/// them (one to a private node, never public) and their timers; an activity's node taken out in the cut that makes
+/// another node; a node made under one and taken out with it in one part; a node made with a link and a timer in one
+/// part and taken out in the next, one cut; a node made and taken out in one part with a link already made to its id
+/// (`Tree` rule 7); a node holding words taken out; and a node alone. The parts, the words and the reader's state are
+/// the same bytes as when every cut is whole.
+#[test]
+fn removes_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
+    let (rows, rows_whole) = removes_run(true);
+    let (whole, whole_whole) = removes_run(false);
+    assert!(rows == whole, "the cuts by rows differ from the whole cuts");
+    assert_eq!(whole_whole, 7, "every reference cut is whole");
+    assert_eq!(rows_whole, 0, "a remove is a cut by rows");
+}
+
+fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
+    use replica::effects::TimerRec;
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch(&format!("removes-rows-{incremental}"));
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let n = |s: u8| Id::new(Scope([0xB0 + s; 16]), 1).unwrap();
+    let (carrier, child, grand, secret, other, activity, stand, fresh, late) =
+        (n(1), n(2), n(3), n(4), n(5), n(6), n(7), n(8), n(9));
+    let (l1, l2, l3, t1, t2) = (n(10), n(11), n(12), n(13), n(14));
+    let (brief, l4, t3) = (n(15), n(16), n(17));
+    let (ghost, l5) = (n(18), n(19));
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([59; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let said = words
+        .write(b"words on the fresh node", Audience::Everyone, fresh)
+        .unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: Some(words),
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    out.incremental = incremental;
+    let everyone = Audience::Everyone;
+    let private = Audience::Of(secret);
+    let change = |seq: u64, node: Id, audience: Audience, c: Change| {
+        w3e_effect(
+            seq,
+            node,
+            audience,
+            Body::Changes(vec![ChangeRec {
+                change: c,
+                rest: Rest::new(),
+            }]),
+        )
+    };
+    let link = |seq: u64, link: Id, ends: [Id; 2]| {
+        change(
+            seq,
+            ends[0],
+            everyone,
+            Change::Link {
+                link,
+                ty: h.kinds[0].clone(),
+                ends,
+                owner: replica::world_model::End::First,
+                audience: everyone,
+            },
+        )
+    };
+    let timer = |seq: u64, timer: Id, node: Id, audience: Audience| {
+        w3e_effect(
+            seq,
+            node,
+            audience,
+            Body::Timers(vec![TimerRec::Set {
+                timer,
+                due: 10_000_000,
+                name: Name::new("souls:light").unwrap(),
+            }]),
+        )
+    };
+    let remove = |seq: u64, node: Id| change(seq, node, everyone, Change::Remove { node });
+    let log = vec![
+        vec![
+            w3e_create(&h, 0, carrier, h.zone, everyone),
+            w3e_create(&h, 1, child, carrier, everyone),
+            w3e_create(&h, 2, grand, child, everyone),
+            w3e_create(&h, 3, secret, carrier, private),
+            w3e_create(&h, 4, other, h.zone, everyone),
+            w3e_create(&h, 5, activity, h.zone, everyone),
+            w3e_create(&h, 6, stand, h.zone, everyone),
+            link(7, l1, [other, child]),
+            link(8, l2, [carrier, secret]),
+            // A member's link to an activity's node.
+            link(9, l3, [other, activity]),
+            timer(10, t1, child, everyone),
+            timer(11, t2, secret, private),
+        ],
+        // The carrier with its child, the child's child, the private node, the links at them and their timers.
+        vec![remove(12, carrier)],
+        // An activity ends as another node is made, and its member's row changes.
+        vec![
+            w3e_create(&h, 13, fresh, h.zone, everyone),
+            remove(14, activity),
+            change(15, other, everyone, set(other, 1, Value::Uint(7))),
+        ],
+        // A node made under one taken out with it, in one part: never public.
+        vec![w3e_create(&h, 16, late, stand, everyone), remove(17, stand)],
+        // A node made with a link to it and a timer, then taken out in the next part of the same cut: never public.
+        vec![
+            w3e_create(&h, 18, brief, h.zone, everyone),
+            link(19, l4, [fresh, brief]),
+            timer(20, t3, brief, everyone),
+        ],
+        vec![remove(21, brief)],
+        vec![remove(22, other)],
+        // A link to an id no node has yet, and words on the node that owns it.
+        vec![
+            link(23, l5, [fresh, ghost]),
+            change(24, fresh, everyone, set(fresh, 5, said.to_value())),
+        ],
+        // The node is made, which takes the link in, and taken out with it, in one part.
+        vec![
+            w3e_create(&h, 25, ghost, h.zone, everyone),
+            remove(26, ghost),
+        ],
+        vec![remove(27, fresh)],
+    ];
+    // The whole cuts of the cuts that take nothing out are not counted: the first, and the one that links to an id
+    // that is no node yet (a cut whole, as before).
+    let mut other_cuts = 0;
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        actual.apply_bytes(&bytes).unwrap();
+        out.push(i as u64, &bytes).unwrap();
+        let before = out.whole_cuts;
+        // The part that makes `brief` is cut with the one that takes it out.
+        if i != 4 {
+            out.flush().unwrap();
+        }
+        if i == 0 || i == 7 {
+            other_cuts += out.whole_cuts - before;
+        }
+    }
+    // The reader holds the source's public state.
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(wire(out.public_player().state().clone()).unwrap());
+    (all, out.whole_cuts - other_cuts)
+}
+
 /// #2731 (0.133 S4): before a still world exits to sleep, its writer writes what is open and leaves a pointer that
 /// says the world is quiet up to now and still until its next due change (field 11: `[t]`, or `[]` when nothing is
 /// due); once it is awake again its pointer has no field 11.
@@ -4200,7 +4376,7 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
 
 /// C5: a creator defining a kind never stops the public stream. A `souls:kind` node the header does not pin is public,
 /// and so is a thing of the kind it defines; a thing of a kind only a private definition names (which a public reader
-/// cannot check) is left out, logged by name, and the stream goes on, touched or not.
+/// cannot check) is left out, logged by name, and the stream goes on, touched or taken out.
 #[test]
 fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
     let h = header();
@@ -4278,15 +4454,34 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
             BTreeMap::new(),
         )],
         vec![i3948_set(4, secret, 1), i3948_set(5, boxed, 2)],
+        // The left-out node taken out: by rows, naming no version for it, as the whole cut names none.
+        vec![w3e_effect(
+            6,
+            secret,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Remove { node: secret },
+                rest: Rest::new(),
+            }]),
+        )],
     ];
+    let mut whole = 0;
     // The private definition changes nothing public: no part for it.
-    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4]).enumerate() {
+    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4, 5]).enumerate() {
+        if n == 5 {
+            whole = out.whole_cuts;
+        }
         let p = w3e_packet(&h, effects);
         actual.apply_bytes(&p).unwrap();
         out.push(n as u64, &p).unwrap();
         out.flush().unwrap();
         assert_eq!(out.player.next(), parts, "after record {n}");
     }
+    assert_eq!(out.whole_cuts, whole, "the remove is a cut by rows");
+    assert_eq!(
+        out.player.state(),
+        &out.shown(out.canonical.tree()).unwrap()
+    );
     assert!(i3948_holds(&out.player, def) && i3948_holds(&out.player, boxed));
     assert!(
         !i3948_holds(&out.player, secret),
@@ -4298,7 +4493,7 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
     );
     // A reader that plays the parts from the baseline holds the same state.
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
-    for n in 0..4 {
+    for n in 0..5 {
         reader
             .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
             .unwrap();

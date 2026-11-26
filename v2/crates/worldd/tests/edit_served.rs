@@ -1406,6 +1406,394 @@ async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
     assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
 }
 
+/// A thing on the open ground at the origin whose solids are `boxes`, each `[cx, cz, hx, hz]` mm (its middle and half
+/// sizes), 2.5 m tall: a wall, a pen or a block.
+fn solids(w: &Seeded, boxes: &[[i64; 4]]) -> Op {
+    let mut op = wall(w, 0, 0);
+    if let Op::Place { fields, .. } = &mut op {
+        let boxes = boxes
+            .iter()
+            .map(|&[cx, cz, hx, hz]| {
+                Value::Array(
+                    [cx, cz, hx, hz, 0, 0, 2_500, 5, 0]
+                        .iter()
+                        .map(|&v| int(v))
+                        .collect(),
+                )
+            })
+            .collect();
+        fields.insert(import_eden::F_SOLIDS, Value::Array(boxes));
+    }
+    op
+}
+
+/// Each body born in the world's log, with its spot on the open ground (µm), in the order born.
+fn births(w: &Seeded) -> Vec<(Id, Vec3)> {
+    let bytes = std::fs::read(w.dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in replica::effects::Part::read(&r).unwrap().effects {
+            if let replica::effects::Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node, kind, pose, ..
+                    } = c.change
+                        && kind.as_str().contains("body")
+                    {
+                        out.push((node, pose.position));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #5006 (god-mode audit row 37): the creator names where new Souls arrive, on a served world, with no restart. Set to
+/// N2's build site, a joining Soul is born round its middle; an unknown place is refused `edit.arrival-unknown`; the
+/// first set is undone and redone; cleared, the next is born round the world's entry. A newcomer is always born where it
+/// can walk from: named the square and then walled in round its middle, a Soul is born at the entry, and naming it now
+/// is refused `edit.arrival-cut-off`; with no ground within 16 m of its middle, a Soul is born at the entry, and naming
+/// it is refused `edit.arrival-no-ground`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let im = import_eden::load(&text).unwrap();
+    let place = |id: &str| {
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes[id]).unwrap()).unwrap();
+        (
+            n.fields()[&import_eden::F_ORIGIN].clone(),
+            replica::arrival::middle(n.fields()).expect("the place has an outline"),
+        )
+    };
+    let ((origin, middle), (square_origin, square_middle)) = (place("site"), place("square.area"));
+    assert_eq!(square_middle, (0, 0), "the square is round the origin");
+    let d = scratch("arrival");
+    let w = seed(&d, &text, 4, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc3);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    // The build site and the square as the served world holds them (each node by the facts' id of it).
+    let (site, square) = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        let by = |origin: &Value| {
+            t.children(ground)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|&c| t.node(c))
+                .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(origin))
+                .expect("the served world holds the place")
+                .id()
+        };
+        (by(&origin), by(&square_origin))
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let nowhere = Id::new(Scope([9; 16]), 1).unwrap();
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, arrival(nowhere.to_value())),
+    )
+    .await;
+    println!("an arrival at no place: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN)
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, arrival(w.ground.to_value())),
+    )
+    .await;
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN),
+        "the open ground itself is not a place: {got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, got.version, arrival(site.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the build site is named: {got:?}");
+    // The first set added the root's field: its undo sets it back to none (the empty list), and the redo names it again.
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 4, got.version, &Asked::Undo),
+    )
+    .await
+    .0;
+    println!("undo of the first arrival: {got:?}");
+    assert_eq!(got.kind, 1, "the first arrival is undone: {got:?}");
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 5, got.version, &Asked::Redo),
+    )
+    .await
+    .0;
+    assert_eq!(got.kind, 1, "and redone: {got:?}");
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let near = |p: Vec3, (x, z): (i64, i64)| {
+        let (dx, dz) = (p.x - x, p.z - z);
+        (((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt()) / 1e6
+    };
+    // A Soul's first act births it (C3); its walk is to a spot near the build site, so it never walks far.
+    walk(
+        &mut souls,
+        &w,
+        w.souls[0],
+        1,
+        middle.0 * 1000 + 3 * M,
+        middle.1 * 1000,
+    );
+    let walked = socket_end(&mut souls);
+    assert_eq!(
+        walked.kind, 1,
+        "the first Soul is born and walks: {walked:?}"
+    );
+    let born = births(&w);
+    assert_eq!(born.len(), 1, "one body born");
+    let at_site = near(born[0].1, (middle.0 * 1000, middle.1 * 1000));
+    println!(
+        "born with the build site named: ({:.2}, {:.2}) m, {at_site:.2} m from its middle ({:.1}, {:.1}) m",
+        born[0].1.x as f64 / 1e6,
+        born[0].1.z as f64 / 1e6,
+        middle.0 as f64 / 1e3,
+        middle.1 as f64 / 1e3
+    );
+    assert!(at_site <= 9.0, "born round the build site: {at_site} m");
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            6,
+            walked.version,
+            arrival(Value::Array(Vec::new())),
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the arrival is cleared: {got:?}");
+    // Each next Soul is born at the entry, and walks a few metres from it.
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let off = near(born[n].1, (-40 * M, 30 * M));
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(1, 30, "once cleared").await;
+    // The square is named; then walled in round its middle (a pen 8 m across, no Soul in it).
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 7, version, arrival(square.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square is named: {got:?}");
+    let pen = solids(
+        &w,
+        &[
+            [0, 4_000, 4_200, 100],
+            [0, -4_000, 4_200, 100],
+            [4_000, 0, 100, 4_200],
+            [-4_000, 0, 100, 4_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 8, got.version, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let version = at_entry(2, 33, "with the square's middle walled in").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 9, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named once walled in: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
+    );
+    // The pen gives way to one solid 34 m across over the square's middle: no ground within 16 m of it.
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            10,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    let version = at_entry(3, 27, "with no ground round the square's middle").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 11, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named with no ground round its middle: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::NO_GROUND),
+        "{got:?}"
+    );
+}
+
+/// #5006 review: a host's arrival (`worldd arrival`) walled off from the world's entry never leaves the world unjoinable,
+/// and every reach is judged from the entry. The square is the host's arrival; a pen 34 m across round its middle shuts
+/// in every spot births try round it (16 m): the next Soul is born round the world's entry, and the creator naming the
+/// square is refused `edit.arrival-cut-off` (judged from the entry, not from the host's arrival inside the pen). The pen
+/// gives way to one solid over the square's middle, no ground within 16 m of it: the next Soul is born round the entry.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hosts_arrival_walled_off_from_the_entry_births_at_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let square_origin = {
+        let im = import_eden::load(&text).unwrap();
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes["square.area"]).unwrap()).unwrap();
+        n.fields()[&import_eden::F_ORIGIN].clone()
+    };
+    let d = scratch("arrival-host");
+    let w = seed(&d, &text, 2, (-40, 30));
+    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["arrival", "--dir"])
+        .arg(&w.dir)
+        .args(["--place", "square.area"])
+        .output()
+        .expect("worldd arrival runs");
+    assert!(
+        out.status.success(),
+        "arrival: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc4);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    println!("{}", s.line("worldd: Souls arrive at square.area", 60));
+    s.line("listening ", 60);
+    let square = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        t.children(ground)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&c| t.node(c))
+            .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(&square_origin))
+            .expect("the served world holds the square")
+            .id()
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let pen = solids(
+        &w,
+        &[
+            [0, 17_000, 17_200, 100],
+            [0, -17_000, 17_200, 100],
+            [17_000, 0, 100, 17_200],
+            [-17_000, 0, 100, 17_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let (dx, dz) = (born[n].1.x + 40 * M, born[n].1.z - 30 * M);
+        let off = ((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt() / 1e6;
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(0, 30, "with the host's arrival walled off").await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the creator names the square in the host's pen: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            3,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    at_entry(1, 33, "with no ground round the host's arrival").await;
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 /// The facts the G1f and K18d served tests build on, and the id of the chair whose kind and fields a creator copies:
@@ -1856,6 +2244,9 @@ async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refuse
 
 #[path = "edit_served/k18d.rs"]
 mod k18d;
+
+#[path = "edit_served/shade.rs"]
+mod shade;
 
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
@@ -5387,7 +5778,11 @@ fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
 async fn put_part(a: &mut GwSoul, c: Id, to: BTreeMap<u64, Value>) -> Got {
     for _ in 0..10 {
         let got = a.act("part:put", c, to.clone()).await;
-        if !(got.kind == 2 && matches!(got.reason.as_str(), "edit.body-stale" | "part.setting-in"))
+        if !(got.kind == 2
+            && matches!(
+                got.reason.as_str(),
+                "edit.body-stale" | "edit.stale" | "part.setting-in"
+            ))
         {
             return got;
         }
@@ -6735,8 +7130,20 @@ fn a_gesture_added_by_the_upgrade_starts(
     release: &Path,
     at: (i64, i64),
 ) -> (PathBuf, Seeded, Id) {
+    a_gesture_added_by_the_upgrade_starts_with(tag, facts, old, release, at, 2)
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] in a world seeded with `souls` Souls; only the first two are born.
+fn a_gesture_added_by_the_upgrade_starts_with(
+    tag: &str,
+    facts: &str,
+    old: &Path,
+    release: &Path,
+    at: (i64, i64),
+    souls: u64,
+) -> (PathBuf, Seeded, Id) {
     let d = scratch(tag);
-    let w = seed_entries(&d, facts, 2, at, Some(old));
+    let w = seed_entries(&d, facts, souls, at, Some(old));
     let name = w.dir.file_name().unwrap().to_str().unwrap().to_owned();
     let activity = format!("{GESTURE}_activity");
     let (a, b) = (w.souls[0], w.souls[1]);
@@ -7060,7 +7467,8 @@ fn eden_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
 /// touching the gesture's node, a kind its header does not pin, `SOULS_GESTURE_PAUSE_MS` (default 400) after each act so
 /// the writer cuts each on its own. Run with `STREAM_PROFILE=1` (and `--release`); prints the stream writer's profile
 /// lines (`public-stream profile:` with its whole cuts and its stages' time) and their sums. Needs the Eden facts file
-/// (`EDEN_FACTS`).
+/// (`EDEN_FACTS`). With `SOULS_PAIRS` (default 1), that many pairs of Souls a few metres apart do it at once, each step
+/// for every pair in turn before the pause: a crowd whose gestures start and end in the same parts.
 #[test]
 #[ignore = "a measurement: needs the generated Eden facts file (EDEN_FACTS) and STREAM_PROFILE=1"]
 fn eden_gesture_parts_on_the_public_stream() {
@@ -7077,14 +7485,19 @@ fn eden_gesture_parts_on_the_public_stream() {
             .and_then(|n| n.parse().ok())
             .unwrap_or(400),
     );
+    let pairs: u64 = std::env::var("SOULS_PAIRS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1);
     let d = scratch("added-eden-stream");
     let (old, release) = library_before_the_gestures(&d);
-    let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts_with(
         "added-eden-stream-w",
         &std::fs::read_to_string(&facts).expect("the Eden facts file"),
         &old,
         &release,
         (52, 3),
+        2 * pairs,
     );
     let activity = format!("{GESTURE}_activity");
     let socket = d.join("s3");
@@ -7094,11 +7507,39 @@ fn eden_gesture_parts_on_the_public_stream() {
     souls
         .set_read_timeout(Some(Duration::from_secs(120)))
         .unwrap();
-    let (a, b) = (w.souls[0], w.souls[1]);
-    let body_b = body_of(&w, b);
+    // Pair `j` stands in a grid of four columns 5 m apart and rows 4 m apart, its two Souls 2 m apart; the first pair
+    // where the setup left it. Each Soul past the first two is born by its walk there.
+    for k in 2..2 * pairs {
+        let j = (k / 2) as i64;
+        let x = 52 + 5 * (j % 4) + 2 * (k % 2) as i64;
+        walk(
+            &mut souls,
+            &w,
+            w.souls[k as usize],
+            1,
+            x * M,
+            (4 + 4 * (j / 4)) * M,
+        );
+        println!("Soul {k}: {:?}", socket_end(&mut souls));
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let crowd: Vec<(Id, Id, Id)> = (0..pairs as usize)
+        .map(|j| {
+            let (a, b) = (w.souls[2 * j], w.souls[2 * j + 1]);
+            let body = t
+                .links_at(b)
+                .iter()
+                .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                .find_map(|e| Some(t.link(e.link)?.1[0]))
+                .expect("a body");
+            (a, b, body)
+        })
+        .collect();
+    drop(copy);
     let pinned = pinned_activity(&w, &activity);
     let mut seq = 3;
-    let leave = |souls: &mut UnixStream, seq: u64, gesture: Id| {
+    let leave = |souls: &mut UnixStream, seq: u64, (a, b): (Id, Id), gesture: Id| {
         for soul in [b, a] {
             let left = intent_on(
                 souls,
@@ -7112,42 +7553,49 @@ fn eden_gesture_parts_on_the_public_stream() {
             assert_eq!(left.kind, 1, "left: {left:?}");
         }
     };
-    leave(&mut souls, seq, open);
+    leave(&mut souls, seq, (crowd[0].0, crowd[0].1), open);
     let t = Instant::now();
     for _ in 0..times {
         seq += 1;
-        let offered = intent_on(
-            &mut souls,
-            &w,
-            a,
-            seq,
-            "activity:offer",
-            w.ground,
-            BTreeMap::from([
-                (1, pinned.clone()),
-                (2, Value::Text(Name::new("eden:one").unwrap())),
-                (3, Value::Array(vec![body_b.to_value()])),
-            ]),
-        );
-        assert_eq!(offered.kind, 1, "offered: {offered:?}");
+        let mut gestures = Vec::new();
+        for &(a, _, body_b) in &crowd {
+            let offered = intent_on(
+                &mut souls,
+                &w,
+                a,
+                seq,
+                "activity:offer",
+                w.ground,
+                BTreeMap::from([
+                    (1, pinned.clone()),
+                    (2, Value::Text(Name::new("eden:one").unwrap())),
+                    (3, Value::Array(vec![body_b.to_value()])),
+                ]),
+            );
+            assert_eq!(offered.kind, 1, "offered: {offered:?}");
+            gestures.push(created_by(&w, &offered.entries, &format!("{activity}@")));
+        }
         std::thread::sleep(pause);
-        let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
-        let accepted = intent_on(
-            &mut souls,
-            &w,
-            b,
-            seq,
-            "activity:accept",
-            gesture,
-            BTreeMap::new(),
-        );
-        assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        for (&(_, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            let accepted = intent_on(
+                &mut souls,
+                &w,
+                b,
+                seq,
+                "activity:accept",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        }
         std::thread::sleep(pause);
         seq += 1;
-        leave(&mut souls, seq, gesture);
+        for (&(a, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            leave(&mut souls, seq, (a, b), gesture);
+        }
     }
     println!(
-        "{times} gestures offered, accepted and left in {:?}",
+        "{times} gestures by {pairs} pairs offered, accepted and left in {:?}",
         t.elapsed()
     );
     // The writer says its profile every 10 s of its own work: wait for the window the last gesture ends in.

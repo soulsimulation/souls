@@ -34,6 +34,11 @@ const TICK: Micros = 50_000;
 /// The capacity of the amount, in its unit.
 const MAX: i64 = 1_000;
 const AMOUNT: u64 = 1;
+/// The vessel's well, a second amount of the same thing (#4103).
+const WELL: u64 = 4;
+/// A second leaf and its well, as a tea caddy's mint (#4103).
+const MINT: u64 = 5;
+const MINT_WELL: u64 = 6;
 
 /// The one kind of thing: an amount (whole grams, 0 to 1,000), one slot that holds a thing, and a form for each
 /// effect. `KIND` stands for its full name, filled in once K3 has named it.
@@ -44,7 +49,12 @@ const ENTRY: &str = r#"{
   "state": {
     "amount": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } },
     "mood": { "n": 2, "type": "enum", "values": ["calm", "sad"], "default": "calm", "audience": { "rule": "everyone" } },
-    "words": { "n": 3, "type": "text", "default": "", "audience": { "rule": "everyone" } }
+    "words": { "n": 3, "type": "text", "default": "", "audience": { "rule": "everyone" } },
+    "well": { "n": 4, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 100, "audience": { "rule": "everyone" } },
+    "mint": { "n": 5, "type": "int", "unit": "g", "default": 8, "min": 0, "max": 100, "audience": { "rule": "everyone" } },
+    "mint_well": { "n": 6, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 100, "audience": { "rule": "everyone" } },
+    "drops": { "n": 7, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 100, "audience": { "rule": "everyone" } },
+    "lit": { "n": 8, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "links": { "user": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
   "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
@@ -90,7 +100,38 @@ const ENTRY: &str = r#"{
     "grieve": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
       "effects": [{ "change": "set", "field": "mood", "to": "angry", "event": "angered" }] },
     "overfill": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
-      "effects": [{ "change": "set", "field": "amount", "to": 5000, "event": "overfilled" }] }
+      "effects": [{ "change": "set", "field": "amount", "to": 5000, "event": "overfilled" }] },
+    "to_well": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": 30, "event": "welled" }] },
+    "to_well_by": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "n": { "type": "count" } },
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": { "arg": "n" }, "event": "welled" }] },
+    "from_well": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "well", "from": "this", "into": "this", "into_field": "amount", "amount": 500, "event": "drained" }] },
+    "to_other_well": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": { "arg": "other" }, "into_field": "well", "amount": 30, "event": "welled" }] },
+    "make_filled": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "m": { "type": "value" } },
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "amount", "to": 300 }, { "field": "mood", "to": { "arg": "m" } }], "event": "made" }] },
+    "make_overfilled": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "amount", "to": 5000 }], "event": "made" }] },
+    "make_unknown": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "colour", "to": 1 }], "event": "made" }] },
+    "make_wrong": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "mood", "to": "angry" }], "event": "made" }] },
+    "blend": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "green": { "type": "count" }, "mint": { "type": "count" } },
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": { "arg": "green" }, "event": "green_added" },
+        { "change": "transfer", "field": "mint", "from": "this", "into": "this", "into_field": "mint_well", "amount": { "arg": "mint" }, "event": "mint_added" }] },
+    "recover": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "well", "from": "this", "into": "this", "into_field": "amount", "amount": 4, "event": "green_recovered" },
+        { "change": "transfer", "field": "mint_well", "from": "this", "into": "this", "into_field": "mint", "amount": 4, "event": "mint_recovered" }] },
+    "to_drops": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "drops", "amount": 1, "event": "dropped" }] },
+    "to_lit": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "lit", "amount": 1, "event": "lit" }] },
+    "well_and_make": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": "this", "into_field": "well", "amount": 30, "event": "welled" },
+        { "change": "create", "kind": "KIND", "into": "actor_hand", "set": [{ "field": "amount", "to": 5000 }], "event": "made" }] },
+    "pour_by": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "n": { "type": "count" } },
+      "effects": [{ "change": "transfer", "field": "amount", "from": "this", "into": { "arg": "other" }, "amount": { "arg": "n" }, "event": "poured" }] }
   }
 }"#;
 
@@ -1145,6 +1186,467 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }
 
+/// Form `form` of the bench's entry, done by body 2 at thing 100 as intent `n` with value arguments `vals`, run to its
+/// end through the tree's commit: how it ended, or the binder's refusal.
+fn run_at(b: &mut Bench, form: &str, vals: &[(&str, Arg)], n: u64) -> Result<String, String> {
+    let entry = b.entry.clone();
+    start(b, &entry, id(2), id(100), form, id(100), vals, n)?;
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    Ok(b.p
+        .forms
+        .ended
+        .pop()
+        .expect("ended")
+        .how
+        .as_str()
+        .to_owned())
+}
+
+/// Form `form` asked again as intent `n`, as [`run_at`] asked it, then the bench run until nothing runs: the forms'
+/// answer.
+fn ask_again(b: &mut Bench, form: &str, vals: &[(&str, Arg)], n: u64) -> Option<Asked> {
+    let entry = b.entry.clone();
+    let mut args: Args = vals
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), v.clone()))
+        .collect();
+    args.insert("other".to_owned(), Arg::Node(id(100)));
+    let effects = bind_effects_args(&entry, form, &args).expect("binds");
+    let steps = bind(&entry, form).expect("binds");
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    let asked = forms.start(
+        &mut w,
+        id(2),
+        id(100),
+        intent(id(2), n),
+        steps,
+        effects,
+        Limits::default(),
+        now,
+    );
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    asked.ok()
+}
+
+/// A fresh observer: `b`'s log replayed part by part onto a fresh bench, which must give the same tree.
+fn replayed(b: &Bench, amounts: &[i64]) -> Bench {
+    let mut fresh = Bench::new(1, 1, amounts);
+    let mut from = b.parts[0];
+    for &len in &b.parts[1..] {
+        fresh.commit(b.log[from..from + len].to_vec());
+        from += len;
+    }
+    assert_eq!(fresh.tree.to_state(), b.tree.to_state());
+    fresh
+}
+
+/// The sets of the latest part that wrote any: each node, field number, value and `by`.
+fn last_sets(b: &Bench) -> Vec<(Id, u64, Value, Option<i64>)> {
+    let mut end = b.log.len();
+    for &len in b.parts.iter().rev() {
+        let sets: Vec<_> = b.log[end - len..end]
+            .iter()
+            .flat_map(Effect::changes)
+            .filter_map(|c| match &c.change {
+                Change::Set {
+                    node,
+                    field,
+                    to,
+                    by,
+                } => Some((*node, *field, to.clone(), *by)),
+                _ => None,
+            })
+            .collect();
+        if !sets.is_empty() {
+            return sets;
+        }
+        end -= len;
+    }
+    Vec::new()
+}
+
+/// #4103: a transfer between two fields of one thing (`into_field`, both ends `"this"`) moves the least of what it
+/// asks and what the source has above its least, as two plain sets (no `by`) in one part, through the tree's commit;
+/// more than the other field's room is refused `no-room`, writing nothing, as the reference refuses it; nothing to move
+/// writes both fields as they are. An amount given by a count argument binds as that number. A resend after a restart
+/// moves nothing again, and a fresh observer sees the same.
+#[test]
+fn a_transfer_between_two_fields_of_one_thing_moves_once_in_one_part() {
+    let mut b = Bench::new(1, 1, &[400]);
+    let n = std::cell::Cell::new(0);
+    let run = |b: &mut Bench, form: &str, vals: &[(&str, Arg)]| {
+        n.set(n.get() + 1);
+        run_at(b, form, vals, n.get())
+    };
+    let amounts = |b: &Bench| {
+        let n = b
+            .tree
+            .node(b.tree.handle(id(100)).expect("a"))
+            .expect("a node");
+        let int = |f: u64| match n.fields().get(&f) {
+            Some(Value::Uint(u)) => i64::try_from(*u).expect("small"),
+            _ => 0,
+        };
+        (int(AMOUNT), int(WELL))
+    };
+
+    assert_eq!(run(&mut b, "to_well", &[]), Ok("done".into()));
+    assert_eq!(amounts(&b), (370, 30));
+    // The log's shape: two plain sets of the one thing, in one part.
+    let (thing, logged) = (id(100), b.log.len());
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (thing, AMOUNT, Value::Uint(370), None),
+            (thing, WELL, Value::Uint(30), None)
+        ]
+    );
+    // A count argument's amount beyond the room the well has left (70) is refused, never moved in part.
+    assert_eq!(
+        run(&mut b, "to_well_by", &[("n", Arg::Int(80))]),
+        Ok("no-room".into())
+    );
+    assert_eq!(amounts(&b), (370, 30));
+    assert!(
+        b.log[logged..]
+            .iter()
+            .flat_map(Effect::changes)
+            .all(|c| !matches!(c.change, Change::Set { .. })),
+        "a refused transfer writes no set"
+    );
+    assert_eq!(
+        run(&mut b, "to_well_by", &[("n", Arg::Int(70))]),
+        Ok("done".into())
+    );
+    assert_eq!(amounts(&b), (300, 100));
+    // The well is full: refused by name, nothing written.
+    assert_eq!(run(&mut b, "to_well", &[]), Ok("no-room".into()));
+    assert_eq!(amounts(&b), (300, 100));
+    // Asked for more than the well holds: what it holds moves; then nothing is left to move, which is not refused:
+    // both fields are written as they are.
+    assert_eq!(run(&mut b, "from_well", &[]), Ok("done".into()));
+    assert_eq!(amounts(&b), (400, 0));
+    assert_eq!(run(&mut b, "from_well", &[]), Ok("done".into()));
+    assert_eq!(amounts(&b), (400, 0));
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (thing, WELL, Value::Uint(0), None),
+            (thing, AMOUNT, Value::Uint(400), None)
+        ]
+    );
+    // A field of another thing is not this transfer.
+    assert_eq!(
+        run(&mut b, "to_other_well", &[]),
+        Err("effect-malformed".into())
+    );
+    println!("own-field transfers: amount and well {:?}", amounts(&b));
+    // A resend after a restart is the first receipt: nothing moves again.
+    let forms = Forms::recover(&b.log, b.now);
+    b.restart(forms);
+    let (before, logged) = (amounts(&b), b.log.len());
+    assert!(matches!(
+        ask_again(&mut b, "to_well", &[], 1),
+        Some(Asked::Applied(_))
+    ));
+    assert_eq!((amounts(&b), b.log.len()), (before, logged));
+    assert_eq!(amounts(&replayed(&b, &[400])), (400, 0));
+}
+
+/// The reference's tea caddy case (form-rules `cases/effects/food_tea_caddy.json`, `rt1` and `rt3`): a blend of two
+/// green and one mint, then of one green and no mint. A count of 0 is admitted: it moves nothing and writes its two
+/// fields as they are, so its key is in the log and a resend, before and after a restart, is the first receipt.
+#[test]
+fn a_blend_of_no_mint_moves_the_green_and_leaves_the_mint() {
+    let mut b = Bench::new(1, 1, &[8]);
+    let thing = id(100);
+    let fields = |b: &Bench| {
+        let n = b
+            .tree
+            .node(b.tree.handle(thing).expect("a"))
+            .expect("a node");
+        let int = |f: u64, default: i64| match n.fields().get(&f) {
+            Some(Value::Uint(u)) => i64::try_from(*u).expect("small"),
+            _ => default,
+        };
+        (
+            int(AMOUNT, 0),
+            int(WELL, 0),
+            int(MINT, 8),
+            int(MINT_WELL, 0),
+        )
+    };
+    let blend = |green: i64, mint: i64| [("green", Arg::Int(green)), ("mint", Arg::Int(mint))];
+    assert_eq!(run_at(&mut b, "blend", &blend(2, 1), 1), Ok("done".into()));
+    assert_eq!(fields(&b), (6, 2, 7, 1));
+    assert_eq!(run_at(&mut b, "blend", &blend(1, 0), 2), Ok("done".into()));
+    assert_eq!(fields(&b), (5, 3, 7, 1));
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (thing, AMOUNT, Value::Uint(5), None),
+            (thing, WELL, Value::Uint(3), None),
+            (thing, MINT, Value::Uint(7), None),
+            (thing, MINT_WELL, Value::Uint(1), None)
+        ]
+    );
+    let logged = b.log.len();
+    assert!(matches!(
+        ask_again(&mut b, "blend", &blend(1, 0), 2),
+        Some(Asked::Applied(_))
+    ));
+    let forms = Forms::recover(&b.log, b.now);
+    b.restart(forms);
+    assert!(matches!(
+        ask_again(&mut b, "blend", &blend(1, 0), 2),
+        Some(Asked::Applied(_))
+    ));
+    assert_eq!((fields(&b), b.log.len()), ((5, 3, 7, 1), logged));
+    assert_eq!(fields(&replayed(&b, &[8])), (5, 3, 7, 1));
+}
+
+/// #4103 review: a blend of four green and no mint leaves the mint well empty; the recover after it moves the green
+/// back and nothing of the mint, writing the mint's two fields as they are, never refused (the reference's `measure`
+/// takes the least of what is asked and what is there, and only `no_room` refuses), and the caddy blends again. Between
+/// two things the same: a pour from an empty source is done, with its two sets by 0.
+#[test]
+fn a_recover_with_nothing_of_one_leaf_moves_the_other_and_the_caddy_blends_again() {
+    let mut b = Bench::new(1, 1, &[8]);
+    let thing = id(100);
+    let fields = |b: &Bench| {
+        let n = b
+            .tree
+            .node(b.tree.handle(thing).expect("a"))
+            .expect("a node");
+        let int = |f: u64, default: i64| match n.fields().get(&f) {
+            Some(Value::Uint(u)) => i64::try_from(*u).expect("small"),
+            _ => default,
+        };
+        (
+            int(AMOUNT, 0),
+            int(WELL, 0),
+            int(MINT, 8),
+            int(MINT_WELL, 0),
+        )
+    };
+    let blend = |green: i64, mint: i64| [("green", Arg::Int(green)), ("mint", Arg::Int(mint))];
+    assert_eq!(run_at(&mut b, "blend", &blend(4, 0), 1), Ok("done".into()));
+    assert_eq!(fields(&b), (4, 4, 8, 0));
+    assert_eq!(run_at(&mut b, "recover", &[], 2), Ok("done".into()));
+    assert_eq!(fields(&b), (8, 0, 8, 0));
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (thing, WELL, Value::Uint(0), None),
+            (thing, AMOUNT, Value::Uint(8), None),
+            (thing, MINT_WELL, Value::Uint(0), None),
+            (thing, MINT, Value::Uint(8), None)
+        ]
+    );
+    assert_eq!(run_at(&mut b, "blend", &blend(0, 1), 3), Ok("done".into()));
+    assert_eq!(fields(&b), (8, 0, 7, 1));
+    assert_eq!(fields(&replayed(&b, &[8])), (8, 0, 7, 1));
+
+    let mut b = Bench::new(1, 2, &[0, 950]);
+    let entry = b.entry.clone();
+    let (pitcher, mug) = (id(100), id(101));
+    start(
+        &mut b,
+        &entry,
+        id(2),
+        pitcher,
+        "pour_by",
+        mug,
+        &[("n", Arg::Int(30))],
+        1,
+    )
+    .expect("binds");
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    let how = b.p.forms.ended.pop().expect("ended").how;
+    assert_eq!(how.as_str(), "done");
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (pitcher, AMOUNT, Value::Uint(0), Some(0)),
+            (mug, AMOUNT, Value::Uint(950), Some(0))
+        ]
+    );
+}
+
+/// A transfer's two fields are whole numbers of one unit, as the reference measures them: a field of another unit is
+/// refused `units-differ`, a flag `field-unknown`; neither writes anything.
+#[test]
+fn a_transfer_into_a_field_of_another_unit_or_type_is_refused() {
+    let mut b = Bench::new(1, 1, &[400]);
+    let logged = b.log.len();
+    assert_eq!(
+        run_at(&mut b, "to_drops", &[], 1),
+        Ok("units-differ".into())
+    );
+    assert_eq!(run_at(&mut b, "to_lit", &[], 2), Ok("field-unknown".into()));
+    assert_eq!(b.things()[&id(100)], 400);
+    assert!(
+        b.log[logged..]
+            .iter()
+            .flat_map(Effect::changes)
+            .all(|c| !matches!(c.change, Change::Set { .. })),
+        "a refused transfer writes no set"
+    );
+}
+
+/// All or none: a form whose transfer is worked out and whose `create` then sets a field out of the made kind's
+/// bounds writes neither, the debit nor the thing.
+#[test]
+fn a_debit_and_a_refused_make_in_one_form_write_nothing() {
+    let mut b = Bench::new(1, 1, &[400]);
+    let logged = b.log.len();
+    assert_eq!(
+        run_at(&mut b, "well_and_make", &[], 1),
+        Ok("out-of-range".into())
+    );
+    assert_eq!(b.things().len(), 1, "nothing made");
+    assert!(
+        b.log[logged..]
+            .iter()
+            .flat_map(Effect::changes)
+            .all(|c| !matches!(c.change, Change::Set { .. } | Change::Create { .. })),
+        "no debit and no thing written"
+    );
+    let n = b
+        .tree
+        .node(b.tree.handle(id(100)).expect("a"))
+        .expect("a node");
+    assert_eq!(
+        (n.fields().get(&AMOUNT), n.fields().get(&WELL)),
+        (Some(&Value::Uint(400)), None)
+    );
+}
+
+/// A transfer between two things by a count argument (`{"arg": "n"}`), as content's pitcher `pour` and ash hearth
+/// `clear_ash` ask, which were refused `effect-malformed` before #4103: it moves that number with its signed `by`s; 0
+/// moves nothing; more than the target's room is refused `no-room`.
+#[test]
+fn a_transfer_between_things_by_a_count_argument_moves_that_number() {
+    let mut b = Bench::new(1, 2, &[400, 950]);
+    let entry = b.entry.clone();
+    let (pitcher, mug) = (id(100), id(101));
+    let mut n = 0;
+    let mut pour = |b: &mut Bench, by: i64| {
+        n += 1;
+        start(
+            b,
+            &entry,
+            id(2),
+            pitcher,
+            "pour_by",
+            mug,
+            &[("n", Arg::Int(by))],
+            n,
+        )
+        .expect("binds");
+        while !b.p.forms.is_empty() {
+            b.tick();
+            b.flush();
+        }
+        b.p.forms
+            .ended
+            .pop()
+            .expect("ended")
+            .how
+            .as_str()
+            .to_owned()
+    };
+    let amounts = |b: &Bench| (b.things()[&pitcher], b.things()[&mug]);
+    assert_eq!(pour(&mut b, 30), "done");
+    assert_eq!(amounts(&b), (370, 980));
+    assert_eq!(
+        last_sets(&b),
+        vec![
+            (pitcher, AMOUNT, Value::Uint(370), Some(-30)),
+            (mug, AMOUNT, Value::Uint(980), Some(30))
+        ]
+    );
+    assert_eq!(pour(&mut b, 0), "done");
+    assert_eq!(amounts(&b), (370, 980));
+    assert_eq!(pour(&mut b, 30), "no-room");
+    assert_eq!(amounts(&b), (370, 980));
+    assert_eq!(pour(&mut b, 20), "done");
+    assert_eq!(amounts(&b), (350, 1000));
+}
+
+/// #4104: a `create` with `set` makes the thing with those fields, read against the made kind's own (by name, its
+/// bounds, its enum's values), or is refused by name and makes nothing; a resend of the intent, before and after a
+/// restart, makes no second thing; a fresh observer replaying the log sees the made thing's fields.
+#[test]
+fn a_made_thing_has_the_fields_its_create_sets_or_is_not_made() {
+    let mut b = Bench::new(1, 1, &[400]);
+    let body = id(2);
+    let ns = b.full.split(':').next().expect("a namespace").to_owned();
+    let n = std::cell::Cell::new(0);
+    let run = |b: &mut Bench, form: &str, vals: &[(&str, Arg)]| {
+        n.set(n.get() + 1);
+        run_at(b, form, vals, n.get())
+    };
+    let held = |b: &Bench| -> Vec<(Id, BTreeMap<u64, Value>)> {
+        let h = b.tree.handle(body).expect("the body");
+        b.tree
+            .children(h)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|c| b.tree.node(*c))
+            .map(|n| (n.id(), n.fields().clone()))
+            .collect()
+    };
+    let sad = Value::Text(replica::encode::Name::new(&format!("{ns}:sad")).expect("a name"));
+    assert_eq!(
+        run(&mut b, "make_overfilled", &[]),
+        Ok("out-of-range".into())
+    );
+    assert_eq!(run(&mut b, "make_unknown", &[]), Ok("field-unknown".into()));
+    assert_eq!(run(&mut b, "make_wrong", &[]), Ok("not-allowed".into()));
+    assert!(held(&b).is_empty(), "a refused make makes nothing");
+    let made_at = n.get() + 1;
+    assert_eq!(
+        run(&mut b, "make_filled", &[("m", Arg::Name("sad".into()))]),
+        Ok("done".into())
+    );
+    let made = held(&b);
+    println!("made with fields: {made:?}");
+    let [(child, ref fields)] = made[..] else {
+        panic!("one thing made: {made:?}")
+    };
+    assert_eq!(fields.get(&AMOUNT), Some(&Value::Uint(300)));
+    assert_eq!(fields.get(&2), Some(&sad));
+
+    // A resend of the intent is its first receipt, before and after a restart: never a second thing.
+    let sad_arg = [("m", Arg::Name("sad".into()))];
+    let resend = |b: &mut Bench| ask_again(b, "make_filled", &sad_arg, made_at);
+    assert!(matches!(resend(&mut b), Some(Asked::Applied(_))));
+    let forms = Forms::recover(&b.log, b.now);
+    b.restart(forms);
+    assert!(matches!(resend(&mut b), Some(Asked::Applied(_))));
+    assert_eq!(held(&b).len(), 1, "one thing made");
+
+    // A fresh observer: the made thing's fields are in the replayed tree.
+    let fresh = replayed(&b, &[400]);
+    let seen = fresh
+        .tree
+        .node(fresh.tree.handle(child).expect("replayed"))
+        .expect("a node");
+    assert_eq!(seen.fields().get(&AMOUNT), Some(&Value::Uint(300)));
+    assert_eq!(seen.fields().get(&2), Some(&sad));
+}
+
 /// E5's kinds: linen (dirt 1, soap 2), a board (soap 1, dirt 2), a tub (soap 2, as linen numbers it) and a funnel
 /// (no soap), each with a form that transfers soap.
 const E5_KINDS: [&str; 4] = [
@@ -1217,6 +1719,7 @@ fn e5_transfer(at: usize, form: &str, args: &[(&str, u64)]) -> Result<Vec<E5Set>
             out: &[],
         },
         limits: &limits,
+        defs: &Default::default(),
         header: None,
         body: id(2),
         soul: id(2),
@@ -1289,6 +1792,7 @@ fn e5_a_transfer_between_kinds_that_number_the_field_differently_moves_the_amoun
             out: &[],
         },
         limits: &limits,
+        defs: &Default::default(),
         header: None,
         body: id(2),
         soul: id(2),
@@ -1452,6 +1956,7 @@ fn a_make_at_a_stocked_container_carries_the_top_row_of_its_pile() {
                 out: &[],
             },
             limits: &limits,
+            defs: &Default::default(),
             header: None,
             body: id(2),
             soul: id(2),
@@ -1466,6 +1971,7 @@ fn a_make_at_a_stocked_container_carries_the_top_row_of_its_pile() {
             &skills::form_runner::Effect::Make {
                 kind: replica::encode::Name::new(kind).expect("a name"),
                 into: skills::form_runner::Place::Hand,
+                set: Vec::new(),
             },
         )
         .expect("made");

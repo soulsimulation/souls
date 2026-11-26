@@ -10,10 +10,13 @@
 //   carry grip <thing id> front|back|left|right|side <n> [--from <m>]   walks to that end of a load (its grip's place,
 //                                     from its entry; 2.2 m off a part that stands), beside it along its own x (1.2 m),
 //                                     or to the n-th side carrier's place, beside a grip between its ends
+//   carry grip <load> left|right <n>  beside its n-th grip between its ends, from its back: a side carrier's (spot.mjs)
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
 //   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
-//                                     middle, or a bay's slot), keeping this Soul's place at the load: each carrier
-//                                     sends its own, at the moment --go names when it names one
+//                                     middle, or a bay's slot), keeping this Soul's place at the load. The front's
+//                                     walks the whole crew (the world keeps each carrier's place); the others may send
+//                                     their own, at the moment --go names when it names one
+//   carry to <crew id> the loading spot   into the spot's first free bay that takes the load (spot.mjs)
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
 //   part take|unseat <crew id> <part id>   the crew takes a loose part, or one out of a bay or stand
@@ -24,6 +27,7 @@
 // `{"kind":"carry","what":"offered","offer":..,"from":..}`.
 
 import { createHash } from 'node:crypto';
+import { isSpot, sideSpot, toSpot } from './spot.mjs';
 
 export const CARRY_ENTRY = 'mars:carry';
 const ID = /^[0-9a-f]{32}-\d+$/;
@@ -38,7 +42,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
 };
 
@@ -186,7 +190,10 @@ export function byName(req, rows) {
     const v = out[k];
     if (v === undefined || ID.test(String(v)) || v === 'here' || pointOf(v)) continue;
     const want = String(v).trim().toLowerCase();
-    const named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    let named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => String(n ?? '').trim().toLowerCase() === want));
+    // None by the whole name: as said ("the loading spot" for `loading-spot`), dashes and underscores as spaces.
+    const said = (n) => String(n ?? '').trim().toLowerCase().replace(/^the\s+/, '').replace(/[\s_-]+/g, ' ');
+    if (!named.length) named = all.filter((r) => [r.name, ...(r.aliases ?? [])].some((n) => said(n) === said(v)));
     // A map's place can share a thing's name (Mars College's `rack-bay` place and its rack bay): a place is never
     // gripped, taken or seated into, so with a thing of that name the thing is meant.
     const things = named.filter((r) => !/:place$/.test(String(r.kind ?? '')));
@@ -248,6 +255,11 @@ export function carryIntents(req, ctx) {
       if (!at) return no('carry-thing-unseen', `${req.thing} is not in the copy`);
       const from = req.from === undefined ? null : Number(req.from);
       if (from !== null && !(from > 0 && from < 10)) return no('carry-usage', '--from <metres, 0 to 10>');
+      if (req.n !== undefined && (req.end === 'left' || req.end === 'right')) {
+        // A side carrier's place (spot.mjs): beside the load's n-th grip between its ends, from its back.
+        const s = /^[1-4]$/.test(String(req.n)) ? sideSpot(at, loadOf(kinds[kindOf(req.thing)]), req.end, Number(req.n)) : null;
+        return s ? [walk(ns, ground, s)] : no('carry-grip-unknown', `${req.thing} has no grip ${req.n} between its ends (count from its back, 1 to ${loadOf(kinds[kindOf(req.thing)])?.inner.length ?? 0})`);
+      }
       const load = loadOf(kinds[kindOf(req.thing)]), spot = gripSpot(at, load, req.end, from === null ? null : from * M);
       // A side stands at a grip between the ends: a load with fewer such grips takes fewer (sim's carry-crew-too-large).
       const inner = load?.inner?.length ?? 0;
@@ -256,6 +268,11 @@ export function carryIntents(req, ctx) {
     }
     case 'to': {
       if (!id(req.crew) || req.where === undefined) return usage;
+      if (req.slot === undefined && id(req.where) && isSpot(kinds[kindOf(req.where)])) {
+        // A loading spot (spot.mjs): its first free bay that takes the crew's load, square in it.
+        const s = toSpot(req, ctx, req.where);
+        return s.code ? s : Object.assign([walk(ns, ground, s.point)], { bay: s.bay });
+      }
       let dest = pointOf(req.where);
       if (!dest && id(req.where)) {
         const at = placeOf(req.where);
@@ -501,8 +518,8 @@ export function nextStep(req, { load = null, bay = null } = {}) {
   switch (req.kind === 'part' ? `part ${req.do}` : req.do) {
     case 'grip': return 'you are at your end: the one who leads offers the crew (carry offer <name>); each other accepts (carry accept <their name>)';
     case 'offer': return `wait for an accept (\`wait\` shows joined); then take or lift it (part take ${c} <part> | carry lift ${c} <load>) and say where it goes`;
-    case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; then every carrier sends the same carry to ${c} <where> [<slot>] at the same moment`;
-    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes and when; every carrier sends the same carry to ${c} <x,z | bay id> [<slot>] at that moment, or the carry breaks off`;
+    case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; when the front walks it (carry to ${c} <where>), you walk with it, keeping your place`;
+    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes; the front sends carry to ${c} <x,z | bay id> [<slot>] and the crew walks with it, each in its place (into a slot, every carrier sends the same carry to, so it turns square)`;
     case 'to': return `when every carrier has arrived, one of you seats it (part put ${c} <bay id> <slot>) or sets it down (carry set-down ${c})`;
     case 'part put':
       if (bay?.left?.length) return `seated: ${bay.built}; still to fill: ${bay.left.join(', ')}. A seated frame stays held while one of you stays in its crew; the others: carry leave ${c}`;
