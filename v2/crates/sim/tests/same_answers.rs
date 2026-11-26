@@ -14,8 +14,12 @@ use sim::spots::{Target, within};
 use sim::walk::town::Town;
 use std::fmt::Write;
 
-/// The hash of every answer before S7.
-const BEFORE: &str = "28bb80e1f5271572f9c62da73db750d789e2245f0f7a806008ea9e79b2694511";
+/// The hash of every answer before S7. Re-pinned by #5034: a route carries the portals it crossed (`Route::crossed`), and
+/// the spot tables' walk is measured as a body could walk it (`Map::walked`). Of 1,237 answers, 47 route lines differ
+/// only by the new field (none once it is left out) and 12 walks measure 0.5 m to 6.5 m shorter (157.7 m to 151.2 m,
+/// the most); no spot, passage or place to stand changed. With that one walk measure taken out the 47 route lines are
+/// the whole remaining difference (8156e31a...).
+const BEFORE: &str = "fd54ebed7707ebccc38171abe053aca9199f669e6990f3270ae5f601405f88c3";
 
 #[test]
 fn s7_the_planner_answers_the_same_questions_the_same_way() {

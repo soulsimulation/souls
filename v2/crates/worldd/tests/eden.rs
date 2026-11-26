@@ -3135,11 +3135,12 @@ fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
 /// lighthouse to its lantern room (today's e_edbbc6a7, four floors up) and a tower to its top room (e_36bd67b1, whose
 /// top floor is 8.5 m up, not the 6.1 m the kind's area names), across the stairs, by their own entries; each ends
 /// `done`. Before #3599 each ended `souls:no-way`: the area's point was carried up to the open ground, cut out under
-/// the building.
+/// the building. The lighthouse's Soul is born on its breakwater, before its door (first-day round 2 turned it to
+/// face the breakwater; before, it was born on the platform beyond it, the only ground its door then opened onto).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
-    let lantern = act_at("96.0,194.0", "e_edbbc6a7", "eden:climb", "c34lh");
+    let lantern = act_at("96.0,182.0", "e_edbbc6a7", "eden:climb", "c34lh");
     let top = act_at("69.0,26.0", "e_36bd67b1", "eden:climb", "c34tw");
     lantern.expect("the lighthouse climbed, done");
     top.expect("the tower climbed, done");
@@ -7071,6 +7072,162 @@ fn last_set(dir: &Path, node: Id, field: u64) -> Option<Value> {
                 {
                     out = Some(to);
                 }
+            }
+        }
+    }
+    out
+}
+
+/// First-day round 2 (0.139): a Soul on the harbour boardwalk walks to the lighthouse at the end of the breakwater,
+/// as `act <id>` sends it: to the lighthouse (today's e_edbbc6a7, its main room), its entrance's floor and its
+/// entrance. Each ends `done` on the entrance's floor. Before, each was refused `spot-none-free` at once, with
+/// nobody about: the lighthouse stood across the breakwater's end (5.4 m wide over a 5.2 m deck) with its one door
+/// on the far side, over the sea, so no walk reached any place in it; turned to face the breakwater, its door opens
+/// onto it.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn the_lighthouse_is_walked_to_from_the_boardwalk() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let floor = im.nodes["e_edbbc6a7/floor-0"];
+    let targets = ["e_edbbc6a7", "e_edbbc6a7/floor-0", "e_edbbc6a7/entrance"];
+    let (served, first, dir) = serve(&facts, "90.0,139.0", "lighthouse", lineage);
+    drop(first);
+    let mut walked = Vec::new();
+    for (k, key) in targets.iter().enumerate() {
+        let mut soul = join(&dir, 2 + k as u64, lineage);
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(400)))
+            .unwrap();
+        let r = soul.act_within(
+            "eden:walk",
+            Some(im.nodes[*key]),
+            BTreeMap::new(),
+            300_000_000,
+        );
+        println!("from the boardwalk to {key}: {r:?}");
+        walked.push(r);
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    // The world mints each Soul's body as it joins: by id, the first Soul's, then the walkers' in order.
+    let ends: Vec<_> = last_poses(&dir).into_values().skip(1).collect();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for ((key, r), end) in targets.iter().zip(&walked).zip(&ends) {
+        println!(
+            "  {key}: ends at {:?} on {:?}",
+            end.position, end.frame.node
+        );
+        assert!(r.is_ok(), "{key}: {r:?}");
+        assert_eq!(end.frame.node, floor, "{key}: in the lighthouse");
+    }
+    assert_eq!(ends.len(), targets.len());
+}
+
+/// First-day round 2 (0.139): from the park north of the harbour, a walk to the harbour (its district,
+/// `place-region-harbour`, as `context harbour` lists it) ends `done` in the harbour, out of the park. The district's
+/// middle is the sea between its piers, so the walk stood back 0.6 m outside its nearest edge, which the park's
+/// own area overlaps: the Soul ended in the park, by the pond. Now it walks into the nearest area the district holds
+/// that is ground (its boardwalk).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_walk_to_the_harbour_from_the_park_ends_in_the_harbour() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let (ground, harbour, park) = (
+        im.nodes["ground"],
+        im.nodes[&facts_id(&text, "place-region-harbour")],
+        im.nodes[&facts_id(&text, "place-region-park")],
+    );
+    let (served, mut soul, dir) = serve(&facts, "20.0,118.0", "harbour", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(400)))
+        .unwrap();
+    let r = soul.act_within("eden:walk", Some(harbour), BTreeMap::new(), 300_000_000);
+    std::thread::sleep(Duration::from_secs(1));
+    let end = end_pose(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let (node, at) = end.expect("the body's end");
+    let gap = |place| replica::select::gap(&im.tree, place, ground, at).unwrap();
+    println!(
+        "to the harbour: {r:?}, ends at ({:.1}, {:.1}) m, {} µm from the harbour, {} µm from the park",
+        at.x as f64 / 1e6,
+        at.z as f64 / 1e6,
+        gap(harbour),
+        gap(park)
+    );
+    r.expect("walked to the harbour, done");
+    assert_eq!(node, ground, "on the open ground");
+    assert_eq!(gap(harbour), 0, "in the harbour");
+    assert!(gap(park) > 0, "out of the park");
+}
+
+/// First-day round 2 review (#5027): a walk to a water place that holds a bridge far along it still ends at the place's
+/// edge, not on the bridge. The west river's region and its river (`place-region-west-river`,
+/// `place-region-west-river-river`, their middles on the water) both hold the stone bridge's area (its middle on the
+/// deck), 200 m south of a Soul by the fishing hamlet at (-200, 150) m; each walk ends `done` near the edge it comes
+/// to, 6 m and 24 m west, as before the harbour's change, which walked it to the bridge.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_walk_to_the_river_ends_at_its_edge_not_on_its_bridge() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let ground = im.nodes["ground"];
+    let bridge = im.nodes[&facts_id(&text, "place-region-west-river-stone-bridge")];
+    let names = ["place-region-west-river", "place-region-west-river-river"];
+    let (served, first, dir) = serve(&facts, "-200.0,150.0", "riverbridge", lineage);
+    let mut walked = Vec::new();
+    for (k, mut soul) in std::iter::once(first)
+        .chain((2..=names.len() as u64).map(|n| join(&dir, n, lineage)))
+        .enumerate()
+    {
+        soul.0
+            .set_read_timeout(Some(Duration::from_secs(400)))
+            .unwrap();
+        let place = im.nodes[&facts_id(&text, names[k])];
+        let r = soul.act_within("eden:walk", Some(place), BTreeMap::new(), 300_000_000);
+        walked.push((names[k], place, r));
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    let ends: Vec<_> = last_poses(&dir).into_values().collect();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(ends.len(), names.len());
+    for ((name, place, r), end) in walked.iter().zip(&ends) {
+        let at = end.position;
+        let gap = |p| replica::select::gap(&im.tree, p, ground, at).unwrap();
+        println!(
+            "to {name}: {r:?}, ends at ({:.1}, {:.1}) m on {:?}, {:.1} m from it, {:.1} m from the bridge",
+            at.x as f64 / 1e6,
+            at.z as f64 / 1e6,
+            end.frame.node,
+            gap(*place) as f64 / 1e6,
+            gap(bridge) as f64 / 1e6
+        );
+        assert!(r.is_ok(), "{name}: {r:?}");
+        assert_eq!(end.frame.node, ground, "{name}: on the open ground");
+        assert!(gap(*place) <= 5_000_000, "{name}: at its edge");
+        assert!(gap(bridge) >= 100_000_000, "{name}: not on the bridge");
+    }
+}
+
+/// Each body's last logged pose in the world's log in `dir`, by body id.
+fn last_poses(dir: &Path) -> BTreeMap<Id, replica::pose::Pose> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                out.insert(id, pose);
             }
         }
     }

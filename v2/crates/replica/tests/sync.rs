@@ -495,3 +495,226 @@ fn a_childs_change_leaves_the_record_holding_its_parents_big_field_as_it_was() {
     let n = back.node(back.handle(world_id(ROOM)).unwrap()).unwrap();
     assert_eq!(n.fields().get(&TERRAIN), Some(&terrain));
 }
+
+/// A made-up world for the let go: a tree of records by hash (`{1: tag, 10: [children]}`), every version kept, and the
+/// tags of leaves served withheld (empty bytes).
+#[derive(Default)]
+struct Made {
+    records: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+    withheld: std::collections::BTreeSet<Vec<u8>>,
+    root: Option<Hash>,
+}
+
+/// A node of a made-up tree: a tag, and children.
+#[derive(Clone)]
+struct Node(u64, Vec<Node>);
+
+impl Made {
+    fn put(&mut self, n: &Node) -> Hash {
+        use replica::encode::{Value, encode};
+        let mut m = std::collections::BTreeMap::from([(1, Value::Uint(n.0))]);
+        if !n.1.is_empty() {
+            let below = n.1.iter().map(|c| Value::Bytes(self.put(c).to_bytes()));
+            m.insert(10, Value::Array(below.collect()));
+        }
+        let bytes = encode(&Value::Map(m)).unwrap();
+        let h = Hash::of(replica::ids::Purpose::StatePrivate, &bytes);
+        self.records.insert(h.to_bytes(), bytes);
+        h
+    }
+
+    fn set(&mut self, root: &Node) {
+        self.root = Some(self.put(root));
+    }
+
+    fn withhold(&mut self, leaf: u64) {
+        let h = self.put(&Node(leaf, Vec::new())).to_bytes();
+        self.withheld.insert(h);
+    }
+}
+
+impl Source for Made {
+    fn hashes(&mut self, ids: &[Id]) -> Result<Vec<Option<Hash>>, Refusal> {
+        Ok(ids.iter().map(|_| self.root).collect())
+    }
+
+    fn records(&mut self, hashes: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, Refusal> {
+        Ok(hashes
+            .iter()
+            .map(|h| {
+                if self.withheld.contains(h) {
+                    Vec::new()
+                } else {
+                    self.records[h].clone()
+                }
+            })
+            .collect())
+    }
+}
+
+/// Answers so many records requests, then is cut off.
+struct CutMade<'a>(&'a mut Made, usize);
+
+impl Source for CutMade<'_> {
+    fn hashes(&mut self, ids: &[Id]) -> Result<Vec<Option<Hash>>, Refusal> {
+        self.0.hashes(ids)
+    }
+
+    fn records(&mut self, hashes: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, Refusal> {
+        if self.1 == 0 {
+            return Err(Refusal {
+                name: "cut",
+                detail: String::new(),
+            });
+        }
+        self.1 -= 1;
+        self.0.records(hashes)
+    }
+}
+
+/// The copy is its scope and nothing else: every record reached is held and checked, and the counts and bytes held
+/// are the reach's.
+fn whole(copy: &Copy, held: usize) {
+    let reached = copy.reach().unwrap();
+    assert_eq!(
+        reached.len(),
+        held,
+        "the copy holds its scope and nothing else"
+    );
+    let bytes: u64 = reached
+        .iter()
+        .map(|h| copy.record(h).map_or(0, |b| b.len() as u64))
+        .sum();
+    assert_eq!(copy.held_bytes(), bytes);
+}
+
+/// #5010 follow-up: each confirm sync's let go walked the whole copy (Eden's 9,588 records, in the daemon's WASM, half a
+/// second a time on a loaded machine, every 3 to 5 s). It now follows what changed: a sync that changed nothing looks
+/// at the scope's hash, one that changed a thing at the old records above it and what they named, and the copy is
+/// still exactly its scope through moves, shared records, removals and withheld ones.
+#[test]
+fn a_sync_lets_go_by_what_it_changed_and_the_copy_stays_its_scope() {
+    let scope = [world_id(0)];
+    let mut rooms: Vec<Vec<u64>> = (0..10)
+        .map(|r| (0..100).map(|t| r * 1000 + t).collect())
+        .collect();
+    let tree = |rooms: &Vec<Vec<u64>>| {
+        let rooms = rooms.iter().enumerate();
+        let rooms = rooms.map(|(r, ts)| {
+            Node(
+                1_000_000 + r as u64,
+                ts.iter().map(|t| Node(*t, Vec::new())).collect(),
+            )
+        });
+        Node(9_999_999, rooms.collect())
+    };
+    let mut w = Made::default();
+    w.set(&tree(&rooms));
+    let mut copy = Copy::default();
+    let s = copy.sync(&scope, &mut w).unwrap();
+    assert_eq!((s.held, s.walked), (1 + 10 + 1000, 0));
+    whole(&copy, s.held);
+
+    let s = copy.sync(&scope, &mut w).unwrap();
+    assert_eq!(
+        (s.fetched, s.walked),
+        (0, 1),
+        "nothing changed: the scope's one hash"
+    );
+
+    rooms[3][7] = 7_777_777;
+    w.set(&tree(&rooms));
+    let s = copy.sync(&scope, &mut w).unwrap();
+    assert_eq!(s.fetched, 3, "the root, the room and the thing");
+    assert_eq!(
+        s.walked,
+        1 + 10 + 100,
+        "the old root, the rooms it named and the old room's things"
+    );
+    whole(&copy, s.held);
+
+    // Moves (a thing's record is the same in its new room), a thing in two rooms at once (one record named twice),
+    // removals, new things and withheld ones, as the world goes on.
+    let mut x: u64 = 7;
+    let mut next = || {
+        x = x
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        x >> 33
+    };
+    for step in 0..300u64 {
+        let (a, b) = ((next() % 10) as usize, (next() % 10) as usize);
+        match next() % 5 {
+            0 if !rooms[a].is_empty() => {
+                let i = (next() as usize) % rooms[a].len();
+                let t = rooms[a].remove(i);
+                rooms[b].push(t);
+            }
+            1 if !rooms[a].is_empty() => {
+                let t = rooms[a][(next() as usize) % rooms[a].len()];
+                rooms[b].push(t);
+            }
+            2 if !rooms[a].is_empty() => {
+                let i = (next() as usize) % rooms[a].len();
+                rooms[a].remove(i);
+            }
+            3 => {
+                let t = 20_000 + step;
+                w.withhold(t);
+                rooms[a].push(t);
+            }
+            _ => rooms[a].push(10_000 + step),
+        }
+        w.set(&tree(&rooms));
+        // Cut off mid-descent, after its root, its rooms or its things: a descent with fewer levels finishes.
+        if step % 7 == 0 {
+            let before = copy.reach().unwrap();
+            let bytes = copy.held_bytes();
+            match copy.sync(&scope, &mut CutMade(&mut w, 1 + (step as usize / 7) % 3)) {
+                Err(e) => {
+                    assert_eq!(e.name, "cut");
+                    assert_eq!(
+                        copy.reach().unwrap(),
+                        before,
+                        "step {step}: a sync cut off leaves the copy as it was"
+                    );
+                    assert_eq!(copy.held_bytes(), bytes);
+                }
+                Ok(s) => whole(&copy, s.held),
+            }
+        }
+        let s = copy.sync(&scope, &mut w).unwrap();
+        whole(&copy, s.held);
+        assert_eq!(
+            copy.roots().get(&world_id(0)),
+            w.root.map(Hash::to_bytes).as_ref()
+        );
+    }
+}
+
+/// A withheld record is asked for again when its parent changes; a sync cut off after taking it again, but before it
+/// finished, leaves it held as withheld, as it was: its parent, still held, names it.
+#[test]
+fn a_sync_cut_off_after_asking_for_a_withheld_record_again_leaves_it_withheld() {
+    let scope = [world_id(0)];
+    let tree = |x: u64, y: u64| {
+        let a = Node(1, vec![Node(2, Vec::new()), Node(x, Vec::new())]);
+        let b = Node(4, vec![Node(5, vec![Node(y, Vec::new())])]);
+        Node(0, vec![a, b])
+    };
+    let mut w = Made::default();
+    w.withhold(2);
+    w.set(&tree(3, 6));
+    let mut copy = Copy::default();
+    let s = copy.sync(&scope, &mut w).unwrap();
+    whole(&copy, s.held);
+    let before = copy.reach().unwrap();
+    // The root, both rooms, then the withheld thing, the changed thing and the shelf, then the shelf's thing: cut
+    // off before the last level, with the withheld thing taken again.
+    w.set(&tree(30, 60));
+    let cut = copy.sync(&scope, &mut CutMade(&mut w, 3));
+    assert_eq!(cut.map(|_| ()).map_err(|e| e.name), Err("cut"));
+    assert_eq!(copy.reach().unwrap(), before);
+    let s = copy.sync(&scope, &mut w).unwrap();
+    whole(&copy, s.held);
+}

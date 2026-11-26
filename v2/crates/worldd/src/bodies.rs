@@ -235,9 +235,9 @@ pub struct Bodies {
     pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
-    /// Each started walk's target, kept to its end however it ends (0.133): how far from it a done walk ended is
-    /// measured then.
-    walked_to: BTreeMap<Id, Id>,
+    /// Each started walk's target, and the point on it when it was sent to one, kept to its end however it ends
+    /// (0.133): how far from it a done walk ended is measured then.
+    walked_to: BTreeMap<Id, (Id, Option<Vec3>)>,
     /// How far from its target each done walk ended, mm, until its end is written ([`Bodies::away`]).
     away_of: BTreeMap<Id, u64>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
@@ -1351,11 +1351,26 @@ impl Bodies {
             };
             let first = i128::from(half.saturating_add(select::GAP));
             let on = if area { -i128::from(select::GAP) } else { 0 };
-            let view = self.town.view_for(body)?;
             let from = (frame, at);
             // On it only when it is ground to stand on: its middle is (a square, a wood, a path), not a sea's or a
             // mountain's (its slopes may be on the map and still no way up).
-            let walkable = view.stand_reached(ground, middle, from).is_some();
+            let walkable = self
+                .town
+                .view_for(body)?
+                .stand_reached(ground, middle, from)
+                .is_some();
+            // First-day round 2 (0.139): a district round water (a harbour, its middle the sea between its piers) is
+            // walked into by the nearest area it holds whose middle the walker may stand on and reach (its
+            // boardwalk), the same way; stood back from, it ended over its border, in the park beside it. Only an
+            // area within [`INNER_REACH`] of the edge the walker comes to: a river's bridge far along it is not.
+            if area
+                && !walkable
+                && let Some(inner) =
+                    inner_ground(&mut self.town, body, node, ground, here, edge, from)?
+            {
+                return self.goal(body, inner, None);
+            }
+            let view = self.town.view_for(body)?;
             let mut tries = walkable
                 .then_some(on)
                 .into_iter()
@@ -1442,6 +1457,15 @@ impl Bodies {
     /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
     pub fn walks_kept(&self) -> usize {
         self.walked_to.len() + self.away_of.len()
+    }
+
+    /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
+    /// another frame.
+    fn gap_to(&self, body: Id, node: Id, p: Vec3) -> Option<u64> {
+        let (frame, at) = self.pose(body)?;
+        (frame == node)
+            .then(|| (i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2)).isqrt() / 1000)
+            .and_then(|mm| u64::try_from(mm).ok())
     }
 
     /// The gap from where `body` stands to `target`'s shape (0 inside its area), or to a body it walked to, mm; none
@@ -1598,8 +1622,8 @@ impl Bodies {
                 continue;
             }
             self.took.insert(id, (rank, ask.target()));
-            if let (Ask::Walk { .. }, Some(t)) = (&ask, ask.target()) {
-                self.walked_to.insert(id, t);
+            if let (Ask::Walk { point, .. }, Some(t)) = (&ask, ask.target()) {
+                self.walked_to.insert(id, (t, *point));
             }
             match ask {
                 Ask::Walk { node, point, gait } => {
@@ -1898,8 +1922,13 @@ impl Bodies {
                 self.live.remove(&body);
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
-                if let Some(t) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
-                    if let Some(mm) = self.gap_of(t, body) {
+                if let Some((t, point)) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
+                    // From the point it was sent to (a grip's place on the ground), not from the ground node it named; a walk
+                    // that ended in another frame (overflowed from a floor onto the open ground) as before.
+                    let gap = point
+                        .and_then(|p| self.gap_to(body, t, p))
+                        .or_else(|| self.gap_of(t, body));
+                    if let Some(mm) = gap {
                         self.away_of.insert(id, mm);
                     }
                     self.face(body, t);
@@ -1981,6 +2010,11 @@ impl Bodies {
             }
         }
         moved
+    }
+
+    /// The move `body` is making of its own (a walk, or a walk to its place), by its intent, if any.
+    pub fn moving(&self, body: Id) -> Option<Id> {
+        self.live.get(&body).map(|(id, _)| *id)
     }
 
     /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
@@ -2749,6 +2783,51 @@ fn place_half_width(tree: &Tree, node: Id) -> Option<(i64, bool)> {
         };
         (mm.saturating_mul(500), false)
     })
+}
+
+/// How far from the point of a place's edge nearest the walker an area within it may lie and still be walked into in
+/// its stead ([`inner_ground`]), µm: the harbour's boardwalk lies 9.5 m in from the edge a walker from the park comes
+/// to; the west river's stone bridge, 200 m along the river from a walker by the fishing hamlet, is not where a walk to
+/// the river ends.
+const INNER_REACH: i64 = 20_000_000;
+
+/// The area within area `node` (a child of `ground` too, [`place_half_width`]) whose middle the walker at `from` may
+/// stand on and reach, within [`INNER_REACH`] of `edge` (the point of `node`'s edge nearest the walker), nearest the
+/// walker's point `here` (both `ground`'s frame), the first by id on a tie; none when no such area lies within it.
+/// Read off the tree first, then checked on the walker's map.
+fn inner_ground(
+    town: &mut Town,
+    body: Id,
+    node: Id,
+    ground: Id,
+    here: Vec3,
+    edge: Vec3,
+    from: (Id, Vec3),
+) -> R<Option<Id>> {
+    let tree = &town.tree;
+    let within: Vec<(i64, Id, Vec3)> = tree
+        .handle(ground)
+        .and_then(|g| tree.children(g))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| tree.node(*c).map(|n| n.id()))
+        .filter(|c| *c != node && place_half_width(tree, *c) == Some((0, true)))
+        .filter(|c| select::gap(tree, *c, ground, edge).is_ok_and(|g| g <= INNER_REACH))
+        .filter(|c| select::within(tree, *c, node).unwrap_or(false))
+        .filter_map(|c| {
+            let (_, middle) = select::nearest_in(tree, c, ground, here).ok()?;
+            Some((select::gap(tree, c, ground, here).ok()?, c, middle))
+        })
+        .collect();
+    if within.is_empty() {
+        return Ok(None);
+    }
+    let view = town.view_for(body)?;
+    Ok(within
+        .into_iter()
+        .filter(|(.., middle)| view.stand_reached(ground, *middle, from).is_some())
+        .min_by_key(|(gap, c, _)| (*gap, *c))
+        .map(|(_, c, _)| c))
 }
 
 /// A building's main room (0.133 Q2): of the rooms within it (a room's kind, at most three levels down), the one with

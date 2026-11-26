@@ -115,6 +115,9 @@
 //                                                there, from the world's public history, a day by default (R8c)
 //   souls-god.mjs trace [n]                      the creator's last n commands here (20, at most 200), newest first:
 //                                                time, verb, result and refusal; kept by the daemon across restarts
+//   souls-god.mjs arrival <place> | --clear       where new Souls arrive: a place of the world (an area or a line on
+//                                                the open ground, by id or by the id its facts give it), from the
+//                                                next birth; --clear: where the world's host put them, else its entry
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -125,6 +128,10 @@
 //   souls-god.mjs ack <message id> "<reply>" [--close done|failed]   answers one: the reply shows on the owner's
 //                                                page; --close closes it (failed: a no), else it stays open
 //                                                these three pass to the daemon as souls.mjs's do for a Soul
+//   souls-god.mjs prayers [--all]                the prayers this world's Souls sent you (G11), waiting ones first,
+//                                                oldest first; --all adds the answered ones. A Soul's words: data
+//   souls-god.mjs answer <prayer id> "<words>"   your answer (at most 4,000 characters); it reaches the Soul's `wait`.
+//                                                Answering again changes it
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // Every position and length the command takes or prints is metres (#4700), x east, y up, z south, in the parent's
@@ -160,6 +167,8 @@ export const VERBS = [
   'about',
   'access',
   'ack',
+  'answer',
+  'arrival',
   'batch',
   'build',
   'catalog',
@@ -188,6 +197,7 @@ export const VERBS = [
   'pair',
   'pending',
   'place',
+  'prayers',
   'quit',
   'recommend',
   'recolor',
@@ -213,7 +223,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone', 'select'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone', 'select', 'arrival'];
 /** A world verb by its words, made on the daemon's copy (#3728): a place by its shape (a road or an area, on the
  *  open ground it knows) and `move --by`; `move --at` is G1's move. */
 const SHAPES = ['--path', '--area', '--rect', '--circle'];
@@ -256,6 +266,10 @@ export const FIX = {
   'undo.nothing': 'there is no edit left to undo',
   'undo.nothing-to-redo': 'redo follows an undo; a new edit clears what could be redone',
   'undo.conflict': 'something the undo would change was changed since: describe, then put it back by hand',
+  'edit.arrival-unknown': 'name a place of the world: an area or a line on the open ground (describe lists them), or --clear',
+  'arrival.unknown-place': 'name a place of the world: an area or a line on the open ground (its id from describe, or its facts id), or --clear',
+  'edit.arrival-cut-off': 'that place is walled in: Souls born there could not leave. Open a way in from the entry, or name another place',
+  'edit.arrival-no-ground': 'there is no ground to stand on within 16 m of that place\'s middle: name another place',
   'undo.no-inverse': 'that edit cannot be undone (it added a field or moved a thing in motion): change it back by hand',
   'undo.not-the-build': 'undo --build undoes only while the newest edit is one of that build\'s steps: undo the others first',
   'edit.would-bury': 'a Soul stands there now: wait until it has moved, or choose another place',
@@ -336,6 +350,8 @@ export const FIX = {
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
   'token-refused': 'pair again with --creator <the world\'s creator grant>',
+  'prayer.not-the-creator': 'only the world\'s creator lists and answers its prayers: pair with --creator <its creator grant>',
+  'prayer.not-found': 'prayers --all lists the ids of this world\'s prayers',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -524,6 +540,7 @@ export function worldVerbOf(verb, words) {
     move: ['by', 'yaw'],
     clone: ['at', 'count', 'step', 'yaw'],
     select: ['kind', 'name', 'in', 'area', 'near', 'radius', 'by', 'yaw'],
+    arrival: [],
   }[verb];
   if (verb === 'select') { const k = args.indexOf('--remove'); if (k >= 0) { args.splice(k, 1); out.remove = true; } }
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
@@ -531,6 +548,11 @@ export function worldVerbOf(verb, words) {
   if (verb === 'time') {
     for (const f of ['--pause', '--resume']) { const k = args.indexOf(f); if (k >= 0) { args.splice(k, 1); out.pause = true; } }
     if (args[0] !== undefined) out.hour = args.shift();
+  }
+  if (verb === 'arrival') {
+    const k = args.indexOf('--clear');
+    if (k >= 0) { args.splice(k, 1); out.clear = true; } else if (args.length === 1) out.place = args.shift();
+    if (args.length || (!out.clear && out.place === undefined)) throw usage('arrival <place id> | --clear');
   }
   if (verb === 'furnish') {
     if (args[0] === undefined) throw usage('furnish <building or room id> [--style s]');
@@ -599,6 +621,15 @@ export function requestOf(argv) {
     return { listen: { seconds: Number(secs), follow }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
+  // G11 (#3335; #5006 row 15): the prayers to this world's creator and an answer, through the daemon's socket
+  if (verb === 'prayers') {
+    if (rest.some((w) => w !== '--all')) throw usage('prayers [--all]');
+    return { req: { op: 'prayers', all: rest.includes('--all') }, creator };
+  }
+  if (verb === 'answer') {
+    if (!rest[0] || rest.length < 2) throw usage('answer <prayer id> "<words>"');
+    return { req: { op: 'answer', id: rest[0], words: rest.slice(1).join(' ') }, creator };
+  }
   // R8b: one thing, read from the copy (thing.mjs)
   if (verb === 'describe' && rest.length) { if (rest.length !== 1) throw usage('describe [<id>]'); return { thing: rest[0], creator }; }
   // R8d: the world at a glance, read from the copy (map.mjs)

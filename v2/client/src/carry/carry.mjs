@@ -13,8 +13,9 @@
 //   carry grip <load> left|right <n>  beside its n-th grip between its ends, from its back: a side carrier's (spot.mjs)
 //   carry lift <crew id> <load id>    lifts a load with the crew (`carry:lift`)
 //   carry to <crew id> <x,z | thing id> [<slot>] [--go <time>]   walks this Soul so the crew's load reaches there (its
-//                                     middle, or a bay's slot), keeping this Soul's place at the load: each carrier
-//                                     sends its own, at the moment --go names when it names one
+//                                     middle, or a bay's slot), keeping this Soul's place at the load. The front's
+//                                     walks the whole crew (the world keeps each carrier's place); the others may send
+//                                     their own, at the moment --go names when it names one
 //   carry to <crew id> the loading spot   into the spot's first free bay that takes the load (spot.mjs)
 //   carry set-down <crew id>          sets the lifted load down where it is
 //   carry list                        the crews in the copy, each with what it holds
@@ -517,8 +518,8 @@ export function nextStep(req, { load = null, bay = null } = {}) {
   switch (req.kind === 'part' ? `part ${req.do}` : req.do) {
     case 'grip': return 'you are at your end: the one who leads offers the crew (carry offer <name>); each other accepts (carry accept <their name>)';
     case 'offer': return `wait for an accept (\`wait\` shows joined); then take or lift it (part take ${c} <part> | carry lift ${c} <load>) and say where it goes`;
-    case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; then every carrier sends the same carry to ${c} <where> [<slot>] at the same moment`;
-    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes and when; every carrier sends the same carry to ${c} <x,z | bay id> [<slot>] at that moment, or the carry breaks off`;
+    case 'accept': return `you are in the crew: be at your end (carry grip <load> back) before it is taken; when the front walks it (carry to ${c} <where>), you walk with it, keeping your place`;
+    case 'lift': case 'part take': case 'part unseat': return `${load ?? 'it'} is up: say where it goes; the front sends carry to ${c} <x,z | bay id> [<slot>] and the crew walks with it, each in its place (into a slot, every carrier sends the same carry to, so it turns square)`;
     case 'to': return `when every carrier has arrived, one of you seats it (part put ${c} <bay id> <slot>) or sets it down (carry set-down ${c})`;
     case 'part put':
       if (bay?.left?.length) return `seated: ${bay.built}; still to fill: ${bay.left.join(', ')}. A seated frame stays held while one of you stays in its crew; the others: carry leave ${c}`;

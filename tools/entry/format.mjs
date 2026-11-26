@@ -17,7 +17,7 @@ export const FORMAT = 'souls-entry/1';
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640).
  *  Section 10 is Engine v2 T3's table of referenced kinds, written by the encoder, never in a file; 12 is `reactions`. */
 export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16, roles: 17, motion: 18, loose: 19,
-  looks: 20, text: 21, card: 22, howtos: 23});
+  looks: 20, text: 21, card: 22, howtos: 23, building: 24});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
 export const RESERVED = Object.freeze({reactions: 'SA-F15'});
