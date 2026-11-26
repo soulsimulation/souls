@@ -291,8 +291,8 @@ test('each step says what comes next; a seated part says what is left of its bay
   const crew = id(8);
   assert.match(nextStep({ do: 'grip' }), /carry offer <name>.*carry accept/);
   assert.match(nextStep({ do: 'offer', crew }), new RegExp(`part take ${crew}`));
-  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*at the same moment/);
-  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes and when; every carrier sends the same carry to ${crew}`));
+  assert.match(nextStep({ do: 'accept', crew }), /carry grip <load> back.*you walk with it, keeping your place/);
+  assert.match(nextStep({ kind: 'part', do: 'take', crew }, { load: 'rack frame 1' }), new RegExp(`rack frame 1 is up: say where it goes; the front sends carry to ${crew}`));
   assert.match(nextStep({ do: 'to', crew }), /part put/);
   assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a']) }), /1 of 6 slots filled; still to fill: upright_b: a rack upright/);
   assert.match(nextStep({ kind: 'part', do: 'put', crew, into: id(5) }, { bay: bayWith(['upright_a', 'upright_b', 'beam_high_l', 'beam_high_r', 'beam_low_l', 'beam_low_r']) }), /6 of 6 slots filled, so it is built/);
