@@ -16,6 +16,7 @@ use sim::orders::{SlotAt, Where};
 use sim::slots::Slots;
 use sim::spots::Ground;
 use sim::walk::town::Plans;
+use skills::close::THERE;
 
 type R<T> = Result<T, Refusal>;
 
@@ -116,6 +117,11 @@ fn approaches(b: &mut Bodies, now: Micros) -> (BTreeMap<Id, Approach>, Vec<(Move
     let mut out = BTreeMap::new();
     for (body, size, goal) in goals {
         let corner = goal.and_then(|to| {
+            // On its spot: the skill stands without asking, so the planner is not asked either.
+            let (dx, dz) = (to.x - body.pose.position.x, to.z - body.pose.position.z);
+            if i128::from(dx).pow(2) + i128::from(dz).pow(2) <= i128::from(THERE).pow(2) {
+                return Some(to);
+            }
             let view = b.town.view_for_size(size).ok()?;
             let plans = Plans {
                 found: &b.planned.lines,

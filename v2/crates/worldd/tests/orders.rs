@@ -286,3 +286,91 @@ fn obstructed_queue(heads: usize) {
         assert!(b.orders.spot(id(2)).is_some() && b.orders.spot(id(3)).is_some());
     }
 }
+
+/// A2 through the served adapter: a seat whose stand point lies off any ground has no supported way to it. The real
+/// planner refuses the head's route, and its queue ends `souls:no-way` within a second: its legs are released, it
+/// takes nothing, and an unrelated walker on the same ground keeps walking.
+#[test]
+fn b7c_planner_refused_approach_ends_no_way_and_others_walk_on() {
+    let (town, ground, chair) = town();
+    let at = |x: i64, z: i64, n: u64| {
+        town.surfaces[&ground]
+            .place(
+                id(n),
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, z),
+                Quat::IDENTITY,
+            )
+            .unwrap()
+    };
+    let (queuer, walker) = (at(22_900_000, 8_000_000, 1), at(18_000_000, 9_000_000, 2));
+    let mut b = Bodies::new(town, TICK).unwrap();
+    b.add_body(family(), queuer).unwrap();
+    b.add_body(family(), walker).unwrap();
+    // The chair's place with its stand point 300 m in front of the seat: past the test world's ground.
+    b.add_place(PlaceAt {
+        thing: chair,
+        place: Place {
+            slot: 1,
+            height: 470_000,
+            stand: [0, 300_000_000],
+        },
+        point: Vec3::new(21_900_000, 470_000, 4_620_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+        more: Vec::new(),
+    })
+    .unwrap();
+    let mut now = 0;
+    worldd::orders::accept(&mut b, &queue(id(1), chair), id(1), id(101), now).unwrap();
+    ask(
+        &mut b,
+        id(2),
+        201,
+        Ask::Walk {
+            node: ground,
+            point: Some(Vec3::new(14_000_000, 0, 9_000_000)),
+            gait: None,
+        },
+    );
+    let from = b.runner.controller.body(id(2)).unwrap().pose.position;
+    let ended = |b: &Bodies| {
+        b.orders.log.iter().find_map(|e| {
+            e.events
+                .iter()
+                .flatten()
+                .find_map(sim::orders::end_reason)
+                .map(str::to_owned)
+        })
+    };
+    while now < 1_000_000 && ended(&b).is_none() {
+        tick(&mut b, &mut now);
+    }
+    assert_eq!(
+        ended(&b).as_deref(),
+        Some(sim::orders::NO_WAY),
+        "at {now} µs"
+    );
+    assert!(b.orders.open(id(1)).is_none());
+    assert!(
+        b.runner
+            .controller
+            .claims(id(1))
+            .unwrap()
+            .running()
+            .is_empty(),
+        "the queue's legs are released"
+    );
+    for _ in 0..40 {
+        tick(&mut b, &mut now);
+    }
+    assert!(takes(&b).is_empty());
+    let to = b.runner.controller.body(id(2)).unwrap().pose.position;
+    assert!(
+        from.x - to.x > 1_000_000,
+        "the walker walked on: {from:?} to {to:?}"
+    );
+}

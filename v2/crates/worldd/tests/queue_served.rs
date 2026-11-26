@@ -48,7 +48,7 @@ fn scratch(tag: &str) -> PathBuf {
     d
 }
 
-/// N2's test world with the dining row, and the folder of entries: the body.
+/// N2's test world with the dining row, and the folder of entries: the body and the chair.
 fn world(d: &Path) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
@@ -58,6 +58,8 @@ fn world(d: &Path) -> String {
         entries.join("humanoid.json"),
     )
     .unwrap();
+    // The chair's seat admits a body (Eden's chair entry, its stand point 509 mm in front as the facts have it).
+    std::fs::copy(root.join("seating/chair.json"), entries.join("chair.json")).unwrap();
     let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
     let row = json::parse(include_str!("fixtures/queue-chairs.json")).unwrap();
     let json::Value::Obj(top) = &mut f else {
