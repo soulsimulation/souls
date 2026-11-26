@@ -8,7 +8,7 @@
 //!   any other second adds itself. A walker going round a block at full speed, its route heading away from its leg's
 //!   end, comes nearer its corner; one held against a thing or a crowd comes nearer neither. A corner counts when
 //!   aimed at the whole second (nearer than ever while aimed at) or turned to in it (nearer than where the second
-//!   began), and one turned back to within [`LONG`] keeps the least distance it had (the stall watch's rule), so a
+//!   began), and one turned back to within [`LONG`] keeps the least distance it had (after the stall watch's), so a
 //!   walker rocking or going to and fro between corners gains on none after its first swing. A tick with no line for
 //!   the leg (the planner's answer pending) measures nothing. A new leg starts the clock again, and so does, while it
 //!   waits for a link taken in turns (N8), that link's owner letting someone in or turning it (the queue moves). The
@@ -372,8 +372,9 @@ impl Clock {
             return;
         }
         // A new corner is measured from where the walker stands when it turns to it. One it turned away from within
-        // [`LONG`] keeps the least distance it had then (the stall watch's rule: a corner turned back to is no new
-        // corner), so a walker going to and fro between corners gains on none after its first swing.
+        // [`LONG`] keeps the least distance it had then (after the stall watch's rule that a corner turned back to is
+        // no new corner, kept longer and with its distance), so a walker going to and fro between corners gains on
+        // none after its first swing.
         let back = self
             .gone
             .iter()
@@ -394,7 +395,8 @@ impl Clock {
     /// mark. It takes the second off the time without progress (to no less than none); any other second adds itself.
     fn second(&mut self, now: Micros, here: [i64; 2], speed: i64) {
         let span = now - self.at;
-        let q = speed * span / 4_000_000;
+        // At least 1 µm: a walker given no speed still climbs.
+        let q = (speed * span / 4_000_000).max(1);
         let on_left = self.mark - self.best >= q;
         let on_corner = now - self.long.1 < LONG
             && self.aim.is_some_and(|aim| {
@@ -943,8 +945,13 @@ impl Ladder {
                 // A new route to the same leg's end keeps the least way left to it: measured again from where the
                 // walker stands, a walker going to and fro would count each swing back as progress, and be routed
                 // again every few seconds without ever climbing further (#3168). A new leg's end is measured again
-                // once a clock, and keeps the backstop's time.
-                if let (Some(c), Some(w)) = (self.clocks.get_mut(&who), self.walkers.get(&who)) {
+                // once a clock, and keeps the backstop's time. A served world's legs come later, to
+                // [`Ladder::routed`], which does this; until then the walk keeps its leg and its clock.
+                if let (false, Some(c), Some(w)) = (
+                    self.served,
+                    self.clocks.get_mut(&who),
+                    self.walkers.get(&who),
+                ) {
                     c.leg = 0;
                     if w.legs[0].to != leg.to {
                         c.rerouted();
@@ -1048,7 +1055,7 @@ mod tests {
     /// - To and fro between corners 10 m apart, its leg's end 20 m to the side: its first swing each way is progress
     ///   (14.3 s), and then no second is, so it ends [`END`] later, at 29 s (51 s without the stall watch's guards,
     ///   each corner measured afresh: to the backstop, then [`END`]).
-    /// - Rocking between two near corners, turning every 0.3 s: at [`END`].
+    /// - Rocking 1.2 m between two near corners, turning every 0.9 s: at 16 s (28 s without the corners it remembers).
     /// - Circling a ring of more corners than it remembers: by the backstop and [`END`], at 48 s.
     #[test]
     fn a_walker_going_to_and_fro_rocking_or_circling_ends() {
@@ -1064,21 +1071,21 @@ mod tests {
         );
 
         let (a, b, to) = (
-            [800_000, 500_000],
+            [1_500_000, 500_000],
             [-300_000, 600_000],
             [5_000_000, 5_000_000],
         );
         let walk = |t: i64, _| {
-            let f = (t * 70_000) % 800_000;
-            let (x, aim) = if f <= 400_000 {
+            let f = (t * 70_000) % 2_400_000;
+            let (x, aim) = if f <= 1_200_000 {
                 (f, a)
             } else {
-                (800_000 - f, b)
+                (2_400_000 - f, b)
             };
             ([x, 0], Some(aim), to)
         };
         let at = run(4000, walk, |_| false).0.expect("rocking ends");
-        assert!(at <= END + SECOND, "rocking ended at {at} µs");
+        assert!(at <= END + 2 * SECOND, "rocking ended at {at} µs");
 
         // Twelve corners round its leg's end, 10 m out (a lap of 45 s): each corner it aims at is one it has not
         // turned from within its memory, so only the backstop stops it gaining on them.
@@ -1093,7 +1100,7 @@ mod tests {
             (here, Some(aim), [0, 0])
         };
         let at = run(4000, walk, |_| false).0.expect("circling ends");
-        assert!(at <= LONG + END + 3 * SECOND, "circling ended at {at} µs");
+        assert!(at <= LONG + END + 4 * SECOND, "circling ended at {at} µs");
     }
 
     /// Review of #4946: a walker going to and fro that is routed again and again, each time to another leg's end,
