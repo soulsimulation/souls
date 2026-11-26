@@ -476,13 +476,13 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     println!("rise: {rose:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    // `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor; <moved> stand
-    // points moved to clear ground`
+    // `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor; <bare> on
+    // things with no slots of their own; <beyond> past a thing's own slots; <moved> stand points moved to clear ground`
     let n: Vec<usize> = seats
         .split(|c: char| !c.is_ascii_digit())
         .filter_map(|w| w.parse().ok())
         .collect();
-    let [registered, on, declared, left, moved] = n[..] else {
+    let [registered, on, declared, left, _bare, _beyond, moved] = n[..] else {
         panic!("{seats}")
     };
     println!(
