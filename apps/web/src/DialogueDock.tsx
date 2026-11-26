@@ -3,7 +3,7 @@ import {createPortal} from 'react-dom';
 import type {TalkLine} from '@souls/protocol';
 import type {WorldViewerHandle,WorldViewerState} from './WorldViewer.ts';
 import {createDialogueStore,hearingLabel,ingestDialogue,keepDialogue,keptDialogue,joinNames,participants,threadSoulColours,type DialogueEdgeMessage,type DialogueLine,type DialogueStore,type DialogueThread} from './dialogue-threads.ts';
-import {dialogueRequests,speakingNow} from './dialogue-speaking.ts';
+import {dialogueRequests,speakingNow,speakNow} from './dialogue-speaking.ts';
 import './DialogueDock.css';
 
 /** A thread counts as current (auto-expanded) while its last line is this recent. */
@@ -44,7 +44,7 @@ export function DialogueDock({root,scope,edge,talk,state,active,handle,nameOf}:P
  useEffect(()=>{
   if(!active)return;const t0=performance.now(),wall=Date.now();
   for(const s of shown)for(const l of s.lines.slice(-6)){if(announced.current.has(l.key))continue;announced.current.add(l.key);
-   if(!l.replay&&wall-l.at<20_000)speakingNow.set(l.soulId,{colour:s.t.colour,since:t0,thread:s.t.id,text:l.text,private:!!s.t.sealed,key:l.key});}
+   if(!l.replay&&wall-l.at<20_000)speakNow(l.soulId,{colour:s.t.colour,since:t0,thread:s.t.id,text:l.text,private:!!s.t.sealed,key:l.key});}
   if(announced.current.size>2000)announced.current=new Set([...announced.current].slice(-1000));
  },[shown,active]);
  useEffect(()=>{setFocus(null);setSoulContext(null);announced.current.clear();speakingNow.clear();},[scope]);

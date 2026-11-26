@@ -124,7 +124,7 @@ import { composeVisibleViewport, viewportNote, visibleViewport, type ViewportIns
 import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
 import { cardLook, fadeCard } from './WorldCardSight.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
-import {paintSpeakingDot,speakingNow} from './dialogue-speaking.ts';
+import {bubbleLift,paintSpeakingDot,speakingClock,speakingNow} from './dialogue-speaking.ts';
 import {WorldGames} from './WorldGames.ts';
 import {parsePlatformFloors,platformFloorOffset,type PlatformFloor} from '../../../mars/viewer/lib/platform-floor.ts';
 import {WorldPlatforms} from './WorldPlatforms.ts';
@@ -412,7 +412,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       extent:()=>(entityLayer.active?entityLayer.groundExtent():null)??(expansion?EDEN_TERRAIN_EXTENT:geometry.bounds),home:()=>{context.current.setCameraMode('manual');controlsApi.current?.overview();}});scene.add(rts.marker);  // VF2: your camera (keys, pivot, double-click)
     // #891: on a touch screen in Free, the floating stick walks, one finger looks, pinch glides, two fingers rise, double-tap flies (all through rts)
     const touchFree=new WorldTouchFree(renderer.domElement,host,{camera:rts,free:()=>context.current.cameraMode==='manual'&&context.current.manualNavigation==='orbit'&&!chipFlight(),soulAt:(x,y)=>hover.pick(x,y)?.kind==='soul'});
-    const speechLayer=new SpectatorSpeechLayer();scene.add(speechLayer.group);let speeches:SpectatorSpeech[]=[];const speechHead=new THREE.Vector3();
+    const speechLayer=new SpectatorSpeechLayer();scene.add(speechLayer.group);let speeches:SpectatorSpeech[]=[];const speechHead=new THREE.Vector3();let paintedSpeaking=-1;
     // W3 fading visuals: Core C9 state when it ships; meanwhile a ?fade= preview override.
     // W2/W5 preview: ?snapshots=1 exposes on-demand low-res JPEG eyes/overhead/map frames (steward queue C10 will call these).
     if(new URLSearchParams(location.search).has('snapshots')){const soulAt=(name:string)=>{const c=context.current,soul=[...c.sim.conn.replica.souls.values()].find(x=>x.name.toLowerCase()===name.toLowerCase()),p=soul?shown.current.entities[soul.entityId]:null;return soul&&p?{soul,p:p.p,yaw:p.yaw??0}:null;};
@@ -1050,7 +1050,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         if((refresh||!soulAvatars.images.has(soul.id))&&!eyes&&!soul.profilePhoto&&soulAvatars.wanted.has(soul.id))void portraits.capture(soul.id,JSON.stringify([drawnBody,soul.entityId]),people?.bodyObject(soul.entityId)??floaters.object(soul.entityId)??standIns.getObjectByName(soul.entityId)??null,drawnBody?.family==='floater',now);
         const l = labelFor(soul);
         l.head.set(pos[0], pos[1] + lift, pos[2]);
-        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : 1.9), pos[2]); l.bubble.visible = true;   // its tail just over the head
+        l.bubble.position.set(pos[0], pos[1] + (drawnBody?.family === 'floater' ? lift : bubbleLift(at.entities[soul.entityId]?.activity)), pos[2]); l.bubble.visible = true;   // its tail just over the head
         const plate = plateAnchor(pos, eye, down, ringR);  // ground point (lying sleepers too), at the ring's near edge
         l.obj.position.set(plate[0], markHeight(waterDetail.regions, plate[0], plate[1], plate[2]) + 0.03, plate[2]);
         l.obj.visible = true;
@@ -1091,6 +1091,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');
           const chip=l.obj.element.querySelector('[data-channel-chip]') as HTMLElement|null;if(!chip)continue;const sp=latest.get(id);
           if(!sp||context.current.publishSpeechAnchors){chip.style.display='none';continue;}const c=channelChip(sp,nameOf);chip.textContent=c.text;chip.style.color=c.colour;chip.style.display='';}}
+      // a new line shows on the next frame, not at the next refresh (trial of 0.137: the bubble came about 2.5 s after say)
+      else if(speakingClock.version!==paintedSpeaking)for(const [id,l] of labels){const tag=l.obj.element as HTMLElement;paintSpeakingDot(l.bubble.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head),l.obj.visible&&tag.style.display!=='none'&&tag.style.visibility!=='hidden');}
+      paintedSpeaking=speakingClock.version;
       speechLayer.update(speeches,Date.now(),soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId,e=id?at.entities[id]:null;if(!id||!e)return null;const body=recordedBody(records[id]?.body,e.state),b=body?.family==='floater'?floaterBody(body):null;return speechHead.set(e.p[0],e.p[1]+(b?b.hoverHeight+b.radius+.05:1.95),e.p[2]).clone();});
       for (const [id, l] of labels) if (!alive.has(id)) { l.obj.visible = false; l.bubble.visible = false; if (!s.conn.replica.souls.has(id)) { labelScene.remove(l.obj, l.bubble); l.obj.element.remove(); l.bubble.element.remove(); labels.delete(id); } }
       if (!focus && thingId) {
