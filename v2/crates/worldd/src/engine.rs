@@ -619,8 +619,8 @@ impl Engine {
     /// conversation (or any activity with no places) face each other, a group faces its middle as it begins and as
     /// another joins it, and a member of one with places left where it stands faces the middle its places are round.
     fn face_middles(&mut self, tree: &Tree, c: &mut Controller) {
-        for (turn, members, middle) in self.activities.turns() {
-            face_middle(c, tree, &turn, &members, middle);
+        for t in self.activities.turns() {
+            face_middle(c, tree, &t.bodies, &t.members, t.middle);
         }
     }
 
