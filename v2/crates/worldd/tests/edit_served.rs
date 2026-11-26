@@ -6735,8 +6735,20 @@ fn a_gesture_added_by_the_upgrade_starts(
     release: &Path,
     at: (i64, i64),
 ) -> (PathBuf, Seeded, Id) {
+    a_gesture_added_by_the_upgrade_starts_with(tag, facts, old, release, at, 2)
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] in a world seeded with `souls` Souls; only the first two are born.
+fn a_gesture_added_by_the_upgrade_starts_with(
+    tag: &str,
+    facts: &str,
+    old: &Path,
+    release: &Path,
+    at: (i64, i64),
+    souls: u64,
+) -> (PathBuf, Seeded, Id) {
     let d = scratch(tag);
-    let w = seed_entries(&d, facts, 2, at, Some(old));
+    let w = seed_entries(&d, facts, souls, at, Some(old));
     let name = w.dir.file_name().unwrap().to_str().unwrap().to_owned();
     let activity = format!("{GESTURE}_activity");
     let (a, b) = (w.souls[0], w.souls[1]);
@@ -7060,7 +7072,8 @@ fn eden_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
 /// touching the gesture's node, a kind its header does not pin, `SOULS_GESTURE_PAUSE_MS` (default 400) after each act so
 /// the writer cuts each on its own. Run with `STREAM_PROFILE=1` (and `--release`); prints the stream writer's profile
 /// lines (`public-stream profile:` with its whole cuts and its stages' time) and their sums. Needs the Eden facts file
-/// (`EDEN_FACTS`).
+/// (`EDEN_FACTS`). With `SOULS_PAIRS` (default 1), that many pairs of Souls a few metres apart do it at once, each step
+/// for every pair in turn before the pause: a crowd whose gestures start and end in the same parts.
 #[test]
 #[ignore = "a measurement: needs the generated Eden facts file (EDEN_FACTS) and STREAM_PROFILE=1"]
 fn eden_gesture_parts_on_the_public_stream() {
@@ -7077,14 +7090,19 @@ fn eden_gesture_parts_on_the_public_stream() {
             .and_then(|n| n.parse().ok())
             .unwrap_or(400),
     );
+    let pairs: u64 = std::env::var("SOULS_PAIRS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1);
     let d = scratch("added-eden-stream");
     let (old, release) = library_before_the_gestures(&d);
-    let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts_with(
         "added-eden-stream-w",
         &std::fs::read_to_string(&facts).expect("the Eden facts file"),
         &old,
         &release,
         (52, 3),
+        2 * pairs,
     );
     let activity = format!("{GESTURE}_activity");
     let socket = d.join("s3");
@@ -7094,11 +7112,39 @@ fn eden_gesture_parts_on_the_public_stream() {
     souls
         .set_read_timeout(Some(Duration::from_secs(120)))
         .unwrap();
-    let (a, b) = (w.souls[0], w.souls[1]);
-    let body_b = body_of(&w, b);
+    // Pair `j` stands in a grid of four columns 5 m apart and rows 4 m apart, its two Souls 2 m apart; the first pair
+    // where the setup left it. Each Soul past the first two is born by its walk there.
+    for k in 2..2 * pairs {
+        let j = (k / 2) as i64;
+        let x = 52 + 5 * (j % 4) + 2 * (k % 2) as i64;
+        walk(
+            &mut souls,
+            &w,
+            w.souls[k as usize],
+            1,
+            x * M,
+            (4 + 4 * (j / 4)) * M,
+        );
+        println!("Soul {k}: {:?}", socket_end(&mut souls));
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let crowd: Vec<(Id, Id, Id)> = (0..pairs as usize)
+        .map(|j| {
+            let (a, b) = (w.souls[2 * j], w.souls[2 * j + 1]);
+            let body = t
+                .links_at(b)
+                .iter()
+                .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                .find_map(|e| Some(t.link(e.link)?.1[0]))
+                .expect("a body");
+            (a, b, body)
+        })
+        .collect();
+    drop(copy);
     let pinned = pinned_activity(&w, &activity);
     let mut seq = 3;
-    let leave = |souls: &mut UnixStream, seq: u64, gesture: Id| {
+    let leave = |souls: &mut UnixStream, seq: u64, (a, b): (Id, Id), gesture: Id| {
         for soul in [b, a] {
             let left = intent_on(
                 souls,
@@ -7112,42 +7158,49 @@ fn eden_gesture_parts_on_the_public_stream() {
             assert_eq!(left.kind, 1, "left: {left:?}");
         }
     };
-    leave(&mut souls, seq, open);
+    leave(&mut souls, seq, (crowd[0].0, crowd[0].1), open);
     let t = Instant::now();
     for _ in 0..times {
         seq += 1;
-        let offered = intent_on(
-            &mut souls,
-            &w,
-            a,
-            seq,
-            "activity:offer",
-            w.ground,
-            BTreeMap::from([
-                (1, pinned.clone()),
-                (2, Value::Text(Name::new("eden:one").unwrap())),
-                (3, Value::Array(vec![body_b.to_value()])),
-            ]),
-        );
-        assert_eq!(offered.kind, 1, "offered: {offered:?}");
+        let mut gestures = Vec::new();
+        for &(a, _, body_b) in &crowd {
+            let offered = intent_on(
+                &mut souls,
+                &w,
+                a,
+                seq,
+                "activity:offer",
+                w.ground,
+                BTreeMap::from([
+                    (1, pinned.clone()),
+                    (2, Value::Text(Name::new("eden:one").unwrap())),
+                    (3, Value::Array(vec![body_b.to_value()])),
+                ]),
+            );
+            assert_eq!(offered.kind, 1, "offered: {offered:?}");
+            gestures.push(created_by(&w, &offered.entries, &format!("{activity}@")));
+        }
         std::thread::sleep(pause);
-        let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
-        let accepted = intent_on(
-            &mut souls,
-            &w,
-            b,
-            seq,
-            "activity:accept",
-            gesture,
-            BTreeMap::new(),
-        );
-        assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        for (&(_, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            let accepted = intent_on(
+                &mut souls,
+                &w,
+                b,
+                seq,
+                "activity:accept",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        }
         std::thread::sleep(pause);
         seq += 1;
-        leave(&mut souls, seq, gesture);
+        for (&(a, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            leave(&mut souls, seq, (a, b), gesture);
+        }
     }
     println!(
-        "{times} gestures offered, accepted and left in {:?}",
+        "{times} gestures by {pairs} pairs offered, accepted and left in {:?}",
         t.elapsed()
     );
     // The writer says its profile every 10 s of its own work: wait for the window the last gesture ends in.
