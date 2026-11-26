@@ -595,19 +595,9 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
         "the things they are on"
     );
     assert_eq!(registered, declared, "every declared body slot registered");
-    // Every def today seats has at least today's slots, but the one whose entry declares no body slot with a stand
-    // point (C17: the campfire's). The piano's bench seats its pianist, as today (#3714).
-    let none: Vec<&str> = short
-        .iter()
-        .filter(|d| by_def.get(*d).copied().unwrap_or(0) > 0)
-        .map(String::as_str)
-        .collect();
-    assert!(none.is_empty(), "short of today's slots: {none:?}");
-    assert_eq!(
-        short,
-        vec!["core-campfire@1".to_owned()],
-        "only the entry with no body slot"
-    );
+    // Every def today seats has at least today's slots: the campfire's entry seats its three logs, as today. The
+    // piano's bench seats its pianist, as today (#3714).
+    assert!(short.is_empty(), "short of today's slots: {short:?}");
     walked.expect("walked in to the armchair's stand point");
     sat.expect("sat in the armchair");
     rose.expect("rose from it");
@@ -5309,31 +5299,61 @@ const fn ask(
     }
 }
 
+/// [`Ask`] `a`, not expected done tonight, for reason `why`.
+const fn not_tonight(why: &'static str, a: Ask) -> Ask {
+    Ask {
+        not_tonight: Some(why),
+        ..a
+    }
+}
+
+/// Why a sit on the quad's fountain is refused tonight: today's page draws a sitter by the fountain def's own slot
+/// rows (its six stand points, on the paving, facing in), so a seat on its rim needs a def revision first (SEATDEF).
+const FOUNTAIN_RIM: &str = "the page seats a sitter by the fountain def's own slot rows (six stand points on the \
+                            paving): a rim seat is a def revision (SEATDEF)";
+
+/// Why a sit on a thing with no seat (a tree, a terrace, a blanket) is refused: the body's own `sit_down` there is done,
+/// but no move of it is drawn, so the page shows the Soul standing.
+const NO_GROUND_SIT: &str = "no seat on it; the body's sit_down is done there but drawn standing (no ground-sit move \
+                             the page draws yet)";
+
 /// The campus quad, where every new Soul arrives (`place-region-campus-quad`), and what is near it.
 const AT_THE_QUAD: &[Ask] = &[
-    ask(
-        "fountain",
-        "sit on the fountain's edge",
-        "campus-quad-fountain",
-        "eden:sit",
+    not_tonight(
+        FOUNTAIN_RIM,
+        ask(
+            "fountain",
+            "sit on the fountain's edge",
+            "campus-quad-fountain",
+            "eden:sit",
+        ),
     ),
-    ask(
-        "fountain",
-        "sit on the fountain's edge (2 of 4 at once)",
-        "campus-quad-fountain",
-        "eden:sit",
+    not_tonight(
+        FOUNTAIN_RIM,
+        ask(
+            "fountain",
+            "sit on the fountain's edge (2 of 4 at once)",
+            "campus-quad-fountain",
+            "eden:sit",
+        ),
     ),
-    ask(
-        "fountain",
-        "sit on the fountain's edge (3 of 4 at once)",
-        "campus-quad-fountain",
-        "eden:sit",
+    not_tonight(
+        FOUNTAIN_RIM,
+        ask(
+            "fountain",
+            "sit on the fountain's edge (3 of 4 at once)",
+            "campus-quad-fountain",
+            "eden:sit",
+        ),
     ),
-    ask(
-        "fountain",
-        "sit on the fountain's edge (4 of 4 at once)",
-        "campus-quad-fountain",
-        "eden:sit",
+    not_tonight(
+        FOUNTAIN_RIM,
+        ask(
+            "fountain",
+            "sit on the fountain's edge (4 of 4 at once)",
+            "campus-quad-fountain",
+            "eden:sit",
+        ),
     ),
     Ask {
         arg: Some("spot"),
@@ -5344,15 +5364,18 @@ const AT_THE_QUAD: &[Ask] = &[
             "eden:sit_down",
         )
     },
-    Ask {
-        first: Some(("eden:sit", "campus-quad-bench-2")),
-        ..ask(
-            "fountain",
-            "seated on a bench: sit on the fountain's edge",
-            "campus-quad-fountain",
-            "eden:sit",
-        )
-    },
+    not_tonight(
+        "a seated body rises first (rise, then sit): the refusal names it",
+        Ask {
+            first: Some(("eden:sit", "campus-quad-bench-2")),
+            ..ask(
+                "bench",
+                "seated on a bench: sit on the other bench",
+                "campus-quad-bench-1",
+                "eden:sit",
+            )
+        },
+    ),
     ask(
         "bench",
         "sit on the bench, across the square",
@@ -5365,7 +5388,10 @@ const AT_THE_QUAD: &[Ask] = &[
         "trees-set-51",
         "eden:go_to_shade",
     ),
-    ask("tree", "sit under the tree", "trees-set-51", "eden:sit"),
+    not_tonight(
+        NO_GROUND_SIT,
+        ask("tree", "sit under the tree", "trees-set-51", "eden:sit"),
+    ),
     Ask {
         arg: Some("spot"),
         ..ask(
@@ -5396,10 +5422,31 @@ const AT_THE_QUAD: &[Ask] = &[
     ),
     ask(
         "campfire",
-        "sit by the fire",
+        "sit by the fire (1 of 3 at once)",
         "social-eden-fire",
         "eden:sit",
     ),
+    ask(
+        "campfire",
+        "sit by the fire (2 of 3 at once)",
+        "social-eden-fire",
+        "eden:sit",
+    ),
+    ask(
+        "campfire",
+        "sit by the fire (3 of 3 at once)",
+        "social-eden-fire",
+        "eden:sit",
+    ),
+    Ask {
+        first: Some(("eden:put_out", "region-campsite-fire-circle")),
+        ..ask(
+            "campfire",
+            "put the campsite fire out, then light it",
+            "region-campsite-fire-circle",
+            "eden:light",
+        )
+    },
     ask(
         "chess table",
         "play chess (white)",
@@ -5430,11 +5477,14 @@ const AT_THE_QUAD: &[Ask] = &[
         "commons-deck",
         "eden:walk",
     ),
-    ask(
-        "terrace",
-        "sit on the terrace",
-        "land-abbey-cloister-court",
-        "eden:sit",
+    not_tonight(
+        NO_GROUND_SIT,
+        ask(
+            "terrace",
+            "sit on the terrace",
+            "land-abbey-cloister-court",
+            "eden:sit",
+        ),
     ),
 ];
 
@@ -5472,17 +5522,23 @@ const AT_THE_PARK: &[Ask] = &[
         "street-hammock-1",
         "eden:lie",
     ),
-    ask(
-        "drinking fountain",
-        "have a drink",
-        "park-drinking-water",
-        "eden:drink",
+    not_tonight(
+        "its water is off until turned on (turn_on, then drink), as today's fountain and its cases have it",
+        ask(
+            "drinking fountain",
+            "have a drink",
+            "park-drinking-water",
+            "eden:drink",
+        ),
     ),
-    ask(
-        "picnic blanket",
-        "sit on the picnic blanket",
-        "park-picnic-blanket",
-        "eden:sit",
+    not_tonight(
+        NO_GROUND_SIT,
+        ask(
+            "picnic blanket",
+            "sit on the picnic blanket",
+            "park-picnic-blanket",
+            "eden:sit",
+        ),
     ),
     Ask {
         arg: Some("spot"),
@@ -5569,15 +5625,20 @@ fn ask_all(
             .map(|(a, (mut soul, body))| {
                 s.spawn(move || {
                     soul.0
-                        .set_read_timeout(Some(Duration::from_secs(600)))
+                        .set_read_timeout(Some(Duration::from_secs(900)))
                         .unwrap();
+                    // An agent's act does not lapse while its walk goes on: 10 minutes for a walk across Eden.
+                    let within = 600_000_000;
                     let thing = ids[a.thing];
-                    let first = a
-                        .first
-                        .map(|(verb, on)| soul.act(verb, Some(ids[on]), BTreeMap::new()));
+                    let first = a.first.map(|(verb, on)| {
+                        soul.act_within(verb, Some(ids[on]), BTreeMap::new(), within)
+                    });
                     let done = match a.arg {
-                        Some(arg) => soul.act(a.verb, Some(body), args(&[(arg, thing.to_value())])),
-                        None => soul.act(a.verb, Some(thing), BTreeMap::new()),
+                        Some(arg) => {
+                            let arg = args(&[(arg, thing.to_value())]);
+                            soul.act_within(a.verb, Some(body), arg, within)
+                        }
+                        None => soul.act_within(a.verb, Some(thing), BTreeMap::new(), within),
                     };
                     let seated = last_frames(dir).get(&body).copied();
                     let how = match (&done, seated) {
