@@ -1331,6 +1331,24 @@ impl Reach for Sight<'_> {
         }
         Some(thing)
     }
+
+    /// #5063: a thing is seen from afar when it stands on the body's own floor, found where it is ([`Sight::carry`]),
+    /// not by what holds it in the tree (a bench placed by a cottage's door is on the open ground): a body on the open
+    /// ground sees what stands on the open ground, one on a building's floor what that floor carries. A thing on
+    /// another building's floor, or a storey up or down, is behind a wall. Ground cover's floors (a lawn, a path) are
+    /// the open ground's.
+    fn seen(&self, body: Id, thing: Id) -> bool {
+        let Some(me) = self.bodies.get(&body) else {
+            return false;
+        };
+        let floor = self.body_on_floor(body, me).0;
+        if let Some(b) = self.bodies.get(&thing) {
+            return self.body_on_floor(body, b).0 == floor;
+        }
+        self.with_view(body, |v| self.carry(v, thing, Vec3::ZERO, &|_| true))
+            .flatten()
+            .is_some_and(|(f, _)| f == floor)
+    }
 }
 
 pub use sim::reach::{AT_ARG, AT_SELF};
