@@ -248,18 +248,19 @@ async function main() {
       const frames = join(dir, 'frames');
       mkdirSync(frames, { recursive: true });
       out.frames = { dir: frames, every, camera: CAMERA, shots: [] };
+      // The crews start at once; the pictures start when the page has drawn the world (late on a loaded machine).
+      const t0 = Date.now();
+      let going = true;
+      const done = play().finally(() => { going = false; });
       try {
         const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
         const shot = cameraShot({ fixed: CAMERA }, 7200, 16 / 9);
         await page.route((u) => u.pathname === '/__lv/shot.json', (rt) => rt.fulfill({ contentType: 'application/json', body: JSON.stringify(shot) }));
         await page.goto(takeUrl(world.page, { hour: '12:00', shot: true }), { waitUntil: 'domcontentloaded' });
-        await page.waitForFunction(worldArrived, null, { timeout: 300_000 });
-        await page.waitForFunction(() => !!window.__soulsShot, null, { timeout: 60_000 });
-        await page.evaluate(() => window.__soulsShot.cue());
-        await new Promise((res) => setTimeout(res, 5000));
-        const t0 = Date.now();
-        let going = true;
-        const done = play().finally(() => { going = false; });
+        await page.waitForFunction(worldArrived, null, { timeout: 900_000 }).catch((e) => log(`frames: ${e.message}`));
+        await page.waitForFunction(() => !!window.__soulsShot, null, { timeout: 60_000 }).catch(() => {});
+        await page.evaluate(() => window.__soulsShot?.cue()).catch(() => {});
+        out.frames.fromS = (Date.now() - t0) / 1000;
         while (going) {
           const at = Math.round((Date.now() - t0) / 1000), file = join(frames, `t${String(at).padStart(5, '0')}.png`);
           await page.screenshot({ path: file }).then(() => out.frames.shots.push(at)).catch(() => {});
@@ -267,7 +268,7 @@ async function main() {
         }
         await new Promise((res) => setTimeout(res, 3000));
         await page.screenshot({ path: join(frames, 'end.png') }).catch(() => {});
-      } finally { await browser.close(); }
+      } catch (e) { log(`frames: ${e.message}`); } finally { await done; await browser.close(); }
     } else if (record) {
       const { capture } = await import('../../launch-video/capture.mjs');
       const { cameraShot } = await import('../../launch-video/scene.mjs');
