@@ -32,6 +32,30 @@ export function onFollowSoulRequest(cb: (soulId: string, approved: boolean) => v
   return () => target.removeEventListener(FOLLOW_SOUL_EVENT, listener);
 }
 
+/** 0.137 (26 Nov): a #soul link, or the owner's Soul after pairing, keeps the camera on that Soul until the viewer chooses
+ *  otherwise. On soul.game the camera went back to the Broadcast tour about 20 s after a #soul link opened, while the card
+ *  stayed open. The Shell holds the Soul (useFollowHold) and puts the camera back on it whenever it is on Broadcast that
+ *  the viewer did not ask for (`requestBroadcast`: the camera pill and its menu). */
+export const BROADCAST_CHOSEN_EVENT = 'sim:broadcast-chosen';
+export function requestBroadcast(target: Pick<EventTarget, 'dispatchEvent'> | null = typeof window === 'undefined' ? null : window): void {
+  target?.dispatchEvent(new CustomEvent(BROADCAST_CHOSEN_EVENT));
+}
+export function onBroadcastChosen(cb: () => void, target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = window): () => void {
+  target.addEventListener(BROADCAST_CHOSEN_EVENT, cb);
+  return () => target.removeEventListener(BROADCAST_CHOSEN_EVENT, cb);
+}
+/** What a held follow does with this viewer state: `keep` (on it, flying to it, or nothing to decide), `refollow` (the
+ *  camera is on Broadcast and the viewer did not choose it), `release` (the viewer chose another Soul or their own camera). */
+export function followHoldStep(soulId: string, state: { cameraMode?: string; flyingTo?: string | null; presentation?: string; inputOwned?: boolean; selection?: { soulId?: string | null } } | null | undefined): 'keep' | 'refollow' | 'release' {
+  if (!state) return 'keep';
+  if (state.flyingTo) return state.flyingTo === soulId ? 'keep' : 'release';
+  const chosen = state.selection?.soulId;
+  if (chosen && chosen !== soulId) return 'release';
+  if (state.cameraMode === 'manual') return 'release';
+  if (state.cameraMode === 'broadcast' && state.presentation !== 'history' && !state.inputOwned) return 'refollow';
+  return 'keep';
+}
+
 /** Whether a Soul's body is in this window's picture now: the approval card asks it (V2PairDialog.tsx, the Soul is
  *  arriving…) and the Shell, which holds the world's copy, answers. False when nothing answers. */
 export const SOUL_PRESENT_EVENT = 'sim:soul-present';

@@ -1973,11 +1973,11 @@ fn plain(kind: &Name) -> &str {
     k.split_once('@').map_or(k, |(p, _)| p)
 }
 
-/// The declared nearest-free seat form (#3573): `sit` taking one slot of this thing's free slots nearest me, walked to and
-/// then sat in. Its slot is bound by the form runner's pick (#3802); this only recognises the shape, so a bare fixture
-/// sit is routed through the form's own approach.
+/// The declared nearest-free seat form (#3573): `sit` (or `lie`: a bed's, a hammock's) taking one slot of this thing's
+/// free slots nearest me, walked to and then sat or lain in. Its slot is bound by the form runner's pick (#3802); this
+/// only recognises the shape, so a bare fixture sit or lie is routed through the form's own approach.
 fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
-    if form != "sit" {
+    if !matches!(form, "sit" | "lie") {
         return None;
     }
     let f = entry.get("forms")?.get(form)?;
@@ -2006,11 +2006,14 @@ fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
 }
 
 impl Acts {
-    /// A bare fixture sit uses its actual entry's approach; explicit arguments and selectors keep their path.
+    /// A bare fixture sit or lie uses its actual entry's approach (a lie in a bed walks to it first, as its sleep does);
+    /// explicit arguments and selectors keep their path.
     pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
-        if intent.parameters.contains_key(&1)
-            || !matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
-        {
+        let form = match intent.verb.as_str().split_once(':') {
+            Some((ns, f @ ("sit" | "lie"))) if ns != "souls" => f,
+            _ => return false,
+        };
+        if intent.parameters.contains_key(&1) {
             return false;
         }
         let Some(Target::Node(node)) = &intent.target else {
@@ -2020,7 +2023,7 @@ impl Acts {
         tree.handle(*node)
             .and_then(|h| tree.node(h))
             .and_then(|n| entry_in(&self.kinds, tree, &n))
-            .is_some_and(|entry| fixture_seat(&entry, "sit").is_some())
+            .is_some_and(|entry| fixture_seat(&entry, form).is_some())
     }
 }
 
@@ -2679,7 +2682,9 @@ impl Acts {
                     Err(_) => false,
                 };
                 let permitted = bound
-                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                    && self
+                        .forms
+                        .may_or_linking(tree, &audiences, &|_| None, body, *node, &entry, form)
                         .is_ok();
                 if permitted
                     && let Err(e) = crate::needs::check(
@@ -2749,7 +2754,7 @@ impl Acts {
                     });
                     effects.extend(sets);
                 }
-                sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
+                forms.may_or_linking(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 // A slot of another thing is checked as `Forms::commit` checks it (E14): no body, nothing private
                 // to another, a slot its kind declares or a seat the world holds.
                 forms.other_slots(w, body, &entry, form, &all)?;

@@ -293,7 +293,7 @@ function oneFence(binding) {
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
     /** B3-2b: every v2 field the routed page's inline config carries beside `v2Stream` (null when not routed): the body
-     *  catalogue's directory, and where the owner's box finds the gateway and the directory (the binding's, else the
+     *  catalogue's directory, the world's name in the new engine, and where the owner's box finds the gateway and the directory (the binding's, else the
      *  front door's paths: `/w/<world>/v2/ws` and `/`). */
     v2Fields(w) {
       if (!this.v2Stream(w)) return null;
@@ -303,7 +303,9 @@ function oneFence(binding) {
       const version = replicaVersion();
       // v2Views: whether the old views (snapshot, scene, items, platforms, kernel) are published; the page asks for none
       // when they are not (apps/web scene-offer.ts oldViews), since each would answer 404
-      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
+      // v2World: the world's name in the new engine, which the navbar's "your Souls" asks the directory by (the stream's
+      // folder is the world's id, not its name)
+      return { ...(v2Bodies ? { v2Bodies } : {}), v2World: canonicalSlug, v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
         v2Views: this.published(w),
         ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
     },

@@ -266,3 +266,23 @@ test('a walker\'s record lands after its part\'s motion samples: no burst to a j
   const steps = pos.slice(1).map((p, i) => pos[i][2] - p[2]);
   assert.ok(steps.length > 100 && Math.max(...steps) <= speed * DT * 1.05 && Math.min(...steps) >= -1e-6, `steps ${Math.min(...steps).toFixed(3)}..${Math.max(...steps).toFixed(3)} m a tick`);
 });
+
+
+test('an old run end in the new move part cannot erase the new same-tick gesture',()=>{
+  const bridge=new V2Bridge({rulesVersion:'test/1'});
+  bridge.receive({t:'snapshot',s:{nodes:[world,building,floor,body],removed:[]}});
+  for(let n=0;n<8;n++)bridge.receive(part(n,n===0?[['b.7','w.2',null,T0,1_000_000,0,0]]:[],n===0?{
+    moves:[{body:'b.7',name:'souls:sit_ups',start:T0,ends:[T0+3_000_000],target:'b.7',run:'new'}],
+    runEnds:[{body:'b.7',at:T0,run:'old'}],
+  }:{}));
+  const chunk=bridge.view.takes.chunks.find(c=>c.fromTick*TICK_US<=T0+1_000_000&&c.toTick*TICK_US>T0+1_000_000)!;
+  const drawn=sampleTake(chunk.take as unknown as Take,(T0+1_000_000-chunk.fromTick*TICK_US)/1e6).entities[E];
+  assert.equal(drawn.activity,'situps');
+});
+
+
+test('a self-target floor move never aims back at its old position while the native body walks',()=>{
+  const b=new V2Bridge({rulesVersion:'test/1'});b.receive({t:'snapshot',s:{nodes:[world,building,floor,body],removed:[]}});
+  for(let n=0;n<8;n++)b.receive(part(n,[['b.7','w.2',null,T0+n*500_000,1_000_000+n*500_000,0,0]],n===0?{moves:[{body:'b.7',name:'souls:stargaze',start:T0,ends:[T0+4_000_000],target:'b.7',run:'floor'}]}:{}));
+  const chunks=b.view.takes.chunks;for(const c of chunks){const take=c.take as unknown as Take;const e=sampleTake(take,.5).entities[E];assert.ok(Math.abs(e.yaw+Math.PI/2)<.01,'canonical floor rotation preserves the actual course heading');}
+});

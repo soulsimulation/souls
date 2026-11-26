@@ -127,9 +127,10 @@ fn form_args(v: Option<&Value>) -> bool {
 /// else the ask and its fallbacks or the reason it is not one. A walk's point is parameter 1, `[x, y, z]` µm in its
 /// target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
-    // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the form
-    // runner with its walk (C17, #3453); a bare sit is the move.
-    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+    // A sit or a lie naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the
+    // form runner with its walk (C17, #3453); a bare one is the move, unless its thing's entry declares that form's
+    // walk to a free slot (`Acts::fixture_sit`).
+    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit" | "lie")) if ns != "souls")
         && form_args(intent.parameters.get(&1))
     {
         return None;
