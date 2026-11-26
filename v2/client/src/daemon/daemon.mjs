@@ -135,14 +135,14 @@
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started; one it gives up after (a sync unanswered and
-//   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in (#4980). One whose frames still
-//   arrive while a sync's answer is late is behind, not gone: it stays, says `gap.why` `behind`, and its acts go on
-//   it (#4979: on a link slower than the world's speech, reconnecting only fell behind again). One the gateway let go
-//   for a full queue is closed as `agent.behind` (1013): it signs in again at once, and answers say `gap.why` `behind`
-//   until its copy is current again (#4979). A `wait` under way is told when a signed-in socket is lost
-//   (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is current
-//   (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by replica's WASM
-//   build (`wire*`).
+//   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in
+//   (#4980). One whose frames still arrive while a sync's answer is late is behind, not gone: it stays, says
+//   `gap.why` `behind`, and its acts go on it (#4979: on a link slower than the world's speech, reconnecting only fell
+//   behind again). One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
+//   once, and answers say `gap.why` `behind` until its copy is current again (#4979). A `wait` under way is told when
+//   a signed-in socket is lost (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is
+//   current (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by
+//   replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -348,7 +348,7 @@ let stopped = 0; // acts stopped locally, for the trace
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
 let laggingAt = null; // when the socket, frames still arriving, was found behind on a sync's answer (#4979)
-// A link found behind: until a sync's answer comes within SYNC_WITHIN again, a socket on it is given up only after
+// A link found behind: until a whole sync is answered within SYNC_WITHIN again, a socket on it is given up only after
 // SLOW_QUIET with nothing received (#4979), not SYNC_WITHIN (#4980's bound on a link that kept up).
 let slowLink = false;
 const SLOW_QUIET = 60_000;
@@ -594,7 +594,6 @@ function startSync(sock, kind) {
  */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
-  syncing.askedAt = performance.now();
   const due = () => {
     if (!syncing) return;
     // On a link found slow a single frame can take longer than SYNC_WITHIN to arrive whole (a sync's records at 512
@@ -630,8 +629,8 @@ function syncAnswer(sock, n, refused, bytes) {
   confirmedAt = t;
   cutAt = null;
   if (laggingAt !== null) log(`caught up: the sync answered ${Math.round(t - laggingAt)} ms after it was found behind`);
+  else if (t - syncing.t0 < SYNC_WITHIN) slowLink = false; // a whole sync in time, never behind: the link keeps up again
   laggingAt = null;
-  if (t - syncing.askedAt < SYNC_WITHIN) slowLink = false; // its last answer came in time: the link keeps up again
   const { waiters } = syncing;
   syncing = null;
   hearing();
