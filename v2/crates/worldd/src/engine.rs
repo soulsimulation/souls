@@ -1227,18 +1227,14 @@ impl Engine {
             "souls:partner-left",
             Some(by),
         )?;
-        self.broke_off(activity, "souls:partner-left");
+        // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
+        if self.led.get(&activity).is_some_and(|(front, _)| *front != body) {
+            self.broke.insert(activity, "souls:partner-left");
+        }
         if let Some(s) = self.asm.as_mut() {
             s.ended(activity);
         }
         Ok(())
-    }
-
-    /// A led carry broke off for `why`: its front's walk is stopped with it ([`Engine::led_over`]).
-    fn broke_off(&mut self, activity: Id, why: &'static str) {
-        if self.led.contains_key(&activity) {
-            self.broke.insert(activity, why);
-        }
     }
 
     fn take(&mut self, carry: &mut Carry, by: Option<(Id, Id)>) {
