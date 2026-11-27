@@ -19,12 +19,18 @@ import { unreadFormat } from '../stream-format.ts';
 import { moveRec } from './move-record.ts';
 import { backoffMs } from './backoff.ts';
 
-/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
-const AHEAD = 16;
+/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. 64 (#4898):
+ *  a cold arrival on an hour-old checkpoint reads some 7,000 small part files. Only while no read is refused (#5068). */
+const AHEAD = 64;
 /** How often a catch-up says how far behind it is (#4684). */
 const CATCHING_MS = 1000;
 /** The existing live pointer cadence, also used while a starting world has no pointer yet. */
 const POLL_MS = 250;
+/** How far back from the stream's newest time a course's places are worked out: the page keeps them only for its newest
+ *  84 s (bridge.ts publish: 12 s of chunks and a minute before them). A part that ends before that (every part of a cold
+ *  arrival's catch-up but the last few) is given no places; one that spans it, only from there. Working out every
+ *  course over every old part was 5 of the 5.7 s a cold Eden took to reach now (27 Nov). */
+const COURSE_KEEP_US = 90_000_000;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string } | { t: 'format'; format: number }
   | { t: 'catching'; behind: number };
@@ -176,10 +182,18 @@ async function run(stream: URL) {
   const readText = async (file: string, p = ptr) => addWords(await get(new URL(path(p, file), stream)));
   // A part's file (`suffix` '') or its words ('.text'), with the next AHEAD the pointer names already asked for.
   const fetching = new Map<string, Promise<Uint8Array | null>>();
+  // While reads are refused (#5068 item 13), and after they were until a part is read again, only the part played is asked
+  // for, never AHEAD at once; and a read ahead that failed is not kept for its part's turn, which reads it again (it used
+  // to leave one part a poll after an outage).
+  let partRead = false;
   const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
-    for (let k = n; k < n + AHEAD && k <= (p.newest ?? n); k++) {
+    const ahead = refused || (fails > 0 && !partRead) ? 1 : AHEAD;
+    for (let k = n; k < n + ahead && k <= (p.newest ?? n); k++) {
       const file = path(p, `${k}${suffix}`);
-      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream), true).catch(() => null));
+      if (fetching.has(file)) continue;
+      const read = get(new URL(file, stream), true).catch(() => null);
+      fetching.set(file, read);
+      void read.then((b) => { if (b) partRead = true; else if (fetching.get(file) === read) fetching.delete(file); });
     }
     const file = path(p, `${n}${suffix}`);
     const bytes = fetching.get(file) ?? get(new URL(file, stream), true);
@@ -254,10 +268,13 @@ async function run(stream: URL) {
     // A retained unresolved record may become drawable later; transfer fresh buffers, retaining its exact bytes.
     for (const n of visible) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
     // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
-    const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, onCourse(), rest.from, rest.to) : {};
+    // Only over the time the page keeps (COURSE_KEEP_US): the places it is given for that time are the same as before.
+    const keepFrom = (ptr.newestTo ?? rest?.to ?? 0) - COURSE_KEEP_US, kept = !!rest && rest.to >= keepFrom && !!replica.courseAt;
+    const courses = kept ? coursePlaces(replica.courseAt, onCourse(), Math.max(rest.from, keepFrom), rest.to) : {};
     if (rest) coursedTo = Math.max(coursedTo, rest.to);
-    // First-day round 4: when each still thing on a course moves on (a balloon at its stop takes off)
-    const leaves = rest && replica.courseAt ? courseLeaves(replica.courseAt, onCourse(), rest.to) : {};
+    // First-day round 4: when each still thing on a course moves on (a balloon at its stop takes off). A part that spans
+    // the kept time's start also says it as of that start, as the parts before it, which are given none, would have.
+    const leaves = kept ? { ...(rest.from < keepFrom ? courseLeaves(replica.courseAt, onCourse(), keepFrom) : {}), ...courseLeaves(replica.courseAt, onCourse(), rest.to) } : {};
     if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => drawn.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}), ...(Object.keys(leaves).length ? { leaves } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
@@ -376,7 +393,7 @@ async function run(stream: URL) {
     const to = sleep.asleep ? Math.max(quiet ?? -Infinity, sleep.stillUntil == null ? now : Math.min(now, sleep.stillUntil)) : quiet;
     let courses: CoursePlaces = {}, leaves: Record<string, number> = {};
     if (to !== null && to > coursedTo && Number.isFinite(coursedTo) && replica.courseAt) {
-      courses = coursePlaces(replica.courseAt, onCourse(), coursedTo, to);
+      courses = coursePlaces(replica.courseAt, onCourse(), Math.max(coursedTo, to - COURSE_KEEP_US), to);
       leaves = courseLeaves(replica.courseAt, onCourse(), to);
       coursedTo = to;
     }
@@ -391,6 +408,7 @@ async function run(stream: URL) {
     if (wait > 0) return void wait--;
     busy = true;
     refused = false;
+    partRead = false;
     try {
       const b = await get(new URL('pointer', stream), true);
       const latest = b ? readPtr(b) as StreamPointer : ptr;

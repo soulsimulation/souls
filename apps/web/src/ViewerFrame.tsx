@@ -7,7 +7,7 @@ import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './Worl
 import { requestBroadcast } from './follow-soul-request.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
-import { arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
+import { arrivalCatching, arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
@@ -224,14 +224,21 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const clock = shownMs !== null ? momentClock(shownMs, zone) : worldTime?.split(' · ').slice(-1)[0] ?? '';
   const day = shownMs !== null ? momentDay(shownMs, zone) : worldTime?.includes(' · ') ? worldTime.split(' · ')[0] : '';
   const ago = recorded && shownMs !== null ? momentAgo(shownMs, Date.now()) : '';
+  // 27 Nov: a cold arrival's first picture is the stream's checkpoint, up to an hour back: Catching up until it is at
+  // now, once (viewer-arrival.ts arrivalCatching); later lags say why through the reasons above, as before
+  const drawnAt = useRef<number | null>(null), reachedNow = useRef(false);
+  if (shownMs !== null && !state?.loading) drawnAt.current ??= performance.now();
+  const catchingUp = v2 && !recorded && !arriving && shownMs !== null && !reachedNow.current
+    && arrivalCatching(shownMs, Date.now(), performance.now() - (drawnAt.current ?? performance.now()));
+  if (shownMs !== null && !arriving && !state?.loading && !catchingUp) reachedNow.current = true;
   const busy = !handle || shownTick == null || !!state?.loading;
   const minute = v2 ? 60e6 / TICK_US : 60 / dt;
   const back = () => { if (shownTick != null) void handle?.seek(Math.max(0, shownTick - minute)); };
   // Pause from live holds the moment shown: a seek to it (the recording plays from there), then paused
   const pause = async () => { if (shownTick == null || !handle) return; if (!recorded) await handle.seek(shownTick); handle.setPlaying(false); };
   const playing = recorded && state?.playback === 'playing';
-  const pillText = arriving || state?.loading || lost || settledReason ? status : recorded ? clock ? `Recorded · ${clock}` : 'Recorded' : 'Live';
-  const pillClass = arriving || state?.loading ? 'loading' : lost || settledReason || !current || !connected ? 'warn' : recorded ? 'recorded' : 'ok';
+  const pillText = arriving || state?.loading || lost || settledReason ? status : catchingUp ? 'Catching up' : recorded ? clock ? `Recorded · ${clock}` : 'Recorded' : 'Live';
+  const pillClass = arriving || state?.loading ? 'loading' : lost || settledReason || !current || !connected ? 'warn' : catchingUp ? 'loading' : recorded ? 'recorded' : 'ok';
   const panelPlace = (): CSSProperties => {
     const r = hourButton.current?.getBoundingClientRect(), top = r?.height ? r.bottom + 8 : 60;  // a phone's pill is hidden behind the menu
     return innerWidth <= 700 ? { top, left: 16, right: 16, width: 'auto' } : { top, left: Math.max(16, Math.min((r?.left ?? 16) - 4, innerWidth - 336)) };
@@ -239,7 +246,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const statusBlock = <div className="viewer-history" data-viewer-navigation={state?.manualNavigation ?? ''} data-viewer-input={state?.inputOwned ?? false} data-viewer-mode={state?.cameraMode ?? ''} data-viewer-presentation={state?.presentation ?? ''} data-viewer-tick={state?.shownTick ?? ''} data-viewer-selection={state?.selection.soulId ?? state?.selection.entityId ?? ''} data-viewer-ready={!!handle}>
       <div className="row viewer-status">
         <button ref={hourButton} type="button" className="time-pill" disabled={arriving} aria-expanded={hourOpen} aria-haspopup="dialog" aria-label={`${pillText}: time controls`} title="Time: go back, pause, play, share this moment" onClick={() => setHourOpen(!hourOpen)}>
-          <span className={pillClass} data-viewer-status data-viewer-live={live}>{pillText}</span>
+          <span className={pillClass} data-viewer-status data-viewer-live={live && !catchingUp}>{pillText}</span>
         </button>
         {hourOpen && !arriving && createPortal(<div ref={hourPanel} className="time-panel" role="dialog" aria-label="Time" data-time-panel={recorded ? 'recorded' : 'live'} style={panelPlace()}>
           <div className="time-panel-head">

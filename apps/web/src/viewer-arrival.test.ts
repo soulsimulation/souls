@@ -1,7 +1,7 @@
 // node --test apps/web/src/viewer-arrival.test.ts — #1266: one arrival progress for the bar and the light.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
+import { ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_STALE_MS, BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalCatching, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
 import { STREAM_CATCHING, STREAM_NOTICE } from './v2-engine/stream-health.ts';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 
@@ -58,4 +58,14 @@ test('#4691: a reader catching up replaces a showing "not available" at once; ot
   assert.deepEqual(run([[1000, STREAM_CATCHING], [9000, null]]), [[0, null], [5000, STREAM_CATCHING], [9000, null]]);
   assert.equal(reasonDelayMs(STREAM_NOTICE, null, true), 0);
   assert.equal(reasonDelayMs('Reconnecting; displaying the last recorded frame.', STREAM_NOTICE, false), 4000);
+});
+
+test('27 Nov: a cold arrival over an old checkpoint is catching up until it is within a few seconds of now, never for good', () => {
+  const now = 1_800_000_000_000;
+  assert.equal(arrivalCatching(now - 3600_000, now, 1000), true, 'an hour-old checkpoint is not Live');
+  assert.equal(arrivalCatching(now - 22_000, now, 4000), true, 'nor the last 22 s it plays on through');
+  assert.equal(arrivalCatching(now - ARRIVAL_NOW_MS, now, 5000), false, 'within a few seconds it is now');
+  assert.equal(arrivalCatching(now - 2500, now, 5000), false, 'the page plays a little behind the world: that is Live');
+  assert.equal(arrivalCatching(now - ARRIVAL_STALE_MS - 1, now, 1000), false, 'a clock far off is no catch-up');
+  assert.equal(arrivalCatching(now - 3600_000, now, ARRIVAL_CATCH_MS), false, 'and the arrival is over after a minute');
 });

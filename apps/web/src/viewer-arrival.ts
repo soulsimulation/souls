@@ -39,6 +39,18 @@ export function heldLabel(reason: string | null | undefined): string {
   return 'Catching up';
 }
 
+/** 27 Nov: a moved world's cold arrival first draws its stream's checkpoint, up to an hour old, and then plays on to now
+ *  (13 to 16 s on soul.game's Eden before this): until the moment drawn is within ARRIVAL_NOW_MS of the clock, the pill says
+ *  Catching up, not Live. A moment more than ARRIVAL_STALE_MS back is no catch-up (a device clock far off, a world whose
+ *  time is not the real time), and after ARRIVAL_CATCH_MS of drawing the arrival is over: the pill never stays on it. */
+export const ARRIVAL_NOW_MS = 6000, ARRIVAL_STALE_MS = 3 * 3600_000, ARRIVAL_CATCH_MS = 60_000;
+/** Whether an arrival that has not yet reached now is still catching up to it: `shownMs` the moment drawn (the real time
+ *  of a moved world's tick), `nowMs` the clock, `drawnMs` how long a picture has been drawn. */
+export function arrivalCatching(shownMs: number, nowMs: number, drawnMs: number): boolean {
+  const behind = nowMs - shownMs;
+  return behind > ARRIVAL_NOW_MS && behind <= ARRIVAL_STALE_MS && drawnMs < ARRIVAL_CATCH_MS;
+}
+
 /** How long a reason must last before the status line shows it: at once for one that blocks the view, the controls
  *  covering it, or (#4691) a reader catching up while the line says the stream is not available (the notice is then
  *  wrong); otherwise 4 s, so a passing gap never flashes. */
