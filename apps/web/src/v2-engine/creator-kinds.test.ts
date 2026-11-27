@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WorldModel } from '@souls/world-compiler';
 import { CreatorKinds, entityId, kindDef } from './creator-kinds.ts';
+import { WorldState, type LayerLike } from './world-state.ts';
 
 const Q = 2 ** 30;
 const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
@@ -189,4 +190,54 @@ test('a piece furnish places in a room (named `<room>-<item>` in field 1, as tod
   for (const e of up) layer.model.entities.set(e.id, e);
   k.apply([], ['f.82']);
   assert.deepEqual(k.next(layer, 2)!.diff.removes, [entityId('f.82')], 'removed with its node');
+});
+
+// A creator's move to another parent is a remove and a new place under the same origin (live Eden, 27 Nov: 35 roof
+// planters and the commons podium set on the ground). The removed node's origin is still a held node's: the layer's
+// entity is that thing's, and world-state.ts moves it. Removing it here left nothing to draw it again.
+test('a thing of the world\'s own removed and placed again under its origin in one part keeps its entity', () => {
+  const k = new CreatorKinds();
+  const planter = { id: 'e_planter1', def: 'core/planter@1', in: { parent: 'world' }, p: [1, 3, 1] };
+  const layer = { seq: 3, model: { entities: new Map<string, { id: string }>([['e_planter1', planter]]), defs: new Map<string, unknown>() } };
+  k.apply([root, node('aa11.5', 'eden:planter@1220aa', [1_000_000, 3_000_000, 1_000_000], { origin: 'e_planter1' })], []);
+  assert.equal(k.next(layer, 1), null, 'as captured');
+  k.apply([node('cc22.9', 'eden:planter@1220aa', [6_000_000, 0, 2_000_000], { origin: 'e_planter1' })], ['aa11.5']);
+  assert.equal(k.next(layer, 2), null, 'a held node has the origin: its entity stays in the layer');
+  assert.ok(layer.model.entities.has('e_planter1'));
+  // removed for good later: it goes, as any of the world's own things a creator removes
+  k.apply([], ['cc22.9']);
+  assert.deepEqual(k.next(layer, 3)!.diff.removes, ['e_planter1']);
+});
+
+// The same, through the page's two readers in the order use-v2-souls.ts runs them (WorldState's diff, then this
+// module's after it), against a layer that applies each diff in sequence as WorldEntityLayer's applyDiff does.
+test('a thing moved from a roof to the ground in one part is drawn once, on the ground (WorldState and CreatorKinds together)', () => {
+  const ws = new WorldState(), k = new CreatorKinds();
+  const poses: Record<string, { x: number; y: number; z: number; yaw: number; s: number }> = { e_planter1: { x: 1, y: 3, z: 1, yaw: 0, s: 1 } };
+  const l = { seq: 7, model: { entities: new Map<string, { id: string; in?: unknown; p?: number[] }>([['e_planter1', { id: 'e_planter1', in: { parent: 'world' }, p: [1, 3, 1] }]]),
+    defs: new Map<string, unknown>(), state: {}, worldPose: (e: { id: string }) => poses[e.id] } };
+  const layer = l as unknown as LayerLike;
+  const turn = (nodes: unknown[], removed: string[]) => {
+    ws.receive({ t: 'part', p: { number: 1, from: 0, to: 500_000, nodes, removed, samples: [] } } as never);
+    k.apply(nodes as never, removed);
+    const diff = ws.next(layer, 0), made = k.next(layer, 0, diff?.seq);
+    for (const d of [diff, made]) {
+      if (!d) continue;
+      assert.equal(d.seq, l.seq + 1, 'next in the layer\'s sequence');
+      l.seq = d.seq;
+      for (const id of d.diff.removes) l.model.entities.delete(id);
+      for (const e of d.diff.upserts as { id: string }[]) l.model.entities.set(e.id, { ...l.model.entities.get(e.id), ...e });
+    }
+    return { diff, made };
+  };
+  const ground = { id: 'g.1', kind: 'souls:ground', parent: 'root', pos: [0, 0, 0], rot: [Q, 0, 0, 0], slot: null };
+  const roof = { ...node('r.1', 'eden:house@1220bb', [1_000_000, 0, 1_000_000], { origin: 'e_house' }), parent: 'g.1' };
+  const on = (id: string, parent: string, pos: [number, number, number]) => ({ ...node(id, 'eden:planter@1220aa', pos, { origin: 'e_planter1' }), parent });
+  assert.deepEqual(turn([root, ground, roof, on('aa11.5', 'r.1', [0, 3_000_000, 0])], []), { diff: null, made: null }, 'as captured: on the roof');
+  const moved = turn([on('cc22.9', 'g.1', [6_000_000, 0, 2_000_000])], ['aa11.5']);
+  assert.equal(moved.made, null, 'CreatorKinds does not remove an origin a held node has');
+  const e = l.model.entities.get('e_planter1');
+  assert.ok(e, 'still drawn');
+  assert.deepEqual([e.in, e.p!.map((v) => +v.toFixed(3))], [{ parent: 'world' }, [6, 0, 2]], 'on the ground, where v2 placed it');
+  assert.deepEqual(turn([], []), { diff: null, made: null }, 'once drawn there, nothing more');
 });
