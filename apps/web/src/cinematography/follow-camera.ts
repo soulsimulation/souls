@@ -43,10 +43,12 @@ const visible=(o:Object3D)=>{let depth=0;for(let p:Object3D|null=o;p;p=p.parent)
 /** Incremental collection over actual rendered roots. Each incomplete pass remains explicitly unknown.
  * Bounds belong to this reader; it never asks Three to compute or update shared geometry/matrices. */
 export class FollowGeometry{
+ private enclosureNodes:Object3D[]=[];private enclosureOverflow=false;
+ enclosureSources(){return{nodes:this.enclosureNodes,complete:!this.failed&&!this.stack.length&&this.nextRoot===this.roots.length&&!this.enclosureOverflow,revision:this.revision};}
  private rootOf=new WeakMap<Mesh,Object3D>();private structure=new Map<Object3D,Object3D[]>();private roots:readonly Object3D[]=[];private revision='';private stack:Scan[]=[];private seen=new Set<Object3D>();private meshes:Mesh[]=[];private bounds=new Map<BufferGeometry,Bounds>();private blocks=new Map<BufferGeometry,Blocks>();private retainedBlocks=0;private requested=new Set<BufferGeometry>();private edges=0;private nextRoot=0;private failed=false;
  private ray=new Ray();private inverse=new Matrix4();private matrix=new Matrix4();private instance=new Matrix4();private a=new Vector3();private b=new Vector3();private c=new Vector3();private hit=new Vector3();private expanded=new Box3();private inflation=new Vector3();private triangle=new Triangle();private worldRay=new Ray();private closest=new Vector3();
  stats={surfaceStartOverlap:false,structure:0,visits:0,vertices:0,triangles:0,blockVisits:0,retainedBlocks:0,instances:0,queries:0,complete:false,meshes:0,unknown:null as string|null,unknownMesh:null as Record<string,unknown>|null};
- reset(keepGeometry=false){this.rootOf=new WeakMap();this.roots=[];this.stack=[];this.seen.clear();this.structure.clear();this.meshes=[];if(!keepGeometry){this.bounds.clear();this.blocks.clear();this.requested.clear();this.retainedBlocks=0;}this.nextRoot=0;this.edges=0;this.failed=false;}
+ reset(keepGeometry=false){this.enclosureNodes=[];this.enclosureOverflow=false;this.rootOf=new WeakMap();this.roots=[];this.stack=[];this.seen.clear();this.structure.clear();this.meshes=[];if(!keepGeometry){this.bounds.clear();this.blocks.clear();this.requested.clear();this.retainedBlocks=0;}this.nextRoot=0;this.edges=0;this.failed=false;}
  prepare(roots:readonly Object3D[],revision:string){
   let structureChanged=false,structureWork=0;for(const [node,children]of this.structure){structureWork++;if(node.children.length!==children.length){structureChanged=true;break;}for(let i=0;i<children.length;i++){structureWork++;if(node.children[i]!==children[i]){structureChanged=true;break;}}if(structureChanged)break;}
   if(structureChanged||revision!==this.revision||roots.length!==this.roots.length||roots.some((r,i)=>r!==this.roots[i])){this.reset(true);this.roots=[...roots];this.revision=revision;}
@@ -56,6 +58,7 @@ export class FollowGeometry{
    if(!this.stack.length)this.stack.push({node:this.roots[this.nextRoot++],child:0,entered:false});
    const top=this.stack.at(-1)!;this.stats.visits++;
    if(!top.entered){top.entered=true;if(this.seen.has(top.node)){this.stack.pop();continue;}this.seen.add(top.node);if((this.edges+=top.node.children.length)>FOLLOW_LIMITS.objects){this.failed=true;break;}this.structure.set(top.node,[...top.node.children]);if(this.seen.size>FOLLOW_LIMITS.objects){this.failed=true;break;}
+    if(top.node.userData.cameraEnclosure){if(this.enclosureNodes.length<64)this.enclosureNodes.push(top.node);else this.enclosureOverflow=true;}
     const m=top.node as Mesh;if(m.isMesh&&m.userData.cameraTransparent!==true){if(this.meshes.length>=FOLLOW_LIMITS.meshes){this.failed=true;break;}this.meshes.push(m);this.rootOf.set(m,this.roots[this.nextRoot-1]);}}
    if(top.child<top.node.children.length){if(this.stack.length>=FOLLOW_LIMITS.depth){this.failed=true;break;}this.stack.push({node:top.node.children[top.child++],child:0,entered:false});}else this.stack.pop();
   }
