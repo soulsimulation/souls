@@ -2697,15 +2697,10 @@ fn under_way(r: &Replica) -> Option<Value> {
 /// lift is never stuck under way: while the cabin is away a board is refused before any walk, saying when it is back,
 /// and once it is back the Soul boards it again.
 #[test]
-// The world's clock is real time: the test reads it to wait for the cabin (#1926's way).
-#[allow(clippy::disallowed_methods)]
 fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_the_gateway() {
-    let started = std::time::Instant::now();
-    let at =
-        |ms: u64| std::thread::sleep(Duration::from_millis(ms).saturating_sub(started.elapsed()));
     let (run, mut a, mut b) = serve("n14");
     let boarded = a.act("test:board", Some(lift()), BTreeMap::new());
-    println!("N14 board: {boarded:?} after {:?}", started.elapsed());
+    println!("N14 board: {boarded:?}");
     boarded.expect("boarded at its stop");
     let r = run.replay();
     assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)));
@@ -2724,24 +2719,35 @@ fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_th
     let course = replica::schedule::course::Course::read(&courses[&1]).expect("a course");
     assert_eq!(course.stations.len(), 2);
     assert_eq!(course.stations[1].at.z - course.stations[0].at.z, 4_000_000);
+    // Each step waits for its time in the cabin's lap, which starts at the course's t0 in world time: real time here,
+    // µs from the Unix epoch (#1926's way). A slow start or a busy machine never shifts the world against the steps,
+    // and an act sent at a time is checked at that time or later (the ticks due run before an act is taken).
+    let lap = course.t0;
+    let into = || Duration::from_micros(u64::try_from(answers::now() - lap).unwrap_or(0));
+    let at = |ms: i64| {
+        if let Ok(wait) = u64::try_from(lap + ms * 1_000 - answers::now()) {
+            std::thread::sleep(Duration::from_micros(wait));
+        }
+    };
+    println!("N14 boarded {:?} into the lap", into());
     let other = b.act("test:board", Some(lift()), BTreeMap::new());
     println!("N14 another board while under way: {other:?}");
     assert!(other.is_err(), "its one seat is taken");
     // On its way to the far stop (it leaves 8 s in and takes 4 s): carried, not set down.
     at(10_000);
     let away = a.act("test:get_off", Some(lift()), BTreeMap::new());
-    println!(
-        "N14 get off on the way: {away:?} after {:?}",
-        started.elapsed()
-    );
+    println!("N14 get off on the way: {away:?} {:?} into the lap", into());
     assert_eq!(away, Err("boarding-frame-away".to_owned()));
     assert_eq!(
         parent(&run.replay(), w1()),
         (Some(lift()), Some(1)),
         "still in its seat"
     );
-    // At the far stop the trip has ended, and it gets off there.
-    at(14_500);
+    // At the far stop (12 s in, for 8 s) the trip ends: wait for the world to say so while the cabin is there, and
+    // get off.
+    while under_way(&run.replay()) != Some(Value::Uint(0)) && into() < Duration::from_secs(18) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
     assert_eq!(
         under_way(&run.replay()),
         Some(Value::Uint(0)),
@@ -2749,8 +2755,8 @@ fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_th
     );
     let off = a.act("test:get_off", Some(lift()), BTreeMap::new());
     println!(
-        "N14 get off at the far stop: {off:?} after {:?}",
-        started.elapsed()
+        "N14 get off at the far stop: {off:?} {:?} into the lap",
+        into()
     );
     off.expect("gets off at the far stop");
     // It steps off its seat to the stop's stand point over the rise's recovery (sim::slots::step_track): read where it
@@ -2774,7 +2780,10 @@ fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_th
     // While the cabin is on its way back, a board is refused before any walk, saying when it is back.
     at(21_000);
     let early = a.act("test:board", Some(lift()), BTreeMap::new());
-    println!("N14 board while the cabin is away: {early:?}");
+    println!(
+        "N14 board while the cabin is away: {early:?} {:?} into the lap",
+        into()
+    );
     assert_eq!(early, Err("boarding-frame-away".to_owned()));
     let still = run.replay();
     let t = still.tree();
@@ -2790,7 +2799,7 @@ fn n14_a_soul_rides_a_cabin_gets_off_at_the_far_stop_and_boards_again_through_th
     // Back at its stop: the Soul boards it again.
     at(24_500);
     let again = a.act("test:board", Some(lift()), BTreeMap::new());
-    println!("N14 board again: {again:?} after {:?}", started.elapsed());
+    println!("N14 board again: {again:?} {:?} into the lap", into());
     again.expect("boards again once the cabin is back");
     let r = run.replay();
     assert_eq!(parent(&r, w1()), (Some(lift()), Some(1)), "aboard again");
