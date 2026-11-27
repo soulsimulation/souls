@@ -1,0 +1,25 @@
+// Fixed real-input Follow handover journey. Legal actor commands; no pose or clock setters.
+import{writeFileSync}from'node:fs';import{join}from'node:path';import{setTimeout as delay}from'node:timers/promises';
+import{beforeNavigation as observeNavigation,depictedBodyIds}from'./camera-observation.mjs';
+import{prepare as prepareSource,chooseFollow,resetFollow,readFollow}from'./camera-follow-source.mjs';
+import{reduceFollow}from'./camera-follow-comparison.mjs';
+export const HANDOVER=Object.freeze({activationDelayMs:2000,trackingMs:3000,dragPixels:36,dragSteps:12,dragStepMs:100,settleMs:3500,zoomDelta:-180});
+export function lifecycleDeclaration(p){if(!p||p.protocol!=='moving-handover-1'||p.variant!=='candidate')throw Error('follow-lifecycle-declaration');return structuredClone(p);}
+let declaration;
+export async function prepare(args){declaration=lifecycleDeclaration(args.recipe.sourceRecording?.lifecycle);return{...await prepareSource(args),plan:declaration};}
+export function beforeNavigation(args){if(!declaration)throw Error('follow-lifecycle-not-prepared');const stop=observeNavigation(args),goto=args.page.goto.bind(args.page);args.page.goto=(url,...rest)=>{const u=new URL(url);u.searchParams.set('camera-follow','experimental');u.searchParams.set('camera-follow-test','1');return goto(u.href,...rest);};return stop;}
+export function poseDelta(a,b){const distance=(x,y)=>Math.hypot(...x.map((v,i)=>v-y[i])),radius=p=>distance(p.eye,p.target),yaw=p=>Math.atan2(p.eye[0]-p.target[0],p.eye[2]-p.target[2]);return{eyeM:distance(a.eye,b.eye),yawDegrees:Math.atan2(Math.sin(yaw(b)-yaw(a)),Math.cos(yaw(b)-yaw(a)))*180/Math.PI,radiusRatio:radius(b)/radius(a),subjectM:a.subject&&b.subject?distance(a.subject.transform.positionM,b.subject.transform.positionM):null};}
+export default async function({page,paths,fixture,signal,check}){
+ let n=0;const save=(file,value)=>writeFileSync(join(paths.dir,file),JSON.stringify(value,null,2)+'\n',{flag:'wx'}),snapshot=async label=>save(`phase-handover-ui-${String(++n).padStart(3,'0')}-${label}.json`,{accessibility:await page.locator('body').ariaSnapshot()}),ids=depictedBodyIds(fixture.actor.body),events=[];
+ const read=async label=>{const state=await readFollow(page,ids);events.push({label,...state});save(`phase-handover-${label}.json`,state);return state;};
+ await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-ready')==='true'&&!document.querySelector('.viewer-arrival'),null,{timeout:30000});
+ const command=await fixture.actor.cli('act',fixture.targets['lab-pond-hall-door-1']);save('phase-handover-command.json',command);check('handover-legal-act',command.ok&&Number.isSafeInteger(command.sequence));
+ await delay(HANDOVER.activationDelayMs,null,{signal});await read('before-entry');await chooseFollow(page,snapshot);await page.waitForFunction(()=>typeof window.__followExperiment==='function',null,{timeout:10000});await read('cold-entry');await delay(HANDOVER.trackingMs,null,{signal});
+ const beforeDrag=await read('before-drag'),box=await page.locator('canvas').first().boundingBox();if(!box)throw Error('handover-canvas');const x=box.x+box.width*.5,y=box.y+box.height*.4;
+ await page.mouse.move(x,y);await page.mouse.down();try{for(let i=1;i<=HANDOVER.dragSteps;i++){await page.mouse.move(x+HANDOVER.dragPixels*i/HANDOVER.dragSteps,y);await delay(HANDOVER.dragStepMs,null,{signal});}}finally{await page.mouse.up();}
+ const afterDrag=await read('after-drag');await delay(HANDOVER.settleMs,null,{signal});await read('drag-resumed');
+ const beforeZoom=await read('before-zoom');await page.mouse.move(x,y);await page.mouse.wheel(0,HANDOVER.zoomDelta);await delay(150,null,{signal});const afterZoom=await read('after-zoom');await delay(HANDOVER.settleMs,null,{signal});await read('zoom-resumed');
+ await resetFollow(page,snapshot);await read('after-reset');await delay(2000,null,{signal});await read('reset-resumed');
+ const exported=await page.evaluate(()=>{const start=performance.now(),data=window.__followExperiment();return{data,exportMs:performance.now()-start};});save('phase-handover-diagnostics.json',exported);save('phase-handover-events.json',events);save('phase-handover-summary.json',{drag:poseDelta(beforeDrag,afterDrag),zoom:poseDelta(beforeZoom,afterZoom),rows:reduceFollow(exported.data.rows.filter(r=>r.mode==='follow')),plan:HANDOVER});await page.screenshot({path:join(paths.dir,'handover-final.png')});
+ check('handover-lossless',exported.data.dropped===0);check('handover-cold-moving-input',poseDelta(events[0],beforeDrag).subjectM>.5);check('handover-drag-visible',Math.abs(poseDelta(beforeDrag,afterDrag).yawDegrees)>1&&poseDelta(beforeDrag,afterDrag).subjectM>.2);check('handover-zoom-visible',poseDelta(beforeZoom,afterZoom).radiusRatio<.98);check('handover-following-ui',await page.getByRole('button',{name:'Following',exact:true}).isVisible());check('handover-resumes',exported.data.rows.filter(r=>r.at>events.find(e=>e.label==='after-zoom').at+2500&&r.reason==='tracking').length>10);
+}
