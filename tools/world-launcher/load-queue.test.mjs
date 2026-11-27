@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { crawlerAgent, openLauncher } from './launcher.mjs';
 import { ChildPool, UNLOADED } from './children.mjs';
 import { BUSY_CODES } from './soul/eden.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const N = 50;
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;

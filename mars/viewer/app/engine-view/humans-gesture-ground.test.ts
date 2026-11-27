@@ -9,7 +9,7 @@ import {CHARACTER_WIRE} from './character-wire.ts';
 import {clipTime, libraryPick, pickClip} from './clip-library.ts';
 import {ankleLocal, legsOf} from './rig.ts';
 import {HumanViews, setHumanGround, type SampledHuman} from './humans.ts';
-import {activityFrame} from './activity-poses.ts';
+import {activityFrame, idPhase} from './activity-poses.ts';
 import {blendFrames} from './posture-transition.ts';
 
 // Production meshes and each rig's actual CHARACTER_WIRE clip pack, not ankle-only diagnostics.
@@ -48,6 +48,43 @@ function skin(views:HumanViews,id:string):Skin {
 }
 
 const distance=(a:ReturnType<HumanViews['meshPoints']>,b:ReturnType<HumanViews['meshPoints']>)=>Math.max(...a.map((v,i)=>Math.hypot(...v.p.map((x,j)=>x-b[i].p[j]))));
+
+test('storytelling phrase changes stay continuous on standing and seated production rigs',async t=>{
+  setHumanGround(()=>0);
+  try {
+    for(const name of ['casual','woman'])for(const base of ['idle','sit'])await t.test(name+' '+base,async()=>{
+      const views=new HumanViews();views.setTemplates([await template(name)]);
+      const id='storytelling-'+name,root:[number,number,number]=[1,0,-1];
+      const draw=(seconds:number,extra:Partial<SampledHuman>={})=>{
+        views.setFrame([{id,p:root,yaw:.35,walk:0,walkDist:0,activity:'tell-story',baseActivity:base,
+          activityAge:30,...(base==='sit'?{seatHeight:.45}:{}),...extra}],seconds);
+        views.render(1);assert.deepEqual(root,[1,0,-1]);
+        assert.deepEqual(views.bodyObject(id)!.position.toArray(),root,'the gesture cannot relocate the native root');
+        return views.meshPoints(id,1);
+      };
+      try {
+        let maxBoundary=0,maxStep=0;
+        for(let phrase=1;phrase<=3;phrase++){
+          const seconds=phrase/.23-idPhase(id)*7;
+          maxBoundary=Math.max(maxBoundary,distance(draw(seconds-1e-5),draw(seconds+1e-5)));
+          const minima=skin(views,id);
+          for(const side of ['L','R'])assert(minima['foot'+side].min>=.001,'both feet stay above ground at a phrase boundary');
+        }
+        assert(maxBoundary<.002,'an internal phrase boundary moves body skin '+maxBoundary+' m');
+        let before=draw(0);
+        for(let i=1;i<=Math.ceil(3/.23*60);i++){
+          const after=draw(i/60);maxStep=Math.max(maxStep,distance(before,after));before=after;
+        }
+        assert(maxStep<.04,'one storytelling frame moves body skin '+maxStep+' m at 60 Hz');
+        const first=draw(1);draw(9);assert(distance(first,draw(1))<1e-5,'a backwards seek preserves the same production pose');
+        draw(1,{hands:{left:[1.1,1.15,-.8]}});
+        const arm=views.bones()[id].arms.find(a=>a.side==='left')!;
+        assert.equal(arm.source,'hands');assert.equal(arm.err,0);assert.deepEqual(arm.palm,[1.1,1.15,-.8],'native hand targets retain authority');
+        t.diagnostic(JSON.stringify({maxBoundary,maxStep}));
+      } finally {views.clear();}
+    });
+  } finally {setHumanGround(null);}
+});
 
 test('free standing gesture skin uses ground support without moving the authoritative root',async t=>{
   setHumanGround(()=>0);

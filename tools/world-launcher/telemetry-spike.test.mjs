@@ -9,7 +9,7 @@ import { metricsText } from './metrics.mjs';
 import { metricsUrlFromArgs, openStore, scrapeOnce } from './telemetry.mjs';
 import { catchUp, problemsOf, rulesWith } from './telemetry/alerts.mjs';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const tmp = (t) => { mkdirSync(join(ROOT, '.local'), { recursive: true }); const d = mkdtempSync(join(ROOT, '.local', 'spike-')); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };

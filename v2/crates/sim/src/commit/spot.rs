@@ -7,7 +7,8 @@
 //!   taken since the check, the act goes back for one re-check as I5's does.
 //! - **A thing or a point** becomes N9's target in the frame of the node the spot stands in. The walker asks N9's
 //!   table for it, and the table's owner grants the nearest legal standing spot (on walkable ground, never in a
-//!   doorway or on a stair), recorded as the engine's choice (`crate::spots::Entry::Grant`, the world its actor).
+//!   doorway or on a stair), recorded as the engine's choice (`crate::spots::Entry::Grant`, the world its actor) where
+//!   the tables keep their record (a served world's keep none, `crate::spots::Spots::forget_record`).
 //!   The client does not load the ground, so for a point its verdict is unknown until then (R2).
 
 use replica::ids::Id;

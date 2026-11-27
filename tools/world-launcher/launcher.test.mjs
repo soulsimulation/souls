@@ -12,7 +12,7 @@ import { openLauncher } from './launcher.mjs';
 import { slugFor, listTemplates } from './registry.mjs';
 import { productionSettings, decorateCommand, shadowsExisting } from './production.mjs';
 import { backoffMs } from './children.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const BASE = Number(process.env.LAUNCHER_TEST_PORT_BASE ?? await testPort(25));
 if (!Number.isInteger(BASE) || BASE < 1024 || BASE > 65535 - 24) throw Error(`LAUNCHER_TEST_PORT_BASE must be 1024–65511 (got ${process.env.LAUNCHER_TEST_PORT_BASE})`);

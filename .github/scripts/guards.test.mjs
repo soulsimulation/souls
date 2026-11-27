@@ -56,7 +56,7 @@ const ledger = (...lines) => `export type CoreRevision={readonly id:string};\nex
 const pip = entry('pip', 1, 'a'), ghost = entry('ghost', 1, 'b'), base = ledger(pip, ghost);
 
 test('ledger guard reads the real ledger', () => {
-  const entries = ledgerEntries(readFileSync(new URL('../../apps/server/src/edge/body/core-revisions.ts', import.meta.url), 'utf8'));
+  const entries = ledgerEntries(readFileSync(new URL('../../tools/body-authoring/admit/core-revisions.ts', import.meta.url), 'utf8'));
   assert.ok(entries.length >= 4);
   assert.deepEqual(Object.keys(entries[0]), ['id', 'family', 'n', 'asset']);
   assert.equal(entries[0].id, 'pip');
