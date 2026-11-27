@@ -101,7 +101,7 @@ export async function assembleConference({ seats, lecture, benches, record = () 
   await offer(speaker, 'hall-lecture', listeners);
 }
 
-export async function explainConference({ speaker, lecture, question, record = () => {}, storyRepeats = 1, interruptStory = false }) {
+export async function explainConference({ speaker, lecture, question, record = () => {}, storyRepeats = 1, interruptStory = false, observe = async () => {} }) {
   assert(Number.isSafeInteger(storyRepeats) && storyRepeats >= 1 && storyRepeats <= 4, 'one to four ordinary story actions per presentation');
   const { command, body, parent } = conferenceCommands(record);
   assert.equal(await parent(speaker), lecture, 'speaker is at the lectern');
@@ -111,17 +111,29 @@ export async function explainConference({ speaker, lecture, question, record = (
   let interrupted;
   if (interruptStory) {
     interrupted = await command(speaker, 'act', 'tell_story');
-    assert(interrupted.ok === true && interrupted.sequence !== undefined, 'ordinary story starts before interruption');
-    await sleep(1000); // Deliberate real-speed demonstration time, never a readiness assertion.
+    assert(interrupted.ok === true && interrupted.sequence !== undefined, 'ordinary story was sent');
+    for (const until = Date.now() + 2000;;) {
+      const receipt = await command(speaker, 'receipt', String(interrupted.sequence));
+      const end = receipt.receipt?.answers?.at(-1);
+      assert(receipt.ok && (!end || end.answer === 'accepted'), 'story must still be running before interruption');
+      // I10: progress is emitted in the form run-start tick; sending an intent alone proves no start.
+      if (end?.answer === 'accepted' && receipt.receipt.going === true) break;
+      assert(Date.now() < until, 'story run-start progress missing');
+      await sleep(50);
+    }
+    await observe('tell-story', { sequence: interrupted.sequence });
+    await sleep(250); // Real-speed demonstration interval after the observed native start.
   }
   await body(speaker, 'point', `toward=${question}`);
   assert.equal(await parent(speaker), lecture, 'aimed point preserves the lectern');
   if (interrupted) {
     const receipt = await command(speaker, 'receipt', String(interrupted.sequence));
     const end = receipt.receipt?.answers?.at(-1);
-    assert(end?.answer === 'refused' && end.reason, 'the interrupted story ends with a named native refusal');
+    assert(end?.answer === 'refused' && end.reason === 'left', 'story replacement must end with native refused:left');
+    await observe('point');
     await body(speaker, 'clap', 'for=1');
     assert.equal(await parent(speaker), lecture, 'next gesture preserves the lectern');
+    await observe('settled');
   }
   return { interrupted: Boolean(interrupted), storyActions: storyRepeats };
 }

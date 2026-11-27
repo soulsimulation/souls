@@ -1,7 +1,7 @@
 // Actual-page conference composition diagnostic. Receipts/canvas readiness do not qualify animation/contact.
 // The unchanged runOwnedAttempt owns the sole native world, all registered clients/commands and the browser.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { assembleConference, discoverConference, explainConference } from '../../playtest/conference/rehearse.mjs';
@@ -17,6 +17,34 @@ export function conferenceFixtures({ lecterns, questions, benches }) {
   assert.equal(benches.length, 2, 'conference-proof requires two authored audience benches');
   return { lecture: lecterns[0].id, question: questions[0].id,
     benches: [...benches].sort((a, b) => a.name.localeCompare(b.name)).map(n => n.id) };
+}
+
+// Same FNV phase mapping as production activity-poses.ts; this is timing metadata, never a pose input.
+export function conferenceObservation(frame, soul) {
+  assert(Number.isFinite(frame?.tick) && Number.isFinite(frame.dt) && frame.dt > 0 && Number.isFinite(frame.renderFrame), 'conference depicted clock missing');
+  const matches = frame.souls?.filter(s => s.id === soul) ?? [];
+  assert.equal(matches.length, 1, 'conference presenter mapping missing or ambiguous');
+  const entity = matches[0].entityId, resident = frame.residents?.find(r => r.id === soul && r.body === entity);
+  assert(resident && frame.entities?.[entity], 'conference presenter not depicted');
+  const partner = frame.entities[entity].state?.partner;
+  const phaseID = typeof partner === 'string' && partner < entity ? partner : entity;
+  let h = 2166136261;
+  for (let i = 0; i < phaseID.length; i++) h = Math.imul(h ^ phaseID.charCodeAt(i), 16777619);
+  const phase = (((frame.tick * frame.dt + ((h >>> 0) % 10007) / 10007 * 7) * .23) % 3 + 3) % 3;
+  return { at: frame.at, tick: frame.tick, renderFrame: frame.renderFrame, entity, activity: resident.activity,
+    renderActivityAge: resident.activityAge, phase: Math.floor(phase) };
+}
+export function conferenceJourney(frames, soul) {
+  assert(frames.length >= 2, 'conference depicted samples missing');
+  const observed = frames.map(f => conferenceObservation(f, soul));
+  assert(observed.at(-1).tick > observed[0].tick && observed.at(-1).renderFrame > observed[0].renderFrame, 'conference depicted clock stale');
+  const phases = new Set(observed.filter(f => f.activity === 'tell-story').map(f => f.phase));
+  assert(phases.size === 3, 'conference one-hand/two-hand/rest story phases not all depicted');
+  for (const action of ['point', 'clap']) assert(observed.some(f => f.activity === action), `conference ${action} never depicted`);
+  const lastGesture = observed.findLastIndex(f => ['tell-story', 'point', 'clap'].includes(f.activity));
+  const settled = observed.slice(lastGesture + 1);
+  assert(settled.length >= 2 && settled.at(-1).tick > settled[0].tick, 'conference settled endpoint not depicted');
+  return { phases: [...phases].sort(), firstTick: observed[0].tick, lastTick: observed.at(-1).tick, entity: observed[0].entity };
 }
 
 export async function prepare({ base, paths, recipe, signal }) {
@@ -44,12 +72,26 @@ export async function prepare({ base, paths, recipe, signal }) {
   return { people: state.seats.length, fixtures: state.fixtures };
 }
 
-export function beforeNavigation({ paths }) {
-  return () => {
+export async function beforeNavigation({ paths, page, base }) {
+  const state = states.get(paths.dir);
+  const oracleURL = new URL('/__proof/conference-oracle.mjs', base).href;
+  const oracle = readFileSync(new URL('../../playtest/carry-contact/oracle.mjs', import.meta.url), 'utf8');
+  await page.route(oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: oracle }));
+  state.oracleURL = oracleURL;
+  const response = r => { if (new URL(r.url()).origin === new URL(base).origin && /\/people-kit-[^/]+\.js$/.test(new URL(r.url()).pathname)) state.kitURL = r.url(); };
+  page.on('response', response);
+  return async () => {
+    page.off('response', response);
+    if (!page.isClosed()) {
+      const draw = await page.evaluate(() => window.__conferenceDrawObserver?.stop());
+      if (draw) save(paths, 'conference-final-draw.json', draw);
+    }
+    await page.unroute(oracleURL);
     const state = states.get(paths.dir);
     if (state) save(paths, 'conference-sequence.json', {
       qualification: 'concise storytelling diagnostic; full question, handover and independent-agent acceptance remain open',
       result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
+      depictedJourney: state.depictedJourney ?? null,
       frameReads: state.frameReads ?? [], frameReadErrors: state.frameReadErrors ?? [],
     });
     states.delete(paths.dir);
@@ -69,28 +111,88 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   check('conference-canvas-drawn', !!bounds && bounds.width > 100 && bounds.height > 100);
   await page.screenshot({ path: join(paths.dir, 'conference-setup.png') });
   signal.throwIfAborted();
+  assert(state.kitURL, 'conference production people kit not observed');
+  await page.evaluate(async ({ oracleURL, kitURL, souls }) => {
+    const { observeRender, bodyGeometry } = await import(oracleURL);
+    const { TakePeople } = await import(kitURL), prototype = TakePeople.prototype;
+    const world = window.__soulsEntity, original = prototype.show;
+    if (!world || !original || window.__conferenceDrawObserver) throw Error('conference final-draw observer unavailable');
+    let people, previous = -Infinity;
+    function show(...args) { const result = original.apply(this, args); people = this; return result; }
+    prototype.show = show;
+    const samples = [], failures = [];
+    const stopRender = observeRender(world.renderer, world, stamp => {
+      const at = performance.now(); if (at - previous < 250) return; previous = at;
+      if (!people?.humans?.meshPoints) throw Error('conference visible body mesh interface missing');
+      const frame = world.gameFrame();
+      const bodies = souls.map(soul => {
+        const matches = frame.souls.filter(s => s.id === soul);
+        if (matches.length !== 1) throw Error('conference final-draw identity missing or ambiguous');
+        const entity = matches[0].entityId, root = people.bodyObject(entity);
+        bodyGeometry(root, world.scene);
+        const points = people.humans.meshPoints(entity, 1);
+        if (!points.length || points.some(q => q.p.length !== 3 || !q.p.every(Number.isFinite))) throw Error('conference final-draw skin missing');
+        const bounds = group => ({ min: [0,1,2].map(i => Math.min(...group.map(q => q.p[i]))), max: [0,1,2].map(i => Math.max(...group.map(q => q.p[i]))) });
+        const legs = points.filter(q => q.part === 'leg'), feet = points.filter(q => q.part === 'foot');
+        if (!legs.length || !feet.length) throw Error('conference feet or legs missing');
+        return { soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
+          footAndLegSkin: [...feet, ...legs], activity: frame.entities[entity]?.activity };
+      });
+      samples.push({ stage: 'after-world-render', units: 'm', at, frame: stamp.frame, tick: frame.tick, dt: frame.dt,
+        currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected, renderTarget: null, bodies });
+    }, error => { if (failures.length < 30) failures.push(String(error)); });
+    window.__conferenceDrawObserver = { samples, failures, stop() {
+      stopRender();
+      if (prototype.show !== show) throw Error('conference people observer ownership changed');
+      prototype.show = original;
+      return { cadenceMs: 250, meshStride: 1, samples, failures, qualification: 'actual visible skin measurements; visual body/object contact review still required' };
+    } };
+  }, { oracleURL: state.oracleURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul) });
   state.frameReads = []; state.frameReadErrors = [];
   let reading = true;
   const readFrames = (async () => {
     while (reading && !signal.aborted) {
       try {
-        state.frameReads.push(await page.evaluate(() => {
+        const frame = await page.evaluate(() => {
           const world = window.__soulsEntity;
           if (!world?.gameFrame || !world?.residents) throw Error('conference read-only page diagnostics unavailable');
           const frame = world.gameFrame();
           return { observation: 'read between draws; not a final-draw contact measurement', at: performance.now(),
             renderFrame: world.renderer.info.render.frame, tick: frame.tick, dt: frame.dt, worldSeconds: world.worldSeconds,
             souls: frame.souls, residents: world.residents(), entities: frame.entities, bones: frame.bones };
-        }));
+        });
+        frame.receivedAt = Date.now(); state.frameReads.push(frame);
       } catch (error) { state.frameReadErrors.push(String(error)); break; }
       await new Promise(ok => setTimeout(ok, 150));
     }
   })();
   try {
-    state.result = await explainConference({ speaker: state.seats[0], ...state.fixtures, record: state.record, storyRepeats: 4, interruptStory: true });
+    const soul = state.seats[0].soul;
+    const observe = async activity => {
+      const startingTick = state.frameReads.at(-1)?.tick ?? -Infinity;
+      for (const until = Date.now() + 2500;;) {
+        assert.equal(state.frameReadErrors.length, 0, 'conference page observation failed');
+        const frames = state.frameReads, last = frames.at(-1);
+        if (last) {
+          const current = conferenceObservation(last, soul);
+          const fresh = Date.now() - last.receivedAt < 500;
+          if (activity === 'tell-story' && fresh && current.tick > startingTick && current.activity === activity && Number.isFinite(current.renderActivityAge) && current.renderActivityAge < 1.5) return;
+          if (activity === 'point' && frames.some(f => conferenceObservation(f, soul).activity === 'point')) return;
+          if (activity === 'settled') {
+            try { state.depictedJourney = conferenceJourney(frames, soul); return; } catch { /* bounded settling below */ }
+          }
+        }
+        assert(Date.now() < until, `conference ${activity} not observed on advancing page`);
+        signal.throwIfAborted(); await new Promise(ok => setTimeout(ok, 50));
+      }
+    };
+    state.result = await explainConference({ speaker: state.seats[0], ...state.fixtures, record: state.record, storyRepeats: 4, interruptStory: true, observe });
+    state.depictedJourney = conferenceJourney(state.frameReads, soul);
+    const draw = await page.evaluate(() => ({ samples: window.__conferenceDrawObserver?.samples.length, failures: window.__conferenceDrawObserver?.failures }));
+    assert(draw.samples >= 2 && draw.failures?.length === 0, 'conference final-draw measurement missing or failed');
     signal.throwIfAborted();
     check('conference-presentation-receipts', state.result.storyActions === 4 && state.result.interrupted === true,
-      'Four ordinary story completions, a named interruption and next point/clap completed; not visual acceptance.');
+      'Ordinary receipts plus advancing depicted story phrases, point, clap and settled endpoint; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
   finally { reading = false; await readFrames; }
