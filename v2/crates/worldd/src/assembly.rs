@@ -7,8 +7,9 @@
 //!   `part:put` (target the activity; 1 the node it goes in, 2 its slot there, or 3 a point `[x, y, z]` µm in that
 //!   node's frame; 4 the parts it joins, ids, when not the bay's standing parts, or for a resting part its bearing
 //!   ones).
-//! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers, goes into the crew's
-//!   slot in one commit (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
+//! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers and each carrier
+//!   within reach of the hold the carry's rule gives it ([`Crew`], below), goes into the crew's slot in one commit
+//!   (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
 //! - **Put** ([`Assembly::put`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
 //!   `reach.too-high`, B18's `support.none`), by `connectors-do-not-mate` for a join the kinds' connectors do not
@@ -25,8 +26,9 @@
 //!
 //! - **Only a crew takes, only a part, only one nobody else has** ([`Assembly::take`]): the activity must be a kind
 //!   a standing part admits as its holders (`part.not-a-crew`), the thing a part B18 reads (`part.not-a-part`), not in
-//!   a body's hand (`part.in-a-hand`), not riding or held by another activity (`part.held-by-another`), and within
-//!   its carriers' standing reach (`reach.too-high`).
+//!   a body's hand (`part.in-a-hand`), not riding or held by another activity (`part.held-by-another`), within
+//!   its carriers' standing reach (`reach.too-high`), and every carrier within reach of its own hold
+//!   (`part.grip-out-of-reach`, naming the carrier).
 //! - **Put from close by** (`part.out-of-reach` beyond [`PUT_REACH`] of where the part goes): the set-in track is
 //!   short and straight.
 //! - **A seating refused at its track's end or at its commit** stops where its track has it then, and goes back along
@@ -36,15 +38,24 @@
 //!   otherwise a leave breaks the carry off and the part is set down where it is (C3), so no part goes with an
 //!   activity that ends.
 //!
-//! - **Every carrier within reach of its grip (#5067 item 3).** The set-in track and the way back move the crew's node
-//!   while its carriers stand, so a put is refused before anyone moves when it would take a carrier's grip out of its
-//!   reach ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above its feet): each carrier
-//!   within reach where the track starts must be within reach where it ends (`part.grip-out-of-reach`, naming it); on a
-//!   straight track a carrier who stands is farthest from its grip at one end or the other. A carrier already out of
-//!   reach at the start (one who took a frame from 2 m off, say: how near a take must be is the take's own admission)
-//!   is not held to it. While a set-in runs, a carrier held to its reach who moves out of it stops it by name: it goes
-//!   back as a refused seating does, to where it started, which every carrier who stood could reach; there its carry
-//!   goes on, or breaks off when its carriers have gone (`crate::engine`).
+//! - **Every carrier within reach of its hold (#5067).** A carrier's reach is measured to where it holds the part, the
+//!   middle of its two hands as its hold is said (`sim::activity::carry::grips::assign`), from its feet: at most
+//!   [`GRIP_REACH`] on the plan and its standing reach above them ([`Carrier`], [`out_of_reach`]).
+//!   - **At the take** ([`Crew`]): every carrier, its front, its back and each side, must reach its hold as the crew
+//!     will hold the part (in its slot, between its front and its back), or the take is refused
+//!     `part.grip-out-of-reach`, naming the carrier and how far it is, before anything is written. A frame that stands
+//!     is held at its edges along the line its carriers stand on, so it is taken from beside its edges, not from its
+//!     faces. The lift (`carry:lift`, `crate::engine`) checks the same holds, `carry-grip-out-of-reach`. Not checked:
+//!     where the part is before the take. It still goes to its carriers' middle in one change of parent, from up to
+//!     [`GRASP`] off.
+//!   - **At the put**: the set-in track and the way back move the crew's node while its carriers stand, so a put is
+//!     refused before anyone moves unless every carrier is within reach where the track starts and where it ends
+//!     (`part.grip-out-of-reach`, naming it); on a straight track a carrier who stands is farthest from its hold at one
+//!     end or the other. A carrier who stepped out of reach walks back to its grip (an ordinary walk) and the crew puts
+//!     again. No carrier is exempt: none is named as holding on a track while out of reach.
+//!   - **While a set-in runs**, a carrier who moves out of reach stops it by name: it goes back as a refused seating
+//!     does, to where it started, which every carrier could reach; there its carry goes on, or breaks off when its
+//!     carriers have gone (`crate::engine`).
 //!
 //! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
@@ -58,7 +69,8 @@ use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, show};
 use sim::activity::Activities;
-use sim::activity::carry::{GRIP_REACH, HEIGHT, yaw_toward};
+use sim::activity::carry::grips::{self, Grip};
+use sim::activity::carry::{Carry, GRIP_REACH, HEIGHT, Load, yaw_toward};
 use sim::activity::seating::{Seating, Target};
 use sim::ground::scene::{slot_points, xform_to};
 use sim::structure::Structure;
@@ -155,7 +167,7 @@ pub struct Setting {
     pub end: (Vec3, Quat),
     /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
     pub span: i64,
-    /// The carriers within reach of their grips where its track started (#5067 item 3): they stay within reach.
+    /// Its carriers where its track started, every one within reach of its hold there (#5067): they stay within reach.
     pub holding: Vec<Id>,
 }
 
@@ -237,8 +249,65 @@ pub fn out_of_reach(carriers: &[Carrier], node: (Vec3, Quat)) -> R<()> {
     Ok(())
 }
 
+/// A carrier where it stands (#5067): its body, its feet on the crew's ground (µm) and its standing reach (µm).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stood {
+    pub body: Id,
+    pub feet: Vec3,
+    pub reach: i64,
+}
+
+/// A crew at a load it would take or lift, for each carrier's reach of its own hold (#5067): the load's grips and the
+/// load as its entry states them, its front, its back and its side carriers in join order, each where it stands.
+#[derive(Clone, Copy, Debug)]
+pub struct Crew<'a> {
+    pub grips: &'a [Grip],
+    pub load: &'a Load,
+    pub front: Stood,
+    pub back: Stood,
+    pub sides: &'a [Stood],
+}
+
+impl Crew<'_> {
+    /// Each carrier with the hold the carry's rule gives it ([`grips::assign`], exactly as it will be said), the load
+    /// held at `held` in the crew's slot (its position and turn in the crew's node's frame, µm): where it holds the load
+    /// (the middle of its hands) in that frame.
+    pub fn carriers(&self, held: (Vec3, Quat)) -> R<Vec<Carrier>> {
+        let (f, k) = (self.front.feet, self.back.feet);
+        let places: Vec<(Id, [i64; 2])> = self
+            .sides
+            .iter()
+            .map(|s| (s.body, Carry::place_of(f, k, s.feet)))
+            .collect();
+        let holds = grips::assign(
+            self.grips,
+            self.load,
+            held,
+            self.front.body,
+            self.back.body,
+            &places,
+        )?;
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let ends = [self.front, self.back];
+        let mut out = Vec::new();
+        for h in &holds {
+            let Some(s) = ends.iter().chain(self.sides).find(|s| s.body == h.body) else {
+                continue;
+            };
+            let g = held.1.rotate(h.middle()).map_err(pose)?;
+            out.push(Carrier {
+                body: s.body,
+                feet: s.feet,
+                reach: s.reach,
+                grip: Vec3::new(held.0.x + g.x, held.0.y + g.y, held.0.z + g.z),
+            });
+        }
+        Ok(out)
+    }
+}
+
 /// A crew's node on its set-in track or its way back (#5067 item 3, [`Assembly::tracks`]): its crew, where the node is
-/// on its ground (µm), when the track ends, whether it is the way back, and the carriers held to their reach on it.
+/// on its ground (µm), when the track ends, whether it is the way back, and its carriers, held to their reach on it.
 #[derive(Clone, Copy, Debug)]
 pub struct OnTrack<'a> {
     pub activity: Id,
@@ -329,7 +398,9 @@ impl Assembly {
 
     /// `part:take` (`unseat` false) or `part:unseat` (true) by crew `activity`, whose carriers stand at `front` and
     /// `back` on `ground` (µm in its frame): the part into the crew's slot, written on `tree` and waiting in
-    /// [`Assembly::ready`]. Returns the crew's node's pose, where its carry starts.
+    /// [`Assembly::ready`]. `crew`, for a part that is a load with grips: every carrier where it stands, each refused
+    /// `part.grip-out-of-reach` by name when it does not reach its hold as the crew will hold the part (#5067), before
+    /// anything is written. Returns the crew's node's pose, where its carry starts.
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -344,6 +415,7 @@ impl Assembly {
         ground: Id,
         unseat: bool,
         reach: i64,
+        crew: Option<&Crew>,
     ) -> R<(Vec3, Quat)> {
         if self.held.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
@@ -431,6 +503,11 @@ impl Assembly {
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
+        // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
+        // between its front and its back, the part in its slot turned as it is).
+        if let Some(crew) = crew {
+            out_of_reach(&crew.carriers((Vec3::ZERO, inside))?, (frame, turn))?;
+        }
         self.aim(tree, activity, ground)?;
         self.seating
             .take(tree, acts, mint, now, activity, part, (frame, turn), inside)?;
@@ -441,9 +518,10 @@ impl Assembly {
 
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
     /// part to `to`'s slot `slot` (or to `point` in `to`'s frame), joined to `joins` (by default, a bearing part to the
-    /// bay's standing parts, a resting part to its bearing ones). Refused before anyone moves; else the set-in track is
-    /// written on `tree` and the seating
-    /// waits for its end ([`Assembly::due`]).
+    /// bay's standing parts, a resting part to its bearing ones). `carriers`: everyone holding the part, each within
+    /// reach of its hold at both ends of the set-in track or the put is refused `part.grip-out-of-reach` (#5067).
+    /// Refused before anyone moves; else the set-in track is written on `tree` and the seating waits for its end
+    /// ([`Assembly::due`]).
     #[allow(clippy::too_many_arguments)]
     pub fn put(
         &mut self,
@@ -503,14 +581,10 @@ impl Assembly {
                 ),
             ));
         }
-        // #5067 item 3: every carrier within reach of its grip where the set-in starts is within reach where it ends (on
-        // a straight track, so all the way). One already out of reach there is not held to it (how near a take must be
-        // is the take's own admission, #5067 item 4).
-        let holding: Vec<Carrier> = carriers
-            .iter()
-            .filter(|c| out_of_reach(&[**c], from).is_ok())
-            .copied()
-            .collect();
+        // #5067: every carrier is within reach of its hold where the set-in starts and where it ends (on a straight
+        // track, so all the way). One out of reach where it would start is refused by name, never named as holding.
+        let holding = carriers.to_vec();
+        out_of_reach(&holding, from)?;
         out_of_reach(&holding, (at, from.1))?;
         // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
         // (its rails), which it rests on.
@@ -894,6 +968,51 @@ mod tests {
             assert_eq!(r.name, "part.grip-out-of-reach");
             assert!(r.detail.contains(&show(body)), "{}", r.detail);
         }
+    }
+
+    /// #5067: a frame that stands is taken from beside its edges (its own x), each carrier within reach of the edge it
+    /// holds; from 2.2 m off its faces each is named out of reach, 2.16 m from its hold.
+    #[test]
+    fn a_standing_frames_carriers_reach_it_from_beside_its_edges_not_from_its_faces() {
+        use replica::rules::json;
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction/rack_upright.json");
+        let e = json::parse(&std::fs::read_to_string(p).expect("the entry")).expect("json");
+        let (load, grips) = (
+            Load::of(&e).expect("a load"),
+            grips::grips_of(&e).expect("grips"),
+        );
+        let id = |n| Id::new(replica::ids::Scope([1; 16]), n).expect("an id");
+        let stood = |n, x: i64, z: i64| Stood {
+            body: id(n),
+            feet: Vec3::new(x, 0, z),
+            reach: 2_060_000,
+        };
+        // The frame stands at the origin, its width along x; the take keeps its turn in the crew's slot.
+        let taken = |front: Stood, back: Stood| {
+            let turn = yaw_toward([front.feet.x - back.feet.x, front.feet.z - back.feet.z])?;
+            let crew = Crew {
+                grips: &grips,
+                load: &load,
+                front,
+                back,
+                sides: &[],
+            };
+            let node = (Vec3::new(0, HEIGHT, 0), turn);
+            out_of_reach(&crew.carriers((Vec3::ZERO, conj(turn)?))?, node)
+        };
+        assert_eq!(
+            taken(stood(1, 1_100_000, 0), stood(2, -1_100_000, 0)),
+            Ok(())
+        );
+        let r = taken(stood(1, 0, 2_200_000), stood(2, 0, -2_200_000)).expect_err("out of reach");
+        assert_eq!(r.name, "part.grip-out-of-reach");
+        assert!(r.detail.contains(&show(id(1))), "{}", r.detail);
+        assert!(
+            r.detail.contains("2162 mm") || r.detail.contains("2161 mm"),
+            "{}",
+            r.detail
+        );
     }
 
     /// A take of a part above its carriers' standing reach is refused by name (the served test world has none that

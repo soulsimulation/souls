@@ -478,6 +478,15 @@ impl Load {
         Ok((plan, [HEIGHT - e.y, HEIGHT + e.y]))
     }
 
+    /// Where a carrier at the grip `along` its length (µm from its middle) holds it: the middle of its two hands, each
+    /// [`grips::HAND_HALF`] from the grip and kept within its length, as [`grips::assign`] places them (#5067). A grip
+    /// nearer its end than a hand's width is held that much nearer its middle (a timber bundle's end grip, 0.1 m), so
+    /// the lift's checks and a seating's measure a carrier's reach to the same place.
+    pub fn hold_along(&self, along: i64) -> i64 {
+        let h = self.half_length;
+        ((along - grips::HAND_HALF).clamp(-h, h) + (along + grips::HAND_HALF).clamp(-h, h)) / 2
+    }
+
     /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
     pub fn places(&self) -> [i64; 2] {
         [self.grips[0] - REACH, self.grips[1] + REACH]
@@ -503,7 +512,8 @@ impl Load {
 
     /// The checks before the lift of its side carriers (0.135 C5), after [`Load::check`]'s: `crew` carriers, more than
     /// its grips refused `carry-crew-too-large`; and each side carrier in `sides` (in join order, where it stands on the
-    /// open ground's plan, µm) within [`GRIP_REACH`] of its grip's edge on the side it stands, or refused
+    /// open ground's plan, µm) within [`GRIP_REACH`] of where it holds the load ([`Load::hold_along`] its grip, at the
+    /// load's edge as it is held on the side it stands: [`grips::assign`]'s contact, #5067), or refused
     /// `carry-grip-out-of-reach`, naming it. The load's middle at `middle`, its grips along `axis` (the front's and the
     /// back's line when none), from the back at `back` toward the front at `front`.
     pub fn check_sides(
@@ -523,14 +533,17 @@ impl Load {
         }
         let a = axis.unwrap_or([front[0] - back[0], front[1] - back[1]]);
         let l = len(a);
+        // Its edge as it is held: half what it takes up across the carry, not the larger of its other two sides (a
+        // beam's 51 mm, not its 102 mm height).
+        let across = self.held_half()?.z;
         for ((who, at), along) in sides.iter().zip(self.inner.iter().flatten()) {
-            let u = scale(a, *along, l);
+            let u = scale(a, self.hold_along(*along), l);
             let grip = [middle[0] + u[0], middle[1] + u[1]];
-            // Its edge on the carrier's side: across the axis by half the load's width.
+            // Its edge on the carrier's side: across the axis by half the load's extent that way.
             let d = [at[0] - grip[0], at[1] - grip[1]];
             let plus =
                 i128::from(a[0]) * i128::from(d[1]) - i128::from(a[1]) * i128::from(d[0]) > 0;
-            let n = scale([-a[1], a[0]], self.half_width, l);
+            let n = scale([-a[1], a[0]], across, l);
             let edge = if plus {
                 [grip[0] + n[0], grip[1] + n[1]]
             } else {
@@ -576,8 +589,9 @@ impl Load {
         }
     }
 
-    /// [`Load::check`] but the way: its crew and its grips. worldd's engine has the way ([`Load::way_to`]) found off
-    /// the clock and answers the lift when it comes back.
+    /// [`Load::check`] but the way: its crew and its grips, each end carrier within [`GRIP_REACH`] of where it holds
+    /// the load ([`Load::hold_along`] its grip). worldd's engine has the way ([`Load::way_to`]) found off the clock and
+    /// answers the lift when it comes back.
     pub fn check_lift(
         &self,
         crew: usize,
@@ -593,11 +607,12 @@ impl Load {
             );
         }
         let d = [front[0] - back[0], front[1] - back[1]];
-        // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips.
+        // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips. #5067:
+        // each is measured to where it holds the load (`Load::hold_along`), as its hold is said and a seating checks it.
         let a = axis.unwrap_or(d);
         for (who, at, along) in [
-            ("front", front, self.grips[1]),
-            ("back", back, self.grips[0]),
+            ("front", front, self.hold_along(self.grips[1])),
+            ("back", back, self.hold_along(self.grips[0])),
         ] {
             let u = scale(a, along, len(a));
             let grip = [middle[0] + u[0], middle[1] + u[1]];
@@ -1437,7 +1452,7 @@ impl Carry {
     }
 
     /// The frame's pose for carriers at `front` and `back` (µm, the open ground's frame).
-    fn pose(front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
+    pub fn pose(front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
         let c = Vec3::new(
             (front.x + back.x) / 2,
             (front.y + back.y) / 2 + HEIGHT,

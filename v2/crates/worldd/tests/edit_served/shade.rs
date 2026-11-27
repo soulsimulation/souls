@@ -234,12 +234,14 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
         leave(&mut hands, k, five);
     }
 
-    // Bent 1: Souls 1 and 2 at its faces take it where it stands and put it in bent_a; Soul 1 lets go and Soul 2 holds
-    // it (a bent's hold crew is one).
+    // Bent 1: Souls 1 and 2 stand either side of its middle along its width, 0.5 m out from its plane (#5067: a part
+    // that stands is held where its grips lie along its carriers' line, 0.55 m either side of a bent's middle, so each
+    // is 0.4 m from its hold; 0.5 m out, they stand clear of its posts), take it (it comes to their line) and put it in
+    // bent_a, 0.5 m back; Soul 1 lets go and Soul 2 holds it (a bent's hold crew is one).
     walk(
         &mut hands,
-        &[(0, at(0, 700)), (1, at(0, -3_700))],
-        "Souls 1 and 2 to bent 1's faces",
+        &[(0, at(950, -2_000)), (1, at(-950, -2_000))],
+        "Souls 1 and 2 either side of bent 1's middle, 0.5 m out",
     );
     let hold_a = crew(&mut hands, 0, &[1], 1);
     ok(
@@ -254,8 +256,8 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     // Bent 2: Souls 1 and 3; Soul 3 holds it.
     walk(
         &mut hands,
-        &[(0, at(0, -700)), (2, at(0, 3_700))],
-        "Souls 1 and 3 to bent 2's faces",
+        &[(0, at(950, 2_000)), (2, at(-950, 2_000))],
+        "Souls 1 and 3 either side of bent 2's middle, 0.5 m out",
     );
     let hold_b = crew(&mut hands, 0, &[2], 1);
     ok(
@@ -281,7 +283,7 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     {
         walk(
             &mut hands,
-            &[(0, at(dx, -2_200)), (3, at(dx, 2_200))],
+            &[(0, at(dx, -1_750)), (3, at(dx, 1_750))],
             "Souls 1 and 4 to a rail's ends",
         );
         let c = *rail.get_or_insert_with(|| crew(&mut hands, 0, &[3], 1));
@@ -300,14 +302,15 @@ fn shade_a_take_by_too_many_or_too_few_is_refused_and_the_cloth_rests_on_both_ra
     leave(&mut hands, 3, rail);
     assert_eq!((crews_on(&w, bents[0]).0, crews_on(&w, bents[1]).0), (0, 0));
 
-    // The cloth: Souls 1 and 2 at its ends, 3 and 4 beside it. Three are too few: refused before anyone moves.
+    // The cloth: Souls 1 and 2 at its ends, 3 and 4 each beside its own grip (in join order from the back, Soul 2's
+    // end), 0.35 m off its edge. Three are too few: refused before anyone moves.
     walk(
         &mut hands,
         &[
-            (0, at(0, -2_000)),
-            (1, at(0, 2_000)),
-            (2, at(-2_000, -500)),
-            (3, at(2_000, 500)),
+            (0, at(0, -1_450)),
+            (1, at(0, 1_450)),
+            (2, at(-1_300, 700)),
+            (3, at(1_300, 250)),
         ],
         "four at the cloth",
     );
@@ -417,11 +420,11 @@ fn set_downs(w: &Seeded) -> Vec<String> {
 /// crew carried and the second bent still stood, it kept that bent there. In a served world whose bents have their
 /// posts' walk boxes, by the Souls' own intents:
 ///
-/// - Crew A (Souls 1 and 2) takes bent 1 where it stands and carries it 3 m west: its carry reads the ground's fixed
+/// - Crew A (Souls 1 and 2) takes bent 1 where it stands and carries it 3 m south: its carry reads the ground's fixed
 ///   geometry, bent 2 standing.
-/// - Crew B (Souls 3 and 4) stands 400 mm south of bent 2's faces, so the bent it takes is held clear of where its
+/// - Crew B (Souls 3 and 4) stands 500 mm south of bent 2, either side of its middle, so the bent it takes is held clear of where its
 ///   own posts stood (on the plan it is 1.8 m by 0.1 m, its posts 100 mm square on its line), and takes it.
-/// - Both crews walk at once: A 1 m further west, B 1.2 m north, its bent across where it stood. Both bents ride their
+/// - Both crews walk at once: A 1 m further south, B 1.2 m north, its bent across where it stood. Both bents ride their
 ///   crews at the end, and the world set nothing down.
 #[test]
 fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stood() {
@@ -448,8 +451,8 @@ fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stoo
     walk_all(
         &mut hands,
         g,
-        &[(0, at(0, 700)), (1, at(0, -3_700))],
-        "crew A to bent 1's faces",
+        &[(0, at(950, -2_000)), (1, at(-950, -2_000))],
+        "crew A either side of bent 1's middle, 0.5 m out",
     );
     let a = crew_of_all(&w, &mut hands, 0, &[1]);
     done(
@@ -459,15 +462,15 @@ fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stoo
     walk_all(
         &mut hands,
         g,
-        &[(0, at(-3_000, 700)), (1, at(-3_000, -3_700))],
-        "crew A carries bent 1 3 m west",
+        &[(0, at(950, -5_000)), (1, at(-950, -5_000))],
+        "crew A carries bent 1 3 m south",
     );
 
     walk_all(
         &mut hands,
         g,
-        &[(2, at(0, 4_100)), (3, at(0, -300))],
-        "crew B 400 mm south of bent 2's faces",
+        &[(2, at(950, 2_000)), (3, at(-950, 2_000))],
+        "crew B 500 mm south of bent 2, either side of its middle",
     );
     let (p, q) = (
         body_at(&w, body_of(&w, w.souls[2])),
@@ -492,10 +495,10 @@ fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stoo
         &mut hands,
         g,
         &[
-            (0, at(-4_000, 700)),
-            (1, at(-4_000, -3_700)),
-            (2, at(0, 2_900)),
-            (3, at(0, -1_500)),
+            (0, at(950, -6_000)),
+            (1, at(-950, -6_000)),
+            (2, at(950, 800)),
+            (3, at(-950, 800)),
         ],
         "both crews carry at once, bent 2 across where it stood",
     );
@@ -517,8 +520,8 @@ fn shade_two_crews_carry_the_two_bents_at_once_neither_meets_where_its_bent_stoo
 }
 
 /// The same cache, one crew (the review's case): a crew's id outlives its carry. A crew of two takes bent 1, carries
-/// it 3 m west and sets it down there (`carry:set-down`, which changes no walker's map either), then takes bent 2,
-/// held 400 mm south of its faces as above, and carries it 1.2 m north across where it stood: bent 2 rides the crew,
+/// it 3 m south and sets it down there (`carry:set-down`, which changes no walker's map either), then takes bent 2,
+/// held 500 mm south of where it stood as above, and carries it 1.2 m north across where it stood: bent 2 rides the crew,
 /// its carry never stopped by its own posts where it stood.
 #[test]
 fn shade_one_crew_sets_one_bent_down_then_carries_the_other_across_where_it_stood() {
@@ -545,8 +548,8 @@ fn shade_one_crew_sets_one_bent_down_then_carries_the_other_across_where_it_stoo
     walk_all(
         &mut hands,
         g,
-        &[(0, at(0, 700)), (1, at(0, -3_700))],
-        "the crew to bent 1's faces",
+        &[(0, at(950, -2_000)), (1, at(-950, -2_000))],
+        "the crew either side of bent 1's middle, 0.5 m out",
     );
     let c = crew_of_all(&w, &mut hands, 0, &[1]);
     done(
@@ -556,8 +559,8 @@ fn shade_one_crew_sets_one_bent_down_then_carries_the_other_across_where_it_stoo
     walk_all(
         &mut hands,
         g,
-        &[(0, at(-3_000, 700)), (1, at(-3_000, -3_700))],
-        "bent 1 carried 3 m west",
+        &[(0, at(950, -5_000)), (1, at(-950, -5_000))],
+        "bent 1 carried 3 m south",
     );
     done(
         hands[0].act("carry:set-down", c, BTreeMap::new()),
@@ -568,8 +571,8 @@ fn shade_one_crew_sets_one_bent_down_then_carries_the_other_across_where_it_stoo
     walk_all(
         &mut hands,
         g,
-        &[(0, at(0, 4_100)), (1, at(0, -300))],
-        "the crew 400 mm south of bent 2's faces",
+        &[(0, at(950, 2_000)), (1, at(-950, 2_000))],
+        "the crew 500 mm south of bent 2, either side of its middle",
     );
     let (p, q) = (
         body_at(&w, body_of(&w, w.souls[0])),
@@ -586,7 +589,7 @@ fn shade_one_crew_sets_one_bent_down_then_carries_the_other_across_where_it_stoo
     walk_all(
         &mut hands,
         g,
-        &[(0, at(0, 2_900)), (1, at(0, -1_500))],
+        &[(0, at(950, 800)), (1, at(-950, 800))],
         "bent 2 carried across where it stood",
     );
     let set_down = set_downs(&w);
@@ -647,8 +650,8 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
 
     // The bents, each held by one of its crew: Soul 2 holds bent 1, Soul 3 bent 2.
     for (k, (faces, holder, slot)) in [
-        ([at(0, 700), at(0, -3_700)], 1, "bent_a"),
-        ([at(0, -700), at(0, 3_700)], 2, "bent_b"),
+        ([at(950, -2_000), at(-950, -2_000)], 1, "bent_a"),
+        ([at(950, 2_000), at(-950, 2_000)], 2, "bent_b"),
     ]
     .into_iter()
     .enumerate()
@@ -657,7 +660,7 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
             &mut hands,
             g,
             &[(0, faces[0]), (holder, faces[1])],
-            "to a bent's faces",
+            "either side of a bent's middle, 0.5 m out",
         );
         let hold = crew_of_all(&w, &mut hands, 0, &[holder]);
         done(
@@ -679,7 +682,7 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
         walk_all(
             &mut hands,
             g,
-            &[(0, at(dx, -2_200)), (3, at(dx, 2_200))],
+            &[(0, at(dx, -1_750)), (3, at(dx, 1_750))],
             "Souls 1 and 4 to a rail's ends",
         );
         let c = *rail.get_or_insert_with(|| crew_of_all(&w, &mut hands, 0, &[3]));
@@ -692,7 +695,7 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
     walk_all(
         &mut hands,
         g,
-        &[(0, at(-1_750, -2_200)), (3, at(-1_750, 2_200))],
+        &[(0, at(-1_750, -1_750)), (3, at(-1_750, 1_750))],
         "the rail crew 0.9 m outside rail 1's posts",
     );
     done(
@@ -714,7 +717,7 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
     walk_all(
         &mut hands,
         g,
-        &[(0, at(-2_850, -2_200)), (3, at(-2_850, 2_200))],
+        &[(0, at(-2_850, -1_750)), (3, at(-2_850, 1_750))],
         "rail 1 carried 1.1 m on west",
     );
     let set_down = set_downs(&w);
