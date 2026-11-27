@@ -14,6 +14,8 @@ export function nativeId(v:unknown):string{
  const n=typeof v[1]==='bigint'?v[1]:BigInt(whole(v[1]));if(n<0n||n>0xffffffffffffffffn)throw Error('carry-record: native id range');
  return Array.from(v[0],b=>b.toString(16).padStart(2,'0')).join('')+'.'+n;
 }
+/** Pose::Frame is the canonical [node, optional slot] array, not a numbered map. */
+const frame=(v:unknown)=>{if(!Array.isArray(v)||(v.length!==1&&v.length!==2))throw Error('carry-record: frame required');return{parent:nativeId(v[0]),slot:v.length===2?whole(v[1]):null};};
 const map=(v:unknown):Map<number,unknown>=>{if(!(v instanceof Map))throw Error('carry-record: map required');return v;};
 const point=(v:unknown):V3=>{if(!Array.isArray(v)||v.length!==3)throw Error('carry-record: point required');return v.map(whole)as V3;};
 export function crewMembers(v:unknown):CrewMember[]|undefined{
@@ -42,7 +44,7 @@ export function carryChanges(entries:unknown[]):CarryChange[]{
    if(ev.get(1)==='souls:carry-grips'){const grips=carryGrips(ev.get(2));if(grips)out.push({at:grips.sinceUs,node:nativeId(e.get(6)),grips});}
    if(ev.get(1)==='souls:carry-track'){const track=carryTrack(ev.get(2));if(track)out.push({at:track.t0,node:nativeId(e.get(6)),track});}
   }
-  const transfer=e.get(9);if(transfer instanceof Map&&transfer.get(1)===1){const p=map(transfer.get(6)),f=map(p.get(1)),q=p.get(3);if(!Array.isArray(q)||q.length!==4)throw Error('carry-record: transfer rotation');out.push({at,node:nativeId(transfer.get(3)),pose:{parent:nativeId(f.get(1)),slot:f.has(2)?whole(f.get(2)):null,pos:point(p.get(2)),rot:q.map(whole)as Q4}});}
+  const transfer=e.get(9);if(transfer instanceof Map&&transfer.get(1)===1){const p=map(transfer.get(6)),f=frame(p.get(1)),q=p.get(3);if(!Array.isArray(q)||q.length!==4)throw Error('carry-record: transfer rotation');out.push({at,node:nativeId(transfer.get(3)),pose:{parent:f.parent,slot:f.slot,pos:point(p.get(2)),rot:q.map(whole)as Q4}});}
  }
  return out.sort((a,b)=>a.at-b.at);
 }
@@ -54,7 +56,7 @@ export function historyMotion(bytes:Uint8Array):[string,string,number|null,numbe
  const b=map(decode(bytes,{useMaps:true})),view=b.get(6),out:[string,string,number|null,number,number,number,number,Q4][]=[];
  if(!(view instanceof Map))return out;
  for(const raw of (view.get(8)as unknown[])??[])for(const rawChange of (map(raw).get(7)as unknown[])??[]){const c=map(rawChange);if(c.get(1)!==7)continue;
-  const h=map(c.get(2)),p=map(h.get(5)),f=map(p.get(1)),position=point(p.get(2)),q=p.get(3);if(!Array.isArray(q)||q.length!==4)throw Error('carry-record: history quaternion');
-  out.push([nativeId(h.get(1)),nativeId(f.get(1)),f.has(2)?whole(f.get(2)):null,whole(h.get(2)),...position,q.map(whole)as Q4]);
+  const h=map(c.get(2)),p=map(h.get(5)),f=frame(p.get(1)),position=point(p.get(2)),q=p.get(3);if(!Array.isArray(q)||q.length!==4)throw Error('carry-record: history quaternion');
+  out.push([nativeId(h.get(1)),f.parent,f.slot,whole(h.get(2)),...position,q.map(whole)as Q4]);
  }return out;
 }
