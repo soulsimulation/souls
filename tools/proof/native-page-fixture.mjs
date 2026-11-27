@@ -6,6 +6,7 @@ import { join, resolve, relative, isAbsolute } from 'node:path';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
 import { pairSeat } from '../playtest/arena/new-engine/seat.mjs';
 import { startOldPage } from '../playtest/arena/new-engine/old-page.mjs';
+import { verifySealedPublicInputs } from './sealed-public-inputs.mjs';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = name => { throw Error('proof.native-page-' + name); };
 const inside = (root, file) => { const path = resolve(root, file), rel = relative(root, path); if (!rel || rel === '..' || rel.startsWith('../') || isAbsolute(rel)) fail('artifact-path'); return path; };
@@ -50,18 +51,28 @@ export function nativePagePorts(port) {
   for (const p of ports) checkPort(p);
   return ports;
 }
-export async function startNativePageFixture({ checkout, data, log, port, artifacts, signal, onSpawn, timeoutMs = 180000 }) {
+export async function startNativePageFixture({ checkout, data, log, port, artifacts, sealedInputs, signal, onSpawn, timeoutMs = 180000 }) {
   const until = Date.now() + timeoutMs; signal?.throwIfAborted();
   for (const p of nativePagePorts(port).slice(0, 8)) if (!await portFree(p)) fail('occupied-port');
   const root = resolve(checkout), m = verifyNativePageArtifacts(root, artifacts), children = [];
+  const sealedPublic = sealedInputs ? verifySealedPublicInputs(sealedInputs) : null;
+  if (sealedPublic && sealedPublic.sourceHead !== m.sourceHead) fail('sealed-source');
+  if (sealedPublic) {
+    if (sealedPublic.assets.artifactHash !== artifacts.hash || sealedPublic.validator?.js !== m.trees['v2/target/wasm-load/pkg']['replica.js'] || sealedPublic.validator?.wasm !== m.trees['v2/target/wasm-load/pkg']['replica_bg.wasm']) fail('sealed-artifact');
+    for (const path of ['apps/web/dist', 'v2/web/dist', 'mars/viewer/dist/client']) {
+      const tree = sealedPublic.assets.trees.find(t => t.root === join(root, path));
+      if (!tree || JSON.stringify(Object.entries(tree.files).sort()) !== JSON.stringify(Object.entries(m.trees[path]).sort())) fail('sealed-assets');
+    }
+  }
   if (Date.now() >= until) fail('startup-timeout');
   const commandRecords = []; let ordinal = 0;
   const onCommand = event => { const id = ++ordinal; const record = { ...event, id }; commandRecords.push(record); writeFileSync(join(data, '..', `command-native-${id}.json`), JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }); return id; };
   writeFileSync(join(data, '..', 'native-page-provenance.json'), JSON.stringify({ artifactPin: artifacts, ...m }, null, 2), { flag: 'wx', mode: 0o600 });
   const runtime = await startOldPage({ checkout: root, template: m.template, dir: data, port, bin: join(root, 'v2/target/release'),
-    marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, signal, timeoutMs: until - Date.now(),
+    marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, sealedPublic, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });
   return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: { kind: 'native-page', async joinActor(label='camera-subject') {
+    if (sealedPublic) fail('sealed-actor-mutation');
     signal?.throwIfAborted();
     const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:'Camera Subject',pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
     signal?.throwIfAborted();const fd=openSync(log,'a',0o600);let daemon;
@@ -69,7 +80,7 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
     await waitActorReady(daemon,{signal,timeoutMs:15000});
     const joined=await seat.join({ms:15000});if(!joined.body)throw Error('native-actor-join-failed');
     return {body:joined.body,cli:(...words)=>seat.cli(...words)};
-  }, verify: () => verifyNativePageArtifacts(root, artifacts) } };
+  }, verify: () => { const product = verifyNativePageArtifacts(root, artifacts); if (sealedInputs) verifySealedPublicInputs(sealedInputs); return product; } } };
 }
 
 /** Readiness ownership is separate from process teardown, which remains with the attempt owner. */

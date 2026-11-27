@@ -40,6 +40,7 @@ import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { sleep } from '../../lib/clock.mjs';
 import { WORLD, freePorts, startWorld, stopWorld, runOwnedCommand } from './world.mjs';
 import { REPLICA_PKG } from './seat.mjs';
+import { sealedPublicRoute } from '../../../proof/sealed-public-inputs.mjs';
 
 export const FRONT_FILE = join(REPO_ROOT, 'v2/tools/ops/proxy/soul-game.caddy');
 export const MARS_WEB = join(REPO_ROOT, 'mars/viewer/dist/client');
@@ -48,7 +49,19 @@ const SWITCH = join(REPO_ROOT, 'tools/world-launcher/v2-switch.mjs');
 const CLIENT_BUILD = join(REPO_ROOT, 'v2/client/served/build.mjs');
 
 /** The production front door with this run's addresses and folders in place of the install's (as check-0132 builds it). */
-export function frontDoor(front, { base, launcher, directory, origin, web, slugs, caddyDir, checkout = REPO_ROOT }) {
+export function frontDoor(front, { base, launcher, directory, origin, web, slugs, caddyDir, checkout = REPO_ROOT, sealedPublic = null }) {
+  if (sealedPublic) {
+    if (front.split('https://soul.game {').length !== 2) throw Error('old-page: sealed site anchor missing or ambiguous');
+    const anchor = 'handle_path /s/* {';
+    if (front.split(anchor).length !== 2) throw Error('old-page: sealed stream anchor missing or ambiguous');
+    const start = front.indexOf(anchor), body = start + anchor.length;
+    let end = body, depth = 1;
+    for (; end < front.length && depth; end++) { if (front[end] === '{') depth++; else if (front[end] === '}') depth--; }
+    if (depth) throw Error('old-page: sealed stream block malformed');
+    // Explicit route order inside the ordinary /s handler prevents Caddy's directive sorter moving the seal
+    // after a mutable proxy/catchall. The sealed handle and fallback are mutually exclusive.
+    front = front.slice(0, body) + '\n route {\n' + sealedPublicRoute(sealedPublic) + '\n handle {\n' + front.slice(body, end - 1) + '\n}\n}\n}' + front.slice(end);
+  }
   return `{\n\tadmin off\n\tauto_https off\n\tpersist_config off\n\tdefault_bind 127.0.0.1\n\tstorage file_system "${caddyDir}"\n}\n` + front
     .replaceAll('https://soul.game', base).replaceAll('localhost:@@PRODUCTION_PORT@@', `127.0.0.1:${launcher}`)
     .replaceAll('localhost:7310', directory).replaceAll('localhost:7320', origin).replaceAll('localhost:7330', origin)
@@ -208,9 +221,10 @@ export async function localCreate({ directory, routesFile, slugs, template, from
 
 /** Brings the old page up on a new-engine world of `template` (with `add`'s things placed), or of `facts` (the template's
  *  facts, edited: the engine's world; the template stays the page's shell). → {page, slug, world, stop()} */
-export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, bodies = null, log = () => {}, checkout = REPO_ROOT, bin = null, port: requestedPort = null, signal, onSpawn, onCommand, timeoutMs = 180000, caddy = process.env.CADDY ?? 'caddy', pinnedArtifacts = false } = {}) {
+export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, bodies = null, log = () => {}, checkout = REPO_ROOT, bin = null, port: requestedPort = null, signal, onSpawn, onCommand, timeoutMs = 180000, caddy = process.env.CADDY ?? 'caddy', pinnedArtifacts = false, sealedPublic = null } = {}) {
   dir = resolve(dir);
   if (create && checkout !== REPO_ROOT) throw Error('old-page: checkout binding requires ordinary world recipe');
+  if (create && sealedPublic) throw Error('old-page: sealed inputs require ordinary world recipe');
   const until = Date.now() + timeoutMs;
   const remaining = () => { signal?.throwIfAborted(); const ms = until - Date.now(); if (ms <= 0) throw Error('old-page: startup timeout'); return ms; };
   const command = async (name, executable, args, options) => onSpawn
@@ -252,12 +266,13 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
 
     const routesFile = join(world.dir, 'routes.json');
     const routes = withRoute(JSON.parse(readFileSync(routesFile, 'utf8')), slug);
+    if (sealedPublic) routes.worlds[slug] = { ...routes.worlds[slug], stream: sealedPublic.stream, history: sealedPublic.history };
     writeFileSync(`${routesFile}.tmp`, JSON.stringify(routes)); renameSync(`${routesFile}.tmp`, routesFile);
     const slugs = join(dir, 'slugs'), caddyDir = join(dir, 'caddy');
     mkdirSync(slugs, { recursive: true }); mkdirSync(caddyDir, { recursive: true }); writeFileSync(join(slugs, slug), '');
     const base = `http://127.0.0.1:${frontPort}`;
     writeFileSync(join(dir, 'Caddyfile'), frontDoor(front, { base, launcher, directory: world.directory.replace('http://', ''), origin: world.origin.replace('http://', ''),
-      web: join(checkout, 'v2/web/dist'), slugs, caddyDir, checkout }));
+      web: join(checkout, 'v2/web/dist'), slugs, caddyDir, checkout, sealedPublic }));
     procs.push(await start('caddy', caddy, ['run', '--adapter', 'caddyfile', '--config', join(dir, 'Caddyfile')], null,
       { dir, checkout, signal, onSpawn, remaining, env: { XDG_CONFIG_HOME: caddyDir, XDG_DATA_HOME: caddyDir } }));
     for (let i = 0; i < 100; i++) { if (await fetch(`${base}/__sim/healthz`, { signal: AbortSignal.any([signal, AbortSignal.timeout(remaining())].filter(Boolean)) }).then((r) => r.ok, () => false)) break; await sleep(100); }
