@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request as request_ } from 'node:http';
 import { ChildPool } from './children.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const P0 = await testPort(6), root = new URL('../../', import.meta.url).pathname, main = new URL('../../apps/server/src/main.ts', import.meta.url).pathname;
 const WORLD = 'recovery-loop-20261115';

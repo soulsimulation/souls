@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const B = await testPort(6), dir = mkdtempSync(join(tmpdir(), 'disk-low-create-'));
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;

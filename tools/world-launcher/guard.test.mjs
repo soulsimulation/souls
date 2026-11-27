@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChildPool, backoffMs } from './children.mjs';
 import { GUARD, bootMark, jitterMs, liveWedge } from './guard.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(10);
 
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;
