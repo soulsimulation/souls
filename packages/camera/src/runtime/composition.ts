@@ -16,6 +16,11 @@ export type CompositionDetail = Readonly<{
     actionBounds?: CameraBounds;
     headLocalM?: CameraVec3;
     actionLocalM?: CameraVec3;
+    /** Only for activity-role-added members, never original shot.requiredSubjects. No guessed default. */
+    roleHeightFraction?: Readonly<{
+        min: number;
+        max: number;
+    }>;
 }>;
 export type CompositionState = Readonly<{
     shotId: string;
@@ -83,6 +88,7 @@ type Shape = {
     id: string;
     required: boolean;
     points: Point[];
+    heightFraction: CameraShotIntent['heightFraction'];
 };
 const finite = (x: number) => Number.isFinite(x);
 const dot = (a: CameraVec3, b: CameraVec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -151,9 +157,9 @@ function frame(shapes: readonly Shape[], pose: CameraInspectionPose, shot: Camer
         else {
             if (!contains(shot.screenRegion, r))
                 issues.push('outside-region');
-            if (height! < shot.heightFraction.min)
+            if (height! < s.heightFraction.min)
                 issues.push('too-small');
-            if (height! > shot.heightFraction.max)
+            if (height! > s.heightFraction.max)
                 issues.push('too-large');
         }
         return { subject: s.id, required: s.required, region: r, heightFraction: height, issues };
@@ -222,6 +228,19 @@ export function composeCamera(input: CompositionInput): CompositionResult {
             byId.set(s.id, s);
         }
         const selected = [...shot.requiredSubjects, ...shot.optionalSubjects].map(id => byId.get(id)).filter((s): s is CameraSubject => !!s);
+        const admittedAnchors = new Set<string>();
+        const admitAnchors = (s: CameraSubject, copies: number) => { if (s.state !== 'present' || admittedAnchors.has(s.id))
+            return; if (!Array.isArray(s.anchors))
+            throw Error('composition.anchors-malformed'); spend(copies * s.anchors.length); admittedAnchors.add(s.id); };
+        // Validator's activity-anchor search plus the two local lookups are admitted before traversal.
+        for (const s of selected) {
+            admitAnchors(s, 3);
+            if (shot.extent === 'activity' && shot.requiredSubjects.includes(s.id) && s.state === 'present' && s.activity) {
+                if (!Array.isArray(s.activity.roles))
+                    return { status: 'rejected', reason: 'composition.roles-malformed' };
+                spend(s.activity.roles.length);
+            }
+        }
         const checked = validateCameraShot(shot, { ...o, subjects: selected });
         if (checked.status === 'rejected')
             return { status: 'rejected', reason: checked.reason };
@@ -229,7 +248,7 @@ export function composeCamera(input: CompositionInput): CompositionResult {
             return { status: 'rejected', reason: 'composition.comfort-outside-limits' };
         const details = new Map<string, CompositionDetail>();
         for (const d of input.details ?? []) {
-            if (details.has(d.subject) || (d.mediumBounds !== undefined && !contractBounds(d.mediumBounds)) || (d.actionBounds !== undefined && !contractBounds(d.actionBounds)) || (d.headLocalM !== undefined && !contractVec(d.headLocalM)) || (d.actionLocalM !== undefined && !contractVec(d.actionLocalM)))
+            if (details.has(d.subject) || (d.mediumBounds !== undefined && !contractBounds(d.mediumBounds)) || (d.actionBounds !== undefined && !contractBounds(d.actionBounds)) || (d.headLocalM !== undefined && !contractVec(d.headLocalM)) || (d.actionLocalM !== undefined && !contractVec(d.actionLocalM)) || (d.roleHeightFraction !== undefined && (!d.roleHeightFraction || !contractNumber(d.roleHeightFraction.min) || !contractNumber(d.roleHeightFraction.max) || d.roleHeightFraction.min <= 0 || d.roleHeightFraction.min > d.roleHeightFraction.max || d.roleHeightFraction.max > 1)))
                 return { status: 'rejected', reason: 'composition.detail-malformed' };
             details.set(d.subject, d);
         }
@@ -242,6 +261,9 @@ export function composeCamera(input: CompositionInput): CompositionResult {
                 for (const role of s.activity.roles)
                     required.add(role.subject);
             }
+        for (const d of details.values())
+            if (d.roleHeightFraction && (!required.has(d.subject) || shot.requiredSubjects.includes(d.subject)))
+                return { status: 'rejected', reason: 'composition.role-readability-not-allowed' };
         const shapes: Shape[] = [], missing: string[] = [], omittedOptional: string[] = [];
         for (const id of [...required, ...shot.optionalSubjects.filter(id => !required.has(id))]) {
             const needed = required.has(id), s = byId.get(id), d = details.get(id);
@@ -254,8 +276,9 @@ export function composeCamera(input: CompositionInput): CompositionResult {
             }
             if (!contractVec(s.transform?.positionM) || !contractVec(s.transform.rotationXyzw, 4) || Math.abs(Math.hypot(...s.transform.rotationXyzw) - 1) > 1e-6)
                 return { status: 'rejected', reason: 'composition.transform-malformed' };
+            admitAnchors(s, 2);
             const actionSubject = shot.extent === 'activity' && shot.requiredSubjects.includes(id);
-            const bounds = shot.extent === 'medium' ? d?.mediumBounds : actionSubject ? d?.actionBounds ?? s.bounds : s.bounds;
+            const bounds = shot.extent === 'medium' ? d?.mediumBounds : shot.extent === 'activity' ? d?.actionBounds ?? s.bounds : s.bounds;
             const head = d?.headLocalM ?? s.anchors.find(a => a.role === 'head' && a.confidence > 0)?.localM;
             const action = d?.actionLocalM ?? s.anchors.find(a => a.role === 'activity' && a.confidence > 0)?.localM;
             if (!bounds || (shot.extent === 'medium' && !head) || (actionSubject && !action)) {
@@ -272,13 +295,13 @@ export function composeCamera(input: CompositionInput): CompositionResult {
             const cameraPoints = points.map(p => cameraPoint(world(p, s.transform), pose, b));
             if (cameraPoints.some(p => !p.every(finite)))
                 return { status: 'rejected', reason: 'composition.numeric-range' };
-            shapes.push({ id, required: needed, points: cameraPoints });
+            shapes.push({ id, required: needed, points: cameraPoints, heightFraction: d?.roleHeightFraction ?? shot.heightFraction });
         }
         if (missing.length)
             return incomplete(...missing);
         if (shot.focusRegionM) {
             spend(8);
-            shapes.push({ id: 'focus-region', required: true, points: corners(shot.focusRegionM).map(p => cameraPoint(p, pose, b)) });
+            shapes.push({ id: 'focus-region', required: true, points: corners(shot.focusRegionM).map(p => cameraPoint(p, pose, b)), heightFraction: shot.heightFraction });
         }
         const proposedPose = { ...pose, nearM: shot.lens.nearM, farM: shot.lens.farM };
         const requiredShapes = shapes.filter(s => s.required), current = frame(shapes, pose, shot, pose.verticalFovRadians, 0, 0, spend);
@@ -321,6 +344,8 @@ export function composeCamera(input: CompositionInput): CompositionResult {
         return { status: proposed.feasible ? 'ready' : 'infeasible', current, proposed, pose: { ...pose, eyeM: add(pose.eyeM), targetM: add(pose.targetM), verticalFovRadians: fov, nearM: shot.lens.nearM, farM: shot.lens.farM }, correctionWorldM, lensTargetRadians: target, state: { shotId: input.shotId, resetId: input.resetId, verticalFovRadians: fov, nowSeconds: clock.nowSeconds }, omittedOptional, work };
     }
     catch (error) {
+        if (error instanceof Error && error.message === 'composition.anchors-malformed')
+            return { status: 'rejected', reason: error.message };
         if (error instanceof Error && error.message === 'composition.work-limit')
             return incomplete('work-limit');
         throw error;

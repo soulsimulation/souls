@@ -147,3 +147,41 @@ test('unapplied prior lens cannot bypass per-step correction rate', () => {
     const i = input();
     assert.equal(composeCamera(change(i, { previous: { shotId: i.shotId, resetId: i.resetId, verticalFovRadians: 1.2, nowSeconds: 1 } })).status, 'rejected');
 });
+test('selected anchor and duplicate role traversals are admitted before validation/lookup', () => {
+    const i = input(), s = subject();
+    if (s.state !== 'present')
+        throw Error('fixture');
+    const manyAnchors = { ...s, anchors: Array.from({ length: 10000 }, () => ({ role: 'root' as const, localM: [0, 0, 0] as CameraVec3, confidence: 1 })) };
+    const a = composeCamera(change(i, { observation: { ...i.observation, subjects: [manyAnchors] }, context: { ...i.context, grant: { queries: 0, candidates: 100 } } }));
+    assert.equal(a.status, 'incomplete');
+    if (a.status === 'incomplete') {
+        assert.deepEqual(a.missing, ['work-limit']);
+        assert.ok(a.work <= 100);
+    }
+    const manyRoles = { ...s, activity: { kind: 'use', roles: Array.from({ length: 10000 }, () => ({ role: 'object' as const, subject: 'object' })) } };
+    const r = composeCamera(change(i, { shot: { ...i.shot, extent: 'activity' as const }, observation: { ...i.observation, subjects: [manyRoles, subject('object')] }, context: { ...i.context, grant: { queries: 0, candidates: 100 } } }));
+    assert.equal(r.status, 'incomplete');
+    if (r.status === 'incomplete') {
+        assert.deepEqual(r.missing, ['work-limit']);
+        assert.ok(r.work <= 100);
+    }
+});
+test('small required activity object needs explicit role readability; primary and clipping remain hard', () => {
+    const i = input(), s = subject();
+    if (s.state !== 'present')
+        throw Error('fixture');
+    const actor = { ...s, anchors: [...s.anchors, { role: 'activity' as const, localM: [.2, 1, 0] as CameraVec3, confidence: 1 }], activity: { kind: 'use', roles: [{ role: 'object' as const, subject: 'object' }] } };
+    const object = { ...s, id: 'object', transform: { ...transform, positionM: [.5, 0, 0] as CameraVec3 }, anchors: [], bounds: { min: [-.05, .95, -.05] as CameraVec3, max: [.05, 1.05, .05] as CameraVec3 } };
+    const action = change(i, { shot: { ...i.shot, extent: 'activity' as const }, observation: { ...i.observation, subjects: [actor, object] } });
+    assert.equal(proposal(composeCamera(action)).status, 'infeasible');
+    const explicit = change(action, { details: [{ subject: 'object', roleHeightFraction: { min: .02, max: .08 }, actionBounds: object.bounds }] });
+    const r = proposal(composeCamera(explicit));
+    assert.equal(r.status, 'ready');
+    const member = r.proposed.members.find(x => x.subject === 'object')!;
+    assert.equal(member.required, true);
+    assert.ok(member.heightFraction! >= .02 && member.heightFraction! <= .08);
+    assert.equal(proposal(composeCamera(change(explicit, { observation: { ...i.observation, subjects: [actor, { ...object, transform: { ...object.transform, positionM: [10, 0, 0] } }] } }))).status, 'infeasible');
+    assert.equal(proposal(composeCamera(change(explicit, { shot: { ...action.shot, heightFraction: { min: .95, max: .99 } } }))).status, 'infeasible');
+    assert.equal(composeCamera(change(explicit, { details: [...explicit.details!, { subject: 'actor', roleHeightFraction: { min: .01, max: 1 } }] })).status, 'rejected');
+    assert.equal(composeCamera(change(explicit, { details: [{ subject: 'object', roleHeightFraction: { min: 0, max: .08 } }] })).status, 'rejected');
+});
