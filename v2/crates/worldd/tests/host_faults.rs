@@ -594,3 +594,126 @@ while :; do "$3" serve --dir "$1/w" --socket "$4" --checkpoint-every 2048; echo 
     drop(world);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// `disk.low` (#2806 follow-up): the disk under a world runs low (a 64 MB tmpfs filled to under the threshold, in a
+/// user and mount namespace of its own), then clears. The world says it once each way, `health.json` names it, acts
+/// are still answered, and it never restarts. Linux only: elsewhere it says so and ends.
+// A real process on the real clock: the fill and the waits are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn o10_b_a_low_disk_is_said_before_it_is_full() {
+    if !cfg!(target_os = "linux") {
+        println!("B: a tmpfs of its own needs Linux");
+        return;
+    }
+    const LOW: u64 = 16 << 20;
+    let d = scratch("o10l");
+    let (seed, body, root, ground) = seeded(&d);
+    let w = Walker { body, root, ground };
+    let socket = d.join("s");
+    let mnt = d.join("m");
+    std::fs::create_dir_all(&mnt).unwrap();
+    let script = r#"mount -t tmpfs -o size=64m tmpfs "$1" || exit 97
+cp -a "$2" "$1/w" || exit 98
+"$3" serve --dir "$1/w" --socket "$4" --checkpoint-every 2048; echo "o10: exited $?""#;
+    let mut c = Command::new("unshare");
+    c.args(["--user", "--map-root-user", "--mount", "sh", "-c", script, "sh"])
+        .arg(&mnt)
+        .arg(&seed)
+        .arg(env!("CARGO_BIN_EXE_worldd"))
+        .arg(&socket)
+        .env("WORLDD_DISK_LOW_BYTES", LOW.to_string())
+        .env("WORLDD_DISK_LOW_PCT", "0");
+    let world = run(c);
+    if world
+        .line_within("listening", Duration::from_secs(60))
+        .is_none()
+    {
+        println!(
+            "B: no tmpfs of its own here (unprivileged namespaces off?); it printed:\n{}",
+            world.said()
+        );
+        return;
+    }
+    let inside = PathBuf::from(format!("/proc/{}/root", world.child.id()))
+        .join(mnt.strip_prefix("/").unwrap());
+    let health = || std::fs::read_to_string(inside.join("w/health.json")).unwrap_or_default();
+    let health_says = |state: &str, within: Duration| {
+        let began = Instant::now();
+        let want = format!("\"disk\":{{\"state\":\"{state}\"");
+        while began.elapsed() < within {
+            if health().contains(&want) {
+                return Some(began.elapsed().as_millis());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        None
+    };
+    assert!(
+        health_says("ok", Duration::from_secs(5)).is_some(),
+        "health names the disk ok at the start: {}",
+        health()
+    );
+    let mut c = None;
+    let (ms, a) = ask(&socket, &mut c, &w, 1, Duration::from_secs(30));
+    println!("B before: walk 1 answered {a:?} in {ms} ms");
+    assert!(a.is_some(), "a walk is answered before");
+
+    // The fill: all but 8 MiB of what is free, under the 16 MiB threshold and well short of full.
+    let s = rustix::fs::statvfs(&inside).expect("the tmpfs's room");
+    let free = s.f_bavail * s.f_frsize;
+    let fill = inside.join("fill");
+    {
+        let mut f = std::fs::File::create(&fill).expect("the fill");
+        let mb = vec![7u8; 1 << 20];
+        for _ in 0..(free.saturating_sub(8 << 20) >> 20) {
+            f.write_all(&mb).expect("room for the fill");
+        }
+        f.sync_all().expect("the fill synced");
+    }
+    let filled_at = world.at();
+    println!("B: {free} bytes were free; filled at {filled_at} ms");
+    let named = world.line_within("disk.low:", Duration::from_secs(3));
+    println!("B: named {named:?} at {} ms", world.at());
+    assert!(
+        named.as_deref().is_some_and(|l| l.contains("nothing is safe to shed")),
+        "disk.low is named within 3 s, with what is shed: {named:?}"
+    );
+    let in_health = health_says("low", Duration::from_secs(3));
+    println!("B: health says low after {in_health:?} ms: {}", health());
+    assert!(in_health.is_some(), "health.json names disk.low");
+    // Nothing is refused for it while low: a walk is answered, never by the disk.
+    let (ms, a) = ask(&socket, &mut c, &w, 2, Duration::from_secs(10));
+    println!("B low: walk 2 answered {a:?} in {ms} ms");
+    assert!(
+        a.as_ref().is_some_and(|a| !a.2.contains("disk")),
+        "a walk is answered while low: {a:?}"
+    );
+    // Said once, not at each reading.
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(
+        world.said().matches("worldd: disk.low:").count(),
+        1,
+        "disk.low is said once: {}",
+        world.said()
+    );
+
+    std::fs::remove_file(&fill).expect("the fill goes");
+    let cleared = world.line_within("disk.low cleared", Duration::from_secs(3));
+    println!("B: cleared {cleared:?} at {} ms", world.at());
+    assert!(cleared.is_some(), "disk.low cleared is named within 3 s");
+    assert!(
+        health_says("ok", Duration::from_secs(3)).is_some(),
+        "health.json names the disk ok again: {}",
+        health()
+    );
+    let (ms, a) = ask(&socket, &mut c, &w, 3, Duration::from_secs(10));
+    println!("B after: walk 3 answered {a:?} in {ms} ms");
+    assert!(a.is_some(), "a walk is answered after");
+    let said = world.said();
+    println!("B: it printed:\n{said}");
+    assert_eq!(said.matches("o10: exited").count(), 0, "the world never restarts");
+    drop(c.take());
+    drop(world);
+    let _ = std::fs::remove_dir_all(&d);
+}

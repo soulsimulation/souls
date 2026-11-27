@@ -224,6 +224,60 @@ fn room_to_start(dir: &Path) {
     }
 }
 
+/// How often the disk watch reads free space under the world.
+const DISK_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// `disk.low` (#2806 follow-up): the warning before `disk.full`. A thread of its own reads free space under the world
+/// each [`DISK_EVERY`] (one `statvfs`, nothing else) against `$WORLDD_DISK_LOW_BYTES` and `$WORLDD_DISK_LOW_PCT`
+/// (default 1 GiB and 5 %: under either is low), keeps it in `health.json` (`disk`), and says it once on entering
+/// (`worldd: disk.low: …`) and once on leaving (`worldd: disk.low cleared: …`). Nothing is refused: acts and ticks
+/// never read it. What is shed while low is the log's bytes a store already holds (the compactor, `sheds`); a world
+/// with no store sheds nothing, and says so. A disk whose room cannot be read is not watched.
+fn watch_disk(dir: PathBuf, sheds: bool) {
+    let env = |k: &str, d: u64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(d)
+    };
+    let low_bytes = env("WORLDD_DISK_LOW_BYTES", worldd::measures::DISK_LOW_BYTES);
+    let low_pct = env("WORLDD_DISK_LOW_PCT", worldd::measures::DISK_LOW_PCT).min(100);
+    let started = std::thread::Builder::new()
+        .name("disk-watch".into())
+        .spawn(move || {
+            loop {
+                let Ok(s) = rustix::fs::statvfs(&dir) else {
+                    return;
+                };
+                let free = s.f_bavail.saturating_mul(s.f_frsize);
+                let total = s.f_blocks.saturating_mul(s.f_frsize);
+                let (low, changed) =
+                    worldd::measures::DISK.reading(free, total, low_bytes, low_pct);
+                if changed {
+                    let pct = u128::from(free) * 100 / u128::from(total.max(1));
+                    let shed = if sheds {
+                        "the log's bytes the store already holds are given back sooner"
+                    } else {
+                        "nothing is safe to shed here (no store holds this world's log); free space on the disk"
+                    };
+                    let line = if low {
+                        format!(
+                            "worldd: disk.low: {free} bytes free under the world ({pct} %), under {low_bytes} bytes \
+                             or {low_pct} %; the world runs on; {shed}"
+                        )
+                    } else {
+                        format!("worldd: disk.low cleared: {free} bytes free under the world ({pct} %)")
+                    };
+                    let _ = writeln!(std::io::stderr(), "{line}");
+                }
+                std::thread::sleep(DISK_EVERY);
+            }
+        });
+    if let Err(e) = started {
+        let _ = writeln!(std::io::stderr(), "worldd: the disk watch did not start: {e}");
+    }
+}
+
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// How long a world with no public pointer waits for its stream's first flush before it listens with the stream still
@@ -4085,6 +4139,7 @@ fn serve(args: &[String]) -> R<()> {
     // The log's compactor (#3837): the bytes every reader has passed go back to the disk.
     let stream_floor = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let (shipped, archive_floor) = off_floors.map_or((None, None), |(m, a)| (Some(m), a));
+    watch_disk(dir.clone(), shipped.is_some());
     crate::compactor::spawn(
         log_path.clone(),
         world.durable.clone(),

@@ -148,6 +148,23 @@ fn choose(samples: &VecDeque<At>, floor: u64, kept_from: u64, min_dead: u64) -> 
     (at.offset >= kept_from.saturating_add(min_dead.max(1))).then_some(at)
 }
 
+/// Room a cut on a low disk leaves beyond its copy of the kept bytes.
+const LOW_ROOM: u64 = 4 << 20;
+/// The grace on a low disk: a cut each MiB the floor passes, not each few bytes (each cut copies what it keeps).
+const LOW_GRACE: u64 = 1 << 20;
+
+/// The grace a cut needs now (#2806 follow-up, `disk.low`): while the disk is low and a store holds the log (the
+/// shipper's mark is in the floor, so every byte before the floor is in the store, and the archive's closed objects
+/// when it has one), the bytes behind the floor are given back once they are [`LOW_GRACE`], not `min_dead`. With no
+/// store, nothing before the floor is proven held elsewhere, and the grace is unchanged.
+fn shed_grace(floors: &Floors, min_dead: u64) -> u64 {
+    if floors.shipped.is_some() && worldd::measures::DISK.is_low() {
+        min_dead.min(LOW_GRACE)
+    } else {
+        min_dead
+    }
+}
+
 /// Starts the compactor for the log at `log`; a cut gives back at least `min_dead` bytes.
 pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
     let started = std::thread::Builder::new()
@@ -192,9 +209,17 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
                         continue;
                     }
                 };
-                let Some(at) = choose(&samples, floor, kept_from, min_dead) else {
+                let Some(at) = choose(&samples, floor, kept_from, shed_grace(&floors, min_dead))
+                else {
                     continue;
                 };
+                // A cut copies what it keeps before it gives anything back: on a low disk, only when that copy fits.
+                if worldd::measures::DISK.is_low()
+                    && worldd::measures::DISK.free()
+                        < now.offset.saturating_sub(at.offset).saturating_add(LOW_ROOM)
+                {
+                    continue;
+                }
                 let note = match &floors.archive {
                     Some(Archive::Parts(p)) => p.note(at.record),
                     _ => 0,
