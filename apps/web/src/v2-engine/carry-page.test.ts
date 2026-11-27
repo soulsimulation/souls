@@ -1,4 +1,4 @@
-import test from'node:test';import assert from'node:assert/strict';import{CarriedParts,bundledEntries}from'./take-parts.ts';import{carryPageAt,carryOwnerBetween}from'./carry-page.ts';import{entityId}from'./creator-kinds.ts';import{worldPoint}from'./recorded-carry.ts';import type{NodeRec,PartRec,SampleRec}from'./source/source.ts';import type{CarryGrips,CrewMember}from'./source/carry-record.ts';
+import test from'node:test';import assert from'node:assert/strict';import{CarriedParts,bundledEntries}from'./take-parts.ts';import{carryPageAt,carryOwnerBetween,carryHeadingAt,setCarryPage,setNativeBodyEntities}from'./carry-page.ts';import{sampleTake}from'../../../../mars/viewer/engine/take/replay.ts';import type{Take}from'../../../../mars/viewer/engine/take/types.ts';import{chunkOf,TICK_US}from'./takes.ts';import{entityId}from'./creator-kinds.ts';import{worldPoint}from'./recorded-carry.ts';import type{NodeRec,PartRec,SampleRec}from'./source/source.ts';import type{CarryGrips,CrewMember}from'./source/carry-record.ts';
 const Q=2**30,I:[number,number,number,number]=[Q,0,0,0];
 const n=(id:string,parent:string|null,extra:Partial<NodeRec>={}):NodeRec=>({id,parent,kind:'fixture:part',slot:null,pos:[0,0,0],rot:I,at:null,...extra});
 const member=(body:string):CrewMember=>({body,role:'souls:side',soul:'s-'+body,link:'l-'+body,intent:'i-'+body});
@@ -11,3 +11,18 @@ test('a load removed later remains depicted and contact-bound at its earlier rec
 
 
 test('preparation is seek-deterministic, never an early active phase, and resets with a new baseline',()=>{const{parts,members,byBody,grips,feed}=fixture();feed({carryChanges:[{at:1000000,node:'crew',members},{at:1000000,node:'crew',grips:grips(1000000)}]});const a=carryPageAt(850000,byBody,parts)!;assert.equal(a.observations.length,0);assert.equal(a.preparations.length,1);assert.equal(Object.keys(a.bodies).length,6);assert(Object.values(a.bodies).every(b=>b.preparing&&b.weight===.5));assert.equal(carryPageAt(600000,byBody,parts)!.preparations.length,0);assert.equal(carryPageAt(1000000,byBody,parts)!.bodies['draw-body0'].weight,1);assert.deepEqual(carryPageAt(850000,byBody,parts),a);parts.receive({t:'snapshot',s:{nodes:[n('ground',null)],removed:[]}});assert.deepEqual(carryPageAt(850000,byBody,parts)!.preparations,[]);});
+test('a body in an unreleased hold is drawn at the world\'s own turn, walking; before the hold, after its release and any other body are not',()=>{const{parts,members,byBody,grips,feed}=fixture(),h=Math.SQRT1_2*Q,turned:[number,number,number,number]=[h,0,h,0];
+ // body0 walks +x at 1 m/s turned a quarter turn by the world (heading -pi/2 as bridge.ts reads it); the hold is 1 s to 3 s
+ const samples:SampleRec[]=[['body0','ground',null,0,0,0,0,I],['body0','ground',null,1000000,1000000,0,0,turned],['body0','ground',null,3000000,3000000,0,0,turned]];
+ feed({to:4000000,samples,carryChanges:[{at:1000000,node:'crew',members},{at:1000000,node:'crew',grips:grips(1000000,2)},{at:3000000,node:'crew',grips:grips(3000000,2,'souls:released')}]});
+ assert.equal(carryHeadingAt('draw-body0',900000,byBody,parts),null,'the hands prepare before the hold; the body is not yet held');
+ assert(Math.abs(carryHeadingAt('draw-body0',2000000,byBody,parts)!+Math.PI/2)<1e-9);assert.equal(carryHeadingAt('draw-body0',3000000,byBody,parts),null);
+ assert.equal(carryHeadingAt('draw-body5',2000000,byBody,parts),null,'not in the hold');assert.equal(carryHeadingAt('draw-nobody',2000000,byBody,parts),null);
+ // through takes.ts: the live take's chunk has the carrier at the world's turn while its travel heading is 0
+ const body={entity:'draw-body0',soul:'s',name:'A',heading:0,samples:[0,1,2,3].map(k=>({at:k*1e6,p:[k*1000,0,0] as [number,number,number]}))},tick=(us:number)=>Math.round(us/TICK_US),frame={rulesVersion:'test/1',datetime:'2026-06-01T12:00:00.000Z'};
+ const yawAt=(us:number)=>sampleTake(chunkOf([body],tick(us),frame).take as unknown as Take,0).entities['draw-body0'].yaw;
+ assert(Math.abs(yawAt(2000000))<.002,'no feed set: its travel');setNativeBodyEntities(byBody);setCarryPage(parts);
+ try{assert(Math.abs(yawAt(2000000)+Math.PI/2)<.002,'held: the world\'s turn');assert(Math.abs(yawAt(500000))<.002,'before the hold: its travel');}finally{setCarryPage(null);setNativeBodyEntities(new Map());}
+ assert(Math.abs(yawAt(2000000))<.002,'the feed gone: its travel again');
+});
+
