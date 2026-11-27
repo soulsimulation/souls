@@ -238,7 +238,9 @@ export async function pairConferenceCreator({ recipe, paths, bundle, signal }) {
   seat.cli = async (...words) => {
     signal.throwIfAborted();
     assert(resident.exitCode === null && resident.signalCode === null, 'conference-proof creator resident must remain alive');
-    return command(conferenceCreatorArgs({ clientRoot, home, soul: seat.soul }, words));
+    // Node's directory read allowance covers descendants, not chdir back to the
+    // allowance directory itself. Long socket paths temporarily change cwd.
+    return command(conferenceCreatorArgs({ clientRoot, home, soul: seat.soul }, words), { cwd: home });
   };
   return seat;
 }

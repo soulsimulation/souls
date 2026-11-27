@@ -4,8 +4,9 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createServer as unixServer } from 'node:net';
 import { atSocket, runtimeOf } from '../../../v2/client/src/home/home.mjs';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { after, test } from 'node:test';
 import { conferenceCaptureResources, conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident, conferenceCreatorArgs, verifyConferenceCreatorPermission, pairConferenceCreator } from './owned-seats.mjs';
 
@@ -137,9 +138,15 @@ test('creator capability preflight uses this exact executable and records its No
   assert(!children.at(-1).spawnargs.includes('--allow-child-process'));
 });
 
-test('the unchanged ordinary creator CLI answers on an owned socket and fails closed after that socket disappears', async () => {
-  const root = resolve(import.meta.dirname, '../../..'), home = join(directory, 'creator-cli-home'); mkdirSync(home);
-  const rt = runtimeOf(home, 'c_public'), requests = [];
+test('the exact served-layout creator CLI restores a permitted cwd on long sockets and cannot auto-spawn', async () => {
+  const source = resolve(import.meta.dirname, '../../..'), home = join(directory, 'data/seats/conference-creator/.souls');
+  mkdirSync(home, { recursive: true });
+  const root = join(home, 'bin/client/exact-source'), soul = 'c_' + 'a'.repeat(32) + '-0';
+  // Exact existing modules in the served layout: the source checkout would give
+  // an overly broad read allowance covering cwd and hide the production failure.
+  for (const path of ['v2/client/src', 'tools/lib']) cpSync(join(source, path), join(root, path), { recursive: true });
+  const rt = runtimeOf(home, soul), requests = [];
+  assert(Buffer.byteLength(rt.socket) > 100, 'exercise actual atSocket chdir/restore branch');
   const server = unixServer(socket => {
     let text = ''; socket.on('data', bytes => {
       text += bytes; if (!text.includes('\n')) return;
@@ -148,14 +155,21 @@ test('the unchanged ordinary creator CLI answers on an owned socket and fails cl
     });
   });
   await new Promise(ok => atSocket(rt.socket, path => server.listen(path, ok)));
-  const args = conferenceCreatorArgs({ clientRoot: root, home, soul: 'c_public' }, ['describe']);
+  const args = conferenceCreatorArgs({ clientRoot: root, home, soul }, ['describe']);
   assert(!args.includes('--allow-child-process'));
   try {
-    const answer = await ownedConferenceCommand(recipe, args, { ...options(), env: { ...options().env, SOULS_HOME: home } });
+    const script = `import {call} from ${JSON.stringify(pathToFileURL(join(root, 'v2/client/src/daemon/client.mjs')).href)};
+      try { await call(${JSON.stringify(home)},${JSON.stringify(soul)},{op:'describe'},{ms:200});process.exitCode=2; }
+      catch(e) { console.log(JSON.stringify({code:e.code,permission:e.permission,resource:e.resource})); }process.exit();`;
+    const denied = await ownedConferenceCommand(recipe, [...args.slice(0, 4), '--input-type=module', '-e', script],
+      { ...options(), cwd: resolve(home, '..'), env: { ...options().env, SOULS_HOME: home } });
+    assert.deepEqual(denied, { code: 'ERR_ACCESS_DENIED', permission: 'FileSystemRead', resource: resolve(home, '..') });
+    assert.deepEqual(requests, [], 'restoring the forbidden cwd failed before the ordinary request');
+    const answer = await ownedConferenceCommand(recipe, args, { ...options(), cwd: home, env: { ...options().env, SOULS_HOME: home } });
     assert.equal(answer.ok, true); assert.equal(answer.nodes[0].id, 'ground');
     assert.deepEqual(requests, [{ op: 'describe' }]);
   } finally { await new Promise(ok => server.close(ok)); }
-  const opts = { ...options(), env: { ...options().env, SOULS_HOME: home } };
+  const opts = { ...options(), cwd: home, env: { ...options().env, SOULS_HOME: home } };
   await assert.rejects(ownedConferenceCommand(recipe, args, opts), /command-exit:1/);
   const log = JSON.parse(readFileSync(opts.log));
   assert.match(log.stdout, /ERR_ACCESS_DENIED/); assert.equal(requests.length, 1);
