@@ -103,10 +103,35 @@ pub const REPLAN_WITHIN: Micros = 1_000_000;
 /// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
 pub use crate::routes::may_stand;
 
-/// How far from a body standing still `aside` may set it, and still find a place too near: farther than this from
-/// where it stands, a place can never be within two radii of a spot it tries (each within four [`CLEAR`]s of it),
-/// so the ladder leaves such places out of `taken` and the answer is the same.
-const AWAY: i64 = 4 * CLEAR + 2 * crate::ground::HUMAN_RADIUS * 1000 + 1_000;
+/// Across `line` at `at`, as [`aside`] steps: the direction across (x, z), how far across the line `at` is (0 for a line
+/// of no length, whose direction is across the way from the walker to `at`), and the direction's length, rounded down.
+fn across(at: Vec3, line: (Vec3, Vec3)) -> (i64, i64, i64, i64) {
+    let (a, b) = line;
+    let (dx, dz) = (b.x - a.x, b.z - a.z);
+    let d = len(a, b);
+    let (nx, nz, lat) = if d > 0 {
+        let lat = (i128::from(at.x - a.x) * i128::from(-dz)
+            + i128::from(at.z - a.z) * i128::from(dx))
+            / i128::from(d);
+        (-dz, dx, lat as i64)
+    } else {
+        (at.z - a.z, a.x - at.x, 0)
+    };
+    (nx, nz, lat, len(Vec3::ZERO, Vec3::new(nx, 0, nz)))
+}
+
+/// How far from `at` a place in `taken` can be and still change what [`aside`] answers for `at` and `line`: a place
+/// farther than this is two radii or more from every spot it tries, so leaving it out gives the same answer. A step is
+/// under four [`CLEAR`]s across, but its direction's length is rounded down (a short line's is a few µm), so a spot
+/// can be up to `1 + 1/n` times as far; one µm more for the rounding of `len`, and a millimetre to spare.
+pub fn away(at: Vec3, line: (Vec3, Vec3)) -> i64 {
+    let (_, _, _, n) = across(at, line);
+    if n == 0 {
+        return 0;
+    }
+    let far = 4 * CLEAR;
+    far + (far + n - 1) / n + 1 + 2 * crate::ground::HUMAN_RADIUS * 1000 + 1_000
+}
 
 /// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to), when it is on
 /// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from
@@ -123,15 +148,7 @@ pub fn aside(
     let (dx, dz) = (b.x - a.x, b.z - a.z);
     let d = len(a, b);
     // Across the line (a line of no length: across the way from the walker to the body).
-    let (nx, nz, lat) = if d > 0 {
-        let lat = (i128::from(at.x - a.x) * i128::from(-dz)
-            + i128::from(at.z - a.z) * i128::from(dx))
-            / i128::from(d);
-        (-dz, dx, lat as i64)
-    } else {
-        (at.z - a.z, a.x - at.x, 0)
-    };
-    let n = len(Vec3::ZERO, Vec3::new(nx, 0, nz));
+    let (nx, nz, lat, n) = across(at, line);
     if n == 0 {
         return None;
     }
@@ -946,9 +963,9 @@ impl Ladder {
                             }
                             by
                         });
-                        // Only the places `aside` could find too near: none farther than AWAY from where the body
-                        // stands can come within its two radii of a spot it tries (with 1,000 bodies on a node, a
-                        // crowd's step asides each read every one, and a tick ran over its budget).
+                        // Only the places `aside` could find too near ([`away`]): with 1,000 bodies on a node, a
+                        // crowd's step asides each read every one, and a tick ran over its budget.
+                        let reach = away(sp, line);
                         let taken = placed
                             .get(&sn)
                             .into_iter()
@@ -961,7 +978,7 @@ impl Ladder {
                                     .filter(|&&(n, _)| n == sn)
                                     .map(|&(_, at)| at),
                             )
-                            .filter(|&at| len(at, sp) <= AWAY)
+                            .filter(|&at| len(at, sp) <= reach)
                             .collect::<Vec<_>>();
                         if let Some(to) = aside(town, sn, sp, line, &taken) {
                             let track = Track {
@@ -1222,11 +1239,28 @@ mod tests {
         }
     }
 
-    /// The ladder leaves out of `taken` the places farther than [`AWAY`] from the still body: `aside` gives the same
-    /// answer without them, for bodies on the line and off it, crowded round or far, at every distance near the bound.
+    /// The ladder leaves out of `taken` the places farther than [`away`] from the still body: `aside` gives the same
+    /// answer without them, for long lines and lines of a few µm or none (whose direction across is rounded down the
+    /// most), with places on every spot it tries and just past the bound.
     #[test]
     fn places_beyond_away_never_change_a_step_aside() {
         let node = Id::new(replica::ids::Scope([7; 16]), 1).unwrap();
+        // The review's case: a line of 1 µm, a place on each of the six spots `aside` tries (none free), and one
+        // farther out that is free only when those six are left out.
+        let (line, at) = (
+            (Vec3::ZERO, Vec3::new(1, 0, 1)),
+            Vec3::new(330_000, 0, -329_999),
+        );
+        let mut spots = Vec::new();
+        let mut taken: Vec<Vec3> = Vec::new();
+        while let Some(to) = aside(&Open, node, at, line, &taken) {
+            spots.push(to);
+            taken.push(to);
+        }
+        assert_eq!(spots.len(), 6, "{spots:?}");
+        for to in &spots {
+            assert!(len(*to, at) <= away(at, line), "{to:?} past away");
+        }
         let mut seed = 0x2545_f491_4f6c_dd1d_u64;
         let mut next = |m: i64| {
             seed ^= seed << 13;
@@ -1235,20 +1269,29 @@ mod tests {
             (seed % (2 * m as u64 + 1)) as i64 - m
         };
         let mut found = 0;
-        for _ in 0..4000 {
-            let at = Vec3::new(next(400_000), 0, next(400_000));
-            let line = (
-                Vec3::new(next(3_000_000), 0, next(3_000_000)),
-                Vec3::new(next(3_000_000), 0, next(3_000_000)),
-            );
-            let n = 1 + next(40).unsigned_abs() as usize;
-            let spread = [AWAY / 2, AWAY, AWAY + 20_000][(next(1) + 1) as usize];
-            let taken: Vec<Vec3> = (0..n)
-                .map(|_| Vec3::new(at.x + next(spread), 0, at.z + next(spread)))
-                .collect();
-            let near: Vec<Vec3> = taken.iter().copied().filter(|&t| len(t, at) <= AWAY).collect();
+        for case in 0..6000 {
+            let a = Vec3::new(next(400_000), 0, next(400_000));
+            // Long lines, lines of a few µm, and none.
+            let reach = [3_000_000, 3_000, 2][case % 3];
+            let line = (a, Vec3::new(a.x + next(reach), 0, a.z + next(reach)));
+            let at = Vec3::new(a.x + next(700_000), 0, a.z + next(700_000));
+            let bound = away(at, line);
+            // Every spot it would try is taken, then places in a ring just inside and just past the bound.
+            let mut taken: Vec<Vec3> = Vec::new();
+            while let Some(to) = aside(&Open, node, at, line, &taken) {
+                taken.push(to);
+            }
+            for _ in 0..1 + next(30).unsigned_abs() {
+                let r = bound + next(40_000);
+                let (x, z) = (next(1_000), next(1_000));
+                let k = len(Vec3::ZERO, Vec3::new(x, 0, z)).max(1);
+                taken.push(Vec3::new(at.x + x * r / k, 0, at.z + z * r / k));
+            }
+            // Free some spots at random, so some cases step aside.
+            taken.retain(|_| next(2) != 0);
+            let near: Vec<Vec3> = taken.iter().copied().filter(|&t| len(t, at) <= bound).collect();
             let whole = aside(&Open, node, at, line, &taken);
-            assert_eq!(aside(&Open, node, at, line, &near), whole);
+            assert_eq!(aside(&Open, node, at, line, &near), whole, "case {case}");
             found += usize::from(whole.is_some());
         }
         assert!(found > 100, "the cases step bodies aside ({found})");

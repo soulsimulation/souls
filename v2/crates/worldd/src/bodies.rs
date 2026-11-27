@@ -1221,17 +1221,7 @@ impl Bodies {
     /// The bodies whose pose changed since the last call, in id order, a body in a seat's slot with its stance: what
     /// the tick's record keeps of them (K18), so a restart stands each where it last stood or seats it again.
     pub fn moved(&mut self) -> Vec<(Id, Pose, Option<Stance>)> {
-        let mut out = Vec::new();
-        for (id, (pose, stance)) in self.every() {
-            if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
-                continue;
-            }
-            if self.logged.get(&id) != Some(&pose) {
-                self.logged.insert(id, pose);
-                out.push((id, pose, stance));
-            }
-        }
-        out
+        self.moved_and_poses().0
     }
 
     /// [`Bodies::moved`] and [`Bodies::poses`] from one pass over the bodies: the tick's record reads both. The poses
