@@ -278,3 +278,20 @@ test("the site admin's veto: a vetoed image is refused at upload (451) and no lo
   admin(sha(DEFAULT), 'unhide');
   assert.ok(def);
 });
+
+test("27 Nov: a world with no owner's picture shows the launcher's drawing of it (world-covers.mjs) before its template's", async () => {
+  const { makeCover } = await import('./world-covers.mjs');
+  const picture = jpeg(1280, 720, { pad: 41 }), asked = [];
+  const chromium = { launch: async () => ({ close: async () => {}, newPage: async () => ({ goto: async (u) => { asked.push(u); }, waitForFunction: async () => {}, waitForTimeout: async () => {}, screenshot: async () => picture }) }) };
+  assert.equal((await row('brief')).thumbnailSource, 'template');
+  await makeCover({ page: `${ORIGIN}/w/brief/`, out: join(data, 'covers', 'brief'), eye: [-60.5, 41.3, 60.5], at: [0, 0, 0], chromium });
+  assert.match(asked[0], /\/w\/brief\/\?shot=1&hour=12%3A00&eye=-60\.5%2C41\.3%2C60\.5&at=0%2C0%2C0$/, 'its own page, in shot mode at noon, from the framing');
+  await new Promise((r) => setTimeout(r, 1100));   // the kept index is looked at once a second
+  const drawn = await row('brief');
+  assert.deepEqual([drawn.thumbnail, drawn.thumbnailSource], [`/__sim/thumbs/brief/${sha(picture)}.jpg`, 'drawn']);
+  const r = await api(drawn.thumbnail); assert.equal(r.status, 200); assert.equal(r.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), picture);
+  assert.equal((await api(`/__sim/thumbs/brief/${sha(DEFAULT)}.jpg`)).status, 404, 'only the kept drawing is served');
+  assert.equal((await put('brief', jpeg(1280, 720, { pad: 43 }), 'dev:gene')).status, 200);
+  assert.equal((await row('brief')).thumbnailSource, 'owner', "the owner's own picture always wins");
+});

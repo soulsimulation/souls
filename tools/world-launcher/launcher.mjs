@@ -133,6 +133,7 @@ import { canonicalRequest } from './world-urls.mjs';
 import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
 import { movedAssets } from './moved-assets.mjs';
 import { placeShotKeeper, placeShots } from './place-shots.mjs';
+import { coverKeeper, worldCovers } from './world-covers.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -313,8 +314,16 @@ export async function openLauncher(cfg = {}) {
   // default <data>/worlds/assets/moderation-site.jsonl (each world's DATA_DIR/../assets), unless the environment names it.
   const vetoed = adminVetoes({ ttlMs: cfg.moderationVetoTtlMs, siteLog: cfg.moderationSiteLog ?? (process.env.SIM_MODERATION_SITE_LOG || process.env.ASSET_DIR ? defaultSiteLog() : join(dataDir, 'worlds', 'assets', 'moderation-site.jsonl')) });
   const worldModeration = (w) => (w ? { file: join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf(w) } : null);
-  // a world with neither picture shows its fullest kept Explore place picture (a moved world's, place-shots.mjs), never grey
-  const thumbView = (w) => { const t = thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) }), c = t.thumbnail || !moved(w) ? null : shots.cover(w.slug);
+  // the card's picture shows the world itself (27 Nov): its owner's, else the launcher's own drawing of it
+  // (world-covers.mjs), else its fullest kept Explore place picture (a moved world's, place-shots.mjs), and only then its
+  // template's default (the empty plain's is bare grass, whatever was built on it since); never grey when one exists
+  const covers = worldCovers({ dir: join(dataDir, 'covers') });
+  const thumbView = (w) => {
+    const t = thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) });
+    if (t.thumbnailSource === 'owner') return t;
+    const own = covers.current(w.slug);
+    if (own && !vetoed(own.sha, worldModeration(w.routeOnly ? null : w))) return { thumbnail: `${B}/__sim/thumbs/${w.slug}/${own.sha}.jpg`, thumbnailSource: 'drawn' };
+    const c = moved(w) ? shots.cover(w.slug) : null;
     return c ? { thumbnail: `${wp(w.slug)}${c}`, thumbnailSource: 'place' } : t; };
   const marsWebDir = cfg.marsWebDir ?? (existsSync(join(root, '.lane/mars-web')) ? join(root, '.lane/mars-web') : undefined);
   const log = cfg.log ?? ((s) => console.log(`[launcher] ${s}`));
@@ -1939,7 +1948,7 @@ export async function openLauncher(cfg = {}) {
       const thumbGet = (req.method === 'GET' || req.method === 'HEAD') && path.match(THUMB_PATH);
       if (thumbGet) {
         const w = thumbGet[1] === '_template' ? null : registry.get(thumbGet[1]);
-        const file = vetoed(thumbGet[2], worldModeration(w)) ? null : thumbGet[1] === '_template' ? defaultThumbs.file(thumbGet[2]) : w && w.thumbnail?.sha === thumbGet[2] ? thumbnailFile(registry.worldDir(w.slug), thumbGet[2]) : null;   // a vetoed picture is gone
+        const file = vetoed(thumbGet[2], worldModeration(w)) ? null : thumbGet[1] === '_template' ? defaultThumbs.file(thumbGet[2]) : w && w.thumbnail?.sha === thumbGet[2] ? thumbnailFile(registry.worldDir(w.slug), thumbGet[2]) : covers.file(thumbGet[1], thumbGet[2]);   // a vetoed picture is gone; else the launcher's drawing of the world (world-covers.mjs)
         if (!file) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         res.setHeader('x-content-type-options', 'nosniff');
         if (serveFile(res, file, THUMB_CACHE, req)) return;
@@ -2005,7 +2014,7 @@ export async function openLauncher(cfg = {}) {
       }
       if (path === '/__sim/launcher' && req.method === 'GET') {
         if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
-        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), placeShots: shotKeeper?.status() ?? null, children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
+        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), placeShots: shotKeeper?.status() ?? null, covers: coverKeep?.status() ?? null, children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
       }
       // lane L7: Prometheus text for the worlds and the launcher (LOAD-CONTRACT §5), loopback only
       if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb(), ...launcherGauges() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), viewers: live.get(w.slug) ?? 0, refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
@@ -2220,6 +2229,12 @@ export async function openLauncher(cfg = {}) {
   const shotKeeper = cfg.placeShotsDraw ? placeShotKeeper({ shots, dir: join(dataDir, 'place-shots'), log,
     worlds: () => registry.worlds.filter((w) => moved(w)).flatMap((w) => { const p = cutover?.publishedPlaces(w); return p?.places?.length ? [{ slug: w.slug, places: p.places }] : []; }),
     page: (slug) => `${publicOrigin}${wp(slug)}/`, canStart: () => memAvailableMb() >= (prod.minFreeMb ?? 0) + 2048 }) : null;
+  // 27 Nov: the home page's picture of each listed world its owner gave none, drawn the same way (world-covers.mjs): one
+  // at a time, never while Explore's pictures are being drawn, redrawn daily so it shows what was built since
+  const coverKeep = cfg.placeShotsDraw ? coverKeeper({ covers, dir: join(dataDir, 'covers'), log, busy: () => !!shotKeeper?.status().running,
+    worlds: () => [...registry.worlds, ...routeOnlyWorlds()].filter((w) => !w.fork && !isUnlisted(w) && thumbView(w).thumbnailSource !== 'owner' && !closing.has(w.slug))
+      .map((w) => ({ slug: w.slug, targets: (w.routeOnly ? null : cutover?.publishedPlaces(w)?.places)?.map((p) => p.target) ?? [] })),
+    page: (slug) => `${publicOrigin}${wp(slug)}/`, canStart: () => memAvailableMb() >= (prod.minFreeMb ?? 0) + 2048 }) : null;
   const stillTimer = unloadStill ? setInterval(() => { if (unloading) return; unloading = true; unloadSweep().catch((e) => log(`unloading still worlds: ${e.message}`)).finally(() => { unloading = false; }); }, STILL.everyMs) : null;
   const alarmTimer = unloadStill ? setInterval(() => alarmScan(), STILL.alarmMs) : null;
   stillTimer?.unref(); alarmTimer?.unref();
@@ -2336,7 +2351,7 @@ export async function openLauncher(cfg = {}) {
      *  a held port every moment here is refused connections, so it stops at once, as before. After a handover (`gentle`)
      *  the keeper's port is served by the next launcher, so that exit is gentle too. */
     close: async ({ drainMs = 3_000, idleMs = 1_500, gentle = process.env.SIM_PORT_HELD === '1' } = {}) => {
-      if (closed) return; closed = true; shotKeeper?.close(); clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
+      if (closed) return; closed = true; shotKeeper?.close(); coverKeep?.close(); clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)
