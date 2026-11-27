@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence, searchPlaces, snapshotPlaces, withV2Stream } from './cutover.mjs';
+import { newEngineClock } from './page-meta.mjs';
 import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
@@ -360,6 +361,9 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
   const html = await page.text(), c = config(html);
   assert.match(html, /<title>Fresh Fields · Souls<\/title>/); assert.match(html, /<link rel="canonical" href="http:\/\/127\.0\.0\.1:\d+\/w\/fresh\/">/);
+  // 27 Nov: the world's clock when the page was sent, before any script reads it, so the first frame has the world's light
+  const sent = /<head[^>]*><script>window\.__simWorldClock="([^"]+)";<\/script>/.exec(html)?.[1];
+  assert.ok(sent && Math.abs(Date.parse(`${sent}Z`) - Date.parse(`${newEngineClock()}Z`)) < 60_000, `the page's world clock: ${sent}`);
   assert.deepEqual([c.worldKey, c.worldPath, c.worldId, c.worldName, c.worldEngine, c.authProvider, c.devAuth], ['fresh', '/w/fresh', 'v2:fresh', 'Fresh Fields', true, 'dev', true]);
   assert.deepEqual([c.v2Stream, c.v2History, c.v2Bodies, c.v2Gateway, c.v2Directory], ['/s/fresh/', '/s/h-fresh/', '/w/fresh/v2/bodies/', '/w/fresh/v2/ws', '/']);
   const { soulClient, ...routed } = await (await get('/w/fresh/v1/config', { accept: 'application/json' })).json();

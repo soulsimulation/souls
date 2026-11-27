@@ -17,6 +17,32 @@ export function withInlineConfig(html, config) {
   return html.slice(0, end) + `<script>window.__simConfig=${scriptJson(config)}</script>` + html.slice(end);
 }
 
+/** The new engine's world clock now: the naive local datetime (`YYYY-MM-DDTHH:MM:SS.sss`, no zone) the page's stream
+ *  gives its sky (apps/web/src/v2-engine/source/sky-record.ts localIsoAt), on the calendar worldd writes into every world
+ *  it serves (v2/crates/worldd/src/serve.rs eden_sky): world time is the machine's clock, the civil origin 0, a day
+ *  86,400 s, and New York's offsets (UTC−5; UTC−4 from 2 AM on March's second Sunday to 2 AM on November's first).
+ *  The page's first frame lights this (27 Nov: a phone at night showed midday until the stream's clock came, 4–8 s);
+ *  the stream's own clock follows it. */
+export function newEngineClock(nowMs = Date.now()) {
+  const DAY = 86_400_000, HOUR = 3_600_000, EST = -5 * HOUR;
+  const y = new Date(nowMs).getUTCFullYear();
+  // day number (since 1970-01-01, a Thursday) of the `n`th Sunday on or after the 1st of `month`
+  const sunday = (month, n) => { const d = Date.UTC(y, month - 1, 1) / DAY; return d + (7 - ((d + 4) % 7 + 7) % 7) % 7 + 7 * (n - 1); };
+  const spring = sunday(3, 2) * DAY + 2 * HOUR - EST, autumn = sunday(11, 1) * DAY + 2 * HOUR - (EST + HOUR);
+  const offset = nowMs >= spring && nowMs < autumn ? EST + HOUR : EST;
+  return new Date(nowMs + offset).toISOString().slice(0, 23);
+}
+
+/** The world page's HTML with the world's clock when it was sent (`window.__simWorldClock`, which apps/web/src/world-env.ts
+ *  entryWorldClock reads), first thing in <head>: the launcher's copy of apps/server/src/edge-snapshot.ts withWorldClock. */
+export function withWorldClock(html, datetime) {
+  if (typeof datetime !== 'string' || !/^\d{4}-\d{2}-\d{2}T[0-9:.]+$/.test(datetime)) return html;
+  const at = html.search(/<head[^>]*>/i);
+  if (at < 0) return html;
+  const end = html.indexOf('>', at) + 1;
+  return html.slice(0, end) + `<script>window.__simWorldClock=${JSON.stringify(datetime)};</script>` + html.slice(end);
+}
+
 const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 /** #894: the world page's own title, description, canonical URL and Open Graph/Twitter fields. The web build's index.html
  *  carries the home page's (it is both pages); without this every world page canonicalises to the home page and cannot be

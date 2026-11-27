@@ -144,7 +144,7 @@ import { makeHandoff } from './handoff.mjs';
 import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, short, soulCeilings } from './flood.mjs';
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
 import { readAlertProblems } from './telemetry/alerts.mjs';   // #2541
-import { defaultSiteLog, withInlineConfig, withWorldMeta } from './page-meta.mjs';
+import { defaultSiteLog, newEngineClock, withInlineConfig, withWorldClock, withWorldMeta } from './page-meta.mjs';
 import { addressKey, forwardedAddress } from './address-key.mjs';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
@@ -889,7 +889,8 @@ export async function openLauncher(cfg = {}) {
     if (!stream) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
     const base = `${publicOrigin}${wp(w.slug)}`;
-    const body = Buffer.from(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), movedConfig(w)));
+    // 27 Nov: with the world's clock, so its first frame has the world's light (the old world server wrote it too)
+    const body = Buffer.from(withWorldClock(withInlineConfig(withWorldMeta(html, { name: w.name ?? w.slug, url: `${base}/` }), movedConfig(w)), newEngineClock()));
     const head = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), 'x-souls-engine': 'new' };
     res.writeHead(200, w.routeOnly ? { ...head, ...(isUnlisted(w) ? { 'x-robots-tag': NOINDEX } : {}) } : robotsOf(w.slug, head)).end(req.method === 'HEAD' ? undefined : body);
     return true;
