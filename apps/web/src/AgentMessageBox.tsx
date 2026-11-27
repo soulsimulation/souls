@@ -2,7 +2,8 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {useDraft, writeDraft} from './input-draft.ts';
 import type {Api} from './useSouls.ts';
 import {windowCode} from './god-ui/join-api.ts';
-import {reportAgentPresence,withLink} from './agent-presence.ts';
+import {clockAt,reportAgentPresence,withLink} from './agent-presence.ts';
+import {readLink} from './soul-state.ts';
 import {pollInbox} from './inbox-poll.ts';
 import {v2OwnerMailbox} from './v2-engine/owner-mailbox.ts';
 import './AgentMessageBox.css';
@@ -12,7 +13,8 @@ export type AgentInbox = {
   lastSeenAt: number | null;
   /** A Soul's box: when its agent last had a listen open (null = never). */
   listenedAt?: number | null;
-  latest: {id: string; text: string; state: 'sent' | 'delivered' | 'acknowledged'; sentAt?: number; reply?: string | null; result?: string | null; outcome?: 'done' | 'failed' | 'withdrawn'; progress?: string | null} | null;
+  /** `readAt` (a v2 world's mailbox): when its agent read it; "Thinking…" lasts only `THINKING_MS` after, while connected. */
+  latest: {id: string; text: string; state: 'sent' | 'delivered' | 'acknowledged'; sentAt?: number; readAt?: number; reply?: string | null; result?: string | null; outcome?: 'done' | 'failed' | 'withdrawn'; progress?: string | null} | null;
   /** Messages waiting for the agent (the shown one included), and whether a listener is waiting right now. */
   queued?: number;
   presence?: 'listening' | 'working' | 'recent' | 'away';
@@ -22,7 +24,13 @@ export type AgentInbox = {
   now?: unknown;
   /** #1313: the owner view's act under way for the newest message, or thinking (read by `readDoing`). */
   doing?: unknown;
+  /** #1330: the world or the page's connection to it is down (a v2 world's box socket): nothing can be sent now. */
+  unavailable?: boolean;
+  /** First-day 27 Nov: how long a message is kept for an agent that is not reading (a v2 world's mailbox), if it lapses. */
+  waitsMs?: number;
 };
+/** #1330: the box's one line while the world is unavailable; what is typed stays in the box. */
+export const UNAVAILABLE_LINE = 'The world is unavailable right now, so this can\'t be sent. Your message stays here; send it when the world is back.';
 export type Doing = {phase: 'thinking'} | {phase: 'running' | 'done' | 'failed' | 'refused' | 'cut' | 'paused'; text: string; reason?: string; step?: {n: number; of: number}};
 const PHASES = ['running', 'done', 'failed', 'refused', 'cut', 'paused'] as const;
 const PHASE_WORD: Record<(typeof PHASES)[number], string> = {running: 'running', done: 'done', failed: 'failed', refused: 'refused', cut: 'cut short', paused: 'paused'};
@@ -67,6 +75,31 @@ export function checkMessagesHint(inbox: AgentInbox | null, name: string | undef
   if (inbox.doing) return null;
   return now - latest.sentAt > CHECK_MESSAGES_MS ? `If this is taking long, try telling ${name}'s agent "check your messages".` : null;
 }
+/** First-day 27 Nov: a Soul's newest message its agent has not read, while the agent is not connected or connected but
+ *  not listening (asleep): the plain truth and how long the message waits for it. Null while the agent listens, or
+ *  nothing is known: the card never claims what it was not told. */
+export function notReadingLine(inbox: AgentInbox | null, now: number): string | null {
+  const latest = inbox?.latest, link = readLink(inbox?.link);
+  if (!inbox || !latest || latest.state !== 'sent' || !link) return null;
+  const why = link.state !== 'connected' ? 'Your agent isn\'t connected.' : link.reason === 'asleep' ? 'Your agent is connected but not listening now (asleep).' : null;
+  const until = inbox.waitsMs && latest.sentAt !== undefined ? latest.sentAt + inbox.waitsMs : null;
+  // listening, and the directory let it lapse unread all the same
+  if (!why) return until !== null && until <= now ? `Your message waited until ${clockAt(until, now)} and was not read: send it again.` : null;
+  if (until === null) return `${why} Your message waits until it is back.`;
+  return until > now ? `${why} Your message waits for it until ${clockAt(until, now)}.` : `${why} Your message waited until ${clockAt(until, now)} and was not read: send it again when your agent is back.`;
+}
+/** First-day 27 Nov: how long after its agent read a message the card says "Thinking…" with no answer; then it says
+ *  when it was read and that no answer came (an agent's turn can end, or it can go, without answering). */
+export const THINKING_MS = 3 * 60_000;
+/** A read message with no answer once "Thinking…" no longer holds: when it was read, or that it lapsed unanswered. */
+export function readNoAnswer(inbox: AgentInbox | null, now: number): string | null {
+  const latest = inbox?.latest, readAt = latest?.readAt;
+  if (!inbox || !latest || latest.state !== 'delivered' || readAt === undefined || readDoing(inbox.doing)?.phase !== 'thinking') return null;
+  const until = inbox.waitsMs && latest.sentAt !== undefined ? latest.sentAt + inbox.waitsMs : null;
+  if (until !== null && now >= until) return `Expired ${clockAt(until, now)}, not answered`;
+  const here = readLink(inbox.link)?.state === 'connected';
+  return here && now - readAt < THINKING_MS ? null : `Read ${clockAt(readAt, now)}, no answer yet`;
+}
 type Transport = (text?: string) => Promise<AgentInbox>;
 
 /** A single private note and receipt, deliberately without a conversation history. */
@@ -107,26 +140,36 @@ export function AgentMessageBoxView({kind, name, inbox, prompt = '', text, sendi
   // the owner's newest message; `queued` counts what still waits (the agent works oldest first)
   const doing = soul && latest ? readDoing(inbox?.doing) : null;
   // #1313: picked up and not yet answered or acted on, with the agent here: it is working on it
-  const thinking = doing?.phase === 'thinking' && latest?.state === 'delivered';
+  // first-day 27 Nov: on a v2 world only while connected and for a while after the read, then when it was read
+  const noAnswer = soul ? readNoAnswer(inbox, now) : null;
+  const thinking = doing?.phase === 'thinking' && latest?.state === 'delivered' && !noAnswer;
   const act = doing && doing.phase !== 'thinking' ? doing : null;
-  const state = latest ? thinking ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^Picked up/, 'Thinking…') : receiptState(latest, inbox?.queued ?? 0, now) : '';
+  const down = soul && inbox?.unavailable === true;
+  const notReading = soul && !down ? notReadingLine(inbox, now) : null;
+  const notLink = readLink(inbox?.link);
+  const notReadingWhy = notLink?.state !== 'connected' ? 'disconnected' : notLink.reason === 'asleep' ? 'asleep' : 'expired';
+  const state = latest ? noAnswer ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^Picked up/, noAnswer)
+    : thinking ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^Picked up/, 'Thinking…')
+    : notReading ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^(Sent|Not picked up yet \([^)]*\))/, notReadingWhy === 'expired' ? 'Expired' : 'Waiting') : receiptState(latest, inbox?.queued ?? 0, now) : '';
   // D3c: until the result, the world's progress line (an act served an earlier step: "now: …; not resting yet")
   const answers = latest ? [latest.reply, latest.result ?? latest.progress].filter((x): x is string => !!x) : [];
   const receipt = latest ? [state, latest.text, ...answers].join(' · ') : '';
-  const hint = soul ? checkMessagesHint(inbox, name, now) : null;
-  return <div className="agent-message" data-agent-message={kind}>
+  const hint = soul && !down ? checkMessagesHint(inbox, name, now) : null;
+  return <div className="agent-message" data-agent-message={kind} data-unavailable={down ? '1' : undefined}>
     {!soul && <div className="agent-message-presence" data-agent-presence={inbox?.presence ?? (inbox ? inbox.connected ? 'recent' : 'away' : 'unknown')}>
       <span>{presence ? presence.text : 'Agent status unavailable'}</span>
       {presence?.away && onCopy && <button type="button" onClick={onCopy} title={prompt}>{copied ? 'Copied' : 'Copy start prompt'}</button>}
     </div>}
     <form className="agent-message-form" onSubmit={onSend}>
       <input aria-label="Message your agent" placeholder="Message your agent…" value={text} onChange={e => onText(e.target.value)} maxLength={1000} disabled={sending} autoComplete="off"/>
-      <button type="submit" disabled={sending || !text.trim()}>{sending ? 'Sending…' : 'Send'}</button>
+      <button type="submit" disabled={sending || down || !text.trim()}>{sending ? 'Sending…' : 'Send'}</button>
     </form>
+    {down && <p className="agent-message-unavailable" role="status" data-world-unavailable="1">{UNAVAILABLE_LINE}</p>}
     {latest && <p className="agent-message-receipt" role="status" title={receipt} data-message-state={latest.state} data-thinking={thinking ? '1' : undefined}>
       <span className="agent-message-state">{state}</span><span aria-hidden="true"> · </span><span className="agent-message-text">{latest.text}</span>
       {answers.map((a, i) => <span key={i} className="agent-message-answer"><span aria-hidden="true"> · </span><span className="agent-message-reply">{a}</span></span>)}
     </p>}
+    {notReading && <p className="agent-message-hint" role="status" data-not-reading={notReadingWhy}>{notReading}</p>}
     {hint && <p className="agent-message-hint" data-check-messages="1">{hint}</p>}
     {act && <p className="agent-message-act" data-act-phase={act.phase} title={doingLine(act)}><i aria-hidden="true"/><span>{doingLine(act)}</span></p>}
     {error && <p className="agent-message-error" role="alert">{error}</p>}
@@ -193,9 +236,11 @@ export function SoulMessageBox({name, inbox, send, draftKey}: {name?: string; in
   const [text, setText] = useDraft(draftKey), [sending, setSending] = useState(false), [error, setError] = useState('');
   const mounted = useRef(true);
   useEffect(() => {mounted.current = true; return () => {mounted.current = false;};}, []);
+  // #1330: the outage's line says why it can't send; an earlier error is from before it
+  useEffect(() => {if (inbox?.unavailable) setError('');}, [inbox?.unavailable]);
   const onSend = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (sending || !text.trim()) return;
+    if (sending || inbox?.unavailable || !text.trim()) return;
     setSending(true); setError('');
     try {await send(text.trim()); writeDraft(draftKey, ''); if (mounted.current) setText('');}
     catch (e) {if (mounted.current) setError(e instanceof Error ? e.message : 'Message could not be sent. Try again.');}

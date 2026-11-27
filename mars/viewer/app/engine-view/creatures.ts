@@ -92,6 +92,7 @@ class DuckRig extends Rig {
       mesh(sphere, orange, [0.08, -0.012, 0], [0.05, 0.016, 0.035]),
       mesh(sphere, dark, [0.035, 0.02, 0.048], [0.011, 0.011, 0.011]),
       mesh(sphere, dark, [0.035, 0.02, -0.048], [0.011, 0.011, 0.011]));
+    this.head.userData.portraitFace = true; // what a portrait frames (apps/web/src/SoulAvatars.ts)
     this.neck = group([0.13, 0.05, 0], mesh(sphere, white, [0, 0.06, 0], [0.045, 0.08, 0.045]), this.head);
     this.body = group([0, 0.2, 0], mesh(sphere, white, [0, 0, 0], [0.2, 0.12, 0.13]), this.tail, ...this.wings, this.neck);
     this.legs = [1, -1].map((side) => {
@@ -139,6 +140,7 @@ class SnailRig extends Rig {
     this.stalks = [1, -1].map((side) => { const g = group([0.19, 0.08, side * 0.022], mesh(stalk, skin, [0, 0.07, 0], [1, 0.14, 1]), mesh(sphere, dark, [0, 0.14, 0], [0.012, 0.012, 0.012])); g.rotation.x = side * 0.25; g.rotation.z = -0.25; return g; });
     this.feelers = [1, -1].map((side) => { const g = group([0.21, 0.05, side * 0.025], mesh(stalk, skin, [0, 0.025, 0], [0.8, 0.05, 0.8])); g.rotation.x = side * 0.6; g.rotation.z = -0.9; return g; });
     this.foot = group([0, 0.035, 0], mesh(capsule, skin, [0, 0, 0], [1, 0.7, 1]), head, ...this.stalks, ...this.feelers);
+    for (const o of [head, ...this.stalks]) o.userData.portraitFace = true;
     // the shell: a tube along a shrinking logarithmic spiral, banded from rim to apex
     const pts: THREE.Vector3[] = [], n = 120, turns = 2.6;
     for (let i = 0; i <= n; i++) { const a = (i / n) * turns * 2 * Math.PI, r = 0.1 * Math.exp(-0.21 * a); pts.push(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0.02 * (i / n))); }
@@ -195,6 +197,7 @@ class DogRig extends Rig {
       mesh(sphere, dark, [0.055, 0.06, 0.042], [0.012, 0.012, 0.012]),
       mesh(sphere, dark, [0.055, 0.06, -0.042], [0.012, 0.012, 0.012]),
       ...this.ears);
+    this.head.userData.portraitFace = true;
     this.tail = group([-0.24, 0.05, 0], mesh(seg, coat, [0, 0.1, 0], [0.55, 1, 0.55]));
     this.tail.rotation.z = 0.7;
     const neck = mesh(sphere, coat, [0.2, 0.05, 0], [0.07, 0.09, 0.065]); neck.rotation.z = -0.6;

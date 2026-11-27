@@ -1,0 +1,8 @@
+[
+ {"cam": "wide", "at": "offer#1", "off": -8, "dur": 8},
+ {"cam": "orbit", "at": "lift#1", "off": -8, "dur": 12},
+ {"cam": "front", "at": "to#1", "off": 0, "dur": 10},
+ {"cam": "pass", "at": "to#1", "off": 10, "dur": 10},
+ {"cam": "orbitbay", "at": "set-down#1", "off": -3, "dur": 8},
+ {"cam": "wide", "at": "end", "off": 1, "dur": 7}
+]

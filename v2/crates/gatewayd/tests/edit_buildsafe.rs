@@ -1,7 +1,8 @@
 //! Engine v2 G1c (#3456): edits through the gateway keep BUILDSAFE. A real world (`worldd::answers`) whose replica
 //! holds open ground with a named area, a seat and three Souls' bodies: A standing, B sitting in the seat, C standing
-//! apart. Behind an in-process gateway, a creator's socket sends three unsafe edits, each refused by G2's name with
-//! nothing committed (the version stays where it was):
+//! apart. Behind an in-process gateway, a creator's two sockets (its page's and its agent's, #5006) send three unsafe
+//! edits in turn, each refused by G2's name on the socket that sent it, with nothing committed (the version stays where
+//! it was):
 //!
 //! - a wall where A stands: `edit.would-bury`;
 //! - a closed building (four walls, no door) round C: `edit.would-cut-off`;
@@ -503,9 +504,12 @@ async fn g1c_unsafe_edits_through_the_gateway_are_refused_by_name_and_nothing_is
             std::thread::spawn(move || answers::serve(d, stream));
         }
     });
+    // Two tokens for the creator, both signed in at once (#5006): its page's and its agent's.
     let mut tokens = Tokens::default();
     let token = Token::issue(Grant::Actor(creator)).unwrap();
     tokens.add(Grant::Actor(creator), token.hash());
+    let agent_token = Token::issue(Grant::Actor(creator)).unwrap();
+    tokens.add(Grant::Actor(creator), agent_token.hash());
     let log: Log = std::sync::Arc::new(|_: &str| {});
     let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, Receipts::off());
     tokio::spawn(world_link::run(gw.clone(), path));
@@ -516,17 +520,23 @@ async fn g1c_unsafe_edits_through_the_gateway_are_refused_by_name_and_nothing_is
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
 
-    let mut ws = connect(&url, &token).await;
+    // The unsafe edits from the page and the agent in turn: each refused by name, on the socket that sent it.
+    let mut sockets = [
+        connect(&url, &token).await,
+        connect(&url, &agent_token).await,
+    ];
     let mut sequence = 0;
     for (name, _, op) in unsafe_ {
         sequence += 1;
-        let got = send(&mut ws, edit_intent(creator, sequence, start, &[op])).await;
+        let ws = &mut sockets[(sequence % 2) as usize];
+        let got = send(ws, edit_intent(creator, sequence, start, &[op])).await;
         assert_eq!((got.kind, got.reason.as_str()), (2, name), "{got:?}");
         assert_eq!(got.version, start, "nothing committed");
     }
     // A closed building where no Soul is: the way it cuts off shuts nobody in, so it commits whole.
     sequence += 1;
-    let built = send(&mut ws, edit_intent(creator, sequence, start, &[pen])).await;
+    let ws = &mut sockets[(sequence % 2) as usize];
+    let built = send(ws, edit_intent(creator, sequence, start, &[pen])).await;
     assert_eq!(built.kind, 1, "{built:?}");
     assert!(built.version > start);
     println!("refusals 3, receipts 1");

@@ -146,7 +146,7 @@ pub fn register<S: Store>(store: &S, w: &Imported) -> R<Done> {
         },
     };
     let row = json!({
-        "name": w.name, "label": w.label, "template": "imported", "lineage": to_hex(&w.lineage),
+        "name": w.name, "label": w.label, "template": IMPORTED, "lineage": to_hex(&w.lineage),
         "zone": principal_text(w.zone), "creator": principal_text(w.creator), "made": w.now, "ready": true,
     });
     let (etag, rows) = read_rows(store)?;

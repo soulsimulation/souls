@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lane PERF-EVENTLOOP (2026-11-02): where the main thread goes during an orbit, per frame, by source function.
-// Opens a world URL in real headless Chrome (the shared Chrome lease, like phone-probe.mjs), waits for the picture to settle
+// Opens a world URL in headless Chromium (the shared Chrome lease, like phone-probe.mjs), waits for the picture to settle
 // (revealed, draw calls and triangles unchanged for 3 s), then records a CDP CPU profile (100 µs sampling) over a touch orbit
 // of `--seconds`, counts the rAF frames meanwhile, and maps every sample to its original source through the build's source
 // maps (`--dist <dir>` holds the served assets/*.js.map; build with `vite build --sourcemap`). Reports, per frame: the
@@ -34,7 +34,7 @@ const INIT = `(() => { const P = window.__orbit = { frames: 0, perFrame: [], dra
   wrap(window.WebGL2RenderingContext?.prototype); wrap(window.WebGLRenderingContext?.prototype); })();`;
 
 const release = await chromeLease('orbit-profile');
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--explicitly-allowed-ports=6000'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--explicitly-allowed-ports=6000'] });
 try {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: dpr, hasTouch: true });
   await ctx.addInitScript((name) => { try { localStorage.setItem('sim.dev', name); } catch {} }, 'admin');

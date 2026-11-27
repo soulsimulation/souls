@@ -20,8 +20,8 @@
 //! ([`crate::bodies`]) instead of the checkers. At the next tick it starts, or is refused by name, and writes an entry
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
-//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, from the tick its route is planned, with no total cap and never beyond the
+//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at its gait's
+//! speed, plus a margin (never under the walking time) and crossings, from the tick its route is planned, with no total cap and never beyond the
 //! intent's expiry. Its deadline is written as C20's entry and it receives C20's one progress answer in that tick
 //! (W11, #4087). A walk that makes no progress is the never-stuck ladder's (0.133 N1, `crate::unstick`): routed again,
 //! still bodies stepped aside, a shoulder turn, then its order ended `goal-unreachable` at 15 s.
@@ -89,7 +89,10 @@
 //! 6. the frozen copy is published (K8);
 //! 7. the answers thread waits for the tick's words to be on the disk, appends and syncs the records, then hands the
 //!    synced tick to the view tier (R3) and sends the answers;
-//! 8. the auditor checks a slice of the tree (K11).
+//! 8. the auditor checks a slice of the tree (K11), at most [`AUDIT_TIME`] of it; its faults are queued for the
+//!    auditor's own printer thread, which writes them to stderr (#3422): a blocked stderr never holds the clock on an
+//!    audit line, and a line the queue ([`AUDIT_LINES`]) has no room for is dropped, counted and said, never waited
+//!    for. Passes, cut slices and lines are in `health.json`'s `audit`.
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
@@ -126,7 +129,7 @@ use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::directory::Directory;
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
-use crate::measures::{self, Measures, Stamps};
+use crate::measures::{self, AUDIT, Measures, Stamps};
 use crate::syncs::{self, ToSync};
 use crate::views::Tier;
 use crate::words;
@@ -140,17 +143,19 @@ use replica::effects::{
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
+use replica::selector::{FREE_SLOT, Selector};
 use replica::sky::{self, Sky};
 use replica::sync::Records;
-use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
+use replica::time::{Line, Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
-use sim::audit::Auditor;
+use sim::audit::{Auditor, Fault};
 use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
@@ -160,7 +165,7 @@ use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::edit::safety::{Known, Who};
 use sim::frozen::Publisher;
-use sim::life::{Birth, Life, Ring};
+use sim::life::{Birth, Life, Ring, Standing};
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
 use sim::speech;
@@ -171,7 +176,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -442,6 +447,11 @@ impl Door {
             .is_ok()
     }
 }
+
+/// The most the auditor's slice takes of a tick (K21, #3422): it stops there and carries on next tick.
+pub const AUDIT_TIME: Duration = Duration::from_millis(2);
+/// The fault lines the auditor's printer queues (#3422): a line the queue has no room for is dropped and counted.
+pub const AUDIT_LINES: usize = 1024;
 
 /// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
 /// that refused a part; a loaded machine catches up well within it.
@@ -719,12 +729,20 @@ pub struct Config {
     /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
     /// its settings keeps them. `None`: a world without settings has no sky.
     pub sky: Option<daylight::Config>,
+    /// The kinds the release added to the world's entries since its header was made (#4954, `serve::added_kinds`), by
+    /// pin: written at this start's first tick as definitions in the world's history ([`Clock::put_kinds`]), so things
+    /// and activities of them are made and every copy applies them.
+    pub define: Definitions,
     /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The world's stock (#4837, [`crate::stock`]): its stocked containers, which a take from one reads, and its
+    /// libraries' words by reference, served beside the records that hold them as public words are.
+    pub stocks: Arc<sim::forms::Stocks>,
+    pub library_words: Arc<BTreeMap<Id, Vec<u8>>>,
     /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
     pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
@@ -748,6 +766,9 @@ pub struct Config {
     /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
     /// ones [`Config::bodies`] makes.
     pub join: Option<Join>,
+    /// The world's entry as its town took it, on dry ground (`Town::entry`): the main ground is the part that holds it.
+    /// A creator's arrival place is judged from it when the set is made (#5006); none, never judged cut off.
+    pub main_entry: Option<(Id, Vec3)>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
     /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
@@ -807,6 +828,129 @@ pub fn notice_key(soul: Id) -> Vec<u8> {
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
 
+/// The spots births try round `at`, by `entry`: rings 1 m apart from 1 m out, eight of them and then
+/// [`sim::life::FAR_RINGS`] further (16 m in all).
+fn birth_ring(entry: Id, at: (Id, Vec3)) -> Ring {
+    Ring {
+        entries: BTreeMap::from([(entry, at)]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    }
+}
+
+/// Rings tried one after another for a birth (#5006): the first ring's own spots are its tries, and every spot of the
+/// rings after it a further place, tried once those are.
+struct Rings<'a>(Vec<&'a Ring>);
+
+impl Standing for Rings<'_> {
+    fn spot(&self, entry: Id, i: u64) -> Option<(Id, Vec3)> {
+        let (r, j) = self.at(i)?;
+        r.spot(entry, j)
+    }
+    fn tries(&self) -> u64 {
+        self.0.first().map_or(0, |r| r.tries())
+    }
+    fn beyond(&self) -> u64 {
+        let all: u64 = self.0.iter().map(|r| r.tries() + r.beyond()).sum();
+        all - self.tries()
+    }
+    fn faces(&self, entry: Id, i: u64) -> Option<Vec3> {
+        let (r, j) = self.at(i)?;
+        r.faces(entry, j)
+    }
+}
+
+impl Rings<'_> {
+    /// The ring that holds the `i`-th spot, and the spot's index on it.
+    fn at(&self, mut i: u64) -> Option<(&Ring, u64)> {
+        for r in &self.0 {
+            let n = r.tries() + r.beyond();
+            if i < n {
+                return Some((r, i));
+            }
+            i -= n;
+        }
+        None
+    }
+}
+
+/// #5006: whether Souls born round a creator's arrival `place` could walk away, on `town` (the copy before the edit):
+/// refused [`replica::arrival::CUT_OFF`] when its middle is on ground no walk from `from` (the world's entry, as the
+/// served town took it: [`sim::walk::town::Town::entry`]) reaches, a walled pen; [`replica::arrival::NO_GROUND`] when
+/// no spot births try round it is ground a Soul can stand on that a walk from `from` reaches. With no entry known, no
+/// ground is cut off. `op` is the set's index in its batch.
+fn arrival_stands(
+    copy: &Replica,
+    town: &sim::walk::town::Town,
+    from: Option<(Id, Vec3)>,
+    (op, place): (usize, Id),
+) -> Result<(), Refused> {
+    let refused = |name: &'static str, detail: String| -> Result<(), Refused> {
+        Err(Refused {
+            op: Some(op),
+            name,
+            detail,
+        })
+    };
+    let shown = replica::world_model::show(place);
+    // A place the check took is one; with none here there is nothing to stand on to judge.
+    let Some((ground, at)) = replica::arrival::point_of(copy.tree(), place) else {
+        return Ok(());
+    };
+    let size = Size::Standard;
+    let cut_off = |node: Id, p: Vec3| from.is_some_and(|f| town.cut_off(f, node, p, size));
+    if cut_off(ground, at) {
+        return refused(
+            replica::arrival::CUT_OFF,
+            format!("the middle of {shown} is on ground no walk from the world's entry reaches"),
+        );
+    }
+    let ring = birth_ring(place, (ground, at));
+    let surfaces = town.surfaces_for(size);
+    let stands = (0..ring.tries() + ring.beyond())
+        .map_while(|i| ring.spot(place, i))
+        .any(|(node, p)| {
+            // As a birth asks: placed first, and only then whether its ground is cut off.
+            surfaces.and_then(|s| s.get(&node)).is_some_and(|s| {
+                s.place_built(
+                    place,
+                    Frame { node, slot: None },
+                    p,
+                    Quat::IDENTITY,
+                    Build::STANDARD,
+                )
+                .is_ok()
+            }) && !cut_off(node, p)
+        });
+    if !stands {
+        return refused(
+            replica::arrival::NO_GROUND,
+            format!(
+                "no ground a Soul can stand on and walk from within 16 m of the middle of {shown}"
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The last set of the world's arrival in `edit` that names a place, with its index in the batch (#5006): none when
+/// it sets none, or its last clears it.
+fn arrival_named(edit: &Edit) -> Option<(usize, Id)> {
+    let (i, place) = edit
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            edit::Op::Set { field, to, .. } if *field == replica::arrival::F_ARRIVAL => {
+                Some((i, replica::arrival::read(to).ok()?))
+            }
+            _ => None,
+        })
+        .next_back()?;
+    Some((i, place?))
+}
+
 /// The births and the intents waiting for them (C3).
 struct Lives {
     life: Life,
@@ -833,6 +977,9 @@ pub struct Synced {
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
 pub type Offer = Box<dyn FnMut(u64, Vec<u8>) + Send>;
+/// Kinds a start defines in the world's history (#4954, [`Config::define`]), by pin.
+pub type Definitions = Vec<Name>;
+
 /// See [`Config::follow`].
 pub type Follow = Box<dyn FnOnce(Durable) -> Offer + Send>;
 
@@ -862,14 +1009,18 @@ impl Config {
             planner_wait: None,
             planned: BTreeMap::new(),
             sky: None,
+            define: Vec::new(),
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            stocks: Arc::default(),
+            library_words: Arc::default(),
             closed: Default::default(),
             follow: None,
             rate: None,
             engine: None,
             join: None,
+            main_entry: None,
             wear: None,
             hatches: Vec::new(),
             halted: None,
@@ -935,6 +1086,10 @@ pub struct World {
     pub durable: Durable,
     /// Still and next due, for sleep (O2).
     pub quiet: Arc<Quiet>,
+    /// The world's real clock (K7's: the machine's wall clock read once, carried on by the steady clock), carried
+    /// ahead of the machine's by the step a restart found (`clock.stepped`, O10): what every thread beside the clock
+    /// thread reads as real time (the watchdog, the public stream, the sleep watch), so none sees another time.
+    pub real: Real,
     handover: Arc<crate::handover::Handover>,
     clock: Option<JoinHandle<()>>,
 }
@@ -963,6 +1118,21 @@ pub fn now() -> Micros {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+        .saturating_add(test_step())
+}
+
+/// O10 (#2806): a test's step of the machine's clock, µs, read from the file `$WORLDD_TEST_CLOCK_STEP` names at each
+/// reading, so a test steps it while the world runs or before it starts (`tests/host_faults.rs`); a debug build's
+/// only.
+fn test_step() -> Micros {
+    #[cfg(debug_assertions)]
+    if let Some(f) = std::env::var_os("WORLDD_TEST_CLOCK_STEP") {
+        return std::fs::read_to_string(f)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+    }
+    0
 }
 
 /// The wall clock read once, at start, carried on by the monotonic clock (K7): µs from the Unix epoch, never a step.
@@ -980,11 +1150,26 @@ impl Real {
             mono0: Instant::now(),
         }
     }
+
+    /// This clock carried `by` µs ahead: a world's whose restart found the machine's clock behind it ([`World::real`]).
+    pub fn ahead(self, by: Micros) -> Real {
+        Real {
+            wall0: self.wall0.saturating_add(by),
+            ..self
+        }
+    }
+}
+
+impl Real {
+    /// The world's real time now, µs from the Unix epoch.
+    pub fn now_us(&self) -> Micros {
+        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+    }
 }
 
 impl Pace for Real {
     fn now(&mut self) -> Micros {
-        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+        self.now_us()
     }
 
     fn sleep_until(&mut self, t: Micros) {
@@ -992,6 +1177,23 @@ impl Pace for Real {
         if wait > 0 {
             std::thread::sleep(Duration::from_micros(wait as u64));
         }
+    }
+}
+
+/// A clock carried `by` µs ahead of another (O10, #2806): a restart's, when the machine's clock is behind the last
+/// logged tick (`clock.stepped`).
+struct Ahead {
+    pace: Box<dyn Pace + Send>,
+    by: Micros,
+}
+
+impl Pace for Ahead {
+    fn now(&mut self) -> Micros {
+        self.pace.now().saturating_add(self.by)
+    }
+
+    fn sleep_until(&mut self, t: Micros) {
+        self.pace.sleep_until(t.saturating_sub(self.by));
     }
 }
 
@@ -1033,6 +1235,58 @@ pub fn state_hash(tree: &[(Audience, Hash)], bodies: &[(Id, Pose)]) -> [u8; 32] 
     let mut out = [0; 32];
     out.copy_from_slice(&h[h.len() - 32..]);
     out
+}
+
+/// Each body's row of the state hash, `[id, pose]` encoded, with the pose it encodes: kept between ticks so a tick
+/// encodes again only the bodies whose pose changed ([`state_hash_kept`]).
+type PoseRows = BTreeMap<Id, (Pose, Vec<u8>)>;
+
+/// [`state_hash`], the same bytes taken by SHA-256 piece by piece: the bodies' rows come from `kept`, and only a body
+/// whose pose changed since is encoded again (with 1,000 Souls, most stand still in a tick). `kept` keeps no body
+/// that is not in `bodies` once it is longer than it. Any row that will not encode gives [`state_hash`]'s answer.
+pub fn state_hash_kept(
+    tree: &[(Audience, Hash)],
+    bodies: &[(Id, Pose)],
+    kept: &mut PoseRows,
+) -> [u8; 32] {
+    let audience = |a: &Audience| match a {
+        Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+        Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+    };
+    let listed = Value::Array(
+        tree.iter()
+            .map(|(a, h)| Value::Array(vec![audience(a), Value::Bytes(h.to_bytes())]))
+            .collect(),
+    );
+    let Ok(listed) = encode(&listed) else {
+        return state_hash(tree, bodies);
+    };
+    if kept.len() > bodies.len() {
+        let here: std::collections::BTreeSet<Id> = bodies.iter().map(|(id, _)| *id).collect();
+        kept.retain(|id, _| here.contains(id));
+    }
+    let mut sha = Hash::taking(Purpose::Fixture);
+    sha.update(&replica::encode::head(4, 2));
+    sha.update(&listed);
+    sha.update(&replica::encode::head(
+        4,
+        u64::try_from(bodies.len()).unwrap_or(u64::MAX),
+    ));
+    for (id, p) in bodies {
+        let row = match kept.get_mut(id) {
+            Some(row) if row.0 == *p => row,
+            _ => {
+                let Ok(bytes) = encode(&Value::Array(vec![id.to_value(), p.to_value()])) else {
+                    kept.remove(id);
+                    return state_hash(tree, bodies);
+                };
+                kept.insert(*id, (*p, bytes));
+                kept.get_mut(id).expect("just kept")
+            }
+        };
+        sha.update(&row.1);
+    }
+    Hash::of_taken(sha).digest()
 }
 
 struct Open {
@@ -1109,6 +1363,16 @@ struct Clock {
     walks: BTreeMap<Id, acts::Walk>,
     /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
     follows: BTreeMap<Id, (Id, Id)>,
+    /// Each carrier keeping its place from its crew's front (moving-group rule 3), by (carry, carrier): the
+    /// `souls:follow` order kept for it, by intent, the front's walk it was made for, and whether it turns.
+    carry_follows: BTreeMap<(Id, Id), (Id, Id, bool)>,
+    /// Each walk taken since the last tick that names a carry's heading at its goal (its parameter 3, moving-group
+    /// rule 3), by intent: read when it starts, if it leads a carry.
+    headings: BTreeMap<Id, [i64; 2]>,
+    /// Carriers that walked their own way during their front's walk, by (the front's walk, carrier): each keeps its
+    /// own legs until the front walks again, so it stays where its own walk ended (a scripted crew's place), and no
+    /// turn of that walk moves it.
+    carry_own: BTreeSet<(Id, Id)>,
     /// Whether the open `souls:follow` orders beside a leader (0.135 R1) were checked against the holds after the
     /// world opened: one whose hold a restart ended is cancelled.
     besides_checked: bool,
@@ -1117,6 +1381,8 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
     away_next: Option<u64>,
+    /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
+    words_next: Option<String>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1147,12 +1413,19 @@ struct Clock {
     /// the next through the form runner when the world has bodies.
     forms: Acts,
     forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
+    /// The sits by kind among them (#3178): each one's selector and its intent, bound to a seat when its form starts.
+    by_kind: BTreeMap<Id, (Selector, Intent)>,
+    /// Each sit by kind bound on the open ground to a seat in a place there: the words its end writes (field 8), which
+    /// name that place and how far it was ([`Clock::seat_by_kind`]).
+    sat_in: BTreeMap<Id, String>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
     /// Engine acts written this tick, answered with a receipt once their entries are applied.
     engine_done: Vec<Id>,
     order_records: Vec<Effect>,
+    /// Each body's row of the state hash as last encoded, with the pose it encodes ([`state_hash_kept`]).
+    pose_rows: PoseRows,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -1162,6 +1435,8 @@ struct Clock {
     outstanding: usize,
     auditor: Auditor,
     audit: usize,
+    /// The auditor's faults, to the thread that prints them (#3422).
+    audit_out: SyncSender<Fault>,
     faults: u64,
     checkpoints: Option<Checkpoints>,
     /// Log records written, the input records included.
@@ -1178,6 +1453,8 @@ struct Clock {
     put_off: BTreeMap<Id, u64>,
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
+    /// The kinds this start defines at its first tick ([`Config::define`]), and the minter of their nodes' ids.
+    define: Option<(Definitions, Minter)>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
@@ -1209,6 +1486,8 @@ struct Clock {
 /// Dropped as the clock thread ends, for any reason: the checker is woken and refuses what it waits on.
 struct EditQueue {
     tx: Sender<(u64, CheckJob)>,
+    /// The most ids each building kind's place mints with its parts (#5006, `buildsafe::ids_most`): reserved at intake.
+    parts: BTreeMap<String, u64>,
     walkers: Arc<buildsafe::Moving>,
     /// The newest tick whose snapshot point (the commit's end, `offer_map`) has passed.
     offered: std::cell::Cell<u64>,
@@ -1394,23 +1673,47 @@ impl Heavens {
     }
 }
 
-/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds.
-fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, Refused> {
+/// Whether `part` sets one of the creator's weather fields or E6's next weather change (`sim::edit::weather::FIELDS`,
+/// `sky::F_WEATHER_NEXT`): an undo or redo of a creator's weather, after which E6 takes the weather back.
+fn sets_weather(part: &Part) -> bool {
+    part.effects.iter().any(|e| match &e.body {
+        Body::Changes(cs) => cs.iter().any(|c| {
+            matches!(&c.change, Change::Set { field, .. }
+                if *field == sky::F_WEATHER_NEXT || sim::edit::weather::FIELDS.contains(field))
+        }),
+        _ => false,
+    })
+}
+
+/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
+/// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
+/// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
+fn reserve_edit(
+    edit: &Edit,
+    lineage: Scope,
+    next: &mut u64,
+    parts: u64,
+) -> Result<Minter, Refused> {
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
-    for op in &edit.ops {
-        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
-        if matches!(
-            op,
-            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
-        ) {
-            end.mint().map_err(|e| Refused {
-                op: None,
-                name: "edit.ids-exhausted",
-                detail: e.to_string(),
-            })?;
-            *next = end.next();
-        }
+    // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+    let own = edit
+        .ops
+        .iter()
+        .filter(|op| {
+            matches!(
+                op,
+                edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+            )
+        })
+        .count() as u64;
+    for _ in 0..own.saturating_add(parts) {
+        end.mint().map_err(|e| Refused {
+            op: None,
+            name: "edit.ids-exhausted",
+            detail: e.to_string(),
+        })?;
+        *next = end.next();
     }
     Ok(reserved)
 }
@@ -1535,7 +1838,29 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
     Ok(args)
 }
 
-/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
+/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name; 8, a done act's
+/// words when its move was made from afar (#5063).
+/// The place on `top` (the open ground) that holds `thing`, for a sit by kind's words (#5152 follow-up): the innermost
+/// node above it and below `top` that `look` shows as a place (a room or a place; a floor or a building is not one),
+/// named by its id so the log holds no words and each reader's copy names it by its title, as `look` does. `None` for
+/// a thing in no such place on `top` (a seat right on the open ground), or not in `tree`.
+fn place_of(tree: &replica::tree::Tree, thing: Id, top: Id) -> Option<Id> {
+    let node = |id: Id| tree.node(tree.handle(id)?);
+    let mut at = node(thing)?.parent()?;
+    for _ in 0..64 {
+        if at == top {
+            return None;
+        }
+        let n = node(at)?;
+        let kind = replica::world_model::plain(n.kind().as_str());
+        if kind.ends_with(":room") || kind.ends_with(":place") {
+            return Some(at);
+        }
+        at = n.parent()?;
+    }
+    None
+}
+
 pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -1559,7 +1884,8 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, with the
-/// answers of the tick in which a form's run or a gateway walk's route gets its deadline (W11, #4087).
+/// answers of the tick in which a form's run, a gateway walk's route or a gateway sit's, lie's or rise's move gets its
+/// deadline (W11, #4087).
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -1712,6 +2038,18 @@ fn spot_of(
     }))
 }
 
+/// A sit by kind (#3178): a sit (`eden:sit`) aimed at I5's free-slot selector (selector 1, any free slot of a kind in
+/// a node). `None` for any other intent, else the selector or its refusal by name (`selector-not-a-record`, ...).
+fn kind_sit(intent: &Intent) -> Option<Result<Selector, &'static str>> {
+    let target @ Target::Selector(FREE_SLOT, _) = intent.target.as_ref()? else {
+        return None;
+    };
+    match intent.verb.as_str().split_once(':') {
+        Some((ns, "sit")) if ns != "souls" => Some(Selector::read(target).map_err(|r| r.name)),
+        _ => None,
+    }
+}
+
 /// Binds a resolved spot once, at commit (`sim::commit::spot`): a slot is sat in (or walked to), a thing or a point
 /// is walked to, as N9's target in the frame of the node it stands in. Refused by the checker's name.
 fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
@@ -1835,6 +2173,7 @@ impl Clock {
             return;
         };
         self.walks.remove(&id);
+        self.sat_in.remove(&id);
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
         self.progress.retain(|p| p.0 != id);
@@ -2201,8 +2540,14 @@ impl Clock {
                 (vec![reply], stamps),
             );
         }
+        // A sit by kind (#3178) is a seat's own form, its seat bound when it starts.
+        let mut by_kind = match self.bodies {
+            Some(_) => kind_sit(&intent),
+            None => None,
+        };
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
+            Some(_) if by_kind.is_some() => None,
             Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
@@ -2220,6 +2565,20 @@ impl Clock {
         };
         let verb = engine::Verb::of(intent.verb.as_str());
         let taken = match (spotted, moved, verb, intent.kind()) {
+            _ if by_kind.is_some() => match by_kind.as_ref().map(Result::as_ref) {
+                Some(Err(r)) => Err(*r),
+                _ => self.body_of(&intent).map(|body| {
+                    Taken::Form(Act {
+                        id: self.next_intent,
+                        cause: Cause::Intent(id),
+                        actor,
+                        body,
+                        candidates: Vec::new(),
+                        recheck: None,
+                        spot: None,
+                    })
+                }),
+            },
             (Some(a), _, _, _) => a.map(Taken::Form),
             (None, Some(m), _, _) => m.map(Taken::Move),
             // The engine's own acts (C2): activities, offers and carrying, by verb.
@@ -2348,6 +2707,16 @@ impl Clock {
                 stamps,
             },
         );
+        // Moving-group rule 3: a walk's parameter 3, a carry's heading at its goal (`[x, z]`), kept until it starts.
+        if let (Taken::Move(_), Some(Value::Array(h))) = (&taken, intent.parameters.get(&3))
+            && let [Some(x), Some(z)] = [
+                h.first().and_then(acts::int_of),
+                h.get(1).and_then(acts::int_of),
+            ]
+            && h.len() == 2
+        {
+            self.headings.insert(id, [x, z]);
+        }
         match taken {
             // A move aimed at a described spot (E2) is resolved by a checker even with bodies, and bound at commit.
             Taken::Form(act) if self.bodies.is_none() || act.spot.is_some() => {
@@ -2360,11 +2729,21 @@ impl Clock {
             Taken::Move(m) => self.moving.push((id, m)),
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
+                if let Some(Ok(selector)) = by_kind.take() {
+                    self.by_kind.insert(id, (selector, intent.clone()));
+                }
                 let i = acts::intent(id, intent.expiry, actor, bytes);
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
-            Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
+            Taken::Edit(e) => match reserve_edit(
+                &e,
+                self.lineage,
+                &mut self.next_intent,
+                self.edits
+                    .as_ref()
+                    .map_or(0, |q| buildsafe::parts_ids(&e, &q.parts)),
+            ) {
                 Ok(reserved) => {
                     if let Some(tx) = &self.edits
                         && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
@@ -2780,7 +3159,11 @@ impl Clock {
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
+                    let weather = sets_weather(&c.part);
                     self.parts.push(c.part);
+                    if weather {
+                        self.weather_back(now);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -2908,12 +3291,14 @@ impl Clock {
             let step = self.steps.remove(&id);
             match committed {
                 Ok((c, mine, places, before)) => {
-                    self.history.record(&before, &self.replica, &c.part, step);
-                    if let Some(b) = &mut self.bodies
-                        && let Err(e) = places.install(&mut b.slots, &c.names)
-                    {
-                        self.faults += 1;
-                        eprintln!("worldd: edit places {}", e.name);
+                    let part = Arc::clone(&c.part);
+                    if let Some(b) = &mut self.bodies {
+                        if let Err(e) = places.install(&mut b.slots, &c.names) {
+                            self.faults += 1;
+                            eprintln!("worldd: edit places {}", e.name);
+                        }
+                        // A seat the edit made is found by a sit by kind too (#3178).
+                        b.file_seats(self.replica.tree(), c.names.values().copied());
                     }
                     self.unsealed = true;
                     // The edit checker's town installs the ground prepared for this edit (#3743), or is built again
@@ -2927,6 +3312,9 @@ impl Clock {
                     if let Some(w) = weather {
                         self.put_weather(now, w);
                     }
+                    // Kept for its undo after E6's write, so its inverse sets the weather's next change back too and
+                    // the world node's hash it left is the one that write left (#5073 follow-up).
+                    self.history.record(&before, &self.replica, &part, step);
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -3389,24 +3777,47 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        // The open ground round the entry first; then, when it holds no free place, the ground-level floor with a way
-        // out that holds the entry point (a world entered under a roof: verdelis-eden's dome).
-        let floor = (l.at.0 == b.town.ground)
+        // Every reach below is judged from one place, the town's own entry (`Town::entry`, on dry ground), as each spot
+        // a birth takes is (`Floors::sealed`).
+        let sealed =
+            |(node, at): (Id, Vec3)| sim::mover::Floors::sealed(&b.town, node, at, Build::STANDARD);
+        // The open ground round where the host puts Souls (`world.json`'s arrival, else its entry); then, when it holds
+        // no free place, the ground-level floor with a way out that holds that point (a world entered under a roof:
+        // verdelis-eden's dome). Both are passed over when the point is walled off from the entry (#5006).
+        let host = !sealed(l.at);
+        let floor = (host && l.at.0 == b.town.ground)
             .then(|| b.town.entry_floor(l.at.1))
-            .flatten()
-            .map(|e| Ring {
-                entries: BTreeMap::from([(l.entry, e)]),
-                radius: l.ring.radius,
-                gap: l.ring.gap,
-                rings: l.ring.rings,
-            });
-        let standing = sim::life::Then(&l.ring, floor.as_ref());
-        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &|soul| {
+            .flatten();
+        // Last, the town's entry itself, when it is neither of those: a host's arrival walled off from it, or with no
+        // ground round it, never keeps a world from being joined (#5006).
+        let main = b
+            .town
+            .entry()
+            .filter(|&e| e != l.at && Some(e) != floor)
+            .map(|e| birth_ring(l.entry, e));
+        let floor = floor.map(|e| birth_ring(l.entry, e));
+        // Before all of those, the place the world's creator names on its root (#5006, `replica::arrival`), read from
+        // the tree each tick a birth waits, so a new arrival holds from the next birth with no restart. Its rings are
+        // tried first and the others after them, so a place whose rings hold no free spot never keeps a birth waiting;
+        // a place whose middle no walk from the entry reaches (walled in since it was named) is passed over.
+        let arrival = replica::arrival::point(self.replica.tree())
+            .filter(|&(ground, at)| ground == l.at.0 && !sealed((ground, at)))
+            .map(|at| birth_ring(l.entry, at));
+        let standing = Rings(
+            arrival
+                .iter()
+                .chain(host.then_some(&l.ring))
+                .chain(&floor)
+                .chain(&main)
+                .collect(),
+        );
+        let build_of = |soul: Id| {
             self.birth_builds
                 .get(&soul)
                 .copied()
                 .unwrap_or(skills::wear::DEFAULT)
-        });
+        };
+        let mut born = b.births_built(&mut l.life, now, &standing, &l.family, &build_of);
         let mut taken = Vec::new();
         for x in &mut born {
             // The world's body kind, as its header pins it (K10 writes the plain name).
@@ -3784,6 +4195,9 @@ impl Clock {
         if let Some(mm) = self.away_next.take() {
             fields.insert(7, Value::Uint(mm));
         }
+        if let Some(w) = self.words_next.take() {
+            fields.insert(8, Value::Bytes(w.into_bytes()));
+        }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
                 u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
@@ -4000,6 +4414,54 @@ impl Clock {
         Ok(Some(asked))
     }
 
+    /// After an undo or redo that set the weather back (#5073 follow-up): E6 takes the world node's weather as it now
+    /// stands, its creator's end (none at 0) and its weather timer due at the next change the node holds (at once, if
+    /// that has passed). The fields are the undo's; only the timer is written, so the node's hash stays the one the undo
+    /// left and its redo is not refused as a conflict.
+    fn weather_back(&mut self, now: Micros) {
+        let tree = self.replica.tree();
+        let Some(f) = tree.node(tree.root()).map(|n| n.fields().clone()) else {
+            return;
+        };
+        let Some(h) = self.sky.as_mut() else { return };
+        let Some(next) = f.get(&sky::F_WEATHER_NEXT).and_then(sky::as_int) else {
+            return;
+        };
+        h.daylight.cfg.until = f.get(&sky::F_WEATHER_UNTIL).and_then(sky::as_int);
+        let Ok(id) = h.mint.mint() else {
+            eprintln!("worldd: the sky's timer ids are spent");
+            return;
+        };
+        let (world, name) = (
+            h.daylight.world,
+            Name::new(sky::T_WEATHER).expect("a constant name"),
+        );
+        let due = next.max(now);
+        let mut recs = Vec::new();
+        if let Some(old) = h.timers.insert(name.clone(), id) {
+            let _ = h.due.clear(world, old);
+            recs.push(TimerRec::Clear { timer: old });
+        }
+        recs.push(TimerRec::Set {
+            timer: id,
+            due,
+            name: name.clone(),
+        });
+        let _ = h.due.set(Timer {
+            node: world,
+            id,
+            due,
+            name,
+        });
+        let timers = Effect {
+            envelope: Clock::own(world, now),
+            body: Body::Timers(recs),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write_own(vec![timers], "the sky's weather timer");
+    }
+
     /// After the creator's batch commits: E6's weather write (its event, and the weather timer set for its end).
     fn put_weather(&mut self, now: Micros, w: sim::edit::weather::Asked) {
         let Some(h) = self.sky.as_mut() else { return };
@@ -4041,6 +4503,79 @@ impl Clock {
             rest: Rest::new(),
         });
         self.write_own(effects, "the clock's mapping");
+    }
+
+    /// Step 1 for the kinds the release added (#4954, [`Config::define`]): at this start's first tick, each its world
+    /// neither pins in its header nor defines yet is defined, as a creator's kind is (#3697): a `souls:kind` node at the
+    /// zone's root, for everyone, its name the pin, all in one entry of the world's own. The record is left empty: the
+    /// world's rules for the kind come from its entries, which keep the entry, and a copy needs only the name, so the
+    /// checkpoints and the stream's snapshots do not carry each entry's bytes. The world's log before it is unchanged,
+    /// and every copy (a replay, the public stream, a fork) learns the kinds from the entry. When the world refuses the
+    /// one entry, each kind is written in an entry of its own, and each refused one is said by name and stays refused
+    /// per act (`kind-not-in-header`), as before.
+    fn put_kinds(&mut self, now: Micros) {
+        let Some((define, mut mint)) = self.define.take() else {
+            return;
+        };
+        let tree = self.replica.tree();
+        let Some(root) = tree.node(tree.root()).map(|n| n.id()) else {
+            return;
+        };
+        let header = self.replica.header();
+        let mut creates = Vec::new();
+        let mut names = Vec::new();
+        for pin in define {
+            if header.kinds.contains(&pin) || replica::kinds::defined::defines(tree, &pin) {
+                continue;
+            }
+            let Ok(node) = mint.mint() else {
+                eprintln!("worldd: the kinds added were not defined: no id left");
+                return;
+            };
+            names.push(pin.as_str().to_owned());
+            creates.push(Change::Create {
+                node,
+                kind: Name::new(&replica::kinds::defined::kind().0).expect("souls:kind's name"),
+                pose: Pose {
+                    frame: Frame {
+                        node: root,
+                        slot: None,
+                    },
+                    position: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    support: Support::None,
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::from([
+                    (replica::kinds::defined::NAME, Value::Text(pin)),
+                    (replica::kinds::defined::ENTRY, Value::Bytes(Vec::new())),
+                ]),
+            });
+        }
+        if creates.is_empty() {
+            return;
+        }
+        let effect = |creates: Vec<Change>| Effect {
+            envelope: Clock::own(root, now),
+            body: Body::Changes(recs_of(creates)),
+            events: None,
+            rest: Rest::new(),
+        };
+        if self.try_own(vec![effect(creates.clone())]).is_ok() {
+            println!("kinds defined: {} [{}]", names.len(), names.join(", "));
+            return;
+        }
+        let mut written = Vec::new();
+        for (create, name) in creates.into_iter().zip(names) {
+            match self.try_own(vec![effect(vec![create])]) {
+                Ok(()) => written.push(name),
+                Err(r) => eprintln!(
+                    "worldd: the kind added {name} was not defined ({}: {}): it is refused per act",
+                    r.name, r.detail
+                ),
+            }
+        }
+        println!("kinds defined: {} [{}]", written.len(), written.join(", "));
     }
 
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
@@ -4158,8 +4693,17 @@ impl Clock {
     /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
     fn step_bodies(&mut self, now: Micros) {
         let Some(b) = self.bodies.as_mut() else {
+            // A world with no bodies still fires its forms' timers (#3991): a form with no steps there sets one (a
+            // bell's fade), and one never fired stayed due, so the world never slept and the thing stayed as it was.
+            let tick = u64::try_from(self.tick).unwrap_or(0);
+            self.forms.tick(self.replica.tree(), None, tick, now);
             return;
         };
+        // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule
+        // 3), as the walkers' map learns a load's place only when it is set down or seated.
+        if let Some(e) = self.engine.as_ref() {
+            b.runner.carrying(e.carried_loads());
+        }
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
@@ -4243,6 +4787,109 @@ impl Clock {
         }
     }
 
+    /// The seat a sit by kind takes as its form starts (#3178), on the clock thread, one sit at a time: the thing of the
+    /// selector's kind in its node, whose own sit form (a walk to its nearest free slot, then the sit) a named sit runs,
+    /// with the free slot nearest the body ([`Bodies::seat_by_kind`]); a seat another run is on its way to and a thing
+    /// private to another are not free. Its form then takes the slot as for a named sit, so a burst of sits fills
+    /// every seat. None free is refused `place.none-free`, naming the next step: the nearest free seat of another
+    /// kind there, else to wait for a seat to be left; no seat of the kind there at all, `place.none-of-kind`, which
+    /// waiting never clears.
+    ///
+    /// From the open ground (the selector's node is the town's ground) a seat in a place on it (a hall, a room of a
+    /// building) is named by that place's id ([`Clock::place_named`]), which the client reads as its title as `look`
+    /// names places, and how far it is: the bound seat's, in the words its act's end writes (the second of the pair);
+    /// none free, the nearest seat of the kind the Soul may use, in the refusal. Elsewhere, and for a seat right on
+    /// the open ground, the words are as before.
+    fn seat_by_kind(
+        &self,
+        selector: &Selector,
+        asked: &Intent,
+        body: Id,
+        now: Micros,
+    ) -> Result<((Id, String), Option<String>), Refusal> {
+        let Selector::FreeSlot { kind, node, .. } = selector;
+        let kind = kind.as_str();
+        let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
+        let refused = |name, detail: String| Err(Refusal { name, detail });
+        let Some(b) = self.bodies.as_ref() else {
+            return refused("bodies-off", "the world has no bodies".into());
+        };
+        if b.runner.controller.body(body).is_none() {
+            return refused("body-unknown", replica::world_model::show(body));
+        }
+        let soul = match asked.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        // The seat's own sit form, read as a named sit's: the intent aimed at the thing, with no arguments.
+        let probe = std::cell::RefCell::new(Intent {
+            parameters: BTreeMap::new(),
+            ..asked.clone()
+        });
+        let mine = |t: Id| replica::who_may::private_to(tree, t, soul).is_none();
+        let fits = |t: Id| {
+            probe.borrow_mut().target = Some(Target::Node(t));
+            mine(t) && self.forms.fixture_sit(tree, &probe.borrow())
+        };
+        let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
+        // From the open ground: the place on it holding seat `t`, `gap` µm² away, and how far, in metres to 0.1 m.
+        let outdoors = *node == b.town.ground;
+        let place = |t: Id, gap: i128| {
+            let named = replica::world_model::show(place_of(tree, t, *node)?);
+            let dm = (u128::try_from(gap).unwrap_or(0).isqrt() + 50_000) / 100_000;
+            Some(format!("in {named}, {}.{} m away", dm / 10, dm % 10))
+        };
+        if let Some((t, gap)) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
+            let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
+            let words = outdoors
+                .then(|| place(t, gap))
+                .flatten()
+                .map(|p| format!("{kind} {} {p}", replica::world_model::show(t)));
+            return Ok(((t, form.to_owned()), words));
+        }
+        // The next step: the nearest free seat of any kind there, else to wait (only where a seat of the kind is).
+        let other = b
+            .seat_by_kind(*node, None, body, &fits, &taken)
+            .map(|(t, _)| {
+                let of = tree
+                    .handle(t)
+                    .and_then(|h| tree.node(h))
+                    .map_or(String::new(), |n| {
+                        replica::world_model::plain(n.kind().as_str()).to_owned()
+                    });
+                format!(
+                    "the nearest free place to sit there is {} ({of}): sit on it",
+                    replica::world_model::show(t)
+                )
+            });
+        if !b.has_kind(*node, kind) {
+            return refused(
+                "place.none-of-kind",
+                format!(
+                    "no {kind} to sit on in {room}{}",
+                    other.map_or(String::new(), |o| format!("; {o}"))
+                ),
+            );
+        }
+        // From the open ground, the place holding the nearest seat of the kind the Soul may use (each one held).
+        let near = outdoors
+            .then(|| b.nearest_of_kind(*node, kind, body, &|t| mine(t)))
+            .flatten()
+            .and_then(|(t, gap)| place(t, gap))
+            .map_or(String::new(), |p| format!(" (the nearest {kind} is {p})"));
+        refused(
+            sim::commit::bind::NONE_FREE,
+            match other {
+                Some(o) => {
+                    format!("no {kind} free in {room}{near}; {o}, or wait for one to be left")
+                }
+                None => {
+                    format!("every place to sit in {room} is held{near}: wait for one to be left")
+                }
+            },
+        )
+    }
+
     /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
     /// going for its intent, gets its first receipt again, or is refused by name.
     fn start_forms(&mut self, now: Micros) {
@@ -4250,6 +4897,7 @@ impl Clock {
         // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
         self.forms.hold_sight();
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
+            let by_kind = self.by_kind.remove(&id);
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -4258,11 +4906,31 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let candidates: Vec<(Id, String)> = act
+            let mut candidates: Vec<(Id, String)> = act
                 .candidates
                 .iter()
                 .map(|c| (c.this, c.form.clone()))
                 .collect();
+            // A sit by kind names no seat by its arguments: its form's own pick takes the chosen thing's free slot.
+            let args = if by_kind.is_some() {
+                acts::Args::default()
+            } else {
+                args
+            };
+            if let Some((selector, asked)) = by_kind {
+                match self.seat_by_kind(&selector, &asked, act.body, now) {
+                    Ok((c, place)) => {
+                        candidates = vec![c];
+                        if let Some(p) = place {
+                            self.sat_in.insert(id, p);
+                        }
+                    }
+                    Err(r) => {
+                        self.end(id, |c| c.refused(actor, sequence, &r));
+                        continue;
+                    }
+                }
+            }
             let r = self.forms.start(
                 self.replica.tree(),
                 self.bodies.as_mut(),
@@ -4292,6 +4960,9 @@ impl Clock {
                 }
                 acts.extend(e.way_back(ask, way));
             }
+            // #5067: acts held while a carry's lift or set-down ran, whose track has ended: run again, answered now.
+            acts.extend(e.reruns());
+            self.engine_done.extend(e.answered());
         }
         // The way thread ended: every lift still waiting for a way is refused by name, and none waits again.
         if std::mem::take(&mut self.ways_gone) {
@@ -4390,6 +5061,13 @@ impl Clock {
                     continue;
                 };
                 eprintln!("worldd: a form's entries were not written: {r}");
+                // A timer's run has no intent to answer (#3991): its refusal is written on its thing, by name.
+                let at = group.first().map_or(now, |e| e.envelope.at);
+                if let Some(e) = of.and_then(|id| self.forms.timer_unwritten(id, &r, at))
+                    && let Err(e) = self.commit_forms(vec![e])
+                {
+                    eprintln!("worldd: a refused timer's entry was not written: {e}");
+                }
                 // A run that ended with them still ends (0.133 F1b): its end, which unlinks its reservation, goes in a
                 // part of its own and names the refusal, so a refused effect never leaves its thing reserved.
                 let (ends, group) = refused_ends(group, r.name, self.replica.tree());
@@ -4474,9 +5152,9 @@ impl Clock {
     }
 
     /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29). The progress answer
-    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted within a tick or two of
-    /// its arrival rather than at its arrival deadline (W11, #4087), and the act is due at its run's own deadline from
-    /// here on. One whose act ends in this tick is dropped, as its answer says more.
+    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted the tick after its commit
+    /// (its place asked as it starts, #4974) rather than at its arrival deadline (W11, #4087), and the act is due at
+    /// its run's own deadline from here on. One whose act ends in this tick is dropped, as its answer says more.
     fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
         let Some(o) = self.open.get(&id) else {
             return;
@@ -4498,11 +5176,20 @@ impl Clock {
     }
 
     /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
-    /// answer, a receipt when `done`.
+    /// answer, a receipt when `done`, else a refusal with `why` as its words (what blocked the walk; a move out of
+    /// reach: how far and the reach, #5019 follow-up), which only a blocked walk's entry carries too.
     fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        let noted = match &why {
+            Some(w) if how == acts::BLOCKED => format!("{how}: {w}"),
+            _ => how.clone(),
+        };
+        // #5063: a done act whose move was made from afar says so on its end (field 8), which its receipt names.
+        self.words_next = why.clone().filter(|_| how == "done");
+        if how == "done" && self.words_next.is_none() {
+            self.words_next = self.sat_in.remove(&id);
+        }
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -4513,7 +5200,13 @@ impl Clock {
                 names: BTreeMap::new(),
             });
         } else {
-            self.end(id, |c| c.refusal(actor, sequence, &how));
+            self.end(id, |c| {
+                let mut a = c.refusal(actor, sequence, &how);
+                if let Answer::Refused { detail, .. } = &mut a {
+                    *detail = why.as_deref().and_then(replica::intents::answer_detail);
+                }
+                a
+            });
         }
     }
 
@@ -4523,6 +5216,7 @@ impl Clock {
     /// expired, its leader gone) ends the follow for both. The orders' entries are written in the same tick.
     fn follow_orders(&mut self, now: Micros) {
         self.keep_follow_orders(now);
+        self.keep_carry_orders(now);
         // In this tick, with the follow's own entries: a stop between two ticks never finds an order without its
         // activity, or an activity without its order (0.135 G2, review R2).
         let orders = self
@@ -4572,12 +5266,14 @@ impl Clock {
                 b.orders
                     .opened()
                     .filter(|o| {
+                        // A carry does not outlast a restart either (its load is set down at the first tick), so
+                        // an order keeping a place at a crew's front goes the same way.
                         matches!(
                             o.what,
                             sim::orders::What::Follow {
                                 beside: Some(_),
                                 ..
-                            }
+                            } | sim::orders::What::Follow { at: Some(_), .. }
                         ) && !followers.contains(&o.body)
                     })
                     .cloned(),
@@ -4661,6 +5357,189 @@ impl Clock {
         }
     }
 
+    /// Carrying together (`v2/docs/moving-group.md` rule 3): while a lifted carry's front walks, each other carrier
+    /// that is not moving on its own (no move of its own, no order of its own) walks with it by its own `souls:follow`
+    /// order, keeping its place in the carry's frame ([`engine::Keeps`]: the back its span behind the front, a side
+    /// where it stood at the lift) as an offset from the front on the plan (parameter 4, `[x, z]` µm). When the front's
+    /// walk turns the crew (its heading at the goal named, or a pose of the carry's way, [`engine::Led`]) the order
+    /// names the goal and the offset there too (parameter 5): the place swings with the front, so one walk turns the
+    /// load square. When that walk ends, wherever the front stood (a spot short of its goal), the order is replaced by
+    /// one that turns from the load's heading then to the turned one, its goal where the front stands, so the turn is
+    /// finished there (as a pivot, at the skill's swing pace). A carrier's own act ends its order (B2: it claims the
+    /// legs), and the carrier stays in the carry, walking its own way, as every carrier did before: a late carrier's own
+    /// `carry to` does not fight the group, and once its own walk ends while the front's still goes, it stays where it
+    /// chose (a scripted crew's carrier arriving first is not dragged on past its place), turned by none of that walk;
+    /// it takes a place again at the front's next walk, where the frame has it then, turned as the frame is. A new walk
+    /// of the front replaces the orders when it or the walk before turns the crew. An order is cancelled when its
+    /// carrier is no longer in the carry, or the carry is over. A carry that broke off (`souls:partner-left`,
+    /// `souls:carriers-apart`, `souls:carry-blocked`) stops its front's walk too, ended by that reason: the whole
+    /// group stops with one reason. Written in the tick, with the rest.
+    fn keep_carry_orders(&mut self, now: Micros) {
+        let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) else {
+            return;
+        };
+        let over = e.led_over();
+        let running = e.carry_follows();
+        if running.is_empty() && self.carry_follows.is_empty() && over.is_empty() {
+            self.carry_own.clear();
+            return;
+        }
+        let keep: BTreeSet<(Id, Id)> = running.iter().map(|r| (r.activity, r.walker)).collect();
+        let mut cancel: Vec<sim::orders::Order> = Vec::new();
+        let gone: Vec<(Id, Id)> = self
+            .carry_follows
+            .keys()
+            .filter(|k| !keep.contains(k))
+            .copied()
+            .collect();
+        for k in gone {
+            let Some((order, _, _)) = self.carry_follows.remove(&k) else {
+                continue;
+            };
+            if let Some(o) = b.orders.open(k.1).filter(|o| o.intent == order) {
+                cancel.push(o.clone());
+            }
+        }
+        // An order ended by itself (the carrier's own act took its legs, or it could not keep its place) is forgotten;
+        // its carrier is still in the carry.
+        self.carry_follows
+            .retain(|(_, f), (order, _, _)| b.orders.open(*f).is_some_and(|o| o.intent == *order));
+        // Walking its own way lasts as long as the front's walk it began during.
+        self.carry_own.retain(|(walk, _)| {
+            running
+                .iter()
+                .any(|k| k.led.walk == *walk && b.moving(k.front) == Some(*walk))
+        });
+        let basis = Version {
+            lineage: self.lineage,
+            zone: self.zone,
+            epoch: 1,
+            sequence: self.replica.version(),
+        }
+        .to_value();
+        let int = |n: i64| match u64::try_from(n) {
+            Ok(u) => Value::Uint(u),
+            Err(_) => Value::Nint(n.unsigned_abs() - 1),
+        };
+        for k in running {
+            let (a, walker, walk) = (k.activity, k.walker, k.led.walk);
+            let going = b.moving(k.front) == Some(walk);
+            // A carrier walking its own way during the front's walk keeps its own legs for the rest of that walk: no
+            // order, and no turn of that walk moves it; it rejoins at the front's next walk.
+            if going && b.moving(walker).is_some() {
+                self.carry_own.insert((walk, walker));
+                continue;
+            }
+            if self.carry_own.contains(&(walk, walker)) {
+                continue;
+            }
+            let (replaces, finish) = match self.carry_follows.get(&(a, walker)).copied() {
+                // The walk that turns the crew has ended, wherever the front stood (a spot short of its goal, say):
+                // the turn is finished there, each place its turned one.
+                Some((_, made_for, true)) if made_for == walk && !going => (true, true),
+                Some((_, made_for, _)) if made_for == walk => continue,
+                // The front's new walk: a turn either way takes the places again; a straight one keeps them.
+                Some((order, _, turned)) => {
+                    if !going || (!turned && k.led.turn.is_none()) {
+                        if going {
+                            self.carry_follows.insert((a, walker), (order, walk, false));
+                        }
+                        continue;
+                    }
+                    (true, false)
+                }
+                None => (false, false),
+            };
+            if (!going && !finish)
+                || b.moving(walker).is_some()
+                || (!replaces && b.orders.open(walker).is_some())
+            {
+                continue;
+            }
+            let (Some((on, here)), Some((own, _))) = (b.pose(k.front), b.pose(walker)) else {
+                continue;
+            };
+            if on != own {
+                continue;
+            }
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            // Finished where the front stands: from the load's heading now to the turned one, the front at its goal.
+            let at = engine::on_plan(k.place, k.heading);
+            let turn = match (finish, k.led.turn) {
+                (true, Some((_, h))) => Some(([here.x, here.z], h)),
+                (_, turn) => turn,
+            };
+            let mut parameters = BTreeMap::from([(4, Value::Array(vec![int(at[0]), int(at[1])]))]);
+            if let Some((goal, h)) = turn {
+                let end = engine::on_plan(k.place, h);
+                parameters.insert(
+                    5,
+                    Value::Array(vec![int(goal[0]), int(goal[1]), int(end[0]), int(end[1])]),
+                );
+            }
+            let order = Intent {
+                actor: Actor::Soul(k.soul),
+                verb: Name::new(skills::orders::FOLLOW).unwrap_or_else(|| unreachable!("a name")),
+                target: Some(Target::Node(k.front)),
+                parameters,
+                sequence: 0,
+                basis: basis.clone(),
+                expiry: now.saturating_add(sim::orders::LONGEST),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                // The order this carrier kept for the front's last walk, ended now (it is the Soul's at sequence 0).
+                replaces: replaces.then_some(0),
+                body: None,
+                reflex: false,
+            };
+            match crate::orders::accept(b, &order, walker, id, now) {
+                Ok(()) => {
+                    self.carry_follows
+                        .insert((a, walker), (id, walk, turn.is_some() && !finish));
+                }
+                Err(r) => eprintln!(
+                    "worldd: {}'s place in its carry was refused: {r}",
+                    replica::world_model::show(walker)
+                ),
+            }
+        }
+        for o in cancel {
+            let walker = o.body;
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            let cancel = Intent {
+                actor: o.actor,
+                verb: Name::new(replica::intents::CANCEL).unwrap_or_else(|| unreachable!("a name")),
+                target: None,
+                parameters: BTreeMap::new(),
+                sequence: o.sequence.saturating_add(1),
+                basis: basis.clone(),
+                expiry: now.saturating_add(60_000_000),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: Some(o.sequence),
+                body: None,
+                reflex: false,
+            };
+            let _ = crate::orders::accept(b, &cancel, walker, id, now);
+        }
+        // The front's walk stops where it is, ended by why its carry broke off.
+        let mut stopped = Vec::new();
+        for (_, walk, why) in over {
+            if self.open.contains_key(&walk) && b.cancel(walk) == Some(Cut::Stopped) {
+                stopped.push((walk, why));
+            }
+        }
+        for (walk, why) in stopped {
+            self.settle(walk, Err(why.to_owned()), now);
+        }
+    }
+
     /// Step 4 for moves (I4b): those taken since the last tick start, each refused by name or begun.
     fn start_moves(&mut self, now: Micros) {
         let Some(mut b) = self.bodies.take() else {
@@ -4669,10 +5548,12 @@ impl Clock {
         let mut asks = Vec::new();
         for (id, m) in std::mem::take(&mut self.moving) {
             let Some(o) = self.open.get(&id) else {
+                self.headings.remove(&id);
                 continue;
             };
             let (actor, sequence) = (o.actor, o.sequence);
             if expired(o.expiry, now) {
+                self.headings.remove(&id);
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
             } else {
                 asks.push((id, m));
@@ -4689,11 +5570,47 @@ impl Clock {
             })
             .map(|(id, a)| (a.body, *id))
             .collect();
-        let started = b.start(asks);
+        // Each walk's gait, so its deadline is its route at that gait's speed (trial 0.137): the slowest of its ask
+        // and its fallbacks, whichever of them starts.
+        let gaits: BTreeMap<Id, i64> = asks
+            .iter()
+            .filter_map(|(id, a)| {
+                std::iter::once(&a.ask)
+                    .chain(&a.fallbacks)
+                    .filter_map(|k| match k {
+                        replica::move_check::Ask::Walk { gait, .. } => {
+                            Some(crate::bodies::speed(*gait))
+                        }
+                        _ => None,
+                    })
+                    .min()
+                    .map(|s| (*id, s))
+            })
+            .collect();
+        // Each walk's goal, its first ask's node and point (moving-group rule 3: where a carry's front turns its crew).
+        let goals: BTreeMap<Id, (Id, Vec3)> = asks
+            .iter()
+            .filter_map(|(id, a)| match a.ask {
+                replica::move_check::Ask::Walk {
+                    node,
+                    point: Some(p),
+                    ..
+                } => Some((*id, (node, p))),
+                _ => None,
+            })
+            .collect();
+        let mut headings = BTreeMap::new();
+        for (id, _) in &asks {
+            if let Some(h) = self.headings.remove(id) {
+                headings.insert(*id, h);
+            }
+        }
+        let started = b.start_committed(asks);
         let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
-                self.walks.insert(id, acts::Walk::new(body, id));
+                let speed = gaits.get(&id).copied().unwrap_or(crate::bodies::WALK);
+                self.walks.insert(id, acts::Walk::new(body, id, speed));
                 walked.push((body, id));
             }
         }
@@ -4707,6 +5624,8 @@ impl Clock {
                     id,
                     now,
                     true,
+                    goals.get(&id).copied(),
+                    headings.get(&id).copied(),
                 );
             }
             for (body, id) in seated {
@@ -4718,6 +5637,8 @@ impl Clock {
                         id,
                         now,
                         false,
+                        None,
+                        None,
                     );
                 }
             }
@@ -4730,7 +5651,17 @@ impl Clock {
         }
         for (id, r) in started {
             match r {
-                Ok(()) => self.note(id, MOVE_STARTED, None, now),
+                Ok(()) => {
+                    self.note(id, MOVE_STARTED, None, now);
+                    // A sit, a lie or a rise under way is answered accepted now, as a walk is once its route is read
+                    // (W11): its first answer was its receipt at the move's end, about 0.93 s for a rise (#5019
+                    // follow-up). It is due as a form's step of the same move is (`sim::forms::span`).
+                    if self.bodies.as_ref().is_some_and(|b| b.placing(id)) {
+                        let span =
+                            sim::forms::span(&[skills::form_runner::Step::Rise], &acts::limits());
+                        self.run_started(id, now.saturating_add(span), now);
+                    }
+                }
                 Err(r) => {
                     if let Some(b) = self.bodies.as_mut() {
                         b.took(id);
@@ -4793,12 +5724,17 @@ impl Clock {
     /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
     fn state(&mut self) -> [u8; 32] {
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
+        self.state_of(&poses)
+    }
+
+    /// [`Clock::state`] with the bodies' poses already read (the tick's record reads them once, with what moved).
+    fn state_of(&mut self, poses: &[(Id, Pose)]) -> [u8; 32] {
         let tree = self
             .replica
             .tree_for_seal()
             .state_hashes()
             .unwrap_or_default();
-        state_hash(&tree, &poses)
+        state_hash_kept(&tree, poses, &mut self.pose_rows)
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -4891,6 +5827,8 @@ impl Clock {
         // in this tick, each at its due time (E6, #3369).
         self.put_clock(now);
         self.fire_sky(now);
+        // 1. The kinds the release added since the world's header, defined at this start's first tick (#4954).
+        self.put_kinds(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
         at[3] = mark();
@@ -5001,10 +5939,14 @@ impl Clock {
             i if i.is_empty() => None,
             i => recorder::record(u64::try_from(n).unwrap_or(0), &i).ok(),
         };
-        let moved = self.bodies.as_mut().map(Bodies::moved).unwrap_or_default();
+        let (moved, poses) = self
+            .bodies
+            .as_mut()
+            .map(Bodies::moved_and_poses)
+            .unwrap_or_default();
         let record =
             (!self.rows.is_empty() || !self.effects.is_empty() || !moved.is_empty()).then(|| {
-                let state = self.state();
+                let state = self.state_of(&poses);
                 let v = Value::Map(BTreeMap::from([
                     (1, Value::Bytes(self.replica.header().hash().to_bytes())),
                     (
@@ -5088,15 +6030,28 @@ impl Clock {
                 .and_then(|s| s.place_in(thing, slot))
                 .map_or(1, |p| usize::try_from(p.most()).unwrap_or(usize::MAX))
         };
+        // The slice stops at AUDIT_TIME, and its faults are printed on the auditor's own thread (#3422): one write to
+        // a loaded stderr blocked for 300 ms. The clock only queues a line, and drops and counts one with no room.
+        let until = Instant::now() + AUDIT_TIME;
+        let mut cut = false;
         let slice = self
             .auditor
-            .slice_most(self.replica.tree(), self.audit, &most);
-        for f in &slice.faults {
-            eprintln!("worldd: audit: {f:?}");
-        }
+            .slice_within(self.replica.tree(), self.audit, &most, &mut || {
+                cut = Instant::now() >= until;
+                cut
+            });
+        AUDIT.slice(cut, self.auditor.passes);
         self.faults += slice.faults.len() as u64;
+        for f in slice.faults {
+            match self.audit_out.try_send(f) {
+                Ok(()) => AUDIT.sent(),
+                Err(_) => AUDIT.dropped(),
+            }
+        }
         at[8] = mark();
         if let Some(m) = &self.measures {
+            // The Souls embodied now, for `health.json` (the home page's count, 26 Nov): off the tick's phases.
+            m.souls(self.life.as_ref().map(|l| l.life.embodied().count()));
             let mut phases = [0; measures::NPHASES];
             for (i, p) in phases.iter_mut().enumerate() {
                 if let (Some(a), Some(b)) = (at[i], at[i + 1]) {
@@ -5126,13 +6081,14 @@ impl Clock {
     }
 
     /// The earliest due time over the world's due lists (O2): the sky's, the bodies' (moves and the wind-down), the
-    /// activities' and the loose things' ends.
+    /// activities', the loose things' ends and the forms' timers (#3991: a bell's fade, a planter's next stage).
     fn next_due(&self) -> Option<Micros> {
         [
             self.sky.as_ref().and_then(|h| h.due.next_due()),
             self.bodies.as_ref().and_then(Bodies::next_due),
             self.engine.as_ref().and_then(Engine::next_due),
             self.loose.next_due(),
+            self.forms.next_due(),
         ]
         .into_iter()
         .flatten()
@@ -5245,6 +6201,27 @@ fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
     eprintln!(
         "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
     );
+}
+
+/// The auditor's printer (#3422): each fault the clock queued, in the `worldd: audit: Fault { … }` form, and after
+/// any line the clock dropped while this thread was behind, how many. A blocked stderr holds this thread, and the
+/// process's stderr lock with it. A write that fails is passed over, so this thread outlives a closed stderr. A drop
+/// happens only while the queue is full, so a line read after it always says it.
+fn print_audit(faults: Receiver<Fault>) {
+    let mut said = 0;
+    for f in faults {
+        let _ = writeln!(std::io::stderr().lock(), "worldd: audit: {f:?}");
+        AUDIT.printed();
+        let dropped = AUDIT.drops();
+        if dropped > said {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "worldd: audit: {} fault lines dropped while the printer was behind ({dropped} in all, {AUDIT_LINES} queued at most)",
+                dropped - said
+            );
+            said = dropped;
+        }
+    }
 }
 
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
@@ -5427,6 +6404,14 @@ type Publish = (Vec<Mapping>, Mapping);
 /// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
 /// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
 /// mappings this start applies, and the one in force, when either is new or the root's fields do not hold it.
+/// The last mapping the world logged (E7b), if any.
+fn logged_mapping(world: &Replica) -> Option<Mapping> {
+    world.tree().time().iter().rev().find_map(|t| match t {
+        TimeEffect::Mapping(m) => Some(*m),
+        _ => None,
+    })
+}
+
 fn timeline(
     world: &Replica,
     rate: Option<(i64, i64)>,
@@ -5687,12 +6672,42 @@ pub fn start<S: Storage + 'static>(
         });
     }
     let shared = Arc::new(Mutex::new(0));
+    // The machine's clock as the world reads it: the threads beside the clock thread read it as [`World::real`].
+    let mut real = Real::start();
     let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
         (true, _) => Box::new(Stepped(Arc::clone(&shared))),
         (false, Some(c)) => c,
-        (false, None) => Box::new(Real::start()),
+        (false, None) => Box::new(real),
     };
-    let real0 = pace.now();
+    let mut real0 = pace.now();
+    // O10 (#2806): a restart whose machine clock went back while it was down (a step) finds its last logged tick in
+    // the clock's future, and once waited, ticking nothing, until the clock came round to it: a frozen world. It is
+    // `clock.stepped`: its clock is carried ahead of the machine's by the step, so world time goes on from the last
+    // tick logged, never back and never waiting, and the step is said by name and in `health.json`. The step is
+    // measured on the logged time line, before a new rate's mapping is made at the start's real time.
+    if let (Some(n), false) = (last, cfg.lockstep) {
+        let logged_rate = cfg.rate.and_then(|_| {
+            let rate = logged_mapping(&world)?.rate();
+            Some((i64::from(rate.num()), i64::from(rate.den())))
+        });
+        let (line, mapping, _) = timeline(&world, logged_rate.or(cfg.rate), real0, tick_us)?;
+        let logged = line.tick_start(n).map_err(time)?;
+        let on = Line::new(mapping.real_us, mapping.world_us, mapping.rate());
+        let behind = on.x_of(logged).map_err(time)? - real0;
+        if behind > 0 {
+            let ahead = behind;
+            pace = Box::new(Ahead { pace, by: ahead });
+            real = real.ahead(ahead);
+            real0 = pace.now();
+            measures::CLOCK_AHEAD_MS.store(ahead / 1000, std::sync::atomic::Ordering::Relaxed);
+            eprintln!(
+                "worldd: clock.stepped: the machine's clock is {} ms behind the last logged tick; world time goes on \
+                 from it, {} ms ahead of the machine's clock",
+                ahead / 1000,
+                ahead / 1000
+            );
+        }
+    }
     // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
     // mappings follow, and the configured rate's (E7b).
     let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
@@ -5839,16 +6854,13 @@ pub fn start<S: Storage + 'static>(
         Scope(s)
     };
     let (forms_scope, engine_scope) = (scope("forms"), scope("engine"));
+    // The nodes of the kinds this start defines (#4954, [`Clock::put_kinds`]).
+    let kinds_scope = scope("kinds");
     let life = cfg.join.take().map(|j| {
         let entry = j.entry.0;
         Lives {
             life: Life::new(scope("life"), j.per_tick),
-            ring: Ring {
-                entries: BTreeMap::from([(entry, j.entry)]),
-                radius: 1_000_000,
-                gap: 1_000_000,
-                rings: 8,
-            },
+            ring: birth_ring(entry, j.entry),
             entry,
             at: j.entry,
             family: j.family,
@@ -5886,6 +6898,7 @@ pub fn start<S: Storage + 'static>(
     let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
         .then(|| Arc::new(buildsafe::Moving::default()));
     let creator = cfg.creator.take();
+    let building_ids = buildsafe::ids_most(&rules.kinds);
     let edits = walkers
         .clone()
         .map(|m| {
@@ -5899,9 +6912,12 @@ pub fn start<S: Storage + 'static>(
                 rules.kinds.clone(),
                 // Lockstep waits for the bodies with no deadline (S10c); a free-running clock at most FRESH_WAIT.
                 (!cfg.lockstep).then_some(FRESH_WAIT),
+                // A world with births judges a creator's arrival place, from the town's entry (#5006).
+                life.as_ref().map(|_| cfg.main_entry),
             )
             .map(|tx| EditQueue {
                 tx,
+                parts: building_ids,
                 walkers: m,
                 offered: std::cell::Cell::new(0),
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
@@ -5927,6 +6943,11 @@ pub fn start<S: Storage + 'static>(
             }
         })
         .map_err(io)?;
+    let (audit_out, audit_in) = sync_channel(AUDIT_LINES);
+    thread::Builder::new()
+        .name("audit".into())
+        .spawn(move || print_audit(audit_in))
+        .map_err(io)?;
     let measures = cfg.measures.then(|| Arc::new(Measures::default()));
     if let (Some(m), Some(path)) = (&measures, cfg.health.take()) {
         measures::write_health(Arc::clone(m), path, measures::EVERY);
@@ -5949,6 +6970,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&cfg.library_words),
         Arc::clone(&text),
         std::mem::take(&mut cfg.closed),
     )
@@ -5982,6 +7004,7 @@ pub fn start<S: Storage + 'static>(
         })
         .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
+    let define = Some((std::mem::take(&mut cfg.define), Minter::new(kinds_scope)));
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let hatches = std::mem::take(&mut cfg.hatches);
@@ -6015,9 +7038,13 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         walks: BTreeMap::new(),
         follows: BTreeMap::new(),
+        carry_follows: BTreeMap::new(),
+        headings: BTreeMap::new(),
+        carry_own: BTreeSet::new(),
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
+        words_next: None,
         edits,
         editing,
         set_down: Vec::new(),
@@ -6033,11 +7060,14 @@ pub fn start<S: Storage + 'static>(
         walkers,
         forms: {
             let mut acts = Acts::new(kinds, library, header, forms_scope);
+            acts.stocks(Arc::clone(&cfg.stocks));
             // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
             let _ = acts.hatches(&hatches);
             acts
         },
         forming: Vec::new(),
+        by_kind: BTreeMap::new(),
+        sat_in: BTreeMap::new(),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
@@ -6050,12 +7080,14 @@ pub fn start<S: Storage + 'static>(
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
         order_records,
+        pose_rows: PoseRows::new(),
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
         outstanding: 0,
         auditor: Auditor::new(),
         audit: cfg.audit,
+        audit_out,
         faults: 0,
         checkpoints,
         records,
@@ -6064,6 +7096,7 @@ pub fn start<S: Storage + 'static>(
         tick: last.unwrap_or(-1),
         measures: clock_measures,
         sky,
+        define,
         tick_us,
         text,
         put_off: BTreeMap::new(),
@@ -6342,6 +7375,7 @@ pub fn start<S: Storage + 'static>(
         restart,
         durable: world_durable,
         quiet,
+        real,
         handover: Arc::default(),
         clock: Some(clock),
     })
@@ -6436,6 +7470,9 @@ fn way_searcher(events: Sender<Event>) -> std::io::Result<Sender<engine::WayAsk>
 ///
 /// `fresh_wait` bounds its wait for the bodies at a job's tick: [`FRESH_WAIT`] on a free-running clock, none in
 /// lockstep (S10c).
+///
+/// With `arrive` (a world with births; in it, the town's entry when one is known), a set of the world's arrival naming a
+/// place Souls born at could not walk away from is refused by name (#5006, [`arrival_stands`]).
 #[allow(clippy::too_many_arguments)]
 fn edit_checker(
     mut world: Option<edit::World>,
@@ -6446,6 +7483,7 @@ fn edit_checker(
     events: Sender<Event>,
     entries: replica::rules::json::Value,
     fresh_wait: Option<Duration>,
+    arrive: Option<Option<(Id, Vec3)>>,
 ) -> R<Sender<(u64, CheckJob)>> {
     let (tx, rx) = channel::<(u64, CheckJob)>();
     // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
@@ -6730,6 +7768,8 @@ fn edit_checker(
                     continue;
                 };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
+                // #5006: the place a set of the world's arrival names, judged once the check takes the edit.
+                let arriving = arrive.zip(arrival_named(&e));
                 // #3958: a panic in the check or the plan answers the edit by name and keeps the thread (and every
                 // edit after it) going, on a town built again.
                 let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -6746,8 +7786,11 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             let mut e = e;
-                            buildsafe::stand_as_kinds(&mut e, &entries, &structure);
-                            edit::check(e, &copy, world)
+                            buildsafe::with_buildings(&mut e, &entries, &world.kinds)
+                                .and_then(|parts| {
+                                    buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    edit::check(e, &copy, world)
+                                })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {
@@ -6758,7 +7801,12 @@ fn edit_checker(
                     };
                     checked
                         .and_then(|c| {
-                            let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                            let t = town.on(&copy, ground, false);
+                            // #5006: a creator's arrival place Souls born at could walk away from, judged on the town.
+                            if let (Some(t), Some((from, set))) = (t.as_deref(), arriving) {
+                                arrival_stands(&copy, t, from, set)?;
+                            }
+                            let known = t.map(|t| Known::of(t));
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
                             sim::edit::plan_classes(
                                 c,
@@ -7018,8 +8066,12 @@ mod tests {
             claim: None,
         };
         let mut next = 5;
-        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 0).unwrap();
         assert_eq!(next, 6, "the link's id is reserved");
+        // #5006: a placed building's parts, which the edit checker adds after intake, are reserved with it.
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next, 19).unwrap();
+        assert_eq!(next, 25, "the link's id and the parts' ids are reserved");
     }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
@@ -7833,6 +8885,424 @@ mod tests {
         );
     }
 
+    /// #5073 follow-up: a creator's weather (the panel's Lightning: with a strike) is undone to the weather before it,
+    /// through the same served undo the page and the agent send: the kind, its levels and E6's next change as they
+    /// were, the creator's end and the strike read as none (0 and [], as T6 has no unset), and E6's weather timer due
+    /// where it was. The edit log names the undo (`souls:undone`) and the redo (`souls:redone`) by the creator, and
+    /// the redo gives the storm and its end back.
+    #[test]
+    fn a_creators_weather_is_undone_to_the_weather_before_it_and_redone() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        // One-second ticks (the longest a tick may be), so the run reaches the weather's next change after the undo.
+        cfg.tick = Duration::from_secs(1);
+        let tick_us: i64 = 1_000_000;
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let until: i64 = 40 * 3_600_000_000;
+        let storm: Vec<Op> = [
+            (
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            (sky::F_CLOUD, int(100)),
+            (sky::F_RAIN, int(90)),
+            (sky::F_WIND, int(80)),
+            (sky::F_WEATHER_UNTIL, int(until)),
+            // The panel's Lightning: the storm and one strike, in one batch (#5006 row 13).
+            (
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ]
+        .into_iter()
+        .map(|(field, to)| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        })
+        .collect();
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let run = |i: Intent, tick: i64| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&storm)), 2);
+        assert_eq!(kind, 2, "stale");
+        let (kind, reason, now) = run(intent(2, now, parameters(&storm)), 4);
+        assert_eq!(kind, 1, "the storm is set: {reason:?}");
+        let (kind, reason, now) = run(intent(3, now, parameters_of(&Asked::Undo)), 6);
+        assert_eq!(kind, 1, "the storm is undone: {reason:?}");
+        let (kind, reason, now) = run(intent(4, now, parameters_of(&Asked::Redo)), 8);
+        assert_eq!(kind, 1, "and redone: {reason:?}");
+        let (kind, reason, _) = run(intent(5, now, parameters_of(&Asked::Undo)), 10);
+        assert_eq!(kind, 1, "and undone again: {reason:?}");
+        // Then the clock runs on past the weather's next change before the storm (read below from the log).
+        let run_to = |tick: i64| {
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+        };
+        run_to(12 * 3_600_000_000 / tick_us);
+        world.stop();
+        // The world node's fields and E6's weather timer: before the storm, after its undo, after the redo.
+        let at = |live: &Replica| {
+            let tree = live.tree();
+            let f = tree.node(tree.root()).unwrap().fields().clone();
+            let due: Vec<i64> = tree
+                .timers()
+                .iter()
+                .filter(|(_, t)| t.name.as_str() == sky::T_WEATHER)
+                .map(|(_, t)| t.due)
+                .collect();
+            (f, due)
+        };
+        let mut live = initial;
+        let mut snaps = Vec::new();
+        let mut log = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            let named: Vec<(Actor, String, i64)> = part
+                .effects
+                .iter()
+                .flat_map(|e| {
+                    e.events.iter().flatten().map(move |ev| {
+                        (e.envelope.actor, ev.name.as_str().to_owned(), e.envelope.at)
+                    })
+                })
+                .collect();
+            // Snapshots just before the storm's part, the undo's and the redo's (each by the creator).
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                snaps.push(at(&live));
+            }
+            log.extend(named);
+            live.apply(&part).unwrap();
+        }
+        snaps.push(at(&live));
+        let [before, stormy, undone, redone, _] = &snaps[..] else {
+            panic!(
+                "the storm, its undo and its redo: {} snapshots",
+                snaps.len()
+            )
+        };
+        let weather = [
+            sky::F_WEATHER,
+            sky::F_CLOUD,
+            sky::F_RAIN,
+            sky::F_WIND,
+            sky::F_WEATHER_NEXT,
+        ];
+        let of = |f: &BTreeMap<u64, Value>| weather.map(|k| f.get(&k).cloned());
+        assert_ne!(
+            of(&before.0),
+            of(&stormy.0),
+            "the storm changed the weather"
+        );
+        assert_eq!(
+            of(&undone.0),
+            of(&before.0),
+            "the undo gives the weather before the storm back"
+        );
+        assert_eq!(before.0.get(&sky::F_WEATHER_UNTIL), None);
+        assert_eq!(
+            undone.0.get(&sky::F_WEATHER_UNTIL),
+            Some(&Value::Uint(0)),
+            "the creator's end reads as none"
+        );
+        assert_eq!(
+            undone.0.get(&sky::F_STRIKE),
+            Some(&Value::Array(Vec::new())),
+            "no strike"
+        );
+        let mut same = undone.0.clone();
+        same.remove(&sky::F_WEATHER_UNTIL);
+        same.remove(&sky::F_STRIKE);
+        assert_eq!(same, before.0, "nothing else on the world node moved");
+        assert_eq!(undone.1, before.1, "E6's weather timer is due where it was");
+        assert_eq!(
+            of(&redone.0),
+            of(&stormy.0),
+            "the redo gives the storm back"
+        );
+        assert_eq!(redone.0.get(&sky::F_WEATHER_UNTIL), Some(&int(until)));
+        assert_eq!(
+            redone.1,
+            [until],
+            "the storm's timer is due at its end again"
+        );
+        let mine: Vec<&str> = log
+            .iter()
+            .filter(|(a, ..)| *a == Actor::Creator(creator))
+            .map(|(_, n, _)| n.as_str())
+            .collect();
+        assert!(
+            mine.contains(&sim::edit::undo::EV_UNDONE)
+                && mine.contains(&sim::edit::undo::EV_REDONE),
+            "the edit log names the undo and the redo: {mine:?}"
+        );
+        let first = |e: &str| mine.iter().position(|n| *n == e);
+        assert!(
+            first(sim::edit::undo::EV_UNDONE) < first(sim::edit::undo::EV_REDONE),
+            "the undo before the redo: {mine:?}"
+        );
+        // Live, after the second undo: E6's table resumes at the next change it held before the storm, and nothing
+        // fires at the storm's end.
+        let next = sky::as_int(&before.0[&sky::F_WEATHER_NEXT]).unwrap();
+        assert!(
+            10 * tick_us < next && next < 12 * 3_600_000_000 && next < until,
+            "the run passes the old next change {next} µs, before the storm's end"
+        );
+        let fires: Vec<i64> = log
+            .iter()
+            .filter(|(a, n, _)| *a == Actor::World && n == sky::EV_WEATHER)
+            .map(|(.., at)| *at)
+            .collect();
+        assert!(
+            fires.contains(&next),
+            "the table resumes at {next}: {fires:?}"
+        );
+        assert!(
+            !fires.contains(&until),
+            "nothing at the storm's end: {fires:?}"
+        );
+        let (f, _) = snaps.last().expect("the end");
+        assert_ne!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap())),
+            "no storm"
+        );
+    }
+
+    /// #5177's review: a second Undo after one that left an unset value. A god claims an area (an edit of the world
+    /// node, field 140 new), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each admitted,
+    /// as the page and the agent send them (`souls:edit` `{5: 1}` / `{5: 2}`): before, the second Undo was refused
+    /// `undo.conflict`, since the storm's undo left 65 at `0` and 69 at `[]`. The world node ends as the storm left it.
+    #[test]
+    fn undo_twice_and_redo_twice_across_a_weather_edit_and_a_claim() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let set = |field, to| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        };
+        let claim = Value::Array(vec![Value::Array(vec![
+            Value::Text(Name::new("c:a").unwrap()),
+            Value::Text(Name::new("part:a").unwrap()),
+            Value::Nint(9_999),
+            Value::Nint(9_999),
+            Value::Uint(10_000),
+            Value::Uint(10_000),
+        ])]);
+        let claimed = vec![set(replica::edit::claims::F_CLAIMS, claim.clone())];
+        let storm = vec![
+            set(
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            set(sky::F_CLOUD, int(100)),
+            set(sky::F_RAIN, int(90)),
+            set(sky::F_WIND, int(80)),
+            set(sky::F_WEATHER_UNTIL, int(40 * 3_600_000_000)),
+            set(
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ];
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let mut tick = 0;
+        let mut run = |i: Intent| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            tick += 2;
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&claimed)));
+        assert_eq!(kind, 2, "stale");
+        let steps = [
+            ("the area is claimed", parameters(&claimed)),
+            ("the storm is set", parameters(&storm)),
+            ("the storm is undone", parameters_of(&Asked::Undo)),
+            (
+                "the claim is undone, past the storm's unset values",
+                parameters_of(&Asked::Undo),
+            ),
+            ("the claim is redone", parameters_of(&Asked::Redo)),
+            ("the storm is redone", parameters_of(&Asked::Redo)),
+        ];
+        let mut now = now;
+        for (n, (what, p)) in steps.into_iter().enumerate() {
+            let (kind, reason, v) = run(intent(2 + n as u64, now, p));
+            assert_eq!(kind, 1, "{what}: {reason:?}");
+            now = v;
+        }
+        world.stop();
+        let mut live = initial;
+        let mut roots = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            live.apply(&part).unwrap();
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                let tree = live.tree();
+                roots.push(tree.node(tree.root()).unwrap().fields().clone());
+            }
+        }
+        // The claim, the storm, the two undos and the two redos.
+        let [claimed, stormy, _, undone, reclaimed, redone] = &roots[..] else {
+            panic!("six creator parts: {}", roots.len())
+        };
+        let weather = |f: &BTreeMap<u64, Value>| {
+            [
+                sky::F_WEATHER,
+                sky::F_RAIN,
+                sky::F_WEATHER_UNTIL,
+                sky::F_STRIKE,
+                replica::edit::claims::F_CLAIMS,
+            ]
+            .map(|k| f.get(&k).cloned())
+        };
+        assert_eq!(
+            undone.get(&sky::F_WEATHER),
+            claimed.get(&sky::F_WEATHER),
+            "both undone: the weather before the storm"
+        );
+        assert_eq!(undone.get(&sky::F_STRIKE), Some(&Value::Array(Vec::new())));
+        assert_eq!(
+            undone.get(&replica::edit::claims::F_CLAIMS),
+            Some(&Value::Array(Vec::new())),
+            "both undone: no claim"
+        );
+        assert_eq!(
+            reclaimed.get(&replica::edit::claims::F_CLAIMS),
+            Some(&claim),
+            "the claim is back"
+        );
+        assert_eq!(
+            weather(redone),
+            weather(stormy),
+            "both redone: the storm and the claim are back"
+        );
+    }
+
     /// S10c: the clock thread's queue to the edit checker dropped (the clock ended, for any reason, `run_due`'s error
     /// among them) wakes a checker waiting for bodies with no deadline, as in lockstep: refused, never blocked.
     #[test]
@@ -7845,6 +9315,7 @@ mod tests {
         let (tx, _rx) = channel();
         let queue = EditQueue {
             tx,
+            parts: BTreeMap::new(),
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),
@@ -8892,5 +10363,61 @@ mod no_brick_tests {
             names > 100 && not_names > 100,
             "both kinds tried: {names} names, {not_names} not"
         );
+    }
+}
+
+#[cfg(test)]
+mod state_hash_kept_tests {
+    use super::*;
+
+    fn pose(ground: Id, x: i64) -> Pose {
+        Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: Vec3::new(x, 0, -x),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        }
+    }
+
+    /// The kept rows give the same state hash as the whole encoding, tick after tick, as bodies move, arrive and
+    /// leave, with one audience or two.
+    #[test]
+    fn kept_rows_hash_as_the_whole() {
+        let id = |n| Id::new(Scope([0x5b; 16]), n).unwrap();
+        let ground = id(1);
+        let mut kept = PoseRows::new();
+        let mut bodies: Vec<(Id, Pose)> =
+            (10..30).map(|n| (id(n), pose(ground, n as i64))).collect();
+        let tree = [
+            (Audience::Everyone, Hash::of(Purpose::Fixture, b"a")),
+            (Audience::Of(id(2)), Hash::of(Purpose::Fixture, b"b")),
+        ];
+        for tick in 0..8i64 {
+            match tick {
+                2 => bodies[3].1 = pose(ground, 900),
+                3 => bodies.push((id(40), pose(ground, 40))),
+                4 => {
+                    bodies.remove(0);
+                    bodies.remove(5);
+                }
+                5 => bodies.iter_mut().for_each(|b| b.1.position.x += 1),
+                6 => bodies.clear(),
+                7 => bodies.push((id(11), pose(ground, 11))),
+                _ => {}
+            }
+            let t = if tick % 2 == 0 { &tree[..1] } else { &tree[..] };
+            assert_eq!(
+                state_hash_kept(t, &bodies, &mut kept),
+                state_hash(t, &bodies),
+                "tick {tick}"
+            );
+            assert!(kept.len() <= bodies.len().max(20) + 1);
+        }
     }
 }

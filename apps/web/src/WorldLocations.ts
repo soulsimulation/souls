@@ -1,5 +1,5 @@
 /** Camera-only addresses derived from the actually depicted recording, never a mind's destination catalogue. */
-export type WorldLocation={id:string;label:string;previewRevision?:number|string;previewLabel?:string;regionId?:string;p:readonly[number,number,number];target:readonly[number,number,number];radius:number;
+export type WorldLocation={id:string;label:string;previewRevision?:number|string;regionId?:string;p:readonly[number,number,number];target:readonly[number,number,number];radius:number;
  /** Picture-only eye inside a one-room building (world-env godTourViews): the card shows the room at eye level. */
  inside?:{readonly p:readonly[number,number,number];readonly target:readonly[number,number,number]}};
 export type DepictedRegion={label?:string;kind?:string;polygon?:readonly(readonly[number,number])[];level?:number};

@@ -670,6 +670,48 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
         (0, 3),
         "no slots of its own, no course: no seats"
     );
+    // An entry that flies a loop from its stop (a balloon's) gives its seats to such a thing on the open ground with no
+    // course yet too: a world seeded before its rides flew, which `worldd serve` gives the course at its start. In a
+    // room (this chair's kitchen) it is given no course, so no seats. Outside the house, it stands on the open ground.
+    let replica::rules::json::Value::Obj(mut aloft) = sofa.clone() else {
+        panic!("an entry")
+    };
+    aloft.push((
+        "ride".into(),
+        replica::rules::json::parse(
+            r#"{"stops": ["f1", "f1"], "returns": false, "ground": "air", "speed_mm_s": 6000}"#,
+        )
+        .unwrap(),
+    ));
+    let aloft = [("eden:sofa".into(), replica::rules::json::Value::Obj(aloft))];
+    let (none, _) = import_eden::body_slots(&im.tree, &aloft);
+    assert!(none.is_empty(), "a ride aloft in a room: no seats");
+    let outside = bare.replace(
+        r#""parent": "e_house", "slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0],"#,
+        r#""parent": null,
+     "pose": [30000, 0, 30000, 0],"#,
+    );
+    assert_ne!(outside, bare);
+    let im = load(&outside).expect("loads");
+    assert_eq!(parent_key(&im, "e_chair"), "ground");
+    let (seats, _) = import_eden::body_slots(&im.tree, &aloft);
+    assert_eq!(
+        seats.len(),
+        3,
+        "a ride aloft on the ground with no course yet: the entry's seats"
+    );
+    // A god edit gives no course, so the same thing alone (a moved or placed one) is offered none.
+    let n = im
+        .tree
+        .handle(seats[0].thing)
+        .and_then(|h| im.tree.node(h))
+        .unwrap();
+    let one = import_eden::body_slots_of(n.id(), n.kind().as_str(), n.fields(), &aloft);
+    assert!(
+        one.is_empty(),
+        "an edited ride aloft with no course: no seats"
+    );
     let flying = SMALL.replace(
         r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,
         r#""pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000, "entry": "eden:sofa",

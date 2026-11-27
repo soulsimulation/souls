@@ -1,7 +1,7 @@
 // The ported scoring (Engine v2 R7, #2701): catalog.mjs's cases, on the copy's rows.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { find, kindWordsOf, nameIn, placeName, score, tokensOf } from './find.mjs';
+import { INDEX_SLICE, find, kindWordsOf, nameIn, placeName, score, tokensOf } from './find.mjs';
 
 const row = (id, name, kind, path = ['World']) => ({ id, name, kind, path });
 const rows = [
@@ -79,4 +79,46 @@ test('a kind entry\'s category, synonyms and forms find its things, below every 
   const kinds = { 'eden:piano': piano };
   assert.deepEqual(find(rows2, 'instrument', { kinds }).found.map((x) => x.id), ['i', 'p']);
   assert.deepEqual(find(rows2, 'instrument').found.map((x) => x.id), ['i'], 'without the entries, names alone');
+});
+
+/** The turns of the loop an index of `n` rows takes to build. */
+const built = async (n) => { for (let i = 0; i <= Math.ceil(n / INDEX_SLICE); i++) await new Promise(setImmediate); };
+
+test('#5010 follow-up: a find on the copy\'s rows by id reads only the rows its words can hit, not every row', async () => {
+  // Eden's 9,588 rows were all scored at every find. Each row here counts the reads of its fields.
+  let reads = 0;
+  const counted = (r) => new Proxy(r, { get: (o, k) => { reads++; return o[k]; } });
+  const many = new Map([...rows, ...Array.from({ length: 2000 }, (_, i) => row(`t${i}`, `tree ${i}`, 'eden:tree'))].map((r) => [r.id, counted(r)]));
+  const kinds = { 'core-chair': { card: { category: 'furniture' } } };
+  const first = find(many, 'chair', { kinds }); // answered row by row while the index is built, a slice a turn
+  await built(many.size);
+  reads = 0;
+  const r = find(many, 'chair', { kinds });
+  assert.deepEqual(r, first, 'the same answer before the index and from it');
+  assert.equal(r.found.length, 8);
+  assert.ok(reads < 200, `${reads} reads of the rows' fields for 12 chairs among ${many.size} rows`);
+  reads = 0;
+  assert.equal(find(many, 'furniture', { kinds }).found.length, 8, 'a kind\'s words are searched too');
+  assert.ok(reads < 200, `${reads} reads`);
+});
+
+test('a find on a Map of rows finds what a find on the same rows as a list does, as the rows change', async () => {
+  const piano = { card: { category: 'instrument', synonyms: ['keys'] }, text: { keys: 'keyboard' }, forms: { play: {} } };
+  const kinds = { 'eden:piano': piano };
+  let list = [...rows, row('p', 'hall-piano', 'eden:piano'), row('i', 'instrument-shop', 'eden:shop'), { ...row('a', 'Old Mill', 'place'), aliases: ['grain house'] }];
+  const asks = ['library', 'eden library', 'libraries', 'librar', 'chair', 'chairs 3', 'eden house 3 kitchen', 'north door eden house 3 kitchen',
+    'instrument', 'keyboard', 'play', 'grain house', 'mill', 'g', 'core', 'bench seat', 'house', 'room', 'reading', 'nothing here'];
+  const same = (why) => {
+    const map = new Map(list.map((r) => [r.id, r]));
+    for (const words of asks) for (const opts of [{ kinds }, {}, { kinds, within: new Set(['g-library', 'p', 'e_c3']) }, { kinds, limit: 50, metres: (x) => x.id.length }]) {
+      assert.deepEqual(find(map, words, opts), find(list, words, opts), `${why}: "${words}" ${JSON.stringify(Object.keys(opts))}`);
+    }
+  };
+  same('first');
+  // A sync changes some rows (a new row object for a changed node), adds some and lets some go; the rest are the same.
+  list = list.map((r) => (r.id === 'g-annex' ? { ...r, name: 'Campus Piano Annex' } : r)).filter((r) => r.id !== 'g-reading');
+  list.push(row('n', 'new library', 'building'), row('e_c3', 'library/chair-3', 'core-chair'));
+  list = list.filter((r, k) => list.findIndex((x) => x.id === r.id) === k);
+  same('after a change');
+  same('again, unchanged');
 });

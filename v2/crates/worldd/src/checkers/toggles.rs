@@ -220,6 +220,34 @@ impl World {
             .unwrap_or_else(|e| panic!("an item applies: {e}"));
     }
 
+    /// Two items in each hand of each body, where a hand holds one: a standing `slot-over-full` on each hand that the
+    /// auditor names again on every pass (the auditor's printer's test). Returns the faults a pass names.
+    pub fn overfill_hands(&mut self) -> usize {
+        let bodies: Vec<Id> = self.pairs.iter().map(|p| p.0).collect();
+        let mut changes = Vec::new();
+        for &body in &bodies {
+            for slot in [1, 2, 1, 2] {
+                let item = self.id();
+                let mut held = pose(body, 0);
+                held.frame.slot = Some(slot);
+                held.support = Support::Slot;
+                let create = Change::Create {
+                    node: item,
+                    kind: self.kinds["souls:item"].clone(),
+                    pose: held,
+                    audience: Audience::Everyone,
+                    fields: BTreeMap::new(),
+                };
+                changes.push((body, create));
+            }
+        }
+        let part = self.part(changes);
+        self.replica
+            .apply(&part)
+            .unwrap_or_else(|e| panic!("the held items apply: {e}"));
+        2 * bodies.len()
+    }
+
     fn room(&mut self, root: Id, bodies: usize, items: usize) {
         let room = self.id();
         let mut changes = vec![(root, self.create(room, "souls:room", root, 0, &[]))];

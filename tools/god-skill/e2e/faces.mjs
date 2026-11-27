@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// XP8 faces e2e: a real world server on the lane's port and real headless Chrome, with a network log of every request
+// XP8 faces e2e: a real world server on the lane's port and headless Chromium, with a network log of every request
 // the page makes.
 //
 //   node tools/god-skill/e2e/faces.mjs [--port 5367] [--keep]
@@ -79,7 +79,7 @@ async function look(name, eye, at, settle = 4000) {
   if (!chromium) return null;
   if (!page) {
     releaseChrome = await chromeLease('Y2-faces-e2e', { waitMs: 20 * 60_000 }); // one Chrome per machine, shared by every lane
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
     page.setDefaultTimeout(600_000);
     page.on('pageerror', (e) => pageErrors.push(String(e).slice(0, 300)));

@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -231,6 +231,9 @@ pub struct Measures {
     next_arrival: AtomicU64,
     /// `health.json` writes so far.
     pub written: AtomicU64,
+    /// The Souls embodied in the world as the last tick left them, plus one; 0 before a tick has set it (or in a world
+    /// with no joins). `souls` in `health.json`: the number a world's card on the home page shows (26 Nov).
+    souls: AtomicU64,
 }
 
 impl Measures {
@@ -286,6 +289,12 @@ impl Measures {
         if total > BUDGET_US {
             self.over_budget.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Clock thread: the Souls embodied in the world after a tick (`None`: a world with no joins, no field).
+    pub fn souls(&self, n: Option<usize>) {
+        let v = n.map_or(0, |n| u64::try_from(n).unwrap_or(u64::MAX - 1) + 1);
+        self.souls.store(v, Ordering::Relaxed);
     }
 
     /// Answers thread: an answer's stamps complete; its parts recorded and returned as the block, `[first stamp,
@@ -352,16 +361,137 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        clock_json(&mut o);
+        DISK.json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
+        o.push_str(",\"audit\":");
+        AUDIT.json(&mut o);
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
+        CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
         ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         HISTORY_EXPORT.json(&mut o);
         CREATOR.json("creator", &mut o);
+        if let Some(n) = self.souls.load(Ordering::Relaxed).checked_sub(1) {
+            let _ = write!(o, ",\"souls\":{n}");
+        }
         o.push_str("}\n");
         o
+    }
+}
+
+/// How far the world's clock runs ahead of the machine's, ms (O10, #2806): set by a restart that found the machine's
+/// clock behind its last logged tick, and by the watchdog, which compares the two each second. Under a second either
+/// way is `steady`; past it, `stepped` (`clock` in `health.json`).
+pub static CLOCK_AHEAD_MS: AtomicI64 = AtomicI64::new(0);
+
+/// `,"clock":{"state":"steady"}`, or `stepped` with how far the world's clock is ahead of the machine's.
+fn clock_json(o: &mut String) {
+    let ahead = CLOCK_AHEAD_MS.load(Ordering::Relaxed);
+    if ahead.abs() < 1000 {
+        o.push_str(",\"clock\":{\"state\":\"steady\"}");
+    } else {
+        let _ = write!(
+            o,
+            ",\"clock\":{{\"state\":\"stepped\",\"ahead_ms\":{ahead}}}"
+        );
+    }
+}
+
+/// Free space under the world (`disk` in `health.json`, #2806 follow-up): `low` before the disk is full, so an
+/// operator hears of it while the world still writes. Written by the disk watch (`worldd serve`), read by the health
+/// writer and by the log's compactor, which gives back what the store already holds sooner while it is low.
+pub struct Disk {
+    /// Whether the disk has been read yet: no field before.
+    read: std::sync::atomic::AtomicBool,
+    low: std::sync::atomic::AtomicBool,
+    free: AtomicU64,
+    total: AtomicU64,
+    low_bytes: AtomicU64,
+    low_pct: AtomicU64,
+    /// Times the disk went low since the start.
+    went_low: AtomicU64,
+}
+
+/// This process's disk.
+pub static DISK: Disk = Disk {
+    read: std::sync::atomic::AtomicBool::new(false),
+    low: std::sync::atomic::AtomicBool::new(false),
+    free: AtomicU64::new(0),
+    total: AtomicU64::new(0),
+    low_bytes: AtomicU64::new(0),
+    low_pct: AtomicU64::new(0),
+    went_low: AtomicU64::new(0),
+};
+
+/// The default `disk.low` threshold: under 1 GiB free, or under 5 % of the disk free.
+pub const DISK_LOW_BYTES: u64 = 1 << 30;
+pub const DISK_LOW_PCT: u64 = 5;
+
+/// Whether a disk with `free` of `total` bytes free is low, given whether it `was` low: under either threshold is low;
+/// once low, it is cleared only past both by a tenth more, so a disk at the line is said once, not at each read.
+pub fn disk_low(free: u64, total: u64, low_bytes: u64, low_pct: u64, was: bool) -> bool {
+    let (bytes, pct) = if was {
+        (
+            low_bytes.saturating_add(low_bytes / 10),
+            low_pct.saturating_mul(11),
+        )
+    } else {
+        (low_bytes, low_pct.saturating_mul(10))
+    };
+    // Percent in tenths, so the tenth's margin holds for small percentages too.
+    let tenths = u128::from(free) * 1000 / u128::from(total.max(1));
+    free < bytes || tenths < u128::from(pct)
+}
+
+impl Disk {
+    /// A reading: `free` of `total` bytes, against the threshold. Whether the disk is low now, and whether that
+    /// changed with this reading.
+    pub fn reading(&self, free: u64, total: u64, low_bytes: u64, low_pct: u64) -> (bool, bool) {
+        let was = self.low.load(Ordering::Relaxed);
+        let low = disk_low(free, total, low_bytes, low_pct, was);
+        self.free.store(free, Ordering::Relaxed);
+        self.total.store(total, Ordering::Relaxed);
+        self.low_bytes.store(low_bytes, Ordering::Relaxed);
+        self.low_pct.store(low_pct, Ordering::Relaxed);
+        self.low.store(low, Ordering::Relaxed);
+        self.read.store(true, Ordering::Relaxed);
+        if low && !was {
+            self.went_low.fetch_add(1, Ordering::Relaxed);
+        }
+        (low, low != was)
+    }
+
+    /// Whether the disk is low.
+    pub fn is_low(&self) -> bool {
+        self.low.load(Ordering::Relaxed)
+    }
+
+    /// Free bytes at the last reading.
+    pub fn free(&self) -> u64 {
+        self.free.load(Ordering::Relaxed)
+    }
+
+    /// `,"disk":{"state":"ok"|"low","free_bytes":n,"total_bytes":n,"free_pct":n,"low_bytes":n,"low_pct":n,
+    /// "went_low":n}`, or nothing before the first reading. `free_pct` in whole percent, rounded down.
+    fn json(&self, o: &mut String) {
+        if !self.read.load(Ordering::Relaxed) {
+            return;
+        }
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (free, total) = (l(&self.free), l(&self.total));
+        let pct = u128::from(free) * 100 / u128::from(total.max(1));
+        let _ = write!(
+            o,
+            ",\"disk\":{{\"state\":\"{}\",\"free_bytes\":{free},\"total_bytes\":{total},\"free_pct\":{pct},\
+             \"low_bytes\":{},\"low_pct\":{},\"went_low\":{}}}",
+            if self.is_low() { "low" } else { "ok" },
+            l(&self.low_bytes),
+            l(&self.low_pct),
+            l(&self.went_low)
+        );
     }
 }
 
@@ -410,6 +540,71 @@ impl Stalls {
             self.now_ms.load(Ordering::Relaxed),
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
+        );
+    }
+}
+
+/// The auditor (K11) and its printer (#3422): passes ended, slices cut short by `answers::AUDIT_TIME`, and the fault
+/// lines the clock queued for the printer, printed, and dropped because the queue was full or the printer gone (the
+/// clock never waits for it). One per process, written by the clock and the printer threads.
+pub struct Audit {
+    passes: AtomicU64,
+    cut: AtomicU64,
+    sent: AtomicU64,
+    printed: AtomicU64,
+    dropped: AtomicU64,
+}
+
+/// This process's auditor.
+pub static AUDIT: Audit = Audit {
+    passes: AtomicU64::new(0),
+    cut: AtomicU64::new(0),
+    sent: AtomicU64::new(0),
+    printed: AtomicU64::new(0),
+    dropped: AtomicU64::new(0),
+};
+
+impl Audit {
+    /// Clock thread: a slice ended, cut short by time or not, with the auditor's passes so far.
+    pub fn slice(&self, cut: bool, passes: u64) {
+        self.passes.store(passes, Ordering::Relaxed);
+        if cut {
+            self.cut.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Clock thread: a line queued.
+    pub fn sent(&self) {
+        self.sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Clock thread: a line dropped.
+    pub fn dropped(&self) {
+        self.dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Printer thread: a line printed.
+    pub fn printed(&self) {
+        self.printed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Lines dropped so far.
+    pub fn drops(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// `{"passes":n,"cut_slices":n,"limit":n,"queued":n,"printed":n,"dropped":n}`: `limit` the lines the queue
+    /// holds; `queued` the lines sent and not yet printed, the one being printed included (so up to `limit` + 1).
+    pub fn json(&self, o: &mut String) {
+        let printed = self.printed.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            "{{\"passes\":{},\"cut_slices\":{},\"limit\":{},\"queued\":{},\"printed\":{printed},\"dropped\":{}}}",
+            self.passes.load(Ordering::Relaxed),
+            self.cut.load(Ordering::Relaxed),
+            crate::answers::AUDIT_LINES,
+            self.sent.load(Ordering::Relaxed).saturating_sub(printed),
+            self.drops()
         );
     }
 }
@@ -481,6 +676,60 @@ pub static STREAM: Stream = Stream(Mutex::new(String::new()));
 /// R15: the stream's recovery chain, backed up to the store behind it (`stream_backup` in `health.json`). Viewers read
 /// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
 pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
+
+/// The stream's clean-up of old generations from the store (#3833, #4954; `stream_cleanup` in `health.json`): the old
+/// generations not read yet (`generations`, each standing for its objects, about a thousand), the deletes in line
+/// (`waiting`), those of them waiting to be tried again after a refusal (`retrying`), and the deletes the store
+/// answered and the refusals since the start. One per process, written by the clean-up's own thread each second,
+/// whether or not it may delete; absent until it first runs.
+pub struct Cleanup {
+    on: std::sync::atomic::AtomicBool,
+    generations: AtomicU64,
+    waiting: AtomicU64,
+    retrying: AtomicU64,
+    deleted: AtomicU64,
+    refused: AtomicU64,
+}
+
+/// This process's stream clean-up.
+pub static CLEANUP: Cleanup = Cleanup {
+    on: std::sync::atomic::AtomicBool::new(false),
+    generations: AtomicU64::new(0),
+    waiting: AtomicU64::new(0),
+    retrying: AtomicU64::new(0),
+    deleted: AtomicU64::new(0),
+    refused: AtomicU64::new(0),
+};
+
+impl Cleanup {
+    /// How the clean-up stands now.
+    pub fn set(&self, generations: u64, waiting: u64, retrying: u64, deleted: u64, refused: u64) {
+        self.generations.store(generations, Ordering::Relaxed);
+        self.waiting.store(waiting, Ordering::Relaxed);
+        self.retrying.store(retrying, Ordering::Relaxed);
+        self.deleted.store(deleted, Ordering::Relaxed);
+        self.refused.store(refused, Ordering::Relaxed);
+        self.on.store(true, Ordering::Relaxed);
+    }
+
+    /// `,"stream_cleanup":{"generations":n,"waiting":n,"retrying":n,"deleted":n,"refused":n}`, or nothing before it
+    /// runs.
+    fn json(&self, o: &mut String) {
+        if !self.on.load(Ordering::Relaxed) {
+            return;
+        }
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            ",\"stream_cleanup\":{{\"generations\":{},\"waiting\":{},\"retrying\":{},\"deleted\":{},\"refused\":{}}}",
+            l(&self.generations),
+            l(&self.waiting),
+            l(&self.retrying),
+            l(&self.deleted),
+            l(&self.refused)
+        );
+    }
+}
 
 /// R17: the start's reads of the store that the world no longer waits on (`shipping`, `archive` and `creator` in
 /// `health.json`): `degraded` with the fault, the tries so far and the wait before the next while the store does not
@@ -727,6 +976,71 @@ mod tests {
     use replica::encode::{Value, decode};
 
     #[test]
+    fn a_disk_is_low_under_either_threshold_and_cleared_past_both_with_a_margin() {
+        const G: u64 = 1 << 30;
+        // 100 GiB disk, 1 GiB and 5 %.
+        let low = |free: u64, was| disk_low(free, 100 * G, G, 5, was);
+        assert!(!low(10 * G, false), "10 % free is not low");
+        assert!(low(4 * G, false), "under 5 % is low");
+        assert!(!low(5 * G, false), "at 5 % is not low");
+        assert!(low(5 * G, true), "once low, 5 % is still low (the margin)");
+        assert!(!low(6 * G, true), "cleared past 5.5 %");
+        // A small disk: the bytes threshold binds first.
+        assert!(
+            disk_low(900 << 20, 10 * G, G, 5, false),
+            "900 MiB of 10 GiB is low"
+        );
+        assert!(
+            disk_low(1100 << 20, 10 * G, G, 5, true),
+            "under 1.1 GiB stays low"
+        );
+        assert!(
+            !disk_low(1200 << 20, 10 * G, G, 5, true),
+            "cleared past 1.1 GiB and 5.5 %"
+        );
+        // Zero thresholds never say low; an unread total is not a division by zero.
+        assert!(!disk_low(0, 0, 0, 0, false));
+    }
+
+    #[test]
+    fn the_disk_gauge_says_its_state_once_read() {
+        let d = Disk {
+            read: std::sync::atomic::AtomicBool::new(false),
+            low: std::sync::atomic::AtomicBool::new(false),
+            free: AtomicU64::new(0),
+            total: AtomicU64::new(0),
+            low_bytes: AtomicU64::new(0),
+            low_pct: AtomicU64::new(0),
+            went_low: AtomicU64::new(0),
+        };
+        let mut o = String::new();
+        d.json(&mut o);
+        assert_eq!(o, "", "no field before the first reading");
+        assert_eq!(d.reading(50, 100, 10, 20), (false, false));
+        assert_eq!(
+            d.reading(5, 100, 10, 20),
+            (true, true),
+            "entering is a change"
+        );
+        assert_eq!(
+            d.reading(5, 100, 10, 20),
+            (true, false),
+            "staying low is not"
+        );
+        d.json(&mut o);
+        assert_eq!(
+            o,
+            ",\"disk\":{\"state\":\"low\",\"free_bytes\":5,\"total_bytes\":100,\"free_pct\":5,\"low_bytes\":10,\
+             \"low_pct\":20,\"went_low\":1}"
+        );
+        assert_eq!(
+            d.reading(90, 100, 10, 20),
+            (false, true),
+            "leaving is a change"
+        );
+    }
+
+    #[test]
     fn buckets_hold_their_values() {
         for us in [0, 1, 3, 4, 5, 7, 8, 100, 1_000, 49_999, 50_000, 1 << 40] {
             let b = bucket(us);
@@ -763,6 +1077,23 @@ mod tests {
             json(),
             ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
         );
+    }
+
+    /// The Souls embodied as the last tick left them are `souls` in `health.json`; never set, no field (26 Nov).
+    #[test]
+    fn the_souls_in_the_world_are_in_the_health_file() {
+        let m = Measures::default();
+        let health = |m: &Measures| m.health(steady_us());
+        assert!(!health(&m).contains("\"souls\""), "unset: no field");
+        m.souls(Some(4));
+        assert!(health(&m).ends_with(",\"souls\":4}\n"), "{}", health(&m));
+        m.souls(Some(0));
+        assert!(
+            health(&m).ends_with(",\"souls\":0}\n"),
+            "none embodied is 0, not unset"
+        );
+        m.souls(None);
+        assert!(!health(&m).contains("\"souls\""));
     }
 
     /// A key the public history mirror could not hold is counted in `health.json`, by its key; none, no field.

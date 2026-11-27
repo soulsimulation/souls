@@ -9,7 +9,7 @@ const { chromium } = require('@playwright/test');
 const out = resolve(process.argv[2]), base = process.argv[3] ?? 'http://127.0.0.1:7846';
 assert.equal(new URL(base).origin, 'http://127.0.0.1:7846', 'only owned isolated fixture port');
 mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 try {
   const context = await browser.newContext({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 1 });
   try {

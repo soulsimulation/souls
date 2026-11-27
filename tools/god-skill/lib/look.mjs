@@ -92,7 +92,7 @@ export async function keeper(worldUrl, port, { warm = false } = {}) {
   phase('fetch');
   const pw = findPlaywright({ timeoutMs: warm ? 180_000 : 60_000 }); if (!pw) throw new Error('no Playwright package found');
   phase('chrome', process.env.EDEN_GOD_PLAYWRIGHT_FROM ? { pwFrom: process.env.EDEN_GOD_PLAYWRIGHT_FROM } : {});
-  browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: [...GL_ARGS, `--remote-debugging-port=${port}`] });
+  browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: [...GL_ARGS, `--remote-debugging-port=${port}`] });
   const ctx = await browser.newContext({ viewport: { width: 1024, height: 640 } });
   // keep the WebGL drawing buffer so the canvas can be read back at any time (page.screenshot stalls on a slow software compositor)
   await ctx.addInitScript(PRESERVE);
@@ -269,7 +269,7 @@ async function shootLocal({ worldUrl, eye, at, out, hour, weather, hideRoofs = f
       const unlock = await (runtime.lease ?? chromeLease)('eden-god look', { waitMs: Math.max(0, timeoutMs - (now() - t0) - 10_000) });
       let unlocked = false; release = () => { if (!unlocked) { unlocked = true; unlock(); } };
       if (cancelled) { release(); throw new Error('look.timeout: lease wait exceeded deadline'); }
-      browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: GL_ARGS }).catch(e => { throw Error(`look: cannot start Chrome (${String(e.message).split('\n')[0]}); install Google Chrome`); });
+      browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: GL_ARGS }).catch(e => { throw Error(`look: cannot start Chrome (${String(e.message).split('\n')[0]}); install Google Chrome`); });
       if (cancelled) { void browser.close().catch(() => {}); throw new Error('look.timeout: browser launch exceeded deadline'); }
       const ctx = await browser.newContext({ viewport: { width, height } });
       await ctx.addInitScript(PRESERVE); page = await ctx.newPage();

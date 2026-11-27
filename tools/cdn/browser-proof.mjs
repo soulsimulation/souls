@@ -139,7 +139,7 @@ if (mode === 'serve') {
   const report = { at: new Date().toISOString(), origin, prefix, sha, bytes: bytes.length, runs: [] };
   let browser;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     for (const dpr of [1, 2]) for (const scenario of ['cdn', 'unreachable', 'corrupt']) {
       await fetch(origin + '/__fixture/cdn/' + (scenario === 'cdn' ? 'up' : scenario === 'corrupt' ? 'corrupt' : 'down'));
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });

@@ -9,14 +9,17 @@ bind everyone.
 2. Open the master view (its address is in the private state file). Read the inbox: Gene's answers and notes come
    first. Then read the lanes and tasks.
 3. Check what is actually running and what is open on GitHub against the tasks. Fix the page where it is wrong.
-4. Dispatch.
+4. Read the previous coordinator's process lessons (its handoff). Apply the mechanical ones before dispatching,
+   such as a rule in the lane brief or a small script, and say in your first inbox update what you changed.
+5. Dispatch.
 
 ## Each wave
 
 - Pick the next task of every lane that is free, in release order. One task per lane. Give the lane its issue and
   nothing else.
 - When a lane returns: read the change against the task, run nothing twice, merge when `ci` is green. Send back
-  work that goes beyond the task.
+  work that goes beyond the task. A change a viewer would see is accepted only after someone has looked at it on
+  the page: frames or screenshots, looked at by eye. Tests and receipts alone do not accept it.
 - Update each task's status and each lane's latest line on the master view. Leave one inbox update: what landed,
   what is running, what is stuck.
 - Anything that needs Gene is one inbox item of kind decision or action, with the choice and a recommendation. Carry
@@ -44,4 +47,5 @@ update with what the release contains.
 ## Handing over
 
 Leave one inbox item of kind handoff: what is running, what is half-done, what the next coordinator should do
-first. The agenda issue and the master view carry everything else.
+first. Add the process lessons: what slowed you down, and for each, the rule or tool that would have prevented it.
+The agenda issue and the master view carry everything else.

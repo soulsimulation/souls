@@ -47,6 +47,8 @@ export function setKindFields(t: Record<string, KindFields>): void { TABLE = t; 
 const F_ENTRY = 27;
 /** E6's weather fields (v2/web/src/sky/record.ts F): the kind, cloud, rain and wind 0 to 100, the next change (µs). */
 const F_WEATHER = 75, F_CLOUD = 76, F_RAIN = 77, F_WIND = 78, F_WEATHER_NEXT = 79, F_DAY = 60, F_LIGHT = 70;
+/** #3695: the creator's last lightning strike, `[x mm, z mm, world µs]` (the panel's Lightning, the agent's `strike`). */
+const F_STRIKE = 69;
 const KINDS = new Set(['clear', 'cloudy', 'rain', 'wind', 'fog', 'storm']);
 
 const whole = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'bigint' ? Number(v) : typeof v === 'boolean' ? (v ? 1 : 0) : null);
@@ -121,7 +123,7 @@ export function drawnState(v2: Record<string, boolean | number | string>, def: O
 
 /** The weather as the old page's world state holds a god's set weather (channels 0 to 1), from the world node's fields
  *  75-79; null before the world node holds its calendar. A wet kind ends at v2's next change (field 79, as a take tick). */
-export type OldWeather = { kind: string; clouds: number; rain: number; wind: number; fog: number; intensity: number; until?: number };
+export type OldWeather = { kind: string; clouds: number; rain: number; wind: number; fog: number; intensity: number; until?: number; strike?: { x: number; z: number; n: number; tick: number } };
 export function weatherOf(sky: Record<number, unknown> | undefined | null): OldWeather | null {
   if (!sky || (!(F_DAY in sky) && !(F_LIGHT in sky))) return null;
   const name = typeof sky[F_WEATHER] === 'string' ? plainName(sky[F_WEATHER] as string) : 'clear';
@@ -130,6 +132,9 @@ export function weatherOf(sky: Record<number, unknown> | undefined | null): OldW
   const w: OldWeather = { kind, clouds: level(F_CLOUD), rain: level(F_RAIN), wind: level(F_WIND), fog: kind === 'fog' ? 1 : 0, intensity: 1 };
   // WEATHER-RULES: a wet setting is in force only before its `until`
   if (kind === 'rain' || kind === 'storm' || (kind === 'manual' && w.rain > 0.1)) w.until = next !== null ? Math.ceil(next / TICK_US) : Number.MAX_SAFE_INTEGER;
+  // #5006 row 13: the creator's strike, as the old page draws a god's (`weather.strike`: metres, at its take tick)
+  const s = Array.isArray(sky[F_STRIKE]) ? (sky[F_STRIKE] as unknown[]).map(whole) : [];
+  if (s.length === 3 && s.every((v) => v !== null)) { const [x, z, us] = s as number[]; w.strike = { x: x / 1000, z: z / 1000, n: 0, tick: Math.round(us / TICK_US) }; }
   return w;
 }
 
@@ -206,7 +211,8 @@ const SAME_M = 0.02, SAME_RAD = 0.02;
 
 const sameWeather = (a: unknown, b: OldWeather) => {
   const o = a as Partial<OldWeather> | null | undefined;
-  return !!o && (Object.keys(b) as (keyof OldWeather)[]).every((k) => o[k] === b[k]) && (o.until === undefined) === (b.until === undefined);
+  const same = (k: keyof OldWeather) => (k === 'strike' ? o?.strike?.tick === b.strike?.tick && o?.strike?.x === b.strike?.x && o?.strike?.z === b.strike?.z : o?.[k] === b[k]);
+  return !!o && (Object.keys(b) as (keyof OldWeather)[]).every(same) && (o.until === undefined) === (b.until === undefined);
 };
 
 /** Each thing's kind state as its old def draws it, kept while neither changes (worldDiff runs five times a second). */
@@ -360,7 +366,8 @@ export class WorldState {
     if (!m?.worldPose || !this.unchecked.size) return;
     const pass = () => {
       for (const id of this.unchecked) {
-        const n = this.nodes.get(id), e = n?.origin ? m.entities.get(n.origin) : undefined;
+        // a thing removed and placed again under its origin in a later part: its entity is stashed, not in the layer
+        const n = this.nodes.get(id), e = n?.origin ? m.entities.get(n.origin) ?? this.stash.get(n.origin) : undefined;
         // a path or an area is world-frame geometry, not a thing set down
         if (!n?.origin || !e || (e as { shape?: unknown }).shape) continue;
         let was: ReturnType<NonNullable<typeof m.worldPose>>;

@@ -22,6 +22,8 @@ fn main() {
         Some("arrival") => std::process::exit(serve::set_arrival(&args)),
         // A running world's entries brought up to a release's (`entries_upgrade`), by the release's move.
         Some("entries") => std::process::exit(entries_upgrade::run(&args)),
+        // One person's words taken out of what a stopped world serves (W7, #2826).
+        Some("remove-words") => std::process::exit(worldd::removal::run(&args)),
         // The schemas this build reads and writes, by hash (T6), which a rollback compares (O7, #2804).
         Some("schemas") => {
             let h = replica::effects::schema_hash();

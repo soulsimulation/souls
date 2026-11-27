@@ -331,6 +331,22 @@ impl Surface {
         (0..3).all(|k| orient(v[k], v[(k + 1) % 3], p) >= 0)
     }
 
+    /// Whether `p` (µm, x and z) lies in a triangle of more than no area, its edges included, found through the
+    /// cells: when it does, `crate::ground::exits::piece_of` finds a piece holding it too (the same triangles, the same
+    /// test), without reading every triangle of the surface.
+    pub fn holds(&self, p: [i64; 2]) -> bool {
+        let p = [i128::from(p[0]), i128::from(p[1])];
+        let Some(qs) = self.cells.get(&(cell(p[0]), cell(p[1]))) else {
+            return false;
+        };
+        qs.iter().any(|&q| {
+            self.tris[q as usize].iter().any(|(v, ..)| {
+                orient(v[0], v[1], v[2]) != 0
+                    && (0..3).all(|k| orient(v[k], v[(k + 1) % 3], p) >= 0)
+            })
+        })
+    }
+
     /// The piece and triangle holding `p`, other than piece `not`.
     fn locate(&self, p: [i128; 2], not: u32) -> Option<(u32, u32)> {
         let qs = self.cells.get(&(cell(p[0]), cell(p[1])))?;

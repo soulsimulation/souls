@@ -106,3 +106,26 @@ test('#3728: a file whose ground is larger grows the world first: its tiles are 
   assert.deepEqual(edits[0].map((o) => [o.op, o.node, o.field, o.value?.length]), [['set', `${T}-1`, 25, 3]]);
   assert.deepEqual(edits[1].map((o) => [o.op, o.kind, o.fields?.[20]]), [['place', 'eden:place@1', 'eden:extent'], ['place', 'eden:bench@1', undefined]]);
 });
+
+test('#5006 row 33: a title and a calendar entry\'s words go over as words; a words record the file lacks is still not brought', () => {
+  const W = 'a'.repeat(32), says = (id) => ({ map: [[21, { id }]] });
+  const file = world(S, [
+    node(`${S}-2`, 'eden:armchair@1', `${S}-1`, { 4: says(`${W}-0`) }),
+    node(`${S}-3`, 'eden:calendar_entry@1', `${S}-1`, { 28: 1000, 29: 2000, 30: says(`${W}-1`) }),
+    node(`${S}-4`, 'eden:bench@1', `${S}-1`, { 4: says(`${W}-9`) }),
+  ]);
+  file.words = { [`${W}-0`]: 'Reading chair', [`${W}-1`]: 'Tea party in the hall' };
+  const plan = importOf(file, world(T));
+  const places = drain(plan).flat().filter((o) => o.op === 'place');
+  assert.deepEqual(places.map((o) => [o.kind, o.fields]), [
+    ['eden:armchair@1', { 4: { words: 'Reading chair' } }],
+    ['eden:calendar_entry@1', { 28: 1000, 29: 2000, 30: { words: 'Tea party in the hall' } }],
+    ['eden:bench@1', {}],
+  ]);
+  assert.deepEqual(Object.fromEntries(plan.counts.droppedFields), { 'eden:bench 4': 1 }, 'only the words the file does not carry');
+  // into the world it came from, the same words are the same field: nothing is set again
+  const same = importOf(file, { ...file, words: { ...file.words } });
+  assert.deepEqual(drain(same), []);
+  assert.deepEqual(batchValue(says('x-1'), new Map(), { 'x-1': 'a b' }), { words: 'a b' });
+  assert.equal(batchValue({ map: [[22, { id: 'x-1' }]] }, new Map(), { 'x-1': 'a b' }), null, 'only a words record');
+});

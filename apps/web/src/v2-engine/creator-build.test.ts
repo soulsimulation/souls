@@ -1,7 +1,7 @@
 // 0.133 item 6: Build's place, move and remove from what the stream shows.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { buildKinds, groundOf, isThing, moveOp, placeOp, removeOp, shortKind, spotIn, thingNear, thingOf, type BuildNode } from './creator-build.ts';
+import { ARRIVAL, arrivalSet, buildKinds, groundOf, isPlace, isThing, moveOp, placeMiddle, placeOp, placeUnder, removeOp, shortKind, spotIn, thingNear, thingOf, type BuildNode } from './creator-build.ts';
 import { entityId } from './creator-kinds.ts';
 
 const S = '1a'.repeat(16), Q = 1 << 30, I: [number, number, number, number] = [Q, 0, 0, 0];
@@ -47,4 +47,18 @@ test('a click names a thing by the entity the page draws it as, or by standing n
   assert.equal(thingOf(nodes, entityId(`${S}.4`)), null);
   assert.equal(thingNear(nodes, [4.4, -2.2]), `${S}.3`);
   assert.equal(thingNear(nodes, [40, 40]), null);
+});
+
+test('#5006: a place under the pointer is the smallest area on the open ground there, and New Souls arrive here names it on the root', () => {
+  const big = { id: `${S}.10`, kind: 'eden:place@p', parent: `${S}.2`, outline: [[-20000, -20000], [20000, -20000], [20000, 20000], [-20000, 20000]] };
+  const pond = { id: `${S}.11`, kind: 'eden:place@p', parent: `${S}.2`, outline: [[2000, 2000], [6000, 2000], [6000, 8000], [2000, 8000]], placeName: 'the pond' };
+  const room = { id: `${S}.12`, kind: 'eden:room@r', parent: `${S}.5`, outline: [[0, 0], [4000, 0], [4000, 4000]] };
+  const all = new Map<string, BuildNode>([...nodes, [big.id, big], [pond.id, pond], [room.id, room]]);
+  assert.equal(placeUnder(all, [3, 5]), pond.id, 'the pond, not the field round it');
+  assert.equal(placeUnder(all, [-10, 0]), big.id);
+  assert.equal(placeUnder(all, [30, 0]), null);
+  assert.ok(isPlace(all, pond) && !isPlace(all, room), 'a room\'s outline is not a place on the open ground');
+  assert.deepEqual(placeMiddle(pond), [4, 5]);
+  assert.deepEqual(arrivalSet(all, pond.id), { sets: [{ node: `${S}.1`, field: ARRIVAL, value: [Uint8Array.from(Array(16).fill(0x1a)), 11] }] });
+  assert.match((arrivalSet(all, `${S}.3`) as { why: string }).why, /not a place/);
 });

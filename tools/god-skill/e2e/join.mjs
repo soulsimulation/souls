@@ -232,7 +232,7 @@ try {
     const release = await chromeLease('join-e2e');
     let browser = null;
     try {
-      browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+      browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
       const shot = async (page, name) => { const file = join(out, `${name}.png`); await page.screenshot({ path: file, timeout: PAGE_MS }); report.shots.push(file); console.log(`  📷 ${name}.png`); };
       const open = async (who, hash = '') => {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });

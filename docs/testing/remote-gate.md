@@ -66,7 +66,7 @@ table.
 | V3-packages | Modal | CI's `pnpm -r test` does not run `protocol` and `engine-native` |
 | V3-mars-engine | Modal | CI skips the full campus re-extraction |
 | V6 (every scenario) | Modal | no CI job runs the scenarios |
-| V7 | local, required | real Chrome on a GPU ([below](#v7-and-the-ship-receipt)) |
+| V7 | local, required | Playwright Chromium on a hardware GPU ([below](#v7-and-the-ship-receipt)) |
 
 The Modal steps run with `--only` and are compared assertion by assertion with the baseline: removed assertions,
 renames, new failures, skips and quarantine work as before. For the CI-covered steps a green CI means every test

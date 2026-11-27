@@ -45,7 +45,7 @@ try{
   await agent(folder,['create-soul','Wren']);
   const owner=JSON.parse(readFileSync(join(folder,'.eden-agent.json'),'utf8')).identity;assert.ok(/^agent-[0-9a-f]+$/.test(owner));
   release=await chromeLease('camera-lane-b');
-  browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+  browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
   const ctx=await browser.newContext({viewport:{width:1280,height:800},deviceScaleFactor:1});
   await ctx.addInitScript(o=>{try{localStorage.setItem('sim.dev',o);localStorage.setItem('skipgc','t');}catch{}},owner);
   page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e).slice(0,200)));

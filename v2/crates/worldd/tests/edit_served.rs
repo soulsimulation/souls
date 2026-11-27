@@ -956,6 +956,8 @@ fn walk(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, x: i64, z: i64)
 struct Got {
     kind: u64,
     reason: String,
+    /// A refusal's detail (the answer's field 8), empty when it has none.
+    detail: String,
     version: u64,
     names: BTreeMap<u64, Id>,
     entries: Vec<u64>,
@@ -984,6 +986,10 @@ fn read_answer(v: &Value) -> Got {
         },
         reason: match a.get(&4) {
             Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => String::new(),
+        },
+        detail: match a.get(&8) {
+            Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
             _ => String::new(),
         },
         version,
@@ -1253,6 +1259,86 @@ async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
     );
 }
 
+/// #5006 row 14 (N2's test world, in CI): a creator's edit and its undo, through a real gateway, reach the world's
+/// public event index as its archiver thread writes it into the history export the page reads (nothing asks the
+/// world): a `souls:placed` row and a `souls:undone` row, each by the creator, the undo's after the edit's.
+#[tokio::test(flavor = "multi_thread")]
+async fn row14_a_creators_edit_and_its_undo_reach_the_public_event_index() {
+    use replica::history::events::EventIndex;
+    let d = scratch("row14");
+    let w = seed(
+        &d,
+        &testworld::generate(1, 0).expect("the test world").text,
+        1,
+        (-40, 30),
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    assert_eq!(
+        s.line("creator: ", 60),
+        format!("creator: {}", principal_text(c))
+    );
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the creator's wall commits: {got:?}");
+    let (got, _) = send(
+        &mut ws,
+        asked_intent(&w, creator, 2, got.version, &Asked::Undo),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "and is undone: {got:?}");
+    // The open day's index is written at most every 5 s while parts come (`serve.rs` `VIEWS_EVERY`): read every
+    // object of it in the export until the creator's two rows are there.
+    let events = w.dir.join("history/history/everyone/events");
+    let creators = || -> Vec<(i64, String)> {
+        let mut files = Vec::new();
+        for day in std::fs::read_dir(&events).into_iter().flatten().flatten() {
+            let p = day.path();
+            if p.is_dir() {
+                files.extend(
+                    std::fs::read_dir(&p)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|h| h.path()),
+                );
+            } else {
+                files.push(p);
+            }
+        }
+        let mut rows: Vec<(i64, String)> = files
+            .iter()
+            .filter_map(|f| EventIndex::read(&std::fs::read(f).ok()?).ok())
+            .flat_map(|x| x.rows)
+            .filter(|r| r.actor == creator)
+            .map(|r| (r.at, r.kind.as_str().to_owned()))
+            .collect();
+        rows.sort();
+        rows
+    };
+    let end = Instant::now() + Duration::from_secs(60);
+    let rows = loop {
+        let rows = creators();
+        if rows.iter().any(|(_, k)| k == "souls:undone") || Instant::now() > end {
+            break rows;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    println!("row 14: the creator's rows in the public event index: {rows:?}");
+    let kinds: Vec<&str> = rows.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(kinds, ["souls:placed", "souls:undone"], "{rows:?}");
+    assert!(rows[0].0 < rows[1].0, "the undo after the edit: {rows:?}");
+}
+
 /// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands, once its
 /// first act has born it, is refused `edit.would-bury` by the record's creator, and the same wall beside it commits.
 #[tokio::test(flavor = "multi_thread")]
@@ -1404,6 +1490,394 @@ async fn a_placed_bench_on_a_standing_soul_is_refused_and_beside_it_commits() {
     assert_eq!(sat.kind, 1, "the Soul sits on the placed bench: {sat:?}");
     let rose = act(&mut souls, 4, "eden:rise", None);
     assert_eq!(rose.kind, 1, "the Soul rises from it: {rose:?}");
+}
+
+/// A thing on the open ground at the origin whose solids are `boxes`, each `[cx, cz, hx, hz]` mm (its middle and half
+/// sizes), 2.5 m tall: a wall, a pen or a block.
+fn solids(w: &Seeded, boxes: &[[i64; 4]]) -> Op {
+    let mut op = wall(w, 0, 0);
+    if let Op::Place { fields, .. } = &mut op {
+        let boxes = boxes
+            .iter()
+            .map(|&[cx, cz, hx, hz]| {
+                Value::Array(
+                    [cx, cz, hx, hz, 0, 0, 2_500, 5, 0]
+                        .iter()
+                        .map(|&v| int(v))
+                        .collect(),
+                )
+            })
+            .collect();
+        fields.insert(import_eden::F_SOLIDS, Value::Array(boxes));
+    }
+    op
+}
+
+/// Each body born in the world's log, with its spot on the open ground (µm), in the order born.
+fn births(w: &Seeded) -> Vec<(Id, Vec3)> {
+    let bytes = std::fs::read(w.dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in replica::effects::Part::read(&r).unwrap().effects {
+            if let replica::effects::Body::Changes(changes) = e.body {
+                for c in changes {
+                    if let replica::effects::Change::Create {
+                        node, kind, pose, ..
+                    } = c.change
+                        && kind.as_str().contains("body")
+                    {
+                        out.push((node, pose.position));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #5006 (god-mode audit row 37): the creator names where new Souls arrive, on a served world, with no restart. Set to
+/// N2's build site, a joining Soul is born round its middle; an unknown place is refused `edit.arrival-unknown`; the
+/// first set is undone and redone; cleared, the next is born round the world's entry. A newcomer is always born where it
+/// can walk from: named the square and then walled in round its middle, a Soul is born at the entry, and naming it now
+/// is refused `edit.arrival-cut-off`; with no ground within 16 m of its middle, a Soul is born at the entry, and naming
+/// it is refused `edit.arrival-no-ground`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_creators_arrival_place_holds_for_the_next_birth_and_clears_to_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let im = import_eden::load(&text).unwrap();
+    let place = |id: &str| {
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes[id]).unwrap()).unwrap();
+        (
+            n.fields()[&import_eden::F_ORIGIN].clone(),
+            replica::arrival::middle(n.fields()).expect("the place has an outline"),
+        )
+    };
+    let ((origin, middle), (square_origin, square_middle)) = (place("site"), place("square.area"));
+    assert_eq!(square_middle, (0, 0), "the square is round the origin");
+    let d = scratch("arrival");
+    let w = seed(&d, &text, 4, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc3);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    // The build site and the square as the served world holds them (each node by the facts' id of it).
+    let (site, square) = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        let by = |origin: &Value| {
+            t.children(ground)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|&c| t.node(c))
+                .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(origin))
+                .expect("the served world holds the place")
+                .id()
+        };
+        (by(&origin), by(&square_origin))
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let nowhere = Id::new(Scope([9; 16]), 1).unwrap();
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, arrival(nowhere.to_value())),
+    )
+    .await;
+    println!("an arrival at no place: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN)
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, arrival(w.ground.to_value())),
+    )
+    .await;
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::UNKNOWN),
+        "the open ground itself is not a place: {got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, got.version, arrival(site.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the build site is named: {got:?}");
+    // The first set added the root's field: its undo sets it back to none (the empty list), and the redo names it again.
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 4, got.version, &Asked::Undo),
+    )
+    .await
+    .0;
+    println!("undo of the first arrival: {got:?}");
+    assert_eq!(got.kind, 1, "the first arrival is undone: {got:?}");
+    let got = send(
+        &mut ws,
+        asked_intent(&w, creator, 5, got.version, &Asked::Redo),
+    )
+    .await
+    .0;
+    assert_eq!(got.kind, 1, "and redone: {got:?}");
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let near = |p: Vec3, (x, z): (i64, i64)| {
+        let (dx, dz) = (p.x - x, p.z - z);
+        (((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt()) / 1e6
+    };
+    // A Soul's first act births it (C3); its walk is to a spot near the build site, so it never walks far.
+    walk(
+        &mut souls,
+        &w,
+        w.souls[0],
+        1,
+        middle.0 * 1000 + 3 * M,
+        middle.1 * 1000,
+    );
+    let walked = socket_end(&mut souls);
+    assert_eq!(
+        walked.kind, 1,
+        "the first Soul is born and walks: {walked:?}"
+    );
+    let born = births(&w);
+    assert_eq!(born.len(), 1, "one body born");
+    let at_site = near(born[0].1, (middle.0 * 1000, middle.1 * 1000));
+    println!(
+        "born with the build site named: ({:.2}, {:.2}) m, {at_site:.2} m from its middle ({:.1}, {:.1}) m",
+        born[0].1.x as f64 / 1e6,
+        born[0].1.z as f64 / 1e6,
+        middle.0 as f64 / 1e3,
+        middle.1 as f64 / 1e3
+    );
+    assert!(at_site <= 9.0, "born round the build site: {at_site} m");
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            6,
+            walked.version,
+            arrival(Value::Array(Vec::new())),
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the arrival is cleared: {got:?}");
+    // Each next Soul is born at the entry, and walks a few metres from it.
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let off = near(born[n].1, (-40 * M, 30 * M));
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(1, 30, "once cleared").await;
+    // The square is named; then walled in round its middle (a pen 8 m across, no Soul in it).
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 7, version, arrival(square.to_value())),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square is named: {got:?}");
+    let pen = solids(
+        &w,
+        &[
+            [0, 4_000, 4_200, 100],
+            [0, -4_000, 4_200, 100],
+            [4_000, 0, 100, 4_200],
+            [-4_000, 0, 100, 4_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 8, got.version, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let version = at_entry(2, 33, "with the square's middle walled in").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 9, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named once walled in: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
+    );
+    // The pen gives way to one solid 34 m across over the square's middle: no ground within 16 m of it.
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            10,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    let version = at_entry(3, 27, "with no ground round the square's middle").await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 11, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the square named with no ground round its middle: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::NO_GROUND),
+        "{got:?}"
+    );
+}
+
+/// #5006 review: a host's arrival (`worldd arrival`) walled off from the world's entry never leaves the world unjoinable,
+/// and every reach is judged from the entry. The square is the host's arrival; a pen 34 m across round its middle shuts
+/// in every spot births try round it (16 m): the next Soul is born round the world's entry, and the creator naming the
+/// square is refused `edit.arrival-cut-off` (judged from the entry, not from the host's arrival inside the pen). The pen
+/// gives way to one solid over the square's middle, no ground within 16 m of it: the next Soul is born round the entry.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hosts_arrival_walled_off_from_the_entry_births_at_the_entry() {
+    let text = testworld::generate(1, 0).unwrap().text;
+    let square_origin = {
+        let im = import_eden::load(&text).unwrap();
+        let t = &im.tree;
+        let n = t.node(t.handle(im.nodes["square.area"]).unwrap()).unwrap();
+        n.fields()[&import_eden::F_ORIGIN].clone()
+    };
+    let d = scratch("arrival-host");
+    let w = seed(&d, &text, 2, (-40, 30));
+    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["arrival", "--dir"])
+        .arg(&w.dir)
+        .args(["--place", "square.area"])
+        .output()
+        .expect("worldd arrival runs");
+    assert!(
+        out.status.success(),
+        "arrival: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc4);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    println!("{}", s.line("worldd: Souls arrive at square.area", 60));
+    s.line("listening ", 60);
+    let square = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let ground = t.handle(w.ground).unwrap();
+        t.children(ground)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&c| t.node(c))
+            .find(|n| n.fields().get(&import_eden::F_ORIGIN) == Some(&square_origin))
+            .expect("the served world holds the square")
+            .id()
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let pen = solids(
+        &w,
+        &[
+            [0, 17_000, 17_200, 100],
+            [0, -17_000, 17_200, 100],
+            [17_000, 0, 100, 17_200],
+            [-17_000, 0, 100, 17_200],
+        ],
+    );
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, pen)).await;
+    assert_eq!(got.kind, 1, "the pen is built: {got:?}");
+    let penned = got.names[&1];
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let mut at_entry = async |n: usize, to_z: i64, why: &str| {
+        walk(&mut souls, &w, w.souls[n], 1, -37 * M, to_z * M);
+        let walked = socket_end(&mut souls);
+        assert_eq!(
+            walked.kind, 1,
+            "Soul {n} is born and walks ({why}): {walked:?}"
+        );
+        let born = births(&w);
+        assert_eq!(born.len(), n + 1, "{} bodies born", n + 1);
+        let (dx, dz) = (born[n].1.x + 40 * M, born[n].1.z - 30 * M);
+        let off = ((dx as f64).powi(2) + (dz as f64).powi(2)).sqrt() / 1e6;
+        println!(
+            "born {why}: ({:.2}, {:.2}) m, {off:.2} m from the entry (-40, 30) m",
+            born[n].1.x as f64 / 1e6,
+            born[n].1.z as f64 / 1e6
+        );
+        assert!(off <= 9.0, "born round the entry ({why}): {off} m");
+        walked.version
+    };
+    let version = at_entry(0, 30, "with the host's arrival walled off").await;
+    let arrival = |to: Value| Op::Set {
+        node: Ref::Node(w.root),
+        field: replica::arrival::F_ARRIVAL,
+        to,
+    };
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, version, arrival(square.to_value())),
+    )
+    .await;
+    println!("the creator names the square in the host's pen: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, replica::arrival::CUT_OFF),
+        "{got:?}"
+    );
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(
+            &w,
+            creator,
+            3,
+            got.version,
+            vec![
+                Op::Remove {
+                    node: Ref::Node(penned),
+                },
+                solids(&w, &[[0, 0, 17_000, 17_000]]),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the square's middle is covered: {got:?}");
+    at_entry(1, 33, "with no ground round the host's arrival").await;
 }
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
@@ -1856,6 +2330,12 @@ async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refuse
 
 #[path = "edit_served/k18d.rs"]
 mod k18d;
+
+#[path = "edit_served/shade.rs"]
+mod shade;
+
+#[path = "edit_served/sit_by_kind.rs"]
+mod sit_by_kind;
 
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
@@ -3299,6 +3779,32 @@ fn logged(w: &Seeded) -> Vec<replica::effects::Part> {
         .collect()
 }
 
+/// Crew `crew`'s last word of who holds which grip (#5067, `souls:carry-grips`) once `ok` takes it, within 10 s: its
+/// phase and the bodies holding, in order.
+fn grips_said(w: &Seeded, crew: Id, ok: impl Fn(&str, &[Id]) -> bool) -> (String, Vec<Id>) {
+    use sim::activity::carry::grips::{GRIPS, Holds};
+    let t0 = std::time::Instant::now();
+    loop {
+        let last = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .map(|h| (h.phase, h.holds.iter().map(|x| x.body).collect::<Vec<_>>()))
+            .next_back();
+        if let Some((phase, bodies)) = last.filter(|(p, b)| ok(p, b)) {
+            return (phase, bodies);
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "no grips word for {}",
+            crew.counter()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The node of a kind starting `prefix` created by the entries numbered `entries`.
 fn created_by(w: &Seeded, entries: &[u64], prefix: &str) -> Id {
     use replica::effects::{Body, Change};
@@ -3737,11 +4243,22 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     }
     let got = leave(&mut hands, 3, crew_b);
     refused(&got, "support.none", "Soul 4, alone, lets go of frame B");
+    // E16: the refusal names the step that frees it.
+    assert!(
+        got.detail.contains("next: lay it down first (part:unseat)"),
+        "the leave names its next step: {}",
+        got.detail
+    );
     let got = hands[3].act("part:unseat", crew_b, part(fb));
     refused(
         &got,
         "laydown.no-room",
         "every way out for frame B passes through a wall",
+    );
+    assert!(
+        got.detail.contains("; next: "),
+        "the lay-down names its next step: {}",
+        got.detail
     );
     for side in walls.drain(1..) {
         let got = creator_edit(Op::Remove {
@@ -5387,7 +5904,11 @@ fn into_slot(node: Id, k: u64) -> BTreeMap<u64, Value> {
 async fn put_part(a: &mut GwSoul, c: Id, to: BTreeMap<u64, Value>) -> Got {
     for _ in 0..10 {
         let got = a.act("part:put", c, to.clone()).await;
-        if !(got.kind == 2 && matches!(got.reason.as_str(), "edit.body-stale" | "part.setting-in"))
+        if !(got.kind == 2
+            && matches!(
+                got.reason.as_str(),
+                "edit.body-stale" | "edit.stale" | "part.setting-in"
+            ))
         {
             return got;
         }
@@ -6525,7 +7046,8 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     println!("plan: {out}");
     assert_eq!(status, 0, "{out}");
     assert!(
-        out.contains("change eden:humanoid ") && out.contains("1 would change, 0 unchanged"),
+        out.contains("change eden:humanoid ")
+            && out.contains("1 would change, 0 would be added, 0 unchanged"),
         "{out}"
     );
     assert_eq!(
@@ -6536,7 +7058,10 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     let (status, out) = entries_cmd("stage", &w.dir, &release);
     println!("stage: {out}");
     assert_eq!(status, 0, "{out}");
-    assert!(out.contains("1 staged, 0 unchanged"), "{out}");
+    assert!(
+        out.contains("1 changed and 0 added staged, 0 unchanged"),
+        "{out}"
+    );
     assert_eq!(
         std::fs::read(&file).unwrap(),
         seeded,
@@ -6555,7 +7080,7 @@ fn an_old_humanoid_brought_up_to_the_release_takes_dance_for_60() {
     );
     let (_, again) = entries_cmd("stage", &w.dir, &release);
     assert!(
-        again.contains("0 would change, 1 unchanged (nothing to stage)")
+        again.contains("0 would change, 0 would be added, 1 unchanged (nothing to stage)")
             && !w.dir.join("entries.next").exists(),
         "staged again: {again}"
     );
@@ -6674,6 +7199,575 @@ fn an_entries_upgrade_is_refused_by_name_and_is_the_same_on_two_copies() {
     }
     assert_eq!(bytes[0], bytes[1], "the same entry on both");
     assert_eq!(starts[0], starts[1], "both start at the same state");
+}
+
+/// The group gesture the upgrade tests add (#4954): one of those Eden lacked on 0.138.
+const GESTURE: &str = "eden:wave_together";
+
+/// The world's log, record for record.
+fn log_records(w: &Seeded) -> Vec<Vec<u8>> {
+    sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+}
+
+/// An intent of `soul` with `parameters` on the world's socket, and its end (a receipt, kind 1, or a refusal).
+fn intent_on(
+    s: &mut UnixStream,
+    w: &Seeded,
+    soul: Id,
+    sequence: u64,
+    verb: &str,
+    target: Id,
+    parameters: BTreeMap<u64, Value>,
+) -> Got {
+    let i = Intent {
+        actor: Actor::Soul(soul),
+        verb: Name::new(verb).unwrap(),
+        target: Some(Target::Node(target)),
+        parameters,
+        sequence,
+        basis: basis(w.root.scope(), 0),
+        expiry: answers::now() + 120_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    s.write_all(&bytes).unwrap();
+    socket_end(s)
+}
+
+/// New Soul Actions reach a running world with the release (#4954). A world seeded from `facts` with the entries in
+/// `old` (before the gesture existed), two Souls born at `at`, runs once (each Soul's body born by a step) and stops.
+/// Then the release's upgrade step with its entries in `release`: `entries plan` lists the gesture as an addition and
+/// changes nothing; `entries stage` and the deploy's swap put it in the world's entries; the next start defines it in the
+/// world's history at its first tick. The log before the upgrade is unchanged record for record, the whole log replays
+/// from empty under the world's own header, and one Soul offers the gesture to the other, who accepts: it starts, two
+/// members in its two roles.
+fn a_gesture_added_by_the_upgrade_starts(
+    tag: &str,
+    facts: &str,
+    old: &Path,
+    release: &Path,
+    at: (i64, i64),
+) -> (PathBuf, Seeded, Id) {
+    a_gesture_added_by_the_upgrade_starts_with(tag, facts, old, release, at, 2)
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] in a world seeded with `souls` Souls; only the first two are born.
+fn a_gesture_added_by_the_upgrade_starts_with(
+    tag: &str,
+    facts: &str,
+    old: &Path,
+    release: &Path,
+    at: (i64, i64),
+    souls: u64,
+) -> (PathBuf, Seeded, Id) {
+    let d = scratch(tag);
+    let w = seed_entries(&d, facts, souls, at, Some(old));
+    let name = w.dir.file_name().unwrap().to_str().unwrap().to_owned();
+    let activity = format!("{GESTURE}_activity");
+    let (a, b) = (w.souls[0], w.souls[1]);
+    {
+        let s = serve_with(&w, &d.join("s1"), None);
+        let line = s.line("activities: ", 900);
+        assert!(!line.contains(&activity), "seeded before it: {line}");
+        s.line("listening ", 900);
+        let mut souls = connect_socket(&d.join("s1"));
+        souls
+            .set_read_timeout(Some(Duration::from_secs(120)))
+            .unwrap();
+        // Each Soul's first intent births its body; a step of a metre keeps the two 2 m apart.
+        for (k, soul) in [a, b].into_iter().enumerate() {
+            let x = (at.0 + 2 * k as i64) * M;
+            walk(&mut souls, &w, soul, 1, x, at.1 * M + M);
+            println!("step {k}: {:?}", socket_end(&mut souls));
+        }
+    }
+    let before = log_records(&w);
+    let (status, out) = entries_cmd("plan", &w.dir, release);
+    println!("plan: {out}");
+    assert_eq!(status, 0, "{out}");
+    assert!(
+        out.contains(&format!("entries: {name}: add {GESTURE} ")),
+        "{out}"
+    );
+    assert!(
+        !w.dir.join("entries.next").exists(),
+        "a plan changes nothing"
+    );
+    let (status, out) = entries_cmd("stage", &w.dir, release);
+    assert_eq!(status, 0, "{out}");
+    // What the release's deploy does between the pin and the restart.
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let file = w
+        .dir
+        .join("entries")
+        .join(format!("{}.json", GESTURE.replace(':', ".")));
+    assert!(file.exists(), "added as a seed writes it");
+    let (_, again) = entries_cmd("plan", &w.dir, release);
+    assert!(!again.contains(" add "), "added once: {again}");
+
+    let s = serve_with(&w, &d.join("s2"), None);
+    let line = s.line("activities: ", 900);
+    assert!(line.contains(&activity), "served after the upgrade: {line}");
+    let defined = s.line("kinds defined: ", 900);
+    println!("{defined}");
+    assert!(defined.contains(&format!("{activity}@")), "{defined}");
+    let mut souls = connect_socket(&d.join("s2"));
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    // The definitions follow the world's history; nothing before them changed, and the whole log replays (served_copy
+    // applies every part from empty, under the header the world keeps).
+    let after = log_records(&w);
+    assert!(after.len() > before.len(), "the definitions are logged");
+    assert_eq!(
+        after[..before.len()],
+        before[..],
+        "the log before the upgrade is unchanged, record for record"
+    );
+    let body_b = body_of(&w, b);
+    let offered = intent_on(
+        &mut souls,
+        &w,
+        a,
+        2,
+        "activity:offer",
+        w.ground,
+        BTreeMap::from([
+            (1, pinned_activity(&w, &activity)),
+            (2, Value::Text(Name::new("eden:one").unwrap())),
+            (3, Value::Array(vec![body_b.to_value()])),
+        ]),
+    );
+    println!("offer: {offered:?}");
+    assert_eq!(offered.kind, 1, "offered: {offered:?}");
+    let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
+    let accepted = intent_on(
+        &mut souls,
+        &w,
+        b,
+        2,
+        "activity:accept",
+        gesture,
+        BTreeMap::new(),
+    );
+    println!("accept: {accepted:?}");
+    assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+    assert!(started_within(&w, gesture), "the gesture starts");
+    // The whole log, the gesture's parts and its definition among them, still replays from empty.
+    let _ = served_copy(&w);
+    (d, w, gesture)
+}
+
+/// Whether the log holds `souls:activity-started` on `activity`, within 20 s.
+fn started_within(w: &Seeded, activity: Id) -> bool {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let started = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| e.envelope.node == activity)
+            .flat_map(|e| e.events.iter().flatten())
+            .any(|ev| ev.name.as_str() == "souls:activity-started");
+        if started || Instant::now() > end {
+            return started;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on N2's test world: seeded with the body alone. Then a later release
+/// changes the added gesture (its lead bows): a new revision of its activity, which the next start takes at the
+/// revision the world defined, as a header's kind is taken; nothing is defined again. The gesture open across the
+/// restart keeps its rules (its member leaves it), a new one is offered, accepted and starts, and a creator's edit that
+/// changes the ground (a wall, so the town and the planner commit it under their own rules) and makes a node of the
+/// gesture's activity at the world's revision commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_gesture_added_by_the_release_starts_in_a_world_seeded_before_it() {
+    let d = scratch("added-tw");
+    let content = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let (old, release) = (d.join("old"), d.join("release"));
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::create_dir_all(release.join("greetings")).unwrap();
+    std::fs::copy(
+        content.join("body/humanoid.json"),
+        old.join("humanoid.json"),
+    )
+    .unwrap();
+    std::fs::copy(
+        content.join("body/humanoid.json"),
+        release.join("humanoid.json"),
+    )
+    .unwrap();
+    std::fs::copy(
+        content.join("greetings/wave_together.json"),
+        release.join("greetings/wave_together.json"),
+    )
+    .unwrap();
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts(
+        "added-tw-w",
+        &testworld::generate(1, 0).unwrap().text,
+        &old,
+        &release,
+        (-40, 30),
+    );
+    let path = release.join("greetings/wave_together.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replacen("\"move\": \"wave\"", "\"move\": \"bow\"", 1),
+    )
+    .unwrap();
+    let (status, out) = entries_cmd("stage", &w.dir, &release);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains(&format!("change {GESTURE} ")), "{out}");
+    supervisor::deploy::swap_entries(&w.dir, true).unwrap();
+    let (c, creator) = creator(0xc4);
+    static_creator(&w, c);
+    let records = log_records(&w).len();
+    let activity = format!("{GESTURE}_activity");
+    let socket = d.join("s3");
+    let s = serve_with(&w, &socket, None);
+    let line = s.line("kinds added since the world's header: ", 900);
+    println!("{line}");
+    assert!(
+        line.contains(": 0 to define at the first tick []")
+            && line
+                .split_once("taken at the world's revision [")
+                .is_some_and(|(_, taken)| taken.contains(&format!("{activity}@"))),
+        "{line}"
+    );
+    s.line("listening ", 900);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    let (a, b) = (w.souls[0], w.souls[1]);
+    // The gesture open across the restart is of the world's revision, whose rules this start took: its members leave
+    // it, each with a receipt, and the last one's leave takes it out.
+    for soul in [b, a] {
+        let left = intent_on(
+            &mut souls,
+            &w,
+            soul,
+            3,
+            "activity:leave",
+            open,
+            BTreeMap::new(),
+        );
+        println!("leave the open gesture: {left:?}");
+        assert_eq!(left.kind, 1, "left at the world's revision: {left:?}");
+    }
+    let body_b = body_of(&w, b);
+    let pinned = pinned_activity(&w, &activity);
+    let offered = intent_on(
+        &mut souls,
+        &w,
+        a,
+        4,
+        "activity:offer",
+        w.ground,
+        BTreeMap::from([
+            (1, pinned.clone()),
+            (2, Value::Text(Name::new("eden:one").unwrap())),
+            (3, Value::Array(vec![body_b.to_value()])),
+        ]),
+    );
+    assert_eq!(
+        offered.kind, 1,
+        "offered at the world's revision: {offered:?}"
+    );
+    let gesture = created_by(&w, &offered.entries, &format!("{activity}@"));
+    let accepted = intent_on(
+        &mut souls,
+        &w,
+        b,
+        4,
+        "activity:accept",
+        gesture,
+        BTreeMap::new(),
+    );
+    assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+    assert!(started_within(&w, gesture), "the changed gesture starts");
+    let created = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            replica::effects::Body::Changes(cs) => Some(cs),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| {
+            matches!(&c.change, replica::effects::Change::Create { kind, .. }
+                if kind.as_str() == replica::kinds::defined::kind().0)
+        })
+        .count();
+    assert!(log_records(&w).len() > records);
+    assert_eq!(created, 2, "the gesture and its activity, defined once");
+    // A creator's edit through the walkers' town (a wall changes the ground) that makes a node of the activity at the
+    // world's revision: the town and the planner commit it under the rules this start took.
+    let Value::Array(pin) = &pinned else {
+        panic!("a pin")
+    };
+    let (Value::Text(plain), Value::Bytes(hash)) = (&pin[0], &pin[1]) else {
+        panic!("a pin's name and hash")
+    };
+    let full = Name::new(&format!(
+        "{}@{}",
+        plain.as_str(),
+        replica::encode::to_hex(hash)
+    ))
+    .unwrap();
+    let made = Op::Place {
+        name: 2,
+        kind: full,
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(-30 * M, 0, 34 * M),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: w.ground,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(&w, creator, 1, 0, vec![wall(&w, -30 * M, 30 * M), made]),
+    )
+    .await;
+    println!("a wall and the gesture's activity at the world's revision: {got:?}");
+    assert_eq!(got.kind, 1, "the edit commits: {got:?}");
+}
+
+/// The release's library (`content/kinds`) as a world seeded before the group gestures had it: without `greetings/`.
+fn library_before_the_gestures(d: &Path) -> (PathBuf, PathBuf) {
+    let release = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let old = d.join("old");
+    assert!(
+        Command::new("cp")
+            .arg("-R")
+            .arg(&release)
+            .arg(&old)
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::remove_dir_all(old.join("greetings")).unwrap();
+    (old, release)
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on Eden's facts, its library before the group gestures. Needs the Eden
+/// facts file (`EDEN_FACTS`, else `.local/import-eden/eden-2026.facts.json`; `v2/tools/import-eden/README.md`).
+#[test]
+#[ignore = "needs the generated Eden facts file (EDEN_FACTS)"]
+fn eden_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let d = scratch("added-eden");
+    let (old, release) = library_before_the_gestures(&d);
+    a_gesture_added_by_the_upgrade_starts(
+        "added-eden-w",
+        &std::fs::read_to_string(&facts).expect("the Eden facts file"),
+        &old,
+        &release,
+        (52, 3),
+    );
+}
+
+/// What the public stream spends on parts that touch a kind the release added (#4954 review): Eden after the upgrade,
+/// its two Souls offering, accepting and leaving the group gesture `SOULS_GESTURES` times (default 40), each part
+/// touching the gesture's node, a kind its header does not pin, `SOULS_GESTURE_PAUSE_MS` (default 400) after each act so
+/// the writer cuts each on its own. Run with `STREAM_PROFILE=1` (and `--release`); prints the stream writer's profile
+/// lines (`public-stream profile:` with its whole cuts and its stages' time) and their sums. Needs the Eden facts file
+/// (`EDEN_FACTS`). With `SOULS_PAIRS` (default 1), that many pairs of Souls a few metres apart do it at once, each step
+/// for every pair in turn before the pause: a crowd whose gestures start and end in the same parts.
+#[test]
+#[ignore = "a measurement: needs the generated Eden facts file (EDEN_FACTS) and STREAM_PROFILE=1"]
+fn eden_gesture_parts_on_the_public_stream() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let times: u64 = std::env::var("SOULS_GESTURES")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(40);
+    let pause = Duration::from_millis(
+        std::env::var("SOULS_GESTURE_PAUSE_MS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(400),
+    );
+    let pairs: u64 = std::env::var("SOULS_PAIRS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1);
+    let d = scratch("added-eden-stream");
+    let (old, release) = library_before_the_gestures(&d);
+    let (d, w, open) = a_gesture_added_by_the_upgrade_starts_with(
+        "added-eden-stream-w",
+        &std::fs::read_to_string(&facts).expect("the Eden facts file"),
+        &old,
+        &release,
+        (52, 3),
+        2 * pairs,
+    );
+    let activity = format!("{GESTURE}_activity");
+    let socket = d.join("s3");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 900);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    // Pair `j` stands in a grid of four columns 5 m apart and rows 4 m apart, its two Souls 2 m apart; the first pair
+    // where the setup left it. Each Soul past the first two is born by its walk there.
+    for k in 2..2 * pairs {
+        let j = (k / 2) as i64;
+        let x = 52 + 5 * (j % 4) + 2 * (k % 2) as i64;
+        walk(
+            &mut souls,
+            &w,
+            w.souls[k as usize],
+            1,
+            x * M,
+            (4 + 4 * (j / 4)) * M,
+        );
+        println!("Soul {k}: {:?}", socket_end(&mut souls));
+    }
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let crowd: Vec<(Id, Id, Id)> = (0..pairs as usize)
+        .map(|j| {
+            let (a, b) = (w.souls[2 * j], w.souls[2 * j + 1]);
+            let body = t
+                .links_at(b)
+                .iter()
+                .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                .find_map(|e| Some(t.link(e.link)?.1[0]))
+                .expect("a body");
+            (a, b, body)
+        })
+        .collect();
+    drop(copy);
+    let pinned = pinned_activity(&w, &activity);
+    let mut seq = 3;
+    let leave = |souls: &mut UnixStream, seq: u64, (a, b): (Id, Id), gesture: Id| {
+        for soul in [b, a] {
+            let left = intent_on(
+                souls,
+                &w,
+                soul,
+                seq,
+                "activity:leave",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(left.kind, 1, "left: {left:?}");
+        }
+    };
+    leave(&mut souls, seq, (crowd[0].0, crowd[0].1), open);
+    let t = Instant::now();
+    for _ in 0..times {
+        seq += 1;
+        let mut gestures = Vec::new();
+        for &(a, _, body_b) in &crowd {
+            let offered = intent_on(
+                &mut souls,
+                &w,
+                a,
+                seq,
+                "activity:offer",
+                w.ground,
+                BTreeMap::from([
+                    (1, pinned.clone()),
+                    (2, Value::Text(Name::new("eden:one").unwrap())),
+                    (3, Value::Array(vec![body_b.to_value()])),
+                ]),
+            );
+            assert_eq!(offered.kind, 1, "offered: {offered:?}");
+            gestures.push(created_by(&w, &offered.entries, &format!("{activity}@")));
+        }
+        std::thread::sleep(pause);
+        for (&(_, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            let accepted = intent_on(
+                &mut souls,
+                &w,
+                b,
+                seq,
+                "activity:accept",
+                gesture,
+                BTreeMap::new(),
+            );
+            assert_eq!(accepted.kind, 1, "accepted: {accepted:?}");
+        }
+        std::thread::sleep(pause);
+        seq += 1;
+        for (&(a, b, _), &gesture) in crowd.iter().zip(&gestures) {
+            leave(&mut souls, seq, (a, b), gesture);
+        }
+    }
+    println!(
+        "{times} gestures by {pairs} pairs offered, accepted and left in {:?}",
+        t.elapsed()
+    );
+    // The writer says its profile every 10 s of its own work: wait for the window the last gesture ends in.
+    let end = Instant::now() + Duration::from_secs(30);
+    let (mut parts, mut whole, mut staged) = (0u64, 0u64, 0u64);
+    let after = |l: &str, key: &str| -> u64 {
+        l.split_once(key)
+            .and_then(|(_, r)| r.split(|c: char| !c.is_ascii_digit()).next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    };
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        match s.lines.recv_timeout(left) {
+            Ok(l) if l.starts_with("public-stream profile: ") => {
+                println!("{l}");
+                parts += after(&l, " parts ");
+                whole += after(&l, " whole-cuts ");
+                staged += after(&l, " staged ");
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    println!(
+        "public stream: {parts} parts, {whole} cut whole, {staged} ms staged ({} ms a part)",
+        staged.checked_div(parts).unwrap_or(0)
+    );
+}
+
+/// [`a_gesture_added_by_the_upgrade_starts`] on an older Mars world's facts, its library before the group gestures.
+/// Needs the Mars template's facts file (`MARS_FACTS`, else `.local/import-eden/mars-two.facts.json`; `tests/mars.rs`).
+#[test]
+#[ignore = "needs the generated Mars facts file (MARS_FACTS)"]
+fn a_mars_world_seeded_before_the_group_gestures_offers_one_after_the_upgrade() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let facts = std::env::var("MARS_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/mars-two.facts.json"));
+    let d = scratch("added-mars");
+    let (old, release) = library_before_the_gestures(&d);
+    a_gesture_added_by_the_upgrade_starts(
+        "added-mars-w",
+        &std::fs::read_to_string(&facts).expect("the Mars facts file"),
+        &old,
+        &release,
+        (-6, -30),
+    );
 }
 
 /// A Soul's next act ends its held dance (continuous activities): `act dance` with no `for` is one run that goes on
@@ -6826,4 +7920,294 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
         wave >= dance_end && wave - dance_end <= 200_000,
         "the dance ends where the wave begins: {dance_end} {wave}"
     );
+}
+
+/// Carrying together, turned with the front (moving-group rule 3): a crew seats a beam square in a bay's slot by its
+/// front's commands alone, as the client's `carry to <crew> <bay> <slot>` sends them from the front (a walk to its end
+/// of the slot's line, naming the load's heading there, parameter 3). On N2's test world with a bay at its build
+/// site, two crews first seat its frames (each walk sent by both, as A3's), one holder left on each. Then:
+///
+/// - **A crew of four** (a front, a back and two sides west of the beam; the beam's entry given two grips between its
+///   ends, so four may take it) takes beam 1, its length along z. Only the
+///   front's Soul walks: to a point west of the bay with the load turned 60 degrees, then to its end of `beam_low_l`'s
+///   line with the heading along it. Each time the other three walk with it by their own follow orders, turning with
+///   it, and stand at their places (within 0.3 m), the back and the front on the slot's line; the front seats the beam.
+/// - **A crew of two** does the same with beam 2 into `beam_high_l`, over the low beam now seated.
+///
+/// Each beam is in its slot afterwards, and no carry broke off on the way.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_two() {
+    const ALONG: i64 = 2_200_000;
+    let d = scratch("hgturn");
+    let (facts, slots) = yard_world(&d);
+    // The beam with four grips, two between its ends, so a crew of four takes it (0.135 C5: no more than its grips).
+    let p = d.join("entries").join("rack_beam.json");
+    let mut e = json::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    let json::Value::Obj(top) = &mut e else {
+        panic!("an entry")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        if let ("points", json::Value::Obj(points)) = (k.as_str(), v) {
+            points.retain(|(_, p)| p.get("role").and_then(json::Value::str) != Some("grip"));
+            for (n, z) in [-1_097, -400, 400, 1_097].iter().enumerate() {
+                points.push((
+                    format!("grip_{n}"),
+                    json::Value::Obj(vec![
+                        ("role".into(), json::Value::s("grip")),
+                        (
+                            "at_mm".into(),
+                            json::Value::Arr([0, 51, *z].map(num).to_vec()),
+                        ),
+                    ]),
+                ));
+            }
+        }
+    }
+    std::fs::write(&p, e.to_json()).unwrap();
+    let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let (bay, fa, fb) = (
+        im.nodes["site-bay"],
+        im.nodes["yard-frame-1"],
+        im.nodes["yard-frame-2"],
+    );
+    let beams = [im.nodes["yard-beam-1"], im.nodes["yard-beam-2"]];
+    let g = w.ground;
+    let actors: Vec<Actor> = w.souls.iter().map(|s| Actor::Soul(*s)).collect();
+    let (url, tokens) = gateway(&socket, &actors).await;
+    let mut souls = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        souls.push(GwSoul::new(&url, t, &w, w.souls[k]).await);
+    }
+    let crew_kind = pinned_activity(&w, "mars:carry_activity");
+    let to = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
+    let part = |p: Id| BTreeMap::from([(1, p.to_value())]);
+    let in_slot = |node: Id, k: u64| BTreeMap::from([(1, node.to_value()), (2, Value::Uint(k))]);
+    let slot_of = |node: Id, k: u64| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        sim::ground::scene::slot_points(t, t.handle(node).unwrap(), t.handle(g).unwrap())
+            .unwrap()
+            .into_iter()
+            .find(|(n, _)| *n == k)
+            .unwrap()
+            .1
+    };
+    // Each Soul named walks to its point; every walk is answered.
+    let walk_all = async |souls: &mut [GwSoul], walks: &[(usize, Vec3)], what: &str| {
+        for (k, v) in walks {
+            souls[*k].send("eden:walk", g, to(*v)).await;
+        }
+        for (k, _) in walks {
+            let e = souls[*k].end().await;
+            assert_eq!(e.kind, 1, "{what}, Soul {}: {e:?}", k + 1);
+        }
+    };
+    // A crew of `members` on the ground: the first offers in front, the rest accept in turn (the back, then sides).
+    let crew = async |souls: &mut [GwSoul], members: &[usize]| {
+        let asked = members[1..]
+            .iter()
+            .map(|k| body_of(&w, w.souls[*k]).to_value())
+            .collect();
+        let got = souls[members[0]]
+            .act(
+                "activity:offer",
+                g,
+                BTreeMap::from([
+                    (1, crew_kind.clone()),
+                    (2, Value::Text(Name::new("mars:front").unwrap())),
+                    (3, Value::Array(asked)),
+                ]),
+            )
+            .await;
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let c = created_by(&w, &got.entries, "mars:carry_activity@");
+        for k in &members[1..] {
+            let got = souls[*k].act("activity:accept", c, BTreeMap::new()).await;
+            assert_eq!(got.kind, 1, "accepted: {got:?}");
+        }
+        c
+    };
+    // Waits until each body stands within 0.3 m of its place. The wait follows progress, not a fixed time: a slow CI
+    // runner walks the crew far slower than a quiet machine (a fixed 30 s failed with one carrier 0.48 m out and still
+    // closing, #5128), so it goes on while some body not yet at its place gets nearer it, up to 180 s, and fails once
+    // none has for 10 s.
+    let settle = async |places: &[(Id, Vec3)], what: &str| {
+        const MOST: Duration = Duration::from_secs(180);
+        const STALL: Duration = Duration::from_secs(10);
+        let t0 = std::time::Instant::now();
+        let (mut best, mut nearer) = (vec![i64::MAX; places.len()], t0);
+        loop {
+            let off: Vec<i64> = places
+                .iter()
+                .map(|(b, p)| {
+                    let q = body_at(&w, *b);
+                    (i128::from(q.x - p.x).pow(2) + i128::from(q.z - p.z).pow(2)).isqrt() as i64
+                })
+                .collect();
+            if off.iter().all(|d| *d < 300_000) {
+                return t0.elapsed();
+            }
+            // Progress: a body not at its place yet stands 10 mm nearer it than it has been.
+            for (b, d) in best.iter_mut().zip(&off) {
+                if *d >= 300_000 && *d + 10_000 < *b {
+                    *b = *d;
+                    nearer = std::time::Instant::now();
+                }
+            }
+            assert!(
+                nearer.elapsed() < STALL,
+                "{what}: nobody nearer their place for {} s, {} ms after the walk, µm off {off:?}",
+                STALL.as_secs(),
+                t0.elapsed().as_millis()
+            );
+            assert!(
+                t0.elapsed() < MOST,
+                "{what}: not all at their places within {} s, µm off {off:?}",
+                MOST.as_secs()
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    };
+
+    // The frames, each by a crew of two whose two walks are sent by both (A3's): Soul 1 lets go, the other holds.
+    let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - ALONG), v3(at.x, 0, at.z + ALONG));
+    for (frame, slot, other) in [(fa, "upright_a", 1), (fb, "upright_b", 2)] {
+        let (f0, f1) = frame_ends(where_is(&w, frame).2);
+        walk_all(&mut souls, &[(0, f0), (other, f1)], "to the frame").await;
+        let c = crew(&mut souls, &[0, other]).await;
+        let got = souls[0].act("part:take", c, part(frame)).await;
+        assert_eq!(got.kind, 1, "frame taken: {got:?}");
+        let (f0, f1) = frame_ends(slot_of(bay, slots[slot]));
+        walk_all(&mut souls, &[(0, f0), (other, f1)], "the frame to the bay").await;
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
+        // #5067: seated, its crew still holds it, each carrier on its grip; Soul 1's leave takes only its own hold.
+        let (a, b) = (body_of(&w, w.souls[0]), body_of(&w, w.souls[other]));
+        let held = grips_said(&w, c, |p, _| p == "souls:held");
+        assert_eq!(held.1, [a, b], "frame in {slot}: both hold it");
+        let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
+        assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
+        let held = grips_said(&w, c, |p, b| p == "souls:held" && b.len() == 1);
+        assert_eq!(
+            held.1,
+            [b],
+            "frame in {slot}: the other still holds its grip"
+        );
+    }
+
+    // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
+    // (`[along, across]`, +along toward the front, +across to the west while the length runs along +z).
+    let sides = [[500_000, 800_000], [-500_000, 800_000]];
+    let at_frame = |mid: Vec3, h: [i64; 2], p: [i64; 2]| {
+        let o = worldd::engine::on_plan(p, h);
+        v3(mid.x + o[0], 0, mid.z + o[1])
+    };
+    let turned = [866_025, 500_000];
+    for (beam, slot, members) in [
+        (beams[0], "beam_low_l", vec![0, 3, 4, 5]),
+        (beams[1], "beam_high_l", vec![0, 3]),
+    ] {
+        let n = members.len();
+        let places = |mid: Vec3, h: [i64; 2]| {
+            let mut v = vec![at_frame(mid, h, [ALONG, 0]), at_frame(mid, h, [-ALONG, 0])];
+            v.extend(sides[..n - 2].iter().map(|p| at_frame(mid, h, *p)));
+            v
+        };
+        let start = where_is(&w, beam).2;
+        let walks: Vec<(usize, Vec3)> =
+            members.iter().copied().zip(places(start, [0, M])).collect();
+        walk_all(&mut souls, &walks, "to the beam").await;
+        let c = crew(&mut souls, &members).await;
+        let got = souls[0].act("part:take", c, part(beam)).await;
+        assert_eq!(got.kind, 1, "beam taken: {got:?}");
+        let crew_bodies: Vec<Id> = members.iter().map(|k| body_of(&w, w.souls[*k])).collect();
+        // Only the front walks from here, naming the load's heading at its goal.
+        let s = slot_of(bay, slots[slot]);
+        let staged = v3(s.x - 4_500_000, 0, s.z);
+        for (mid, h, what) in [
+            (staged, turned, "turned 60 degrees, west of the bay"),
+            (s, [0, M], "square on the slot's line"),
+        ] {
+            let want = places(mid, h);
+            let mut walk = to(want[0]);
+            walk.insert(3, Value::Array(vec![int(h[0]), int(h[1])]));
+            let got = souls[0].act("eden:walk", g, walk).await;
+            assert_eq!(got.kind, 1, "the front's walk, {what}: {got:?}");
+            let took = settle(
+                &crew_bodies
+                    .iter()
+                    .copied()
+                    .zip(want.iter().copied())
+                    .collect::<Vec<_>>(),
+                what,
+            )
+            .await;
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            println!(
+                "crew of {n}, {what}: all at their places {} ms after the front's walk; the back {} mm east and {} mm \
+                 south of the front",
+                took.as_millis(),
+                (k.x - f.x) / 1000,
+                (k.z - f.z) / 1000
+            );
+        }
+        // Its last 0.3 m the back closes by two thirds a second: square on the slot's line within 5 s.
+        let t0 = std::time::Instant::now();
+        let across = loop {
+            let (f, k) = (body_at(&w, crew_bodies[0]), body_at(&w, crew_bodies[1]));
+            if (f.x - k.x).abs() < 50_000 || t0.elapsed() > Duration::from_secs(5) {
+                break k.x - f.x;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        println!(
+            "crew of {n}: the back {} mm across from the front, on the slot's line",
+            across / 1000
+        );
+        assert!(
+            across.abs() < 50_000,
+            "square on the slot's line: the back {} mm across from the front",
+            across / 1000
+        );
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        println!(
+            "crew of {n} seats beam {} in {slot}: {got:?}",
+            beam.counter()
+        );
+        assert_eq!(got.kind, 1, "beam seated in {slot}");
+        // #5067: a hold for each carrier, let go of as the beam is seated.
+        let (phase, holding) = grips_said(&w, c, |p, _| p == "souls:released");
+        assert_eq!(
+            (phase.as_str(), holding),
+            ("souls:released", crew_bodies.clone())
+        );
+        for k in &members {
+            let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
+            assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);
+        }
+        assert_eq!(
+            where_is(&w, beam).1,
+            Some(slots[slot]),
+            "the beam is in {slot}"
+        );
+        // The sides step off the next beam's way.
+        let off: Vec<(usize, Vec3)> = members[2..]
+            .iter()
+            .enumerate()
+            .map(|(j, k)| (*k, v3(s.x - 8 * M, 0, s.z - 6 * M - j as i64 * M)))
+            .collect();
+        walk_all(&mut souls, &off, "the sides step away").await;
+    }
+    let downs = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .count();
+    assert_eq!(downs, 0, "no carry broke off");
 }

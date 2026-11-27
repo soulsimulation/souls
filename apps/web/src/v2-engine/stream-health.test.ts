@@ -1,13 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STREAM_CATCHING, STREAM_NOTICE, streamNotice, type StreamHealth } from './stream-health.ts';
+import { STREAM_CATCHING, STREAM_FIRST_MS, STREAM_NOTICE, StreamLife, streamNotice, type StreamHealth } from './stream-health.ts';
 
 const base: StreamHealth = { failed: false, error: null, errorAtParts: null, parts: 0, startedAt: 1000, lastPartAt: null, now: 1000 };
 const at = (h: Partial<StreamHealth>) => streamNotice({ ...base, ...h });
 
-test('no part 15 s after the start is unavailable; before that it is only loading', () => {
-  assert.equal(at({ now: 15_999 }), null);
-  assert.equal(at({ now: 16_000 }), STREAM_NOTICE);
+test('25 Nov: a slow first load is loading, not unavailable, until nothing at all has come for 2 minutes', () => {
+  // Eden's first baseline on a loaded desktop: no part at 26 s, 28 s or 87 s after the start, the page still loading
+  for (const s of [16, 26, 28, 87]) assert.equal(at({ now: 1000 + s * 1000 }), null, `${s} s in`);
+  assert.equal(at({ now: 1000 + STREAM_FIRST_MS - 1 }), null);
+  assert.equal(at({ now: 1000 + STREAM_FIRST_MS }), STREAM_NOTICE, 'nothing at all for 2 minutes');
+  // a pointer (or baseline) that cannot be read is the reader's error: unavailable at once, first load or not
+  assert.equal(at({ now: 3000, error: 'stream pointer 404', errorAtParts: 0, errorAt: 2900 }), STREAM_NOTICE);
+  // once the first part has come, a stream silent for 15 s is unavailable as before
+  assert.equal(at({ parts: 1, lastPartAt: 60_000, now: 74_999 }), null);
+  assert.equal(at({ parts: 1, lastPartAt: 60_000, now: 75_000 }), STREAM_NOTICE);
+  // and so after the world's first picture (its baseline read and shown) when no part follows it
+  const life = new StreamLife();
+  life.see({ parts: 0, newestTo: null, world: null }, 30_000);
+  assert.equal(life.lastPartAt, null, 'still loading');
+  life.see({ parts: 0, newestTo: null, world: 'w' }, 40_000);
+  assert.equal(at({ lastPartAt: life.lastPartAt, now: 54_999 }), null);
+  assert.equal(at({ lastPartAt: life.lastPartAt, now: 55_000 }), STREAM_NOTICE);
 });
 test('#4684: a reader catching up says so while its words keep coming, and the notice only if they stop for 15 s', () => {
   assert.equal(at({ parts: 40, lastPartAt: 30_000, now: 31_000, catching: true }), STREAM_CATCHING);

@@ -14,7 +14,7 @@
 //!   other Soul with words. The world reads it at its start and on each change (`worldd::directory`): it retires
 //!   the body, or gives it the words as its own describe.
 
-use super::{Pairing, is_name, is_soul_grant};
+use super::{Pairing, is_creator_grant, is_name, is_soul_grant};
 use replica::encode::to_hex;
 use replica::ids::sha256;
 use rusqlite::{OptionalExtension, params};
@@ -120,6 +120,45 @@ impl Pairing {
         store(rows.collect())
     }
 
+    /// How many Souls of other people live in the world that `keys` name (its name, instance and aliases: #5006, a
+    /// creator archives a world only while no one else's Souls live there): unretired Souls paired for it and held by an
+    /// account other than `account`, and Souls brought over for it (`imported`: grant and owning account) that have
+    /// neither paired nor retired. The creator's own Souls and the operator's test Souls do not count.
+    pub fn others_living(
+        &self,
+        keys: &[String],
+        account: &str,
+        imported: &[(String, String)],
+    ) -> Result<u64, &'static str> {
+        let db = self.db.lock().expect("the store");
+        let mut n = 0u64;
+        for key in keys {
+            let here = store(db.query_row(
+                "SELECT COUNT(*) FROM soul_profiles_v1 p JOIN paired_souls_v1 ps ON ps.grant_text = p.grant_text
+                  WHERE p.world = ?1 AND p.retired_at IS NULL AND p.grant_text LIKE 'soul-%'
+                    AND ps.account <> ?2 AND ps.account <> ?3",
+                params![key, account, super::operator::OWNER],
+                |r| r.get::<_, i64>(0),
+            ))?;
+            n += here.max(0) as u64;
+        }
+        let waiting: std::collections::BTreeSet<&str> = imported
+            .iter()
+            .filter(|(_, owner)| owner != account)
+            .map(|(grant, _)| grant.as_str())
+            .collect();
+        for grant in waiting {
+            let gone: bool = store(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM paired_souls_v1 WHERE grant_text = ?1)
+                     OR EXISTS(SELECT 1 FROM soul_profiles_v1 WHERE grant_text = ?1 AND retired_at IS NOT NULL)",
+                params![grant],
+                |r| r.get(0),
+            ))?;
+            n += u64::from(!gone);
+        }
+        Ok(n)
+    }
+
     /// The world the request with this poll `secret` named, if it named one (#3702: its welcome goes with the token).
     pub fn world_by_secret(&self, secret: &str) -> Option<String> {
         let hash = to_hex(&sha256(secret.as_bytes()));
@@ -168,12 +207,15 @@ impl Pairing {
 
     /// The Soul requests still pending for `world`, asked from `from` in the last [`WAITING_WITHIN`] seconds, newest
     /// first: `(code, device, label, soul, age, former, name)`. The card shows the code for the owner to match.
+    /// A creator's request (G7) is listed too, its creator grant as `soul`, but only to the account that `holds` that
+    /// grant (the world's owner, who alone can approve it) and only when it names this world or none (#5006 row 3).
     #[allow(clippy::type_complexity)]
     pub fn waiting(
         &self,
         world: &str,
         from: std::net::IpAddr,
         now: u64,
+        holds: impl Fn(&str) -> bool,
     ) -> Result<
         Vec<(
             String,
@@ -196,20 +238,29 @@ impl Pairing {
         codes.sort_by(|a, b| b.1.cmp(&a.1));
         let mut out = Vec::new();
         for (code, _) in codes {
-            let row: Option<(String, String, Option<String>, i64)> = {
+            let row: Option<(String, String, Option<String>, i64, String)> = {
                 let db = self.db.lock().expect("the store");
                 store(
                     db.query_row(
-                        "SELECT r.device, r.label, r.soul, r.created_at FROM pair_requests_v1 r
-                           JOIN pair_request_worlds_v1 w ON w.code = r.code
-                          WHERE r.code = ?1 AND w.world = ?2 AND r.state = 'pending' AND r.scope = 'soul'",
+                        "SELECT r.device, r.label, r.soul, r.created_at, r.scope FROM pair_requests_v1 r
+                           LEFT JOIN pair_request_worlds_v1 w ON w.code = r.code
+                          WHERE r.code = ?1 AND r.state = 'pending'
+                            AND ((r.scope = 'soul' AND w.world = ?2)
+                              OR (r.scope = 'creator' AND (w.world IS NULL OR w.world = ?2)))",
                         params![code, world],
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
                     )
                     .optional(),
                 )?
             };
-            if let Some((device, label, soul, created)) = row {
+            // A creator's request only for the account holding its grant: nobody else could approve it.
+            let row = row.filter(|(.., soul, _, scope)| {
+                scope != "creator"
+                    || soul
+                        .as_deref()
+                        .is_some_and(|g| is_creator_grant(g) && holds(g))
+            });
+            if let Some((device, label, soul, created, _)) = row {
                 let former = self.former_of(&code)?.map(|(_, f)| f);
                 let name = self.name_of(&code)?;
                 let age = now.saturating_sub(created.max(0) as u64);
@@ -316,6 +367,34 @@ impl Pairing {
             params![code, grant],
         ))
         .map(|_| ())
+    }
+
+    /// At an approval: the Soul `grant` takes the name its request (by its code) asked for, unless it already has one
+    /// or another unretired Soul of its world is called that (first day, 26 Nov: the account's list said no name
+    /// until the world had the body, so the navbar showed "Your new Soul"). The world hears it as an owner's name.
+    pub(super) fn note_name(&self, code: &str, grant: &str) -> Result<(), &'static str> {
+        let Some(name) = self.name_of(code)? else {
+            return Ok(());
+        };
+        if self.name_taken(grant, &name)? {
+            return Ok(());
+        }
+        let db = self.db.lock().expect("the store");
+        let named = store(db.execute(
+            "INSERT INTO soul_profiles_v1(grant_text, name) VALUES (?1, ?2)
+             ON CONFLICT(grant_text) DO UPDATE SET name = excluded.name
+               WHERE soul_profiles_v1.name IS NULL AND soul_profiles_v1.retired_at IS NULL",
+            params![grant, name],
+        ))?;
+        if named == 0 {
+            return Ok(());
+        }
+        let worlds = Self::worlds_of(&db, grant)?;
+        // A file not written now never undoes the approval: the name is kept, and the next write of the file has it.
+        let _ = self.publish(&db, &worlds, || {
+            self.write_souls(&db).map_err(|_| "souls-file")
+        });
+        Ok(())
     }
 
     /// Whether the Soul `grant` was retired.
@@ -702,6 +781,17 @@ impl Pairing {
         store(self.db.lock().expect("the store").execute(
             "INSERT INTO soul_profiles_v1(grant_text, retire_asked) VALUES (?1, 1)
              ON CONFLICT(grant_text) DO UPDATE SET retire_asked = 1",
+            params![grant],
+        ))
+        .map(|_| ())
+    }
+
+    /// The signed-in `account` keeps its Soul `grant`: its agent's ask to retire it is cleared, so the agent's
+    /// `retire wait` hears the owner kept it. Nothing else changes.
+    pub fn keep(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "UPDATE soul_profiles_v1 SET retire_asked = 0 WHERE grant_text = ?1",
             params![grant],
         ))
         .map(|_| ())

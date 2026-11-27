@@ -160,7 +160,7 @@ try {
   const base = `${origin}${BASE}/w/${slug}`; report.world = base;
   for (let i = 0; i < 120; i++) { const s = await call(`${base}/v1/god/status`, { sub: 'user_gene' }).catch(() => null); if (s?.status === 200) break; await sleep(1000); }
   release = await chromeLease('approve-in-window');
-  browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
 
   // ---------- A: gene, desktop dpr 1 — in-window delivery, Approve -> Connected -> closes itself -> paired
   {

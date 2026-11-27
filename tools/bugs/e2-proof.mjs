@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// E2 bug-list proof in real Chrome (lane bugs, 2026-10-16). One fresh god world on the lane's port; the harness plays the
+// E2 bug-list proof in Chromium (lane bugs, 2026-10-16). One fresh god world on the lane's port; the harness plays the
 // god (eden-god CLI + the god env API, as a creator's agent does) and one Soul (the unchanged Soul CLI); the viewer is real
 // Chrome (Metal GPU, shared Chrome lease) at dpr 1 and 2 with real clicks.
 //   #8 rain: the god sets rain, then clear, then rain and back to the schedule ('auto'): seconds until rain stops drawing.
@@ -100,7 +100,7 @@ try {
   if (chromium) for (const dpr of dprs) {
     const release = await chromeLease(`bugs-e2-proof-dpr${dpr}`).catch(() => null);
     if (!release) { log('(Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

@@ -31,6 +31,45 @@ export function badResponse({ method, path, status }, allow = ALLOW) {
   return !allow.some((a) => (!a.method || a.method === method) && a.path.test(path) && (!a.status || a.status === status));
 }
 
+/** A world day's bundle index, as the page's history worker asks for it: `<history base>bundles/<day>/index`. */
+export const DAY_INDEX = /^(.*\/history\/)bundles\/(\d{8})\/index$/;
+const DAY_US = 86_400_000_000, TICK_US = 50_000;
+
+/** #5144: the page's history walk (apps/web/src/v2-engine/history-keys.ts `walk`, v2/docs/archive.md rule 8) asks for a
+ *  day's index and, when the day has none, goes on to the day before, back to the newest day that has one. A world still
+ *  for days wrote no index for them, so each is a 404 the walk expects. A 404 for `day` is such a miss when:
+ *  - the page found an index below it (`reads`, day -> the last status seen for this world: 200 on the nearest day read
+ *    below it, every day between read and 404). A walk that found none ran past the world's first day: it fails;
+ *  - the day is not after the world's own today (`nowDay`): no walk asks for one (#5140); and
+ *  - the world had no public event that day (`eventful` false): a day with one wrote a bundle, so its index is real and
+ *    missing. Its event index (`history/everyone/events/<day>`) is the check's own read of that, a lower bound: a day
+ *    whose record was only motion has none, and its missing index passes. */
+export function walkBackMiss(day, reads, { nowDay = Infinity, eventful = false } = {}) {
+  if (day > nowDay || eventful) return false;
+  for (let d = day - 1; d >= 0; d--) {
+    const s = reads.get(d);
+    if (s === 200) return true;
+    if (s !== 404) return false;
+  }
+  return false;
+}
+
+/** The world day of a tick (50 ms) of world time. */
+export const dayOfTick = (tick) => Math.floor((tick * TICK_US) / DAY_US);
+
+/** A step's held day-index errors (`held`: [{path, line}], a 404 and its console line), settled at the step's end against
+ *  the world's reads: the lines that still count. `eventful(base, day)` reads whether the day had a public event. */
+export async function settleMisses(held, reads, { nowDay = Infinity, eventful }) {
+  const out = [];
+  for (const h of held) {
+    const m = DAY_INDEX.exec(h.path);
+    const day = Number(m[2]), r = reads.get(m[1]) ?? new Map();
+    if (!walkBackMiss(day, r, { nowDay })) { out.push(h.line); continue; }
+    if (await eventful(m[1], day)) out.push(`${h.line} (a day with public events: its index is missing)`);
+  }
+  return out;
+}
+
 /** The site-level probes Sign in depends on: [{name, method, path, want}]. */
 export const siteProbes = (slugs) => [
   { name: 'view-token without a token', method: 'POST', path: '/v1/account/view-token', want: 401 },
@@ -61,6 +100,36 @@ export function verdict(slug, steps) {
   return { slug, ok: failures.length === 0 && skipped.length === 0, failures, steps };
 }
 
+/** What Follow a Soul says when the world's Explore lists no Soul. It passes, as Places does with no places: there is no
+ *  control to press. A Soul listed that does not follow still fails. */
+export const NO_SOUL_TO_FOLLOW = 'no Soul listed in Explore: nothing to follow';
+
+/** Follow a Soul: open Explore (a place clicked closes it), click its first Soul, the camera follows it. A world whose
+ *  Explore lists none (it lists only bodies a Soul drives, from the new engine's stream) gets NO_SOUL_TO_FOLLOW instead
+ *  of a 10 s wait for a row that never comes. `camera()` reads the page's camera mode. */
+export async function followSoul(page, { press, until, camera }) {
+  const search = page.locator('input.explore-search');
+  if (!await search.isVisible()) await press(page.locator('.explore-open').first());
+  const soul = page.locator('.explore-soul').first();
+  try { await soul.waitFor({ state: 'visible', timeout: 10000 }); } catch (e) {
+    if (await search.isVisible() && !await page.locator('.explore-soul').count()) return NO_SOUL_TO_FOLLOW;
+    throw e;
+  }
+  // Explore searches its locations again each time it opens. When they come, the centred dialog grows and its Soul rows
+  // move up, so a click aimed before that lands where the row was (release 0.138 on Eden: Explore stayed open, the camera
+  // free). Click once the search is done and the row has held still for 250 ms; a row that never settles is clicked anyway.
+  const searching = page.locator('.explore-modal [aria-live=polite]').first();
+  await until(async () => {
+    if (/searching/i.test(await searching.textContent({ timeout: 1000 }).catch(() => '') ?? '')) return false;
+    const a = await soul.boundingBox(); await sleep(250); const b = await soul.boundingBox();
+    return !!a && !!b && a.x === b.x && a.y === b.y;
+  }, 10000);
+  const name = (await soul.locator('b').first().textContent())?.trim();
+  await press(soul);
+  if (!await until(async () => (await camera()) === 'follow', 20000)) throw Error(`clicking ${name} did not follow (camera ${await camera()})`);
+  return `following ${name}`;
+}
+
 const arg = (argv, k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -89,21 +158,44 @@ async function walkWorld(browser, origin, slug, dir) {
   mkdirSync(dir, { recursive: true });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const host = new URL(origin).host;
-  let errs = [];
+  let errs = [], held = [];
+  // Day indexes read, per history base: day -> the last status. A 404 for one is held to the step's end (walkBackMiss).
+  const reads = new Map(), events = new Map();
+  const dayPath = (url) => { try { const u = new URL(url); return u.host === host && DAY_INDEX.test(u.pathname) ? u.pathname : null; } catch { return null; } };
+  const eventful = (base, day) => {
+    const k = `${base}${day}`;
+    if (!events.has(k)) events.set(k, fetch(`${origin}${base}history/everyone/events/${String(day).padStart(8, '0')}`).then((r) => r.status === 200).catch(() => false));
+    return events.get(k);
+  };
   const watch = (page) => {
-    page.on('console', (m) => { if (m.type() === 'error' && new URL(page.url()).host === host) errs.push(`console: ${m.text().slice(0, 200)}${m.location()?.url ? ` (${m.location().url.replace(origin, '').slice(0, 120)})` : ''}`); });
+    page.on('console', (m) => {
+      if (m.type() !== 'error' || new URL(page.url()).host !== host) return;
+      const line = `console: ${m.text().slice(0, 200)}${m.location()?.url ? ` (${m.location().url.replace(origin, '').slice(0, 120)})` : ''}`;
+      const p = /^Failed to load resource/.test(m.text()) && dayPath(m.location()?.url ?? '');
+      if (p) held.push({ path: p, line }); else errs.push(line);
+    });
     page.on('pageerror', (e) => { if (new URL(page.url()).host === host) errs.push(`pageerror: ${String(e?.message ?? e).slice(0, 200)}`); });
     page.on('response', (r) => {
       let u; try { u = new URL(r.url()); } catch { return; }
       if (u.host !== host) return;
       const x = { method: r.request().method(), path: u.pathname, status: r.status() };
+      const d = DAY_INDEX.exec(x.path);
+      if (d && (x.status === 200 || x.status === 404)) {
+        if (!reads.has(d[1])) reads.set(d[1], new Map());
+        reads.get(d[1]).set(Number(d[2]), x.status);
+        if (x.status === 404) { held.push({ path: x.path, line: `${x.status} ${x.method} ${x.path}` }); return; }
+      }
       if (badResponse(x)) errs.push(`${x.status} ${x.method} ${x.path}`);
     });
   };
   ctx.on('page', watch);
   const page = await ctx.newPage();
   const steps = [];
-  const view = (p = page) => p.evaluate(() => { const d = document.querySelector('.viewer-history')?.dataset ?? {}; return { pres: d.viewerPresentation ?? null, tick: d.viewerTick ? Number(d.viewerTick) : null, camera: document.querySelector('[data-camera]')?.dataset.camera ?? null, pill: document.querySelector('.time-pill')?.textContent?.trim() ?? null, clock: document.querySelector('.time-panel-clock')?.textContent?.trim() ?? null }; }).catch(() => ({}));
+  // The world's own today: the newest tick drawn, run on by the wall since (world time runs at the wall's pace).
+  let seen = null;
+  const nowDay = () => (seen ? dayOfTick(seen.tick + (Date.now() - seen.at) / 50) : Infinity);
+  const look = (p = page) => p.evaluate(() => { const d = document.querySelector('.viewer-history')?.dataset ?? {}; return { pres: d.viewerPresentation ?? null, tick: d.viewerTick ? Number(d.viewerTick) : null, camera: document.querySelector('[data-camera]')?.dataset.camera ?? null, pill: document.querySelector('.time-pill')?.textContent?.trim() ?? null, clock: document.querySelector('.time-panel-clock')?.textContent?.trim() ?? null }; }).catch(() => ({}));
+  const view = async (p = page) => { const v = await look(p); if (v.tick != null && (!seen || v.tick > seen.tick)) seen = { tick: v.tick, at: Date.now() }; return v; };
   const notLoaded = (p = page) => p.evaluate(() => [...document.querySelectorAll('.warn, [role=status], .explore-note')].map((e) => e.textContent?.trim() ?? '').find((t) => /could not be loaded|temporarily unavailable/i.test(t)) ?? null).catch(() => null);
   const until = async (fn, ms, every = 250) => { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(every); } return null; };
   // A world whose page never loaded has nothing to click: its remaining steps are skipped (and fail the world) instead
@@ -115,9 +207,11 @@ async function walkWorld(browser, origin, slug, dir) {
       steps.push(s); console.log(`[${slug}] skip ${name}: ${SKIPPED_AFTER_LOAD}`);
       return s;
     }
-    errs = []; const t0 = Date.now(); let detail = null, ok = true;
+    errs = []; held = []; const t0 = Date.now(); let detail = null, ok = true;
     try { detail = (await fn()) ?? null; } catch (e) { ok = false; detail = String(e?.message ?? e).split('\n')[0].slice(0, 240); }
     await sleep(300);
+    const h = held; held = [];
+    errs.push(...await settleMisses(h, reads, { nowDay: nowDay(), eventful }));
     const shot = `${String(steps.length + 1).padStart(2, '0')}-${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
     await page.screenshot({ path: join(dir, shot) }).catch(() => {});
     const s = { name, ok: ok && errs.length === 0, ms: Date.now() - t0, detail, errors: [...new Set(errs)], shot };
@@ -274,15 +368,7 @@ async function walkWorld(browser, origin, slug, dir) {
     await press(places.first());
     return `${n} places; clicked the first`;
   });
-  await step('Follow a Soul', async () => {
-    if (!await page.locator('input.explore-search').isVisible()) await press(page.locator('.explore-open').first());
-    const soul = page.locator('.explore-soul').first();
-    await soul.waitFor({ state: 'visible', timeout: 10000 });
-    const name = (await soul.textContent())?.trim();
-    await press(soul);
-    if (!await until(async () => (await view()).camera === 'follow', 20000)) fail(`clicking ${name} did not follow (camera ${(await view()).camera})`);
-    return `following ${name}`;
-  });
+  await step('Follow a Soul', () => followSoul(page, { press, until, camera: async () => (await view()).camera }));
   if (!loadFailed) await escape();
   await step('New Soul', async () => {
     await press(page.locator('.bring-agent-open').first());

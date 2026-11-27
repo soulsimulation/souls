@@ -16,7 +16,7 @@ mkdirSync(out, {recursive: true});
 const {chromium} = createRequire(ROOT + 'mars/viewer/package.json')('@playwright/test');
 const {chromeLease} = await import(ROOT + 'tools/god-skill/lib/chrome-lease.mjs');
 const release = await chromeLease('L10-humanoid-sizes');
-const browser = await chromium.launch({channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist']});
+const browser = await chromium.launch({channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist']});
 const results = {}, ok = (name, v, detail) => { assert.ok(v, `${name}: ${JSON.stringify(detail)}`); results[name] = detail ?? true; console.log('ok', name, detail === undefined ? '' : JSON.stringify(detail)); };
 const pixels = page => page.evaluate(() => { const c = document.querySelector('.look-picker canvas'); const g = document.createElement('canvas'); g.width = c.width; g.height = c.height; const x = g.getContext('2d'); x.drawImage(c, 0, 0); return Array.from(x.getImageData(0, 0, c.width, c.height).data); });
 const diff = (a, b) => { let d = 0; for (let i = 0; i < a.length; i += 4) if (Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > 16) d++; return d / (a.length / 4); };

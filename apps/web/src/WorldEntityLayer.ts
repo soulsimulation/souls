@@ -42,7 +42,7 @@ import { noteUploadSizes } from './cdn-assets.ts';
 import { eagerShas, planEager } from './gen-mesh/lazy-assets.ts';
 import { progressiveNearM } from './quality-tier.ts';
 import { contextStamp } from './context-stamp.ts';
-import { arrivalMark, arrivalOver } from './arrival-marks.ts';
+import { arrivalMark, arrivalOver, liveOver } from './arrival-marks.ts';
 import { computeVertexNormals } from './gen-mesh/fast-geometry.ts';
 import { entityArrivalPose } from './entity-arrival.ts';
 import { keySeen, shapeWedgeDistance, viewFirst, viewWedge, type ViewWedge } from './arrival-view.ts';
@@ -693,8 +693,9 @@ export class WorldEntityLayer {
   fill: Promise<void> = Promise.resolve();
   private async fillRest(m: WorldModel, all: readonly Entity[], from: number, pending: Map<string, Promise<void>>, signal: AbortSignal, workersNow: boolean) {
     try {
-      // the arrival's own last steps (first frame, shaders, the card) go first: the fill starts once it is over
-      while (!arrivalOver()) { await new Promise((r) => setTimeout(r, 100)); if (signal.aborted || this.model !== m) return; }
+      // the arrival's own last steps (first frame, shaders, the card, the Live pill's preparation) go first: the fill starts
+      // at the first live frame, not when the card goes (it took the 4x phone's main thread from Live's preparation)
+      while (!liveOver()) { await new Promise((r) => setTimeout(r, 100)); if (signal.aborted || this.model !== m) return; }
       if (workersNow) this.prefetchBuildings(m, all.slice(from), pending);   // P7b: phones start the building workers now
       const arrival = this.coarse.size ? this.arrivalAt() : null;
       for (let i = from; i < all.length || this.coarse.size;) {

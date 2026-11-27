@@ -1,10 +1,15 @@
 // The two links the launcher's handoff (tools/world-launcher/handoff.mjs) sends people to on a world page:
 //   #worldoffer/<code>   an owner's invitation: become a co-builder, or take the world over. Accepting, signed in, is the consent.
 //   #cobuildpair/<code>  a co-builder's own agent asks for a god token on this world; the co-builder approves it.
+// On a world the new engine runs the creator's handoff link is the same #worldoffer/<code>, made by the world's directory
+// (v2-forsake.ts, #5006): accepting asks the directory, signed in; there are no co-builders there (one creator per world).
 import { useEffect, useState } from 'react';
 import { BASE } from '../base-path.ts';
 import { worldKey } from '../world-path.ts';
 import { userAuthHeaders } from '../auth-session.ts';
+import type { ForsakePlace } from './v2-forsake.ts';
+import { v2MailboxPlace, v2PageWorldName, v2WorldName } from '../v2-engine/owner-mailbox.ts';
+import { worldTitle } from '../world-title.ts';
 
 export type OfferLink = { kind: 'worldoffer' | 'cobuildpair'; code: string };
 export const offerFromHash = (hash: string): OfferLink | null => {
@@ -19,28 +24,35 @@ async function send(sub: string, body: unknown) {
   return d;
 }
 
-export function OfferCard({ link, signedIn, onDone }: { link: OfferLink; signedIn: boolean; onDone: () => void }) {
-  const [offer, setOffer] = useState<{ kind: 'cobuild' | 'transfer'; world: { name: string } } | 'gone' | 'off' | null>(null);
+type Offer = { kind: 'cobuild' | 'transfer'; world: { name: string } } | 'gone' | 'off' | null;
+type Here = { place: ForsakePlace; world: string } | null;
+/** This page's world and its directory on a world the new engine runs (as v2-forsake.ts `forsakeHere`, which loads
+ *  only with Forsake or an acceptance); null on an old-engine world. */
+const pageWorld = (): Here => { const place = v2MailboxPlace(), world = v2WorldName(); return place && world ? { place, world } : null; };
+export function OfferCard({ link, signedIn, onDone, here = pageWorld() }: { link: OfferLink; signedIn: boolean; onDone: () => void; here?: Here }) {
+  // a world the new engine runs: the directory holds the offer, and has no read of it before acceptance
+  const [offer, setOffer] = useState<Offer>(() => (!here ? null : link.kind === 'worldoffer' ? { kind: 'transfer', world: { name: worldTitle(v2PageWorldName(), here.world) } } : 'off'));
   const [state, setState] = useState<{ busy?: boolean; done?: string; err?: string }>({});
   useEffect(() => {
-    if (link.kind !== 'worldoffer') return;
+    if (link.kind !== 'worldoffer' || here) return;
     // a co-builder invitation while co-builders are off (one god per world): the launcher says so (code cobuilders-off)
     void fetch(`${at('offer')}?code=${encodeURIComponent(link.code)}`).then(async (r) => (r.ok ? r.json() : (await r.json().catch(() => ({}))).code === 'cobuilders-off' ? 'off' : 'gone')).then(setOffer, () => setOffer('gone'));
   }, [link]);
   const act = async () => {
     setState({ busy: true });
     try {
-      if (link.kind === 'cobuildpair') { const d = await send('cobuild/pair/approve', { code: link.code }); setState({ done: `Approved. ${d.agent} now builds here as your co-builder agent; it finishes on its own.` }); }
+      if (here) { const { acceptHandoff } = await import('./v2-forsake.ts'); await acceptHandoff(here.place, here.world, link.code); setState({ done: 'This world is yours now. Reload to open God Mode.' }); }
+      else if (link.kind === 'cobuildpair') { const d = await send('cobuild/pair/approve', { code: link.code }); setState({ done: `Approved. ${d.agent} now builds here as your co-builder agent; it finishes on its own.` }); }
       else { const d = await send('offer/accept', { code: link.code }); setState({ done: d.kind === 'transfer' ? 'This world is yours now. Reload to open God mode.' : 'You are a co-builder now. Ask your agent to pair with this world as a co-builder.' }); }
     } catch (e) { setState({ err: (e as Error).message }); }
   };
-  const title = link.kind === 'cobuildpair' ? 'Your agent asks to co-build this world'
-    : offer === 'gone' ? 'This invitation is no longer valid'
-      : offer === 'off' ? 'Co-builders are turned off'
+  const title = offer === 'off' ? 'Co-builders are turned off'
+    : link.kind === 'cobuildpair' ? 'Your agent asks to co-build this world'
+      : offer === 'gone' ? 'This invitation is no longer valid'
       : offer?.kind === 'transfer' ? `You are offered ${offer.world.name}` : offer ? `You are invited to co-build ${offer.world.name}` : 'Invitation…';
-  const what = link.kind === 'cobuildpair' ? 'It gets its own god token for this world, labelled with your name. The owner can revoke it.'
-    : offer === 'off' ? 'Each world has one god, its owner, so this co-builder invitation cannot be used.'
-    : offer && offer !== 'gone' ? (offer.kind === 'transfer' ? 'Accept and you become its god: its owner hands it to you, and every agent that could edit it loses that access.' : 'Accept and your own agent can build here alongside the owner. You cannot hand the world on or archive it.') : null;
+  const what = offer === 'off' ? 'Each world has one god, its owner, so this co-builder invitation cannot be used.'
+    : link.kind === 'cobuildpair' ? 'It gets its own god token for this world, labelled with your name. The owner can revoke it.'
+    : offer && offer !== 'gone' ? (offer.kind === 'transfer' ? `Accept and you become its ${here ? 'creator' : 'god'}: its owner hands it to you, and every agent that could edit it loses that access.${here ? ' Its Souls and everything built stay as they are.' : ''}` : 'Accept and your own agent can build here alongside the owner. You cannot hand the world on or archive it.') : null;
   return (
     <div className="gp-pairs" data-offer={link.kind} data-offer-kind={offer && offer !== 'gone' && offer !== 'off' ? offer.kind : offer ?? ''}>
       <b>{title}</b>

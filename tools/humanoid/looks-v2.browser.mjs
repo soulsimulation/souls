@@ -70,7 +70,7 @@ try{
   const {chromium}=createRequire(resolve(root,'mars/viewer/package.json'))('@playwright/test');
   release=await chromeLease('r3d-looks');
   try{
-    browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+    browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
     for(const dpr of [1,2])for(const name of Object.keys(LOOKS)){
       const page=await browser.newPage({viewport:{width:1100,height:760},deviceScaleFactor:dpr});
       page.on('pageerror',e=>report.pageErrors.push(e.message));

@@ -17,6 +17,9 @@
 //!   their straight gap plus a pitch. A target that is not (in a box, a wall, a doorway, on a stair, on water, off the
 //!   ground) is bound to the nearest clear place beside it the same way, and so is a clear target the asker's walk
 //!   does not reach (a pocket of ground walled in by a desk's legs and the chairs round it, #4072).
+//! - **From where its walk leaves** (0.137 trial): an asker not on a standing point (a body left a little inside an
+//!   obstacle's cut, over a stump or against a basin) asks from the nearest point of the ground its walk leaves from
+//!   ([`Ground::start`]), so it is never refused every target for where it stands.
 //! - **Recorded as the engine's.** Each grant is an [`Entry::Grant`] with the actor the world and the cause the
 //!   asker's order; the same marks give the same grants every run (integers, id order, no hashing).
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
@@ -28,7 +31,10 @@
 //!   the act is brief, and the walk keeps bodies apart. A form's walk to a thing with a footprint (its entry's
 //!   bounds, [`footprint`]: a workbench, a shelf against a wall, a window in one) goes to the nearest place within
 //!   that reach of its outline, not of its middle; a walk to be at a walkable one ([`walkable`]: a stage, a rug, a
-//!   deck) ends on it ([`within_footprint`], #4072).
+//!   deck) ends on it ([`within_footprint`], #4072). When the walk reaches no such place clear of every doorway and
+//!   stair, it goes to the nearest one at a doorway's mouth ([`Ground::mouth`]: within [`CLEAR`] of its end, on the
+//!   room's side, never in the doorway or on a stair), as a person steps just inside a kitchen's door to reach its
+//!   table when its chairs and counter leave floor only there (#5003's Eden audit). The spot tables never give one.
 //!
 //! - **Overflow** (0.133 A2-5, a crowded meetup ends as near as the crowd allows, never refused). When every place
 //!   of a target is held or kept for another's room, and one of those its walk reaches, the asker is granted the
@@ -59,8 +65,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const PITCH: i64 = 700_000;
 /// Rings round the target (ring 0 is the target).
 pub const RINGS: i64 = 10;
-/// No place within this of a link's end, nor within half the link's width and half this of its line, µm: the engine
-/// never stops a walker in a doorway or on a stair.
+/// No place within this of a link's end, nor within half this of its line (a flight's: and half its width; a
+/// doorway's between its ends: and half its widest end), µm: the engine never stops a walker in a doorway or on a
+/// stair (`walk::town::in_passage`).
 pub const CLEAR: i64 = 700_000;
 /// How far round a crowded target its overflow points lie, µm (A2-5): a walker is refused `spot-none-free` only when
 /// no free standing point is within this.
@@ -86,6 +93,14 @@ pub trait Ground {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     /// Whether `p` on `node` lies in a doorway or on a stair.
     fn passage(&self, node: Id, p: Vec3) -> bool;
+    /// Whether `p` on `node`, in a passage ([`Ground::passage`]), lies only at a doorway's mouth: within [`CLEAR`] of
+    /// a doorway's end, on the room's side of it, off every line and every end but a doorway's
+    /// (`walk::town::in_mouth_indexed`).
+    /// A brief act may stand there when no place clear of every passage is reached ([`within`]). A ground that cannot
+    /// tell says `false`.
+    fn mouth(&self, _node: Id, _p: Vec3) -> bool {
+        false
+    }
     /// The walking distance from `a` on node `an` to `b` on node `bn`, never through a wall; `None` with no way there.
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
     /// Whether a walk from `a` to `b` may find a way: `false` only when none can (no portal or link joins them),
@@ -97,6 +112,12 @@ pub trait Ground {
     /// order tried, and the point there. None, the default: it does not overflow.
     fn overflow_at(&self, _node: Id, _p: Vec3) -> Vec<(Id, Vec3)> {
         Vec::new()
+    }
+    /// Where an asker at `p` on `node` leaves from: where it stands, else the nearest point of the walkable ground
+    /// within the walk's own reach of it (a body pressed on an obstacle's edge, its centre a hair off the ground), as
+    /// [`Ground::stand`] gives it; `None` when there is none. The default: [`Ground::stand`].
+    fn start(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(node, p)
     }
 }
 
@@ -110,6 +131,9 @@ pub trait ClassGround {
     }
     fn overflow_at(&self, _size: Size, _node: Id, _p: Vec3) -> Vec<(Id, Vec3)> {
         Vec::new()
+    }
+    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(size, node, p)
     }
 }
 struct Selected<'a> {
@@ -132,6 +156,9 @@ impl Ground for Selected<'_> {
     fn overflow_at(&self, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
         self.ground.overflow_at(self.size, node, p)
     }
+    fn start(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.ground.start(self.size, node, p)
+    }
 }
 struct Standard<'a>(&'a mut dyn Ground);
 impl ClassGround for Standard<'_> {
@@ -153,6 +180,11 @@ impl ClassGround for Standard<'_> {
     }
     fn overflow_at(&self, _size: Size, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
         self.0.overflow_at(node, p)
+    }
+    fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        (size == Size::Standard)
+            .then(|| self.0.start(node, p))
+            .flatten()
     }
 }
 
@@ -606,12 +638,25 @@ pub const REACH_PITCH: i64 = 100_000;
 /// nearest place within `reach` of it, on rings [`REACH_PITCH`] apart (`⌊2πk⌋` places on ring `k`), on walkable
 /// ground and out of doorways and off stairs, as a table's places are. Nearest as a table's nearest: the least walk
 /// from `from` (the asker's node and where it stands) plus [`WEIGHT`] times the place's gap to the target, ties by
-/// (ring, place), a place with no walk there skipped; with no `from`, by the gap alone. `None` when no place is.
+/// (ring, place), a place with no walk there skipped; with no `from`, by the gap alone. With `from` and none reached,
+/// the same over the places at a doorway's mouth ([`Ground::mouth`]). `None` when no place is.
 pub fn within(
     g: &mut dyn Ground,
     target: Target,
     reach: i64,
     from: Option<(Id, Vec3)>,
+) -> Option<Vec3> {
+    within_by(g, target, reach, from, false).or_else(|| within_by(g, target, reach, from, true))
+}
+
+/// [`within`]'s two passes: without `mouths`, the target itself or the places clear of every passage; with `mouths`,
+/// a walker's places at a doorway's mouth, else the target when a body may stand on it, though no walk reaches it.
+fn within_by(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3)>,
+    mouths: bool,
 ) -> Option<Vec3> {
     let t = target.point();
     let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
@@ -619,10 +664,13 @@ pub fn within(
     // walled in by its legs and the chairs round it, #4072): then the rings are tried, and the point is kept only
     // when none of them is reached either.
     let standable = g.stand(target.node, t).is_some();
-    if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
-        return Some(t);
+    if !mouths {
+        if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
+            return Some(t);
+        }
+        return rings(g, target, reach, from, false);
     }
-    let found = rings(g, target, reach, from);
+    let found = from.and_then(|_| rings(g, target, reach, from, true));
     if found.is_none() && standable {
         return Some(t);
     }
@@ -691,8 +739,9 @@ pub const ON_DEPTH: i64 = 400_000;
 /// On each band at most [`BAND_PLACES`] places, a pitch apart or spread evenly round a longer band. Kept, as
 /// [`within`]'s rings are, on walkable ground, out of doorways and off stairs. Nearest as [`within`]'s: the least walk
 /// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it; a place off a walkable thing, its edge
-/// too, counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place,
-/// [`within`] at the middle, so a thing reached before still is.
+/// too, counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With `from` and none
+/// reached, the same over the band's places at a doorway's mouth ([`Ground::mouth`]). With no such place, [`within`]
+/// at the middle, so a thing reached before still is.
 pub fn within_footprint(
     g: &mut dyn Ground,
     target: Target,
@@ -733,8 +782,10 @@ pub fn within_footprint(
         }
     };
     let mut seen = BTreeSet::new();
-    // Places by a bound below their cost: the straight way there plus the weighted gap.
+    // Places by a bound below their cost: the straight way there plus the weighted gap. Those at a doorway's mouth are
+    // tried only when none clear of every passage is reached, and only by a walker.
     let mut order: Vec<(i64, (usize, usize, i64), Vec3)> = Vec::new();
+    let mut mouths: Vec<(i64, (usize, usize, i64), Vec3)> = Vec::new();
     for (band, &d) in bands.iter().enumerate() {
         let whole: i64 = lens.iter().map(|l| (l + 2 * d).max(0)).sum();
         let step = REACH_PITCH.max((whole + BAND_PLACES - 1) / BAND_PLACES);
@@ -771,10 +822,17 @@ pub fn within_footprint(
                 let Some((at, world)) = g.stand(target.node, p) else {
                     continue;
                 };
-                if !seen.insert([at.x, at.y, at.z]) || g.passage(target.node, at) {
+                if !seen.insert([at.x, at.y, at.z]) {
                     continue;
                 }
-                order.push((
+                let list = if !g.passage(target.node, at) {
+                    &mut order
+                } else if walker.is_some() && g.mouth(target.node, at) {
+                    &mut mouths
+                } else {
+                    continue;
+                };
+                list.push((
                     cost(to_outline(at, ring), d) + walker.map_or(0, |(_, _, w)| flat(world, w)),
                     (band, i, j),
                     at,
@@ -782,38 +840,44 @@ pub fn within_footprint(
             }
         }
     }
-    order.sort_unstable_by_key(|&(bound, key, _)| (bound, key));
-    let best = match walker {
-        None => order.first().map(|o| o.2),
-        Some((node, p, _)) => {
-            let mut best: Option<(i64, (usize, usize, i64), Vec3)> = None;
-            let mut misses = 0;
-            for (bound, key, at) in order {
-                if best.is_some_and(|b| bound > b.0) {
-                    break;
-                }
-                // As `within`'s rings: a place the ground knows no walk reaches costs no search and no miss.
-                if !g.may_reach(node, p, target.node, at) {
-                    continue;
-                }
-                let Some(walk) = g.walk(node, p, target.node, at) else {
-                    misses += 1;
-                    if misses >= MISSES_MOST {
+    let pick = |g: &mut dyn Ground, mut order: Vec<(i64, (usize, usize, i64), Vec3)>| {
+        order.sort_unstable_by_key(|&(bound, key, _)| (bound, key));
+        match walker {
+            None => order.first().map(|o| o.2),
+            Some((node, p, _)) => {
+                let mut best: Option<(i64, (usize, usize, i64), Vec3)> = None;
+                let mut misses = 0;
+                for (bound, key, at) in order {
+                    if best.is_some_and(|b| bound > b.0) {
                         break;
                     }
-                    continue;
-                };
-                let c = walk + cost(to_outline(at, ring), bands[key.0]);
-                if best.is_none_or(|b| (c, key) < (b.0, b.1)) {
-                    best = Some((c, key, at));
+                    // As `within`'s rings: a place the ground knows no walk reaches costs no search and no miss.
+                    if !g.may_reach(node, p, target.node, at) {
+                        continue;
+                    }
+                    let Some(walk) = g.walk(node, p, target.node, at) else {
+                        misses += 1;
+                        if misses >= MISSES_MOST {
+                            break;
+                        }
+                        continue;
+                    };
+                    let c = walk + cost(to_outline(at, ring), bands[key.0]);
+                    if best.is_none_or(|b| (c, key) < (b.0, b.1)) {
+                        best = Some((c, key, at));
+                    }
                 }
+                best.map(|b| b.2)
             }
-            best.map(|b| b.2)
         }
     };
-    // None found (the bands are sampled, and a search gives up after [`MISSES_MOST`] misses): [`within`] at the middle,
-    // so a thing reached before is still reached. A target cut off from the asker costs it lookups, not searches.
-    best.or_else(|| within(g, target, reach, from))
+    // None clear found (the bands are sampled, and a search gives up after [`MISSES_MOST`] misses): [`within`] at the
+    // middle, so a thing reached before is still reached; then a doorway's mouth, on the bands and at the middle. A
+    // target cut off from the asker costs it lookups, not searches.
+    pick(g, order)
+        .or_else(|| within_by(g, target, reach, from, false))
+        .or_else(|| pick(g, mouths))
+        .or_else(|| within_by(g, target, reach, from, true))
 }
 
 /// Whether a body goes onto a thing to be at it (#4072), by its entry: it is a place (`owner: place`: a deck, a pier, a
@@ -861,12 +925,14 @@ pub fn walkable(entry: &replica::rules::json::Value) -> bool {
     place || stand || low || standing
 }
 
-/// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.
+/// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone; with
+/// `mouths`, of the places at a doorway's mouth ([`Ground::mouth`]) instead of those clear of every passage.
 fn rings(
     g: &mut dyn Ground,
     target: Target,
     reach: i64,
     from: Option<(Id, Vec3, Vec3)>,
+    mouths: bool,
 ) -> Option<Vec3> {
     let t = target.point();
     // Places by a bound below their cost: the straight way there plus the weighted gap.
@@ -881,7 +947,12 @@ fn rings(
             else {
                 continue;
             };
-            if g.passage(target.node, at) {
+            let kept = if mouths {
+                g.mouth(target.node, at)
+            } else {
+                !g.passage(target.node, at)
+            };
+            if !kept {
                 continue;
             }
             let gap = WEIGHT * flat(at, t);
@@ -1113,6 +1184,16 @@ impl Spots {
             let mut g = Selected {
                 ground: grounds,
                 size: *size,
+            };
+            // An asker a hair off the ground (pressed on a stump's or a basin's edge, its centre rounded just off the
+            // piece) leaves from the nearest point of the ground, as its walk does: never refused every target for
+            // where it stands (0.137 trial).
+            let a = &match g.stand(a.node, a.from) {
+                Some(_) => *a,
+                None => Ask {
+                    from: g.start(a.node, a.from).map_or(a.from, |s| s.0),
+                    ..*a
+                },
             };
             let tb = if *size == Size::Standard {
                 self.owners

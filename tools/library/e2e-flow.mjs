@@ -103,14 +103,14 @@ try {
   check('route.restricted-absent', rx.status === 404 && rx.data.code === 'library.missing', rx.data.code);
   report.ledger = readFileSync(join(libDir, 'ledger.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
-  // ---------------------------------------------------------------- what a visitor sees in beta (real Chrome)
+  // ---------------------------------------------------------------- what a visitor sees in beta (Chromium)
   if (shots) {
     mkdirSync(shots, { recursive: true });
     const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../god-skill/lib/chrome-lease.mjs');
     const { chromium } = createRequire(new URL('../../mars/viewer/package.json', import.meta.url))('@playwright/test');
     const release = await chromeLease('library');
     try {
-      const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+      const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
       try {
         for (const dpr of [1, 2]) {
           const ctx = await browser.newContext({ viewport: { width: 1280, height: 760 }, deviceScaleFactor: dpr });

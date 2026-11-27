@@ -26,7 +26,7 @@ if (isMain(import.meta.url)) {
   const dpr = Number(flag('dpr', 1)); const [url, out, ...names] = args; mkdirSync(out, { recursive: true });
   const release = await chromeLease('mars-two shots');
   try {
-    const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const b = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     const page = await (await b.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr })).newPage();
     const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
     for (const name of names.length ? names : Object.keys(VIEWS)) {

@@ -129,7 +129,7 @@ try {
   report.world = base;
   for (let i = 0; i < 180; i++) { if (launcher.exitCode !== null) throw new Error('the world server exited: ' + launcherLog.slice(-400)); if (await fetch(`${base}/v1/world/souls`).then((r) => r.ok, () => false)) break; await sleep(1000); }
   release = await chromeLease('approve-legacy');
-  browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
 
   // ---------- A: gene, desktop dpr 1 — in-window delivery, Approve -> Connected -> closes itself -> paired
   {

@@ -3,7 +3,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { accountSoulsOf, retireByDirectory } = await import('./owner-mailbox.ts');
+const { accountSoulsOf, byDirectory, retireByDirectory } = await import('./owner-mailbox.ts');
 
 test('the navbar lists this world\'s Souls, named, and none from another world', () => {
   const grant = `soul-${'ab'.repeat(16)}-1`, other = `soul-${'cd'.repeat(16)}-2`;
@@ -45,4 +45,19 @@ test('the card retires the person\'s Soul through the directory, by its grant, c
   assert.equal(await retireByDirectory(id(grant), async () => null, id), false);
   // The agent's ask (`souls retire`) shows on the list the card reads, which opens the question there.
   assert.deepEqual(accountSoulsOf({ souls: [{ soul: grant, world: 'eden', name: 'Fern', retire_asked: true }] }, 'eden', id), [{ id: id(grant), name: 'Fern', retireAsked: true }]);
+});
+
+test('the card\'s Disconnect and Keep go to the directory too, by its grant (0.137)', async () => {
+  const grant = `soul-${'ab'.repeat(16)}-1`;
+  const id = (g: string) => `s_${g.replace(/^soul-/, '')}`;
+  const sent: [string, Record<string, unknown>][] = [];
+  const call = async (path: string, body: Record<string, unknown>) => { sent.push([path, body]);
+    return path === '/v1/account/souls' ? { status: 200, body: { souls: [{ soul: grant, world: 'eden', retire_asked: true }] } } : { status: 200, body: { ok: true, soul: grant } }; };
+  // Disconnect: the directory takes its agent's token (the old process's `/v1/souls/:id/revoke` is refused there).
+  assert.equal(await byDirectory('revoke', id(grant), call, id), true);
+  // Keep: the agent's ask is cleared, so its `retire wait` hears the owner kept it.
+  assert.equal(await byDirectory('keep', id(grant), call, id), true);
+  assert.deepEqual(sent, [['/v1/account/souls', {}], ['/v1/account/souls/revoke', { soul: grant }], ['/v1/account/souls', {}], ['/v1/account/souls/keep', { soul: grant }]]);
+  assert.equal(await byDirectory('keep', 's_nobody', call, id), false, 'not the person\'s: nothing sent');
+  assert.equal(sent.at(-1)![0], '/v1/account/souls');
 });

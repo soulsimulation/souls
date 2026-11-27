@@ -17,7 +17,8 @@ keeps, where it can be held, stood at or sat in, and what can be done with it. T
 1. **Write** the entry and its cases (below).
 2. **Prove**: `pnpm entry prove <family>` (or `node tools/entry/prove.mjs <family|folder|file>`).
 3. **Look** at the sheets the verdict names (`gates.look.kinds[].sheet`). Judge them against the bar: it reads as
-   the thing in each state, natural if comical. Today no entry can carry a shape, so there is no sheet yet (below).
+   the thing in each state, natural if comical. Entries can declare `looks.shape`; a kind without one waits for a
+   sheet. These sheets inspect the authoring model, not the actual served page's rig or hand contacts.
 4. **Revise** and prove again, up to three times. Still failing after three: hand back with the last verdict.
 5. **Attach** the verdict and the sheets to the pull request (`tools/proof/upload.mjs`). Never commit a sheet.
 
@@ -27,11 +28,16 @@ keeps, where it can be held, stood at or sat in, and what can be done with it. T
 The rules that catch most first drafts:
 
 - Whole numbers only, in stated units: `_mm`, `_mdeg`, `_us`. No `1.5`, no `1.0`, nothing in ticks.
-- Every state field has `n` (a stable number), `type`, `default` and `audience` (`public` unless it is private).
+- Every state field has `n` (a stable number), `type`, `default` and an audience rule, for example
+  `"audience": {"rule": "everyone"}`. Use the format's closed rule list, not the word `public`.
 - Words go by reference: every phrase lives in `text` and is named by its key. A `card` names one text of at most
   80 characters saying what it is and what can be done, in facts, never a mood ("quiet", "cosy").
 - No word of today's engine in any name you choose (`server`, `tick`, `eden`, `json`, ...), no time of day.
 - A relation (who sits, who holds, who signed up) is a link or a parent, never an id in a field.
+- `roles` is supported. Existing joint activities use offer/accept and their declared roles; top-level `standing`
+  and `pair` are rejected. Copy a current entry such as [handshake](../../../content/kinds/together/handshake.json).
+- A move's effector is `hand`, `held_point` or `aim`; the latter names a non-contact target. A form naming a move
+  also needs its compiled engine move and page drawing path. A sheet cannot prove that a page hand reaches it.
 - Each form: `who`, `starts`, `needs`, `steps`, `effects`; every argument it `takes` is used; a `create` spends
   something; every form can be reached from the defaults. A field that no form sets to some value it declares is
   taken as set from outside (the kettle's water), so a need on it is not a dead end.
@@ -70,7 +76,7 @@ It prints one JSON verdict and exits 0 when no gate failed, 1 when one did, 2 on
 | `check` | `tools/entry/check.mjs`: the format and the check gate's rules | any finding; each is `{rule, form, field, path, reason, fix}` |
 | `cases` | every rule and effect case on the family's kinds, through `@souls/form-rules` | a case's verdict differs, or a form lacks a case above |
 | `look` | `tools/entry/look.mjs`: one sheet per kind, a frame per declared state | the picture could not be drawn |
-| `run`, `body-look`, `find` | nothing yet | never; they wait for a runner (Engine v2) |
+| `run`, `body-look`, `find` | not invoked by `prove.mjs`; separate tools exist | reported as waiting by this verdict, never counted as passed |
 
 Read `failed` first: it names the gates that failed. `ran` lists the gates that ran, `waits` those that could not
 run yet. When `check` fails, `cases` and `look` are skipped: fix the check findings first, each carries its `fix`.
@@ -88,9 +94,15 @@ free and holds what it held, and the thing, as it stands, can be used again.
 fresh Soul. It reports whether the form finished and the seat's reads, acts and refusals, with the card and without
 (`--arms`). It spends model time: run it only when the task is to measure finding, two repeats.
 
-**The look gate and shapes.** It draws `looks.shape`. Until SA-D3 (#2855) settles how an entry carries a shape,
-the format cannot hold one, so a kind with no shape shows `"waits": "a shape: ..."` instead of a sheet. That is
-not a failure; say so in the pull request.
+**The look gate and shapes.** It draws the supported `looks.shape` section. Only a kind with no drawable shape
+shows `"waits": "a shape: ..."` instead of a sheet; that wait is not a pass. State what was actually checked.
+`look --body` uses the authoring pose helper, not the served page's production rig. For visible behavior, also use
+the real new-engine playtest/client path and inspect one short, uncut, real-speed clip on the old page. A successful
+case, completed receipt or sheet alone does not prove the action is drawn or its contacts are correct.
+
+**Loading.** Entries are read by `worldd seed --entries` and the world's `entries/` catalogue at startup. Editing
+`content/kinds` alone does not update a running world or place a new thing. Use the supported world boot/admission
+and creator placement path; do not turn a missing binding into a hidden fixture or an alternate group mechanism.
 
 ## 3 to 5. Look, revise, attach
 

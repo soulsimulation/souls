@@ -46,7 +46,8 @@
 //!   there is told the link, its door and both widths. A floater routes as a walker of its class.
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), a gait's speed as cost (a route is
-//! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
+//! the shortest, not the quickest), walking a shore link (the walk's,
+//! `crate::walk::town`, #3225, reading [`Map::shore`]). Ground
 //! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
 // The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
@@ -113,6 +114,8 @@ const SHORE_OFF: i64 = 2;
 /// The shortest stretch of edge two pieces share that is a portal or a shore, mm.
 const SHORE_MIN: i64 = 10;
 
+/// A shore link as [`Map::shore`] reads it: its kind, its two pieces (the drier first) and its edge's ends, mm.
+pub type ShoreOf = (Kind, [u32; 2], [i64; 2], [i64; 2]);
 /// A patch by its node and, on the open ground, its square.
 type PatchKey = (Id, Option<(i32, i32)>);
 /// A stretch of a square's edge a piece lies along: from, to (mm), the square, the piece.
@@ -237,6 +240,9 @@ pub struct Route {
     pub waypoints: Vec<[i64; 3]>,
     /// Its length by the coarse search, mm.
     pub length: u64,
+    /// The portals the search crossed, in order, each with the piece (or `LINK` and the link) it was reached across;
+    /// none for a line inside one piece. What [`Map::walked`] measures by.
+    pub crossed: Vec<(u32, u32)>,
     /// Portals taken from the search's queue.
     pub searched: u32,
 }
@@ -324,6 +330,23 @@ fn mm(um: i64) -> i64 {
 
 fn cross(o: [i64; 2], a: [i64; 2], b: [i64; 2]) -> i64 {
     (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+}
+
+/// Where a walk from `s` to `t` (mm) crosses the portal `a`–`b`: where the straight line between them meets it, else
+/// the portal's end that makes the way through it shorter.
+fn crossing(a: [i64; 2], b: [i64; 2], s: [i64; 2], t: [i64; 2]) -> [i64; 2] {
+    let (ca, cb) = (i128::from(cross(s, t, a)), i128::from(cross(s, t, b)));
+    let (ds, dt) = (i128::from(cross(a, b, s)), i128::from(cross(a, b, t)));
+    // `a` and `b` on either side of the line s–t (or on it), and `s` and `t` on either side of the portal's.
+    if ca != cb && ca * cb <= 0 && ds * dt <= 0 {
+        let k = |u: i64, v: i64| u + (i128::from(v - u) * ca / (ca - cb)) as i64;
+        return [k(a[0], b[0]), k(a[1], b[1])];
+    }
+    if len2(s, a) + len2(a, t) <= len2(s, b) + len2(b, t) {
+        a
+    } else {
+        b
+    }
 }
 
 /// The part of the segment `a`–`b` inside the box `[x0, z0, x1, z1]` (mm), if any: Liang–Barsky, its bounds kept
@@ -1266,6 +1289,17 @@ impl Map {
         self.links.iter().filter(|l| !l.gone).map(pieces).collect()
     }
 
+    /// Shore link `id` (a [`Kind::Wade`] or [`Kind::Swim`]): its kind, its two pieces (the drier first) and the stretch
+    /// of edge they share, both its ends (mm, the ground's frame). For the walk to cross it (#3225).
+    pub fn shore(&self, id: Id) -> Option<ShoreOf> {
+        let l = self
+            .links
+            .iter()
+            .find(|l| l.id == id && !l.gone && matches!(l.kind, Kind::Wade | Kind::Swim))?;
+        let [p, r] = [&l.ends[0], &l.ends[1]].map(|e| &self.portals[e[0] as usize]);
+        Some((l.kind, [p.pieces[0], r.pieces[0]], p.a, p.b))
+    }
+
     /// Whether the map holds a floor's patch for `node`.
     pub fn is_floor(&self, node: Id) -> bool {
         self.by_patch.contains_key(&(node, None))
@@ -1797,13 +1831,15 @@ impl Map {
         let start_xz = [from.at[0], from.at[2]];
         let direct = (from.piece == to.piece).then(|| {
             let first_line = self.line_in(sc, from.piece, start_xz, goal_xz);
+            let length = first_line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u64;
             Route {
                 size: self.size,
                 hops: vec![Hop::Patch {
                     at: self.pieces[from.piece as usize].at,
                     piece: from.piece,
                 }],
-                length: first_line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u64,
+                length,
+                crossed: Vec::new(),
                 first_line,
                 waypoints: Vec::new(),
                 searched: 0,
@@ -1893,8 +1929,67 @@ impl Map {
             first_line,
             waypoints,
             length,
+            crossed: chain,
             searched,
         })
+    }
+
+    /// [`Map::walked_in`] with the map's own scratch.
+    pub fn walked(&mut self, r: &Route, from: Spot, to: Spot) -> u64 {
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let w = self.walked_in(&mut scratch, r, from, to);
+        self.keep(&mut scratch);
+        self.scratch = scratch;
+        w
+    }
+
+    /// The length of route `r` from `from` to `to` as a body could walk it, mm, never more than its coarse `length`.
+    /// The coarse search measures each crossing of a square's edge at the middle of the whole stretch the two squares
+    /// share (up to 16 m long), so a goal just past an edge can measure several metres longer than its walk: here the
+    /// crossing is where the straight way on from the last one to the goal meets that portal (or the portal's end
+    /// nearer that way), each piece's own line between. N9's spot tables weigh a place by it (PR #5012's short walk: a
+    /// grip 2.8 m past an edge cost 7.9 m more than its walk, so a place 3.5 m short of it on the walker's own square
+    /// was granted instead). A route across a link (a doorway, a stair, a shore) keeps its coarse length: its ends lie
+    /// on other frames.
+    pub fn walked_in(&self, sc: &mut Scratch, r: &Route, from: Spot, to: Spot) -> u64 {
+        if r.crossed.is_empty() {
+            return r.length;
+        }
+        self.through(
+            sc,
+            [from.at[0], from.at[2]],
+            [to.at[0], to.at[2]],
+            &r.crossed,
+        )
+        .min(r.length)
+    }
+
+    /// [`Map::walked_in`]'s length along `chain` from `start` to `end`; `u64::MAX` across a link.
+    fn through(
+        &self,
+        sc: &mut Scratch,
+        start: [i64; 2],
+        end: [i64; 2],
+        chain: &[(u32, u32)],
+    ) -> u64 {
+        let goal = self.portals.len() as u32;
+        let (mut at, mut total) = (start, 0u64);
+        for &(p, via) in chain {
+            if via & LINK != 0 {
+                return u64::MAX;
+            }
+            if p == goal {
+                return total + u64::from(self.run(sc, via, at, end));
+            }
+            let por = &self.portals[p as usize];
+            if por.link != NONE {
+                return u64::MAX;
+            }
+            let c = crossing(por.a, por.b, at, end);
+            total += u64::from(self.run(sc, via, at, c));
+            at = c;
+        }
+        u64::MAX
     }
 }
 

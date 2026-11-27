@@ -68,6 +68,11 @@ fn main() {
             &folder
         }
     };
+    // The world's own objects under the store generation its folder names (#4954), as its launcher reads them.
+    let label = supervisor::generation(&supervisor::world_folder(&root, &world))
+        .unwrap_or_else(|e| fail(e));
+    let placed = supervisor::bucket::Generation::new(store, world, label.as_deref());
+    let store: &dyn Store = &placed;
     // The build the world is pinned to, which a deploy leaves and `--from` must name (the runbook's wrappers).
     if pinned {
         let (b, _) = supervisor::pin(store, &root, &world).unwrap_or_else(|e| fail(e));

@@ -196,7 +196,13 @@ fn a_move_beyond_reach_is_refused_with_the_distance() {
             )
             .expect_err("refused");
         assert_eq!(r.name, "out-of-reach");
-        assert!(r.detail.contains(&format!("{far} µm")), "{r}");
+        // In whole mm, rounded up, so one µm over still reads over (#5019 follow-up).
+        let (mm, reach) = (far.div_euclid(1000) + 1, mv.reach / 1000);
+        assert!(
+            r.detail.contains(&format!("{mm} mm"))
+                && r.detail.ends_with(&format!("reach {reach} mm")),
+            "{r}"
+        );
         assert!(r.detail.starts_with(mv.name.as_str()), "{r}");
         println!("{r}");
         assert!(
@@ -398,5 +404,129 @@ fn a_contact_move_is_still_refused_at_0_8_m() {
         run_at(&touch, 500_000).as_deref(),
         Ok("done"),
         "within an arm it completes"
+    );
+}
+
+/// #5063's geometry: every distance `d`, the thing argument named (`aimed`, none in a closed container) and seen or
+/// not (behind a wall).
+struct Afar {
+    d: i64,
+    aimed: Option<Id>,
+    seen: bool,
+}
+
+impl Reach for Afar {
+    fn distance(&self, _: Id, _: &Effector, _: Option<&Name>, _: Id, _: &Name) -> Option<i64> {
+        Some(self.d)
+    }
+    fn aimed(&self, _: Id, _: &Name) -> Option<Id> {
+        self.aimed
+    }
+    fn seen(&self, _: Id, thing: Id) -> bool {
+        self.seen && Some(thing) == self.aimed
+    }
+}
+
+/// Starts content move `name` at its thing argument through `geo`, then fires it to its end: its words from afar
+/// and how it ended, or its refusal.
+fn aimed_at(name: &str, geo: &Afar) -> Result<(Option<String>, String), replica::effects::Refusal> {
+    let mut mv = content_move(name);
+    mv.contact = Name::new(crate::reach::AT_ARG).unwrap();
+    let mut w = world();
+    let n = w.moves.start(
+        &mut w.c,
+        &mut w.due,
+        &mut w.mint,
+        geo,
+        w.body,
+        &mv,
+        w.target,
+        0,
+    )?;
+    let afar = w.moves.afar(n).map(str::to_owned);
+    let mut how = String::new();
+    while let Some(t) = w.due.fire(Micros::MAX) {
+        if let Some(Fired::Done(r) | Fired::Cancelled(r)) =
+            w.moves.fire(&mut w.c, &mut w.due, &mut w.mint, geo, &t)
+        {
+            how = r
+                .ended
+                .map(|e| e.how.as_str().to_owned())
+                .unwrap_or_default();
+        }
+    }
+    Ok((afar, how))
+}
+
+/// #5063: a look or a point at a thing seen 30 m away, beyond its 20 m reach, is made from afar and done, its words
+/// saying so; one behind a wall, one in a closed container and one past sight are refused `out-of-reach`, each saying
+/// why (the hidden one without its distance or its name).
+#[test]
+fn a_look_or_point_at_a_seen_thing_beyond_reach_is_made_from_afar() {
+    let thing = Id::new(Scope([0xb2; 16]), 99).unwrap();
+    let shown = replica::world_model::show(thing);
+    for name in ["look", "point"] {
+        let seen = Afar {
+            d: 30_000_000,
+            aimed: Some(thing),
+            seen: true,
+        };
+        let (afar, how) = aimed_at(name, &seen).expect("accepted");
+        println!("{name} at 30 m, seen: {afar:?}, {how}");
+        assert_eq!(how, "done", "{name}");
+        assert_eq!(
+            afar.as_deref(),
+            Some(format!("souls:{name}: from afar, 30000 mm to {shown}, reach 20000 mm").as_str())
+        );
+        let wall = Afar {
+            seen: false,
+            ..seen
+        };
+        let r = aimed_at(name, &wall).expect_err("behind a wall");
+        println!("{name} at 30 m, behind a wall: {r}");
+        assert_eq!(r.name, "out-of-reach");
+        assert!(
+            r.detail.ends_with(&format!(
+                "30000 mm to {shown}, reach 20000 mm, not in sight"
+            )),
+            "{r}"
+        );
+        let closed = Afar {
+            aimed: None,
+            ..seen
+        };
+        let r = aimed_at(name, &closed).expect_err("in a closed container");
+        println!("{name} at 30 m, in a closed container: {r}");
+        assert_eq!(r.name, "out-of-reach");
+        assert_eq!(
+            r.detail,
+            format!("souls:{name}: beyond its reach of 20000 mm")
+        );
+        let past = Afar {
+            d: super::SIGHT + 1,
+            ..seen
+        };
+        let r = aimed_at(name, &past).expect_err("past sight");
+        println!("{name} past sight: {r}");
+        assert!(r.detail.ends_with(", sight 60000 mm"), "{r}");
+        // Within its reach, nothing changes: no words from afar.
+        let near = Afar {
+            d: 10_000_000,
+            ..wall
+        };
+        assert_eq!(
+            aimed_at(name, &near).expect("in reach"),
+            (None, "done".to_owned())
+        );
+    }
+    // A move that touches is never made from afar.
+    let touch = Afar {
+        d: 800_000,
+        aimed: Some(thing),
+        seen: true,
+    };
+    assert_eq!(
+        aimed_at("touch", &touch).expect_err("an arm").name,
+        "out-of-reach"
     );
 }

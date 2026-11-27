@@ -226,6 +226,32 @@ impl Store {
         }))
     }
 
+    /// The Souls X11 brought over for any of `worlds` (`imported_souls_v1`), each as its grant and owning account
+    /// (`souls_v1`), for the count an archive waits on (#5006). Empty when the store holds no import.
+    pub fn imported_in(&self, worlds: &[String]) -> Result<Vec<(String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('imported_souls_v1','souls_v1')", [], |r| r.get(0))?;
+        if tables != 2 {
+            return Ok(Vec::new());
+        }
+        let mut query = db.prepare(
+            "SELECT i.soul, s.account_id FROM imported_souls_v1 i JOIN souls_v1 s ON s.soul = i.soul WHERE i.world = ?1",
+        )?;
+        let mut out = Vec::new();
+        for world in worlds {
+            let rows = query.query_map(params![world], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (soul, account) = row?;
+                if let Some(id) = principal_from_text(&soul) {
+                    out.push((super::view::grant_text("soul", id), account));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Existing live imported Souls owned by this account, before their first v2 agent connection (W15).
     pub fn imported_souls(
         &self,

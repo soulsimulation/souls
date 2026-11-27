@@ -154,6 +154,8 @@ jobs:
           cargo build --release --locked -p worldd -p gatewayd -p directoryd
           cargo build --release --locked -p assets --bin assets-check
           cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade --bin world-aside --bin store-copy
+          # publish-template, which the move's New world step republishes the templates with (release.sh placement)
+          cargo build --release --locked -p templates --bin templates
           bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
@@ -263,6 +265,25 @@ jobs:
           status=$?
           cat "$RUNNER_TEMP/move.txt"
           { echo '```'; cat "$RUNNER_TEMP/move.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      # New world on this build (#5047, #5051): every template of the catalogue republished by this release's
+      # publish-template and dry-run forked by its worldd; a real release then puts its worldd and ops/ in the library,
+      # moves the placement pin, swaps the templates in (the previous under templates/.aside/) and restarts the
+      # directory when its catalogue changed. A dry run checks and changes nothing. Any failure fails the job loudly,
+      # and the previous templates, worldd and pin stay.
+      - name: New world on this build (templates republished and dry-run forked)
+        if: ${{ inputs.part != 'stage' }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set +e
+          act=run; [ "$DRY_RUN" != false ] && act=check
+          bash v2/tools/ops/release/release.sh remote placement "$SHA" "$act" > "$RUNNER_TEMP/placement.txt" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/placement.txt"
+          { echo "New world ($act$([ "$status" = 0 ] || echo ", FAILED: the previous templates stay"))"; echo '```'; cat "$RUNNER_TEMP/placement.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$status" = 0 ] || echo "::error::New world: release.sh placement $act failed (above); the previous templates, worldd and pin stay"
           exit $status
       - name: News entry (only when every world runs it)
         if: ${{ !inputs.dry_run && inputs.part != 'stage' }}

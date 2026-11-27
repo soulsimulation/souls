@@ -50,9 +50,9 @@
   },
   {
     "name": "core-shed",
-    "hash": "14b03daa170ba932bf43c5b784be2d8ca8c942f1c7f0cf03dda657ae63dbdf28",
-    "grid": "0388e1f60558b5c008223c0e41b93e79d7d0e3f7ff0a85f8cec6958c228d958c",
-    "tris": 552,
+    "hash": "ef471184a0ec3d2594d83fa17fcc56615fb04d7c3aa28150d5c1c6d967eeddad",
+    "grid": "95048da6f54b2903f83baad2fd882378f4c74fbff9de30d161ace809a9468886",
+    "tris": 556,
     "draws": 9
   },
   {
@@ -197,9 +197,9 @@
   },
   {
     "name": "core-garage",
-    "hash": "a4254422646e949fc8c7e359d40577eb2b9b9bd1a38b0895bc0b9d01f9c10635",
-    "grid": "15e02917add9f0521d64fb2db4e45cc32f3b8b6402d0ffaa7e7f5528cc506726",
-    "tris": 1788,
+    "hash": "2a1d69f0feb969e0a67566303ef9928b9ae85b041bd8783bae9d37bbda0f304f",
+    "grid": "981a3504ff073913dd74f38515e9d3424349a2a2c13f1b3777805b0810c61160",
+    "tris": 1792,
     "draws": 9
   },
   {
