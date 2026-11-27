@@ -279,7 +279,7 @@ fn deck_two_carry_a_plywood_sheet_and_a_crew_seats_a_two_by_four_across_two_seat
     }
     // The beams, by Souls 1 and 4 at each beam's ends: the 0.5 m ones from where they lie, 0.5 m outside their slots;
     // the 1.8 m ones carried in from 1 m outside to there first.
-    let beam_crew = crew(&mut hands, 0, &[3]);
+    let mut beam_crew = None;
     for (beam, (dx, from, slot)) in [
         (low[0], (-1_072, -1_072, "beam_low_l")),
         (low[1], (1_072, 1_072, "beam_low_r")),
@@ -291,6 +291,7 @@ fn deck_two_carry_a_plywood_sheet_and_a_crew_seats_a_two_by_four_across_two_seat
             &[(0, at(from, -1_547)), (3, at(from, 1_547))],
             "Souls 1 and 4 to a beam's ends",
         );
+        let beam_crew = *beam_crew.get_or_insert_with(|| crew(&mut hands, 0, &[3]));
         ok(
             hands[0].act("part:take", beam_crew, part(beam)),
             "a beam taken",
@@ -310,6 +311,7 @@ fn deck_two_carry_a_plywood_sheet_and_a_crew_seats_a_two_by_four_across_two_seat
     for (holder, hold) in holds {
         leave(&mut hands, holder, hold);
     }
+    let beam_crew = beam_crew.unwrap();
     leave(&mut hands, 0, beam_crew);
     leave(&mut hands, 3, beam_crew);
     assert_eq!(
