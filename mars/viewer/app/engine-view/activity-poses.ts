@@ -38,6 +38,21 @@ export function propFor(activity: string, prop?: string, instrument?:string): Pr
 }
 /** Extra inputs of a frame: seconds since the activity began (one-shot gestures; undefined = cycle on take time) and
  *  the distance to the partner of a paired gesture (body points; undefined = the contract gap). */
+/** Recorded press phases; world µs, not a new action clock. An early cut gets only cosmetic recovery. */
+export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
+export function formPresses(value: unknown): readonly FormPress[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const valid = value.filter((p): p is FormPress => !!p && (p.hand === 'left' || p.hand === 'right') && [p.start,p.contact,p.end,p.cut ?? p.end].every(Number.isFinite) && p.start < p.contact && p.contact < p.end && (p.cut === undefined || p.cut >= p.start && p.cut <= p.end));
+  return valid.length ? valid : undefined;
+}
+export function pressWeight(p: FormPress, seconds: number): number {
+  const t = seconds * 1_000_000;
+  if (![t,p.start,p.contact,p.end,p.cut ?? p.end].every(Number.isFinite) || !(p.start < p.contact && p.contact < p.end)) return 0;
+  const ease = (x: number) => S(Math.max(0,Math.min(1,x)));
+  const at = (at: number) => at < p.contact ? ease((at-p.start)/(p.contact-p.start)) : 1-ease((at-p.contact)/(p.end-p.contact));
+  return p.cut !== undefined && t >= p.cut ? at(p.cut)*(1-ease((t-p.cut)/(p.end-p.contact))) : at(t);
+}
+
 export type FrameOpts = { groundSeat?: boolean; since?: number; gap?: number;instrument?:string;game?:RecordedGame;gameTick?:number;gameDt?:number;actorId?:string;
   /** Entry 36: whom a singer sings along with (her voice and the head/breath motion follow its sung notes), and, after
    *  her singing ended, the seconds since (the hand lets go of the mic and the pose eases out). */

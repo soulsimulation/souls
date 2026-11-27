@@ -577,3 +577,84 @@ fn a4_make_way_steps_aside_only_a_still_body_with_no_order_to_stay() {
     }
     println!("thirty to one point: {sent} make-way, each to a body that had arrived");
 }
+
+/// E16 (#2787): the shoulder turn never squeezes a walker through a carried load. A crew of two, staying by their own
+/// orders, holds a board across the 0.9 m corridor upstairs between the walker and its goal (one of them in reach;
+/// the goal is further than CROWDED past it, so the walk is not ended as near as the crowd allows). At 9 s the walker turns
+/// its shoulder and the crew, standing still near it, is named to it; the board keeps its whole space all the same.
+/// The walker never passes it, never comes within two radii and slack of it, and its order ends `goal-unreachable`
+/// at 15 s, naming a next step.
+#[test]
+fn e16_a_walker_never_squeezes_through_a_carried_board() {
+    use replica::encode::Value;
+    use replica::host::F_SHOULDER;
+    let (mut s, n) = Scene::new("a board held across the 0.9 m corridor");
+    let f1 = n["building/floor-1"];
+    s.walker(1, f1, v(-1_500_000, 0), f1, v(3_400_000, 0));
+    for (k, x) in [(3, 400_000), (4, 1_000_000)] {
+        s.still(k, f1, v(x, 0));
+        s.c.stay(id(k));
+    }
+    let y = body_of(&s, id(1)).pose.position.y + 500_000;
+    let board = sim::host::Carried::new(
+        id(900),
+        f1,
+        ([0, 600_000], [0, -600_000]),
+        100_000,
+        y,
+        Vec3::ZERO,
+        vec![id(3), id(4)],
+    );
+    let points = board.points.clone();
+    s.c.carrying(vec![board]);
+    let (mut closest, mut furthest, mut named) = (i64::MAX, i64::MIN, None);
+    while s.c.now < LIMIT && !s.l.done(&s.c) {
+        s.l.step(&mut s.c, &mut s.t)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+        let p = body_of(&s, id(1)).pose.position;
+        furthest = furthest.max(p.x);
+        for q in &points {
+            closest = closest.min(dist(v(p.x, p.z), v(q.x, q.z)));
+        }
+        if named.is_none()
+            && let Some(Value::Array(a)) = s.c.fields.get(&id(1)).and_then(|f| f.get(&F_SHOULDER))
+        {
+            named = Some(a.clone());
+        }
+    }
+    let rungs: Vec<(i64, &str)> =
+        s.l.log
+            .iter()
+            .filter(|r| r.who == id(1))
+            .map(|r| (r.at, r.rung.name()))
+            .collect();
+    let ended = s.l.log.iter().find_map(|r| match &r.rung {
+        Rung::Ended { name, detail } if r.who == id(1) => Some((r.at, *name, detail.clone())),
+        _ => None,
+    });
+    println!(
+        "E16 board: rungs {rungs:?}; named at the shoulder turn {named:?}; furthest x {furthest} um, closest to the \
+         board {closest} um; ended {ended:?}"
+    );
+    let shoulder = rungs
+        .iter()
+        .find(|r| r.1 == "shoulder-turn")
+        .expect("a shoulder turn");
+    assert!(shoulder.0 >= 9_000_000, "at 9 s: {}", shoulder.0);
+    let named = named.expect("the shoulder turn names who it may pass");
+    assert!(
+        named.contains(&id(3).to_value()),
+        "the carrier standing still near it is named: {named:?}"
+    );
+    assert!(!named.contains(&id(900).to_value()), "never the load");
+    let (at, name, detail) = ended.expect("its order ended by name");
+    assert_eq!(name, "goal-unreachable");
+    assert!(at >= 15_000_000, "at 15 s: {at}");
+    assert!(detail.contains("next: "), "names a next step: {detail}");
+    assert!(furthest < 0, "never past the board: {furthest} um");
+    let room = 2 * skills::route::ROOM + skills::route::SLACK;
+    assert!(
+        closest >= room - 5_000,
+        "the board keeps its whole space: {closest} um (two radii and slack {room})"
+    );
+}

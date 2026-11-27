@@ -185,3 +185,25 @@ test('run-owned ends preserve a different run at the same tick, but cut their ow
   cut(legacy, 500_000);
   assert.equal(legacy[0].end, 500_000, 'an old stream without run identity retains its body-wide behavior');
 });
+
+test('press keeps the actual hand and phase times, including cosmetic cancellation recovery across chunks',async()=>{
+  const {pressAt}=await import('./take-gestures.ts');
+  const move={name:'souls:press',start:t0+100_000,ends:[t0+350_000,t0+650_000],limbs:['souls:hand-left'],run:'press-1'};
+  const g=gestureFrom(move)!;
+  assert.deepEqual(g.press,{hand:'left',start:move.start,contact:move.ends[0],end:move.ends[1]});
+  assert.equal(gestureFrom({...move,limbs:['some-other-resource']})!.press,undefined,'unknown resources never become guessed hands');
+  assert.equal(gestureFrom({...move,limbs:[]})!.press,undefined);
+  assert.equal(gestureFrom({...move,limbs:['souls:hand-right']})!.press!.hand,'right');
+  cut([g],t0+250_000,'press-1');
+  assert.equal(gestureAt([g],t0+300_000),null,'cosmetic recovery does not extend the native activity');
+  assert.equal(pressAt([g],t0+300_000)![0].cut,t0+250_000);
+  assert.equal(pressAt([g],t0+550_000),null);
+  const fallback=gestureFrom({...move,start:t0+300_000,limbs:[]})!;
+  assert.equal(pressAt([g,fallback],t0+350_000)![0].current,false,'old recovery cannot own the newer generic operate');
+  const b:Body={entity:'press-body',node:'press-node',soul:'press-soul',name:'Press test',heading:0,samples:[{at:t0-1_000_000,p:[0,0,0]}],gestures:[g]};
+  const take=chunkOf([b],FROM,frame).take as unknown as Take;
+  const at=(s:number)=>sampleTake(take,s).entities[b.entity];
+  assert.equal(at(.2).activity,'operate');assert.equal(at(.3).activity,'idle');
+  assert.deepEqual(at(.3).state.formPress,pressAt([g],t0+300_000));
+  assert.equal(at(.6).state.formPress,null);
+});

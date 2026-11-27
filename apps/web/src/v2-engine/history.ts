@@ -19,6 +19,8 @@ export function historyBase(stream: string, config: unknown): string | null {
 
 /** How far the bridge is moved on at a time, so it makes every chunk on the way (it keeps its newest twelve). */
 const STEP_US = 6 * TICKS * TICK_US;
+/** How long before a moment the page's window of it starts (WorldGeometry.ts rewindWindow). */
+const LEAD_US = 10_000_000;
 
 /** One past window's chunks, made from history bundles. */
 export class V2History {
@@ -34,8 +36,7 @@ export class V2History {
 
   /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
   private floor: number | undefined;
-  /** The moment `at` (µs), with the world's time `now` (µs): no seek asks for a day after now's. */
-  private seek(at: number, now: number): Promise<Seeked> {
+  private post(m: { seq: number; at: number; now: number; ahead?: true }): void {
     if (!this.worker) {
       this.worker = this.make();
       this.worker.onmessage = (e: MessageEvent<HistoryMsg>) => {
@@ -44,11 +45,34 @@ export class V2History {
         done?.(m.t === 'seeked' ? m.s : new Error(m.message));
       };
     }
+    this.worker.postMessage({ base: new URL(this.base, location.href).href, ...m, floor: this.floor });
+  }
+  /** The moment `at` (µs), with the world's time `now` (µs): no seek asks for a day after now's. */
+  private seek(at: number, now: number): Promise<Seeked> {
     const seq = ++this.seq;
     return new Promise((ok, no) => {
       this.waiting.set(seq, (r) => (r instanceof Error ? no(r) : ok(r)));
-      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at, now, floor: this.floor });
+      this.post({ seq, at, now });
     });
+  }
+  /** K3: where a window from `at` (µs) starts, and the floor of its seeks' walks: a window before the world's first
+   *  moment starts there, and no seek walks back through the empty days before it (a young world: each would be a
+   *  404). Not known (no public events yet): no day before the asked one's. */
+  private async start(at: number, endUs: number): Promise<number> {
+    const known = await this.first(endUs).catch(() => null);
+    if (known !== null && at < known) at = known;
+    this.floor = known ?? Math.min(at, this.floor ?? Infinity);
+    return at;
+  }
+
+  /** #3358: read ahead what a seek to take tick `tick` will read first (the world's first moment, the day's index and
+   *  the bundle's bytes, which the worker keeps), so a seek the page can foresee waits only for that bundle to be
+   *  applied: a moment link's while the page catches up to now, Back 1 min's and From the start's once the time panel
+   *  is open. On soul.game a bundle is Eden whole, about 1.8 MB, and reading it was the slowest step of a cold seek
+   *  (0.9 to 1.7 s of about 2.1). Nothing is applied or drawn, and nothing is said back. */
+  async prepare(tick: number, nowTick?: number | null): Promise<void> {
+    const now = Math.max(tick, nowTick ?? tick) * TICK_US, at = await this.start(tick * TICK_US - LEAD_US, now);
+    this.post({ seq: 0, at, now, ahead: true });
   }
 
   /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them.
@@ -58,12 +82,7 @@ export class V2History {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     const now = (nowTick ?? to) * TICK_US;
-    let at = from * TICK_US, first = true, next: number | null = null;
-    // K3: a window before the world's first moment starts there, and no seek walks back through the empty days before
-    // it (a young world: each would be a 404). Not known (no public events yet): no day before the asked one's.
-    const known = await this.first(endUs).catch(() => null);
-    if (known !== null && at < known) at = known;
-    this.floor = known ?? Math.min(at, this.floor ?? Infinity);
+    let at = await this.start(from * TICK_US, endUs), first = true, next: number | null = null;
     const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
     while (at < endUs + STEP_US && got.size < limit) {

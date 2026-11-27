@@ -300,6 +300,34 @@ pub struct Bodies {
     place_moves: BTreeMap<(Id, Id), Id>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
     sleeping: BTreeMap<Id, Driver>,
+    /// The things with a seat in each room, by kind (#3178): under the floor each seat is on and each node above its
+    /// thing, and under its plain kind and the entry it goes by. A sit by kind looks its room and kind up here
+    /// ([`Bodies::seat_by_kind`]), never scans the tree.
+    rooms: Rooms,
+}
+
+/// [`Bodies::rooms`]: (room, kind) to the things with a seat there.
+type Rooms = BTreeMap<(Id, String), BTreeSet<Id>>;
+
+/// Files `thing`, its seat on `floor`, in `rooms` as `tree` holds it ([`Bodies::rooms`]).
+fn file(rooms: &mut Rooms, tree: &Tree, thing: Id, floor: Id) {
+    let node = |id: Id| tree.node(tree.handle(id)?);
+    let Some(n) = node(thing) else {
+        return;
+    };
+    let plain = replica::world_model::plain(n.kind().as_str()).to_owned();
+    let entry = import_eden::entry_name(n.kind().as_str(), n.fields());
+    let entry = entry.split('@').next().unwrap_or(entry).to_owned();
+    let mut room = Some(floor);
+    let mut up = n.parent();
+    for _ in 0..64 {
+        let Some(r) = room else { break };
+        for k in [&plain, &entry] {
+            rooms.entry((r, k.clone())).or_default().insert(thing);
+        }
+        room = up;
+        up = up.and_then(|u| node(u)?.parent());
+    }
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
@@ -478,6 +506,7 @@ impl Bodies {
             wind_moves: BTreeMap::new(),
             place_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
+            rooms: BTreeMap::new(),
         })
     }
 
@@ -674,9 +703,73 @@ impl Bodies {
         Ok(())
     }
 
-    /// Adds a seat.
+    /// Adds a seat, and its thing to the rooms it is in ([`Bodies::seat_by_kind`]).
     pub fn add_place(&mut self, place: PlaceAt) -> R<()> {
-        self.slots.add(place)
+        let (thing, floor) = (place.thing, place.floor);
+        self.slots.add(place)?;
+        file(&mut self.rooms, &self.town.tree, thing, floor);
+        Ok(())
+    }
+
+    /// Files the seats a creator's edit installed (`crate::edit_places`), as `tree` (the live tree) holds them, in the
+    /// rooms a sit by kind looks up. A thing with no seat is passed over.
+    pub fn file_seats(&mut self, tree: &Tree, things: impl IntoIterator<Item = Id>) {
+        for t in things {
+            if let Some(floor) = self.slots.place(t).map(|p| p.floor) {
+                file(&mut self.rooms, tree, t, floor);
+            }
+        }
+    }
+
+    /// Whether `room` holds a seat of `kind` (taken or free; [`Bodies::seat_by_kind`]).
+    pub fn has_kind(&self, room: Id, kind: &str) -> bool {
+        self.rooms
+            .get(&(room, kind.to_owned()))
+            .is_some_and(|t| t.iter().any(|t| self.slots.place(*t).is_some()))
+    }
+
+    /// The thing a sit by kind takes in `room` (#3178; I5's selector, any free slot of a kind in a node, nearest the
+    /// body, ties by id): of the things of `kind` (any, for none) with a seat there that `fits` (its form, as the
+    /// caller reads it), the one whose free slot nearest `body` (C19's pick) is nearest, ties by thing. A slot
+    /// `taken` names is not free. Bound at commit on the clock thread, one sit at a time, so each of a tick's sits
+    /// sees the seats taken before it: one lookup per seat of that kind in the room, no rule run. `None` when none
+    /// there is free.
+    pub fn seat_by_kind(
+        &self,
+        room: Id,
+        kind: Option<&str>,
+        body: Id,
+        fits: &dyn Fn(Id) -> bool,
+        taken: &dyn Fn(Id, u64) -> bool,
+    ) -> Option<Id> {
+        let c = &self.runner.controller;
+        let from = c.body(body)?.pose.position;
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        let mut best: Option<(i128, Id)> = None;
+        // A thing filed under two kinds (its plain kind and its entry's) is met twice with any kind: the same key.
+        let things: Box<dyn Iterator<Item = Id> + '_> = match kind {
+            Some(k) => Box::new(self.rooms.get(&(room, k.to_owned()))?.iter().copied()),
+            None => Box::new(
+                self.rooms
+                    .range((room, String::new())..)
+                    .take_while(move |((r, _), _)| *r == room)
+                    .flat_map(|(_, t)| t.iter().copied()),
+            ),
+        };
+        for t in things {
+            let Some(s) = self.slots.free_unless(c, body, t, &|s| taken(t, s)) else {
+                continue;
+            };
+            let Some(p) = self.slots.place_in(t, s).and_then(|p| p.stand().ok()) else {
+                continue;
+            };
+            let key = (d(p.x, from.x) + d(p.z, from.z), t);
+            // `fits` reads the tree and the entries: asked only of a seat nearer than the best so far.
+            if best.is_none_or(|b| key < b) && fits(t) {
+                best = Some(key);
+            }
+        }
+        best.map(|(_, t)| t)
     }
 
     /// Where `body` is: the node of its frame (its floor, or the thing whose slot it sits in) and its position there.

@@ -25,7 +25,6 @@
   <a href="https://soul.game/docs/for-agents"><img src="https://img.shields.io/badge/Claude_Code-works-D97757?logo=claude&logoColor=white" alt="Works with Claude Code"></a>
   <a href="https://soul.game/docs/for-agents"><img src="https://img.shields.io/badge/Codex-works-111111" alt="Works with Codex"></a>
   <a href="https://soul.game/docs/for-agents"><img src="https://img.shields.io/badge/Cursor-works-333333" alt="Works with Cursor"></a>
-  <a href="https://soul.game/docs/mcp"><img src="https://img.shields.io/badge/MCP-works-6b5bd6" alt="Works over MCP"></a>
 </p>
 
 Souls are persistent 3D worlds that run in real time, day and night, whether anyone is watching or not. Each
@@ -44,8 +43,7 @@ Read the instructions at https://soul.game/w/eden-2026/instructions.md to create
 
 Your agent fetches a small client, asks the world for a Soul, and you approve it once in the browser. From then on
 you tell your Soul what you want in plain words and your agent makes it happen: walk to the library, sit with a
-friend, make tea, dance, ride the ferris wheel, play music with other Souls. Agents that prefer tools can use each
-world's [MCP endpoint](https://soul.game/docs/mcp) instead.
+friend, make tea, dance, ride the ferris wheel, play music with other Souls.
 
 ## Build a world
 

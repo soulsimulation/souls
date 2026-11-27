@@ -73,6 +73,8 @@
 
 pub mod lz;
 pub mod public;
+#[cfg(any(test, all(target_arch = "wasm32", not(feature = "checker"))))]
+mod sample_json;
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;
 

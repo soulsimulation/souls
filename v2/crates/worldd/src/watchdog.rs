@@ -107,6 +107,8 @@ pub fn watch_to(beat: Arc<Heartbeat>, mut real: Real, limit_ms: i64, hard_ms: i6
     let stalls = &worldd::measures::STALLS;
     std::thread::spawn(move || {
         let mut w = Watch::new(limit_ms, hard_ms);
+        let ahead_ms = &worldd::measures::CLOCK_AHEAD_MS;
+        let mut said = ahead_ms.load(std::sync::atomic::Ordering::Relaxed);
         for k in 1u64.. {
             std::thread::sleep(Duration::from_millis(10));
             let (tick, at) = beat.read();
@@ -138,6 +140,18 @@ pub fn watch_to(beat: Arc<Heartbeat>, mut real: Real, limit_ms: i64, hard_ms: i6
             // Short of the hard limit: alive, told to the service manager twice a second (O1, #2730).
             if k % 50 == 0 {
                 crate::alive();
+                // O10 (#2806): the machine's clock against the world's, each half second. The world runs on the
+                // steady clock, so a step of the machine's moves nothing; it is said by name and kept in `health.json`.
+                let ahead = (real.now() - worldd::answers::now()) / 1000;
+                ahead_ms.store(ahead, std::sync::atomic::Ordering::Relaxed);
+                if (ahead - said).abs() >= 1000 {
+                    eprintln!(
+                        "worldd: clock.stepped: the machine's clock moved {} ms while the world ran; world time goes \
+                         on by the steady clock, {ahead} ms ahead of the machine's",
+                        said - ahead
+                    );
+                    said = ahead;
+                }
             }
         }
     });

@@ -149,9 +149,10 @@ use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
+use replica::selector::{FREE_SLOT, Selector};
 use replica::sky::{self, Sky};
 use replica::sync::Records;
-use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
+use replica::time::{Line, Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 use sim::audit::{Auditor, Fault};
@@ -1085,6 +1086,10 @@ pub struct World {
     pub durable: Durable,
     /// Still and next due, for sleep (O2).
     pub quiet: Arc<Quiet>,
+    /// The world's real clock (K7's: the machine's wall clock read once, carried on by the steady clock), carried
+    /// ahead of the machine's by the step a restart found (`clock.stepped`, O10): what every thread beside the clock
+    /// thread reads as real time (the watchdog, the public stream, the sleep watch), so none sees another time.
+    pub real: Real,
     handover: Arc<crate::handover::Handover>,
     clock: Option<JoinHandle<()>>,
 }
@@ -1113,6 +1118,21 @@ pub fn now() -> Micros {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+        .saturating_add(test_step())
+}
+
+/// O10 (#2806): a test's step of the machine's clock, µs, read from the file `$WORLDD_TEST_CLOCK_STEP` names at each
+/// reading, so a test steps it while the world runs or before it starts (`tests/host_faults.rs`); a debug build's
+/// only.
+fn test_step() -> Micros {
+    #[cfg(debug_assertions)]
+    if let Some(f) = std::env::var_os("WORLDD_TEST_CLOCK_STEP") {
+        return std::fs::read_to_string(f)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+    }
+    0
 }
 
 /// The wall clock read once, at start, carried on by the monotonic clock (K7): µs from the Unix epoch, never a step.
@@ -1130,11 +1150,26 @@ impl Real {
             mono0: Instant::now(),
         }
     }
+
+    /// This clock carried `by` µs ahead: a world's whose restart found the machine's clock behind it ([`World::real`]).
+    pub fn ahead(self, by: Micros) -> Real {
+        Real {
+            wall0: self.wall0.saturating_add(by),
+            ..self
+        }
+    }
+}
+
+impl Real {
+    /// The world's real time now, µs from the Unix epoch.
+    pub fn now_us(&self) -> Micros {
+        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+    }
 }
 
 impl Pace for Real {
     fn now(&mut self) -> Micros {
-        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+        self.now_us()
     }
 
     fn sleep_until(&mut self, t: Micros) {
@@ -1142,6 +1177,23 @@ impl Pace for Real {
         if wait > 0 {
             std::thread::sleep(Duration::from_micros(wait as u64));
         }
+    }
+}
+
+/// A clock carried `by` µs ahead of another (O10, #2806): a restart's, when the machine's clock is behind the last
+/// logged tick (`clock.stepped`).
+struct Ahead {
+    pace: Box<dyn Pace + Send>,
+    by: Micros,
+}
+
+impl Pace for Ahead {
+    fn now(&mut self) -> Micros {
+        self.pace.now().saturating_add(self.by)
+    }
+
+    fn sleep_until(&mut self, t: Micros) {
+        self.pace.sleep_until(t.saturating_sub(self.by));
     }
 }
 
@@ -1309,6 +1361,8 @@ struct Clock {
     /// the next through the form runner when the world has bodies.
     forms: Acts,
     forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
+    /// The sits by kind among them (#3178): each one's selector and its intent, bound to a seat when its form starts.
+    by_kind: BTreeMap<Id, (Selector, Intent)>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -1894,6 +1948,18 @@ fn spot_of(
     }))
 }
 
+/// A sit by kind (#3178): a sit (`eden:sit`) aimed at I5's free-slot selector (selector 1, any free slot of a kind in
+/// a node). `None` for any other intent, else the selector or its refusal by name (`selector-not-a-record`, ...).
+fn kind_sit(intent: &Intent) -> Option<Result<Selector, &'static str>> {
+    let target @ Target::Selector(FREE_SLOT, _) = intent.target.as_ref()? else {
+        return None;
+    };
+    match intent.verb.as_str().split_once(':') {
+        Some((ns, "sit")) if ns != "souls" => Some(Selector::read(target).map_err(|r| r.name)),
+        _ => None,
+    }
+}
+
 /// Binds a resolved spot once, at commit (`sim::commit::spot`): a slot is sat in (or walked to), a thing or a point
 /// is walked to, as N9's target in the frame of the node it stands in. Refused by the checker's name.
 fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
@@ -2383,8 +2449,14 @@ impl Clock {
                 (vec![reply], stamps),
             );
         }
+        // A sit by kind (#3178) is a seat's own form, its seat bound when it starts.
+        let mut by_kind = match self.bodies {
+            Some(_) => kind_sit(&intent),
+            None => None,
+        };
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
+            Some(_) if by_kind.is_some() => None,
             Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
@@ -2402,6 +2474,20 @@ impl Clock {
         };
         let verb = engine::Verb::of(intent.verb.as_str());
         let taken = match (spotted, moved, verb, intent.kind()) {
+            _ if by_kind.is_some() => match by_kind.as_ref().map(Result::as_ref) {
+                Some(Err(r)) => Err(*r),
+                _ => self.body_of(&intent).map(|body| {
+                    Taken::Form(Act {
+                        id: self.next_intent,
+                        cause: Cause::Intent(id),
+                        actor,
+                        body,
+                        candidates: Vec::new(),
+                        recheck: None,
+                        spot: None,
+                    })
+                }),
+            },
             (Some(a), _, _, _) => a.map(Taken::Form),
             (None, Some(m), _, _) => m.map(Taken::Move),
             // The engine's own acts (C2): activities, offers and carrying, by verb.
@@ -2552,6 +2638,9 @@ impl Clock {
             Taken::Move(m) => self.moving.push((id, m)),
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
+                if let Some(Ok(selector)) = by_kind.take() {
+                    self.by_kind.insert(id, (selector, intent.clone()));
+                }
                 let i = acts::intent(id, intent.expiry, actor, bytes);
                 self.forming.push((id, act, i, form_args));
             }
@@ -3108,11 +3197,13 @@ impl Clock {
             match committed {
                 Ok((c, mine, places, before)) => {
                     self.history.record(&before, &self.replica, &c.part, step);
-                    if let Some(b) = &mut self.bodies
-                        && let Err(e) = places.install(&mut b.slots, &c.names)
-                    {
-                        self.faults += 1;
-                        eprintln!("worldd: edit places {}", e.name);
+                    if let Some(b) = &mut self.bodies {
+                        if let Err(e) = places.install(&mut b.slots, &c.names) {
+                            self.faults += 1;
+                            eprintln!("worldd: edit places {}", e.name);
+                        }
+                        // A seat the edit made is found by a sit by kind too (#3178).
+                        b.file_seats(self.replica.tree(), c.names.values().copied());
                     }
                     self.unsealed = true;
                     // The edit checker's town installs the ground prepared for this edit (#3743), or is built again
@@ -4546,6 +4637,80 @@ impl Clock {
         }
     }
 
+    /// The seat a sit by kind takes as its form starts (#3178), on the clock thread, one sit at a time: the thing of the
+    /// selector's kind in its node, whose own sit form (a walk to its nearest free slot, then the sit) a named sit runs,
+    /// with the free slot nearest the body ([`Bodies::seat_by_kind`]); a seat another run is on its way to and a thing
+    /// private to another are not free. Its form then takes the slot as for a named sit, so a burst of sits fills
+    /// every seat. None free is refused `place.none-free`, naming the next step: the nearest free seat of another
+    /// kind there, else to wait for a seat to be left; no seat of the kind there at all, `place.none-of-kind`, which
+    /// waiting never clears.
+    fn seat_by_kind(
+        &self,
+        selector: &Selector,
+        asked: &Intent,
+        body: Id,
+        now: Micros,
+    ) -> Result<(Id, String), Refusal> {
+        let Selector::FreeSlot { kind, node, .. } = selector;
+        let kind = kind.as_str();
+        let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
+        let refused = |name, detail: String| Err(Refusal { name, detail });
+        let Some(b) = self.bodies.as_ref() else {
+            return refused("bodies-off", "the world has no bodies".into());
+        };
+        if b.runner.controller.body(body).is_none() {
+            return refused("body-unknown", replica::world_model::show(body));
+        }
+        let soul = match asked.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        // The seat's own sit form, read as a named sit's: the intent aimed at the thing, with no arguments.
+        let probe = std::cell::RefCell::new(Intent {
+            parameters: BTreeMap::new(),
+            ..asked.clone()
+        });
+        let fits = |t: Id| {
+            probe.borrow_mut().target = Some(Target::Node(t));
+            replica::who_may::private_to(tree, t, soul).is_none()
+                && self.forms.fixture_sit(tree, &probe.borrow())
+        };
+        let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
+        if let Some(t) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
+            let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
+            return Ok((t, form.to_owned()));
+        }
+        // The next step: the nearest free seat of any kind there, else to wait (only where a seat of the kind is).
+        let other = b.seat_by_kind(*node, None, body, &fits, &taken).map(|t| {
+            let of = tree
+                .handle(t)
+                .and_then(|h| tree.node(h))
+                .map_or(String::new(), |n| {
+                    replica::world_model::plain(n.kind().as_str()).to_owned()
+                });
+            format!(
+                "the nearest free place to sit there is {} ({of}): sit on it",
+                replica::world_model::show(t)
+            )
+        });
+        if !b.has_kind(*node, kind) {
+            return refused(
+                "place.none-of-kind",
+                format!(
+                    "no {kind} to sit on in {room}{}",
+                    other.map_or(String::new(), |o| format!("; {o}"))
+                ),
+            );
+        }
+        refused(
+            sim::commit::bind::NONE_FREE,
+            match other {
+                Some(o) => format!("no {kind} free in {room}; {o}, or wait for one to be left"),
+                None => format!("every place to sit in {room} is held: wait for one to be left"),
+            },
+        )
+    }
+
     /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
     /// going for its intent, gets its first receipt again, or is refused by name.
     fn start_forms(&mut self, now: Micros) {
@@ -4553,6 +4718,7 @@ impl Clock {
         // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
         self.forms.hold_sight();
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
+            let by_kind = self.by_kind.remove(&id);
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -4561,11 +4727,26 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let candidates: Vec<(Id, String)> = act
+            let mut candidates: Vec<(Id, String)> = act
                 .candidates
                 .iter()
                 .map(|c| (c.this, c.form.clone()))
                 .collect();
+            // A sit by kind names no seat by its arguments: its form's own pick takes the chosen thing's free slot.
+            let args = if by_kind.is_some() {
+                acts::Args::default()
+            } else {
+                args
+            };
+            if let Some((selector, asked)) = by_kind {
+                match self.seat_by_kind(&selector, &asked, act.body, now) {
+                    Ok(c) => candidates = vec![c],
+                    Err(r) => {
+                        self.end(id, |c| c.refused(actor, sequence, &r));
+                        continue;
+                    }
+                }
+            }
             let r = self.forms.start(
                 self.replica.tree(),
                 self.bodies.as_mut(),
@@ -6020,6 +6201,14 @@ type Publish = (Vec<Mapping>, Mapping);
 /// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
 /// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
 /// mappings this start applies, and the one in force, when either is new or the root's fields do not hold it.
+/// The last mapping the world logged (E7b), if any.
+fn logged_mapping(world: &Replica) -> Option<Mapping> {
+    world.tree().time().iter().rev().find_map(|t| match t {
+        TimeEffect::Mapping(m) => Some(*m),
+        _ => None,
+    })
+}
+
 fn timeline(
     world: &Replica,
     rate: Option<(i64, i64)>,
@@ -6280,12 +6469,42 @@ pub fn start<S: Storage + 'static>(
         });
     }
     let shared = Arc::new(Mutex::new(0));
+    // The machine's clock as the world reads it: the threads beside the clock thread read it as [`World::real`].
+    let mut real = Real::start();
     let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
         (true, _) => Box::new(Stepped(Arc::clone(&shared))),
         (false, Some(c)) => c,
-        (false, None) => Box::new(Real::start()),
+        (false, None) => Box::new(real),
     };
-    let real0 = pace.now();
+    let mut real0 = pace.now();
+    // O10 (#2806): a restart whose machine clock went back while it was down (a step) finds its last logged tick in
+    // the clock's future, and once waited, ticking nothing, until the clock came round to it: a frozen world. It is
+    // `clock.stepped`: its clock is carried ahead of the machine's by the step, so world time goes on from the last
+    // tick logged, never back and never waiting, and the step is said by name and in `health.json`. The step is
+    // measured on the logged time line, before a new rate's mapping is made at the start's real time.
+    if let (Some(n), false) = (last, cfg.lockstep) {
+        let logged_rate = cfg.rate.and_then(|_| {
+            let rate = logged_mapping(&world)?.rate();
+            Some((i64::from(rate.num()), i64::from(rate.den())))
+        });
+        let (line, mapping, _) = timeline(&world, logged_rate.or(cfg.rate), real0, tick_us)?;
+        let logged = line.tick_start(n).map_err(time)?;
+        let on = Line::new(mapping.real_us, mapping.world_us, mapping.rate());
+        let behind = on.x_of(logged).map_err(time)? - real0;
+        if behind > 0 {
+            let ahead = behind;
+            pace = Box::new(Ahead { pace, by: ahead });
+            real = real.ahead(ahead);
+            real0 = pace.now();
+            measures::CLOCK_AHEAD_MS.store(ahead / 1000, std::sync::atomic::Ordering::Relaxed);
+            eprintln!(
+                "worldd: clock.stepped: the machine's clock is {} ms behind the last logged tick; world time goes on \
+                 from it, {} ms ahead of the machine's clock",
+                ahead / 1000,
+                ahead / 1000
+            );
+        }
+    }
     // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
     // mappings follow, and the configured rate's (E7b).
     let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
@@ -6644,6 +6863,7 @@ pub fn start<S: Storage + 'static>(
             acts
         },
         forming: Vec::new(),
+        by_kind: BTreeMap::new(),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
@@ -6950,6 +7170,7 @@ pub fn start<S: Storage + 'static>(
         restart,
         durable: world_durable,
         quiet,
+        real,
         handover: Arc::default(),
         clock: Some(clock),
     })

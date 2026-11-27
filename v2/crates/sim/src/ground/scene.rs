@@ -372,7 +372,7 @@ pub fn xform_to(tree: &Tree, from: Handle, frame: Handle) -> Result<Xform, Strin
 }
 
 /// Slot `n`'s point (`F_SLOTS`' `[n, x, y, z, …]` mm, the thing's frame) of node `h`, µm.
-fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
+pub fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
     let node = tree.node(h)?;
     let rows = node.fields().get(&F_SLOTS).map(row)?;
     rows.iter().map(row).find_map(|r| {

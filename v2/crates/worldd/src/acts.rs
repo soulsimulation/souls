@@ -225,6 +225,14 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
+/// `place.none-free` for the places `key` names, with its next step (E16): the only seat, taken, is not a dead end.
+fn none_free_refusal(key: &str) -> Refusal {
+    refusal(
+        sim::commit::bind::NONE_FREE,
+        format!("{key}; next: wait until one is free, or ask for another place"),
+    )
+}
+
 /// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
 type Way = (Id, [i64; 2], [i64; 2], [i64; 2]);
 
@@ -405,6 +413,9 @@ impl Sight<'_> {
                     at.y + p.position.y,
                     at.z + p.position.z,
                 );
+            }
+            if let Some(s) = slot_at(self.tree, &n) {
+                at = at.plus(s).ok()?;
             }
             match n.parent() {
                 Some(p) => id = p,
@@ -1108,9 +1119,22 @@ impl Geometry for Sight<'_> {
     }
 
     /// A body where the controller has it; a seated, lying or riding one at its slot's point in the frame of the thing
-    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin.
+    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin. A
+    /// thing in a slot its holder gives a point likewise at that point (#4120: a walk to a thing just made into a
+    /// bench's slot goes to the slot); any other thing is read from the tree by the host.
     fn read(&self, node: Id) -> Option<Seen> {
-        let b = self.bodies.get(&node)?;
+        let Some(b) = self.bodies.get(&node) else {
+            let n = self.tree.node(self.tree.handle(node)?)?;
+            let slot = slot_at(self.tree, &n)?;
+            let at = n.place().map_or(Vec3::ZERO, |p| p.position);
+            return Some(Seen {
+                id: node,
+                kind: n.kind().clone(),
+                parent: n.parent(),
+                position: at.plus(slot).ok()?,
+                fields: n.fields().clone(),
+            });
+        };
         let mut fields = BTreeMap::new();
         if self.carrying.contains(&node) {
             fields.insert(F_CROSSING, replica::encode::Value::Uint(1));
@@ -1201,19 +1225,36 @@ impl Sight<'_> {
         p: Vec3,
         keep: &dyn Fn(Id) -> bool,
     ) -> Option<(Id, Vec3)> {
-        if let Some((f, at, _)) = view.on_floor(target, p).filter(|(f, ..)| keep(*f)) {
-            return Some((f, at));
+        if let Some(found) = self.on_floor(view, target, p).filter(|(f, _)| keep(*f)) {
+            return Some(found);
         }
         let n = self.tree.node(self.tree.handle(target)?)?;
-        let place = n.place()?;
-        let up = place
-            .position
-            .plus(place.orientation.rotate(p).ok()?)
-            .ok()?;
-        if let Some((f, at, _)) = view.on_floor(n.parent()?, up).filter(|(f, ..)| keep(*f)) {
-            return Some((f, at));
+        let (parent, up) = up_one(self.tree, &n, p)?;
+        if let Some(found) = self.on_floor(view, parent, up).filter(|(f, _)| keep(*f)) {
+            return Some(found);
         }
-        self.floor_of(n.parent()?, up).filter(|(f, _)| keep(*f))
+        self.floor_of(parent, up).filter(|(f, _)| keep(*f))
+    }
+
+    /// Point `at` of node `node`'s frame carried up the tree to the first node the view has a surface for (the open
+    /// ground, or a building's floor), each slot's point included ([`up_one`]). #4120: up the world's own tree, which
+    /// holds every part committed, not the town's: the town takes only parts that change its ground, so a take, a
+    /// thing made into a slot, or a thing set down that walkers do not go round never reach it, and a take right
+    /// after one was measured to where the thing had been (or to its holder's origin). The town's tree is read only
+    /// for a node the world's does not hold.
+    fn on_floor(&self, view: &View<'_>, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
+        let surfaces = view.surfaces();
+        let (mut on, mut p) = (node, at);
+        for _ in 0..64 {
+            if surfaces.contains_key(&on) {
+                return Some((on, p));
+            }
+            let Some(n) = self.tree.handle(on).and_then(|h| self.tree.node(h)) else {
+                break;
+            };
+            (on, p) = up_one(self.tree, &n, p)?;
+        }
+        view.on_floor(node, at).map(|(f, p, _)| (f, p))
     }
 
     /// The entry of the thing `node` is.
@@ -1637,19 +1678,20 @@ pub const HERE_REACH_MM: i64 = 20_000;
 /// How near a body stands to a thing to be within a form's reach of it, mm, beyond the thing's own half size.
 const NEAR_MM: i64 = 1_500;
 
-/// A node's place in the zone's frame, µm: its position carried up the tree through each parent's place, turns
-/// included.
+/// A node's place in the zone's frame, µm: its position from its slot's point ([`slot_at`]), carried up the tree
+/// through each parent's place, turns included.
 pub(crate) fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
     let n = tree.node(tree.handle(node)?)?;
-    carried(
-        tree,
-        n.parent(),
-        n.place().map_or(Vec3::ZERO, |p| p.position),
-    )
+    let at = n.place().map_or(Vec3::ZERO, |p| p.position);
+    let at = match slot_at(tree, &n) {
+        Some(s) => at.plus(s).ok()?,
+        None => at,
+    };
+    carried(tree, n.parent(), at)
 }
 
-/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included
-/// (a seated body's controller pose is in its seat's frame).
+/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included,
+/// and the point of each slot a node stands in ([`slot_at`]) (a seated body's controller pose is in its seat's frame).
 fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
     let mut at = local;
     let mut up = frame;
@@ -1659,9 +1701,36 @@ fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
         if let Some(pp) = pn.place() {
             at = pp.orientation.rotate(at).ok()?.plus(pp.position).ok()?;
         }
+        if let Some(s) = slot_at(tree, &pn) {
+            at = at.plus(s).ok()?;
+        }
         up = pn.parent();
     }
     None
+}
+
+/// The point, in its parent's frame, of the slot node `n` stands in (`F_SLOTS`, as [`xform_to`] carries it): a thing
+/// in a slot stands from its slot's point, and a thing a form makes or puts into one stands at its zero (#4120).
+/// `None` outside a slot, or in one its parent gives no point (a hand).
+fn slot_at(tree: &Tree, n: &replica::tree::NodeRef<'_>) -> Option<Vec3> {
+    sim::ground::scene::slot_point(tree, tree.handle(n.parent()?)?, n.slot()?)
+}
+
+/// Point `p` of node `n`'s frame in its parent's frame, with the parent: turned and moved by its place, from its
+/// slot's point ([`slot_at`]).
+fn up_one(tree: &Tree, n: &replica::tree::NodeRef<'_>, p: Vec3) -> Option<(Id, Vec3)> {
+    let place = n.place()?;
+    let at = place
+        .orientation
+        .rotate(p)
+        .ok()?
+        .plus(place.position)
+        .ok()?;
+    let at = match slot_at(tree, n) {
+        Some(s) => at.plus(s).ok()?,
+        None => at,
+    };
+    Some((n.parent()?, at))
 }
 
 /// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
@@ -1964,7 +2033,7 @@ fn other_seat(
         None => open.len().checked_sub(1),
     };
     let Some(at) = at else {
-        return Some(Err(refusal(sim::commit::bind::NONE_FREE, key)));
+        return Some(Err(none_free_refusal(key)));
     };
     let far = open[at].0;
     let mut even: Vec<&Open> = open
@@ -2055,6 +2124,19 @@ fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
 }
 
 impl Acts {
+    /// Whether slot `slot` of `thing` is not `body`'s to pick now, as a form's own pick skips it: held, or another run
+    /// on its way to it (#4575), or its cabin away from its stop (N14). A sit by kind binds by it (#3178).
+    pub(crate) fn seat_reserved(
+        &self,
+        b: &Bodies,
+        thing: Id,
+        slot: u64,
+        body: Id,
+        now: Micros,
+    ) -> bool {
+        self.forms.seat_taken(&b.slots, thing, slot, body) || !b.slots.at_own_stop(thing, slot, now)
+    }
+
     /// A bare fixture sit or lie uses its actual entry's approach (a lie in a bed walks to it first, as its sleep does);
     /// explicit arguments and selectors keep their path.
     pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
@@ -2609,9 +2691,7 @@ impl Acts {
                         });
                     free.and_then(|_| b.slots.boardable_seat(*node, now).err())
                 });
-                first.get_or_insert(
-                    away.unwrap_or_else(|| refusal(sim::commit::bind::NONE_FREE, key)),
-                );
+                first.get_or_insert(away.unwrap_or_else(|| none_free_refusal(&key)));
                 continue;
             }
             if let Some(e) = other {
