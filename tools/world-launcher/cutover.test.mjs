@@ -477,9 +477,12 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
   const bot = await get('/', { accept: 'text/html', 'user-agent': 'Googlebot/2.1' });
   assert.equal(bot.status, 200, 'a crawler gets the same page'); assert.equal(bot.headers.get('x-souls-engine'), 'new');
-  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls', '/mcp']) {
+  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls']) {
     const r = await get(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path);
   }
+  // no MCP: a plain 410 that points to the For agents page, never the old world's endpoint
+  const mcp = await fetch(`${base}/w/eden/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(mcp.status, 410); assert.match(await mcp.text(), /^Souls does not serve MCP\..*\/docs\/for-agents\n$/);
   // the page's polled reads are never a 404, with nothing published either (the release walk fails on any same-origin 404)
   for (const path of ['/v1/world/visitors', '/v1/world/context', '/v1/world/context?q=pond']) assert.equal((await get(path)).status, 200, path);
   const seq = await get('/v1/world/seq'); assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 0, entities: 0 }, 'nothing published: seq 0');

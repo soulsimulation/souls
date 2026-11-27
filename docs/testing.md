@@ -218,7 +218,7 @@ Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
 `AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
 bundle). It runs `repo`, `soul-tools` (the one launcher test that reads `content/kinds`, among others), `kinds` (the
-entry tests and the form-rules tests) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
+entry tests and the form-rules tests). A change under `packages/form-rules/src/` also
 keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
 and the usual path map decides; a changelog fragment beside other files selects nothing itself (since 21 Nov; before,
 it read as an unmapped path and every PR with a fragment ran every job). `content/kinds` and `content/moves` also run

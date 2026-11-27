@@ -146,7 +146,7 @@ import { addressKey, forwardedAddress } from './address-key.mjs';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
-import { mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
+import { mcpGone, siteLlmsTxt } from './mcp-card.mjs';
 import { opSoul, opSetTest } from './op-souls.mjs';
 import { accountSouls, directorySouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
@@ -1343,6 +1343,12 @@ export async function openLauncher(cfg = {}) {
   /** #897: the site's docs index (the build's llms.txt plus every listed world's reader, from the registry per request); null when the web app is not built. */
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
+  /** No MCP is served (mcp-card.mjs): the site's card and every world's /mcp answer 410 with a pointer to the For agents page. */
+  function mcpRetired(req, res) {
+    const body = Buffer.from(mcpGone({ origin: publicOrigin, base: B }));
+    res.writeHead(410, { 'content-type': 'text/plain; charset=utf-8', 'content-length': String(body.length), 'cache-control': 'no-cache', 'x-robots-tag': NOINDEX, link: `<${publicOrigin}${B}/docs/for-agents>; rel="help"` })
+      .end(req.method === 'HEAD' ? undefined : body);
+  }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
   function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep, pageStream = null, pageBodies = null } = {}) {
     if (clientGone(req, res)) return;
@@ -1773,6 +1779,8 @@ export async function openLauncher(cfg = {}) {
         catch (e) { json(res, 503, { ok: false, code: e.message }); }
         return;
       }
+      // no MCP is served (mcp-card.mjs): a world's /mcp, moved or not, answers the pointer before the fence below refuses it
+      if (/^\/w\/[^/]+\/mcp(?:\/|$)/.test(path)) { mcpRetired(req, res); return; }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
       const cutoverWorld = cutoverSlug && cutover ? registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug) : null;
       // before the fence, which refuses a moved world's writes: its agents' revoke is the directory's, not the old world's
@@ -2066,7 +2074,7 @@ export async function openLauncher(cfg = {}) {
         // #897: the root llms.txt is the build's docs index plus every listed world's reader (registry, per request)
         if (path === '/llms.txt') { const idx = siteIndex();
           if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : idx); return; } }
-        if (path === '/.well-known/mcp/server.json') { json(res, 200, mcpServerJson({ origin: publicOrigin, base: B, version: BUILD }), { 'cache-control': 'public, max-age=3600', 'x-robots-tag': 'noindex' }); return; }
+        if (path === '/.well-known/mcp/server.json') { mcpRetired(req, res); return; }
         const doc = docFile(path, req.headers.accept), negotiated = /^\/docs(?:\.md$|\/|$)|^\/changelog(?:\/|\.md)?$/.test(path);
         if (negotiated) res.setHeader('vary', 'Accept');
         if (doc && serveFile(res, join(webDir, doc), 'no-cache', req)) return;
