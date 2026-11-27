@@ -16,8 +16,11 @@ fn fixtures() -> PathBuf {
 /// flight stands 0.5 m beside its slot: 5 m of run from its foot up to the sheet's edge at the sheet's height, its
 /// landing too small to stand on, as a roof stair's is.
 /// The folder of entries: the construction kinds (the carry), the carpentry kinds, the test deck kinds and the body.
+/// With `perch` (racks T6), each rail holds a standing place, a floor 0.8 m by 1.2 m about its middle at its top,
+/// and each bent a ladder up its left post, 0.6 m of run rising 2 m toward the site's front: set in `bent_a`, its top
+/// is 0.34 m short of the left rail's standing place, at its height.
 /// Returns the facts and the site's slot numbers, by name.
-pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
+pub(super) fn deck_world(d: &Path, perch: bool) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
     std::fs::create_dir_all(&entries).unwrap();
@@ -133,6 +136,25 @@ pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
                         ("scale_ppm".into(), num(1_000_000)),
                         ("name".into(), json::Value::s(id)),
                     ];
+                    if r == 2 && perch {
+                        t.push(("floors".into(), floor(100, quad(-400, 400, -600, 600))));
+                    }
+                    if r == 1 && perch {
+                        let ladder = json::Value::Obj(vec![
+                            ("id".into(), json::Value::s(&format!("{id}-ladder"))),
+                            ("kind".into(), json::Value::s("ladder")),
+                            ("from".into(), num(0)),
+                            ("to".into(), num(1)),
+                            (
+                                "path".into(),
+                                json::Value::Arr(vec![ints(&[-850, 300]), ints(&[-850, 900])]),
+                            ),
+                            ("width".into(), num(600)),
+                            ("y0".into(), num(0)),
+                            ("y1".into(), num(RAIL_TOP)),
+                        ]);
+                        t.push(("stairs".into(), json::Value::Arr(vec![ladder])));
+                    }
                     if r == 4 {
                         // The sheet's top, 18 mm up, in its own frame.
                         t.push(("floors".into(), floor(18, quad(-1_000, 1_000, -950, 950))));
@@ -181,6 +203,8 @@ pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
     (f.to_json(), numbers)
 }
 
+/// A seated rail's top above the ground, mm: its slot's height and its own 100 mm.
+const RAIL_TOP: i64 = 2_000;
 /// The seated sheet's top above the ground, mm: its slot's height and its own 18 mm.
 const DECK_TOP: i64 = 2_056;
 
@@ -199,6 +223,8 @@ pub(super) struct Deck {
     pub flight: Id,
     /// The floor the sheet holds: its top.
     pub deck: Id,
+    /// The standing place the left rail holds, in a world with perches.
+    pub perch: Option<Id>,
 }
 
 impl Deck {
@@ -212,8 +238,12 @@ impl Deck {
     }
 
     pub fn serve(tag: &str, souls: usize) -> Deck {
+        Deck::serve_with(tag, souls, false)
+    }
+
+    pub fn serve_with(tag: &str, souls: usize, perch: bool) -> Deck {
         let d = scratch(tag);
-        let (facts, slots) = deck_world(&d);
+        let (facts, slots) = deck_world(&d, perch);
         let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
         let w = seed_entries(
             &d,
@@ -235,6 +265,7 @@ impl Deck {
             sheet: im.nodes["sheet"],
             flight: im.nodes["flight"],
             deck: im.nodes["sheet/floor-1"],
+            perch: im.nodes.get("timber-rail-1/floor-1").copied(),
             w,
             _s: s,
             hands,
@@ -589,4 +620,93 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
     let c = k.crew_at((2, 3), SHEET_ENDS, "Souls 3 and 4 under the sheet's ends");
     done(k.unseat(2, c, sheet), "the sheet off, nobody on it");
     assert_eq!(where_is(&k.w, sheet).0, Some(c), "the sheet rides its crew");
+}
+
+/// Every row of body `body` in the log, in order: the node it was on and its place there.
+fn body_rows(w: &Seeded, body: Id) -> Vec<(Id, Vec3)> {
+    let mut out = Vec::new();
+    for p in logged(w) {
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == body {
+                    out.push((pose.frame.node, pose.position));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Racks T6, in a served world by Souls' intents: a Soul climbs a frame to a standing place at the beam level.
+///
+/// - the frame stands: two bents, a rail on each side, the holders gone. The left rail holds a standing place at its
+///   top; bent 1 holds a ladder up its left post (the world's facts, as a building's ladder is);
+/// - a fifth Soul walks to the standing place: its way is the ladder, climbed as a track (its body's rows rise from
+///   the ground to the rail's top, none a jump), and it stands on the rail's floor at the rail's top, 2 m up;
+/// - a crew taking the rail out from under it is refused `part.stood-on`, naming the body, and the rail and the body
+///   stay where they are;
+/// - it climbs down, and the walk ends on the open ground.
+#[test]
+fn deck_a_soul_climbs_the_frame_to_a_standing_place_on_the_rail_and_the_rail_stays_under_it() {
+    let mut k = Deck::serve_with("deck-climb", 5, true);
+    k.frame();
+    let g = k.w.ground;
+    let perch = k.perch.expect("the left rail's standing place");
+    let rail = k.rails[0];
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let before = body_rows(&k.w, walker).len();
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(100_000), int(0)]))]);
+    k.hands[4].send("eden:walk", perch, to);
+    let got = socket_end(&mut k.hands[4].s);
+    println!("Soul 5 climbs to the rail: {got:?}");
+    assert_eq!(got.kind, 1, "the climb ends on the rail");
+    let rows = body_rows(&k.w, walker);
+    let (on, at) = *rows.last().expect("rows");
+    println!("the body on {} at {at:?}", show(on));
+    assert_eq!(on, perch, "the body stands on the rail's standing place");
+    assert_eq!(at.y, 100_000, "at the rail's top");
+    // The climb is a track: rows on the open ground's frame between the ground and the rail's top, each a short step
+    // from the last.
+    let climb: Vec<Vec3> = rows[before..]
+        .iter()
+        .filter(|(n, p)| *n == g && p.y > 0)
+        .map(|(_, p)| *p)
+        .collect();
+    let mut most = 0;
+    for w in climb.windows(2) {
+        let d = |a: i64, b: i64| i128::from(a - b) * i128::from(a - b);
+        let step = (d(w[0].x, w[1].x) + d(w[0].y, w[1].y) + d(w[0].z, w[1].z)).isqrt() as i64;
+        most = most.max(step);
+    }
+    let high = climb.iter().map(|p| p.y).max().unwrap_or(0);
+    println!(
+        "the climb: {} rows off the ground, the highest {} mm up, the longest step between two {} mm",
+        climb.len(),
+        high / 1000,
+        most / 1000
+    );
+    assert!(climb.len() >= 10, "sampled on the way up: {}", climb.len());
+    assert!(high > 1_500_000, "up the ladder: {high}");
+    assert!(most <= 300_000, "no jump on the way: {most}");
+
+    // The rail under it stays.
+    k.walk(
+        &[(0, Deck::at(-1_350, -1_750)), (3, Deck::at(-1_350, 1_750))],
+        "Souls 1 and 4 to the left rail's ends",
+    );
+    let c = k.crew(0, &[3]);
+    let got = k.unseat(0, c, rail);
+    refused_as(&got, "part.stood-on", "the rail out from under Soul 5");
+    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
+    assert_eq!(where_is(&k.w, rail).0, Some(k.site), "the rail stays");
+    assert_eq!(body_on(&k.w, walker).0, perch, "the body where it was");
+
+    // Down again.
+    let down = Deck::at(-850, -4_000);
+    let to = BTreeMap::from([(1, Value::Array(vec![int(down.x), int(0), int(down.z)]))]);
+    k.hands[4].send("eden:walk", g, to);
+    let got = socket_end(&mut k.hands[4].s);
+    println!("Soul 5 climbs down: {got:?}");
+    assert_eq!(got.kind, 1, "the climb down ends on the ground");
+    assert_eq!(body_on(&k.w, walker).0, g, "on the open ground");
 }
