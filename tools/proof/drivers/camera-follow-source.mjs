@@ -3,7 +3,7 @@ import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {beforeNavigation as observeNavigation,depictedBodyIds} from './camera-observation.mjs';
-import {openCostTime} from './camera-observation-cost.mjs';
+import {openCostTime,seekCostTarget} from './camera-observation-cost.mjs';
 import {publicEnd,nativeReader,receiptState} from './camera-observation-cost-source.mjs';
 export const beforeNavigation=observeNavigation;
 export const ROUTE=Object.freeze([{target:'lab-pond-hall-door-1',holdSeconds:4},{target:'plaza',holdSeconds:0}]);
@@ -45,6 +45,10 @@ export default async function({page,paths,fixture,signal,check}){
  check('follow-route-actual-translation',coverage.distanceM>10);check('follow-route-mode-retained',rows.every(r=>r.mode==='follow'&&r.subject));
  await openCostTime(page,snapshot);const panel=page.getByRole('dialog',{name:'Time',exact:true});await snapshot('pause');await panel.getByRole('button',{name:'Pause',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation')==='history');
- const slider=page.getByRole('slider',{name:'Every moment since the world began',exact:true});await snapshot('history-seek');await slider.press('ArrowLeft');const seekTarget=Number(await slider.inputValue());await page.waitForFunction(t=>{const v=document.querySelector('.viewer-history'),p=document.querySelector('[data-time-panel]');return Number(v?.getAttribute('data-viewer-tick'))===t&&p&&!p.textContent.includes('loading that moment');},seekTarget,{timeout:10000});await page.keyboard.press('Escape');await resetFollow(page,snapshot);
+ const slider=page.getByRole('slider',{name:'Every moment since the world began',exact:true}),seekTarget=Math.ceil(before.tick),selected=Number(await slider.inputValue());await snapshot('history-seek');
+ // A paused calibration for a later candidate-first comparison, not a measured
+ // legacy arm. The source driver never plays this historical interval.
+ if(Math.abs(selected-seekTarget)>256){const back=selected-1200;if(!Number.isSafeInteger(back)||Math.abs(back-seekTarget)>256)throw Error('follow-source-calibration-range');await panel.getByRole('button',{name:'Back 1 min',exact:true}).click();await page.waitForFunction(t=>{const v=document.querySelector('.viewer-history'),p=document.querySelector('[data-time-panel]');return Number(v?.getAttribute('data-viewer-tick'))===t&&p&&!p.textContent.toLowerCase().includes('loading that moment');},back,{timeout:10000});}
+ await seekCostTarget(slider,seekTarget,signal);await page.waitForFunction(t=>{const v=document.querySelector('.viewer-history'),p=document.querySelector('[data-time-panel]');return Number(v?.getAttribute('data-viewer-tick'))===t&&p&&!p.textContent.toLowerCase().includes('loading that moment');},seekTarget,{timeout:10000});await page.keyboard.press('Escape');await resetFollow(page,snapshot);await delay(3000,null,{signal});
  const retained=await readFollow(page,ids);save('follow-history-retention.json',retained);check('follow-before-history-retained',retained.mode==='follow'&&retained.presentation==='history'&&retained.tick===seekTarget&&!!retained.subject&&compositionConsistent(retained));await page.screenshot({path:join(paths.dir,'follow-history-reset.png')});
 }
