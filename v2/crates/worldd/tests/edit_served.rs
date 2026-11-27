@@ -956,6 +956,8 @@ fn walk(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, x: i64, z: i64)
 struct Got {
     kind: u64,
     reason: String,
+    /// A refusal's detail (the answer's field 8), empty when it has none.
+    detail: String,
     version: u64,
     names: BTreeMap<u64, Id>,
     entries: Vec<u64>,
@@ -984,6 +986,10 @@ fn read_answer(v: &Value) -> Got {
         },
         reason: match a.get(&4) {
             Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => String::new(),
+        },
+        detail: match a.get(&8) {
+            Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
             _ => String::new(),
         },
         version,
@@ -4234,11 +4240,22 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     }
     let got = leave(&mut hands, 3, crew_b);
     refused(&got, "support.none", "Soul 4, alone, lets go of frame B");
+    // E16: the refusal names the step that frees it.
+    assert!(
+        got.detail.contains("next: lay it down first (part:unseat)"),
+        "the leave names its next step: {}",
+        got.detail
+    );
     let got = hands[3].act("part:unseat", crew_b, part(fb));
     refused(
         &got,
         "laydown.no-room",
         "every way out for frame B passes through a wall",
+    );
+    assert!(
+        got.detail.contains("; next: "),
+        "the lay-down names its next step: {}",
+        got.detail
     );
     for side in walls.drain(1..) {
         let got = creator_edit(Op::Remove {

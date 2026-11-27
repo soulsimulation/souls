@@ -225,6 +225,14 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
+/// `place.none-free` for the places `key` names, with its next step (E16): the only seat, taken, is not a dead end.
+fn none_free_refusal(key: &str) -> Refusal {
+    refusal(
+        sim::commit::bind::NONE_FREE,
+        format!("{key}; next: wait until one is free, or ask for another place"),
+    )
+}
+
 /// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
 type Way = (Id, [i64; 2], [i64; 2], [i64; 2]);
 
@@ -1964,7 +1972,7 @@ fn other_seat(
         None => open.len().checked_sub(1),
     };
     let Some(at) = at else {
-        return Some(Err(refusal(sim::commit::bind::NONE_FREE, key)));
+        return Some(Err(none_free_refusal(key)));
     };
     let far = open[at].0;
     let mut even: Vec<&Open> = open
@@ -2609,9 +2617,7 @@ impl Acts {
                         });
                     free.and_then(|_| b.slots.boardable_seat(*node, now).err())
                 });
-                first.get_or_insert(
-                    away.unwrap_or_else(|| refusal(sim::commit::bind::NONE_FREE, key)),
-                );
+                first.get_or_insert(away.unwrap_or_else(|| none_free_refusal(&key)));
                 continue;
             }
             if let Some(e) = other {
