@@ -3284,30 +3284,39 @@ fn walk_by_form(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Wa
     Walked { done, secs, track }
 }
 
-/// The distance (m) across x and z from `(x, z)` to the polyline `line` (`[x, z]` m).
-fn off_line(x: f64, z: f64, line: &[[f64; 2]]) -> f64 {
-    line.windows(2)
-        .map(|w| {
-            let ([ax, az], [bx, bz]) = (w[0], w[1]);
-            let (dx, dz) = (bx - ax, bz - az);
-            let t = (((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)).clamp(0.0, 1.0);
-            (x - ax - t * dx).hypot(z - az - t * dz)
+/// The rows of `track` (as [`Walked`]'s) where the body stood on the open ground on wading ground or water, by Eden's
+/// own walk map (`facts`): a walker (hands, no wading or swimming) may never be there.
+fn wet_rows(facts: &str, track: &[(u64, Id, f64, f64)]) -> Vec<(u64, f64, f64)> {
+    let im = import_eden::load(&std::fs::read_to_string(facts).unwrap()).expect("Eden loads");
+    let ground = im.nodes["ground"];
+    let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+    let next = im.tree.to_state().next;
+    let town = sim::walk::town::Town::new(im.tree, ground, sim::links::Doors::new(header, im.rules, next))
+        .expect("the town");
+    let all = sim::routes::WADE | sim::routes::SWIM;
+    track
+        .iter()
+        .filter(|t| t.1 == ground)
+        .filter(|t| {
+            let at = replica::pose::Vec3::new((t.2 * 1e6) as i64, 0, (t.3 * 1e6) as i64);
+            town.map
+                .spot_for(ground, at, all)
+                .is_some_and(|s| town.map.piece(s.piece).ground != sim::gaits::Ground::Dry)
         })
-        .fold(f64::INFINITY, f64::min)
+        .map(|t| (t.0, t.2, t.3))
+        .collect()
 }
 
 /// #3890 A1: born on either bank of the west river's stone bridge (today's e_d10385f7, a deck of 18 stepped slabs laid
 /// in the world's frame from (-252, -61) to (-225, -55) m, over the 7 m river), a Soul crosses it by its own entry
 /// (`cross`: `end_a`, then `end_b`), three starts a bank. Each ends `done` within 2.5 m of the east end, having stood
-/// on the deck, and never stands on the open ground in the river (its 7 m channel).
+/// on the deck, and never stands in the river ([`wet_rows`]).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
-    let (deck, ground) = (im.nodes["e_d10385f7/floor-0"], im.nodes["ground"]);
-    // The river's line near the bridge (its 7 m channel each side of it).
-    let river = [[-228.0, -84.0], [-238.0, -58.0], [-246.0, -30.0]];
+    let deck = im.nodes["e_d10385f7/floor-0"];
     let starts = [
         ("-256.0,-62.0", "w1"),
         ("-254.5,-58.5", "w2"),
@@ -3333,14 +3342,10 @@ fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
     for (at, w) in &walks {
         let end = w.track.last().map(|t| (t.1, t.2, t.3));
         let on_deck = w.track.iter().any(|t| t.1 == deck);
-        let wet = w
-            .track
-            .iter()
-            .filter(|t| t.1 == ground && off_line(t.2, t.3, &river) < 3.5)
-            .count();
+        let wet = wet_rows(&facts, &w.track).len();
         let to_end = end.map_or(f64::INFINITY, |e| (e.1 + 225.0).hypot(e.2 + 55.0));
         println!(
-            "BRIDGE from ({at}): {:?} in {:.1} s; on the deck {on_deck}; {wet} rows in the river; ends {to_end:.2} m from \
+            "BRIDGE from ({at}): {:?} in {:.1} s; on the deck {on_deck}; {wet} rows in water; ends {to_end:.2} m from \
              the east end, on {}",
             w.done.as_ref().map(|_| "done"),
             w.secs,
@@ -3356,45 +3361,12 @@ fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
 /// #3890 A2: born round the park pond (today's e_5c6d4b00, water 26 by 17 m round (-6, 112) m, inside a stone kerb
 /// with five open gates, a jetty out from its east side), a Soul walks round it by its own entry (`walk_around`: its
 /// south, east, north, west and south shores), from four sides. Each ends `done` back at the south shore, having come
-/// within 3 m of each shore in turn, and never stands on the open ground more than 0.45 m inside the water's outline
-/// (its stone edge's inner 0.4 m lies over it).
+/// within 3 m of each shore in turn, and never stands in its water ([`wet_rows`]; its jetty and stone edge are ground
+/// cover over it, walked as the open ground).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn i3890_a_soul_walks_round_the_park_pond() {
     let facts = facts_path();
-    let text = std::fs::read_to_string(&facts).unwrap();
-    let im = import_eden::load(&text).expect("Eden loads");
-    let ground = im.nodes["ground"];
-    // The water's outline, from the facts.
-    let all = replica::rules::json::parse(&text).unwrap();
-    let water: Vec<[f64; 2]> = all
-        .get("things")
-        .and_then(|t| t.arr())
-        .unwrap_or(&[])
-        .iter()
-        .find(|t| t.get("id").and_then(|i| i.str()) == Some("e_5c6d4b00"))
-        .and_then(|t| t.get("water")?.get("area")?.arr())
-        .expect("the pond's water")
-        .iter()
-        .filter_map(|p| {
-            let p = p.arr()?;
-            let mm = |v: &replica::rules::json::Value| match v {
-                replica::rules::json::Value::Int(n) => Some(*n as f64 / 1e3),
-                _ => None,
-            };
-            Some([mm(p.first()?)?, mm(p.get(1)?)?])
-        })
-        .collect();
-    let inside = |x: f64, z: f64| {
-        let mut odd = false;
-        for i in 0..water.len() {
-            let (a, b) = (water[i], water[(i + 1) % water.len()]);
-            if (a[1] > z) != (b[1] > z) && x < a[0] + (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) {
-                odd = !odd;
-            }
-        }
-        odd
-    };
     // Its shores as its entry lays them on the water's box: south, east, north, west.
     let shores = [(-6.0, 120.97), (7.72, 112.0), (-6.0, 103.03), (-19.72, 112.0)];
     let starts = [
@@ -3429,26 +3401,15 @@ fn i3890_a_soul_walks_round_the_park_pond() {
                 }
             }
         }
-        // How far inside the water's outline the body stood on the open ground (m): the stone edge's inner 0.4 m lies
-        // over the outline, ground cover taken from the water.
-        let ring: Vec<[f64; 2]> = water.iter().chain(water.first()).copied().collect();
-        let depth = |x: f64, z: f64| if inside(x, z) { off_line(x, z, &ring) } else { 0.0 };
-        let deepest = w
-            .track
-            .iter()
-            .filter(|t| t.1 == ground)
-            .map(|t| (depth(t.2, t.3), t.2, t.3))
-            .fold((0.0, 0.0, 0.0), |a, b| if b.0 > a.0 { b } else { a });
-        let wet = w
-            .track
-            .iter()
-            .filter(|t| t.1 == ground && depth(t.2, t.3) > 0.45)
-            .count();
-        println!("  deepest inside the water's outline on the ground: {deepest:?}");
+        let wet = wet_rows(&facts, &w.track);
+        if let Some(first) = wet.first() {
+            println!("  first in water: {first:?}");
+        }
+        let wet = wet.len();
         let end = w.track.last().map(|t| (t.2, t.3));
         let to_end = end.map_or(f64::INFINITY, |e| (e.0 - shores[0].0).hypot(e.1 - shores[0].1));
         println!(
-            "POND from ({at}): {:?} in {:.1} s; {next} of 5 shores in turn; {wet} rows in the water; ends {to_end:.2} m \
+            "POND from ({at}): {:?} in {:.1} s; {next} of 5 shores in turn; {wet} rows in water; ends {to_end:.2} m \
              from the south shore at {end:?}",
             w.done.as_ref().map(|_| "done"),
             w.secs
