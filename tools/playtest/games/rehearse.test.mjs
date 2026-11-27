@@ -4,12 +4,12 @@ import { counterState, counterDone, rehearseCounterMatch } from './rehearse.mjs'
 const done = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
 // Independent public replies: never import client builders, native rules, entry internals or private fixture ids.
-function publicGame({ players = 3, busy = false, declined = false, staleTurn = false, wrongWinner = false, stuckLeave = false } = {}) {
+function publicGame({ players = 3, busy = false, declined = false, staleTurn = false, wrongWinner = false, stuckLeave = false, approachFails = false } = {}) {
   const calls = [], members = new Map(), board = 'observed-table', activity = 'observed-invitation';
   let offered = false, remaining = 7, turn = 'first';
-  const card = 'Play 1 vs 1–3; second_stand/second_back/second_far; last counter wins.';
+  const card = 'Offerer first vs 1–3 second; second_stand/second_back/second_far; last wins.';
   const acts = { take_1_first: 'first-one', take_2_first: 'first-two', take_1_second: 'second-one', take_2_second: 'second-two', restart: 'new-round' };
-  const inspectBoard = () => ({ ok: true, id: board, card, state: { remaining, turn }, offers: Object.entries(acts).map(([name, alias]) => ({ name, act: `${alias}:${board}`, ...(name.endsWith('second') ? { params: { stand: { type: 'part' } } } : {}) })) });
+  const inspectBoard = () => ({ ok: true, id: board, card, state: { remaining, turn }, offers: [{ name: 'walk', act: `approach:${board}` }, ...Object.entries(acts).map(([name, alias]) => ({ name, act: `${alias}:${board}`, ...(name.endsWith('second') ? { params: { stand: { type: 'part' } } } : {}) }))] });
   const seats = Array.from({ length: players }, (_, i) => ({ label: `player-${i}`, body: `body-${i}`, cli: async (...words) => {
     calls.push({ i, words }); const [op, sub, id] = words;
     if (op === 'help') return { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'together', 'events'] };
@@ -34,6 +34,7 @@ function publicGame({ players = 3, busy = false, declined = false, staleTurn = f
       return { ok: true, can: 'yes', current: true };
     }
     if (op === 'act') {
+      if (sub === `approach:${board}`) return approachFails ? { ok: false, phase: 'refused', code: 'walk.blocked' } : done();
       const form = Object.entries(acts).find(([, alias]) => sub === `${alias}:${board}`)?.[0]; assert(form, 'use public offer aliases');
       if (form === 'restart') { remaining = 7; turn = 'first'; }
       else {
@@ -63,6 +64,11 @@ test('ordinary discovery, exact invitation, late teammate, refusal recovery, win
   assert.equal(report.refusalRecovery.wrongTurn.says, 'first_to_play'); assert.equal(report.refusalRecovery.completedSecondTake, true);
   assert.deepEqual(report.departures, ['player-2', 'player-1']); assert.equal(fixture.members.size, 0);
   assert.equal(report.independentCollaborationProved, false);
+  assert.equal(report.handContactProved, false);
+  assert.equal(report.approaches.length, 3);
+  assert(fixture.calls.filter(c => c.words[0] === 'act').slice(0, 3).every(c => c.words[1] === 'approach:observed-table'));
+  const offerIndex = fixture.calls.findIndex(c => c.words[0] === 'together' && c.words[1] === 'offer');
+  assert.equal(fixture.calls.slice(0, offerIndex).filter(c => c.words[0] === 'act').length, 3);
   assert(fixture.calls.some(c => c.words.includes('first-one:observed-table')));
   assert(!fixture.calls.some(c => c.words.includes('take_1_first:observed-table')));
 });
@@ -88,13 +94,13 @@ test('prior membership stops before any activity offer or act', async () => {
 test('declined consent stops before any counter action', async () => {
   const fixture = publicGame({ declined: true });
   await assert.rejects(run(fixture), /offer-declined/);
-  assert(!fixture.calls.some(c => c.words[0] === 'act'));
+  assert(!fixture.calls.some(c => c.words[0] === 'act' && c.words[1] !== 'approach:observed-table'));
 });
 
 test('a continuing definite wrong-turn refusal prevents claiming recovery', async () => {
   const fixture = publicGame({ staleTurn: true });
   await assert.rejects(run(fixture), /definite refusal/);
-  assert.equal(fixture.calls.filter(c => c.words[0] === 'act').length, 1);
+  assert.equal(fixture.calls.filter(c => c.words[0] === 'act' && c.words[1] !== 'approach:observed-table').length, 1);
 });
 
 test('an inconsistent final next-turn cannot name the last taker as winner', async () => {
@@ -103,4 +109,11 @@ test('an inconsistent final next-turn cannot name the last taker as winner', asy
 
 test('a leave receipt cannot hide retained membership', async () => {
   await assert.rejects(run(publicGame({ stuckLeave: true })), /departed player/);
+});
+
+test('a refused ordinary approach stops before offering or taking counters', async () => {
+  const fixture = publicGame({ approachFails: true });
+  await assert.rejects(run(fixture), /walk.blocked/);
+  assert(!fixture.calls.some(c => c.words[0] === 'together' && c.words[1] === 'offer'));
+  assert.equal(fixture.calls.filter(c => c.words[0] === 'act').length, 1);
 });

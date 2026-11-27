@@ -48,6 +48,8 @@ export async function discoverCounterMatch({ seats, name = 'counter-match', comm
     assert.equal(board.id, boards[0].id, 'inspect must read the selected table'); counterState(board);
     const stands = [...new Set(board.card?.match(/\bsecond_(?:stand|back|far)\b/g) ?? [])];
     assert.equal(stands.length, 3, 'the public card must teach three named second-side approaches');
+    assert(/offerer first/i.test(board.card), 'the public card must identify the offerer as first');
+    counterOffer(board, 'walk');
     for (const form of ['take_1_first', 'take_2_first', 'take_1_second', 'take_2_second', 'restart']) counterOffer(board, form, form.endsWith('second') ? { stand: stands[0] } : {});
     discovered.push({ person: seat.label, board, activity, stands });
   }
@@ -78,6 +80,12 @@ export async function rehearseCounterMatch({ seats, name, record = () => {}, sle
     assert.equal(answer.leave, `together leave ${id}`, 'inspect must teach independent leave'); return answer;
   };
   await read(first, { remaining: 7, turn: 'first', winner: null });
+  // Use each client's discovered ordinary approach, never assume fixture placement or hand reach.
+  const approaches = [];
+  for (const seat of seats) {
+    const reply = counterDone(await command(seat, 'act', ...counterOffer(discovery[seats.indexOf(seat)].board, 'walk'), '--wait'), 'approach table');
+    approaches.push({ person: seat.label, reply });
+  }
   for (const seat of seats) { const look = await command(seat, 'look'); assert(look.ok === true && !(look.in ?? []).length, 'players must still be free immediately before offering'); }
   counterDone(await command(first, 'together', 'offer', word, ...second.map(s => s.body)), 'offer game');
   const id = activityId(await command(first, 'look'));
@@ -118,6 +126,6 @@ export async function rehearseCounterMatch({ seats, name, record = () => {}, sle
   assert(noOpponent.can === 'no' && noOpponent.current === true && noOpponent.says === 'other_side_missing', 'taking alone must explain the missing opponent');
   counterDone(await command(first, 'together', 'leave', id), 'first leaves');
   const final = await command(first, 'look'); assert(final.ok === true && !(final.in ?? []).some(line => line.includes(word)), 'first must leave too');
-  return { complete: true, diagnosticOnly: true, independentCollaborationProved: false, discovery, initialMembers, allMembers,
+  return { complete: true, diagnosticOnly: true, independentCollaborationProved: false, approaches, handContactProved: false, discovery, initialMembers, allMembers,
     refusalRecovery: { wrongTurn, recovered, completedSecondTake: true }, finished, winnerBasis: 'remaining=0: opposite the recorded next turn; last observed taker was first', departures, noOpponent };
 }
