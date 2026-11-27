@@ -94,27 +94,32 @@ export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number
 export class FollowCamera{
  private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;
  reset(eye?:Vector3,aim?:Vector3){this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(before:Vector3,after:Vector3){if(!this.initialized)return;this.eye.copy(this.aim).add(after);if(this.anchor)this.offset.copy(this.eye).sub(this.anchor);this.velocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ gesture(eye:Vector3,aim:Vector3){if(!this.initialized)this.reset(eye,aim);this.eye.copy(eye);this.aim.copy(aim);if(this.anchor)this.offset.copy(eye).sub(this.anchor);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
  step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null):FollowResult{
-  if(!this.initialized)this.reset(camera.position,aim);dt=Math.max(0,Math.min(.05,dt));this.clock+=dt;
+  if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
   let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
-  if(!centre||!geometry.stats.complete){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown');}
+  if(invalidStep){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
+  if(!centre||!geometry.stats.complete){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
   const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y))return result('projection-unavailable');
-  if(centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
-  if(projected.z>1)return result('projection-unavailable');
+  if(!manual&&centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
+  if(!manual&&projected.z>1)return result('projection-unavailable');
   const screen:[number,number]=[projected.x,projected.y];
-  if(this.clock<this.gestureUntil){this.eye.copy(camera.position);this.aim.copy(aim);return result('user-hold',screen);}
+  const manualEye=manual?this.eye.clone():null;
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
   let reason='tracking';
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
   const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next);motion={groundY,sweep,unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?'motion-obstructed':'motion-unknown';}
+  // A Follow gesture changes its orbit/zoom, not the subject's world translation.
+  // Carry eye and aim together so orientation stays exactly the user's, while the
+  // normal bounded safety sweep continues. Search/framing wait until input settles.
+  if(manualEye){this.aim.add(this.eye.clone().sub(manualEye));return result(reason==='tracking'?'user-hold':'user-hold:'+reason,screen);}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
   if(dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;

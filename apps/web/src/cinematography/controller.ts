@@ -19,15 +19,16 @@ export class FollowController{
  private diagnostics:boolean;
  selectedGround(info:Pick<SceneInfo,'scene'|'shore'>|null){if(info!==this.groundInfo){this.groundInfo=info;this.groundSampler=publishedFollowGround(info);}return this.groundSampler;}
  reset(eye?:Vector3,aim?:Vector3){this.prior=null;this.activeKey='';this.policy.reset(eye,aim);this.geometry.reset();this.reason='reset';}
- gesture(before:Vector3,after:Vector3){if(this.enabled)this.policy.gesture(before,after);}
+ gesture(eye:Vector3,aim:Vector3){if(this.enabled)this.policy.gesture(eye,aim);}
+ owns(mode:string,selected:boolean,kind:string|undefined,eyes:boolean,shot:boolean,track:boolean){return this.enabled&&mode==='follow'&&selected&&kind==='human'&&!eyes&&!shot&&!track;}
  control(input:FollowInput,step:number,source:()=>{roots:readonly Object3D[];revision:string},ground:(x:number,z:number)=>number|null,groundSource='unspecified'){
   this.controlMs=this.preparationMs=this.candidates=0;this.motion=null;this.groundSource=groundSource;if(!this.enabled)return;
   const start=performance.now();try{
    if(input.mode!=='follow'||!input.id){if(this.activeKey)this.reset();this.reason='inactive';return;}
    if(this.activeKey!==input.key){this.activeKey=input.key;this.policy.reset(input.camera.position,input.aim);this.geometry.reset();}
    const p=this.prior,age=p?input.at-p.at:Infinity,gap=p?input.seconds-p.seconds:Infinity;
-   if(!p||p.key!==input.key||p.result.status!=='observed'||age<0||age>250||gap<0||gap>.25||p.tick>input.tick){this.reason='depicted-input-stale';return;}
-   const subject=p.result.value.subjects.find(s=>s.id===input.id);if(!subject||subject.state!=='present'){this.reason='subject-unavailable';return;}
+   if(!p||![input.at,input.seconds,input.tick,p.at,p.seconds,p.tick].every(Number.isFinite)||p.key!==input.key||p.result.status!=='observed'||age<0||age>250||gap<0||gap>.25||p.tick>input.tick){this.policy.reset(input.camera.position,input.aim);this.reason='depicted-input-stale';return;}
+   const subject=p.result.value.subjects.find(s=>s.id===input.id);if(!subject||subject.state!=='present'){this.policy.reset(input.camera.position,input.aim);this.reason='subject-unavailable';return;}
    const preparing=performance.now();const {roots,revision}=source();this.geometry.prepare(roots,revision);this.preparationMs=performance.now()-preparing;
    const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;
    input.camera.position.copy(pose.eye);input.aim.copy(pose.aim);input.camera.lookAt(pose.aim);
