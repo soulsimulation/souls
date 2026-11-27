@@ -7,7 +7,7 @@ import { decode } from 'cborg';
 import { V2Bridge } from './bridge.ts';
 import { TICK_US, TICKS, type Frame, type RecordedChunk } from './takes.ts';
 import type { HistoryMsg, Seeked } from './history-worker.ts';
-import { DAY_US, dayIndexKey, yearCountsKey } from './history-keys.ts';
+import { DAY_US, dayIndexKey, headerKey, yearCountsKey } from './history-keys.ts';
 
 /** The world's history export, from the page's config: the route's `v2History`, else beside the stream's `views/`. */
 export function historyBase(stream: string, config: unknown): string | null {
@@ -36,6 +36,7 @@ export class V2History {
 
   /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
   private floor: number | undefined;
+  private headerAsked = false;
   private post(m: { seq: number; at: number; now: number; ahead?: true }): void {
     if (!this.worker) {
       this.worker = this.make();
@@ -69,8 +70,11 @@ export class V2History {
    *  the bundle's bytes, which the worker keeps), so a seek the page can foresee waits only for that bundle to be
    *  applied: a moment link's while the page catches up to now, Back 1 min's and From the start's once the time panel
    *  is open. On soul.game a bundle is Eden whole, about 1.8 MB, and reading it was the slowest step of a cold seek
-   *  (0.9 to 1.7 s of about 2.1). Nothing is applied or drawn, and nothing is said back. */
+   *  (0.9 to 1.7 s of about 2.1). Nothing is applied or drawn, and nothing is said back.
+   *  The world's header is asked for here too, once: the worker reads it at its first seek (0.25 to 0.5 s on soul.game),
+   *  and it is immutable, so that read is then answered from the browser's cache. */
   async prepare(tick: number, nowTick?: number | null): Promise<void> {
+    if (!this.headerAsked) { this.headerAsked = true; void fetch(new URL(headerKey(), new URL(this.base, location.href))).then((r) => r.arrayBuffer()).catch(() => {}); }
     const now = Math.max(tick, nowTick ?? tick) * TICK_US, at = await this.start(tick * TICK_US - LEAD_US, now);
     this.post({ seq: 0, at, now, ahead: true });
   }

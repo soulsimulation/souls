@@ -276,8 +276,10 @@ test('#3358: a read ahead asks the worker for the window\'s first bundle, from t
   (globalThis as { location?: unknown }).location = { href: 'http://example.invalid/w/a/' };
   globalThis.fetch = (async (u: URL) => {
     const path = String(u).replace('http://example.invalid/s/x/history/', '');
+    asked.push(path);
     return files[path] ? new Response(encode(files[path])) : new Response(null, { status: 404 });
   }) as typeof fetch;
+  const asked: string[] = [];
   const posted: { seq: number; at: number; now: number; floor?: number; ahead?: true; base: string }[] = [];
   const w = { onmessage: null as null | ((e: MessageEvent) => void), postMessage(m: (typeof posted)[number]) { posted.push(m); }, terminate() {} };
   try {
@@ -291,6 +293,7 @@ test('#3358: a read ahead asks the worker for the window\'s first bundle, from t
     await h.prepare(back); // a moment link, now not known yet: the moment is taken as now
     assert.equal(posted[2].now, back * TICK_US);
     assert.ok(posted.every((m) => m.ahead && m.seq === 0), 'a read ahead is never a seek the page waits on');
+    assert.equal(asked.filter((x) => x === 'header').length, 1, 'the immutable header is asked for once, ahead of the worker\'s first seek');
   } finally {
     globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
   }

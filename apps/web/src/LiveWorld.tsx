@@ -162,6 +162,15 @@ function serverNow(sim: Souls): number | null {
   if (!t || typeof t.serverTick !== 'number') return null;
   return t.serverTick + Math.min(2, Math.max(0, (performance.now() - t.receivedAt) / 1000)) * tpsOf(sim);
 }
+/** The world's tick now for a rewind: the stream's, or a later one a seek was given (`floor`: a cold moment link opened
+ *  while the stream still catches up from its checkpoint, moment-link.ts landingNow), moved on at the world's rate. The
+ *  live view itself never reads it: it plays what the stream has. */
+function headNow(sim: Souls, floor: { tick: number; at: number } | null): number | null {
+  const live = serverNow(sim);
+  if (!floor) return live;
+  const known = floor.tick + (performance.now() - floor.at) / 1000 * tpsOf(sim);
+  return live === null ? known : Math.max(live, known);
+}
 /** Live playback sits this many ticks behind the server, so the next chunk has arrived before it is needed; a source
  *  with shorter chunks says how far (`playDelay`, the v2 bridge's, B3-4). */
 const LIVE_DELAY = 30;
@@ -272,6 +281,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   const context = useRef({ placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds });
   context.current = { placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds };
   const past = useRef<Past | null>(null);
+  /** The world's tick now as a seek was told it, where that is later than the stream's (headNow). */
+  const nowFloor = useRef<{ tick: number; at: number } | null>(null);
   const shown = useRef<Shown>({ tick: 0, datetime: null, take: null, entities: {} });
   const drawnTick = useRef<number | null>(null);
   const stateSignature = useRef('');
@@ -284,7 +295,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   };
   const seeking = useRef<AbortController | null>(null);
   const controlsApi = useRef<{ feedbackContext(): import('./WorldViewer.ts').WorldViewContext; overview(): void; frameSouls(ids:readonly string[]):boolean; framePoint(point:THREE.Vector3,radius:number):void; locations():readonly WorldLocation[];refreshLocations():void;locationPage():import('./WorldLocations.ts').WorldLocationPage|null;searchLocations(query:string):void;moreLocations():void;cancelLocationPictures():void;frameLocation(id:string):boolean;locationPreview(id:string):Promise<string|null>;framePlace(place:WorldPlaceId): boolean; placePreview(place:WorldPlaceId):Promise<string|null>; focusSelected(): boolean; reset(): boolean; releaseInput(): void; flyToSoul(soulId:string,opts?:{chip?:boolean}):boolean; move(delta: CameraMove): boolean; inputOwned(): boolean } | null>(null);
-  const playbackCommands = useRef<{ seek(tick: number): Promise<void>; live(): void; setPlaying(playing: boolean): boolean } | null>(null);
+  const playbackCommands = useRef<{ seek(tick: number, now?: number): Promise<void>; live(): void; setPlaying(playing: boolean): boolean } | null>(null);
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // a Soul picked elsewhere (the table, my Soul) replaces a picked thing
@@ -869,7 +880,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         if (p.playing) { p.tick = Math.min(end.toTick, p.tick + step / dt * playSpeed()); const n = p.chunks.find((c) => c.toTick > p.tick); if (n && n.fromTick > p.tick) p.tick = n.fromTick; }
         // A paused recent seek remains history. Playing history catches the actual
         // delayed live moment, not merely the oldest buffered chunk boundary.
-        const liveHead = serverNow(s);
+        const liveHead = headNow(s, nowFloor.current);
         if (p.playing && liveList.length && liveHead !== null &&
           p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
@@ -882,7 +893,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }).catch(() => { p.retryAt = performance.now() + 5000; }).finally(() => { p.extending = false; });
         }
         if (p.ended && p.tick >= end.toTick && p.playing) {
-          const at = serverNow(s);
+          const at = headNow(s, nowFloor.current);
           if (at !== null && at - end.toTick < 120 / dt) { goLive(); return; } // only the last moments are missing: they are live
           p.playing = false;
           setNote('This is the end of what was recorded here. Go back to live to continue.');
@@ -1450,14 +1461,16 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
   useEffect(() => () => { seeking.current?.abort(); if (commitTimer.current) clearTimeout(commitTimer.current); }, []);
 
   // ------------------------------------------------------------------ rewind
-  const dt = dtOf(sim), now = serverNow(sim), hour = HOUR_SECONDS / dt;
+  const dt = dtOf(sim), now = headNow(sim, nowFloor.current), hour = HOUR_SECONDS / dt;
   const p = past.current;
   const shownTick = p ? p.tick : (now ?? 0);
   const lo = Math.max(0, Math.floor((now ?? 0) - hour)), hi = Math.max(lo + 1, Math.floor(now ?? 0));
   const goLive = () => { controlsApi.current?.releaseInput(); seeking.current?.abort(); seeking.current = null; setLoading(false); past.current = null; setDraft(null); setNote(null); setMode('live'); };
-  const seek = async (wanted: number) => {
+  const seek = async (wanted: number, knownNow?: number) => {
     controlsApi.current?.releaseInput();
-    const s = context.current.sim, at = serverNow(s), dts = dtOf(s);
+    const s = context.current.sim, dts = dtOf(s);
+    if (knownNow !== undefined && Number.isFinite(knownNow) && knownNow > (serverNow(s) ?? -Infinity)) nowFloor.current = { tick: knownNow, at: performance.now() };
+    const at = headNow(s, nowFloor.current);
     if (at === null) { setDraft(null); return; }
     // An explicit seek chooses a recorded moment even inside the live buffer.
     // The separate live command resumes the delayed live view.
@@ -1524,7 +1537,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       },
       hasEntity: id => !!shown.current.entities[id],
       select: (soulId, entityId) => { context.current.onSelect(soulId); context.current.setThing(entityId); },
-      seek: tick => playbackCommands.current?.seek(tick) ?? Promise.resolve(),
+      seek: (tick, now) => playbackCommands.current?.seek(tick, now) ?? Promise.resolve(),
       live: () => playbackCommands.current?.live(),
       setPlaying: playing => playbackCommands.current?.setPlaying(playing) ?? false,
     }));

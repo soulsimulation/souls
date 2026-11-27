@@ -17,7 +17,7 @@ import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
 import { playSpeed, setPlaySpeed, v2History } from './v2-engine/history.ts';
 import { TICK_US } from './v2-engine/takes.ts';
-import { momentLink, momentTick } from './v2-engine/moment-link.ts';
+import { landingNow, momentLink, momentTick } from './v2-engine/moment-link.ts';
 // X3: read at module load: Shell rewrites the landing fragment to its tab (#watch) before the scene is ready.
 const landingMoment = typeof location === 'undefined' ? null : momentTick(location.hash);
 
@@ -91,14 +91,23 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   useEffect(() => {
     if (opened.current || !handle || state?.shownTick == null || state.loading) return;
     if (!v2History()) { opened.current = true; setLanding(false); return; }
-    // #3358: the moment's bundle is read while the stream catches up, so the seek below only applies it
-    if (landingMoment !== null && !readAhead.current) { readAhead.current = true; void v2History()!.prepare(landingMoment).catch(() => {}); }
-    // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: hours back), and
-    // a seek is never past the shown clock: wait until it reaches the moment, or is about now (a link names a past time)
-    if (landingMoment !== null && state.shownTick < landingMoment && state.shownTick * TICK_US < Date.now() * 1000 - 120e6) return;
+    // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: an hour back), and
+    // a seek is never past the world's now: the wall clock's on a real-time world, else the shown clock once it reaches
+    // the moment or is about now (moment-link.ts landingNow). The seek does not wait for the catch-up (about 6 s of 11).
+    const now = landingMoment === null ? null : landingNow(state.shownTick, landingMoment, Date.now() * 1000);
+    if (landingMoment !== null && now === null) return;
     opened.current = true;
-    if (landingMoment !== null) void handle.seek(landingMoment).finally(() => setSeeked(true));
+    if (landingMoment !== null) void handle.seek(landingMoment, now!).finally(() => setSeeked(true));
   }, [handle, state?.shownTick, state?.loading]);
+  // #3358: the moment's bundle is read ahead, so the seek above only applies it; from the page's start (the history is
+  // known as the stream starts), not from the first frame drawn, about 3 s later
+  useEffect(() => {
+    if (landingMoment === null) return;
+    const read = () => { const h = v2History(); if (!h || readAhead.current) return !!h; readAhead.current = true; void h.prepare(landingMoment).catch(() => {}); return true; };
+    if (read()) return;
+    const id = setInterval(() => { if (read()) clearInterval(id); }, 100);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     if (!landing) return;
     if (seeked && state?.presentation === 'history') { setLanding(false); return; }

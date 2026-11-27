@@ -35,7 +35,8 @@ export interface WorldViewerHandle {
   /** True only when this Soul has a body in the currently depicted live frame. */
   canFollowSoul?(id: string): boolean;
   selectEntity(id: string | null): boolean;
-  seek(tick: number): Promise<void>;
+  /** `now`: the world's take tick now where the caller knows it better than the stream does (moment-link.ts landingNow). */
+  seek(tick: number, now?: number): Promise<void>;
   live(): void;
   setPlaying(playing: boolean): boolean;
   setManualNavigation?(mode: ManualNavigation): void;
@@ -102,7 +103,8 @@ export interface WorldViewerPort {
   canFollowSoul?(id: string): boolean;
   hasEntity(id: string): boolean;
   select(soulId: string | null, entityId: string | null): void;
-  seek(tick: number): Promise<void>;
+  /** `now`: the world's take tick now where the caller knows it better than the stream does (moment-link.ts landingNow). */
+  seek(tick: number, now?: number): Promise<void>;
   live(): void;
   setPlaying(playing: boolean): boolean;
   setManualNavigation?(mode: ManualNavigation): void;
@@ -131,7 +133,7 @@ export function createWorldViewerHandle(current: () => WorldViewerPort): WorldVi
     canFollowSoul: id => current().canFollowSoul?.(id) ?? false,
     selectSoul: id => { const p = current(); if (id !== null && !p.hasSoul(id)) return false; p.select(id, null); return true; },
     selectEntity: id => { const p = current(); if (id !== null && !p.hasEntity(id)) return false; p.select(null, id); return true; },
-    seek: tick => Number.isFinite(tick) ? current().seek(tick) : Promise.resolve(),
+    seek: (tick, now) => Number.isFinite(tick) ? current().seek(tick, now) : Promise.resolve(),
     live: () => current().live(),
     setPlaying: playing => current().setPlaying(playing),
     setManualNavigation: mode => { if(mode==='free'||mode==='orbit')current().setManualNavigation?.(mode); },
