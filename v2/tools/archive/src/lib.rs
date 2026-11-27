@@ -12,7 +12,8 @@
 //!    rewritten as its day gains objects; the head only when a new day begins.
 //! 3. **Bundles** ([`Bundler`], formats in `replica::history`) are the public view at the history level, one
 //!    minute of world time each, with a public snapshot at each start, and a **day index** per day, written when the
-//!    day closes and at shutdown. A window with no public record writes no bundle: **a still world writes nothing.**
+//!    day closes and at shutdown, and the next day's, empty, written ahead with it, so a day that has begun always has
+//!    an index. A window with no public record writes no bundle: **a still world writes nothing** more.
 //!    A bundle is stored deflated ([`bundle_stored`], #3284); its day index names the SHA-256 of its bytes before.
 //! 4. **No words** (T8): records hold text by reference, and so do objects and bundles; [`words`] scans for them.
 //! 5. **Restore** ([`fetch`], [`restore`]) reads the head, the manifests and the objects, checks each against its
@@ -1135,6 +1136,9 @@ pub struct Shelf<S: Store> {
     store: S,
     prefix: String,
     day: Option<(DayIndex, Option<String>)>,
+    /// The day after the newest indexed, whose empty index is written ahead ([`Shelf::write_ahead`]), with that
+    /// index's ETag when this shelf wrote it.
+    ahead: Option<(i64, Option<String>)>,
     /// The ETag of each view written here (V4's event index and coarse levels), to write over it.
     etags: BTreeMap<String, String>,
     pub writes: Writes,
@@ -1147,6 +1151,7 @@ impl<S: Store> Shelf<S> {
             store,
             prefix: prefix.to_owned(),
             day: None,
+            ahead: None,
             etags: BTreeMap::new(),
             writes: Writes::default(),
             based: false,
@@ -1187,12 +1192,36 @@ impl<S: Store> Shelf<S> {
         let Some((ix, etag)) = &self.day else {
             return Ok(());
         };
-        let key = self.index_key(ix.day);
+        let (key, day) = (self.index_key(ix.day), ix.day);
         let e = put(&self.store, &key, &ix.to_bytes()?, etag.as_deref())?;
         self.writes.indexes += 1;
         if let Some((_, etag)) = &mut self.day {
             *etag = Some(e);
         }
+        self.write_ahead(day + 1)
+    }
+
+    /// The next day's index, empty, written ahead of its first bundle when none is there yet, once a day: a reader of
+    /// a day that has begun finds its index (no bundle yet sends a seek to the day before) rather than none, in its
+    /// first minute or while the world is still. An index already there is left as it is.
+    fn write_ahead(&mut self, day: i64) -> R<()> {
+        if self.ahead.as_ref().is_some_and(|(d, _)| *d >= day) {
+            return Ok(());
+        }
+        let key = self.index_key(day);
+        let etag = match self.store.get(&key)? {
+            Some(_) => None,
+            None => {
+                let empty = DayIndex {
+                    day,
+                    bundles: Vec::new(),
+                };
+                let e = put(&self.store, &key, &empty.to_bytes()?, None)?;
+                self.writes.indexes += 1;
+                Some(e)
+            }
+        };
+        self.ahead = Some((day, etag));
         Ok(())
     }
 
@@ -1232,6 +1261,12 @@ impl<S: Store> Shelf<S> {
             } else {
                 None
             };
+            // The empty index written ahead for this day is written over by its ETag.
+            let ahead = self
+                .ahead
+                .as_ref()
+                .filter(|(d, _)| *d == day)
+                .and_then(|(_, e)| e.clone());
             self.day = Some(match existing {
                 Some(object) => (DayIndex::read(&object.bytes)?, Some(object.etag)),
                 None => (
@@ -1239,7 +1274,7 @@ impl<S: Store> Shelf<S> {
                         day,
                         bundles: Vec::new(),
                     },
-                    None,
+                    ahead,
                 ),
             });
         }
