@@ -858,7 +858,11 @@ impl Town {
 
     /// The surfaces a body of class `size` steps on while it stands on `ground` (#3225): its class's on dry ground,
     /// the open ground's wet surfaces otherwise (the standard class only).
-    pub fn surfaces_on(&self, size: Size, ground: crate::gaits::Ground) -> Option<&BTreeMap<Id, Surface>> {
+    pub fn surfaces_on(
+        &self,
+        size: Size,
+        ground: crate::gaits::Ground,
+    ) -> Option<&BTreeMap<Id, Surface>> {
         match ground {
             crate::gaits::Ground::Dry => self.surfaces_for(size),
             g if size == Size::Standard => self.water.surfaces(g),

@@ -50,11 +50,7 @@ fn mm(um: i64) -> i64 {
 
 /// The spot of piece `q` of `map` at `p` (µm).
 fn spot_at(map: &Map, q: u32, p: Vec3) -> Spot {
-    let y = map
-        .piece(q)
-        .vertices
-        .first()
-        .map_or(0, |v| i64::from(v[1]));
+    let y = map.piece(q).vertices.first().map_or(0, |v| i64::from(v[1]));
     Spot {
         piece: q,
         at: [mm(p.x), y, mm(p.z)],
@@ -111,7 +107,11 @@ impl Water {
             return None;
         }
         let (_, idx) = self.surface(g)?;
-        Some(spot_at(map, *idx.get(body.piece as usize)?, body.pose.position))
+        Some(spot_at(
+            map,
+            *idx.get(body.piece as usize)?,
+            body.pose.position,
+        ))
     }
 
     /// The spot of wet ground `g` at `at` (µm), or its nearest point (a shore's end on its piece's edge).
@@ -163,13 +163,7 @@ impl Water {
         let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
         let len = (i128::from(ex).pow(2) + i128::from(ez).pow(2)).isqrt() as i64;
         let m = shore.middle;
-        let out = |k: i64| {
-            Vec3::new(
-                m.x - ez * k / len.max(1),
-                m.y,
-                m.z + ex * k / len.max(1),
-            )
-        };
+        let out = |k: i64| Vec3::new(m.x - ez * k / len.max(1), m.y, m.z + ex * k / len.max(1));
         // The side of the edge the far piece lies on; none told (a sliver of a piece, a corner): no landing.
         if len == 0 {
             return None;

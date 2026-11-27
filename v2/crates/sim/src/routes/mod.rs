@@ -1290,9 +1290,10 @@ impl Map {
     /// Shore link `id` (a [`Kind::Wade`] or [`Kind::Swim`]): its kind, its two pieces (the drier first) and the stretch
     /// of edge they share, both its ends (mm, the ground's frame). For the walk to cross it (#3225).
     pub fn shore(&self, id: Id) -> Option<(Kind, [u32; 2], [i64; 2], [i64; 2])> {
-        let l = self.links.iter().find(|l| {
-            l.id == id && !l.gone && matches!(l.kind, Kind::Wade | Kind::Swim)
-        })?;
+        let l = self
+            .links
+            .iter()
+            .find(|l| l.id == id && !l.gone && matches!(l.kind, Kind::Wade | Kind::Swim))?;
         let [p, r] = [&l.ends[0], &l.ends[1]].map(|e| &self.portals[e[0] as usize]);
         Some((l.kind, [p.pieces[0], r.pieces[0]], p.a, p.b))
     }

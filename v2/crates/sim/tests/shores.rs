@@ -894,7 +894,11 @@ fn walkers_cross_eden_waters() {
         assert_eq!(w.end, Some(Progress::Done), "{name}: arrived");
         assert!(w.path().contains(&deepest), "{name}: in the water");
         assert_eq!(w.path().first(), Some(&Ground::Dry));
-        assert_eq!(w.path().last(), Some(&Ground::Dry), "{name}: out on the far shore");
+        assert_eq!(
+            w.path().last(),
+            Some(&Ground::Dry),
+            "{name}: out on the far shore"
+        );
         for (g, gait) in [(Ground::Wading, WADE_GAIT), (Ground::Water, SWIM_GAIT)] {
             if let Some(v) = w.median(g) {
                 assert!(
@@ -927,7 +931,15 @@ fn a_swimmer_with_long_ticks_and_found_again_in_the_water() {
         Vec3::new(1_500_000, 0, 8_000_000),
         Vec3::new(14_500_000, 0, 8_000_000),
     );
-    let (w, _, _) = cross_ticked(world(Pond::Bowl), common::id(3), ALL, from, to, None, 100_000);
+    let (w, _, _) = cross_ticked(
+        world(Pond::Bowl),
+        common::id(3),
+        ALL,
+        from,
+        to,
+        None,
+        100_000,
+    );
     println!("100 ms ticks: grounds {:?}; ended {:?}", w.path(), w.end);
     assert_eq!(
         w.path(),
@@ -953,7 +965,12 @@ fn a_swimmer_with_long_ticks_and_found_again_in_the_water() {
         slot: None,
     };
     let b = water
-        .place(who, frame, Vec3::new(8_000_000, 0, 8_000_000), replica::pose::Quat::IDENTITY)
+        .place(
+            who,
+            frame,
+            Vec3::new(8_000_000, 0, 8_000_000),
+            replica::pose::Quat::IDENTITY,
+        )
         .expect("afloat");
     t.water.grounds.insert(who, Ground::Water);
     let again = t.relocate(&b).expect("found again in the water");
