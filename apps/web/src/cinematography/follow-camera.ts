@@ -7,21 +7,22 @@ import type {CameraSubject} from '../../../../packages/camera/src/observation.ts
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
 export function publishedFollowGround(info:Pick<SceneInfo,'scene'|'shore'>|null){return !info||(info.scene?.surfaces.length??0)>256?undefined:cameraGroundSampler(info);}
 export type Sight='clear'|'blocked'|'unknown';
-export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8});
+export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,blocks:4096,blockVisits:4096,blockTriangles:64,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8});
 type Scan={node:Object3D;child:number;entered:boolean};
-type Bounds={position:unknown;version:number;count:number;next:number;box:Box3};
+type Bounds={position:unknown;version:number;count:number;next:number;box:Box3;invalid:boolean};
+type Blocks={bounds:Bounds;index:unknown;version:number;count:number;start:number;end:number;next:number;boxes:Box3[];pending:Box3;complete:boolean;invalid:boolean};
 const visible=(o:Object3D)=>{let depth=0;for(let p:Object3D|null=o;p;p=p.parent){if(++depth>64||!p.visible)return false;}return true;};
 /** Incremental collection over actual rendered roots. Each incomplete pass remains explicitly unknown.
  * Bounds belong to this reader; it never asks Three to compute or update shared geometry/matrices. */
 export class FollowGeometry{
- private rootOf=new WeakMap<Mesh,Object3D>();private structure=new Map<Object3D,Object3D[]>();private roots:readonly Object3D[]=[];private revision='';private stack:Scan[]=[];private seen=new Set<Object3D>();private meshes:Mesh[]=[];private bounds=new WeakMap<BufferGeometry,Bounds>();private edges=0;private nextRoot=0;private failed=false;
+ private rootOf=new WeakMap<Mesh,Object3D>();private structure=new Map<Object3D,Object3D[]>();private roots:readonly Object3D[]=[];private revision='';private stack:Scan[]=[];private seen=new Set<Object3D>();private meshes:Mesh[]=[];private bounds=new Map<BufferGeometry,Bounds>();private blocks=new Map<BufferGeometry,Blocks>();private retainedBlocks=0;private edges=0;private nextRoot=0;private failed=false;
  private ray=new Ray();private inverse=new Matrix4();private matrix=new Matrix4();private instance=new Matrix4();private a=new Vector3();private b=new Vector3();private c=new Vector3();private hit=new Vector3();
- stats={structure:0,visits:0,vertices:0,triangles:0,instances:0,queries:0,complete:false,meshes:0,unknown:null as string|null,unknownMesh:null as Record<string,unknown>|null};
- reset(){this.rootOf=new WeakMap();this.roots=[];this.stack=[];this.seen.clear();this.structure.clear();this.meshes=[];this.bounds=new WeakMap();this.nextRoot=0;this.edges=0;this.failed=false;}
+ stats={structure:0,visits:0,vertices:0,triangles:0,blockVisits:0,retainedBlocks:0,instances:0,queries:0,complete:false,meshes:0,unknown:null as string|null,unknownMesh:null as Record<string,unknown>|null};
+ reset(keepGeometry=false){this.rootOf=new WeakMap();this.roots=[];this.stack=[];this.seen.clear();this.structure.clear();this.meshes=[];if(!keepGeometry){this.bounds.clear();this.blocks.clear();this.retainedBlocks=0;}this.nextRoot=0;this.edges=0;this.failed=false;}
  prepare(roots:readonly Object3D[],revision:string){
   let structureChanged=false,structureWork=0;for(const [node,children]of this.structure){structureWork++;if(node.children.length!==children.length){structureChanged=true;break;}for(let i=0;i<children.length;i++){structureWork++;if(node.children[i]!==children[i]){structureChanged=true;break;}}if(structureChanged)break;}
-  if(structureChanged||revision!==this.revision||roots.length!==this.roots.length||roots.some((r,i)=>r!==this.roots[i])){this.reset();this.roots=[...roots];this.revision=revision;}
-  this.stats={structure:structureWork,visits:0,vertices:0,triangles:0,instances:0,queries:0,complete:false,meshes:this.meshes.length,unknown:null,unknownMesh:null};
+  if(structureChanged||revision!==this.revision||roots.length!==this.roots.length||roots.some((r,i)=>r!==this.roots[i])){this.reset(true);this.roots=[...roots];this.revision=revision;}
+  this.stats={structure:structureWork,visits:0,vertices:0,triangles:0,blockVisits:0,retainedBlocks:this.retainedBlocks,instances:0,queries:0,complete:false,meshes:this.meshes.length,unknown:null,unknownMesh:null};
   if(!roots.length||roots.length>32||this.failed){this.stats.unknown='geometry-unavailable';return;}
   while(this.stats.visits<FOLLOW_LIMITS.visits&&(this.stack.length||this.nextRoot<this.roots.length)){
    if(!this.stack.length)this.stack.push({node:this.roots[this.nextRoot++],child:0,entered:false});
@@ -33,10 +34,26 @@ export class FollowGeometry{
   // Cold geometry is admitted incrementally, with a shared vertex budget across this frame.
   let incomplete=false;
   for(const mesh of this.meshes){const g=mesh.geometry,p=g?.attributes.position;if(!p){incomplete=true;continue;}const version='version'in p?p.version:p.data.version;
-   let cache=this.bounds.get(g);if(!cache||cache.position!==p||cache.version!==version||cache.count!==p.count){cache={position:p,version,count:p.count,next:0,box:new Box3()};this.bounds.set(g,cache);}
-   while(cache.next<p.count&&this.stats.vertices<FOLLOW_LIMITS.vertices){this.a.fromBufferAttribute(p,cache.next++);cache.box.expandByPoint(this.a);this.stats.vertices++;}
-   if(cache.next<p.count)incomplete=true;
+   let cache=this.bounds.get(g);if(!cache||cache.position!==p||cache.version!==version||cache.count!==p.count){if(!cache&&this.bounds.size>=FOLLOW_LIMITS.meshes){incomplete=true;continue;}cache={position:p,version,count:p.count,next:0,box:new Box3(),invalid:false};this.bounds.set(g,cache);}
+   while(cache.next<p.count&&this.stats.vertices<FOLLOW_LIMITS.vertices){this.a.fromBufferAttribute(p,cache.next++);if(!Number.isFinite(this.a.x)||!Number.isFinite(this.a.y)||!Number.isFinite(this.a.z))cache.invalid=true;else cache.box.expandByPoint(this.a);this.stats.vertices++;}
+   if(cache.next<p.count||cache.invalid)incomplete=true;
   }
+  // Retain immutable local geometry work across collection changes, but not dead meshes.
+  // Both maps are bounded by collected meshes; blocks additionally have a global cap.
+  if(!this.stack.length&&this.nextRoot===this.roots.length){const used=new Set(this.meshes.map(m=>m.geometry));for(const g of this.bounds.keys())if(!used.has(g)){this.bounds.delete(g);const old=this.blocks.get(g);if(old)this.retainedBlocks-=old.boxes.length;this.blocks.delete(g);}}
+  for(const mesh of this.meshes){const g=mesh.geometry,p=g?.attributes.position,cache=this.bounds.get(g);if(!p||!cache||cache.next<p.count||cache.invalid)continue;
+   const ix=g.index,start=Math.max(0,g.drawRange.start),end=Math.min(ix?.count??p.count,start+g.drawRange.count),version=ix?.version??0,count=ix?.count??p.count;
+   let blocks=this.blocks.get(g);if(blocks&&(blocks.bounds!==cache||blocks.index!==ix||blocks.version!==version||blocks.count!==count||blocks.start!==start||blocks.end!==end)){this.retainedBlocks-=blocks.boxes.length;this.blocks.delete(g);blocks=undefined;}
+   if(!blocks){blocks={bounds:cache,index:ix,version,count,start,end,next:start,boxes:[],pending:new Box3(),complete:false,invalid:false};this.blocks.set(g,blocks);}
+   while(!blocks.complete&&!blocks.invalid&&blocks.next+2<end&&this.stats.vertices+3<=FOLLOW_LIMITS.vertices){
+    // A partially built block reserves one slot too. Never grow past the retained cap.
+    if(blocks.pending.isEmpty()){if(this.retainedBlocks>=FOLLOW_LIMITS.blocks)break;blocks.boxes.push(blocks.pending);this.retainedBlocks++;}
+    for(let j=0;j<3;j++){const at=blocks.next+j,index=ix?ix.getX(at):at;this.stats.vertices++;if(!Number.isSafeInteger(index)||index<0||index>=p.count){blocks.invalid=true;break;}this.a.fromBufferAttribute(p,index);blocks.pending.expandByPoint(this.a);}blocks.next+=3;
+    if((blocks.next-start)%(FOLLOW_LIMITS.blockTriangles*3)===0)blocks.pending=new Box3();
+   }
+   blocks.complete=!blocks.invalid&&blocks.next+2>=end;
+  }
+  this.stats.retainedBlocks=this.retainedBlocks;
   this.stats.meshes=this.meshes.length;this.stats.complete=!this.failed&&!this.stack.length&&this.nextRoot===this.roots.length&&!incomplete;this.stats.unknown=this.stats.complete?null:this.failed?'geometry-cap':'geometry-warming';
  }
  segment(from:Vector3,to:Vector3):Sight{
@@ -46,7 +63,7 @@ export class FollowGeometry{
    // Its disabled picking hook is not unsupported visible geometry.
    if(mesh.userData.shadowProxy===true&&materials.length===1&&materials[0].name==='shadow-proxy'&&materials[0].type==='ShaderMaterial'&&!materials[0].colorWrite&&!materials[0].depthWrite)continue;
    if(materials.every(m=>!m.visible||m.transparent&&m.opacity<.5))continue;
-   const g=mesh.geometry,bounds=this.bounds.get(g),p=g.attributes.position;if(!bounds||bounds.next<p.count)return unknown('bounds-incomplete',mesh);
+   const g=mesh.geometry,bounds=this.bounds.get(g),p=g.attributes.position;if(!bounds||bounds.next<p.count||bounds.invalid)return unknown('bounds-incomplete',mesh);if(!Number.isSafeInteger(g.drawRange.start)||g.drawRange.start<0||g.drawRange.count!==Infinity&&(!Number.isSafeInteger(g.drawRange.count)||g.drawRange.count<0)||this.blocks.get(g)?.invalid)return unknown('invalid-drawn-geometry',mesh);
    // Unsupported deformation has no proven conservative bounds. Refuse before culling.
    if((mesh as Mesh&{isSkinnedMesh?:boolean}).isSkinnedMesh||g.morphAttributes.position?.length||mesh.raycast!==Mesh.prototype.raycast&&!(mesh as InstancedMesh).isInstancedMesh)return unknown('unsupported-deformation-or-raycast',mesh);
    const instances=(mesh as InstancedMesh).isInstancedMesh?(mesh as InstancedMesh).count:1;
@@ -56,7 +73,12 @@ export class FollowGeometry{
     this.inverse.copy(this.matrix).invert();this.a.copy(from).applyMatrix4(this.inverse);this.b.copy(to).applyMatrix4(this.inverse);const localLength=this.a.distanceTo(this.b);this.ray.set(this.a,this.c.copy(this.b).sub(this.a).normalize());
     const entry=this.ray.intersectBox(bounds.box,this.hit);if(!entry||!bounds.box.containsPoint(this.ray.origin)&&entry.distanceTo(this.ray.origin)>localLength)continue;
     const ix=g.index,start=Math.max(0,g.drawRange.start),end=Math.min(ix?.count??p.count,start+g.drawRange.count);
-    for(let i=start;i+2<end;i+=3){if(++this.stats.triangles>FOLLOW_LIMITS.triangles)return unknown('triangle-cap',mesh);this.a.fromBufferAttribute(p,ix?ix.getX(i):i);this.b.fromBufferAttribute(p,ix?ix.getX(i+1):i+1);this.c.fromBufferAttribute(p,ix?ix.getX(i+2):i+2);const h=this.ray.intersectTriangle(this.a,this.b,this.c,false,this.hit);if(h){const d=h.distanceTo(this.ray.origin);if(d<=localLength+1e-9*Math.max(1,localLength))return'blocked';}}
+    const blocks=this.blocks.get(g),accelerated=blocks?.complete===true,step=FOLLOW_LIMITS.blockTriangles*3;
+    for(let first=start;first+2<end;first+=step){
+     if(accelerated){if(this.stats.blockVisits>=FOLLOW_LIMITS.blockVisits)return unknown('block-query-cap',mesh);this.stats.blockVisits++;const box=blocks.boxes[Math.floor((first-start)/step)],entry=this.ray.intersectBox(box,this.hit);if(!entry||!box.containsPoint(this.ray.origin)&&entry.distanceTo(this.ray.origin)>localLength)continue;}
+     // Incomplete acceleration falls back to the original bounded exact scan, never an empty block.
+     for(let i=first;i+2<Math.min(end,first+step);i+=3){if(++this.stats.triangles>FOLLOW_LIMITS.triangles)return unknown('triangle-cap',mesh);const ia=ix?ix.getX(i):i,ib=ix?ix.getX(i+1):i+1,ic=ix?ix.getX(i+2):i+2;if(![ia,ib,ic].every(n=>Number.isSafeInteger(n)&&n>=0&&n<p.count))return unknown('invalid-drawn-geometry',mesh);this.a.fromBufferAttribute(p,ia);this.b.fromBufferAttribute(p,ib);this.c.fromBufferAttribute(p,ic);const h=this.ray.intersectTriangle(this.a,this.b,this.c,false,this.hit);if(h){const d=h.distanceTo(this.ray.origin);if(d<=localLength+1e-9*Math.max(1,localLength))return'blocked';}}
+    }
    }
   }
   return invalidMatrix?unknown('invalid-transform'):'clear';
