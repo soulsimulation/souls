@@ -3142,16 +3142,18 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
             .unwrap()
     );
     // A part whose delta does not make the state its digest claims: played deferred it is taken, and refused at verify.
+    // The delta, version and effects stay as written (a valid stream record); only the claimed result digest, in the
+    // context (4) and the part's hash (7) alike, is not the state's.
     let last = parts.len() - 1;
     let mut corrupted = object_map(&parts[last]).unwrap();
     let mut context = object_map(&obj_bytes(&corrupted, 10).unwrap()).unwrap();
-    let Some(Value::Map(delta)) = context.get_mut(&5) else {
-        panic!("a part's context holds its delta")
+    let Some(Value::Bytes(claimed)) = context.get(&4).cloned() else {
+        panic!("a part's context holds its result digest")
     };
-    let Some(Value::Uint(v)) = delta.get(&1).cloned() else {
-        panic!("the delta holds the version")
-    };
-    delta.insert(1, Value::Uint(v + 7));
+    assert_eq!(claimed.len(), 32);
+    let wrong_digest = Value::Bytes(claimed.iter().map(|b| !b).collect());
+    context.insert(4, wrong_digest.clone());
+    corrupted.insert(7, wrong_digest);
     corrupted.insert(10, Value::Bytes(wire(Value::Map(context)).unwrap()));
     let corrupted = wire(Value::Map(corrupted)).unwrap();
     let mut wrong = PublicPlayer::start(h.stored(), &baseline).unwrap();
