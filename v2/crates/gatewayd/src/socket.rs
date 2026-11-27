@@ -88,7 +88,7 @@ pub const MESSAGE_TOO_BIG: &str = "message.too-big";
 pub const UNREADABLE: u16 = 1002;
 pub const FRAME_UNREADABLE: &str = "frame.unreadable";
 /// [`SLOW_DOWN`]'s plain words, in the refusal's detail.
-const SLOW_DOWN_WORDS: &str = "Too many of this Soul's intents are waiting at the gateway. Send it again once one of them is answered.";
+const SLOW_DOWN_WORDS: &str = "Too many of this Soul's intents are waiting at the gateway. Once one of them is answered, send it again under a sequence after the newest you sent.";
 
 /// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
 /// entries (`entries.rs`), a creator's bulk edits (#3695, `bulk.rs`) and uploads (#3697, `uploads.rs`).
@@ -781,7 +781,7 @@ fn take_intent(
             .collect();
         return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
-            // A sync request is never charged against KEPT_MOST; it is not kept.
+            // A sync request is not charged against KEPT_MOST (`ask` never answers `Full`).
             Sent::Restarting | Sent::Full(_) => Some((sync_refused(n, RESTARTING), false)),
         };
     }

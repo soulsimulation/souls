@@ -198,5 +198,9 @@ async fn o8_a_flood_past_the_kept_budget_is_refused_by_name_and_never_kept() {
             .is_err(),
         "the honest agent is told nothing: its intent is kept for the world"
     );
+    let by = tokio::time::Instant::now() + Duration::from_secs(5);
+    while gw.link.unanswered() < fits + 1 && tokio::time::Instant::now() < by {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(gw.link.unanswered(), fits + 1);
 }
