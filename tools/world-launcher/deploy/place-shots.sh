@@ -43,7 +43,11 @@ for slug in ${SLUGS//,/ }; do
   if [ "$DRY" = 0 ]; then
     # what the host keeps already (nothing on a first run)
     if [ -n "$DEST" ]; then mkdir -p "$DEST/$slug"; else rsh "mkdir -p '$HOST_DATA/place-shots/$slug'" || { FAILED="$FAILED $slug"; continue; }; fi
-    "$RSYNC" -a "${RSH[@]}" "$(remote "$slug")" "$local_dir/" || { echo "   cannot read the host's pictures"; FAILED="$FAILED $slug"; continue; }
+    "$RSYNC" -a --exclude index.json "${RSH[@]}" "$(remote "$slug")" "$local_dir/" || { echo "   cannot read the host's pictures"; FAILED="$FAILED $slug"; continue; }
+    # its index joins this cache's, never replaces it: pictures drawn on another machine and copied here stay named
+    # (the host's index may be emptier); a ref in both keeps this cache's entry, the one about to go up
+    rm -f "$local_dir/host-index.tmp"; "$RSYNC" -a "${RSH[@]}" "$(remote "$slug")index.json" "$local_dir/host-index.tmp" 2>/dev/null
+    node -e 'const fs=require("fs"),d=process.argv[1],r=(f)=>{try{return JSON.parse(fs.readFileSync(d+"/"+f,"utf8")).shots??{}}catch{return {}}};const shots={...r("host-index.tmp"),...r("index.json")};fs.writeFileSync(d+"/index.json",JSON.stringify({schema:"place-shots/1",shots}));fs.rmSync(d+"/host-index.tmp",{force:true})' "$local_dir"
   fi
   plan=(); [ "$DRY" = 1 ] && plan=(--plan)
   $DRAW --page "$ORIGIN/w/$slug/" --out "$local_dir" ${plan[@]+"${plan[@]}"} > "$CACHE/$slug.log" 2>&1; rc=$?
