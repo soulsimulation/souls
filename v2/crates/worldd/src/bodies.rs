@@ -707,17 +707,21 @@ impl Bodies {
         let c = &self.runner.controller;
         let from = c.body(body)?.pose.position;
         let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        self.rooms
-            .get(&room)?
-            .iter()
-            .filter(|t| fits(**t))
-            .filter_map(|&t| {
-                let s = self.slots.free_unless(c, body, t, &|s| taken(t, s))?;
-                let p = self.slots.place_in(t, s)?.stand().ok()?;
-                Some((d(p.x, from.x) + d(p.z, from.z), t))
-            })
-            .min()
-            .map(|(_, t)| t)
+        let mut best: Option<(i128, Id)> = None;
+        for &t in self.rooms.get(&room)? {
+            let Some(s) = self.slots.free_unless(c, body, t, &|s| taken(t, s)) else {
+                continue;
+            };
+            let Some(p) = self.slots.place_in(t, s).and_then(|p| p.stand().ok()) else {
+                continue;
+            };
+            let key = (d(p.x, from.x) + d(p.z, from.z), t);
+            // `fits` reads the tree and the entries: asked only of a seat nearer than the best so far.
+            if best.is_none_or(|b| key < b) && fits(t) {
+                best = Some(key);
+            }
+        }
+        best.map(|(_, t)| t)
     }
 
     /// Where `body` is: the node of its frame (its floor, or the thing whose slot it sits in) and its position there.
