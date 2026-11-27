@@ -510,7 +510,13 @@ impl Client {
                 })
                 .collect()),
             (Some(Value::Uint(2)), _) => match a.get(&4) {
-                Some(Value::Text(t)) => Err(t.as_str().to_owned()),
+                Some(Value::Text(t)) => {
+                    // The refusal's words (field 8), for reading.
+                    if let Some(Value::Text(d)) = a.get(&8) {
+                        println!("refused {}: {d}", t.as_str());
+                    }
+                    Err(t.as_str().to_owned())
+                }
                 other => panic!("a refusal: {other:?}"),
             },
             other => panic!("an answer: {other:?}"),
@@ -902,8 +908,6 @@ fn i4120_a_take_right_after_a_make_reaches_the_thing_at_its_slot() {
     let made = made_on_bench(&run.replay()).expect("a thing in the bench's slot");
     let taken = a.act("test:take", Some(made), BTreeMap::new());
     println!("#4120 take right after the make: {taken:?}");
-    taken.expect("taken from the slot, in reach");
-    assert_eq!(at(&run.replay(), made).0, Some(body), "held by the body");
     // Taken from where the body was born, 600 mm from the slot's point: not after a walk to the bench's origin.
     let s = first_spot();
     let moved = track(&run, body)
@@ -912,6 +916,8 @@ fn i4120_a_take_right_after_a_make_reaches_the_thing_at_its_slot() {
         .max()
         .unwrap_or(0);
     println!("#4120 the body moved at most {moved} um from where it was born");
+    taken.expect("taken from the slot, in reach");
+    assert_eq!(at(&run.replay(), made).0, Some(body), "held by the body");
     assert!(moved < 300_000, "taken where it stood: moved {moved} um");
     run.stop();
 }
