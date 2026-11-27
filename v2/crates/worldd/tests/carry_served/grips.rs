@@ -846,10 +846,16 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         track.last()
     );
     assert!(
-        (first.x - at.x).abs() <= 1_000 && (first.z - at.z).abs() <= 1_000 && first.y.abs() <= 1_000,
+        (first.x - at.x).abs() <= 1_000
+            && (first.z - at.z).abs() <= 1_000
+            && first.y.abs() <= 1_000,
         "the node starts where the frame stood: {first:?}"
     );
-    assert!(track.len() >= 12, "a track, not a step: {} samples", track.len());
+    assert!(
+        track.len() >= 12,
+        "a track, not a step: {} samples",
+        track.len()
+    );
     assert!(
         track.windows(2).all(|p| {
             let d = |a: i64, b: i64| i128::from(a - b).pow(2);
@@ -858,7 +864,10 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         "no sample more than 0.1 m from the last: {track:?}"
     );
     let last = track.last().copied().unwrap();
-    assert!((last.y - 900_000).abs() <= 5_000, "in its carriers' hands: {last:?}");
+    assert!(
+        (last.y - 900_000).abs() <= 5_000,
+        "in its carriers' hands: {last:?}"
+    );
     // Each carrier turned to face its hold (the back walked past the frame and stood with its back to it): its
     // body's own turn, as a turn toward the frame's middle would have it, within 2 s.
     let end = Instant::now() + Duration::from_secs(5);
