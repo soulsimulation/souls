@@ -2074,6 +2074,7 @@ type Open = (Option<i128>, Id, u64, Option<i128>);
 /// nearer the body; equally near both, the choice is not the world's: refused `arg-ambiguous`, naming the argument.
 /// None free is refused by name, as on the act's own thing. `None` for a select of the node's own slots (`in`:
 /// `this`, or none), which [`Acts::start`]'s own pick takes.
+#[allow(clippy::too_many_arguments)]
 fn other_seat(
     tree: &Tree,
     kinds: &Json,
