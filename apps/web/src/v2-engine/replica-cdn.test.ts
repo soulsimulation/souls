@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { REPLICA_CDN, replicaAtCdn, replicaOrigin } from './replica-cdn.ts';
+import { REPLICA_CDN, REPLICA_GLOBAL, replicaAtCdn } from './replica-cdn.ts';
 
 // a new instance of the worker's replica module per test (its address arrives once per instance)
 const fresh = (tag: string) => import(`./replica-served.ts?${tag}`) as Promise<typeof import('./replica-served.ts')>;
@@ -26,41 +26,56 @@ test('the CDN copy of the named version, and nothing else', () => {
   assert.equal(replicaAtCdn(undefined, ''), null);
 });
 
-test('replicaUrl: the CDN copy for the config it was loaded with, the origin copy kept for the worker', async () => {
-  const g = globalThis as { location?: unknown }, suite = Object.getOwnPropertyDescriptor(g, 'location');
+test('replicaUrl: what the head script left, as it is; else the origin\'s copy as before', async () => {
+  const g = globalThis as Record<string, unknown>, suite = Object.getOwnPropertyDescriptor(g, 'location');
   Object.defineProperty(g, 'location', { value: new URL('https://example.invalid/w/eden/'), configurable: true, writable: true });
-  after(() => { if (suite) Object.defineProperty(g, 'location', suite); else delete g.location; });
+  after(() => { if (suite) Object.defineProperty(g, 'location', suite); else delete g.location; delete g[REPLICA_GLOBAL]; });
   const { replicaUrl } = await import('./early-stream.ts');
-  const origin = `https://example.invalid${ORIGIN}`;
-  assert.equal(replicaUrl(ORIGIN, { v2Replica: ORIGIN, v2ReplicaCdn: CDN }, ''), CDN);
-  assert.equal(replicaOrigin(CDN), origin, 'the worker\'s fallback');
-  assert.equal(replicaOrigin(origin), undefined);
-  assert.equal(replicaUrl(ORIGIN, { v2Replica: ORIGIN, v2ReplicaCdn: CDN }, '?replicacdn=0'), origin);
-  assert.equal(replicaUrl(ORIGIN, { v2Replica: ORIGIN }, ''), origin);
-  assert.equal(replicaUrl(ORIGIN, undefined, ''), origin);
-  assert.equal(replicaUrl(ORIGIN), origin, 'no config at load: as before');
-  // asked for another replica than the config's (never by the page): the origin's, not a CDN copy of a different one
-  assert.equal(replicaUrl('/w/eden/v2/replica/0000000000000000/replica.js', { v2Replica: ORIGIN, v2ReplicaCdn: CDN }, ''), 'https://example.invalid/w/eden/v2/replica/0000000000000000/replica.js');
+  assert.equal(replicaUrl(ORIGIN), `https://example.invalid${ORIGIN}`);
+  g[REPLICA_GLOBAL] = `${CDN}#${ORIGIN}`;
+  assert.equal(replicaUrl(ORIGIN), `${CDN}#${ORIGIN}`, 'the stream hook and the early reader are given the same address');
+  delete g[REPLICA_GLOBAL];
+  assert.equal(replicaUrl(ORIGIN), `https://example.invalid${ORIGIN}`);
 });
 
-test('the worker loads the origin copy when the CDN copy does not load', async () => {
+const worker = async (tag: string, replica: string) => {
   const listeners: ((e: unknown) => void)[] = [];
   (globalThis as unknown as { addEventListener: unknown }).addEventListener = (type: string, f: (e: unknown) => void) => { if (type === 'message') listeners.push(f); };
-  const m = await fresh('fallback');
-  mkdirSync(new URL('../../../../.local/', import.meta.url), { recursive: true });
-  const dir = mkdtempSync(join(new URL('../../../../.local/', import.meta.url).pathname, 'replica-cdn-'));
-  writeFileSync(join(dir, 'replica.js'), 'export default async function init() {} export class StreamPlayer {} export const readPointer = () => "origin";\n');
-  const init = m.default();
-  for (const f of listeners) f({ data: { replica: pathToFileURL(join(dir, 'missing.js')).href, replicaOrigin: pathToFileURL(join(dir, 'replica.js')).href }, stopImmediatePropagation: () => {} });
+  const m = await fresh(tag), init = m.default();
+  for (const f of listeners) f({ data: { replica }, stopImmediatePropagation: () => {} });
+  return { m, init };
+};
+const scratch = () => { mkdirSync(new URL('../../../../.local/', import.meta.url), { recursive: true }); return mkdtempSync(join(new URL('../../../../.local/', import.meta.url).pathname, 'replica-cdn-')); };
+const REPLICA = (from: string) => `export default async function init() {} export class StreamPlayer {} export const readPointer = () => ${JSON.stringify(from)};\n`;
+
+test('the worker loads the CDN copy, without the origin path after the #', async () => {
+  const dir = scratch();
+  writeFileSync(join(dir, 'replica.js'), REPLICA('cdn'));
+  const { m, init } = await worker('cdn', `${pathToFileURL(join(dir, 'replica.js')).href}#/w/eden/v2/replica/${V}/replica.js`);
   await init;
-  assert.equal(m.readPointer(), 'origin');
+  assert.equal(m.readPointer(), 'cdn');
 });
 
-test('with no origin copy posted, a replica that does not load still fails', async () => {
-  const listeners: ((e: unknown) => void)[] = [];
-  (globalThis as unknown as { addEventListener: unknown }).addEventListener = (type: string, f: (e: unknown) => void) => { if (type === 'message') listeners.push(f); };
-  const m = await fresh('none');
-  const init = m.default();
-  for (const f of listeners) f({ data: { replica: 'file:///nonexistent-replica-4986.js' }, stopImmediatePropagation: () => {} });
-  await assert.rejects(init);
+test('the worker loads the origin copy when the CDN copy does not load (its module, or its WASM)', async () => {
+  const g = globalThis as Record<string, unknown>, suite = Object.getOwnPropertyDescriptor(g, 'location');
+  const dir = scratch(), origin = join(dir, 'w/eden/v2/replica', V);
+  mkdirSync(origin, { recursive: true });
+  writeFileSync(join(origin, 'replica.js'), REPLICA('origin'));
+  writeFileSync(join(dir, 'no-wasm.js'), 'export default async function init() { throw new Error("the WASM did not load"); }\n');
+  // the worker's own origin: here a folder, so the origin path resolves to the file above
+  Object.defineProperty(g, 'location', { value: { origin: pathToFileURL(dir).href }, configurable: true, writable: true });
+  after(() => { if (suite) Object.defineProperty(g, 'location', suite); else delete g.location; });
+  const path = `${new URL(pathToFileURL(dir).href).pathname}/w/eden/v2/replica/${V}/replica.js`;
+  for (const [tag, cdn] of [['missing', 'missing.js'], ['nowasm', 'no-wasm.js']]) {
+    const { m, init } = await worker(tag, `${pathToFileURL(join(dir, cdn)).href}#${path}`);
+    await init;
+    assert.equal(m.readPointer(), 'origin', tag);
+  }
+});
+
+test('no origin copy after the #, or one that is not a replica path: a replica that does not load still fails', async () => {
+  for (const [tag, address] of [['none', 'file:///nonexistent-replica-4986.js'], ['other', 'file:///nonexistent-replica-4986.js#//elsewhere.example/replica.js'], ['dots', 'file:///nonexistent-replica-4986.js#/w/../replica.js'], ['api', 'file:///nonexistent-replica-4986.js#/w/eden/v1/config']]) {
+    const { init } = await worker(tag, address);
+    await assert.rejects(init, undefined, tag);
+  }
 });

@@ -50,10 +50,11 @@ test('#4986: the replica the launcher saw on the asset CDN is fetched from there
     const ctx: Record<string, unknown> = { location: { pathname: '/w/eden', search }, __simConfig: { worldEngine: true, v2Views: false, v2Replica: origin, v2ReplicaCdn }, fetch: (u: unknown) => { calls.push(u); return Promise.resolve(new Response('')); } };
     ctx.window = ctx;
     vm.runInNewContext(entryPrefetchScript(''), ctx);
-    return calls;
+    return { calls, left: ctx.__simReplica };
   };
-  assert.deepEqual(run(cdn), [cdn, cdn.replace('replica.js', 'replica_bg.wasm')]);
-  const fromOrigin = [origin, origin.replace('replica.js', 'replica_bg.wasm')];
+  // fetched from the CDN, and the decision left for the page: the CDN's address with the origin's copy after a #
+  assert.deepEqual(run(cdn), { calls: [cdn, cdn.replace('replica.js', 'replica_bg.wasm')], left: `${cdn}#${origin}` });
+  const fromOrigin = { calls: [origin, origin.replace('replica.js', 'replica_bg.wasm')], left: undefined };
   assert.deepEqual(run(cdn, '?replicacdn=0'), fromOrigin, 'the visitor asked for the origin');
   for (const other of [undefined, 'https://cdn.soul.game/assets/replica/0000000000000000/replica.js', 'https://elsewhere.example/assets/replica/5a3078cd4de2c2bd/replica.js', `${cdn}?x=1`, ['x']]) assert.deepEqual(run(other), fromOrigin, String(other));
 });

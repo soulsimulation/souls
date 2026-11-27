@@ -5,16 +5,13 @@
 // worker before the stream; it is taken here, ahead of the worker's own handler.
 type Replica = { default: () => Promise<unknown>; StreamPlayer: unknown; readPointer: unknown; historyAt: unknown; courseAt: unknown };
 
-// #4986: `replicaOrigin` is the origin's copy of a replica posted from the asset CDN (reader.ts), loaded when the CDN's
-// does not load (its module or its WASM): a viewer whose network cannot reach the CDN still gets the stream.
-type Address = { url: string; origin?: string };
-let address: (a: Address) => void = () => {};
-const served = new Promise<Address>((y) => { address = y; });
+let address: (url: string) => void = () => {};
+const served = new Promise<string>((y) => { address = y; });
 (globalThis as unknown as { addEventListener?: (type: 'message', f: (e: MessageEvent) => void) => void }).addEventListener?.('message', (e) => {
-  const data = e.data as { replica?: unknown; replicaOrigin?: unknown } | null, url = data?.replica;
+  const url = (e.data as { replica?: unknown } | null)?.replica;
   if (typeof url !== 'string') return;
   e.stopImmediatePropagation();
-  address(typeof data?.replicaOrigin === 'string' && data.replicaOrigin !== url ? { url, origin: data.replicaOrigin } : { url });
+  address(url);
 });
 
 // Live bindings: set by init(), which the worker awaits before it plays anything (v2/web/src/source/worker.ts run()).
@@ -29,10 +26,16 @@ export let historyAt: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export let courseAt: any;
 
-/** Loads the served replica.js, which fetches replica_bg.wasm beside itself (wasm-bindgen's `--target web` init). */
+/** Loads the served replica.js, which fetches replica_bg.wasm beside itself (wasm-bindgen's `--target web` init).
+ *  #4986: an address on the asset CDN carries the origin's copy after a `#` (`<cdn address>#<origin path>`,
+ *  replica-cdn.ts): that one is loaded when the CDN's does not load (its module or its WASM), so a viewer whose network
+ *  cannot reach the CDN still gets the stream. */
 export default async function init(): Promise<void> {
-  const { url, origin } = await served;
+  const url = await served, at = url.indexOf('#'), origin = at < 0 ? '' : url.slice(at + 1);
   const load = async (from: string) => { const m = await import(/* @vite-ignore */ from) as Replica; await m.default(); return m; };
-  const m = await load(url).catch((error: unknown) => { if (!origin) throw error; return load(origin); });
+  const m = await load(at < 0 ? url : url.slice(0, at)).catch((error: unknown) => {
+    if (!/^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(origin) || origin.includes('..')) throw error;
+    return load(new URL(origin, location.origin).href);
+  });
   ({ StreamPlayer, readPointer, historyAt, courseAt } = m);
 }

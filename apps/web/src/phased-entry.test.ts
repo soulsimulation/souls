@@ -126,3 +126,53 @@ test('phasedEntryWanted = the early layer\'s gate (lever D on the page\'s tier) 
     assert.equal(phasedEntryWanted(search, coarse, screen[0], screen[1], mem), want, `${search} ${coarse} ${screen} ${mem}`);
   }
 });
+
+test('#4986: where the launcher says the build is on the asset CDN, both phases are asked for there, by file name', () => {
+  const js = /<script>(\(function\(\)\{var d=document[\s\S]*?)<\/script>/.exec(rewritePhasedHtml(HTML, 'assets/main-A.js', 'assets/early-E.js', ['assets/three-B.js']))![1];
+  const run = (config: unknown, search = '') => {
+    const added: { tag: string; url: string; el: Record<string, unknown> }[] = [], replaced: string[] = [];
+    const listen = (el: Record<string, unknown>) => { el.addEventListener = (type: string, f: () => void) => { if (type === 'error') el.failed = f; }; return el; };
+    const document = { createElement: (tag: string) => listen({ tag }), head: { appendChild: (el: Record<string, unknown>) => { added.push({ tag: el.type === 'module' ? 'entry' : String(el.rel), url: String(el.src ?? el.href), el }); } } };
+    const location = { pathname: '/w/eden/', search, hash: '#watch', href: 'https://soul.game/w/eden/', replace: (u: string) => replaced.push(u) };
+    // the browser's Worker, recording what it was started with; and enough of URL and Blob for the wrapper
+    class Worker { static started: [string, unknown][] = []; constructor(u: string, o: unknown) { Worker.started.push([u, o]); } }
+    const blobs: string[] = [], window = { __soulsPhased: false, __simConfig: config, Worker };
+    const URL_ = Object.assign(function (u: string, b?: string) { return new URL(u, b); }, { createObjectURL: (b: { text: string }) => { blobs.push(b.text); return `blob:https://soul.game/${blobs.length}`; } });
+    class Blob { text: string; constructor(parts: string[]) { this.text = parts.join(''); } }
+    vm.runInNewContext(js, { window, document, location, URL: URL_, Blob, setTimeout: () => 0 });
+    return { added, replaced, window, Original: Worker, blobs };
+  };
+  const CDN = 'https://cdn.soul.game/assets/app/';
+  const on = run({ appCdn: CDN });
+  assert.deepEqual(on.added.map((a) => `${a.tag} ${a.url}`), [`modulepreload ${CDN}react-C.js`, `modulepreload ${CDN}Shell-D.js`, `entry ${CDN}main-A.js`, `modulepreload ${CDN}three-B.js`, `entry ${CDN}early-E.js`]);
+  assert.ok(on.added.every((a) => a.el.crossOrigin === ''), 'read as another origin\'s module needs it');
+  // an entry that does not load from the CDN: the page once more, from the origin; a preload's failure alone does nothing
+  assert.equal(on.added[0].el.failed, undefined);
+  (on.added[2].el.failed as () => void)();
+  assert.deepEqual(on.replaced, ['/w/eden/?appcdn=0#watch']);
+  assert.deepEqual(run({ appCdn: CDN }, '?hour=12:00').added[2].url, `${CDN}main-A.js`);
+  const off = ['/worlds/assets/react-C.js', '/worlds/assets/Shell-D.js', '/worlds/assets/main-A.js', '/worlds/assets/three-B.js', '/worlds/assets/early-E.js'];
+  // not named, another place named, or the visitor (or the loader's own fallback) asked for the origin: as before
+  for (const [config, search] of [[undefined, ''], [{}, ''], [{ appCdn: 'https://cdn.soul.game/assets/' }, ''], [{ appCdn: 'https://evil.example/assets/app/' }, ''], [{ appCdn: [CDN] }, ''], [{ appCdn: CDN }, '?appcdn=0'], [{ appCdn: CDN }, '?hour=12:00&appcdn=0']] as const) {
+    const r = run(config, search);
+    assert.deepEqual(r.added.map((a) => a.url), off, JSON.stringify([config, search]));
+    assert.ok(r.added.every((a) => a.el.failed === undefined), 'no reload from the origin\'s own failures');
+    assert.equal(r.window.Worker, r.Original, 'Worker is the browser\'s own');
+  }
+  // workers on a page whose code came from the CDN: a module worker asked for at the CDN's origin (the built code names
+  // it by the site's path, resolved beside a CDN file) starts from a same-origin blob that imports it from the CDN folder
+  const W = on.window.Worker as unknown as new (u: string | URL, o?: unknown) => object, Original = on.Original;
+  assert.notEqual(W, Original); assert.equal((W as unknown as { prototype: unknown }).prototype, Original.prototype, 'instanceof still holds');
+  const w = new W(new URL('/assets/worker-C1tn-FgR.js', `${CDN}early-layer-AAAAbbbb.js`), { type: 'module' });
+  assert.ok(w instanceof Original);
+  assert.deepEqual(Original.started.at(-1), ['blob:https://soul.game/1', { type: 'module' }]);
+  assert.deepEqual(on.blobs, [`import ${JSON.stringify(`${CDN}worker-C1tn-FgR.js`)}`]);
+  new W(`${CDN}history-worker-D7OBKG8k.js`, { type: 'module' });
+  assert.equal(on.blobs[1], `import ${JSON.stringify(`${CDN}history-worker-D7OBKG8k.js`)}`, 'already in the CDN folder: the same file');
+  // any other worker is started as asked: a library's blob worker, a same-origin file, a classic worker
+  for (const [u, o] of [['blob:https://soul.game/abc', undefined], ['/assets/worker-C1tn-FgR.js', { type: 'module' }], ['https://soul.game/assets/worker-C1tn-FgR.js', { type: 'module' }], ['https://cdn.soul.game/assets/app/x.js', undefined]] as const) {
+    new W(u, o);
+    assert.deepEqual(Original.started.at(-1), [u, o]);
+  }
+  assert.equal(on.blobs.length, 2);
+});
