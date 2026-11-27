@@ -512,7 +512,12 @@ impl Tree {
         {
             return Ok(h.clone());
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        let t0 = std::time::Instant::now();
         let scan = self.scan();
+        #[cfg(not(target_arch = "wasm32"))]
+        let t1 = std::time::Instant::now();
+        let before = self.rehashed;
         let mut tops = BTreeMap::new();
         for (a, slots) in &scan.tops {
             let mut hashes = Vec::with_capacity(slots.len());
@@ -521,11 +526,25 @@ impl Tree {
             }
             tops.insert(*a, hashes);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use std::sync::atomic::Ordering::Relaxed;
+            let t2 = std::time::Instant::now();
+            PROF[0].fetch_add(t1.duration_since(t0).as_micros() as u64, Relaxed);
+            PROF[1].fetch_add(t2.duration_since(t1).as_micros() as u64, Relaxed);
+            PROF[3].fetch_add(self.rehashed - before, Relaxed);
+            PROF[4].fetch_add(scan.tops.values().map(Vec::len).sum::<usize>() as u64, Relaxed);
+            PROF[5].fetch_add(scan.timers.values().map(Vec::len).sum::<usize>() as u64, Relaxed);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let t2 = std::time::Instant::now();
         let hashes: Vec<(Audience, Hash)> = self
             .audiences(scan, tops)?
             .into_iter()
             .map(|(a, h, _)| (a, h))
             .collect();
+        #[cfg(not(target_arch = "wasm32"))]
+        PROF[2].fetch_add(t2.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
         self.kept = Some((self.changes, hashes.clone()));
         Ok(hashes)
     }
@@ -1108,3 +1127,6 @@ fn node_in(v: Value, links: &mut BTreeMap<Id, LinkIn>) -> R<NodeIn> {
     }
     Ok(n)
 }
+
+/// PROFILING ONLY (tick-budget-1000): scan µs, nodes µs, audiences µs, nodes rehashed, tops, timers. Not for merge.
+pub static PROF: [std::sync::atomic::AtomicU64; 6] = [const { std::sync::atomic::AtomicU64::new(0) }; 6];
