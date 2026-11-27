@@ -280,6 +280,13 @@ SHA-256 and falls back to the origin on any failure. God uploads go through a pu
 Signed-in actions use Clerk. The launcher reads only the public Clerk settings from the stage's auth env file and all
 worlds of a stage share one account registry. See [auth](operations/auth.md).
 
+A world no account owns (its creator principal held by no account, as the 25 Nov 2026 wipe left every imported world)
+cannot be handed off from the page. As root on the production host, `node /usr/local/lib/souls/ops/give-world.mjs <world>
+<account id> check`, then `run`, gives its creator to that account and installs its gateway's creator flags, with
+backups; it refuses a principal another account holds (that account hands the world off from its page) and an account
+whose own principal creates another world. `place-world.sh` writes those flags for any world whose `world.json` names a
+creator, and no release step rewrites a gateway's file.
+
 ## Analytics
 
 Page views and three events are counted without cookies and without any query string, hash, Soul id or token.
