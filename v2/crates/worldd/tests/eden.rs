@@ -3346,7 +3346,8 @@ fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
 /// #3890 A2: born round the park pond (today's e_5c6d4b00, water 26 by 17 m round (-6, 112) m, inside a stone kerb
 /// with five open gates, a jetty out from its east side), a Soul walks round it by its own entry (`walk_around`: its
 /// south, east, north, west and south shores), from four sides. Each ends `done` back at the south shore, having come
-/// within 3 m of each shore in turn, and never stands on the open ground in the water.
+/// within 3 m of each shore in turn, and never stands on the open ground more than 0.45 m inside the water's outline
+/// (its stone edge's inner 0.4 m lies over it).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn i3890_a_soul_walks_round_the_park_pond() {
@@ -3418,11 +3419,22 @@ fn i3890_a_soul_walks_round_the_park_pond() {
                 }
             }
         }
+        // How far inside the water's outline the body stood on the open ground (m): the stone edge's inner 0.4 m lies
+        // over the outline, ground cover taken from the water.
+        let ring: Vec<[f64; 2]> = water.iter().chain(water.first()).copied().collect();
+        let depth = |x: f64, z: f64| if inside(x, z) { off_line(x, z, &ring) } else { 0.0 };
+        let deepest = w
+            .track
+            .iter()
+            .filter(|t| t.1 == ground)
+            .map(|t| (depth(t.2, t.3), t.2, t.3))
+            .fold((0.0, 0.0, 0.0), |a, b| if b.0 > a.0 { b } else { a });
         let wet = w
             .track
             .iter()
-            .filter(|t| t.1 == ground && inside(t.2, t.3))
+            .filter(|t| t.1 == ground && depth(t.2, t.3) > 0.45)
             .count();
+        println!("  deepest inside the water's outline on the ground: {deepest:?}");
         let end = w.track.last().map(|t| (t.2, t.3));
         let to_end = end.map_or(f64::INFINITY, |e| (e.0 - shores[0].0).hypot(e.1 - shores[0].1));
         println!(
