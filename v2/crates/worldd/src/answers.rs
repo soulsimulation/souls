@@ -1493,7 +1493,18 @@ struct EditQueue {
     offered: std::cell::Cell<u64>,
     /// Lockstep, in a world with bodies: the tick running (or last run, between ticks). `None` otherwise.
     running: Option<std::cell::Cell<u64>>,
+    /// The edits on the checker's thread, waiting or being checked (#5216): at most [`EDITS_WAITING_MOST`].
+    waiting: std::cell::Cell<usize>,
 }
+
+/// The most creator's edits that may be on the edit checker's thread at once, waiting or being checked (#5216). The
+/// checker is one thread, and an act is kept open [`Config::deadline`] (10 s): a longer line could not all be
+/// answered in time when one check is slow, and each would end `act.timed-out` only after its 10 s. An edit sent
+/// while that many wait is refused at once, by [`EDIT_BUSY`], and is sent again. `edit_check` in `health.json` has the
+/// line's length, this limit and the edits refused by it.
+const EDITS_WAITING_MOST: usize = 8;
+/// An edit sent while [`EDITS_WAITING_MOST`] edits are on the checker's thread (#5216).
+const EDIT_BUSY: &str = "edit.checker-busy";
 
 impl Drop for EditQueue {
     fn drop(&mut self) {
@@ -1516,9 +1527,27 @@ impl EditQueue {
             .running
             .as_ref()
             .map_or(self.offered.get(), std::cell::Cell::get);
+        // Each of these comes back as one `Event::Edited` ([`EditQueue::back`]).
+        let edit = matches!(job, CheckJob::Edit(..) | CheckJob::Reprepare(_));
         self.tx
             .send((need, job))
-            .map_err(|e| std::sync::mpsc::SendError(e.0.1))
+            .map_err(|e| std::sync::mpsc::SendError(e.0.1))?;
+        if edit {
+            self.waiting.set(self.waiting.get() + 1);
+            measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
+        }
+        Ok(())
+    }
+
+    /// An edit's check came back from the checker's thread.
+    fn back(&self) {
+        self.waiting.set(self.waiting.get().saturating_sub(1));
+        measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
+    }
+
+    /// Whether the checker's thread has as many edits as it may ([`EDITS_WAITING_MOST`]).
+    fn full(&self) -> bool {
+        self.waiting.get() >= EDITS_WAITING_MOST
     }
 }
 
@@ -2736,6 +2765,18 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
+            // #5216: the checker's line has its own limit; past it an edit is refused by name, never left to wait.
+            Taken::Edit(_) if self.edits.as_ref().is_some_and(EditQueue::full) => {
+                measures::EDIT_CHECKS.refused();
+                let r = Refused {
+                    op: None,
+                    name: EDIT_BUSY,
+                    detail: format!(
+                        "{EDITS_WAITING_MOST} edits are waiting to be checked: send it again"
+                    ),
+                };
+                self.end(id, |c| c.edit_refusal(actor, sequence, &r));
+            }
             Taken::Edit(e) => match reserve_edit(
                 &e,
                 self.lineage,
@@ -6923,6 +6964,7 @@ pub fn start<S: Storage + 'static>(
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
                 running: (cfg.lockstep && (make.is_some() || make_built.is_some()))
                     .then(|| std::cell::Cell::new(0)),
+                waiting: std::cell::Cell::new(0),
             })
         })
         .transpose()?;
@@ -7223,6 +7265,9 @@ pub fn start<S: Storage + 'static>(
                     }
                     Event::Edited(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
+                        if let Some(q) = &c.edits {
+                            q.back();
+                        }
                         c.edited.push(*k);
                     }
                     Event::Worn(k) => {
@@ -7846,6 +7891,15 @@ fn edit_checker(
                                 })
                                 .transpose()?;
                             stages.end(measures::EDIT_MAPS);
+                            if let Some(m) = &maps {
+                                let classes = m.live.whole_classes();
+                                stages.ground(
+                                    m.live.whole() || !classes.is_empty(),
+                                    m.live.why.or_else(|| classes.iter().find_map(|(_, w)| *w)),
+                                    m.live.squares(),
+                                    m.live.buildings(),
+                                );
+                            }
                             Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
                         })
                 }))
@@ -9329,6 +9383,7 @@ mod tests {
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),
+            waiting: std::cell::Cell::new(0),
         };
         thread::sleep(Duration::from_millis(20));
         drop(queue);
