@@ -222,6 +222,9 @@ export class CreatorKinds {
     }
   }
 
+  /** Whether a node the stream still holds has this origin (a thing removed and placed again under it: the layer's still). */
+  private holds(o: string): boolean { for (const n of this.nodes.values()) if (n.origin === o) return true; return false; }
+
   /** Listens to the reader's worker, as WorldState.watch does; returns it. */
   watch<W extends { addEventListener(type: 'message', fn: (e: MessageEvent) => void): void }>(w: W): W {
     w.addEventListener('message', (e: MessageEvent) => {
@@ -286,7 +289,7 @@ export class CreatorKinds {
       this.sent.set(eid, key);
     }
     // sent again with each diff until the layer has dropped it (a diff it did not apply loses nothing)
-    for (const o of this.gone) { if (m.entities.has(o)) removes.push(o); else this.gone.delete(o); }
+    for (const o of this.gone) { if (m.entities.has(o) && !this.holds(o)) removes.push(o); else this.gone.delete(o); }
     for (const eid of [...this.sent.keys()]) {
       if (live.has(eid)) continue;
       this.sent.delete(eid);
