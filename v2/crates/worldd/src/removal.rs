@@ -105,12 +105,10 @@ pub fn in_range(records: &[Vec<u8>], from: Micros, to: Micros) -> R<BTreeSet<Id>
 
 /// Whether a reference removed as `now` changes when asked for `grade`.
 fn due(grade: Grade, now: Option<Grade>) -> bool {
-    match (grade, now) {
-        (_, Some(Grade::Erased))
-        | (Grade::Hidden, Some(Grade::Hidden))
-        | (Grade::Restored, None) => false,
-        _ => true,
-    }
+    !matches!(
+        (grade, now),
+        (_, Some(Grade::Erased)) | (Grade::Hidden, Some(Grade::Hidden)) | (Grade::Restored, None)
+    )
 }
 
 /// Applies `ask` to `store`, then writes the text files under `views` again without the rows of every reference the
