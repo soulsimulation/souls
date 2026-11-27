@@ -1,0 +1,17 @@
+# Files Codex owns. A pull request that is not Codex's must not change them (Gene's decision of 26 Nov; issue #5068).
+# Checked by .github/scripts/codex-files.mjs in the ci workflow's codex-files job, so ci-ok fails on a hit.
+#
+# One glob per line, from the repository root: `*` is any run of characters inside one path segment, `**` any number
+# of segments, `{a,b}` either. A line starting with `warn ` only reports (a job summary line and a warning, never a
+# failure): it is for a shared file where Codex owns only one path through it, so a whole-file rule would block main.
+#
+# A PR is Codex's when it carries the `codex:land` label. The coordinator passes another PR whose change Codex has
+# agreed to with the `codex:files-ok` label, and names that agreement on #5068.
+
+mars/viewer/app/engine-view/{humans,posture-transition,activity-poses,take-replay}.ts
+apps/web/src/v2-engine/{bridge,takes,take-gestures,take-parts,use-v2-souls,creator-kinds}.ts
+apps/web/src/v2-engine/source/*
+v2/crates/replica/src/stream/**
+
+# Codex owns the carried-load path in this file, not the file.
+warn apps/web/src/WorldEntityLayer.ts

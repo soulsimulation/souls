@@ -109,6 +109,7 @@ jobs:
           tools/assets/mars-web.test.mjs
           .github/scripts/ci-scope.test.mjs
           .github/scripts/ci-main.test.mjs
+          .github/scripts/codex-files.test.mjs
           .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
@@ -124,6 +125,32 @@ jobs:
           tools/coordinator/status.test.mjs
           tools/changelog/compile.test.mjs
           e2e/local-smoke.test.mjs
+
+  # Codex's files (Gene, 26 Nov; #5068): a PR without `codex:land` fails when it changes a file in
+  # tools/ci/codex-files.txt (a `warn` entry only reports). It reads the PR's changed files and labels from the API
+  # and checks out just the script and the list. Labels start no run: after the coordinator adds `codex:files-ok`,
+  # re-run the failed jobs; the labels are read when the job runs. .github/scripts/codex-files.mjs
+  codex-files:
+    if: github.event_name == 'pull_request' || inputs.pr != ''
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github/scripts/codex-files.mjs
+            tools/ci/codex-files.txt
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: No Codex files changed outside Codex's PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: node .github/scripts/codex-files.mjs --repo "$GITHUB_REPOSITORY" --pr "$PR"
 
   qualify:
     name: ${{ matrix.name }}
@@ -500,7 +527,7 @@ jobs:
   # head, and the group's combined code must compile (B1-8).
   ci-ok:
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
-    needs: [scope, repo, qualify, smoke, group-check]
+    needs: [scope, repo, codex-files, qualify, smoke, group-check]
     if: always()
     timeout-minutes: 5
     steps:
@@ -521,10 +548,12 @@ jobs:
           GREEN: ${{ needs.scope.outputs.green }}
           EVENT: ${{ github.event_name }}
           GROUP: ${{ needs.group-check.result }}
+          CODEX_FILES: ${{ needs.codex-files.result }}
         run: |
-          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"
+          echo "scope=$SCOPE repo=$REPO codex_files=$CODEX_FILES qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"
           if [ "$EVENT" = merge_group ]; then echo "merge group: the PR's own ci-ok passed at its head; the combined code compiles: group-check=$GROUP"; test "$GROUP" = success; exit 0; fi
           test "$SCOPE" = success
+          case "$CODEX_FILES" in failure|cancelled) echo "codex-files: $CODEX_FILES (#5068)"; exit 1;; esac
           if [ "$GREEN" = true ]; then test "$REPO" = skipped; else test "$REPO" = success; fi
           if [ "$ANY" = true ]; then test "$QUALIFY" = success; else test "$QUALIFY" = skipped; fi
           if [ "$SMOKE_SELECTED" = true ]; then test "$SMOKE" = success; else test "$SMOKE" = skipped; fi
