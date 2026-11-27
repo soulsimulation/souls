@@ -24,10 +24,12 @@ export class InteriorView{
  }
  search(clock:number,eye:Vector3,points:readonly Vector3[],geometry:FollowGeometry,radius:(eye:Vector3)=>number|null,ground:(x:number,z:number)=>number|null){
   if(!this.key||clock<this.next)return;this.next=clock+.25;const d=this.diagnostic;
-  const sight=(eye:Vector3):Sight=>{for(const p of points){const s=geometry.segmentAuthored(eye,p);if(s!=='clear')return s;}return'clear';};
+  // Authored glass may transmit a ray but veil the body in pixels. Interior
+  // proposals conservatively reject it; two anchors still do not prove body extent.
+  const sight=(eye:Vector3):Sight=>{for(const p of points){const s=geometry.segmentAuthored(eye,p,0,true);if(s!=='clear')return s;}return'clear';};
   // Destination validity is separate from the still-occluded transit view. Keep
   // one target through a safe approach; never restart selection every search tick.
-  if(this.anchor){const r=radius(this.anchor);d.visibility=sight(this.anchor);if(r===null||d.visibility==='unknown'){d.status='anchor-unknown';return;}const envelope=geometry.segmentAuthored(this.anchor,this.anchor,r);if(envelope==='unknown'){d.status='anchor-unknown';return;}if(d.visibility==='clear'&&envelope==='clear'&&this.anchor.distanceTo(points[0])>=2){d.status='holding';d.anchor=this.anchor.toArray();return;}this.anchor=null;d.anchor=null;}
+  if(this.anchor){const r=radius(this.anchor);d.visibility=sight(this.anchor);if(r===null||d.visibility==='unknown'){d.status='anchor-unknown';return;}const envelope=d.visibility==='clear'?geometry.segmentAuthored(this.anchor,this.anchor,r):'blocked';if(envelope==='unknown'){d.status='anchor-unknown';return;}if(d.visibility==='clear'&&envelope==='clear'&&this.anchor.distanceTo(points[0])>=2){d.status='holding';d.anchor=this.anchor.toArray();return;}this.anchor=null;d.anchor=null;}
   // Keep a readable exterior or previously selected room-world eye. This is the
   // actual eye, not the old outdoor root-relative goal.
   d.visibility=sight(eye);if(d.visibility==='unknown'){d.status='visibility-unknown';return;}
