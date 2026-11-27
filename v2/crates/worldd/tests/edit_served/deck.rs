@@ -237,11 +237,11 @@ impl Deck {
         )
     }
 
-    pub fn serve(tag: &str, souls: usize) -> Deck {
+    pub fn serve(tag: &str, souls: u64) -> Deck {
         Deck::serve_with(tag, souls, false)
     }
 
-    pub fn serve_with(tag: &str, souls: usize, perch: bool) -> Deck {
+    pub fn serve_with(tag: &str, souls: u64, perch: bool) -> Deck {
         let d = scratch(tag);
         let (facts, slots) = deck_world(&d, perch);
         let (x, z) = (testworld::SITE_X, testworld::YARD_Z);

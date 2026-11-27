@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 
 use replica::effects::Change;
+use replica::ids::Id;
 use replica::world_model::{Audience, show};
 
 use super::shade_tests::{FLOOR, WALKER, World, accepted, n, pose, refused, shade_with};

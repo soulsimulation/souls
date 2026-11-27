@@ -18,6 +18,7 @@ use replica::time::Micros;
 use replica::world_model::{Audience, show};
 use sim::host::Runner;
 use sim::links::Kind;
+use sim::walk::World;
 use sim::walk::town::Town;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -200,13 +201,13 @@ fn a_sheet_seated_while_the_world_runs_is_a_floor_and_a_flight_set_beside_it_the
     let mut r = Runner::new(TICK);
     r.add_body(common::humanoid(), stand(&t, who, ground, start))
         .expect("a body");
-    let plan = |t: &Town, r: &Runner| {
+    let plan = |t: &mut Town, r: &Runner| {
         let b = r.controller.body(who).expect("the walker");
         t.plan(b, deck, on_deck).map(|l| l.len()).map_err(|e| e.name)
     };
 
     // 1. Lying on the ground the sheet is ground cover: walked as the open ground, no floor of its own.
-    let lying = plan(&t, &r);
+    let lying = plan(&mut t, &r);
     println!("1. the sheet lying: a walk onto its floor: {lying:?}");
     assert!(lying.is_err(), "no floor of its own while it lies");
     let loose = stair(&t, flight);
@@ -234,7 +235,7 @@ fn a_sheet_seated_while_the_world_runs_is_a_floor_and_a_flight_set_beside_it_the
         !t.surfaces.contains_key(&deck),
         "a carried sheet is no floor"
     );
-    assert!(plan(&t, &r).is_err());
+    assert!(plan(&mut t, &r).is_err());
 
     // 3. Seated 2 m up: a floor there, with no way up yet; the open ground under it stays open.
     let part = moved(
@@ -253,7 +254,7 @@ fn a_sheet_seated_while_the_world_runs_is_a_floor_and_a_flight_set_beside_it_the
         t.surfaces.contains_key(&deck),
         "the seated sheet is a floor"
     );
-    let no_way = plan(&t, &r);
+    let no_way = plan(&mut t, &r);
     println!("3. a walk onto the deck with no way up: {no_way:?}");
     assert!(no_way.is_err(), "no way up before the flight is set");
     let f = |node| Frame { node, slot: None };
