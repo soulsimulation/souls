@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { checkSoulGame, staticRanges, FORGED, POINTS } from './deploy/caddy/check-soul-game.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const CADDY_DIR = new URL('./deploy/caddy/', import.meta.url).pathname;
 const SITE = readFileSync(join(CADDY_DIR, 'soul-game.caddy'), 'utf8'), TRUST = readFileSync(join(CADDY_DIR, 'cdn-trust.snippet'), 'utf8');

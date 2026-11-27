@@ -14,10 +14,10 @@ test('a touch is one finger: down at the first point, through the rest, up', () 
   assert.throws(() => touchPath([[1, NaN]]), /touch-points/);
 });
 test('only private addresses may carry a local page; a public one is refused', async () => {
-  for (const ip of ['10.0.0.5', '172.16.4.1', '172.31.255.1', '192.168.1.20', '100.64.0.1', '100.127.9.9', '169.254.3.3']) assert.equal(privateAddress(ip), true, ip);
-  for (const ip of ['8.8.8.8', '172.32.0.1', '100.128.0.1', '192.169.1.1', '1.2.3', 'example.org']) assert.equal(privateAddress(ip), false, ip);
-  assert.deepEqual(privateAddresses({ a: [{ family: 'IPv4', internal: false, address: '100.70.1.1' }, { family: 'IPv4', internal: false, address: '203.0.113.9' }], b: [{ family: 'IPv4', internal: false, address: '192.168.1.7' }, { family: 'IPv4', internal: true, address: '127.0.0.1' }] }), ['192.168.1.7', '100.70.1.1']);
-  await assert.rejects(privateDoor('http://127.0.0.1:9', '203.0.113.9'), /not-private/);
+  for (const ip of ['10.0.0.5', '172.16.4.1', '172.31.255.1', '192.168.1.20', '100.64.0.1', '100.127.9.9', '169.254.3.3']) assert.equal(privateAddress(ip), true, ip); // scrub-guard: allow (made-up private-range fixtures)
+  for (const ip of ['198.51.100.7', '172.32.0.1', '100.128.0.1', '192.169.1.1', '1.2.3', 'example.org']) assert.equal(privateAddress(ip), false, ip); // scrub-guard: allow (documentation-range fixtures)
+  assert.deepEqual(privateAddresses({ a: [{ family: 'IPv4', internal: false, address: '100.70.1.1' }, { family: 'IPv4', internal: false, address: '203.0.113.9' }], b: [{ family: 'IPv4', internal: false, address: '192.168.1.7' }, { family: 'IPv4', internal: true, address: '127.0.0.1' }] }), ['192.168.1.7', '100.70.1.1']); // scrub-guard: allow (documentation-range fixtures)
+  await assert.rejects(privateDoor('http://127.0.0.1:9', '203.0.113.9'), /not-private/); // scrub-guard: allow (documentation-range fixtures)
   await assert.rejects(privateDoor('http://example.org', '192.168.1.7'), /not-local/);
 });
 test('the session opens an address, sends a touch and saves a screenshot through WebDriver', async () => {

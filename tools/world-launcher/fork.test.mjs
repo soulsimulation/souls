@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { slugFor } from './registry.mjs';
 import { forkOptions } from './fork-world.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(4);
 
 const PORT = P0, dir = mkdtempSync(join(tmpdir(), 'launcher-fork-test-'));

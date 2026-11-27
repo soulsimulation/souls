@@ -11,7 +11,7 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
 mkdirSync(scratch, { recursive: true });
