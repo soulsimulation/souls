@@ -20,7 +20,7 @@ export async function prepare({recipe,paths,signal}){
 }
 export async function chooseFollow(page,snapshot){
  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-ready')==='true'&&!document.querySelector('.viewer-arrival'),null,{timeout:30000});
- await snapshot('explore');await page.getByRole('button',{name:/^Explore /}).click();await snapshot('subject');await page.getByRole('dialog',{name:/^Explore /}).getByRole('button',{name:/Camera Subject/}).click();
+ await snapshot('explore');const explore=page.getByRole('button',{name:/^Explore /});if(await explore.isVisible())await explore.click();else{const toggle=page.getByRole('button',{name:'Menu',exact:true});if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();await snapshot('explore-menu');await page.getByRole('menu',{name:'Menu',exact:true}).getByRole('menuitem',{name:'Search',exact:true}).click();}await snapshot('subject');await page.getByRole('dialog',{name:/^Explore /}).getByRole('button',{name:/Camera Subject/}).click();
  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-mode')==='follow',null,{timeout:15000});
 }
 export async function openCameraHelp(page,snapshot){
