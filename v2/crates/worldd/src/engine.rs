@@ -604,6 +604,22 @@ fn face_middle(
     }
 }
 
+/// Turns each of `carriers` where it stands to face where it holds its crew's load, the crew's node at `node` (#5067:
+/// a carrier who walked up from the side lifted with its back to the load). Its body's own turn, the facing input the
+/// mover turns it to as #423 turns members to their activity's middle ([`crate::bodies::turn_free`]): only a body
+/// whose legs nothing else drives, so one walking or kept in its place by an order keeps its facing.
+fn face_holds(c: &mut Controller, carriers: &[crate::assembly::Carrier], node: (Vec3, replica::pose::Quat)) {
+    for k in carriers {
+        let Ok(g) = node.1.rotate(k.grip) else {
+            continue;
+        };
+        let to = Vec3::new(node.0.x + g.x, k.feet.y, node.0.z + g.z);
+        if let Some(facing) = sim::controller::facing_toward(k.feet, to) {
+            crate::bodies::turn_free(c, k.body, facing);
+        }
+    }
+}
+
 /// Where the controller has a body: the node it stands on and its position there.
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
@@ -1206,6 +1222,8 @@ impl Engine {
                     if let Some(carry) = self.carries.remove(&activity) {
                         self.set_sides.insert(activity, carry.sides);
                     }
+                    // Each carrier faces its hold as the part is set in.
+                    face_holds(c, &carriers, from);
                     self.push(effects, Some(by));
                     // #5067: its holds on the set-in track, until it ends.
                     let until = self.asm.as_ref().and_then(|s| {
@@ -1278,7 +1296,7 @@ impl Engine {
                             sides: &beside,
                         })
                     });
-                    let (at, turn) = asm.take(
+                    let ((at, turn), holding) = asm.take(
                         &mut tree,
                         &self.activities,
                         &mut self.mint,
@@ -1292,6 +1310,7 @@ impl Engine {
                         slots.reach_of(front).min(slots.reach_of(back)),
                         crew.as_ref(),
                     )?;
+                    face_holds(c, &holding, (at, turn));
                     // A crew's sides (0.135 C5) carry beside the part from where they stand at the take.
                     let sides = beside
                         .iter()
@@ -1422,6 +1441,7 @@ impl Engine {
                     let on_plan: Vec<(Id, [i64; 2])> =
                         sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
                     load.check_sides(crew, xz(f), xz(k), xz(middle), axis, &on_plan)?;
+                    let mut facing = None;
                     // #5067: and each carrier within reach of the hold it will be said to have, the load lifted between
                     // its front and its back: the lift admits no carrier a seating would then find out of reach.
                     if let Some(grips) = self.grips.get(plain(node.kind().as_str())) {
@@ -1438,11 +1458,10 @@ impl Engine {
                             back: stood(back, k),
                             sides: &beside,
                         };
-                        crate::assembly::out_of_reach(
-                            &lifted.carriers(load.held()?)?,
-                            Carry::pose(f, k)?,
-                        )
-                        .map_err(|r| refusal("carry-grip-out-of-reach", r.detail))?;
+                        let holding = lifted.carriers(load.held()?)?;
+                        crate::assembly::out_of_reach(&holding, Carry::pose(f, k)?)
+                            .map_err(|r| refusal("carry-grip-out-of-reach", r.detail))?;
+                        facing = Some((holding, Carry::pose(f, k)?));
                     }
                     // 0.135 R2, off the clock: the way to a destination is swept, and when the straight way clips one
                     // that turns the load is searched, on the way thread; the lift waits for it, nothing written, and
@@ -1501,8 +1520,11 @@ impl Engine {
                         None,
                         by,
                     )?;
-                    // #5067: who holds which grip, said with the lift.
+                    // #5067: who holds which grip, said with the lift; and each carrier turns to face its hold.
                     self.grip(&mut tree, activity, board, &carry.sides, by);
+                    if let Some((holding, node)) = &facing {
+                        face_holds(c, holding, *node);
+                    }
                     // 0.135 R2: a way that turns the load is kept on the carry and said to its carriers after the lift.
                     if let Some(way) = way {
                         self.activities

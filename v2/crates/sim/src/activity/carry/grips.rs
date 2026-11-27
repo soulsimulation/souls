@@ -544,7 +544,10 @@ mod tests {
         let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
         assert_eq!(
             [h[0].middle(), h[1].middle()],
-            [Vec3::new(900_000, 500_000, 0), Vec3::new(-900_000, 500_000, 0)]
+            [
+                Vec3::new(900_000, 500_000, 0),
+                Vec3::new(-900_000, 500_000, 0)
+            ]
         );
     }
 

@@ -402,7 +402,8 @@ impl Assembly {
     /// `back` on `ground` (µm in its frame): the part into the crew's slot, written on `tree` and waiting in
     /// [`Assembly::ready`]. `crew`, for a part that is a load with grips: every carrier where it stands, each refused
     /// `part.grip-out-of-reach` by name when it does not reach its hold as the crew will hold the part (#5067), before
-    /// anything is written. Returns the crew's node's pose, where its carry starts.
+    /// anything is written. Returns the crew's node's pose, where its carry starts, and each carrier with its hold in
+    /// that node's frame (for the turn of each toward its hold, `crate::engine`).
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -418,7 +419,7 @@ impl Assembly {
         unseat: bool,
         reach: i64,
         crew: Option<&Crew>,
-    ) -> R<(Vec3, Quat)> {
+    ) -> R<((Vec3, Quat), Vec<Carrier>)> {
         if self.held.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
         }
@@ -528,9 +529,11 @@ impl Assembly {
         };
         // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
         // between its front and its back, the part in its slot turned as it is).
-        if let Some(crew) = crew {
-            out_of_reach(&crew.carriers((slot, inside))?, (frame, turn))?;
-        }
+        let carriers = match crew {
+            Some(crew) => crew.carriers((slot, inside))?,
+            None => Vec::new(),
+        };
+        out_of_reach(&carriers, (frame, turn))?;
         self.aim(tree, activity, ground)?;
         self.seating.take(
             tree,
@@ -544,7 +547,7 @@ impl Assembly {
         )?;
         self.drain(by, activity, Step::Taken);
         self.held.insert(activity, part);
-        Ok((frame, turn))
+        Ok(((frame, turn), carriers))
     }
 
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
