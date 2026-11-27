@@ -65,6 +65,14 @@ export function nativePageClientRegistration(children, onSpawn) {
     registerCommand(child) { onSpawn(child, { transient: true }); },
   };
 }
+/** Retain finite startup output before the existing owner can observe a nonzero child exit. */
+export function nativePageStartupRegistration(onSpawn, log) {
+  return (child, mode) => {
+    child.stdout?.on('data', bytes => log('startup stdout: ' + String(bytes)));
+    child.stderr?.on('data', bytes => log('startup stderr: ' + String(bytes)));
+    onSpawn(child, mode);
+  };
+}
 export async function startNativePageFixture({ checkout, data, log, port, artifacts, signal, onSpawn, timeoutMs = 180000 }) {
   const until = Date.now() + timeoutMs; signal?.throwIfAborted();
   for (const p of nativePagePorts(port).slice(0, 8)) if (!await portFree(p)) fail('occupied-port');
@@ -74,7 +82,7 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   const onCommand = event => { const id = ++ordinal; const record = { ...event, id }; commandRecords.push(record); writeFileSync(join(data, '..', `command-native-${id}.json`), JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }); return id; };
   writeFileSync(join(data, '..', 'native-page-provenance.json'), JSON.stringify({ artifactPin: artifacts, ...m }, null, 2), { flag: 'wx', mode: 0o600 });
   const facts = m.map ? join(data, 'template.facts.json') : null;
-  if (facts) await runOwnedCommand(process.execPath, nativePageExportArgs(root, m, facts), { cwd: root, onCommand, onSpawn, signal, timeoutMs: until - Date.now(), name: 'export-facts' });
+  if (facts) await runOwnedCommand(process.execPath, nativePageExportArgs(root, m, facts), { cwd: root, onCommand, onSpawn: nativePageStartupRegistration(onSpawn, text => writeFileSync(log, text, { flag: 'a', mode: 0o600 })), signal, timeoutMs: until - Date.now(), name: 'export-facts' });
   const runtime = await startOldPage({ checkout: root, template: m.template, facts, dir: data, port, bin: join(root, 'v2/target/release'),
     marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });

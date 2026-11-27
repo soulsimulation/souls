@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration, nativePageExportArgs } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration, nativePageExportArgs, nativePageStartupRegistration } from './native-page-fixture.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
 import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
@@ -89,4 +89,11 @@ test('tracked-map export uses the canonical exporter and fresh owned facts desti
   const f = fixture(t, { map: 'content/worlds/mars/map.json' }), facts = join(f.root, '.local/run/data/template.facts.json');
   assert.deepEqual(nativePageExportArgs(f.root, f.manifest, facts), [join(f.root, 'v2/tools/import-eden/export/export.ts'), '--template', join(f.root, f.manifest.template), '--out', facts, '--map', join(f.root, f.manifest.map)]);
   assert.throws(() => nativePageExportArgs(f.root, { ...f.manifest, map: '../escape' }, facts), /artifact-path/);
+});
+
+test('startup output is observed before forwarding the same child and mode to its existing owner', async () => {
+  const { EventEmitter } = await import('node:events'), child = { stdout: new EventEmitter(), stderr: new EventEmitter() }, mode = { transient: true, processGroup: true }, output = [], calls = [];
+  const register = nativePageStartupRegistration((seen, flags) => { assert.equal(seen, child); assert.equal(flags, mode); calls.push(seen); seen.stderr.emit('data', Buffer.from('missing dependency')); }, text => output.push(text));
+  register(child, mode); child.stdout.emit('data', Buffer.from('export detail'));
+  assert.deepEqual(output, ['startup stderr: missing dependency', 'startup stdout: export detail']); assert.deepEqual(calls, [child]);
 });
