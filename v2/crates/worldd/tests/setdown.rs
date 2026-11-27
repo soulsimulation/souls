@@ -904,6 +904,15 @@ fn i4120_a_take_right_after_a_make_reaches_the_thing_at_its_slot() {
     println!("#4120 take right after the make: {taken:?}");
     taken.expect("taken from the slot, in reach");
     assert_eq!(at(&run.replay(), made).0, Some(body), "held by the body");
+    // Taken from where the body was born, 600 mm from the slot's point: not after a walk to the bench's origin.
+    let s = first_spot();
+    let moved = track(&run, body)
+        .iter()
+        .map(|p| ((p.x - s.x).pow(2) + (p.z - s.z).pow(2)).isqrt())
+        .max()
+        .unwrap_or(0);
+    println!("#4120 the body moved at most {moved} um from where it was born");
+    assert!(moved < 300_000, "taken where it stood: moved {moved} um");
     run.stop();
 }
 
