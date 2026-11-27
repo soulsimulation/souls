@@ -1601,11 +1601,14 @@ impl Runner {
             self.ended.insert(*who, (self.now, p.clone()));
         }
         let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));
-        let town = &*town;
+        // Wading ground and water, the standard class's only (#3225).
+        let wet = [crate::gaits::Ground::Wading, crate::gaits::Ground::Water]
+            .map(|g| town.surfaces_on(replica::kinds::sizes::Size::Standard, g));
         let stepped = self.controller.step_on_selected(
             move |_, size, ground| {
                 if ground != crate::gaits::Ground::Dry {
-                    return town.surfaces_on(size, ground);
+                    return wet[usize::from(ground == crate::gaits::Ground::Water)]
+                        .filter(|_| size == replica::kinds::sizes::Size::Standard);
                 }
                 surfaces[match size {
                     replica::kinds::sizes::Size::Small => 0,
