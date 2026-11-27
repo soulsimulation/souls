@@ -1040,7 +1040,8 @@ export class HumanViews {
     this.poseFrame++; const st = this.poseStats; st.posed = st.skipped = st.shown = st.entered = st.held = 0;
     for (const v of this.views.values()) {
       const due = this.poseDue(v);
-      if (due) { this.pose(v, alpha, reach); v.posedOnce = true; st.posed++; } else st.skipped++;
+      // A resumed pose needs fresh matrices throughout reconstruction, including ground fitting.
+      if (due) { v.held = false; this.pose(v, alpha, reach); v.posedOnce = true; st.posed++; } else st.skipped++;
       v.held = !due && !v.shown; if (v.held) st.held++;
     }
     // the dock shows one bicycle fewer for each one out under a rider (decorative-motion 'dock-bike')
