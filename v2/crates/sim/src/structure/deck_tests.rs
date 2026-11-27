@@ -3,7 +3,12 @@
 //! joining link to the rail and the sheet to the joist, so the rule reads four tiers from the kinds alone. A mat on
 //! the sheet is a fifth. `cargo test -p sim deck -- --nocapture` prints each step.
 
-use super::shade_tests::{World, accepted, refused, shade_with};
+use std::collections::BTreeMap;
+
+use replica::effects::Change;
+use replica::world_model::{Audience, show};
+
+use super::shade_tests::{FLOOR, WALKER, World, accepted, n, pose, refused, shade_with};
 
 const JOIST: &str = include_str!("fixtures/test_joist.json");
 const SHEET: &str = include_str!("fixtures/test_sheet.json");
@@ -92,8 +97,7 @@ fn deck_builds_sheet_on_joists_on_rails_and_nothing_leaves_from_under_what_rests
     let [a, b] = w.bents;
     let [rl, rr] = w.rails;
     let (jb, jf, sheet, mat) = (w.id(), w.id(), w.id(), w.id());
-    let sheet_name = replica::world_model::show(sheet);
-    let mat_name = replica::world_model::show(mat);
+    let (sheet_name, mat_name) = (show(sheet), show(mat));
     // The frame, as the shade builds it.
     accepted(w.raise(0, "bent_a", 1), "1. bent a raised and held");
     accepted(w.raise(1, "bent_b", 1), "2. bent b raised and held");
@@ -184,6 +188,84 @@ fn deck_builds_sheet_on_joists_on_rails_and_nothing_leaves_from_under_what_rests
         "held by nobody",
         "23. a rail out while nobody holds the bents",
     );
+}
+
+/// Racks T6 and T9: a part with someone on it stays. A body stands on a floor the seated sheet holds; another stands
+/// on a joist itself (a standing place a part gives).
+#[test]
+fn deck_a_part_with_a_body_on_it_is_not_taken_out() {
+    let mut w = deck();
+    let [a, b] = w.bents;
+    let [rl, rr] = w.rails;
+    let (jb, jf, sheet) = (w.id(), w.id(), w.id());
+    let (floor, walker, percher) = (w.id(), w.id(), w.id());
+    accepted(w.raise(0, "bent_a", 1), "bent a");
+    accepted(w.raise(1, "bent_b", 1), "bent b");
+    accepted(w.put(rl, "mars:timber_rail", "rail_l", &[a, b]), "rail l");
+    accepted(w.put(rr, "mars:timber_rail", "rail_r", &[a, b]), "rail r");
+    accepted(
+        w.put(jb, "mars:test_joist", "joist_back", &[rl, rr]),
+        "back joist",
+    );
+    accepted(
+        w.put(jf, "mars:test_joist", "joist_front", &[rl, rr]),
+        "front joist",
+    );
+    accepted(
+        w.put(sheet, "mars:test_sheet", "sheet", &[jb, jf]),
+        "the sheet",
+    );
+    let make = |node: Id, kind: &str, on: Id| Change::Create {
+        node,
+        kind: n(kind),
+        pose: pose(on, None),
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    accepted(
+        w.write(sheet, vec![make(floor, FLOOR, sheet)]),
+        "1. the sheet's own floor",
+    );
+    accepted(
+        w.write(floor, vec![make(walker, WALKER, floor)]),
+        "3. a body walks onto the sheet's floor",
+    );
+    refused(
+        w.take_out(sheet),
+        "part.stood-on",
+        &show(walker),
+        "4. the sheet out from under the body",
+    );
+    refused(
+        w.take_out(jb),
+        "support.none",
+        &show(sheet),
+        "5. a joist out from under the sheet the body stands on",
+    );
+    accepted(
+        w.write(jf, vec![make(percher, WALKER, jf)]),
+        "6. a body in a standing place on the front joist",
+    );
+    accepted(
+        w.write(walker, vec![Change::Remove { node: walker }]),
+        "7. the body on the sheet steps off",
+    );
+    accepted(
+        w.take_out_and(sheet, vec![Change::Remove { node: floor }]),
+        "8. the sheet off, nobody on it",
+    );
+    refused(
+        w.take_out(jf),
+        "part.stood-on",
+        &show(percher),
+        "9. the front joist out from under the body on it",
+    );
+    accepted(w.take_out(jb), "10. the back joist, nobody on it, out");
+    accepted(
+        w.write(percher, vec![Change::Remove { node: percher }]),
+        "11. the body climbs down",
+    );
+    accepted(w.take_out(jf), "12. the front joist out");
 }
 
 #[test]

@@ -82,6 +82,15 @@
 //!   not cut. A part moved to a new parent with its boxes (a transfer, not a creator's edit) touches its old ground and
 //!   its new, so the commit that seats or takes it asks for G3's rebuild (`crate::activity::seating::Seating::write`).
 //!   A body standing where a part would be seated is found by [`scene::stands_in`].
+//! - **A floor made by a seating** (racks T9). A part may hold a floor of its own, as a building or a boat does: a
+//!   floor node under it, its surfaces in the part's frame (a sheet's top), and a flight its stairs' rows. Nothing
+//!   else is needed for it to be ground: lying within [`STEP`] of the ground it is ground cover; seated in a bay's
+//!   slot it is a floor at the slot's height, shrunk at its edges like any floor, and at [`BODY_HIGH`] or more above
+//!   the ground the open ground under it stays open (a deck one walks under); carried it is no floor at all
+//!   ([`scene::carried`]: the route map does not read a carried thing as a building). The commit that seats or takes
+//!   it touches its floor and the open ground ([`changed`]), so G3 cuts both again and installs them with the commit.
+//!   A flight's top lands on the floor it meets at its height, as a roof stair's does (`crate::links`), and its foot
+//!   on the open ground. The floor is never stored apart from the part: it is where the part is.
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
@@ -1280,12 +1289,19 @@ pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
         let changes = match &e.body {
             Body::Changes(changes) => changes,
             // A thing with boxes moved to a new parent (a part seated or taken out, N19 #3341): its old ground and
-            // its new. A body or a crew's node has none, so a body's hop through a doorway touches nothing.
+            // its new. So is one that holds a floor of its own (racks T9: a sheet seated becomes a floor where it
+            // sits, a flight a way up). A body or a crew's node has neither, so a body's hop through a doorway touches
+            // nothing.
             Body::Transfer(TransferRec::Leave { node, .. }) => {
                 let solid = |h| {
                     before
                         .node(h)
                         .is_some_and(|n| n.fields().contains_key(&scene::F_SOLIDS))
+                        || before.children(h).unwrap_or(&[]).iter().any(|&c| {
+                            before
+                                .node(c)
+                                .is_some_and(|n| plain(n.kind().as_str()) == scene::FLOOR)
+                        })
                 };
                 if before.handle(*node).is_some_and(solid) {
                     ids.push(*node);

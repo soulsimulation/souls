@@ -729,8 +729,9 @@ fn things_below_on(
 }
 
 /// Whether node `h` rides a slot its parent gives no point for (N19, #3341): a body's hands, a crew's carry. It is
-/// carried, so neither it nor what it holds is fixed geometry; a part seated in a bay's slot (a point) is.
-fn carried(tree: &Tree, h: Handle) -> bool {
+/// carried, so neither it nor what it holds is fixed geometry; a part seated in a bay's slot (a point) is. Nor is a
+/// floor it holds a floor to walk (racks T9): a sheet with a floor of its own is one only where it lies or is seated.
+pub fn carried(tree: &Tree, h: Handle) -> bool {
     let Some(n) = tree.node(h) else {
         return false;
     };

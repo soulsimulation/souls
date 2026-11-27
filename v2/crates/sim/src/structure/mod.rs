@@ -33,6 +33,12 @@
 //!   A part that touches no bay costs the walk up and runs no check ([`Structure::checks`] counts the checks).
 //! - **Refusals:** `support.holders` (a part held by some, fewer than its crew, and not joined to stand) and
 //!   `support.none` (the part, and what it would hang by). The verdict is computed each time, never stored.
+//! - **Nothing leaves with someone on it** (racks T6, T9): a part taken out of its bay, or removed from it, while
+//!   anything is on it is refused `part.stood-on`, naming what is on it and the part. On it: a child of the part that
+//!   is not a crew holding it (a body in a standing place the part gives, a thing in its slot), and whoever or
+//!   whatever is on a floor the part holds (a body standing on a seated sheet; a floor's rooms, windows and places
+//!   are the floor's own). What leaves in the same change does not count. With `support.none` under it, nobody is
+//!   left standing on nothing: the part under a body's feet stays, and so does every part that one rests on.
 //!
 //! - **A part moved by a transfer** (B19, `crate::activity::seating`): a leave and arrive inside the zone is read as
 //!   the change of parent it makes, so a part handed into a bay's slot, out of it to a carry, and a crew's node moved
@@ -449,6 +455,7 @@ impl Structure {
                 _ => {}
             }
         }
+        self.stood_on(tree, &changes)?;
         let mut bays = BTreeSet::new();
         let mut touched = BTreeSet::new();
         for c in &changes {
@@ -485,6 +492,77 @@ impl Structure {
             }
         }
         Ok(())
+    }
+
+    /// `part.stood-on` when `changes` take a part out of its bay, or remove it from it, with something on it (see the
+    /// module's notes).
+    fn stood_on(&self, tree: &Tree, changes: &[Change]) -> R<()> {
+        let leaving: BTreeSet<Id> = changes
+            .iter()
+            .filter_map(|c| match c {
+                Change::Reparent { node, .. } | Change::Remove { node } => Some(*node),
+                _ => None,
+            })
+            .collect();
+        let node = |id: Id| tree.handle(id).and_then(|h| tree.node(h));
+        for c in changes {
+            let (part, from) = match c {
+                Change::Reparent { node, from, pose } if from.node != pose.frame.node => {
+                    (*node, from.node)
+                }
+                Change::Remove { node: gone } => match node(*gone).and_then(|n| n.parent()) {
+                    Some(p) => (*gone, p),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let in_bay = node(from).is_some_and(|n| self.is_bay(n.kind().as_str()));
+            let is_part = node(part).is_some_and(|n| self.is_part(n.kind().as_str()));
+            if !in_bay || !is_part {
+                continue;
+            }
+            if let Some(on) = Self::on_it(tree, part, &leaving) {
+                return Err(Refusal {
+                    name: "part.stood-on",
+                    detail: format!(
+                        "{} is on {}; it stays where it is until nothing is on it",
+                        show(on),
+                        show(part)
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// The first thing on part `part` that is not in `leaving`: a child that is no crew holding it, or a child of a
+    /// floor it holds that is not the floor's own room, window or place.
+    fn on_it(tree: &Tree, part: Id, leaving: &BTreeSet<Id>) -> Option<Id> {
+        use crate::ground::scene::{DOORWAY, FLOOR, PLACE, ROOM, WINDOW};
+        let kids = |id: Id| -> Vec<(Id, String)> {
+            tree.handle(id)
+                .and_then(|h| tree.children(h))
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(|c| tree.node(*c))
+                .map(|n| (n.id(), plain(n.kind().as_str()).to_owned()))
+                .filter(|(id, _)| !leaving.contains(id))
+                .collect()
+        };
+        for (child, kind) in kids(part) {
+            if kind == FLOOR {
+                let own = [ROOM, WINDOW, PLACE, DOORWAY];
+                if let Some((on, _)) = kids(child)
+                    .into_iter()
+                    .find(|(_, k)| !own.contains(&k.as_str()))
+                {
+                    return Some(on);
+                }
+            } else if Self::act(tree, child).is_none() {
+                return Some(child);
+            }
+        }
+        None
     }
 
     /// A bay as the tree holds it now (empty when it is not there yet).

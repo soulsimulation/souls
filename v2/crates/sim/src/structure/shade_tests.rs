@@ -25,9 +25,14 @@ use crate::commit::write_guarded;
 const PLACE: &str =
     "souls:place@12200000000000000000000000000000000000000000000000000000000000000001";
 const HOLD: &str = "test:hold@12200000000000000000000000000000000000000000000000000000000000000003";
+/// A body, and a floor a part holds (racks T9), for the deck's checks.
+pub(super) const WALKER: &str =
+    "test:walker@12200000000000000000000000000000000000000000000000000000000000000002";
+pub(super) const FLOOR: &str =
+    "eden:floor@12200000000000000000000000000000000000000000000000000000000000000004";
 const JOINT: &str = "mars:joint";
 
-fn n(s: &str) -> Name {
+pub(super) fn n(s: &str) -> Name {
     Name::new(s).expect("a name")
 }
 
@@ -119,7 +124,10 @@ pub(super) fn shade_with(extra: &[(&'static str, &str)], site: &'static str) -> 
 }
 
 fn header(zone: Id, s: &Shade) -> Vec<u8> {
-    let mut kinds: Vec<Value> = vec![Value::Text(n(PLACE)), Value::Text(n(HOLD))];
+    let mut kinds: Vec<Value> = [PLACE, HOLD, WALKER, FLOOR]
+        .into_iter()
+        .map(|k| Value::Text(n(k)))
+        .collect();
     kinds.extend(s.full.values().map(|k| Value::Text(n(k))));
     let v = Value::Map(BTreeMap::from([
         (
@@ -136,7 +144,7 @@ fn header(zone: Id, s: &Shade) -> Vec<u8> {
     encode(&v).expect("bytes")
 }
 
-fn pose(parent: Id, slot: Option<u64>) -> Pose {
+pub(super) fn pose(parent: Id, slot: Option<u64>) -> Pose {
     Pose {
         frame: Frame { node: parent, slot },
         position: Vec3::ZERO,
@@ -249,7 +257,11 @@ impl World {
     }
 
     /// Commits `changes` through the rule (`write_guarded`); a refusal changes nothing.
-    fn write(&mut self, node: Id, changes: Vec<Change>) -> Result<(), (String, String)> {
+    pub(super) fn write(
+        &mut self,
+        node: Id,
+        changes: Vec<Change>,
+    ) -> Result<(), (String, String)> {
         self.write_all(vec![(node, changes)])
     }
 
@@ -393,7 +405,16 @@ impl World {
     /// `part` taken out of the site: its joints undone (each by the part that owns it, the cloth's to a rail
     /// included) and the part removed, in one change.
     pub(super) fn take_out(&mut self, part: Id) -> Result<(), (String, String)> {
-        let mut changes: Vec<Change> = Vec::new();
+        self.take_out_and(part, Vec::new())
+    }
+
+    /// As [`World::take_out`], with `first` written before the part goes (what it holds removed with it).
+    pub(super) fn take_out_and(
+        &mut self,
+        part: Id,
+        first: Vec<Change>,
+    ) -> Result<(), (String, String)> {
+        let mut changes: Vec<Change> = first;
         for (owner, js) in &self.joints {
             for (link, other) in js {
                 if *owner == part || *other == part {

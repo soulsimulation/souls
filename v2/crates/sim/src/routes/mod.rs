@@ -555,9 +555,14 @@ impl Map {
             }
         }
         // Each building: its floors, in its frame, and its stairs and ladders.
+        // A thing carried (in a body's hands, on a crew's carry) is nowhere on the ground: it has no place to read a
+        // floor at, so neither it nor what it holds is a building while it is carried (racks T9).
         let mut things = Vec::new();
         let mut stack = vec![gh];
         while let Some(h) = stack.pop() {
+            if crate::ground::scene::carried(tree, h) {
+                continue;
+            }
             let kids = tree.children(h).ok_or("a node that is gone")?;
             if kids.iter().any(|&c| {
                 tree.node(c)
