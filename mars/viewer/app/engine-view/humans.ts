@@ -81,9 +81,32 @@ import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './b
 type Hands = { left?: Vec3; right?: Vec3 };
 type Snap = { p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
 const POSTURE_ORIGINS = new Set(['idle','pushups','situps','stargaze','lie','jumping-jacks','stretch','yoga']);
+export type ClipOrigin = {
+  age: number; sample: SampledHuman;
+  /** Earlier contributing boundaries, newest first; no recursive sampled-human tree. */
+  history?: readonly {offset:number;age:number;sample:SampledHuman}[];
+  /** Identity of the immutable indexed recording context, invalidated when adjacent takes change. */
+  context?: object;
+  /** Internal collapsed pose, used only by the isolated iterative evaluator. */
+  drawn?: DrawnOrigin;
+};
 type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion };
+function poseBones(model:THREE.Object3D) {
+  const joints:THREE.Object3D[]=[];model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});return joints;
+}
+function drawnOrigin(model:THREE.Object3D,holder:THREE.Object3D,root:THREE.Vector3,nativeQ:THREE.Quaternion):DrawnOrigin {
+  return {bones:poseBones(model).map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),offset:holder.position.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),q:nativeQ.clone().invert().multiply(holder.quaternion)};
+}
+function blendDrawn(holder:THREE.Object3D,joints:THREE.Object3D[],target:{bones:DrawnOrigin['bones'];p:THREE.Vector3;q:THREE.Quaternion},origin:DrawnOrigin,k:number,root:THREE.Vector3,nativeQ:THREE.Quaternion){
+  target.bones.forEach((s,i)=>{joints[i].position.lerpVectors(origin.bones[i].p,s.p,k);joints[i].quaternion.slerpQuaternions(origin.bones[i].q,s.q,k);});
+  holder.position.copy(root).add(origin.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));
+  holder.quaternion.copy(nativeQ).multiply(origin.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));holder.updateMatrixWorld(true);
+}
 type View = {
   postureOrigins?: Map<string, DrawnOrigin>;
+  clipOrigins?: Map<string, DrawnOrigin>;
+  clipContext?: object;
+  clipOrigin?: ClipOrigin;
   clipReference?: {o:THREE.Object3D;p:THREE.Vector3;q:THREE.Quaternion;s:THREE.Vector3}[];
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
@@ -332,6 +355,8 @@ export type SampledHuman = {
   /** Seconds since `activity` began in this take, and the activity / base before it (library clip crossfades and
    *  one-shots); absent when the activity began before the take. */
   activityAge?: number;
+  /** Immutable prior drawn context at the newest activity boundary, including any still-visible origin. */
+  clipOrigin?: ClipOrigin;
   /** Existing v2 press record, including its native hand and phase clock. */
   formPress?: readonly FormPress[];
   /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
@@ -949,6 +974,7 @@ export class HumanViews {
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
       v.gait = chooseGait(v.gait, v.speed, t, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.since = seatMove?.activity ? seatMove.since : f.activityAge;
+      v.clipOrigin = f.clipOrigin;
       v.postureChange = seatMove?.activity ? undefined : f.postureChange;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
@@ -1028,7 +1054,8 @@ export class HumanViews {
     // Transition layouts change the lowest torso vertex; a prior-pose shortlist is not a valid contact sample.
     if(v.postureChange)v.restCache=undefined;
     const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
-    const plainIdle=v.activity==='idle'&&!v.postureChange;
+    const clipHistoryReset=!!v.clipOrigin&&!v.speaking&&!v.instrument&&!v.propWanted&&!v.prop?.obj.visible&&!v.itemPose&&!v.handActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.lastHandActuator&&!v.handHold&&!v.rps&&!v.grip&&!v.on&&!v.formPress?.length&&v.cur.walkW<.01&&v.cur.sitW===0&&postureKind(v.activity,v.base)==='stand'&&postureKind(v.clipOrigin.sample.activity??'idle',v.clipOrigin.sample.baseActivity)==='stand';
+    const plainIdle=v.activity==='idle'&&!v.postureChange&&!clipHistoryReset;
     if(!nativeHandOwner && !plainIdle){
       v.rig.mixer.stopAllAction();
       for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
@@ -1100,7 +1127,7 @@ export class HumanViews {
       : pn?.tilt ? pn.frame ?? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
       : pn?.flat ? pn.frame ?? blendFrames(null, activityFrame(pn.flat.act, v.base, tSec - (pn.flat.ago ?? 0), pairPhase, { actorId: h.name }), pn.flat.k)
       : pn ? blendFrames(null, act0, pn.settle)
-      : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name }), act0, smooth(v.since! / ACT_BLEND))
+      : blendFrom ? blendFrames(activityFrame(blendFrom, v.prevBase ?? 'idle', tSec, pairPhase, { actorId: h.name, since:v.prevDuration===undefined?undefined:v.prevDuration+v.since! }), act0, smooth(v.since! / ACT_BLEND))
       : act0;
     const tilt = pn?.tilt ? pn.tilt.k : 1;
     if(act&&pn?.tilt)act={...act,handW:[(act.handW?.[0]??1)*tilt,(act.handW?.[1]??1)*tilt]};
@@ -1681,12 +1708,57 @@ export class HumanViews {
     if (pc && pc.age >= 0 && (pc.age < ACT_BLEND || phase !== undefined) && noOwner && ['stand','back','front'].includes(postureKind(pc.from,pc.fromBase)) && ['stand','back','front'].includes(postureKind(v.activity,v.base))) {
       this.blendPostureOrigin(v, pc, tSec, alpha, reach, sourcePose, phase ?? 0);
     } else if (!noOwner) v.postureOrigins?.clear();
+    // Upright library ownership changes also suppress idle/procedural layers at zero clip weight. Start from
+    // their full immutable drawn origin, not merely the last named clip or the last rendered frame.
+    const origin = v.clipOrigin;
+    const originFrame = origin ? activityFrame(origin.sample.activity ?? 'idle', origin.sample.baseActivity ?? 'idle', tSec - origin.age, h.name, { since: origin.sample.activityAge }) : null;
+    // A re-entering Wave already reconstructs its released tail; freezing it again double-blends that owner.
+    const clipBoundary = !!origin && origin.age >= 0 && origin.age < CLIP_FADE && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.transfer && !v.watering && !v.cup && !v.letGo && !v.lastHandActuator && !v.handHold && !v.rps && !v.propWanted && !v.prop?.obj.visible && !v.instrument && !v.speaking && !v.formPress?.length && !v.shore && !waterFrom && sitW === 0 && w < .01
+      && !(v.activity==='wave'&&origin.history?.length===0&&(origin.sample.activityAge??0)>=CLIP_FADE&&origin.sample.waveSamples?.some(s=>s.released!==undefined))
+      && !act?.pairedContact && !originFrame?.pairedContact && (!act?.hop || ACTIVITY_OVERLAYS.has(v.activity)) && (!originFrame?.hop || ACTIVITY_OVERLAYS.has(origin.sample.activity ?? 'idle')) && !act?.ride && !originFrame?.ride && !lib.posture && !lib.still
+      && postureKind(v.activity, v.base) === 'stand' && postureKind(origin.sample.activity ?? 'idle', origin.sample.baseActivity) === 'stand'
+      && origin.sample.walk < .01 && !origin.sample.instrument;
+    if (clipBoundary) {
+      this.blendClipOrigin(v, origin!, tSec, sourcePose);
+    }
     const freeContacts=noOwner||freeFloor&&freeBody&&!engineHands&&!gripping&&!v.handHold&&!v.rps&&!v.partner&&!v.propWanted&&!v.prop?.obj.visible&&!v.shore&&!waterFrom&&sitW===0;
     if (freeContacts && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
     if(hgDiag)v.diag.handGame=hgDiag;
+  }
+
+  private blendClipOrigin(v: View, c: ClipOrigin, time: number, sourcePose: boolean) {
+    const h=v.rig.holder, root=new THREE.Vector3(...v.cur.p), nativeQ=new THREE.Quaternion().setFromAxisAngle(UP,-v.cur.yaw);
+    const joints=poseBones(v.rig.model);
+    const target={bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
+    if(v.clipContext!==c.context){v.clipOrigins?.clear();v.clipContext=c.context;}
+    const cache=v.clipOrigins??=new Map();let origin=c.drawn;
+    if(!origin){
+      const boundary=time-c.age, sources=[{offset:0,age:c.age,sample:c.sample},...c.history??[]];
+      const key=(i:number)=>JSON.stringify([boundary-sources[i].offset,sources[i].sample,v.cur.p,v.cur.yaw],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
+      // A cached collapsed prefix is a complete fixed-size pose, including every earlier contribution.
+      // Warm playback evaluates only new boundaries; a cold seek folds the retained chain once, without recursion.
+      let start=sources.length-1;
+      for(let i=0;i<sources.length;i++){const found=cache.get(key(i));if(found){origin=found;start=i-1;break;}}
+      if(start>=0){
+        const evaluator=new HumanViews(false);evaluator.setTemplates([v.rig.template]);
+        try {
+          for(let i=start;i>=0;i--){
+            const source=sources[i],prior=sources[i+1];
+            const sample={...source.sample,id:h.name,p:[...v.cur.p] as [number,number,number],yaw:v.cur.yaw,
+              ...(origin&&prior?{clipOrigin:{age:prior.age,sample:prior.sample,drawn:origin}}:{})};
+            evaluator.setFrame([sample],boundary-source.offset);evaluator.render(1);
+            const old=evaluator.bodyObject(h.name)!;origin=drawnOrigin(old,old,root,nativeQ);
+            if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
+          }
+        } finally {evaluator.clear();}
+      }
+    }
+    if(!origin)return;
+    const k=smooth(c.age/CLIP_FADE);
+    blendDrawn(h,joints,target,origin,k,root,nativeQ);
   }
 
   private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {
@@ -1699,7 +1771,7 @@ export class HumanViews {
     const key = JSON.stringify([Math.round(boundary*1e6),pc.from,pc.fromBase,pc.fromAge,before,v.cur.p,v.cur.yaw,pc.fromWalk??null,phase],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
     const cache = v.postureOrigins ??= new Map();
     let origin = cache.get(key);
-    const joints:THREE.Object3D[]=[];v.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});
+    const joints=poseBones(v.rig.model);
     const target = {bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
     const root = new THREE.Vector3(...v.cur.p);
     if (!origin) {
@@ -1713,15 +1785,13 @@ export class HumanViews {
         restAge:REST_ACTS.has(from)?age:undefined,restFrom:REST_ACTS.has(from)&&age!==undefined?boundary-age:undefined});
       try {
         evaluator.pose(old,1,undefined,true);
-        const sourceJoints:THREE.Object3D[]=[];old.rig.model.traverse(o=>{if((o as THREE.Bone).isBone)sourceJoints.push(o);});
-        origin={bones:sourceJoints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),offset:old.rig.holder.position.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),q:nativeQ.clone().invert().multiply(old.rig.holder.quaternion)};
+        origin=drawnOrigin(old.rig.model,old.rig.holder,root,nativeQ);
       } finally { evaluator.clear(); }
       // Cache only values derived from immutable boundaries. Eviction changes cost, never the evaluated pose.
       if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key,origin!);}
     }
     const k=smooth((pc.age-phase)/ACT_BLEND);
-    target.bones.forEach((s,i)=>{joints[i].position.lerpVectors(origin!.bones[i].p,s.p,k);joints[i].quaternion.slerpQuaternions(origin!.bones[i].q,s.q,k);});
-    h.position.copy(root).add(origin!.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));h.quaternion.copy(nativeQ).multiply(origin!.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));h.updateMatrixWorld(true);
+    blendDrawn(h,joints,target,origin!,k,root,nativeQ);
   }
 
   /**
