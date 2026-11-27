@@ -176,6 +176,7 @@ import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
 import { BARE, bareAct } from '../check/bare.mjs';
+import { sitByKind } from '../check/by-kind.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { afarFor, afarOf } from './afar.mjs';
 import { definedIn, kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
@@ -1546,7 +1547,8 @@ function actsOf(words) {
   };
   // a thing's forms, or null when its kind is not in the copy (then nothing is read as the body's in its place)
   const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); const k = kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]; return k ? k.forms ?? {} : null; };
-  const list = words.map(String);
+  const list = words.map(String), kindSits = new Map();
+  const by = (w) => (kindSits.has(w) ? kindSits : kindSits.set(w, sitByKind(w, { rows: rows ??= rowsOf(copy), me: ME, ns: NS }))).get(w);
   for (let i = 0; i < list.length; i++) {
     const w = list[i];
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
@@ -1576,6 +1578,8 @@ function actsOf(words) {
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
     } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    // #3178: `sit:<kind>` (sit:bench, sit:chair) is any free one of that kind where the Soul is, nearest it
+    else if (/^sit:/.test(w) && by(w)) out.push(by(w));
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
     else if (k > 0 && ID.test(tail)) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');

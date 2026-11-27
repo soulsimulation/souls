@@ -956,6 +956,8 @@ fn walk(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, x: i64, z: i64)
 struct Got {
     kind: u64,
     reason: String,
+    /// A refusal's detail (the answer's field 8), empty when it has none.
+    detail: String,
     version: u64,
     names: BTreeMap<u64, Id>,
     entries: Vec<u64>,
@@ -984,6 +986,10 @@ fn read_answer(v: &Value) -> Got {
         },
         reason: match a.get(&4) {
             Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => String::new(),
+        },
+        detail: match a.get(&8) {
+            Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
             _ => String::new(),
         },
         version,
@@ -2327,6 +2333,9 @@ mod k18d;
 
 #[path = "edit_served/shade.rs"]
 mod shade;
+
+#[path = "edit_served/sit_by_kind.rs"]
+mod sit_by_kind;
 
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
@@ -3770,6 +3779,32 @@ fn logged(w: &Seeded) -> Vec<replica::effects::Part> {
         .collect()
 }
 
+/// Crew `crew`'s last word of who holds which grip (#5067, `souls:carry-grips`) once `ok` takes it, within 10 s: its
+/// phase and the bodies holding, in order.
+fn grips_said(w: &Seeded, crew: Id, ok: impl Fn(&str, &[Id]) -> bool) -> (String, Vec<Id>) {
+    use sim::activity::carry::grips::{GRIPS, Holds};
+    let t0 = std::time::Instant::now();
+    loop {
+        let last = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .map(|h| (h.phase, h.holds.iter().map(|x| x.body).collect::<Vec<_>>()))
+            .next_back();
+        if let Some((phase, bodies)) = last.filter(|(p, b)| ok(p, b)) {
+            return (phase, bodies);
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "no grips word for {}",
+            crew.counter()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The node of a kind starting `prefix` created by the entries numbered `entries`.
 fn created_by(w: &Seeded, entries: &[u64], prefix: &str) -> Id {
     use replica::effects::{Body, Change};
@@ -4208,11 +4243,22 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     }
     let got = leave(&mut hands, 3, crew_b);
     refused(&got, "support.none", "Soul 4, alone, lets go of frame B");
+    // E16: the refusal names the step that frees it.
+    assert!(
+        got.detail.contains("next: lay it down first (part:unseat)"),
+        "the leave names its next step: {}",
+        got.detail
+    );
     let got = hands[3].act("part:unseat", crew_b, part(fb));
     refused(
         &got,
         "laydown.no-room",
         "every way out for frame B passes through a wall",
+    );
+    assert!(
+        got.detail.contains("; next: "),
+        "the lay-down names its next step: {}",
+        got.detail
     );
     for side in walls.drain(1..) {
         let got = creator_edit(Op::Remove {
@@ -7986,9 +8032,15 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         }
         c
     };
-    // Waits until each body stands within 0.3 m of its place, at most 30 s.
+    // Waits until each body stands within 0.3 m of its place. The wait follows progress, not a fixed time: a slow CI
+    // runner walks the crew far slower than a quiet machine (a fixed 30 s failed with one carrier 0.48 m out and still
+    // closing, #5128), so it goes on while some body not yet at its place gets nearer it, up to 180 s, and fails once
+    // none has for 10 s.
     let settle = async |places: &[(Id, Vec3)], what: &str| {
+        const MOST: Duration = Duration::from_secs(180);
+        const STALL: Duration = Duration::from_secs(10);
         let t0 = std::time::Instant::now();
+        let (mut best, mut nearer) = (vec![i64::MAX; places.len()], t0);
         loop {
             let off: Vec<i64> = places
                 .iter()
@@ -8000,9 +8052,23 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             if off.iter().all(|d| *d < 300_000) {
                 return t0.elapsed();
             }
+            // Progress: a body not at its place yet stands 10 mm nearer it than it has been.
+            for (b, d) in best.iter_mut().zip(&off) {
+                if *d >= 300_000 && *d + 10_000 < *b {
+                    *b = *d;
+                    nearer = std::time::Instant::now();
+                }
+            }
             assert!(
-                t0.elapsed() < Duration::from_secs(30),
-                "{what}: not all at their places within 30 s, µm off {off:?}"
+                nearer.elapsed() < STALL,
+                "{what}: nobody nearer their place for {} s, {} ms after the walk, µm off {off:?}",
+                STALL.as_secs(),
+                t0.elapsed().as_millis()
+            );
+            assert!(
+                t0.elapsed() < MOST,
+                "{what}: not all at their places within {} s, µm off {off:?}",
+                MOST.as_secs()
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
@@ -8020,8 +8086,18 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         walk_all(&mut souls, &[(0, f0), (other, f1)], "the frame to the bay").await;
         let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
+        // #5067: seated, its crew still holds it, each carrier on its grip; Soul 1's leave takes only its own hold.
+        let (a, b) = (body_of(&w, w.souls[0]), body_of(&w, w.souls[other]));
+        let held = grips_said(&w, c, |p, _| p == "souls:held");
+        assert_eq!(held.1, [a, b], "frame in {slot}: both hold it");
         let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
         assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
+        let held = grips_said(&w, c, |p, b| p == "souls:held" && b.len() == 1);
+        assert_eq!(
+            held.1,
+            [b],
+            "frame in {slot}: the other still holds its grip"
+        );
     }
 
     // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
@@ -8104,6 +8180,12 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             beam.counter()
         );
         assert_eq!(got.kind, 1, "beam seated in {slot}");
+        // #5067: a hold for each carrier, let go of as the beam is seated.
+        let (phase, holding) = grips_said(&w, c, |p, _| p == "souls:released");
+        assert_eq!(
+            (phase.as_str(), holding),
+            ("souls:released", crew_bodies.clone())
+        );
         for k in &members {
             let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
             assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);

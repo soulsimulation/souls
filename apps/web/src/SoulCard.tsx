@@ -64,7 +64,7 @@ function OwnerCard({api,soul,camera,signedIn=true,body,now,place,activity}:SoulC
  // and disconnects it (the old route answers 409 `world.new-engine` there); Keep clears its agent's ask
  const disconnect=async()=>{const v2=v2Act('revoke');if(v2)return v2(soul.id);const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
  const keep=async()=>{const v2=v2Act('keep');return v2?v2(soul.id):true;};
- return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} doing={doingNow(soul,activity)}
+ return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} unavailable={inbox?.unavailable===true} doing={doingNow(soul,activity)}
   prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true,v2Act('retire'))} retireAsked={retireAsked} keep={keep}/>;
 }
 
@@ -83,9 +83,12 @@ export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|
  clock?:number;open?:{details?:boolean;pair?:boolean};
  /** owner only (B3-2): a v2 world's mailbox, which keeps a message until the agent takes it: the box shows without a link */
  mailbox?:boolean;
+ /** owner only (#1330): the world or the page's connection to it is down. The status line says so instead of the last
+  *  known link and activity, nothing blames the agent, and the box stays with its draft, unable to send. */
+ unavailable?:boolean;
  /** B3-3: what it is doing now ("Walking"), shown in the status line while it is awake; null when not known */
  doing?:string|null};
-export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,retireAsked=false,keep,clock,open,mailbox=false,doing=null}:SoulCardViewProps){
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,retireAsked=false,keep,clock,open,mailbox=false,unavailable=false,doing=null}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -110,16 +113,18 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
     :<><Head soul={soul} title={title} share={share} copied={copied}/><p className="soul-meta"><span className="soul-status" data-status="pairing"><i aria-hidden="true"/>Pairing</span><StatusPlace text="waiting for your answer"/></p></>}
   </article>;
  }
- const owner=view==='owner',connected=owner&&link?.state==='connected',disconnected=owner&&link?.state==='disconnected';
+ const owner=view==='owner',down=owner&&unavailable;
+ // #1330: while the world is unavailable the last link is from before it: no Connected, no Reconnect box blaming the agent
+ const connected=owner&&!down&&link?.state==='connected',disconnected=owner&&!down&&link?.state==='disconnected';
  const waiting=disconnected&&link!.reason==='approved-waiting'&&body?.state!=='zombie'&&body?.state!=='asleep';
  const sleeping=owner?disconnected:body?.state==='zombie'||body?.state==='asleep';
- const state=!owner?(body?.state??'unknown'):link?(waiting?'approved-waiting':link.state):'checking';
+ const state=!owner?(body?.state??'unknown'):down?'unavailable':link?(waiting?'approved-waiting':link.state):'checking';
  const followShown=camera&&(owner?connected||camera.following:true);
  return <article className="soul-card" aria-labelledby="soul-card-name" data-soul-state={state} data-body={body?.state} data-sleeping={sleeping?'1':undefined}>
   <Head soul={soul} title={title} share={share} copied={copied}/>
   <p className="soul-meta">
-   {owner?<OwnerStatus link={link} waiting={waiting} details={details} toggle={()=>setDetails(v=>!v)}/>:<VisitorStatus body={body}/>}
-   <StatusPlace text={doing&&(!body||body.state==='awake')?`${doing}${place?` at ${place}`:''}`:!owner?visitorPhrase(body,place,t):waiting?(link?.since&&t-link.since<WAITING_PROMPT_MS?'approved just now':'approved'):disconnected&&!body?(link?.since?`since ${clockAt(link.since,t)}`:''):bodyPhrase(body,place,t)} title={body?.since?clockTitle(body.since):undefined}/>
+   {down?<span className="soul-status" data-status="unavailable"><i aria-hidden="true"/>World unavailable</span>:owner?<OwnerStatus link={link} waiting={waiting} details={details} toggle={()=>setDetails(v=>!v)}/>:<VisitorStatus body={body}/>}
+   <StatusPlace text={down?'':doing&&(!body||body.state==='awake')?`${doing}${place?` at ${place}`:''}`:!owner?visitorPhrase(body,place,t):waiting?(link?.since&&t-link.since<WAITING_PROMPT_MS?'approved just now':'approved'):disconnected&&!body?(link?.since?`since ${clockAt(link.since,t)}`:''):bodyPhrase(body,place,t)} title={body?.since?clockTitle(body.since):undefined}/>
    <VisitorFrom soulId={soul.id}/>
   </p>
   {slowedNow&&<p className="soul-slowed soul-dim" role="status" data-slowed={slowed!.reason}>{slowedNow}</p>}
@@ -129,7 +134,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   {disconnected&&!waiting&&<ReconnectBox name={soul.name} link={link!} prompt={prompt} clock={t}/>}
   {!owner&&story&&story.length>0&&<SoulStory story={story}/>}
   <div className="soul-card-thread" data-soul-thread={soul.id}/>
-  {(connected||(owner&&mailbox))&&send&&<SoulMessageBox name={soul.name} inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
+  {(connected||(owner&&(mailbox||down)))&&send&&<SoulMessageBox name={soul.name} inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
   {followShown&&<div className="soul-actions">
    <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':camera.held?'Follow again':'Follow'}</button>
   </div>}

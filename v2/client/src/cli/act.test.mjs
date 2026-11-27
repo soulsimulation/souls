@@ -219,6 +219,12 @@ test('A2: an act carries each candidate\'s own target, and the first one\'s thin
   const steer = decode(wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'carrier:steer', 2n, new Uint8Array(), 10n ** 15n, a, undefined, undefined, JSON.stringify({ 1: [-59800000, 250000] })));
   assert.equal(steer.get(2), 'carrier:steer');
   assert.deepEqual(steer.get(4).get(1).map(Number), [-59800000, 250000]);
+  // #3178: a sit by kind's target, `<kind>@<node id>`, is I5's free-slot selector (1), nearest (rule 1), not a node.
+  const sitBy = (t) => decode(wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'eden:sit', 3n, new Uint8Array(), 10n ** 15n, t)).get(3);
+  const free = sitBy(`eden:chair@${b}`);
+  assert.deepEqual([Number(free.get(1)), free.get(2).get(1), id(free.get(2).get(2)), Number(free.get(2).get(3))], [1, 'eden:chair', b, 1]);
+  assert.throws(() => sitBy('eden:chair@the-hall'), /target-not-an-id/);
+  assert.throws(() => sitBy(`chair@${b}`), /target-kind-not-a-name/);
 });
 
 test('A1, A2: can answers from the local check; a walk to a named thing and a sit on a chosen chair each end with their receipt', async () => {

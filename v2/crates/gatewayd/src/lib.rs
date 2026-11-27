@@ -37,6 +37,12 @@
 //!   client's next cursor. A refusal the gateway gives itself (`world.restarting`, `intent-not-granted`) is a frame
 //!   of the stream too, at the newest version the world sent, and kept for a resume; before the world has sent any
 //!   version, and for bytes that are not an intent, it is `{2: answer}`, with no version and not kept.
+//! - A client nobody trusts (O8, #2805): an agent's intents kept here, unanswered, are bounded in bytes
+//!   (`world_link::KEPT_MOST`, far above an honest agent's few at a time); one past it is refused at once
+//!   `agent.slow-down`, with plain words and when to send again, as `{2: answer}`, not kept and never sent to the
+//!   world. A message over the intent limits' `frame_bytes` closes the socket 1009 `message.too-big`, refused from its
+//!   length unread; a frame the WebSocket protocol cannot read closes it 1002 `frame.unreadable`. The bench is
+//!   `v2/tools/bench/hostile`.
 //! - both ways, after sign-in, R5's sync by hash (R5b, #3164; `replica::sync::wire`): a frame with key 20 is a sync
 //!   request, not an intent. The gateway passes it to the world with the asking actor (key 23) under a number of its
 //!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.

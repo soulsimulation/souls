@@ -286,3 +286,61 @@ test('a self-target floor move never aims back at its old position while the nat
   for(let n=0;n<8;n++)b.receive(part(n,[['b.7','w.2',null,T0+n*500_000,1_000_000+n*500_000,0,0]],n===0?{moves:[{body:'b.7',name:'souls:stargaze',start:T0,ends:[T0+4_000_000],target:'b.7',run:'floor'}]}:{}));
   const chunks=b.view.takes.chunks;for(const c of chunks){const take=c.take as unknown as Take;const e=sampleTake(take,.5).entities[E];assert.ok(Math.abs(e.yaw+Math.PI/2)<.01,'canonical floor rotation preserves the actual course heading');}
 });
+
+
+test('an overlapping part keeps a completed activity turn after its own final walking sample', () => {
+  // Sanitized recorded sequence: part ranges overlap; the ended motion leaves node.at null but a final sample remains.
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  const ground = node('w.0', null, [0, 0, 0], { kind: 'souls:place@1' });
+  const facing = (yaw: number): [number, number, number, number] => [Math.cos(-yaw / 2) * Q, 0, Math.sin(-yaw / 2) * Q, 0];
+  const a = node('b.7', 'w.0', [395377, 0, -858299], { kind: 'souls:body@1', at: null, rot: facing(Math.PI / 4) });
+  const other = node('b.9', 'w.0', [1000000, 0, 0], { kind: 'souls:body@1', at: null, rot: facing(-2.356194489) });
+  b.receive({ t: 'snapshot', s: { nodes: [ground, a, other], removed: [] } });
+  const stopped = { ...a, pos: [122000, 0, -1247000] as [number, number, number] };
+  b.receive(part(0, [['b.7', 'w.0', null, T0 + 250000, 355107, 0, -915556], ['b.7', 'w.0', null, T0 + 450000, 194029, 0, -1144584],
+    ['b.7', 'w.0', null, T0 + 600000, 122000, 0, -1247000], ['b.9', 'w.0', null, T0 + 300000, 1000000, 0, 0]],
+    { from: T0, to: T0 + 600000, nodes: [stopped, { ...other, rot: facing(-2.1844889988272453) }] }));
+  const final = { ...stopped, rot: facing(.9571036547625479) };
+  b.receive(part(1, [['b.7', 'w.0', null, T0 + 650000, 122000, 0, -1247000], ['b.9', 'w.0', null, T0 + 990000, 1000000, 0, 0]],
+    { from: T0 + 500000, to: T0 + 1000000, nodes: [final] }));
+  for (let n = 2; n < 10; n++) b.receive(part(n, []));
+  const at = (s: number, entity = E) => { const tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find(x => x.fromTick <= tick && tick < x.toTick)!; return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[entity]; };
+  assert.ok(Math.abs(at(1.3).yaw - .957103655) < .002, 'the final recorded turn survives the preceding walk and unrelated later body sample');
+  assert.deepEqual(at(1.3).p.map(x => +x.toFixed(3)), [.122, 0, -1.247], 'authoritative position is unchanged');
+  assert.ok(at(.75).yaw > -2.184 && at(.75).yaw < .9, 'it eases from the actual walking heading');
+  const finalPose = at(1.3); at(.1); at(2.3); assert.deepEqual(at(1.3), finalPose, 'fresh take seeks reproduce the same pose');
+  const otherEntity = entityWithLook('v2_b_9', defaultLookOf('b.9'));
+  assert.ok(Math.abs(at(1.3, otherEntity).yaw + 2.184488999) < .002, 'the other body keeps its own authoritative turn');
+});
+
+test('null-at turns without body samples use the part start, while declared turn times remain authoritative', () => {
+  for (const declared of [null, T0 + 400000]) {
+    const b = new V2Bridge({ rulesVersion: 'test/1' });
+    const ground = node('w.0', null, [0, 0, 0], { kind: 'souls:place@1' });
+    const a = node('b.7', 'w.0', [0, 0, 0], { kind: 'souls:body@1', at: T0 });
+    b.receive({ t: 'snapshot', s: { nodes: [ground, a], removed: [] } });
+    const changed = { ...a, at: declared, rot: [Math.SQRT1_2 * Q, 0, -Math.SQRT1_2 * Q, 0] as [number, number, number, number] };
+    b.receive(part(0, declared === null ? [] : [['b.7', 'w.0', null, T0 + 490000, 0, 0, 0]], { nodes: [changed] }));
+    for (let n = 1; n < 8; n++) b.receive(part(n, []));
+    const tick = T0 / TICK_US + 4, c = b.view.takes.chunks.find(x => x.fromTick <= tick && tick < x.toTick)!;
+    const yaw = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E].yaw;
+    assert.ok(declared === null ? yaw > .2 : Math.abs(yaw) < .002, 'a later sample cannot replace a declared turn time, and no-sample turns still ease');
+  }
+});
+
+
+test('a history bundle standing turn precedes its later bundled motion samples', () => {
+  for (const moved of [true, false]) {
+    const b = new V2Bridge({ rulesVersion: 'test/1' });
+    const ground = node('w.0', null, [0, 0, 0], { kind: 'souls:place@1' });
+    const a = node('b.7', 'w.0', [0, 0, 0], { kind: 'souls:body@1', at: T0 });
+    b.receive({ t: 'snapshot', s: { nodes: [ground, a], removed: [] } });
+    const turned = { ...a, at: null, rot: [Math.SQRT1_2 * Q, 0, -Math.SQRT1_2 * Q, 0] as [number, number, number, number] };
+    b.receive(part(0, [['b.7', 'w.0', null, T0 + 1e6, moved ? 1000000 : 0, 0, 0]], { from: T0, to: T0, nodes: [turned] }));
+    for (let n = 1; n < 8; n++) b.receive(part(n, []));
+    const tick = T0 / TICK_US + (moved ? 40 : 7), c = b.view.takes.chunks.find(x => x.fromTick <= tick && tick < x.toTick)!;
+    const yaw = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E].yaw;
+    assert.ok(Math.abs(yaw - (moved ? 0 : Math.PI / 2)) < .002,
+      moved ? 'the later walking heading wins after the as-at-read turn' : 'the as-at-read standing orientation is not postponed');
+  }
+});

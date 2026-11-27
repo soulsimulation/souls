@@ -13,7 +13,7 @@ import {LOOK_MODEL} from '../../../web/src/humanoid/look.ts';
 import type {WorldHost} from '../world.ts';
 
 /** Bumped when the renderer's framing or light changes (apps/web/src/humanoid/portrait.ts), so portraits are redrawn. */
-export const AUTO_PORTRAIT_STYLE='portrait-cpu/3';
+export const AUTO_PORTRAIT_STYLE='portrait-cpu/4';
 const WORKER=fileURLToPath(new URL('./render-worker.mjs',import.meta.url));
 const KIT=fileURLToPath(new URL('../../../../mars/viewer/public/modular/humanoid/kit.json',import.meta.url));
 export type AutoPortraitPhoto={hash:string;mime:'image/png';width:number;height:number;bytes:number};

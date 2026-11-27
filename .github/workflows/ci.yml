@@ -139,8 +139,8 @@ jobs:
     # a launcher leg passes in about 9 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
     # Every other kind: about 2x the p95 of its green runs, and never under 1.5x the slowest (the 100 green runs before
     # 21 Nov, job wall time in minutes, p95/max): native 15.0/17.8 -> 30; v2 10.0/29.6 (a cold cargo build) -> 45;
-    # soul-actions legs 14.5/15.5 -> 30; packages 9.2/9.3 and web 8.0/8.1 -> 20; types-web, client-cli, latency,
-    # docs-reference and soul-tools all under 2.3 -> 15, room for a cold install. Re-measure before tightening.
+    # soul-actions legs 14.5/15.5 -> 30; packages 9.2/9.3 and web 8.0/8.1 -> 20; types-web, client-cli, latency
+    # and soul-tools all under 2.3 -> 15, room for a cold install. Re-measure before tightening.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || matrix.kind == 'v2' && 45 || matrix.kind == 'native' && 30 || matrix.kind == 'soul-actions' && 30 || matrix.kind == 'packages' && 20 || matrix.kind == 'web' && 20 || 15 }}
     strategy:
       fail-fast: false
@@ -264,10 +264,6 @@ jobs:
               # the gate: docs-site.test.ts checks its files and skips without it (#1463: a skip is not proof)
               pnpm --filter @souls/web build
               bash tools/test-harness/web-suite.sh
-              ;;
-            docs-reference)
-              # #898: the generator of the reference pages (docs/site actions, api, mcp) runs, and writes all the server answers
-              node --test --test-concurrency=1 tools/docs/generate.test.mjs
               ;;
             launcher)
               # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts).

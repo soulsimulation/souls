@@ -1,0 +1,172 @@
+{
+  "schema": "camera-budgets/1",
+  "protocol": "cam01/1",
+  "parentIssue": 4907,
+  "status": "frozen acceptance targets; not measurements",
+  "changeRule": "Coordinator records rationale before a new comparison; never weaken or retroactively rescore a failed run.",
+  "references": {
+    "desktop": {
+      "role": "quiet desktop, native served apps/web page",
+      "requiredFacts": [
+        "OS/browser versions",
+        "CPU/GPU class",
+        "display refresh",
+        "actual renderer backend",
+        "browser launch flags",
+        "recording and temporal inspection capabilities"
+      ]
+    },
+    "mobile": {
+      "role": "one physical mobile, economical default",
+      "emulationQualifies": false,
+      "requiredFacts": [
+        "device class and OS/browser versions",
+        "physical device verified",
+        "power state",
+        "thermal state",
+        "orientation",
+        "CSS and physical pixels",
+        "refresh rate",
+        "remote input and video access"
+      ]
+    },
+    "linux": {
+      "role": "isolated Linux simulation/API/history interference reference; required only if compiler selected",
+      "requiredFacts": [
+        "effective CPU/memory/I/O controls",
+        "load generator version",
+        "sample counts",
+        "clock resolution",
+        "quiet-load baseline noise"
+      ]
+    }
+  },
+  "client": {
+    "mainThreadPerDisplayedFrameMs": {
+      "medianMax": 1,
+      "p95Max": 2,
+      "p99Max": 4,
+      "singleTaskMax": 8,
+      "scope": "all camera observation, queries, scoring, scheduling, transitions and final pose application; include zero-work displayed frames"
+    },
+    "steadyTotalCpuMsPerSecond": {
+      "max": 100,
+      "scope": "sum camera main-thread and worker CPU; include messaging, serialization and rejected/cancelled work",
+      "windowSeconds": 1
+    },
+    "additionalResidentMemoryMiB": {
+      "targetMax": 32,
+      "scope": "camera geometry, plans, caches, queues and worker copies; report peak and post-cleanup retained delta against disabled control"
+    },
+    "bounds": {
+      "required": [
+        "numeric request/inflight/queue/cache bounds declared before each candidate run",
+        "peak depth and bytes",
+        "overflow/coalescing/cancellation behavior",
+        "idle/absent/distant/in-use measurements"
+      ]
+    },
+    "delivery": {
+      "required": [
+        "cold transferred and decoded bytes",
+        "startup duration and peak CPU",
+        "warm bytes",
+        "bundle gate retained",
+        "optional planner/debug lazy loading"
+      ]
+    }
+  },
+  "visual": {
+    "feasibleFrameReadableFractionMin": 0.95,
+    "hardFailures": [
+      "unintended camera inside opaque solid",
+      "unintended executed near-plane intersection",
+      "chest-only crop credited as a medium/full shot",
+      "camera changes actor motion or reads beyond public audience",
+      "manual input ownership lost"
+    ],
+    "followDiscretionaryCuts": {
+      "minimumSpacingSeconds": 20,
+      "maximumPerRollingMinute": 2
+    },
+    "broadcastDiscretionaryCuts": {
+      "minimumSpacingSeconds": 6,
+      "maximumPerRollingMinute": 6
+    },
+    "emergencyCuts": "Count separately and in total cut ledger; timestamp cause/recovery and inspect every event; cannot exempt a discretionary cut by renaming it.",
+    "rubric": [
+      "subject and activity readability",
+      "calm comfortable motion with framing slack",
+      "intentional movement and stable horizon",
+      "face and context preferences yielding to visibility",
+      "room/doorway/carrier composition",
+      "meaningful scene choice and continuity",
+      "purposeful pan/track/arc/push or justified stillness",
+      "novelty, pacing and no repetitive tour"
+    ]
+  },
+  "serverCompiler": {
+    "optional": true,
+    "maxActiveJobs": 1,
+    "cpuFractionOfOneCoreMax": 0.25,
+    "memoryHighMiB": 256,
+    "memoryMaxMiB": 512,
+    "io": "Declare and verify a numeric I/O limit before qualification; absent effective controls disables compiler.",
+    "zeroTolerance": [
+      "attributable tick stall",
+      "missed durability",
+      "new act/query failure",
+      "world restart",
+      "request-time compilation",
+      "world clock or API waiting for camera artifacts"
+    ],
+    "latencyRegression": {
+      "relativeMax": 0.05,
+      "absoluteMsMax": 2,
+      "rule": "candidate minus compiler-off baseline <= max(0.05 * baseline, 2 ms)",
+      "metrics": [
+        "p99 tick lag",
+        "p95 API latency",
+        "p99 API latency",
+        "p95 archive latency",
+        "p99 archive latency"
+      ]
+    },
+    "loadCases": [
+      "even active worlds",
+      "uneven hot-world load",
+      "quiet/dormant worlds",
+      "edits and artifact churn"
+    ],
+    "unknownRule": "Retain counts, noise, raw samples and effective-limit evidence; inconclusive non-interference is unknown, never pass."
+  },
+  "adoption": {
+    "common": [
+      "name an observed failure and incumbent/fallback",
+      "freeze one observable minimum useful gain before trial",
+      "same source/input/render pairing and two repeats",
+      "meet all absolute visual and resource bars with no hard regression",
+      "retain negative results; do not adopt solely on aggregate aesthetic score"
+    ],
+    "methods": {
+      "prediction": "Improve a named turn/occlusion recovery interval without control-case comfort or cost regression.",
+      "planner": "Improve named feasible-shot readability or a timestamped uncomfortable transition beyond the incumbent, counting all search cost.",
+      "worker": "Improve measured frame pacing on an accepted workload after startup/transfer, with total CPU and memory within bars.",
+      "compiler": "Reduce measured static-query/build or repeated setup cost end to end, including download/decode, and pass paired server non-interference.",
+      "broadcastComplexity": "Improve timestamped scene selection/continuity/variety or purposeful motion in active and quiet sessions without readability or comfort regression."
+    },
+    "minimumGainRecord": [
+      "metric or timestamped visual defect",
+      "absolute minimum gain",
+      "measurement resolution/noise",
+      "control cases",
+      "cost ceiling",
+      "accept/reject verdict and evidence"
+    ]
+  },
+  "statistics": {
+    "percentiles": "nearest rank: sorted samples[ceil(p*n)-1], p in {0.5,0.95,0.99}; empty set is unknown",
+    "aggregation": "Report each repeat, mode, orientation, thermal and cold/warm cell separately; never hide a failing cell in a pooled percentile.",
+    "missing": "Missing instrumentation, dropped samples or uninspected pixels yield unknown for affected claims."
+  }
+}
