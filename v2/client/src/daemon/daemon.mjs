@@ -314,7 +314,7 @@ const handedMail = new Set(); // ids a reader handed out: read once the model's 
 const readMail = new Set(); // ids the model's turn has (read)
 const toldRead = new Set(); // of those, the ids told on this sign-in
 function sayListening() {
-  const on = listeners > 0;
+  const on = listeners > 0 || listenOff !== null; // within the grace after a reader, still listening (a reconnect too)
   if (on === listeningSaid || !ws || !signedIn) return;
   listeningSaid = on;
   ws.send(JSON.stringify({ listening: on }));
