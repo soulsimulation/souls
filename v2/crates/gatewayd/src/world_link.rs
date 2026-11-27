@@ -628,20 +628,19 @@ impl Link {
             .sync_slowed
     }
 
-    /// The socket signed in as `session` for `key` ended (O8): its sync requests are given up, their charges released
-    /// and their places in the world's line given to the agent's next, so a replaced or dropped socket never holds a
-    /// later one's sync. The world's answers to them are dropped.
+    /// The socket signed in as `session` for `key` ended (O8): its sync requests still waiting their turn here are
+    /// given up and never sent. Those already in the world's line keep their places until the world answers them (the
+    /// answer then goes nowhere) or [`SYNC_DEADLINE`] passes, so signing in again never buys an agent more places in
+    /// that line.
     pub fn sync_ended(&self, key: &[u8], session: u64) {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        // Those waiting their turn first, so a place freed is never given to one of them.
-        let mut ended: Vec<(bool, u64)> = s
+        let ended: Vec<u64> = s
             .syncs
             .iter()
-            .filter(|(_, a)| a.key == key && a.session == session)
-            .map(|(ours, a)| (a.waiting.is_none(), *ours))
+            .filter(|(_, a)| a.key == key && a.session == session && a.waiting.is_some())
+            .map(|(ours, _)| *ours)
             .collect();
-        ended.sort_unstable();
-        for (_, ours) in ended {
+        for ours in ended {
             s.sync_drop(ours);
         }
     }
@@ -650,11 +649,12 @@ impl Link {
     /// actor's bytes, session and the client's number, to answer [`SYNC_TIMED_OUT`]. Its place goes to the agent's next.
     pub fn syncs_overdue(&self, now: u64) -> Vec<(Vec<u8>, u64, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        // Those waiting their turn first, so a place freed is never given to one of them.
+        // `due` grows with the gateway's number (one clock, one lock), so the late ones come first. Those waiting their
+        // turn are taken first, so a place freed is never given to one of them.
         let mut late: Vec<(bool, u64)> = s
             .syncs
             .iter()
-            .filter(|(_, a)| now >= a.due)
+            .take_while(|(_, a)| now >= a.due)
             .map(|(ours, a)| (a.waiting.is_none(), *ours))
             .collect();
         late.sort_unstable();
@@ -1235,7 +1235,8 @@ mod kept_tests {
         // The agent syncs again at once.
         assert_eq!(ask(1, 4), Sent::Sent);
         assert_eq!(drain(&mut queue), 1);
-        // A socket replaced with its syncs out: they are given up, and the new socket's go at once.
+        // A socket replaced with its syncs out: the one waiting here is given up, never sent; the two in the world's
+        // line keep their places, so signing in again buys no more of them.
         assert_eq!(ask(1, 5), Sent::Sent);
         assert_eq!(ask(1, 6), Sent::Sent);
         assert_eq!(drain(&mut queue), 1, "its turn is full");
@@ -1243,15 +1244,21 @@ mod kept_tests {
         assert_eq!(
             drain(&mut queue),
             0,
-            "an ended socket's waiting request is not sent"
+            "an ended socket's waiting one is not sent"
         );
-        assert_eq!(link.syncs_waiting(), 0);
-        assert_eq!(ask(2, 1), Sent::Sent);
-        assert_eq!(ask(2, 2), Sent::Sent);
-        assert_eq!(drain(&mut queue), 2, "the new socket has the whole turn");
-        // A late answer to an ended socket's request is dropped and frees nothing of the new socket's.
-        let late = encode(&Value::Map([(wire::ASK, Value::Uint(0))].into())).unwrap();
-        assert!(matches!(link.sync_answered(&late), Some(None)));
         assert_eq!(link.syncs_waiting(), 2);
+        assert_eq!(ask(2, 1), Sent::Sent);
+        assert_eq!(drain(&mut queue), 0, "the new socket's waits its turn");
+        // The world's answer to one of the ended socket's (the gateway's numbers 3 and 4) frees a place: the new
+        // socket's goes.
+        let answer = encode(&Value::Map([(wire::ASK, Value::Uint(3))].into())).unwrap();
+        assert!(matches!(link.sync_answered(&answer), Some(Some(_))));
+        assert_eq!(drain(&mut queue), 1);
+        // One the world never answers is given up at its deadline, freeing its place too.
+        assert_eq!(ask(2, 2), Sent::Sent);
+        assert_eq!(drain(&mut queue), 0);
+        let late = link.syncs_overdue(times::stamp() + SYNC_DEADLINE + 1);
+        assert_eq!(late.len(), 3);
+        assert_eq!(link.syncs_waiting(), 0);
     }
 }

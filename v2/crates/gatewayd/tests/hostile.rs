@@ -267,13 +267,14 @@ async fn o8_a_sync_flood_past_its_budget_is_refused_by_name_and_never_sent() {
     assert_eq!(gw.link.syncs_waiting(), waiting + 1);
 }
 
-/// #5195 triage: an agent whose sync requests the world never answers, its socket then replaced, syncs again at once:
-/// the ended socket's requests are given up and hold no place for the new one.
+/// #5195 triage: an agent whose sync requests the world never answers, its socket then replaced, is not stuck: its
+/// requests waiting here are given up at once, those in the world's line keep their places until their deadline, and
+/// then the new socket's request goes, itself given up by name (`sync.timed-out`) when the world never answers it.
 #[tokio::test]
-async fn o8_a_replaced_sockets_unanswered_syncs_never_hold_the_next() {
+async fn o8_a_sync_the_world_never_answers_never_holds_the_agents_next() {
     let mut tokens = Tokens::default();
     let soul_token = issue(&mut tokens, soul(1));
-    let (gw, url) = start("sync-replaced", tokens).await;
+    let (gw, url) = start("sync-never", tokens).await;
     let mut first = connect(&url, soul_token.reveal()).await;
     for n in 0..5 {
         first
@@ -281,32 +282,42 @@ async fn o8_a_replaced_sockets_unanswered_syncs_never_hold_the_next() {
             .await
             .unwrap();
     }
-    let by = tokio::time::Instant::now() + Duration::from_secs(5);
-    while gw.link.syncs_waiting() < 5 && tokio::time::Instant::now() < by {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(gw.link.syncs_waiting(), 5, "the world answers none");
-    // The same Soul signs in again: the first socket is replaced, and its requests are given up.
+    let wait_for = |want: usize| {
+        let gw = gw.clone();
+        async move {
+            let by = tokio::time::Instant::now() + Duration::from_secs(5);
+            while gw.link.syncs_waiting() != want && tokio::time::Instant::now() < by {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            gw.link.syncs_waiting()
+        }
+    };
+    assert_eq!(wait_for(5).await, 5, "the world answers none");
+    // The same Soul signs in again: the three waiting here are given up; two stay in the world's line.
     let mut second = connect(&url, soul_token.reveal()).await;
-    let by = tokio::time::Instant::now() + Duration::from_secs(5);
-    while gw.link.syncs_waiting() > 0 && tokio::time::Instant::now() < by {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(gw.link.syncs_waiting(), 0);
+    assert_eq!(wait_for(2).await, 2);
     second
-        .send(Message::Binary(sync_ask(1).into()))
+        .send(Message::Binary(sync_ask(7).into()))
         .await
         .unwrap();
-    let by = tokio::time::Instant::now() + Duration::from_secs(5);
-    while gw.link.syncs_waiting() < 1 && tokio::time::Instant::now() < by {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(gw.link.syncs_waiting(), 1);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(300), second.next())
-            .await
-            .is_err(),
-        "nothing refused: it is in the world's line"
+    // The two are given up at their deadline; the new request goes then, and is given up by name 10 s later.
+    let deadline = Duration::from_micros(world_link::SYNC_DEADLINE);
+    let told = tokio::time::timeout(deadline * 2 + Duration::from_secs(3), async {
+        loop {
+            if let Some(Ok(Message::Binary(b))) = second.next().await
+                && let Value::Map(m) = decode(&b).unwrap().value
+                && m.get(&20) == Some(&Value::Uint(7))
+            {
+                return m.get(&24).cloned();
+            }
+        }
+    })
+    .await
+    .expect("the new socket's request is answered");
+    assert_eq!(
+        told,
+        Some(Value::Text(Name::new(world_link::SYNC_TIMED_OUT).unwrap()))
     );
+    assert_eq!(gw.link.syncs_waiting(), 0);
     drop(first);
 }
