@@ -5,7 +5,7 @@
 // Before the fix it flashed while the page still saw an anonymous visitor, then vanished once the god's own status
 // arrived (the god's approval card lived only inside the closed God modal).
 //
-// Clerk mode as production, no network, no keys: the launcher verifies a synthetic issuer (apps/server/test/clerk-fixture.ts)
+// Clerk mode as production, no network, no keys: the launcher verifies a synthetic issuer (tools/lib/clerk-fixture.ts)
 // and the browser runs a test-only stand-in for clerk-js (window.Clerk before the app loads, signed in as user_gene,
 // loading asynchronously like the real one). The approval is a real pending request made with the agent's own call
 // (POST /v1/agent/approval/start, what `eden-agent.mjs create-soul` sends). Chrome lease, real GPU. The fourth scenario
@@ -37,12 +37,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const report = { origin, scenarios: [], failures: [] };
 
 // ---------- the launcher in Clerk mode (synthetic issuer)
-const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../../apps/server/test/clerk-fixture.ts');
+const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../lib/clerk-fixture.ts');
 const keys = await clerkKeys(origin);
 const dir = mkdtempSync(join(tmpdir(), 'approve-clerk-'));
 writeFileSync(join(dir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
 writeFileSync(join(dir, 'clerk.env'), [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${origin}`,
-  `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${resolve(root, 'apps/server/test/clerk-jwks-preload.mjs')}`, ''].join('\n'));
+  `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${resolve(root, 'tools/lib/clerk-jwks-preload.mjs')}`, ''].join('\n'));
 const launcher = spawn(process.execPath, ['tools/world-launcher/launcher.mjs', '--port', String(port), '--range', range, '--data', join(out, 'data'), '--base', BASE,
   '--web', resolve(args.web), ...(typeof args['mars-web'] === 'string' ? ['--mars-web', resolve(args['mars-web'])] : []), '--auth-env', join(dir, 'clerk.env'), '--public-origin', origin],
 { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });

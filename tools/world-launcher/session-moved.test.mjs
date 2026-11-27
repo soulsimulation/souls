@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 test('a moved world\'s sign-in check is the directory\'s, never 404', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'launcher-session-moved-'));

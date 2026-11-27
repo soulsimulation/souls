@@ -11,11 +11,14 @@
 // the bodies are counted as sent and never decoded, but for the pointer); each answer's `cf-cache-status` is counted by
 // file type (`cache`) and its `cf-ray` location (`colo`), each request's time by file type (`rtt`); `drop` lets n viewers go (a churn wave); slow readers
 // open TLS when the base is https.
+// #4985 rerun: `headers` (from v2-remote.mjs) are sent on every read and by slow readers, as a browser's would be: a
+// reader without a User-Agent was blocked by the CDN's DDoS rule for unusual headers. Answers are counted by
+// `content-encoding` (`enc`), and br, gzip, deflate and zstd are decoded for the pointer.
 import { Agent as HttpAgent, request as httpRequest } from 'node:http';
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { connect } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
-import { brotliDecompressSync, gunzipSync } from 'node:zlib';
+import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,7 +32,7 @@ let cfg, readPointer;
 const viewers = new Set(), slow = new Set();
 const loop = monitorEventLoopDelay({ resolution: 10 });
 loop.enable();
-const fresh = () => ({ bytes: {}, requests: {}, cache: {}, rtt: {}, colo: {}, headerBytes: 0, installed: {}, firstPicture: {}, latency: {}, errors: {}, reinstalls: 0, crossed: 0, behind: 0, recovered: 0, joined: 0, left: 0 });
+const fresh = () => ({ bytes: {}, requests: {}, cache: {}, enc: {}, rtt: {}, colo: {}, headerBytes: 0, installed: {}, firstPicture: {}, latency: {}, errors: {}, reinstalls: 0, crossed: 0, behind: 0, recovered: 0, joined: 0, left: 0 });
 let w = fresh(), cpu0 = process.cpuUsage(), refusal = null; // the first refusal's status and body, once
 
 const fail = (code) => { w.errors[code] = (w.errors[code] ?? 0) + 1; };
@@ -38,7 +41,7 @@ const fail = (code) => { w.errors[code] = (w.errors[code] ?? 0) + 1; };
 function get(url, agent) {
   const type = fileType(url.pathname), t0 = performance.now();
   return new Promise((ok, no) => {
-    const headers = cfg.encoding ? { 'accept-encoding': cfg.encoding } : {};
+    const headers = cfg.headers ?? (cfg.encoding ? { 'accept-encoding': cfg.encoding } : {});
     const req = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, { agent, timeout: TIMEOUT_MS, headers }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
@@ -49,12 +52,14 @@ function get(url, agent) {
         w.headerBytes += res.rawHeaders.reduce((n, h) => n + h.length + 2, 0);
         const cs = res.headers['cf-cache-status'];
         if (cs) (w.cache[type] ??= {})[cs] = (w.cache[type][cs] ?? 0) + 1;
+        const ce = res.headers['content-encoding'] ?? 'identity';
+        (w.enc[type] ??= {})[ce] = (w.enc[type][ce] ?? 0) + 1;
         const colo = /-([A-Z]{3})$/.exec(res.headers['cf-ray'] ?? '')?.[1]; // the edge location that answered
         if (colo) w.colo[colo] = (w.colo[colo] ?? 0) + 1;
         record((w.rtt[type] ??= {}), performance.now() - t0);
-        res.decoded = () => (res.headers['content-encoding'] === 'br' ? brotliDecompressSync(body) : res.headers['content-encoding'] === 'gzip' ? gunzipSync(body) : body);
+        res.decoded = () => ({ br: brotliDecompressSync, gzip: gunzipSync, deflate: inflateSync, zstd: zstdDecompressSync })[ce]?.(body) ?? body;
         // a CDN's refusal says why (`cf-mitigated: challenge`, or a block with no such header)
-        if (res.statusCode >= 400 && !refusal) { const t = body.toString('latin1'); refusal = `${res.statusCode} ${/<title>([^<]*)/i.exec(t)?.[1] ?? ''} ${/(Error code|error|cf-error-code)[^0-9]{0,40}(\d{3,4})/i.exec(t)?.[2] ?? ''} ${t.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 400)}`; }
+        if (res.statusCode >= 400 && !refusal) { let t; try { t = res.decoded().toString('latin1'); } catch { t = body.toString('latin1'); } refusal = `${res.statusCode} ${/<title>([^<]*)/i.exec(t)?.[1] ?? ''} ${/(Error code|error|cf-error-code)[^0-9]{0,40}(\d{3,4})/i.exec(t)?.[2] ?? ''} ${t.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 400)}`; }
         if (res.statusCode !== 200) { fail(`${type} ${res.statusCode}${res.headers['cf-mitigated'] ? ` ${res.headers['cf-mitigated']}` : ''}`); return no(Object.assign(new Error('status'), { status: res.statusCode, counted: true })); }
         ok(type === 'pointer' ? res.decoded() : body);
       });
@@ -154,7 +159,8 @@ function slowReader(p) {
   const tls = base.protocol === 'https:';
   const s = (tls ? tlsConnect : connect)({ port: Number(base.port || (tls ? 443 : 80)), host: base.hostname, servername: tls ? base.hostname : undefined }, () => {
     s.pause();
-    const ask = (path) => `GET ${path} HTTP/1.1\r\nHost: ${base.host}\r\nConnection: keep-alive\r\n\r\n`;
+    const extra = Object.entries(cfg.headers ?? {}).filter(([k]) => !/^(host|connection)$/i.test(k)).map(([k, v]) => `${k}: ${v}\r\n`).join('');
+    const ask = (path) => `GET ${path} HTTP/1.1\r\nHost: ${base.host}\r\n${extra}Connection: keep-alive\r\n\r\n`;
     s.write(ask(url.pathname) + ask(new URL('pointer', streamUrl()).pathname));
   });
   s.on('error', () => fail('slow-reader'));

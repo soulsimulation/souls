@@ -37,4 +37,4 @@ Honest limits:
   placed on slopes or steps. Supported terrain is the ordinary walkable ground a humanoid uses.
 - Seats, prone poses, swimming, rides, mounting, passengers, paired contact acts and running gaits are refused.
 - The shared core preset `centaur` is built lazily from this source and pinned by asset id
-  (`apps/server/src/edge/body/shared-bodies.ts`). A change to the source gives a new asset id and a new preset revision.
+  (`tools/body-authoring/admit/shared-bodies.ts`). A change to the source gives a new asset id and a new preset revision.

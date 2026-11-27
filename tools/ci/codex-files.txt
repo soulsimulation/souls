@@ -1,4 +1,6 @@
-# Files Codex owns. A pull request that is not Codex's must not change them (Gene's decision of 26 Nov; issue #5068).
+# Files Codex writes. A pull request that is not Codex's must not change them without a writer agreed on #5068.
+# From 27 Nov (Gene) main owns carrying, racks and their page and reader files; Codex keeps the shared pose files
+# below for conference, meal, party and games.
 # Checked by .github/scripts/codex-files.mjs in the ci workflow's codex-files job, so ci-ok fails on a hit.
 #
 # One glob per line, from the repository root: `*` is any run of characters inside one path segment, `**` any number
@@ -10,9 +12,4 @@
 # and names that agreement on #5068.
 
 mars/viewer/app/engine-view/{humans,posture-transition,activity-poses,take-replay}.ts
-apps/web/src/v2-engine/{bridge,takes,take-gestures,take-parts,use-v2-souls,creator-kinds}.ts
-apps/web/src/v2-engine/source/*
-v2/crates/replica/src/stream/**
-
-# Codex owns the carried-load path in this file, not the file.
-warn apps/web/src/WorldEntityLayer.ts
+apps/web/src/v2-engine/{bridge,takes,take-gestures}.ts

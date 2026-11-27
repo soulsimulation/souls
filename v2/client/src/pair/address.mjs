@@ -39,3 +39,21 @@ export async function pairAddress(text, get = fetch) {
   if (data?.world !== address.world || data.directory !== '/' || data.gateway !== `${base}/v2/ws`) throw Object.assign(new Error('world bootstrap is invalid'), { code: 'pair-world-routing' });
   return address;
 }
+
+/**
+ * The world's public name, as its own record gives it (`<origin>/w/<world>/v1/config` `worldName`, what the world page's
+ * title shows), or null when it does not answer. First day, 27 Nov: the home's guide named the world by its address key
+ * (`in eden`) while the page said "Eden 2026", and an agent could not tell whether they were one world. Plain words only.
+ */
+export async function worldNameOf(directory, world, { get = fetch, within = 3000 } = {}) {
+  try {
+    const r = await get(new URL(`w/${encodeURIComponent(world)}/v1/config`, `${new URL(directory).origin}/`).href,
+      { redirect: 'error', credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(within) });
+    if (!r.ok) return null;
+    const n = (await r.json())?.worldName;
+    const name = typeof n === 'string' ? n.replace(/[^\p{L}\p{N} '.,!&()-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+    return name || null;
+  } catch {
+    return null;
+  }
+}

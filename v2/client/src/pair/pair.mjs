@@ -26,6 +26,7 @@ import { homedir, hostname } from 'node:os';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeGuide } from '../home/guide.mjs';
+import { worldNameOf } from './address.mjs';
 import { CREDENTIALS, Refused, findHome, makeHome } from '../home/home.mjs';
 
 const SLOW_DOWN = 5;
@@ -207,10 +208,10 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (typeof got.token !== 'string' || typeof got.grant !== 'string') throw new Refused('pair-answer', 'no token in the answer');
     makeHome(home); // a new home gets its .gitignore (0.133 Q2)
     const id = localId(got.grant);
-    const history = await advertisedHistory(advert ?? advertOf(directory, world));
+    const [history, worldName] = await Promise.all([advertisedHistory(advert ?? advertOf(directory, world)), worldNameOf(directory, world)]);
     const configFile = join(home, 'config.json');
     const config = readJson(configFile);
-    config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}) } };
+    config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}), ...(worldName ? { name: worldName } : {}) } };
     // The Soul's name, which its daemon's first join carries (it is born named) and `list` shows.
     if (name) config.souls = { ...config.souls, [id]: { ...config.souls?.[id], id, world, name } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');

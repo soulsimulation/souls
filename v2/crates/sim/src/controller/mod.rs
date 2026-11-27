@@ -34,6 +34,11 @@
 //! - **The world's own carry** ([`Controller::carry`], T9c #3127): the world carries a body by its own rule, with no
 //!   driver: N10's walk-out to the nearest legal point, at the body's speed, collision off. It is a [`Track`] with no
 //!   link, stepped like a crossing.
+//! - **Its ground** (#3225). Each body stands on dry ground, wading ground or water (`crate::gaits::Ground`); the
+//!   step's surfaces are chosen by it ([`Controller::step_on_selected`]), so a body on one ground never walks onto
+//!   another. Only a crossing changes it: a carry lands on dry ground unless the world named the ground it lands on
+//!   ([`Controller::lands_on`], a shore). Off dry ground, the velocity asked is cut to that ground's gait
+//!   (`crate::gaits::WADE`, `crate::gaits::SWIM`), whatever drives it.
 //! - **Standing still is not stepped.** A body with no velocity asked, none of its own and no track is left as it is:
 //!   the mover would leave it so.
 //!
@@ -42,6 +47,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use crate::gaits::Ground;
 use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
@@ -416,6 +422,9 @@ struct Slot {
     /// Ticks its carry has stood at the last point of its track, held while another body stands where it lands (#4215).
     landing: u32,
     voice: Voice,
+    /// The ground it stands on (#3225), and the one its carry lands it on when the world named it.
+    ground: Ground,
+    lands: Option<Ground>,
 }
 
 /// Immutable admission basis. Resource claims, input and crossing state are checked again before a change.
@@ -452,6 +461,8 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// The input log is not kept ([`Controller::forget_log`]).
+    unlogged: bool,
     /// Where each body not being carried across a link stands, kept as the bodies move: "who is near" (N16). A body
     /// the world carries by its own rule (N10's walk-out) stays on its node, and in the index.
     near: Index,
@@ -619,6 +630,14 @@ impl Controller {
         Controller::default()
     }
 
+    /// Keeps no input log from now on (#2803): [`Controller::log`] stays empty. A served world keeps its inputs in its
+    /// own log (K12) and never reads this one, which would otherwise grow with every changed input for the world's
+    /// life; the tests and tools that read it keep it.
+    pub fn forget_log(&mut self) {
+        self.unlogged = true;
+        self.log = Vec::new();
+    }
+
     /// No bodies yet, kept in `near` (N16: `Index::fixed()` turns splitting off).
     pub fn with_index(near: Index) -> Controller {
         Controller {
@@ -651,6 +670,8 @@ impl Controller {
                 track: None,
                 landing: 0,
                 voice: Voice::default(),
+                ground: Ground::Dry,
+                lands: None,
             },
         );
         Ok(())
@@ -890,6 +911,7 @@ impl Controller {
         self.woken.remove(&body);
         if let Some(s) = self.bodies.get_mut(&body) {
             s.moved = placed;
+            s.ground = Ground::Dry;
         }
         Ok(h)
     }
@@ -1017,6 +1039,32 @@ impl Controller {
                 && crate::walk::node_of(&s.moved) == track.to
                 && d(p.x, at.x) + d(p.z, at.z) < i128::from(room) * i128::from(room)
         })
+    }
+
+    /// The ground the carry under way lands `body` on (#3225: a shore crossing's far ground); without it, dry.
+    /// `crossing-not-under-way` when it is not carried.
+    pub fn lands_on(&mut self, body: Id, ground: Ground) -> R<()> {
+        let s = self.slot(body)?;
+        if s.track.is_none() {
+            return refuse("crossing-not-under-way", replica::world_model::show(body));
+        }
+        s.lands = Some(ground);
+        Ok(())
+    }
+
+    /// The ground `body` stands on (#3225); dry for a body it does not hold.
+    pub fn ground(&self, body: Id) -> Ground {
+        self.get(body).map_or(Ground::Dry, |s| s.ground)
+    }
+
+    /// Every body off dry ground, with its ground (#3225).
+    pub fn grounds(&self) -> BTreeMap<Id, Ground> {
+        self.bodies
+            .iter()
+            .chain(&self.rested)
+            .filter(|(_, s)| s.ground != Ground::Dry)
+            .map(|(id, s)| (*id, s.ground))
+            .collect()
     }
 
     /// The link `body` is being carried across, if any.
@@ -1202,13 +1250,14 @@ impl Controller {
         at: Micros,
         threads: usize,
     ) -> Stepped {
-        self.step_on_selected(|_, _| Some(surfaces), dt, at, threads)
+        self.step_on_selected(|_, _, _| Some(surfaces), dt, at, threads)
     }
 
-    /// The same controller step, selecting each body's exact admitted-class surface bank.
+    /// The same controller step, selecting each body's exact admitted-class surface bank for the ground it stands on
+    /// (#3225), or, while carried, the ground its carry lands it on.
     pub fn step_on_selected<'a>(
         &mut self,
-        surfaces: impl Fn(Id, Size) -> Option<&'a BTreeMap<Id, Surface>> + Sync,
+        surfaces: impl Fn(Id, Size, Ground) -> Option<&'a BTreeMap<Id, Surface>> + Sync,
         dt: Micros,
         at: Micros,
         threads: usize,
@@ -1223,6 +1272,9 @@ impl Controller {
                 }
                 s.log(id, at, &mut self.log);
             }
+        }
+        if self.unlogged {
+            self.log.clear();
         }
         // A carry about to land waits at its track's end while another body stands where it would land, for at most
         // LANDING_WAIT ticks (#4215): never one body set down on another while it can be helped, never held for good.
@@ -1267,7 +1319,7 @@ impl Controller {
         let step_run = |run: &mut [(Id, &mut Slot)]| {
             let mut o = Gave::default();
             for (id, s) in run.iter_mut() {
-                match surfaces(*id, s.build.size) {
+                match surfaces(*id, s.build.size, s.stands_on()) {
                     Some(_) if hold.contains(id) => {
                         // Held at its track's end: it stands there, still carried, out of "who is near".
                         s.speak(*id, at, &mut o.said);
@@ -1300,11 +1352,15 @@ impl Controller {
         let mut put = Vec::with_capacity(self.bodies.len());
         out.samples
             .reserve(gave.iter().map(|g| g.samples.len()).sum::<usize>());
-        self.log
-            .reserve(gave.iter().map(|g| g.log.len()).sum::<usize>());
+        if !self.unlogged {
+            self.log
+                .reserve(gave.iter().map(|g| g.log.len()).sum::<usize>());
+        }
         for g in gave {
             out.said.extend(g.said);
-            self.log.extend(g.log);
+            if !self.unlogged {
+                self.log.extend(g.log);
+            }
             out.samples.extend(g.samples);
             out.refused.extend(g.refused);
             put.extend(g.put);
@@ -1318,6 +1374,22 @@ impl Controller {
         );
         out
     }
+}
+
+/// `v` cut to the gait of `ground` across the ground (x and z, #3225): as asked on dry ground, else no faster than
+/// wading's or swimming's speed.
+fn gait_cut(v: Vec3, ground: Ground) -> Vec3 {
+    let most = match ground {
+        Ground::Dry => return v,
+        Ground::Wading => crate::gaits::WADE.speed,
+        Ground::Water => crate::gaits::SWIM.speed,
+    };
+    let len = (i128::from(v.x).pow(2) + i128::from(v.z).pow(2)).isqrt();
+    if len <= i128::from(most) {
+        return v;
+    }
+    let cut = |c: i64| (i128::from(c) * i128::from(most) / len) as i64;
+    Vec3::new(cut(v.x), v.y, cut(v.z))
 }
 
 /// A carry waits at its track's end while another body stands within this of where it lands, µm: two personal radii
@@ -1340,6 +1412,14 @@ struct Gave {
 }
 
 impl Slot {
+    /// The ground whose surfaces it steps on: its own, or, while carried, the one its carry lands it on.
+    fn stands_on(&self) -> Ground {
+        match self.track {
+            Some(_) => self.lands.unwrap_or(Ground::Dry),
+            None => self.ground,
+        }
+    }
+
     /// One body's step on its surface, as [`Controller::step`] gives it; whether it takes its new place in "who is
     /// near".
     fn step_one(
@@ -1357,6 +1437,7 @@ impl Slot {
             match t.advance(&mut self.moved, surfaces, dt) {
                 Ok(true) => {
                     self.track = None;
+                    self.ground = self.lands.take().unwrap_or(Ground::Dry);
                     self.input.velocity = Vec3::ZERO;
                     // A changed input: logged at the next step (B2's `touched`).
                     self.touched = true;
@@ -1364,6 +1445,7 @@ impl Slot {
                 Ok(false) => {}
                 Err(r) => {
                     self.track = None;
+                    self.lands = None;
                     o.refused.push((id, r));
                 }
             }
@@ -1394,7 +1476,7 @@ impl Slot {
             return false;
         };
         let input = ControllerInput {
-            velocity: self.input.velocity,
+            velocity: gait_cut(self.input.velocity, self.ground),
             mode: self.input.mode,
         };
         match on.step(&mut self.moved, input, dt, at) {
@@ -1522,7 +1604,7 @@ mod class_tests {
         let mut previous_x = 0;
         for at in [50_000, 100_000] {
             let out = c.step_on_selected(
-                |_, size| (size == Size::Large).then_some(&floors),
+                |_, size, _| (size == Size::Large).then_some(&floors),
                 50_000,
                 at,
                 1,

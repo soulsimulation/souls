@@ -1,0 +1,118 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:shrug_and_nod",
+  "owner": "thing",
+  "links": {
+    "one": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "other": {
+      "n": 2,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_one": {
+      "role": "stand",
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ],
+      "yaw_mdeg": 90000
+    },
+    "by_other": {
+      "role": "stand",
+      "at_mm": [
+        1000,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    }
+  },
+  "slots": {
+    "one": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ],
+      "stand": "by_one"
+    },
+    "other": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1000,
+        0,
+        0
+      ],
+      "stand": "by_other"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      100,
+      1600
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "one": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "one"
+        ],
+        "within_mm": 3000
+      },
+      "move": "shrug",
+      "on_beat": true
+    },
+    "other": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "other"
+        ],
+        "within_mm": 3000
+      },
+      "move": "nod",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "One Soul shrugs while an accepted partner nods.",
+    "activity": "activity",
+    "shrug_and_nod": "shrug and nod",
+    "rules": "Offer a shrug and nod exchange to a nearby Soul. They may accept or decline. Accepted members repeat their own gestures: the first shrugs and the other nods. Nearby standing members on the same floor are asked to walk to separate standing places through ordinary movement admission. Either person may leave."
+  },
+  "card": {
+    "text": "card",
+    "category": "activity",
+    "synonyms": [
+      "shrug_and_nod"
+    ]
+  }
+}
