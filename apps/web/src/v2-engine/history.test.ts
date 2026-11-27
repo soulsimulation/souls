@@ -172,6 +172,34 @@ test('a world made through New world (its clock from 0): every history file the 
   assert.ok(posts.length && posts.every((m) => m.now === to * TICK_US), JSON.stringify(posts.map((m) => m.now)));
 });
 
+test('a world busy on day 0 and still for three days: Back 1 min and Pause in day 3 walk back over the days with no index', async () => {
+  // the archiver wrote day 0's index and day 1's, empty, ahead of it (v2/docs/archive.md); days 2 and 3 have none
+  const DAY = 86_400_000_000, first = 60_000_000, last = 660_000_000;
+  const indexes = new Map<number, DayIndex>([[0, [[first, 'a', new Uint8Array(32)], [last, 'b', new Uint8Array(32)]]], [1, []]]);
+  const served = () => {
+    const asked = new Set<number>();
+    return { asked, get: async (day: number) => { asked.add(day); return indexes.get(day) ?? null; } };
+  };
+  let now = 3 * DAY + 30_000_000;
+  for (const at of [now - 60_000_000, now]) { // Back 1 min (day 2) and Pause (day 3), 30 s into day 3
+    const o = served(), got = await walk(at, now, first, o.get);
+    assert.equal(got?.key, 'b', `at ${at} µs: day 0's last bundle`);
+    assert.equal(await got!.later(), null, 'nothing written since');
+    assert.deepEqual([...o.asked].sort(), [0, 1, 2, 3], 'from now\'s day back to the world\'s first, none after or before');
+  }
+  // the world wakes on day 4: a replay from day 3 goes on to day 4's first bundle, over the days with no index
+  indexes.set(4, [[4 * DAY + 10_000_000, 'c', new Uint8Array(32)]]);
+  now = 4 * DAY + 30_000_000;
+  const back = await walk(now - 60_000_000, now, first, served().get);
+  assert.equal(back?.key, 'b');
+  assert.equal(await back!.later(), 4 * DAY + 10_000_000);
+  // the world's first moment not known: no day before day 0
+  const o = served();
+  indexes.clear();
+  assert.equal(await walk(2 * DAY, 2 * DAY, undefined, o.get), null);
+  assert.deepEqual([...o.asked].sort(), [0, 1, 2]);
+});
+
 test('K3: the first moment asks only for years that can hold it: back past a year that has its day 0, at most two when there are none', async () => {
   const { encode } = await import('cborg');
   const DAY = 86_400_000_000, now = 56 * 365 * DAY + 20 * DAY;

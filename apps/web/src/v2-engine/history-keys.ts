@@ -22,22 +22,31 @@ export const yearCountsKey = (year: number) => `history/everyone/counts/year/${p
 /** A day's bundle index, `[[start µs, key, SHA-256], ...]`. */
 export type DayIndex = [number, string, Uint8Array][];
 
-/** V4's walk, the worker's seek: the last bundle that starts at or before `at`, back through earlier days to a year, and
- *  where the bundle after it starts (`later`, null when none is written yet). `nowUs` is the world's time now, as the
- *  page has it: no index is asked of a day after its day, since none is written yet; nor of a day before `floor`'s (the
- *  world's first moment), so a young world's walk asks no empty day. World time is the world's own, from its start
+/** V4's walk, the worker's seek: the last bundle that starts at or before `at`, back over days with no bundle before it
+ *  or no index at all to the newest day that has one, and where the bundle after it starts (`later`: on over the days
+ *  after, to now's, null when none is written yet). The archiver writes a day's index with its first bundle and the next
+ *  day's, empty, ahead of it (v2/docs/archive.md), so the day after a day with a bundle has one from its first minute;
+ *  a day after a still day has none until its first bundle, and the walk asks for it and goes on past it. Bounded by the
+ *  world's first day (`floor`, its first moment, the page's), else a year back, never before day 0; and by now (`nowUs`,
+ *  the world's time as the page has it): no day after now's is asked for. World time is the world's own, from its start
  *  (v2/docs/time.md rule 1), never the wall's: a world made through New world is in its day 0 whatever the date (only an
  *  imported world's clock reads as the wall's), so the wall's day is one its export will not reach for years. */
 export async function walk(at: number, nowUs: number, floor: number | undefined, dayIndex: (day: number) => Promise<DayIndex | null>):
   Promise<{ day: number; key: string; sha: Uint8Array; later: () => Promise<number | null> } | null> {
-  const now = Math.floor(nowUs / DAY_US), lowest = Math.max(Math.floor(at / DAY_US) - 365, floor === undefined ? -Infinity : Math.floor(floor / DAY_US));
+  const now = Math.floor(nowUs / DAY_US);
+  const lowest = Math.max(Math.floor(at / DAY_US) - 365, 0, floor === undefined ? 0 : Math.floor(floor / DAY_US));
   for (let day = Math.min(Math.floor(at / DAY_US), now); day >= lowest; day--) {
     const ix = await dayIndex(day);
     let i = ix ? ix.length - 1 : -1;
     while (i >= 0 && ix![i][0] > at) i--;
     if (!ix || i < 0) continue;
     const [, key, sha] = ix[i];
-    return { day, key, sha, later: async () => ix[i + 1]?.[0] ?? (day < now ? (await dayIndex(day + 1))?.[0]?.[0] : null) ?? null };
+    const later = async () => {
+      if (ix[i + 1]) return ix[i + 1][0];
+      for (let d = day + 1; d <= now; d++) { const first = (await dayIndex(d))?.[0]; if (first) return first[0]; }
+      return null;
+    };
+    return { day, key, sha, later };
   }
   return null;
 }

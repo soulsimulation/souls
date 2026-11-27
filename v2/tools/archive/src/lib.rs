@@ -12,8 +12,10 @@
 //!    rewritten as its day gains objects; the head only when a new day begins.
 //! 3. **Bundles** ([`Bundler`], formats in `replica::history`) are the public view at the history level, one
 //!    minute of world time each, with a public snapshot at each start, and a **day index** per day, written when the
-//!    day closes and at shutdown, and the next day's, empty, written ahead with it, so a day that has begun always has
-//!    an index. A window with no public record writes no bundle: **a still world writes nothing** more.
+//!    day closes and at shutdown, and the next day's, empty, written ahead with it, so the day after a day with a
+//!    bundle has an index from its first minute. A window with no public record writes no bundle: **a still world
+//!    writes nothing** more, and a day after a still day has no index until its first bundle ([`seek`] walks back
+//!    over it).
 //!    A bundle is stored deflated ([`bundle_stored`], #3284); its day index names the SHA-256 of its bytes before.
 //! 4. **No words** (T8): records hold text by reference, and so do objects and bundles; [`words`] scans for them.
 //! 5. **Restore** ([`fetch`], [`restore`]) reads the head, the manifests and the objects, checks each against its
@@ -1857,12 +1859,13 @@ pub struct Seeked {
 }
 
 /// The public state at world time `at` (µs), from the store alone and cold: the day's index, then the bundle that
-/// holds `at` (the last that starts at or before it), checked by its hash and applied up to `at`. A day with none
-/// before `at` sends it to the day before, back to a year.
+/// holds `at` (the last that starts at or before it), checked by its hash and applied up to `at`. A day with no index
+/// (after a still day) or none before `at` sends it to the day before, back to the newest day that has one: a year at
+/// most, and never before day 0, the world's first (world time is from its start).
 pub fn seek<S: Store>(store: &S, prefix: &str, header: &Header, at: i64) -> R<Seeked> {
     let (mut bytes, mut requests, mut keys) = (0u64, 0u32, Vec::new());
     let day = day_of(at);
-    for d in (day - replica::history::events::YEAR_DAYS..=day).rev() {
+    for d in ((day - replica::history::events::YEAR_DAYS).max(0)..=day).rev() {
         requests += 1;
         let k = format!("{prefix}bundles/{d:08}/index");
         let Some(o) = store.get(&k)? else {

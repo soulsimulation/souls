@@ -78,7 +78,8 @@ function dayIndex(base: URL, day: number): Promise<DayIndex | null> {
 
 async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
-  // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
+  // V4's walk (history-keys.ts): back over days with no index (a still world's) to the newest that has one, asking for
+  // no day after the world's own today (`now`, the page's world time) nor before its first (`floor`)
   const found = await walk(at, now, floor, (day) => dayIndex(base, day));
   if (!found) throw new Error(`no history in the year before ${at} µs`);
   const stored = await get(new URL(found.key, base));

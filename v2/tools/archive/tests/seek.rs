@@ -100,8 +100,8 @@ fn a_seek_gives_the_public_state_at_its_moment() {
 /// 27 Nov (Eden on soul.game at 00:24 UTC, 404 for the new day's index): a day's index was first written with the day's
 /// first bundle, which a still world writes late or never, so Pause and Back 1 min in a day's first minute asked for an
 /// index not there (the seek's walk, and the next bundle's lookup after the day before's last). The next day's index is
-/// written, empty, with the day before's: in the first minute of a new day every index those ask for is there, still
-/// world or busy, and once the day's first bundle closes its index names it over the empty one.
+/// written, empty, with the day before's: in the first minute of the day after a day with a bundle every index those
+/// ask for is there, still world or busy, and once the day's first bundle closes its index names it over the empty one.
 #[test]
 fn the_first_minute_of_a_new_day_asks_no_index_that_is_not_there() {
     const DAY: i64 = 86_400_000_000;
@@ -139,6 +139,42 @@ fn the_first_minute_of_a_new_day_asks_no_index_that_is_not_there() {
                 "{next} s of day 1, at {at} µs"
             );
         }
+    }
+}
+
+/// A world busy on day 0 and then still for three days: day 1 has an index (written ahead, empty), days 2 and 3 none.
+/// Back 1 min and Pause 30 s into day 3, and a moment of day 2, walk back over the days with no index to day 0's last
+/// bundle and give the state it left the world in; no day before day 0 is asked for.
+#[test]
+fn a_world_still_for_days_seeks_back_over_the_days_with_no_index() {
+    const DAY: i64 = 86_400_000_000;
+    let (store, header, log, start) = recorded_with(7, 0);
+    let has = |day: i64| {
+        store
+            .get(&format!("{PREFIX}bundles/{day:08}/index"))
+            .expect("get")
+            .is_some()
+    };
+    assert_eq!([0, 1, 2, 3].map(has), [true, true, false, false]);
+    for at in [
+        3 * DAY - 30_000_000,
+        3 * DAY + 30_000_000,
+        2 * DAY + DAY / 2,
+    ] {
+        let got = seek(&store, PREFIX, &header, at).expect("seeks over the still days");
+        assert_eq!(
+            public_snapshot(&got.state, &Redactions::default()),
+            truth(&header, &log, &start, at),
+            "at {at} µs"
+        );
+        // each day from at's back to day 0, then the bundle; of them day 1's empty index, day 0's and the bundle read
+        assert_eq!(
+            got.requests as i64,
+            at / DAY + 2,
+            "at {at} µs: {:?}",
+            got.keys
+        );
+        assert_eq!(got.keys.len(), 3, "at {at} µs: {:?}", got.keys);
     }
 }
 
