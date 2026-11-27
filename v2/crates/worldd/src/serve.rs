@@ -4525,7 +4525,7 @@ fn serve(args: &[String]) -> R<()> {
                 // R12: a refused recovery (the store out of reach or refusing, as a read past its cap did on 23 Nov)
                 // never ends the world, which systemd would only start again into the same refusal. It stays up,
                 // degraded: no public pointer, so no viewers; `health.json` names the fault; tried again with back-off
-                // until the store answers. Records wait in `stream_rx` meanwhile.
+                // until the store answers. Records wait in `stream_rx` meanwhile, and past its window in the log.
                 measures::STREAM.recovering();
                 let mut tries = 0u64;
                 let mut writer = loop {
@@ -5774,6 +5774,7 @@ mod tests {
             first: 0,
             end: 30,
             at: None,
+            tail: None,
         };
         let e = disk.each_from(0, &mut |_, _| Ok(true)).unwrap_err();
         assert_eq!(e.name, "log-corrupt", "{e}");
@@ -5930,7 +5931,11 @@ mod tests {
         }
         world.join().unwrap();
         assert!(!stream_takes(
-            &rx, &handover, &mut reader, &records, &mut next
+            &rx,
+            &handover,
+            &mut reader,
+            &records,
+            &mut next
         ));
         let h = handover.lock();
         assert_eq!((h.queued, h.queued_bytes, h.left), (0, 0, None));

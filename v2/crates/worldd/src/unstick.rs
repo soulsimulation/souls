@@ -256,7 +256,12 @@ mod tests {
         let names: Vec<String> = all
             .iter()
             .take(3)
-            .map(|e| e.events.as_ref().expect("an event")[0].name.as_str().to_owned())
+            .map(|e| {
+                e.events.as_ref().expect("an event")[0]
+                    .name
+                    .as_str()
+                    .to_owned()
+            })
             .collect();
         assert_eq!(
             names,
