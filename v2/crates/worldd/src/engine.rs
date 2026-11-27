@@ -196,6 +196,16 @@ pub struct Engine {
     led: BTreeMap<Id, Led>,
     /// Why each led carry broke off (its load set down by the world), until [`Engine::led_over`] reads it.
     broke: BTreeMap<Id, &'static str>,
+    /// Acts held while a carry's node is on a lift's or a set-down's track (#5067), by the carry: a set-down or a put
+    /// asked during its lift, the last member's leave during its set-down (its node holds the load until it rests).
+    /// Each runs again when the track ends ([`Engine::reruns`]), answered then.
+    held: BTreeMap<Id, Vec<Act>>,
+    /// Held acts whose track has ended, to be run again.
+    rerun: Vec<Act>,
+    /// Each crew's set-down on its way down, by the carry: its intent, answered when the load rests (#5067).
+    answering: BTreeMap<Id, Id>,
+    /// Set-downs whose load rests (or whose carry is gone), to be answered with their receipts.
+    answered: Vec<Id>,
 }
 
 /// A lifted carry's front walking (moving-group rule 3): its body, its walk, and where that walk turns the crew: the
@@ -319,24 +329,38 @@ fn regrip(
     activities.carry_grips(tree, activity, &h, by)
 }
 
+/// `activity`'s carriers let go of their grips as its load comes to rest (#5067): at once for a load set down at once,
+/// at the end of its set-down's track otherwise. A failure is said and changes nothing.
+fn let_go(activities: &mut Activities, tree: &mut Tree, activity: Id, by: (Micros, Actor, Cause)) {
+    if let Err(r) = regrip(activities, tree, activity, grips::RELEASED, None, by) {
+        eprintln!(
+            "worldd: the grips of {} were not let go: {r}",
+            show(activity)
+        );
+    }
+}
+
 /// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
-/// (`souls:carry-set-down`, 0.135 C3); its entries are stamped with `by`'s intent and Soul, or the world's, and go in
-/// the activities' stream, so every entry leaves the engine in the order it was written.
+/// (`souls:carry-set-down`, 0.135 C3): on a set-down's track (#5067, [`Carry::release`]), so the caller keeps the carry
+/// until it rests ([`Carry::lowering`]); a lift's track is ended by name first (`souls:lift-cancelled`) and the load
+/// goes back along it to where it lay. A carry already on its way down keeps to its track and nothing is said. Its
+/// entries are stamped with `by`'s intent and Soul, or the world's, and go in the activities' stream, so every entry
+/// leaves the engine in the order it was written.
 #[allow(clippy::too_many_arguments)]
 fn break_off(
     carry: &mut Carry,
     activities: &mut Activities,
-    mint: &mut Minter,
     tree: &mut Tree,
     now: Micros,
-    here: Option<(Vec3, replica::pose::Quat)>,
+    here: Option<((Vec3, replica::pose::Quat), Option<i64>)>,
     why: &'static str,
     by: Option<(Id, Id)>,
 ) -> R<()> {
-    let transfer = mint
-        .mint()
-        .map_err(|e| refusal("id-counter-exhausted", e.to_string()))?;
-    carry.set_down_here(tree, now, carry.ground, here, transfer)?;
+    if carry.lowering() {
+        return Ok(());
+    }
+    let lift = carry.hoist.filter(|_| carry.lifting());
+    let track = carry.release(tree, now, carry.ground, here, why)?;
     let mut effects: Vec<Effect> = carry.log.parts.drain(..).flatten().collect();
     for e in &mut effects {
         if let Some((intent, soul)) = by {
@@ -350,14 +374,28 @@ fn break_off(
         Some((intent, soul)) => (Actor::Soul(soul), Cause::Intent(intent)),
         None => (Actor::World, Cause::World),
     };
-    activities.carry_set_down(tree, carry.activity, carry.board, why, (now, actor, cause))?;
-    // #5067: its carriers let go of their grips.
-    let by = (now, actor, cause);
-    if let Err(r) = regrip(activities, tree, carry.activity, grips::RELEASED, None, by) {
-        eprintln!(
-            "worldd: the grips of {} were not let go: {r}",
-            show(carry.activity)
-        );
+    let (a, load) = (carry.activity, carry.board);
+    if let Some(h) = lift {
+        let w = (now, actor, cause);
+        activities.carry_track(
+            tree,
+            a,
+            load,
+            "souls:lift-cancelled",
+            (h.t0, now),
+            Some(why),
+            w,
+        )?;
+    }
+    if let Some(t) = track {
+        let w = (now, actor, cause);
+        activities.carry_track(tree, a, load, "souls:set-down", t, Some(why), w)?;
+    }
+    activities.carry_set_down(tree, a, load, why, (now, actor, cause))?;
+    // #5067: its carriers let go of their grips when the load rests: now when it is set down at once, else at the end
+    // of its set-down's track ([`let_go`]).
+    if !carry.lowering() {
+        let_go(activities, tree, a, (now, actor, cause));
     }
     Ok(())
 }
@@ -592,12 +630,42 @@ impl Engine {
             entries: Json::Null,
             led: BTreeMap::new(),
             broke: BTreeMap::new(),
+            held: BTreeMap::new(),
+            rerun: Vec::new(),
+            answering: BTreeMap::new(),
+            answered: Vec::new(),
         }
     }
 
     /// Whether act `id` waits for its way (a lift, [`WayAsk`]): it is answered when the way comes back.
     pub fn waits(&self, id: Id) -> bool {
         self.waiting.contains_key(&id)
+            || self.held.values().flatten().any(|a| a.id == id)
+            || self.answering.values().any(|i| *i == id)
+    }
+
+    /// The crews' set-downs whose load has come to rest since the last call (#5067), by intent: each answered now.
+    pub fn answered(&mut self) -> Vec<Id> {
+        std::mem::take(&mut self.answered)
+    }
+
+    /// The acts held while a carry's node was on a lift's or a set-down's track that has ended since the last call
+    /// (#5067), in order: each to be run again and answered then.
+    pub fn reruns(&mut self) -> Vec<Act> {
+        std::mem::take(&mut self.rerun)
+    }
+
+    /// Holds act `a` until carry `activity`'s track ends (#5067).
+    fn hold(&mut self, activity: Id, a: &Act) {
+        self.held.entry(activity).or_default().push(a.clone());
+    }
+
+    /// Carry `activity`'s track has ended, or the carry is gone: its held acts run again, and its set-down is answered.
+    fn unhold(&mut self, activity: Id) {
+        if let Some(acts) = self.held.remove(&activity) {
+            self.rerun.extend(acts);
+        }
+        self.answered.extend(self.answering.remove(&activity));
     }
 
     /// The lifts waiting for their ways, by intent.
@@ -944,8 +1012,18 @@ impl Engine {
                 {
                     return Err(refusal("crew.setting-in", show(activity)));
                 }
-                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is. A side carrier's
-                // with the load's crew left does not (C5).
+                // #5067: the last member's leave waits while its carry's load is on its way down: the node holds it.
+                if self.carries.get(&activity).is_some_and(Carry::lowering)
+                    && self
+                        .activities
+                        .members(activity)
+                        .is_some_and(|m| m.len() == 1 && m[0].body == a.body)
+                {
+                    self.hold(activity, a);
+                    return Ok(());
+                }
+                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is (a lift's track
+                // ended by name and gone back down, #5067). A side carrier's with the load's crew left does not (C5).
                 self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
                 let e = &mut self.activities;
                 e.next = tree.next();
@@ -962,6 +1040,7 @@ impl Engine {
                 // A carry ends with its activity: what it carried stays where the last sample put it.
                 if self.activities.members(activity).is_none() {
                     self.carries.remove(&activity);
+                    self.unhold(activity);
                     if let Some(s) = self.asm.as_mut() {
                         s.ended(activity);
                     }
@@ -1022,6 +1101,14 @@ impl Engine {
                         .carries
                         .get(&activity)
                         .ok_or_else(|| refusal("part.not-held", show(activity)))?;
+                    // #5067: a put waits for the lift's track to end; none while the load goes down.
+                    if carry.lifting() {
+                        self.hold(activity, a);
+                        return Ok(());
+                    }
+                    if carry.lowering() {
+                        return Err(refusal("carry-setting-down", show(activity)));
+                    }
                     let from = carry
                         .track
                         .last()
@@ -1177,6 +1264,14 @@ impl Engine {
                     ));
                 }
                 let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
+                // #5067: a lift or a set-down asked while the load is on its way down waits until it rests; a set-down
+                // asked during the lift waits for the lift's end.
+                if let Some(c) = self.carries.get(&activity)
+                    && (c.lowering() || (a.verb == Verb::SetDown && c.lifting()))
+                {
+                    self.hold(activity, a);
+                    return Ok(());
+                }
                 let transfer = self
                     .mint
                     .mint()
@@ -1205,11 +1300,15 @@ impl Engine {
                         })?;
                     let pose = |e| refusal("carry-pose", format!("{e:?}"));
                     // Its middle, wherever its origin is (a laid-flat upright's is at its end).
-                    let (middle, axis) = match (node.parent(), node.place()) {
+                    let (middle, axis, lay) = match (node.parent(), node.place()) {
                         (Some(p), Some(at)) if p == ground => {
                             let m = at.orientation.rotate(load.middle).map_err(pose)?;
                             let middle = Vec3::new(at.position.x + m.x, 0, at.position.z + m.z);
-                            (middle, load.lies_along(at.orientation)?)
+                            (
+                                middle,
+                                load.lies_along(at.orientation)?,
+                                (at.position, at.orientation),
+                            )
                         }
                         _ => {
                             return Err(refusal(
@@ -1284,51 +1383,55 @@ impl Engine {
                         self.rules.clone(),
                     );
                     carry.load = load;
-                    carry.lift(&mut tree, now, f, k, transfer)?;
+                    // #5067: the lift is a track from where the load lies up into its carriers' hands, said at once.
+                    let times = carry.lift(&mut tree, now, f, k, lay, transfer)?;
                     carry.sides = sides
                         .iter()
                         .map(|(b, at)| (*b, Carry::place_of(f, k, *at)))
                         .collect();
-                    // #5067: who holds which grip, said with the lift.
                     self.take(&mut carry, Some((a.id, a.soul)));
+                    self.activities.next = tree.next();
                     let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
+                    self.activities.carry_track(
+                        &mut tree,
+                        activity,
+                        board,
+                        "souls:lift",
+                        times,
+                        None,
+                        by,
+                    )?;
+                    // #5067: who holds which grip, said with the lift.
                     self.grip(&mut tree, activity, board, &carry.sides, by);
                     // 0.135 R2: a way that turns the load is kept on the carry and said to its carriers after the lift.
                     if let Some(way) = way {
-                        self.take(&mut carry, Some((a.id, a.soul)));
-                        self.activities.next = tree.next();
-                        let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
                         self.activities
                             .carry_way(&mut tree, activity, board, &way, by)?;
                         carry.way = way;
                     }
                     self.carries.insert(activity, carry);
                 } else {
-                    let mut carry = self
+                    let carry = self
                         .carries
-                        .remove(&activity)
+                        .get_mut(&activity)
                         .ok_or_else(|| refusal("not-carried", show(activity)))?;
-                    let done = carry.set_down(&mut tree, now, ground, f, k, transfer);
-                    self.take(&mut carry, Some((a.id, a.soul)));
-                    if let Err(r) = done {
-                        self.carries.insert(activity, carry);
-                        return Err(r);
-                    }
-                    // #5067: its carriers let go of their grips.
-                    let by = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
-                    if let Err(r) = regrip(
-                        &mut self.activities,
+                    let by = (a.id, a.soul);
+                    // A set-down's track straight down to rest, said at once; the load leaves the slot at its end.
+                    let times = carry.set_down(&tree, now, ground, f, k, Some(by), transfer)?;
+                    let board = carry.board;
+                    // Answered when the load rests.
+                    self.answering.insert(activity, a.id);
+                    self.activities.next = tree.next();
+                    let w = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
+                    self.activities.carry_track(
                         &mut tree,
                         activity,
-                        grips::RELEASED,
+                        board,
+                        "souls:set-down",
+                        times,
                         None,
-                        by,
-                    ) {
-                        eprintln!(
-                            "worldd: the grips of {} were not let go: {r}",
-                            show(activity)
-                        );
-                    }
+                        w,
+                    )?;
                     // A crew's part set down is no longer its own (0.135 A2).
                     if let Some(s) = self.asm.as_mut() {
                         s.ended(activity);
@@ -1419,16 +1522,52 @@ impl Engine {
             }
             return Ok(());
         }
-        break_off(
+        if let Err(r) = break_off(
             &mut carry,
             &mut self.activities,
-            &mut self.mint,
             tree,
             now,
             None,
             "souls:partner-left",
             Some(by),
-        )?;
+        ) {
+            self.unhold(activity);
+            return Err(r);
+        }
+        // #5067: the load goes down on its track, its node kept until it rests. The last member going (a retire: a
+        // leave of the last waits) takes the node with it, so its load is set down at once.
+        let last = self
+            .activities
+            .members(activity)
+            .is_some_and(|m| m.len() == 1);
+        if last && carry.lowering() {
+            let t0 = carry.hoist.map_or(now, |h| h.t0);
+            if let Some(h) = carry.hoist.as_mut() {
+                h.t1 = now;
+            }
+            let mint = &mut self.mint;
+            carry.lower(tree, now, || {
+                mint.mint()
+                    .map_err(|e| refusal("id-counter-exhausted", e.to_string()))
+            })?;
+            let effects: Vec<Effect> = carry.log.parts.drain(..).flatten().collect();
+            self.activities.stream.extend(effects);
+            self.activities.next = tree.next();
+            let w = (now, Actor::Soul(by.1), Cause::Intent(by.0));
+            self.activities.carry_track(
+                tree,
+                activity,
+                carry.board,
+                "souls:released",
+                (t0, now),
+                None,
+                w,
+            )?;
+            let_go(&mut self.activities, tree, activity, w);
+            self.unhold(activity);
+        } else if carry.lowering() {
+            self.carries.insert(activity, carry);
+        }
         // The front's own leave lets it walk on; a partner's stops the front's walk with the carry.
         if self.led.get(&activity).is_some_and(|l| l.front != body) {
             self.broke.insert(activity, "souls:partner-left");
@@ -1655,6 +1794,7 @@ impl Engine {
             self.activities.next = tr.next();
             for a in self.activities.release_gone(tr, c, now) {
                 self.carries.remove(&a);
+                self.unhold(a);
             }
         }
         // B10: an unstarted activity past its expiry that no offer or pair waits on (a proposal, or an offer a restart
@@ -1706,16 +1846,27 @@ impl Engine {
             }) {
                 carry.load = l.held_turned(held).unwrap_or(Load { turn: held, ..*l });
             }
+            // #5067: from where the node is, down a set-down's track to rest on its carriers' floor (a lift cut off
+            // by the restart left the node between the floor and carrying height).
+            let floor = self
+                .activities
+                .members(activity)
+                .unwrap_or(&[])
+                .iter()
+                .find_map(|m| stands(c, m.body).ok())
+                .map(|(_, at)| at.y);
             match break_off(
                 &mut carry,
                 &mut self.activities,
-                &mut self.mint,
                 tr,
                 now,
-                Some(here),
+                Some((here, floor)),
                 "souls:world-restarted",
                 None,
             ) {
+                Ok(()) if carry.lowering() => {
+                    self.carries.insert(activity, carry);
+                }
                 Ok(()) => {}
                 Err(r) => eprintln!(
                     "worldd: {} was not set down after the restart: {r}",
@@ -1728,7 +1879,13 @@ impl Engine {
             let mut gone = Vec::new();
             let mut apart = Vec::new();
             let mut step = Vec::new();
+            let mut lower = Vec::new();
             for (activity, carry) in &self.carries {
+                // #5067: a load on its way down keeps to its track, whoever has gone.
+                if carry.lowering() {
+                    lower.push(*activity);
+                    continue;
+                }
                 let carriers = self
                     .activities
                     .members(*activity)
@@ -1772,18 +1929,12 @@ impl Engine {
                     let Some(mut carry) = self.carries.remove(&a) else {
                         continue;
                     };
-                    match break_off(
-                        &mut carry,
-                        &mut self.activities,
-                        &mut self.mint,
-                        tr,
-                        now,
-                        None,
-                        why,
-                        None,
-                    ) {
+                    match break_off(&mut carry, &mut self.activities, tr, now, None, why, None) {
                         // A crew's part set down is no longer its own (0.135 A2).
                         Ok(()) => {
+                            if carry.lowering() {
+                                self.carries.insert(a, carry);
+                            }
                             if self.led.contains_key(&a) {
                                 self.broke.insert(a, why);
                             }
@@ -1791,7 +1942,10 @@ impl Engine {
                                 s.ended(a);
                             }
                         }
-                        Err(r) => eprintln!("worldd: a carry was not set down: {r}"),
+                        Err(r) => {
+                            eprintln!("worldd: a carry was not set down: {r}");
+                            self.unhold(a);
+                        }
                     }
                 }
             }
@@ -1834,10 +1988,33 @@ impl Engine {
                     blocked.push(activity);
                     continue;
                 }
+                let lifting = carry.hoist.filter(|_| carry.lifting());
                 let done = match self.fixed.get(&carry.ground) {
                     Some((_, _, g)) => carry.step(tr, now, f, k, g),
                     None => Err(refusal("carry-geometry", show(carry.ground))),
                 };
+                // Every entry leaves in the order it was written: the carries' samples with the words between them.
+                let (board, ended) = (carry.board, lifting.is_some() && !carry.lifting());
+                self.activities
+                    .stream
+                    .extend(carry.log.parts.drain(..).flatten());
+                if let (Some(h), true) = (lifting, ended) {
+                    // #5067: the lift's track ended, the load in its carriers' hands.
+                    self.activities.next = tr.next();
+                    let w = (now, Actor::World, Cause::World);
+                    if let Err(r) = self.activities.carry_track(
+                        tr,
+                        activity,
+                        board,
+                        "souls:lifted",
+                        (h.t0, now),
+                        None,
+                        w,
+                    ) {
+                        eprintln!("worldd: a lift's end was not said: {r}");
+                    }
+                    self.unhold(activity);
+                }
                 match done {
                     Ok(()) => {}
                     Err(r) if r.name == "carry-load-blocked" || r.name == "carry-geometry" => {
@@ -1854,7 +2031,6 @@ impl Engine {
                 match break_off(
                     &mut carry,
                     &mut self.activities,
-                    &mut self.mint,
                     tr,
                     now,
                     None,
@@ -1863,6 +2039,9 @@ impl Engine {
                 ) {
                     // A crew's part set down is no longer its own (0.135 A2).
                     Ok(()) => {
+                        if carry.lowering() {
+                            self.carries.insert(a, carry);
+                        }
                         if self.led.contains_key(&a) {
                             self.broke.insert(a, "souls:carry-blocked");
                         }
@@ -1870,7 +2049,79 @@ impl Engine {
                             s.ended(a);
                         }
                     }
-                    Err(r) => eprintln!("worldd: a carry was not set down: {r}"),
+                    Err(r) => {
+                        eprintln!("worldd: a carry was not set down: {r}");
+                        self.unhold(a);
+                    }
+                }
+            }
+            // #5067: each load on its way down, one sample a tick; at its track's end it rests, out of the crew's slot,
+            // and the carry is over.
+            for a in lower {
+                let Some(carry) = self.carries.get_mut(&a) else {
+                    continue;
+                };
+                let h = carry.hoist;
+                let mint = &mut self.mint;
+                let landed = carry.lower(tr, now, || {
+                    mint.mint()
+                        .map_err(|e| refusal("id-counter-exhausted", e.to_string()))
+                });
+                let by = h.and_then(|h| h.by);
+                let effects: Vec<Effect> = carry.log.parts.drain(..).flatten().collect();
+                let board = carry.board;
+                for mut e in effects {
+                    if let Some((intent, soul)) = by {
+                        e.envelope.cause = Cause::Intent(intent);
+                        e.envelope.actor = Actor::Soul(soul);
+                    }
+                    self.activities.stream.push(e);
+                }
+                match landed {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        self.carries.remove(&a);
+                        self.unhold(a);
+                        let Some(h) = h else { continue };
+                        self.activities.next = tr.next();
+                        let w = match by {
+                            Some((intent, soul)) => (now, Actor::Soul(soul), Cause::Intent(intent)),
+                            None => (now, Actor::World, Cause::World),
+                        };
+                        if let Err(r) = self.activities.carry_track(
+                            tr,
+                            a,
+                            board,
+                            "souls:released",
+                            (h.t0, now),
+                            None,
+                            w,
+                        ) {
+                            eprintln!("worldd: a set-down's end was not said: {r}");
+                        }
+                        let_go(&mut self.activities, tr, a, w);
+                    }
+                    Err(r) => {
+                        // Never stuck: a set-down whose floor is gone (a creator's edit) rests on the carry's own
+                        // ground next tick; one that still cannot be written is ended, its load where it is.
+                        eprintln!("worldd: a carry's set-down was not written: {r}");
+                        let ground = self.carries.get(&a).map(|c| c.ground);
+                        match self.carries.get_mut(&a).and_then(|c| c.hoist.as_mut()) {
+                            Some(h) if Some(h.rest.0) != ground => {
+                                h.rest.0 = ground.unwrap_or(h.rest.0);
+                            }
+                            _ => {
+                                self.carries.remove(&a);
+                                self.unhold(a);
+                                let_go(
+                                    &mut self.activities,
+                                    tr,
+                                    a,
+                                    (now, Actor::World, Cause::World),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2019,7 +2270,6 @@ impl Engine {
             match break_off(
                 &mut carry,
                 &mut self.activities,
-                &mut self.mint,
                 tree,
                 now,
                 None,
@@ -2027,11 +2277,17 @@ impl Engine {
                 Some(s.by),
             ) {
                 Ok(()) => {
+                    if carry.lowering() {
+                        self.carries.insert(activity, carry);
+                    }
                     if let Some(asm) = self.asm.as_mut() {
                         asm.ended(activity);
                     }
                 }
-                Err(r) => eprintln!("worldd: a crew's part was not set down: {r}"),
+                Err(r) => {
+                    eprintln!("worldd: a crew's part was not set down: {r}");
+                    self.unhold(activity);
+                }
             }
         }
     }
@@ -3195,7 +3451,9 @@ impl Engine {
 
     /// The lifted carry whose front is `body`, if any: the first member of a carry being sampled.
     fn front_of(&self, body: Id) -> Option<Id> {
-        self.carries.keys().copied().find(|a| {
+        // A carry on its way down (#5067) leads nobody.
+        let carried = self.carries.iter().filter(|(_, c)| !c.lowering());
+        carried.map(|(a, _)| *a).find(|a| {
             self.activities
                 .members(*a)
                 .and_then(|m| m.first())
@@ -3323,7 +3581,7 @@ impl Engine {
     pub fn carry_follows(&self) -> Vec<Keeps> {
         let mut out = Vec::new();
         for (a, led) in &self.led {
-            let Some(carry) = self.carries.get(a) else {
+            let Some(carry) = self.carries.get(a).filter(|c| !c.lowering()) else {
                 continue;
             };
             let Ok(Some((f, b))) = carry.ends() else {
@@ -3369,10 +3627,11 @@ impl Engine {
     /// broke off, its front's body, its walk and why (`souls:partner-left`, `souls:carriers-apart`,
     /// `souls:carry-blocked`), so the whole group stops with that one reason.
     pub fn led_over(&mut self) -> Vec<(Id, Id, &'static str)> {
+        // A carry on its way down (#5067) is over for its front: its walk stops now, not when the load rests.
         let over: Vec<Id> = self
             .led
             .keys()
-            .filter(|a| !self.carries.contains_key(a))
+            .filter(|a| self.carries.get(a).is_none_or(|c| c.lowering()))
             .copied()
             .collect();
         let mut out = Vec::new();

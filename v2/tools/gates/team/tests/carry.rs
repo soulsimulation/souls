@@ -1577,7 +1577,8 @@ async fn rung_3_five_souls_carry_a_plank_with_a_carrier_at_every_grip() {
         .act("activity:leave", Some(carry), none())
         .await
         .expect("a leave is always accepted");
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // #5067: it goes down on a track of up to 1.2 s before it rests.
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
     assert_eq!(
         Logged::read(&store).set_downs(),
         vec!["souls:partner-left".to_owned()],
