@@ -944,6 +944,18 @@ impl Controller {
         self.carry(body, track)
     }
 
+    /// The world turns `body` to `facing` by its own rule, with no driver (#5067: a carrier faces where it holds its
+    /// load while it carries, whatever drives its legs). Its facing input only: its velocity and stance stay its
+    /// driver's, and the mover turns it as it turns to any facing input.
+    pub fn face(&mut self, body: Id, facing: Quat) -> R<()> {
+        let s = self.slot(body)?;
+        if s.input.facing != facing {
+            s.input.facing = facing;
+            s.touched = true;
+        }
+        Ok(())
+    }
+
     /// The world carries `body` along `track` from the next step by its own rule, with no driver (N10's walk-out);
     /// its velocity input goes to still. `crossing-under-way` when it is already carried.
     pub fn carry(&mut self, body: Id, track: Track) -> R<()> {
