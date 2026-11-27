@@ -131,7 +131,8 @@ export async function makeCover({ page, out, eye, at, chromium, args = [], settl
     await tab.goto(url.href, { waitUntil: 'load', timeout: 300_000 });
     await tab.waitForFunction(() => !!window.__shotReady, null, { timeout: 600_000, polling: 1000 });
     await tab.waitForTimeout(settleMs);
-    bytes = await tab.screenshot({ type: 'jpeg', quality: 80 });
+    // a CPU-drawn (swiftshader) frame of a large world can take longer than Playwright's 30 s default (Verdelis Eden did)
+    bytes = await tab.screenshot({ type: 'jpeg', quality: 80, timeout: 180_000 });
   } finally { await browser.close(); }
   const sha = createHash('sha256').update(bytes).digest('hex');
   mkdirSync(out, { recursive: true });
