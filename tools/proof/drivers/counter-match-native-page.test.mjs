@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createRequire } from 'node:module';
 import { readFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator, counterBootBoard, counterSceneBoard } from './counter-match-native-page.mjs';
+import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator, counterBootBoard, counterSceneBoard, counterJourney } from './counter-match-native-page.mjs';
 import { drawnLoad } from '../../playtest/carry-contact/oracle.mjs';
 import { defOf } from '../../entry/look.mjs';
 const THREE=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('three');
@@ -143,6 +143,19 @@ test('browser stop and host finalization cache failures and preserve command rec
   const state={rows:[{receipt:'kept'}],stages:[],observerInstalled:true};let calls=0;
   const page={evaluate:async()=>{calls++;assert.equal(JSON.parse(readFileSync(join(dir,'command-counter-sequence.json'))).rows[0].receipt,'kept');return undefined;}};
   counterFinalization(page,{dir},state);await assert.rejects(state.finalize(),/collector missing/);await assert.rejects(state.finalize(),/collector missing/);assert.equal(calls,1);
+});
+
+test('journey and collector failures remain separate while finalization still rejects on cleanup',async()=>{
+  mkdirSync(new URL('../../../.local',import.meta.url),{recursive:true});const dir=mkdtempSync(new URL('../../../.local/counter-errors-test-',import.meta.url).pathname);
+  const primary=new Error('ordinary discovery ambiguous'),secondary=new Error('draw root detached'),state={rows:[{reply:'retained'}],stages:[],observerInstalled:true};
+  counterFinalization({evaluate:async()=>{throw secondary;}},{dir},state);
+  await assert.rejects(counterJourney(state,async()=>{throw primary;}),error=>{
+    assert(error instanceof AggregateError);assert.deepEqual(error.errors,[primary,secondary]);assert.equal(error.cause,primary);return true;
+  });
+  const sequence=JSON.parse(readFileSync(join(dir,'command-counter-sequence.json'))),finalization=JSON.parse(readFileSync(join(dir,'command-counter-finalization.json')));
+  assert.match(sequence.failure,/ordinary discovery ambiguous/);assert.match(finalization.journeyFailure,/ordinary discovery ambiguous/);
+  assert.match(finalization.finalizationFailure,/draw root detached/);assert.equal(finalization.ok,false);
+  await assert.rejects(state.finalize(),error=>error===secondary,'cached cleanup still fails; neither error is waived');
 });
 
 

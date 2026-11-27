@@ -36,6 +36,14 @@ function activityId(look) {
   assert(id, 'look must teach the exact activity id'); return id;
 }
 
+/** Fuzzy search may return other tables; only the exact intended public name identifies this game. */
+export function counterTable(answer,name='counter-match') {
+  const named=(answer.found??[]).filter(row=>row.name===name);
+  assert(answer.ok===true&&named.length===1&&named[0].kind?.split('@')[0]==='eden:counter_match'&&typeof named[0].id==='string'&&named[0].id,
+    'find must uniquely identify the exact public counter table name and identity');
+  return named[0];
+}
+
 /** Discover actual public syntax and cards in each player's own copy before any offer or action. */
 export async function discoverCounterMatch({ seats, name = 'counter-match', command }) {
   const discovered = [];
@@ -50,10 +58,8 @@ export async function discoverCounterMatch({ seats, name = 'counter-match', comm
     assert(activity.where?.includes('(eden:counter_match)'), 'counter-match must be offered at the discovered table kind');
     assert(Number.isInteger(activity.asks) && activity.asks >= seats.length - 1, 'the served invitation count must accommodate this diagnostic');
     const found = await command(seat, 'find', name);
-    const boards = (found.found ?? []).filter(row => row.kind?.split('@')[0] === 'eden:counter_match');
-    assert(found.ok === true && boards.length === 1 && boards[0].id, 'find must uniquely identify the actual counter table');
-    const board = await command(seat, 'inspect', boards[0].id);
-    assert.equal(board.id, boards[0].id, 'inspect must read the selected table'); counterState(board);
+    const selected=counterTable(found,name),board=await command(seat,'inspect',selected.id);
+    assert.equal(board.id, selected.id, 'inspect must read the selected table'); counterState(board);
     const stands = [...new Set(board.card?.match(/\bsecond_(?:stand|back|far)\b/g) ?? [])];
     assert.equal(stands.length, 3, 'the public card must teach three named second-side approaches');
     assert(/offerer first/i.test(board.card), 'the public card must identify the offerer as first');

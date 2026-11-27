@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { rehearseCounterMatch } from '../../playtest/games/rehearse.mjs';
+import { rehearseCounterMatch, counterTable } from '../../playtest/games/rehearse.mjs';
 import { downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 import { conferenceClearanceTools } from './conference-native-page.mjs';
 import { nativeCameraMode } from './camera-native-page.mjs';
@@ -129,7 +129,7 @@ export async function prepare({base,paths,recipe,signal}) {
   const worldPage=counterWorldPage(await response.json(),base),bundle=await downloadConferenceClient({base:worldPage,paths,signal});
   state.seats=await Promise.all(names.map((name,i)=>pairConferenceSeat({recipe,paths,bundle,label:`counter-${i}`,name,signal})));
   const found=await state.seats[0].cli('find','counter-match');state.record({person:state.seats[0].label,words:['find','counter-match'],answer:found});
-  const boards=found.found?.filter(n=>n.kind.split('@')[0]==='eden:counter_match')??[];assert.equal(boards.length,1,'counter boot board ambiguous');state.nativeBoard=boards[0].id;
+  state.nativeBoard=counterTable(found).id;
   state.creator=await pairConferenceCreator({recipe,paths,bundle,signal});
   state.creatorProof=await proveCounterCreator({creator:state.creator,record:state.record,signal});save(paths,'command-counter-creator.json',state.creatorProof);
   return {people:3,nativeBoard:state.nativeBoard};
@@ -148,8 +148,18 @@ export function counterFinalization(page,paths,state){
   state.finalize=()=>state.finalization??=(async()=>{state.persist();try{
     const draw=await page.evaluate(counterBrowserStop);assert(draw||!state.observerInstalled,'counter installed draw collector missing');
     if(draw){save(paths,'command-counter-final-draw.json',draw);assert(draw.samples.length>=2&&draw.failures.length===0,'counter final-draw collection failed');}
-    state.outcome={ok:!!draw,samples:draw?.samples.length??0};
-  }catch(error){state.outcome={ok:false,error:String(error)};throw error;}finally{save(paths,'command-counter-finalization.json',state.outcome);}})();
+    state.outcome={ok:!!draw,samples:draw?.samples.length??0,journeyFailure:state.failure??null,finalizationFailure:null};
+  }catch(error){state.outcome={ok:false,error:String(error),journeyFailure:state.failure??null,finalizationFailure:String(error.stack??error)};throw error;}finally{save(paths,'command-counter-finalization.json',state.outcome);}})();
+}
+
+export async function counterJourney(state,perform) {
+  let primary;
+  try{return await perform();}
+  catch(error){primary=error;state.failure=String(error.stack??error);throw error;}
+  finally{try{await state.finalize();}catch(secondary){
+    if(primary)throw new AggregateError([primary,secondary],'counter journey and finalization both failed',{cause:primary});
+    throw secondary;
+  }}
 }
 
 export async function beforeNavigation({paths,page,base}) {
@@ -197,7 +207,7 @@ export default async function({page,paths,check,expectHttp,signal}){
     window.__counterDrawObserver={samples,failures,sampleLimit,stopRender,prototype,show,original,qualification:'actual submitted bodyDraw and board-role measurements every250ms; inferred foot groups; no every-frame, skin/table/hand contact, unrestricted stand admission or independent-agent certification'};
   },{oracleURL:state.oracleURL,geometryURL:state.geometryURL,kitURL:state.kitURL,souls:state.seats.map(s=>s.soul),bootBoard:state.bootBoard});
   state.observerInstalled=true;let expected,stateReads=0;
-  try{
+  await counterJourney(state,async()=>{
     const observe=async(stage,details)=>{
       if(stage==='departure'){state.stages.push({stage,person:details.seat.label,midRound:details.midRound,at:Date.now()});return;}
       if(stage==='state'){
@@ -222,5 +232,5 @@ export default async function({page,paths,check,expectHttp,signal}){
     check('counter-native-turns-and-drawing',state.result.complete&&state.result.midRoundDeparture&&state.stages.filter(s=>s.observed).length>=10,
       'Ordinary terminal refusals/recovery, authoritative counts, actual submitted fill/light and independent mid-round leave; physical contact remains unproved.');
     await page.screenshot({path:join(paths.dir,'counter-completion.png')});
-  }catch(error){state.failure=String(error.stack??error);throw error;}finally{await state.finalize();}
+  });
 }

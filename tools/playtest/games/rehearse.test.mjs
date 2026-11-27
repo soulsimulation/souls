@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { counterState, counterDone, counterRefused, rehearseCounterMatch } from './rehearse.mjs';
+import { counterState, counterDone, counterRefused, rehearseCounterMatch, counterTable, discoverCounterMatch } from './rehearse.mjs';
 const done = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
 // Independent public replies: never import client builders, native rules, entry internals or private fixture ids.
@@ -53,6 +53,24 @@ function publicGame({ players = 3, busy = false, declined = false, staleTurn = f
   return { seats, calls, members };
 }
 const run = fixture => rehearseCounterMatch({ seats: fixture.seats, sleep: async () => {} });
+
+test('exact public table name survives unrelated same-kind fuzzy results without selecting their order',()=>{
+  const intended={id:'boot-table',name:'counter-match',kind:'eden:counter_match'},other={id:'placed-table',name:'counter_match 7',kind:'eden:counter_match'};
+  for(const found of [[other,intended],[intended,other]])assert.equal(counterTable({ok:true,found}).id,'boot-table');
+  for(const found of [[other],[intended,{...intended,id:'duplicate'}],[{...intended,kind:'eden:chess'}],[{...intended,id:undefined}]])
+    assert.throws(()=>counterTable({ok:true,found}),/exact public counter table/);
+});
+
+test('exact public discovery retains agreement on the same table identity across participants',async()=>{
+  const fixture=publicGame(),second=fixture.seats[1],original=second.cli;
+  second.cli=async(...words)=>{
+    if(words[0]==='find')return{ok:true,found:[{id:'different-table',name:'counter-match',kind:'eden:counter_match'}]};
+    if(words[0]==='inspect'&&words[1]==='different-table')return{...await original('inspect','observed-table'),id:'different-table'};
+    return original(...words);
+  };
+  await assert.rejects(discoverCounterMatch({seats:fixture.seats,command:(seat,...words)=>seat.cli(...words)}),/same table/);
+  assert(!fixture.calls.some(c=>c.words[0]==='act'));
+});
 
 test('turn and inferred winner require actual valid state; receipts must be terminal', () => {
   assert.deepEqual(counterState({ ok: true, state: { remaining: 0, turn: 'second' } }), { remaining: 0, turn: 'second', winner: 'first' });
