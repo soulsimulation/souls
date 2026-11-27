@@ -39,7 +39,8 @@
 //!
 //! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
 //!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
-//!   timer ([`Acts::fired`]). Those the tree holds at a start (a restart, a sleeping world woken) go back on the list
+//!   timer ([`Acts::fired`]); its needs are decided then, on the world's state at its due time, and a refusal is
+//!   written by name as a [`TIMER_REFUSED`] entry on the thing (#3991). Those the tree holds at a start (a restart, a sleeping world woken) go back on the list
 //!   at the first tick (#3991). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
@@ -216,6 +217,38 @@ fn selects_body_slot(f: &Json, key: &str) -> bool {
                 && e.get("what").and_then(Json::str) == Some("actor")
                 && arg(e.get("into"))
         }))
+}
+
+/// The event of the entry a form's timer the world refused writes (#3991): on the timer's thing, at its due time,
+/// changing nothing. Its fields: 1 the timer, 2 the refusal's name (a need's reason, `thing-missing`, a binder's),
+/// 3 the form, 4 the refusal's detail.
+pub const TIMER_REFUSED: &str = "souls:timer-refused";
+
+fn timer_refused(t: &Timer, node: Id, form: &str, e: &Refusal) -> Effect {
+    let text = |s: &str| replica::encode::Value::Bytes(s.as_bytes().to_vec());
+    Effect {
+        envelope: replica::effects::Envelope {
+            sequence: 0,
+            at: t.due,
+            cause: replica::effects::Cause::World,
+            actor: Actor::World,
+            audience: replica::world_model::Audience::Everyone,
+            node,
+        },
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![replica::effects::Event {
+            name: Name::new(TIMER_REFUSED).unwrap_or_else(|| unreachable!("a name")),
+            fields: BTreeMap::from([
+                (1, t.id.to_value()),
+                (2, text(e.name)),
+                (3, text(form)),
+                (4, text(&e.detail)),
+            ]),
+            changes: Vec::new(),
+            rest: replica::effects::Rest::new(),
+        }]),
+        rest: replica::effects::Rest::new(),
+    }
 }
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -1545,7 +1578,9 @@ pub struct Acts {
     toward: BTreeMap<Id, Id>,
     /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
     timers: BTreeMap<Id, (Id, Name)>,
-    /// Each form a timer started since the last call, by the timer's id: its run, or its refusal by name (C24).
+    /// Each form a timer started in the last tick, by the timer's id: its run, or its refusal by name (C24). Emptied at
+    /// each tick's start (#3991), so it holds one tick's timers however long the world runs; a refusal is also written
+    /// to the log as a [`TIMER_REFUSED`] entry on the timer's thing, where Souls and the page read it.
     pub fired: Vec<(Id, R<Asked>)>,
     /// The form's walks watched for progress (C21).
     watch: Watch,
@@ -2957,6 +2992,7 @@ impl Acts {
     /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
     /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
+        self.fired.clear();
         if !self.timed {
             self.timed = true;
             self.timers_from_state(tree);
@@ -3103,7 +3139,9 @@ impl Acts {
     }
 
     /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as
-    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`].
+    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`]. Its needs are decided at
+    /// its due time on the world's state then, as an act's are at commit (#3991): a bell already hushed is not faded
+    /// again. A refusal is written as a [`TIMER_REFUSED`] entry on the thing, so why the thing never changed is seen.
     fn timer_fired(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, t: &Timer, tick: u64) {
         let Some((node, form)) = self.timers.remove(&t.id) else {
             return;
@@ -3140,15 +3178,33 @@ impl Acts {
                         &replica::encode::encode(&t.id.to_value()).unwrap_or_default(),
                     ),
                 };
-                self.with(tree, bodies, tick, |forms, w| {
-                    let steps = skills::form_runner::bind(&entry, name)?;
-                    let effects = skills::form_runner::bind_effects(&entry, name)?;
-                    forms.start(w, node, node, intent, steps, effects, limits(), t.due)
-                })
+                let none = skills::form_runner::Args::new();
+                match crate::needs::check(
+                    tree,
+                    bodies.as_deref(),
+                    &self.kinds,
+                    node,
+                    node,
+                    &entry,
+                    name,
+                    &none,
+                    t.due,
+                ) {
+                    Err(e) => Err(e),
+                    Ok(()) => self.with(tree, bodies, tick, |forms, w| {
+                        let steps = skills::form_runner::bind(&entry, name)?;
+                        let effects = skills::form_runner::bind_effects(&entry, name)?;
+                        forms.start(w, node, node, intent, steps, effects, limits(), t.due)
+                    }),
+                }
             }
         };
-        if let Ok(Asked::Started(run) | Asked::Running(run)) = &asked {
-            self.runs.insert(*run, t.id);
+        match &asked {
+            Ok(Asked::Started(run) | Asked::Running(run)) => {
+                self.runs.insert(*run, t.id);
+            }
+            Ok(_) => {}
+            Err(e) => self.forms.out.push(timer_refused(t, node, name, e)),
         }
         self.fired.push((t.id, asked));
     }

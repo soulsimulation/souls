@@ -4547,6 +4547,10 @@ impl Clock {
     /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
     fn step_bodies(&mut self, now: Micros) {
         let Some(b) = self.bodies.as_mut() else {
+            // A world with no bodies still fires its forms' timers (#3991): a form with no steps there sets one (a
+            // bell's fade), and one never fired stayed due, so the world never slept and the thing stayed as it was.
+            let tick = u64::try_from(self.tick).unwrap_or(0);
+            self.forms.tick(self.replica.tree(), None, tick, now);
             return;
         };
         // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule

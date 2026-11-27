@@ -353,6 +353,8 @@ fn entries() -> Json {
         "ring": { "who": "anyone", "starts": "act", "steps": [],
           "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
             { "change": "timer", "form": "fade", "after_us": 2000000, "event": "will_fade" }] },
+        "hush": { "who": "anyone", "starts": "act", "steps": [],
+          "effects": [{ "change": "set", "field": "ringing", "to": false, "event": "hushed" }] },
         "fade": { "who": "world", "starts": "timer", "steps": [],
           "needs": [{ "need": "state", "field": "ringing", "is": true }],
           "effects": [{ "change": "set", "field": "ringing", "to": false, "event": "faded" }] }, "put": { "who": "anyone",
@@ -769,8 +771,15 @@ fn serve(tag: &str) -> (Run, Client, Client) {
 
 /// [`serve`] on the log `store` holds: a world started again after a stop reads it back.
 fn serve_on(tag: &str, store: Mem) -> (Run, Client, Client) {
+    serve_as(tag, store, true)
+}
+
+/// [`serve_on`], the world given bodies only when `with_bodies` (a world with none takes forms with no steps).
+fn serve_as(tag: &str, store: Mem, with_bodies: bool) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    if with_bodies {
+        cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    }
     cfg.engine = Some((
         tree_rules(),
         vec![
@@ -1137,7 +1146,7 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
         matches!(started, Ok(sim::forms::Asked::Started(_))),
         "{started:?}"
     );
-    let (mut ended, mut timers) = (Vec::new(), Vec::new());
+    let (mut ended, mut timers, mut fired) = (Vec::new(), Vec::new(), Vec::new());
     while ended.len() < 2 && now < 5_000_000 {
         now += 50_000;
         tick += 1;
@@ -1160,8 +1169,8 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
             println!("{now} µs: pending {:?}", r.tree().timers().values().next());
         }
         ended.extend(acts.ended());
+        fired.extend(acts.fired.drain(..));
     }
-    let fired: Vec<_> = acts.fired.drain(..).collect();
     println!("timer entries: {timers:?}\nfired: {fired:?}\nended: {ended:?}");
     assert_eq!(timers.len(), 2, "set, then cleared as it fired");
     assert!(matches!(
@@ -1175,6 +1184,67 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
         "the timer's run is keyed by the timer"
     );
     assert!(r.tree().timers().is_empty());
+}
+
+/// #3991: the timers a world fires are kept one tick only, so a timer that sets itself again, fired every 50 ms for
+/// ten minutes of world time, never grows [`worldd::acts::Acts::fired`] past one tick's timers.
+#[test]
+fn i3991_fired_timers_are_kept_one_tick_over_a_long_run() {
+    use worldd::acts::{Acts, Args, intent, library};
+    let vessel_entry = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
+      "forms": {
+        "ring": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "timer", "form": "again", "after_us": 50000, "event": "will_ring" }] },
+        "again": { "who": "world", "steps": [],
+          "effects": [{ "change": "timer", "form": "again", "after_us": 50000, "event": "rang" }] } } }"#,
+    )
+    .unwrap();
+    let mut r = world();
+    let mut b = bodies().expect("the bodies");
+    let mut acts = Acts::new(
+        Json::Obj(vec![(VESSEL.into(), vessel_entry)]),
+        library().expect("the moves"),
+        header(ground()),
+        Scope([0xc4; 16]),
+    );
+    let (mut now, mut tick) = (1_000_000_i64, 0u64);
+    b.begin(now);
+    let ask = intent(id(9001), now + 60_000_000, Actor::Soul(w1()), b"ring");
+    let started = acts.start(
+        r.tree(),
+        Some(&mut b),
+        w1(),
+        &[(vessel(), "ring".to_owned())],
+        &Args::default(),
+        ask,
+        tick,
+        now,
+    );
+    assert!(started.is_ok(), "{started:?}");
+    let (mut total, mut most) = (0usize, 0usize);
+    while now < 601_000_000 {
+        now += 50_000;
+        tick += 1;
+        let _ = b.step(now);
+        acts.tick(r.tree(), Some(&mut b), tick, now);
+        most = most.max(acts.fired.len());
+        total += acts.fired.len();
+        let mut out = acts.out();
+        for (k, e) in out.iter_mut().enumerate() {
+            e.envelope.sequence = r.version() + k as u64;
+        }
+        if !out.is_empty() {
+            let part = sim::commit::write(&mut r, &out).expect("the forms' entries commit");
+            for e in &part.effects {
+                acts.forms.logged(e);
+            }
+        }
+        let _ = acts.ended();
+    }
+    println!("#3991 fired over {tick} ticks: {total}, most kept at once: {most}");
+    assert!(total > 10_000, "the timer fired again and again: {total}");
+    assert!(most <= 1, "one tick's timers kept, not every one: {most}");
 }
 
 /// 0.135 E16, review of #4549: two Souls take one slot of two places (`most: 2`) through the gateway, each naming
