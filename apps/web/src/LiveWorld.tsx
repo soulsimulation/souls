@@ -1,4 +1,3 @@
-import {FollowController} from './cinematography/controller.ts';
 import { ObservationCostRing, COST_LAYOUT } from './cinematography/observation-cost.ts';
 import { DisplayedCameraObserver, drawnTakeActivity, drawnRepresentation, type DrawnSubject } from './cinematography/observation.ts';
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
@@ -398,8 +397,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const camera = (adopted?.camera as THREE.PerspectiveCamera|undefined) ?? new THREE.PerspectiveCamera(45, 1, 0.1, 2400);
     const followView=new WorldFollow();
     const followQuery=new URLSearchParams(location.search),experimentalFollow=followQuery.get('camera-follow')==='experimental';
-    const followController=experimentalFollow||followQuery.get('camera-follow-test')==='1'?new FollowController(experimentalFollow):null;
-    if(followController){const probe=()=>followController.read();Object.defineProperty(window,'__followExperiment',{configurable:true,value:probe});abort.signal.addEventListener('abort',()=>{if((window as unknown as {__followExperiment?:unknown}).__followExperiment===probe)delete (window as unknown as {__followExperiment?:unknown}).__followExperiment;});}
+    let followController:import('./cinematography/controller.ts').FollowController|null=null;
+    if(experimentalFollow||followQuery.get('camera-follow-test')==='1')void import('./cinematography/controller.ts').then(({FollowController})=>{if(abort.signal.aborted)return;followController=new FollowController(experimentalFollow);const probe=()=>followController!.read();Object.defineProperty(window,'__followExperiment',{configurable:true,value:probe});abort.signal.addEventListener('abort',()=>{if((window as unknown as {__followExperiment?:unknown}).__followExperiment===probe)delete (window as unknown as {__followExperiment?:unknown}).__followExperiment;});});
     // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
     let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
     // #1963, 0.135 P3: ?track=<same-origin file> gives the camera a planned track (a recorded range, or a live take's); nothing loads without it.
@@ -1048,7 +1047,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const { selected: soulId, thing: thingId, follow: following, cameraMode: viewing } = context.current;
       const followEligibilityStart=followController?performance.now():0;
       const selectedBody=soulId?s.conn.replica.souls.get(soulId)?.entityId:null;
-      const experimentalFollowing=experimentalFollow&&viewing==='follow'&&!!selectedBody&&records[selectedBody]?.kind==='human'&&!eyes&&!shotMode&&!shotTrack;
+      const experimentalFollowing=experimentalFollow&&!!followController&&viewing==='follow'&&!!selectedBody&&records[selectedBody]?.kind==='human'&&!eyes&&!shotMode&&!shotTrack;
       let followSetupMs=followController?performance.now()-followEligibilityStart:0;
       if(following||soulId&&!groupSelection.has(soulId))groupSelection.clear();
       if (viewing !== previousCameraMode) { broadcast.reset(); previousCameraMode = viewing; renderer.domElement.dataset.cameraShot=''; }
@@ -1217,8 +1216,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const followId=soulId?s.conn.replica.souls.get(soulId)?.entityId??null:thingId;
       const followVersion=followController?{world:String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),epoch:JSON.stringify([s.conn.welcome?.epoch,observationSeekGeneration.current,!!past.current]),revision:String(sceneKey??'draw')}:null;
       const followInput=()=>({key:JSON.stringify([followVersion,followId,experimentalFollowing]),tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),at:performance.now(),mode:context.current.cameraMode,id:followId,camera,aim:controls.target});
+      const followControlInput=experimentalFollow&&followController?{...followInput(),mode:experimentalFollowing?'follow':'inactive'}:null;
       if(followController)followSetupMs+=performance.now()-followLookupStart;
-      if(experimentalFollow&&followController){if(experimentalFollowing)renderer.domElement.dataset.cameraShot='follow-experimental:'+(followId??'');followController.control({...followInput(),mode:experimentalFollowing?'follow':'inactive'},step,()=>({roots:visualObstructionRoots(),revision:String(entityLayer.staticRevision)}),entityLayer.active?entityLayer.groundPeek:()=>null);}
+      if(experimentalFollow&&followController){if(experimentalFollowing)renderer.domElement.dataset.cameraShot='follow-experimental:'+(followId??'');followController.control(followControlInput!,step,()=>({roots:visualObstructionRoots(),revision:String(entityLayer.staticRevision)}),entityLayer.active?entityLayer.groundPeek:()=>null);}
       if(camTrace){const tracing=context.current.cameraMode==='follow'&&!!focus;camTrace.frame({mode:context.current.cameraMode,target:controls.target.toArray(),eye:camera.position.toArray(),desired:tracing?followView.desired?.toArray()??null:null,rule:tracing?followView.rule:null,dt:Math.round(step*1e5)/1e5});}  // #1317
       const area = visibleViewport(host.clientWidth, host.clientHeight, context.current.viewportInsets);
       // #3374: a box with no size waits quietly; panels that cover a sized box get the note, and the console names why once
