@@ -58,10 +58,10 @@ export default async function({page,paths,signal,fixture,measurement,arm,check})
  state.task=(async()=>{try{while(!state.stop.signal.aborted){await delay(1000,null,{signal:state.stop.signal});if(!state.stop.signal.aborted)await state.collector.poll();}}catch(error){if(!state.stop.signal.aborted)state.error=String(error);}})();
  let cdp;const metrics=async label=>{try{if(!cdp){cdp=await page.context().newCDPSession(page);await cdp.send('Performance.enable',{timeDomain:'threadTicks'});}save(`cost-cdp-${label}.json`,{supported:true,metrics:await cdp.send('Performance.getMetrics'),scope:'Reported renderer metrics only; complete worker/process attribution and resident memory unknown'});}catch(error){save(`cost-cdp-${label}.json`,{supported:false,error:String(error),scope:'Unknown; no metric substituted'});}};
  try{
-  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-ready')==='true'&&document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation')==='history',null,{timeout:30000});
+  await page.waitForFunction(costHistoryReady,undefined,{timeout:30000});
   const snapshot=async label=>save(`cost-ui-before-${label}.json`,{accessibility:await page.locator('body').ariaSnapshot()});
   await nativeCameraMode(page,'broadcast',snapshot);
-  await snapshot('time');await page.getByRole('button',{name:/time controls$/}).click();const panel=page.getByRole('dialog',{name:'Time',exact:true});
+  await openCostTime(page,snapshot);const panel=page.getByRole('dialog',{name:'Time',exact:true});
   if(await panel.getByRole('button',{name:'Pause',exact:true}).isVisible()){await snapshot('pause');await panel.getByRole('button',{name:'Pause',exact:true}).click();}
   const slider=page.getByRole('slider',{name:'Every moment since the world began',exact:true});
   await snapshot('seek-keys');await seekCostTarget(slider,plan.targetTick,signal);
@@ -83,3 +83,8 @@ export default async function({page,paths,signal,fixture,measurement,arm,check})
 
 /** Real keyboard controls from the paused nearby value; independent of pixel/wall-clock slider resolution. */
 export async function seekCostTarget(slider,target,signal){const min=Number(await slider.getAttribute('min')),max=Number(await slider.getAttribute('max'));let selected=Number(await slider.inputValue());if(!Number.isInteger(min)||Number(await slider.getAttribute('step'))!==1||!Number.isInteger(selected)||target<min||target>max||Math.abs(selected-target)>256)throw Error('camera-cost-target-keyboard-range');if(selected===target){signal.throwIfAborted();await slider.press('ArrowRight');const right=Number(await slider.inputValue());if(right!==target+1)throw Error('camera-cost-target-no-progress');selected=right;}for(let steps=0;selected!==target;steps++){signal.throwIfAborted();if(steps>=256)throw Error('camera-cost-target-step-limit');const direction=selected<target?1:-1,previous=selected;await slider.press(direction>0?'ArrowRight':'ArrowLeft');selected=Number(await slider.inputValue());if(selected!==previous+direction)throw Error('camera-cost-target-no-progress');}}
+
+/** Same page readiness as before, plus the real arrival layer must be gone before input. */
+export function costHistoryReady(doc=globalThis.document){const v=doc.querySelector('.viewer-history');return v?.getAttribute('data-viewer-ready')==='true'&&v?.getAttribute('data-viewer-presentation')==='history'&&!doc.querySelector('.viewer-arrival');}
+/** Responsive real UI; preserve an already-open Menu instead of toggling it shut. */
+export async function openCostTime(page,snapshot){const direct=page.getByRole('button',{name:/time controls$/});if(await direct.isVisible()){await snapshot('time');await direct.click();return;}const menu=page.getByRole('menu',{name:'Menu',exact:true});if(!await menu.isVisible()){await snapshot('time-menu');await page.getByRole('button',{name:'Menu',exact:true}).click();}await snapshot('time-route');await menu.getByRole('menuitem',{name:/^Time(?:\s|$)/}).click();}
