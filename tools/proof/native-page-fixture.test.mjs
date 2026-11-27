@@ -5,16 +5,16 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration } from './native-page-fixture.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
 import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-function fixture(t) {
+function fixture(t, options = {}) {
   const root = mkdtempSync(join(parent, 'artifacts-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const write = (file, content = 'fixture') => { mkdirSync(dirname(join(root, file)), { recursive: true }); writeFileSync(join(root, file), content); };
-  for (const file of ['worlds/templates/hello-hamlet.json', 'apps/web/src/LiveWorld.tsx', 'tools/world-launcher/launcher.mjs', 'v2/tools/dev/run.sh']) write(file);
+  for (const file of ['worlds/templates/hello-hamlet.json', 'apps/web/src/LiveWorld.tsx', 'tools/world-launcher/launcher.mjs', 'v2/tools/dev/run.sh', 'content/worlds/mars/map.json']) write(file);
   execFileSync('git', ['init', '-q', root]); execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '-qm', 'fixture']);
   // Synthetic source repository; ordinary configured commit hooks remain enabled.
@@ -22,7 +22,7 @@ function fixture(t) {
   for (const name of ['worldd', 'gatewayd', 'directoryd', 'testworld', 'assets-check', 'register-world']) write('v2/target/release/' + name);
   write('.gitignore', '.local/\n**/dist/\nv2/target/\n'); execFileSync('git', ['-C', root, 'add', '.gitignore']); execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '-qm', 'ignore outputs']);
   write('.local/caddy');
-  const manifest = createNativePageArtifacts(root, { caddy: join(root, '.local/caddy') });
+  const manifest = createNativePageArtifacts(root, { caddy: join(root, '.local/caddy'), ...options });
   write('.local/pin.json', JSON.stringify(manifest));
   return { root, write, manifest, pin: { file: '.local/pin.json', hash: hash(readFileSync(join(root, '.local/pin.json'))) } };
 }
@@ -65,4 +65,22 @@ test('owned group cleanup kills descendants even after its direct leader has exi
     await stopOwnedChild(leader, { processGroup: true });
     assert.throws(() => process.kill(-leader.pid, 0), { code: 'ESRCH' });
   } finally { try { process.kill(-leader.pid, 'SIGKILL'); } catch {} }
+});
+
+test('optional tracked map is pinned with template and cannot escape or borrow untracked bytes', t => {
+  const f = fixture(t, { map: 'content/worlds/mars/map.json' });
+  assert.equal(verifyNativePageArtifacts(f.root, f.pin).map, 'content/worlds/mars/map.json');
+  assert.equal(f.manifest.source['content/worlds/mars/map.json'], hash(Buffer.from('fixture')));
+  assert.throws(() => createNativePageArtifacts(f.root, { caddy: join(f.root, '.local/caddy'), map: '../map.json' }), /map-untracked/);
+  assert.throws(() => createNativePageArtifacts(f.root, { caddy: join(f.root, '.local/caddy'), map: 'content/worlds/mars/missing.json' }));
+  f.write('content/worlds/mars/map.json', 'changed');
+  assert.throws(() => verifyNativePageArtifacts(f.root, f.pin), /source-pin/);
+});
+
+test('foreground controllers and finite commands enter the existing owner with distinct lifetimes', () => {
+  const children = [], calls = [], recipe = nativePageClientRegistration(children, (child, mode) => calls.push({ child, mode }));
+  const controller = {}, command = {};
+  recipe.registerClient(controller); recipe.registerCommand(command);
+  assert.deepEqual(children, [controller]);
+  assert.deepEqual(calls, [{ child: controller, mode: { processGroup: true } }, { child: command, mode: { transient: true } }]);
 });

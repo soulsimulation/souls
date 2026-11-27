@@ -1,0 +1,167 @@
+// One actual native two-carrier lifecycle. Resources belong to runOwnedAttempt; controls are ordinary UI/CLI input.
+import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { PAIR, pairArgs, lastJson, seatOf, seatEnv } from '../../playtest/arena/new-engine/seat.mjs';
+import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
+import { entityId } from '../../../apps/web/src/v2-engine/entity-id.ts';
+import { layerDraws } from '../../../apps/web/src/v2-engine/layer-draws.ts';
+import { nativeCameraMode } from './camera-native-page.mjs';
+const states = new Map();
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const native = id => id.replace(/-(\d+)$/, '.$1');
+const save = (state, file, value) => writeFileSync(join(state.paths.dir, file), JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? v.toString() : v, 2), { flag: 'wx', mode: 0o600 });
+const delay = (ms, signal) => new Promise((ok, no) => {
+  const abort = () => { clearTimeout(timer); no(signal.reason); };
+  const timer = setTimeout(() => { signal.removeEventListener('abort', abort); ok(); }, ms);
+  signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
+});
+async function cli(state, who, ...words) {
+  state.signal.throwIfAborted();
+  const seat = state.seats[who];
+  const result = await new Promise((ok, no) => {
+    const child = execFile(process.execPath, [join(state.recipe.checkout, 'v2/client/src/cli/souls.mjs'), ...words, '--soul', seat.soul],
+      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : 15000, maxBuffer: 4 << 20 },
+      (error, stdout, stderr) => { const result = { who, words, stdout, stderr, code: child.exitCode, signal: child.signalCode }; save(state, `command-carry-${++state.ordinal}.json`, result); if (error) no(error); else { try { ok(JSON.parse(stdout)); } catch (e) { no(e); } } });
+    state.recipe.registerCommand(child);
+  });
+  if (result.ok !== true) throw Error(`carry-proof.command-refused: ${who} ${words.join(' ')}`);
+  return result;
+}
+// Same ordinary pair/approve interface as pairSeat, with every finite subprocess registered before waiting.
+async function pair(state, who) {
+  const folder = join(state.paths.data, 'seats', who), home = join(folder, '.souls'); mkdirSync(folder, { recursive: true });
+  let text = '', asked;
+  const asking = new Promise((ok, no) => {
+    const child = execFile(process.execPath, [PAIR, ...pairArgs(state.recipe.world, who)],
+      { cwd: folder, env: seatEnv(home, state.recipe.pkg), signal: state.signal, timeout: 20000, maxBuffer: 1 << 20 },
+      (error, stdout, stderr) => { save(state, `command-carry-pair-${who}.json`, { code: child.exitCode, signal: child.signalCode, stdout, stderr }); error ? no(error) : ok(lastJson(stdout)); });
+    state.recipe.registerCommand(child);
+    child.stdout.on('data', chunk => { text += chunk; asked ??= text.split('\n').map(lastJson).find(row => row?.step === 'approve'); });
+  });
+  // Attach the rejection handler immediately while the approval word arrives.
+  const settled = asking.then(answer => ({ answer }), error => ({ error }));
+  const until = Date.now() + 10000;
+  while (!asked) { state.signal.throwIfAborted(); if (Date.now() > until) throw Error('carry-proof.pair-code'); await delay(20, state.signal); }
+  const approval = await fetch(new URL('/v1/pair/approve', state.recipe.world.directory), { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: asked.code, confirm: true, test_person: who }), signal: state.signal });
+  if (approval.status !== 200) throw Error('carry-proof.pair-approval');
+  const result = await settled; if (result.error) throw result.error;
+  if (result.answer?.ok !== true || !result.answer.soul) throw Error('carry-proof.pair-result');
+  const soul = result.answer.soul, post = (path, body) => fetch(new URL(path, state.recipe.world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: who }), signal: state.signal });
+  const mine = (await (await post('/v1/account/souls', {})).json()).souls ?? [];
+  const key = mine.find(s => s.soul.replace(/^soul-/, '') === soul.replace(/^s_/, ''))?.soul ?? soul;
+  if ((await post('/v1/account/souls/profile', { soul: key, name: who === 'ada' ? 'Ada' : 'Bo' })).status !== 200) throw Error('carry-proof.name');
+  return seatOf({ label: who, folder, home, soul, env: seatEnv(home, state.recipe.pkg), log: join(folder, 'commands.jsonl') });
+}
+export async function prepare({ paths, recipe, signal }) {
+  if (recipe?.kind !== 'native-page' || !recipe.world || !recipe.registerClient) throw Error('carry-proof.recipe');
+  const state = { paths, recipe, signal, seats: {}, bodies: {}, ordinal: 0, loaded: {}, pending: [], pageErrors: [] };
+  states.set(paths.dir, state);
+  await Promise.all(['ada', 'bo'].map(async who => {
+    signal.throwIfAborted();
+    const seat = await pair(state, who);
+    state.seats[who] = seat;
+    const fd = openSync(join(paths.dir, `client-${who}.log`), 'wx', 0o600);
+    let daemon;
+    try { daemon = spawn(process.execPath, [join(recipe.checkout, 'v2/client/src/daemon/daemon.mjs'), '--home', seat.home, '--soul', seat.soul, '--pkg', recipe.pkg, '--ready-fd', '3'],
+      { cwd: seat.folder, env: seatEnv(seat.home, recipe.pkg), detached: true, stdio: ['ignore', fd, fd, 'pipe'] }); }
+    finally { closeSync(fd); }
+    recipe.registerClient(daemon);
+    await new Promise((ok, no) => { const timer = setTimeout(() => no(Error('carry-proof.client-ready')), 10000); daemon.stdio[3].once('data', data => { clearTimeout(timer); String(data).trim() === 'ready' ? ok() : no(Error('carry-proof.client-ready')); }); daemon.once('error', no); daemon.once('exit', () => no(Error('carry-proof.client-exited'))); });
+    await cli(state, who, 'act', 'life:join', '--wait');
+    const until = Date.now() + 10000;
+    while (!state.bodies[who]) { state.bodies[who] = (await cli(state, who, 'status')).body; if (Date.now() > until) throw Error('carry-proof.body-admission'); if (!state.bodies[who]) await delay(50, signal); }
+  }));
+  state.grips = Promise.all([cli(state, 'ada', 'carry', 'grip', 'pallet-crates-1', 'front'), cli(state, 'bo', 'carry', 'grip', 'pallet-crates-1', 'back')]).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  return { dir: paths.dir };
+}
+async function offer(state) {
+  const grips = await state.grips; if (!grips.ok) throw Error(grips.error);
+  state.crew = (await cli(state, 'ada', 'carry', 'offer', state.bodies.bo)).crew;
+  if (!state.crew) throw Error('carry-proof.crew');
+  await cli(state, 'bo', 'carry', 'accept', state.crew);
+  const query = await cli(state, 'ada', 'query', JSON.stringify([{ find: 'pallet-crates-1' }]));
+  state.load = (query.answers ?? []).flatMap(a => a.found ?? []).find(n => n.kind.split('@')[0] === 'mars:pallet_crates');
+  if (!state.load) throw Error('carry-proof.load');
+}
+export function beforeNavigation({ page, paths, signal }) {
+  const state = states.get(paths.dir); if (!state) throw Error('carry-proof.preparation');
+  const pageError = error => state.pageErrors.push(String(error.stack ?? error));
+  const response = response => {
+    const path = new URL(response.url()).pathname; if (!/\.(js|wasm)$/.test(path)) return;
+    state.pending.push((async () => { const bytes = await response.body(); state.loaded[path] = hash(bytes); })().catch(error => (state.cancelledLoads ??= []).push({ path, error: String(error) })));
+  };
+  page.on('pageerror', pageError); page.on('response', response);
+  return async () => {
+    try {
+      await Promise.all(state.pending);
+      if (!page.isClosed()) {
+        const observer = await page.evaluate(() => { const o = window.__carryContactObserver; if (!o) return null; o.stop(); const { stop, ...data } = o; return data; });
+        save(state, 'carry-observer.json', observer);
+      }
+      save(state, 'carry-loaded.json', state.loaded); save(state, 'carry-page-errors.json', state.pageErrors);
+    } finally { page.off('pageerror', pageError); page.off('response', response); states.delete(paths.dir); }
+  };
+}
+export function wholeRunFailure(observer, pageErrors) {
+  return !observer || !!pageErrors.length || !!observer.failures?.length || !!observer.failedWitnesses?.length || Object.keys(observer.counts ?? {}).some(k => !['passed-native-pair', 'native-release-observation', 'native-inactive-observation'].includes(k));
+}
+export default async function ({ page, paths, signal, fixture, check, expectHttp }) {
+  const state = states.get(fixture.dir), root = state.recipe.checkout;
+  // This is a published optional client document route, not a waived asset/stream/measurement failure.
+  expectHttp('/safety.md', 404, 'Optional standalone client documentation is not routed by the old-page front door.');
+  const snapshot = async label => writeFileSync(join(paths.dir, `accessibility-before-${label}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
+  const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=22,4.2,25.2&at=16.4,.8,24';
+  await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.__soulsEntity?.gameFrame().souls.length >= 2 && !document.querySelector('.viewer-arrival') && document.querySelector('.viewer-history[data-viewer-ready="true"]'), null, { timeout: 30000 });
+  await nativeCameraMode(page, 'manual', snapshot);
+  await offer(state);
+  await page.waitForFunction(({ load, crew }) => window.__soulsCarry?.evidence?.[load] && window.__soulsCarry.contactStates.some(s => s.crew === crew && s.field === 'absent' && s.members?.length === 2), { load: native(state.load.id), crew: native(state.crew) }, { timeout: 15000 });
+  const scene = await page.evaluate(() => ({ frame: window.__soulsEntity.gameFrame(), carry: window.__soulsCarry, viewport: { width: innerWidth, height: innerHeight, touch: navigator.maxTouchPoints } }));
+  const node = scene.carry.evidence[native(state.load.id)].frames[0].record;
+  const entryFile = join(root, 'content/kinds/construction/pallet_crates.json'), bytes = readFileSync(entryFile), entry = JSON.parse(bytes);
+  const binding = { crew: native(state.crew), load: { native: native(state.load.id), entity: layerDraws(node) && node.origin ? node.origin : entityId(node.id), kind: state.load.kind, entrySha256: hash(bytes) },
+    bodies: Object.entries(state.seats).map(([who, seat]) => { const shown = scene.frame.souls.filter(s => s.id === seat.soul); if (shown.length !== 1) throw Error('carry-proof.body-mapping'); return { native: native(state.bodies[who]), soul: seat.soul, entity: shown[0].entityId }; }) };
+  await Promise.all(state.pending);
+  const manifest = JSON.parse(readFileSync(join(paths.dir, 'native-page-provenance.json')));
+  check('no-missing-cancelled-assets', (state.cancelledLoads ?? []).every(f => state.loaded[f.path]), JSON.stringify(state.cancelledLoads ?? []));
+  for (const [path, actual] of Object.entries(state.loaded)) {
+    const replica = /\/v2\/replica\/[^/]+\/(replica\.js|replica_bg\.wasm)$/.exec(path);
+    const expected = replica ? manifest.trees['v2/target/wasm-load/pkg'][replica[1]] : manifest.trees['apps/web/dist'][path.slice(path.lastIndexOf('/assets/') + 1)];
+    check('served-artifact-' + path, actual === expected, 'Loaded page/replica bytes match their separate pinned artifact trees.');
+  }
+  check('desktop-input', scene.viewport.touch === 0 && scene.viewport.width === 1440 && scene.viewport.height === 1000);
+  const kitURL = Object.keys(state.loaded).find(path => /\/people-kit-[^/]+\.js$/.test(path)); check('production-kit-loaded', !!kitURL);
+  await page.evaluate(contactTools, { kitURL, binding, entry, source: manifest.sourceHead });
+  save(state, 'carry-binding.json', binding); save(state, 'carry-scene.json', scene);
+  await page.screenshot({ path: join(paths.dir, 'setup.png') });
+  console.log('SETUP_READY ' + paths.dir);
+  const gateEnd = Date.now() + 25000;
+  while (!existsSync(join(paths.dir, 'go'))) { signal.throwIfAborted(); if (Date.now() > gateEnd) throw Error('carry-proof.setup-review-timeout'); await delay(100, signal); }
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  await page.evaluate(() => { window.__carryContactObserver.active = true; });
+  const abort = new AbortController(), journeySignal = AbortSignal.any([signal, abort.signal]);
+  state.signal = journeySignal;
+  let checking = false;
+  const monitor = setInterval(async () => {
+    if (checking || abort.signal.aborted) return; checking = true;
+    try { const o = await page.evaluate(() => { const o = window.__carryContactObserver; return o && { counts: o.counts, failures: o.failures, failedWitnesses: o.failedWitnesses }; }); if (wholeRunFailure(o, state.pageErrors)) abort.abort(Error('carry-proof.final-draw-measurement-failure')); }
+    catch (error) { abort.abort(error); } finally { checking = false; }
+  }, 50);
+  const wait = async (predicate, ms) => { const until = Date.now() + ms; while (!await page.evaluate(predicate)) { journeySignal.throwIfAborted(); if (Date.now() > until) throw Error('carry-proof.draw-timeout'); await delay(50, journeySignal); } journeySignal.throwIfAborted(); };
+  try {
+    await cli(state, 'ada', 'carry', 'lift', state.crew, 'pallet-crates-1');
+    await wait(() => window.__carryContactObserver.counts['passed-native-pair'] > 0, 10000);
+    await page.screenshot({ path: join(paths.dir, 'first-lift.png') }); console.log('FIRST_CONTACT ' + paths.dir);
+    // Short ordinary relative walk keeps both participants in the reviewed view; full loading/rack proof remains separate.
+    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'to', state.crew, '17,24')));
+    await cli(state, 'ada', 'carry', 'set-down', state.crew);
+    await wait(() => window.__carryContactObserver.samples.some(s => s.result.releaseComplete), 10000);
+    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'leave', state.crew)));
+    const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return { counts: o.counts, failures: o.failures, failedWitnesses: o.failedWitnesses }; });
+    check('complete-contact-lifecycle', !wholeRunFailure(observer, state.pageErrors), JSON.stringify(observer));
+    check('native-active-contacts-observed', observer.counts['passed-native-pair'] > 0);
+  } finally { clearInterval(monitor); state.signal = signal; }
+}
