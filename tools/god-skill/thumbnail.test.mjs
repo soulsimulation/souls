@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { THUMB_SIZE, framing, thumbnail, thumbnailEndpoint, toJpeg } from './lib/thumbnail.mjs';
 import { decodePng, encodeJpeg } from './lib/jpeg.mjs';
-import { validateUpload } from '../../apps/server/src/moderation/validate.ts';
+import { validateUpload } from '../body-authoring/admit/validate.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'god-thumb-test-'));
 const CRC = Array.from({ length: 256 }, (_, n) => { for (let i = 0; i < 8; i++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });

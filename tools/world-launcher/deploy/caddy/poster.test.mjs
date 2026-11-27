@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { testPort } from '../../../../apps/server/test/test-port.ts';
+import { testPort } from '../../../lib/test-port.ts';
 
 const HERE = new URL('./', import.meta.url).pathname;
 const SITE = readFileSync(join(HERE, 'soul-game.caddy'), 'utf8'), TRUST = readFileSync(join(HERE, 'cdn-trust.snippet'), 'utf8');

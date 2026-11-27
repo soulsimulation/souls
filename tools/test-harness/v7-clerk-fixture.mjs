@@ -5,7 +5,7 @@ import {mkdirSync, openSync, closeSync, writeFileSync} from 'node:fs';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createServer} from 'node:net';
-import {clerkKeys, ISSUER, PUBLISHABLE_KEY} from '../../apps/server/test/clerk-fixture.ts';
+import {clerkKeys, ISSUER, PUBLISHABLE_KEY} from '../lib/clerk-fixture.ts';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -42,7 +42,7 @@ export async function startV7ClerkFixture({origin, out, web, marsWeb}) {
   writeFileSync(jwks, JSON.stringify({keys: [keys.jwk]}), {mode: 0o600});
   writeFileSync(envFile, [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`,
     `CLERK_AUTHORIZED_PARTIES=${origin}`, `SIM_TEST_JWKS_FILE=${jwks}`,
-    `NODE_OPTIONS=--import=${resolve(root, 'apps/server/test/clerk-jwks-preload.mjs')}`, ''].join('\n'), {mode: 0o600});
+    `NODE_OPTIONS=--import=${resolve(root, 'tools/lib/clerk-jwks-preload.mjs')}`, ''].join('\n'), {mode: 0o600});
   const fd = openSync(join(out, 'launcher.log'), 'wx');
   const launcher = spawn(process.execPath, ['tools/world-launcher/launcher.mjs', '--port', '5873', '--range', '5874-5876',
     '--data', join(out, 'launcher-data'), '--base', '/worlds', '--web', resolve(web),

@@ -17,6 +17,7 @@ import { fieldsOf } from './kinds-state.ts';
 import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
 import { moveRec } from './move-record.ts';
+import { backoffMs } from './backoff.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
@@ -41,9 +42,16 @@ const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(nu
  *  poll, which waits for it, for good; given up, it is an error like a failed read, and the next poll reads again. */
 const READ_MS = 5000;
 
+/** #5068 item 13: whether a read was refused (any answer but a 2xx or a 404) or did not answer since this was last
+ *  cleared, and how many polls in a row had one. A 404 is a file not written yet (the next part, a starting world's
+ *  pointer): read again at the usual pace, as before. */
+let refused = false;
+let fails = 0;
+
 /** `timed`: given up after READ_MS. Baselines are not: a slow viewer's 9 MB baseline may well take longer. */
 async function get(url: URL, timed = false): Promise<Uint8Array | null> {
-  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) });
+  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) }).catch((e) => { refused = true; throw e; });
+  if (!res.ok && res.status !== 404) refused = true;
   return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
 }
 
@@ -143,8 +151,10 @@ async function run(stream: URL) {
   // parse only after it answers, outside the retry catch, so invalid pointer bytes remain a visible error.
   let first: Uint8Array | null = null;
   while (!first) {
+    refused = false;
     first = await get(new URL('pointer', stream), true).catch(() => null);
-    if (!first) await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    fails = refused ? fails + 1 : 0;
+    if (!first) await new Promise((resolve) => setTimeout(resolve, Math.max(POLL_MS, backoffMs(fails))));
   }
   let ptr = readPtr(first) as StreamPointer;
   let player: StreamPlayer;
@@ -373,9 +383,14 @@ async function run(stream: URL) {
     post({ t: 'pointer', p: { ...ptr, quietUntil: quiet, ...(Object.keys(courses).length ? { courses } : {}), ...(Object.keys(leaves).length ? { leaves } : {}) } });
   };
   await install(ptr);
+  // #5068 item 13: a poll with a refused or unanswered read is followed by a wait that grows (backoffMs), counted in
+  // polls passed over; the first poll whose reads are all good goes back to the usual pace.
+  let wait = 0;
   const poll = async () => {
     if (busy) return;
+    if (wait > 0) return void wait--;
     busy = true;
+    refused = false;
     try {
       const b = await get(new URL('pointer', stream), true);
       const latest = b ? readPtr(b) as StreamPointer : ptr;
@@ -414,7 +429,11 @@ async function run(stream: URL) {
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
     } catch (e) { post({ t: 'error', message: String((e as Error)?.stack ?? e) }); }
-    finally { busy = false; }
+    finally {
+      busy = false;
+      fails = refused ? fails + 1 : 0;
+      wait = Math.floor(backoffMs(fails) / POLL_MS);
+    }
   };
   await poll();
   setInterval(poll, POLL_MS);

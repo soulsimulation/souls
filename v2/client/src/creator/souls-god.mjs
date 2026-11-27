@@ -58,10 +58,11 @@
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
 //   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
-//   souls-god.mjs apply-batch <file> [--dry-run]   a reviewed souls-named-batch/1 file (worlds/patches/*/batch.json):
+//   souls-god.mjs apply-batch <file> [--dry-run] [--terrain <file>]   a reviewed souls-named-batch/1 file (worlds/patches/*/batch.json):
 //                                                each thing it names (by its template name, or <building>/<thing>)
 //                                                found on the copy, never guessed; sent as edits of at most 256
-//                                                operations, each op's outcome a line; --dry-run sends nothing (named.mjs)
+//                                                operations, each op's outcome a line; --dry-run sends nothing (named.mjs);
+//                                                --terrain <file> gives the ground's tiles to a copy that came without them
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist m]   beside another (default e, 1 m)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
@@ -354,6 +355,7 @@ export const FIX = {
   'name-ambiguous': 'give one of the ids in choices',
   'named.file': 'apply-batch <file>: a souls-named-batch/1 file readable here',
   'named.format': 'a souls-named-batch/1 file: {"schema": "souls-named-batch/1", "ops": [...]}, as worlds/patches/*/batch.json',
+  'named.terrain': 'apply-batch --terrain <file>: {"tileSize": <the ground\'s field 24, mm>, "tiles": [[tx, tz, {"hex"}, {"hex"}], ...]}, as field 25 holds them',
   'unknown-op': 'your daemon is older than this command: run quit, then the command again',
   'when.no-calendar': 'the copy has no world clock yet: run status until connected is true, or give --when <world µs>us',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
@@ -648,9 +650,10 @@ export function requestOf(argv) {
   if (verb === 'quit') return { req: { op: 'stop' }, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
   if (verb === 'apply-batch') {
-    const files = rest.filter((w) => w !== '--dry-run');
-    if (files.length !== 1) throw usage('apply-batch <souls-named-batch/1 file> [--dry-run]');
-    return { named: { file: absolute(files[0]), dry: rest.includes('--dry-run') }, creator };
+    const t = rest.indexOf('--terrain'), terrain = t >= 0 ? rest[t + 1] : undefined;
+    const files = rest.filter((w, i) => w !== '--dry-run' && (t < 0 || (i !== t && i !== t + 1)));
+    if (files.length !== 1 || (t >= 0 && !terrain)) throw usage('apply-batch <souls-named-batch/1 file> [--dry-run] [--terrain <file>]');
+    return { named: { file: absolute(files[0]), dry: rest.includes('--dry-run'), ...(terrain ? { terrain: absolute(terrain) } : {}) }, creator };
   }
   if (verb === 'export' || verb === 'import') {
     if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);

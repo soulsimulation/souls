@@ -22,7 +22,13 @@
 //                  also moves the walked surfaces of its floors that stood at `from` (field 14); a floor with no room
 //                  brought to a step or less is ground cover, as import-eden makes it: it goes, and what stood on it
 //                  is placed again on the open ground, lowered with it (a later move of such a thing in the file
-//                  places it there instead)
+//                  places it there instead). A thing whose def keeps no params (an older revision, as live Eden's
+//                  `core-deck@1`) has only its floors moved: they are what a walk stands on
+//
+// The terrain (`--terrain <file>`): a copy whose open ground holds its tile size (field 24) but not its tiles (field
+// 25) has no heights to place a thing on the ground by. The file gives them, `{ tileSize, tiles }` as field 25 holds
+// them (an export's `[tx, tz, { hex }, { hex }]` rows); it is read only for such a copy, and only at the same tile
+// size.
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,7 +75,8 @@ export function indexOf(world) {
   }
   const kids = new Map();
   for (const n of world.nodes) { if (!kids.has(n.parent)) kids.set(n.parent, []); kids.get(n.parent).push(n); }
-  const ground = world.nodes.find((n) => n.fields?.[F.TILES] !== undefined) ?? null;
+  // The open ground: the node holding the terrain, or its tile size when the copy came without the tiles
+  const ground = world.nodes.find((n) => n.fields?.[F.TILES] !== undefined) ?? world.nodes.find((n) => n.fields?.[F.TILE_SIZE] !== undefined) ?? null;
   return { byId, byName, kids, ground };
 }
 
@@ -187,13 +194,24 @@ export function planOp(ix, op, lift) {
   if (op.op === 'set-param') {
     let params;
     try { params = JSON.parse(text(n.fields?.[F.PARAMS]) ?? 'null'); } catch { params = null; }
-    if (!params || typeof params !== 'object' || typeof op.param !== 'string') return said('bad-op', [], `${op.node} keeps no params`);
-    const cur = params[op.param], same = (a, b) => (typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-9 : JSON.stringify(a) === JSON.stringify(b));
-    const s = same(cur, op.to) ? 'already' : same(cur, op.from) ? 'ready' : 'moved-since';
-    if (s !== 'ready') return said(s, [], s === 'moved-since' ? `${op.param} is ${JSON.stringify(cur)}` : undefined);
-    const ops = [{ op: 'set', node: id, field: F.PARAMS, value: { hex: Buffer.from(JSON.stringify({ ...params, [op.param]: op.to })).toString('hex') } }];
-    if (op.param === 'height' && typeof op.from === 'number' && typeof op.to === 'number') {
-      const [was, now] = [Math.round(op.from * 1000), Math.round(op.to * 1000)];
+    const height = op.param === 'height' && typeof op.from === 'number' && typeof op.to === 'number';
+    const [was, now] = height ? [Math.round(op.from * 1000), Math.round(op.to * 1000)] : [];
+    const floors = (ix.kids.get(id) ?? []).filter((f) => Array.isArray(f.fields?.[F.SURFACES]));
+    const at = (mm) => floors.some((f) => f.fields[F.SURFACES].some((row) => num(row[0]) === mm));
+    const ops = [];
+    let only;
+    if (params && typeof params === 'object' && typeof op.param === 'string') {
+      const cur = params[op.param], same = (a, b) => (typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-9 : JSON.stringify(a) === JSON.stringify(b));
+      const s = same(cur, op.to) ? 'already' : same(cur, op.from) ? 'ready' : 'moved-since';
+      if (s !== 'ready') return said(s, [], s === 'moved-since' ? `${op.param} is ${JSON.stringify(cur)}` : undefined);
+      ops.push({ op: 'set', node: id, field: F.PARAMS, value: { hex: Buffer.from(JSON.stringify({ ...params, [op.param]: op.to })).toString('hex') } });
+    } else if (height) {
+      // No params (an older def revision): its floors alone. Already when a floor stands at `to`, or when none is
+      // left and `to` is ground cover (its floor went).
+      only = `${op.node} keeps no params: its floors only`;
+      if (!at(was)) return said(at(now) || (!floors.length && now <= STEP_MM) ? 'already' : 'moved-since', [], only);
+    } else return said('bad-op', [], `${op.node} keeps no params`);
+    if (height) {
       for (const f of ix.kids.get(id) ?? []) {
         const rows = f.fields?.[F.SURFACES], on = ix.kids.get(f.id) ?? [];
         if (!Array.isArray(rows) || !rows.some((row) => num(row[0]) === was)) continue;
@@ -209,7 +227,7 @@ export function planOp(ix, op, lift) {
         } else ops.push({ op: 'set', node: f.id, field: F.SURFACES, value: rows.map((row) => (num(row[0]) === was ? [now, row[1]] : row)) });
       }
     }
-    return said('ready', ops);
+    return said('ready', ops, only);
   }
   return { status: 'bad-op', detail: `no op ${op.op}`, ops: [] };
 }
@@ -266,9 +284,16 @@ export async function sendPlan(plan, ask) {
   return edits;
 }
 
-/** The open ground's height at (x, z) µm on an export (null off it), as the engine reads it (`terrain/terrain.mjs`). */
-export async function liftOf(world) {
-  const g = world.nodes.find((n) => n.fields?.[F.TILES] !== undefined);
+/** The open ground's height at (x, z) µm on an export (null off it), as the engine reads it (`terrain/terrain.mjs`).
+ *  `terrain` (`{ tileSize, tiles }`, the `--terrain` file) gives the tiles to a copy whose ground came without them. */
+export async function liftOf(world, terrain = null) {
+  let g = world.nodes.find((n) => n.fields?.[F.TILES] !== undefined);
+  if (!g && terrain) {
+    const bare = world.nodes.find((n) => n.fields?.[F.TILE_SIZE] !== undefined);
+    if (!bare) return null;
+    if (num(terrain.tileSize) !== num(bare.fields[F.TILE_SIZE]) || !Array.isArray(terrain.tiles)) throw Object.assign(new Error(`the terrain file's tiles are ${terrain.tileSize} mm, the ground's ${bare.fields[F.TILE_SIZE]} mm`), { code: 'named.terrain' });
+    g = { fields: { [F.TILE_SIZE]: bare.fields[F.TILE_SIZE], [F.TILES]: terrain.tiles } };
+  }
   if (!g) return null;
   const { heightAt } = await import('./terrain/terrain.mjs');
   const tiles = g.fields[F.TILES].map(([tx, tz, h, c]) => {
@@ -284,10 +309,10 @@ export async function liftOf(world) {
 const lineOf = (e) => ({ i: e.i, op: e.op, node: e.node, ...(e.id ? { id: e.id } : {}), status: e.status, ...(e.code ? { code: e.code } : {}), ...(e.detail ? { detail: e.detail } : {}), ...(e.choices ? { choices: e.choices } : {}) });
 
 /**
- * `apply-batch <file> [--dry-run]`: the file resolved on the copy (`ask` export), each op's line given to `print`,
+ * `apply-batch <file> [--dry-run] [--terrain <file>]`: the file resolved on the copy (`ask` export), each op's line given to `print`,
  * then sent unless dry. The summary: counts by outcome and the edits sent.
  */
-export async function runNamed({ file, dry }, ask, print) {
+export async function runNamed({ file, dry, terrain: terrainFile = null }, ask, print) {
   let batch;
   try { batch = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { return { ok: false, code: 'named.file', detail: `${file}: ${e.code ?? e.message}` }; }
   if (batch?.schema !== SCHEMA || !Array.isArray(batch.ops) || !batch.ops.length) return { ok: false, code: 'named.format', detail: `a ${SCHEMA} file with a list of ops` };
@@ -298,7 +323,10 @@ export async function runNamed({ file, dry }, ask, print) {
     if (x.ok === false) return x;
     world = JSON.parse(readFileSync(out, 'utf8'));
   } finally { rmSync(tmp, { recursive: true, force: true }); }
-  const plan = planOf(batch, world, await liftOf(world));
+  let terrain = null, lift;
+  if (terrainFile) try { terrain = JSON.parse(readFileSync(terrainFile, 'utf8')); } catch (e) { return { ok: false, code: 'named.terrain', detail: `${terrainFile}: ${e.code ?? e.message}` }; }
+  try { lift = await liftOf(world, terrain); } catch (e) { return { ok: false, code: e.code ?? 'named.terrain', detail: e.message }; }
+  const plan = planOf(batch, world, lift);
   const edits = dry ? 0 : await sendPlan(plan, ask);
   for (const e of plan) print(lineOf(e));
   const counts = {};

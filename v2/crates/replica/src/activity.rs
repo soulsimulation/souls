@@ -44,6 +44,16 @@ pub const F_STATE: u64 = 2;
 pub const F_EXPIRES: u64 = 3;
 /// The members, `[[role, body, soul, link, intent], ...]`, in the order they joined.
 pub const F_MEMBERS: u64 = 4;
+/// Where the node holds a thing riding each slot its kind gives (a moving group's rider, `v2/docs/moving-group.md`
+/// rule 2): `[[slot, x, y, z], ...]`, mm in the node's own frame, in slot order, rowed as a thing's slot points are
+/// (N1's field 13). The engine holds a rider in the node's own frame (`sim::activity::carry::Load::held`), so each
+/// point is that frame's origin; a reader composes a rider's pose from it and never has to assume it. Written once,
+/// in the change that makes the node, and only when its kind's rules give it a slot; a node made before the field
+/// existed has none. It is not field 13: on an activity's node a slot with a point there would make its rider fixed
+/// geometry to the ground (`sim::ground::scene::carried`), and a rider is carried. The number is an activity node's
+/// own, as its fields 1 to 4 are: the importer writes a place's kind at 15 (`import_eden::F_PLACE_KIND`, a text), so a
+/// reader takes these rows from an activity's node only, never as field 15 of any node.
+pub const F_RIDES: u64 = 15;
 
 /// The longest leave a kind may state, µs: ten seconds. A leave is bounded, so nobody is held.
 pub const LEAVE_MOST: Micros = 10_000_000;
@@ -313,6 +323,14 @@ pub struct Node {
     pub state: State,
     pub expires: Micros,
     pub members: Vec<Member>,
+}
+
+/// [`F_RIDES`]' value for a node whose kind gives `slots`; none when it gives none.
+pub fn rides(slots: impl Iterator<Item = u64>) -> Option<Value> {
+    let rows: Vec<Value> = slots
+        .map(|n| Value::Array(vec![Value::Uint(n), int(0), int(0), int(0)]))
+        .collect();
+    (!rows.is_empty()).then_some(Value::Array(rows))
 }
 
 fn int(n: i64) -> Value {
