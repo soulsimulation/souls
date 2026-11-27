@@ -2,8 +2,77 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator } from './conference-native-page.mjs';
+import { createRequire } from 'node:module';
+import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
+import { drawnLoad, bodyGeometry } from '../../playtest/carry-contact/oracle.mjs';
+const THREE = createRequire(new URL('../../../mars/viewer/package.json', import.meta.url))('three');
+const clearanceTools = options => conferenceClearanceTools({ vector: () => new THREE.Vector3(), drawnLoad, bodyGeometry, ...options });
+function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
+  const scene=new THREE.Scene(),root=new THREE.Group(),mesh=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial());root.add(mesh);scene.add(root);scene.updateMatrixWorld(true);
+  return {scene,root,mesh,layer:{drawn:new Map([['lectern',{obj:root}]]),instancer:{pools:new Map()}}};
+}
+const vertex = p => ({ p, mesh:'actual-skin',index:7 });
+
+test('clearance uses actual instance slot plus mesh-parent transform without applying geometry-local placement twice',()=>{
+  const f=rigidFixture(),tools=clearanceTools();f.scene.remove(f.root);
+  const parent=new THREE.Group();parent.position.set(3,2,-4);parent.rotation.y=.7;f.scene.add(parent);
+  const local=new THREE.Matrix4().makeTranslation(.3,.6,-.2),root=new THREE.Matrix4().makeRotationY(.4).setPosition(1,.5,2);
+  const mesh=new THREE.InstancedMesh(f.mesh.geometry,f.mesh.material,2);mesh.count=2;mesh.setMatrixAt(0,new THREE.Matrix4().makeTranslation(100,0,0));mesh.setMatrixAt(1,root.clone().multiply(local));parent.add(mesh);f.scene.updateMatrixWorld(true);
+  f.layer.drawn.set('lectern',{inst:'pool',shown:true,obj:f.root});f.layer.instancer.pools.set('pool',{slots:new Map([['lectern',1]]),parts:[{local}],meshes:[mesh]});
+  const before=mesh.instanceMatrix.array.slice(),matrix=parent.matrixWorld.clone().multiply(root).multiply(local);
+  const inside=new THREE.Vector3().applyMatrix4(matrix).toArray(),result=tools.clearance([vertex(inside)],tools.lectern(f.layer,f.scene,'lectern'));
+  assert.equal(result.insideVertices,1);assert.equal(result.worst.part.slot,1);assert(result.worst.distanceM>.49);
+  const direct=rigidFixture();direct.root.matrixAutoUpdate=false;direct.root.matrix.copy(matrix);direct.scene.updateMatrixWorld(true);
+  const uninstanced=tools.clearance([vertex(inside)],tools.lectern(direct.layer,direct.scene,'lectern'));
+  assert.equal(uninstanced.insideVertices,1);assert(Math.abs(uninstanced.worst.distanceM-result.worst.distanceM)<1e-7,'visible-root and actual-instance surfaces agree');
+  assert.deepEqual(mesh.instanceMatrix.array,before,'observation never mutates native/drawn transforms');
+  f.layer.instancer.pools.get('pool').slots.set('lectern',0);
+  assert.equal(tools.clearance([vertex(inside)],tools.lectern(f.layer,f.scene,'lectern')).insideVertices,0,'neighbor instance cannot substitute for this lectern');
+});
+
+test('actual production chamfered, merged lectern shells preserve gaps and bevels rather than using their enclosing box',async()=>{
+  const {buildKit}=await import('../../../apps/web/src/gen-mesh/kit.mesh.ts');
+  const {MaterialLib}=await import('../../../apps/web/src/gen-mesh/materials.ts');
+  const template=JSON.parse(readFileSync(new URL('../../../worlds/templates/conference-rehearsal.json',import.meta.url)));
+  const args=template.batches.flatMap(b=>b.ops).find(o=>o.op==='define'&&o.def.name==='core-hall_lecture').def.make.args;
+  const scene=new THREE.Scene(),root=buildKit(args,{materials:new MaterialLib(),tint:(_key,fallback)=>fallback});scene.add(root);scene.updateMatrixWorld(true);
+  const layer={drawn:new Map([['lectern',{obj:root}]]),instancer:{pools:new Map()}},tools=clearanceTools(),load=tools.lectern(layer,scene,'lectern');
+  assert.equal(load.parts.length,4,'the real merged mesh has four disconnected closed authored pieces');
+  assert.equal(tools.clearance([vertex([.4,.4,0])],load).insideVertices,0,'empty gap inside total bounds stays empty');
+  assert.equal(tools.clearance([vertex([0,.64,.1])],load).insideVertices,1,'actual shaft interior is detected');
+  const bevel=tools.clearance([vertex([.799,.099,.599])],load);
+  assert(bevel.projectedPartOverlaps>0);assert.equal(bevel.insideVertices,0,'outer dais corner is outside its actual bevel');
+  const surface=tools.clearance([vertex([0,.1,0])],load);assert.equal(surface.insideVertices,0);assert.equal(surface.surfaceUncertainVertices,1,'surface contact stays uncertain');
+});
+
+test('visible bodyDraw sampling honors indexed drawRange/material groups and excludes hidden source primitives',()=>{
+  const f=rigidFixture(),root=new THREE.Group(),bone=new THREE.Bone();bone.name='FootL';root.add(bone);f.scene.add(root);
+  const g=new THREE.BoxGeometry(1,1,1),count=g.attributes.position.count;
+  g.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(new Uint16Array(count*4),4));
+  const weights=new Float32Array(count*4);for(let i=0;i<count;i++)weights[i*4]=1;g.setAttribute('skinWeight',new THREE.Float32BufferAttribute(weights,4));
+  const mesh=new THREE.SkinnedMesh(g,new THREE.MeshBasicMaterial());mesh.userData.bodyDraw=true;root.add(mesh);mesh.bind(new THREE.Skeleton([bone]));
+  const hidden=new THREE.Mesh(new THREE.BoxGeometry(100,100,100),new THREE.MeshBasicMaterial());hidden.visible=false;root.add(hidden);
+  g.setDrawRange(0,6);f.scene.updateMatrixWorld(true);const tools=clearanceTools(),points=tools.body(root,f.scene);
+  assert.equal(points.length,4);assert(points.every(p=>p.mesh===mesh.uuid&&p.part==='foot'&&p.inferredPart));
+  assert(points.every(p=>p.matrix.length===16&&Number.isInteger(p.index)));
+  g.setDrawRange(0,12);g.clearGroups();g.addGroup(0,6,0);g.addGroup(6,6,1);mesh.material=[new THREE.MeshBasicMaterial(),new THREE.MeshBasicMaterial({visible:false})];
+  assert.equal(tools.body(root,f.scene).length,4,'hidden material group is not submitted');
+  assert.throws(()=>clearanceTools({maxVertices:3}).body(root,f.scene),/vertex limit/);
+  mesh.visible=false;assert.throws(()=>tools.body(root,f.scene),/skin unavailable|visibly/);
+});
+
+test('clearance fails closed on open, changed, hidden, detached, singular and bounded-work geometry',()=>{
+  for(const mutate of [f=>f.mesh.visible=false,f=>f.scene.remove(f.root),f=>f.root.scale.set(0,1,1),f=>f.mesh.geometry.setDrawRange(0,3)]){
+    const f=rigidFixture();mutate(f);f.scene.updateMatrixWorld(true);assert.throws(()=>clearanceTools().lectern(f.layer,f.scene,'lectern'));
+  }
+  const f=rigidFixture(),tools=clearanceTools(),load=tools.lectern(f.layer,f.scene,'lectern');
+  f.mesh.geometry.attributes.position.needsUpdate=true;assert.throws(()=>tools.lectern(f.layer,f.scene,'lectern'),/topology changed/);
+  assert.throws(()=>clearanceTools({maxTests:1}).clearance([vertex([0,0,0])],load),/work limit/);
+  assert.throws(()=>clearanceTools({maxTriangles:1}).lectern(f.layer,f.scene,'lectern'),/geometry limit/);
+  assert.throws(()=>tools.clearance([vertex([NaN,0,0])],load),/nonfinite skin/);
+  assert.equal(tools.clearance([vertex([0,0,.5])],load).surfaceUncertainVertices,1);
+});
 
 test('tracked conference fixture preserves the existing authored layout exactly', () => {
   const eden = JSON.parse(readFileSync(new URL('../../../worlds/templates/eden-2026.json', import.meta.url)));
