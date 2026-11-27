@@ -1,7 +1,7 @@
 // One actual native two-carrier lifecycle. Resources belong to runOwnedAttempt; controls are ordinary UI/CLI input.
 import { execFile, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync, fsyncSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAIR, pairArgs, lastJson, seatOf, seatEnv } from '../../playtest/arena/new-engine/seat.mjs';
 import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
@@ -153,12 +153,35 @@ async function verifyAssets(state, check) {
   }
   return manifest;
 }
-async function setupGate(state, page, signal) {
-  const paths = state.paths;
-  await page.screenshot({ path: join(paths.dir, 'setup.png') });
+export function validateSetupApproval(ready, approval, signal, now = Date.now()) {
+  signal.throwIfAborted();
+  if (now >= ready.deadline) throw Error('carry-proof.setup-review-timeout');
+  if (approval?.approved !== true || approval.nonce !== ready.nonce || approval.screenshotSHA256 !== ready.screenshotSHA256)
+    throw Error('carry-proof.setup-review-mismatch');
+  return true;
+}
+export async function setupGate(state, page, signal) {
+  const paths = state.paths, screenshot = join(paths.dir, 'setup.png');
+  await page.screenshot({ path: screenshot });
+  signal.throwIfAborted();
+  const provenance = JSON.parse(readFileSync(join(paths.dir, 'native-page-provenance.json')));
+  const ready = { schema: 'carry-setup-ready/1', nonce: randomUUID(), screenshot: 'setup.png', screenshotSHA256: hash(readFileSync(screenshot)),
+    source: { product: provenance.sourceHead, artifactSHA256: provenance.artifactPin.hash,
+      driverSHA256: hash(readFileSync(new URL(import.meta.url))), oracleSHA256: hash(readFileSync(new URL('../../playtest/carry-contact/oracle.mjs', import.meta.url))) },
+    deadline: Date.now() + 25000 };
+  const temporary = join(paths.dir, 'setup-ready-' + ready.nonce + '.tmp');
+  const fd = openSync(temporary, 'wx', 0o600);
+  try { writeFileSync(fd, JSON.stringify(ready, null, 2) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+  renameSync(temporary, join(paths.dir, 'setup-ready.json'));
+  const directory = openSync(paths.dir, 'r'); try { fsyncSync(directory); } finally { closeSync(directory); }
   console.log('SETUP_READY ' + paths.dir);
-  const gateEnd = Date.now() + 25000;
-  while (!existsSync(join(paths.dir, 'go'))) { signal.throwIfAborted(); if (Date.now() > gateEnd) throw Error('carry-proof.setup-review-timeout'); await delay(100, signal); }
+  for (;;) {
+    signal.throwIfAborted();
+    if (Date.now() >= ready.deadline) throw Error('carry-proof.setup-review-timeout');
+    const approval = join(paths.dir, 'setup-approval.json');
+    if (existsSync(approval)) { validateSetupApproval(ready, JSON.parse(readFileSync(approval)), signal); return; }
+    await delay(100, signal);
+  }
 }
 export default async function ({ page, paths, signal, fixture, check, expectHttp, arm }) {
   const state = states.get(fixture.dir), root = state.recipe.checkout;

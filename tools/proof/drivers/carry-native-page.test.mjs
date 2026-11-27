@@ -22,3 +22,39 @@ test('observer evaluation records success and a bounded stalled evaluation witho
     { timeoutMs: 5, record: stage => stages.push(stage), onFailure: async () => { failure++; } }), /observer-install-timeout/);
   assert.deepEqual(stages, ['evaluate-begin', 'evaluate-error']); assert.equal(failure, 1);
 });
+
+
+test('setup approval binds the new screenshot and nonce; abort and fixed deadline win over matching approval', async () => {
+  const { validateSetupApproval } = await import('./carry-native-page.mjs');
+  const ready = { nonce: 'current-run', screenshotSHA256: 'current-image', deadline: 25000 };
+  const approval = { approved: true, nonce: ready.nonce, screenshotSHA256: ready.screenshotSHA256 };
+  const signal = new AbortController().signal;
+  assert.equal(validateSetupApproval(ready, approval, signal, 24999), true);
+  for (const bad of [{ ...approval, nonce: 'earlier-run' }, { ...approval, screenshotSHA256: 'earlier-image' }, { ...approval, approved: false }, {}])
+    assert.throws(() => validateSetupApproval(ready, bad, signal, 24999), /setup-review-mismatch/);
+  assert.throws(() => validateSetupApproval(ready, approval, signal, 25000), /setup-review-timeout/);
+  assert.throws(() => validateSetupApproval(ready, approval, signal, 25001), /setup-review-timeout/);
+  const aborted = new AbortController(); aborted.abort(Error('owner-aborted'));
+  assert.throws(() => validateSetupApproval(ready, approval, aborted.signal, 24000), /owner-aborted/);
+});
+
+test('setup publishes source-bound readiness only after screenshot completion and accepts only its matching approval', async () => {
+  const fs = await import('node:fs'), { join } = await import('node:path');
+  const { setupGate } = await import('./carry-native-page.mjs');
+  const root = new URL('../../../.local/', import.meta.url); fs.mkdirSync(root, { recursive: true });
+  const dir = fs.mkdtempSync(new URL('carry-setup-gate-', root));
+  fs.writeFileSync(join(dir, 'native-page-provenance.json'), JSON.stringify({ sourceHead: 'fixture-source', artifactPin: { hash: 'fixture-artifact' } }));
+  let release; const screenshot = new Promise(ok => { release = ok; });
+  const run = setupGate({ paths: { dir } }, { screenshot: async ({ path }) => { await screenshot; fs.writeFileSync(path, 'new screenshot'); } }, new AbortController().signal);
+  assert.equal(fs.existsSync(join(dir, 'setup-ready.json')), false);
+  release();
+  try {
+    while (!fs.existsSync(join(dir, 'setup-ready.json'))) await new Promise(ok => setTimeout(ok, 1));
+    const ready = JSON.parse(fs.readFileSync(join(dir, 'setup-ready.json')));
+    assert.equal(ready.source.product, 'fixture-source'); assert.equal(ready.source.artifactSHA256, 'fixture-artifact');
+    assert.match(ready.screenshotSHA256, /^[a-f0-9]{64}$/); assert.match(ready.source.driverSHA256, /^[a-f0-9]{64}$/);
+    assert.match(ready.source.oracleSHA256, /^[a-f0-9]{64}$/); assert.ok(ready.deadline - Date.now() <= 25000);
+    fs.writeFileSync(join(dir, 'setup-approval.json'), JSON.stringify({ approved: true, nonce: ready.nonce, screenshotSHA256: ready.screenshotSHA256 }));
+    await run;
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
