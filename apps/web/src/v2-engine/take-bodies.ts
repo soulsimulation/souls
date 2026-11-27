@@ -138,7 +138,8 @@ export function lookBodyOf(params: string | undefined): Record<string, unknown> 
 export function catalogueOf(json: unknown): CatalogueBody[] | null {
   const c = json as { format?: unknown; bodies?: unknown } | null;
   if (!c || c.format !== 'souls/bodies/1' || !Array.isArray(c.bodies)) return null;
-  return c.bodies.filter((b): b is CatalogueBody => !!b && typeof b === 'object' && typeof (b as CatalogueBody).hash === 'string' && /^[a-f0-9]{64}$/.test((b as CatalogueBody).hash));
+  return c.bodies.filter((b): b is CatalogueBody => !!b && typeof b === 'object' && typeof (b as CatalogueBody).hash === 'string' && /^[a-f0-9]{64}$/.test((b as CatalogueBody).hash))
+    .map(row => { const trustedLater = {...row}; delete trustedLater.resources; return trustedLater; }); // Only verified companion bytes may add resources.
 }
 
 const BODIES_DIR = /^\/[A-Za-z0-9._-][A-Za-z0-9._/-]*\/$/; // one leading slash: never `//host/`

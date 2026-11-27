@@ -242,11 +242,16 @@ test('declared sit and lie take precedence over kind names and preserve recorded
 
 test('canonical body resources require the exact verified companion; defaults and digest mismatches stay unknown', async () => {
   const { createHash } = await import('node:crypto');
-  const { loadBodyResources, legacyBodyOf, bodyResources } = await import('./take-bodies.ts');
+  const { loadBodyResources, legacyBodyOf, bodyResources, catalogueOf } = await import('./take-bodies.ts');
   const raw = JSON.stringify({kind:'body:declared', kindHash:'ab'.repeat(32), resources:[['souls:hand-left',2,7],['souls:hand-right',2,4]]});
   const hash = 'ab'.repeat(32), entryHash = createHash('sha256').update(raw).digest('hex');
   const row = { hash, entry:'declared.json', entryHash, legacy:[{family:'humanoid'}] };
   const read = (async () => new Response(raw)) as typeof fetch;
+  const inline=catalogueOf({format:'souls/bodies/1',bodies:[{...row,resources:[['souls:hand-left',2,99]]}]})!;
+  assert.equal(inline[0].resources,undefined,'unverified catalogue metadata cannot preempt companion verification');
+  assert.equal(legacyBodyOf(hash,new Map(inline.map(r=>[r.hash,r])))?.nativeResources,undefined);
+  const failed=await loadBodyResources(inline,'/',(async()=>new Response('',{status:404})) as typeof fetch);
+  assert.equal(legacyBodyOf(hash,new Map(failed.map(r=>[r.hash,r])))?.nativeResources,undefined,'failed companion never revives unverified inline metadata');
   const loaded = await loadBodyResources([row], '/assets/bodies/', read);
   assert.deepEqual(loaded[0].resources,[['souls:hand-left',2,7],['souls:hand-right',2,4]]);
   const catalog = new Map(loaded.map(r => [r.hash,r]));

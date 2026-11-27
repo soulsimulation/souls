@@ -45,7 +45,8 @@ test('canonical held quantity, owner and arrival controls follow production palm
   try{
     const drawn=(layer as unknown as {drawn:Map<string,unknown>}).drawn;
     const duplicate={id:'same-bowl',kind:'eden:soup_bowl@aa',origin:'other-origin',parent:'native-body',slot:7,pos:[0,0,0] as const,rot:[Q,0,0,0] as const,fields:{28:2}};
-    drawn.set(entityId(duplicate.id),{});assert.equal(layer.heldPicture(duplicate),null,'native entity drawn during handoff blocks duplicate even with a different origin');drawn.delete(entityId(duplicate.id));
+    drawn.set(entityId(duplicate.id),{obj:new THREE.Group()});
+    try { assert.equal(layer.heldPicture(duplicate),null,'native entity drawn during handoff blocks duplicate even with a different origin'); } finally { drawn.delete(entityId(duplicate.id)); }
     const retry=layer.heldPicture(duplicate);assert(retry,'same observation can acquire canonical picture after world draw retires');retry.dispose();
     const counts:number[]=[];
     for(const soup of [2,1,0,2]){
