@@ -231,7 +231,7 @@ function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
           if (!people.palmOf(binding.entity, hand, out)) fail('live palm unavailable');
           palms[hand] = out.toArray();
         }
-        return { ...binding, visibleSkin, palms, root: root.matrixWorld.toArray(),nativeCarryOwned:!!nativeFrame?.bodies?.[binding.entity],order:nativeFrame?.bodies?.[binding.entity]?.order };
+        return { ...binding, visibleSkin, palms, root: root.matrixWorld.toArray(),nativeCarryOwned:!!frame.entities[binding.entity]?.state?.nativeCarry,order:nativeFrame?.bodies?.[binding.entity]?.order };
       });
       const sample = { stage: 'after-world-render', units: 'm', currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected,
         renderTarget: world.renderer.getRenderTarget(), frame: stamp.frame, at: now, tick: frame.tick, worldSeconds: world.worldSeconds,

@@ -1,6 +1,6 @@
 // The old page samples this public recording at its depicted body clock, once per render (never at wall time).
 import type {CarriedParts} from './take-parts.ts';
-import {entityId} from './creator-kinds.ts';
+import {entityId} from './entity-id.ts';
 import {layerDraws} from './layer-draws.ts';
 import {worldPoint,type NativePose} from './recorded-carry.ts';
 import type {CarryObservation} from './recorded-carry.ts';
