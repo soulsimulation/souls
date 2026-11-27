@@ -83,40 +83,60 @@ function dayIndex(base: URL, day: number, today: number): Promise<DayIndex | nul
 /** #3358: the stored bytes of the bundles read last (a bundle's key names it for good), so a bundle read ahead, or
  *  read by the seek before, is not fetched again. A failed read is not kept. */
 const bundles = new Map<string, Promise<Uint8Array>>();
-function bundle(base: URL, key: string): Promise<Uint8Array> {
+function bundle(base: URL, key: string, load = () => get(new URL(key, base))): Promise<Uint8Array> {
   let b = bundles.get(key);
   if (!b) {
-    bundles.set(key, (b = get(new URL(key, base)).then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
+    bundles.set(key, (b = load().then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
     b.catch(() => bundles.delete(key));
     while (bundles.size > 4) bundles.delete(bundles.keys().next().value!);
   }
   return b;
 }
 /** #3358: read aheads (history.ts prepare) fetch what a seek they foresee will read and keep the bundle, applying
- *  nothing, one at a time in the order asked (the first is the likelier). A seek whose moment the read ahead under way
- *  holds (the first guess was right) drops those not begun (`round`). One under way is never stopped: measured on
- *  soul.game, the bytes already sent drain first whatever is asked after them, so a seek of another guess waits about
- *  as long either way, and the next read ahead starts the moment they have. */
-let reading: Promise<unknown> = Promise.resolve(), round = 0;
-let under: { from: number; to: number } | null = null;
+ *  nothing, one at a time in the order asked. A seek drops those not begun (`round`); the one under way it either
+ *  wants (its bundle holds the seek's moment: the rest comes in one request) or stops after the part it is reading.
+ *  It reads in parts because a stopped fetch does not free the line: measured on soul.game, the bytes of a 1.8 MB
+ *  bundle already sent drained first and held a seek's 9 KB index 1.2 to 1.8 s. */
+const PART = 512 * 1024;
+type Under = { key: string; from: number; to: number; wanted: boolean; stopped: boolean };
+let reading: Promise<unknown> = Promise.resolve(), round = 0, under: Under | null = null;
+async function parts(url: URL, u: Under): Promise<Uint8Array> {
+  const got: Uint8Array[] = [];
+  let have = 0, total = Infinity;
+  while (have < total) {
+    if (u.stopped) throw new Error('read ahead stopped');
+    const res = await fetch(url, { headers: { Range: `bytes=${have}-${u.wanted ? '' : have + PART - 1}` } });
+    if (res.status === 200 && !have) return new Uint8Array(await res.arrayBuffer()); // no parts served: the whole
+    const size = /\/(\d+)$/.exec(res.headers.get('content-range') ?? '')?.[1], b = new Uint8Array(await res.arrayBuffer());
+    if (res.status !== 206 || !size || !b.length) throw new Error(`no bundle ${u.key}`);
+    total = Number(size); got.push(b); have += b.length;
+  }
+  const out = new Uint8Array(have);
+  got.reduce((o, b) => (out.set(b, o), o + b.length), 0);
+  return out;
+}
 function readAhead(base: URL, at: number, now: number, floor?: number) {
   const r = round, today = Math.floor(now / DAY_US);
   reading = reading.then(async () => {
     const f = r === round ? await walk(at, now, floor, (day) => dayIndex(base, day, today)) : null;
     const to = f && r === round ? await f.later() : null;
     if (!f || r !== round) return;
-    under = { from: at, to: to ?? Infinity };
-    await bundle(base, f.key).finally(() => { under = null; });
+    const u: Under = (under = { key: f.key, from: at, to: to ?? Infinity, wanted: false, stopped: false });
+    await bundle(base, f.key, () => parts(new URL(f.key, base), u)).finally(() => { under = null; });
   }).catch(() => null);
 }
 
 async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
-  if (under && under.from <= at && at < under.to) round++;
+  round++;
+  if (under && under.from <= at && at < under.to) under.wanted = true;
+  else if (under) under.stopped = true;
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
   // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
   const today = Math.floor(now / DAY_US), found = await walk(at, now, floor, (day) => dayIndex(base, day, today));
   if (!found) throw new Error(`no history in the year before ${at} µs`);
-  const stored = await bundle(base, found.key);
+  if (under?.key === found.key) Object.assign(under, { stopped: false, wanted: true });
+  // a read ahead stopped before the seek knew it wanted that bundle: read it again
+  const stored = await bundle(base, found.key).catch(() => bundle(base, found.key));
   await ready;
   const out = decode(historyAt(await header, await inflate(stored), found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
   const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
