@@ -16,7 +16,7 @@
 //! - `replace`: as `flood`, each intent replacing the one before it.
 //! - `slow`: a reader that never reads: it subscribes to everything in full and sends ten toggles a second, reading
 //!   nothing, until it is let go; then again.
-//! - `subscribe`: a subscription for everything (every lamp and body) in full, read as it comes, asked again each second.
+//! - `subscribe`: a subscription for everything (the world's root) in full, read as it comes, asked again each second.
 //! - `silent`: 10,000 sockets that never sign in, half never sending their HTTP request, half upgraded and never
 //!   sending their first frame; each closed is opened again.
 //! - `guess`: four loops signing in with fresh well-formed tokens the world never issued.
@@ -371,17 +371,15 @@ fn sync_ask(n: u64) -> Vec<u8> {
     .expect("a sync request")
 }
 
-/// A subscription for everything (#3292): every lamp held and every body followed, at level 1 (full), with a budget
-/// far above the world's.
-fn everything(pairs: &[(Id, Id)]) -> Vec<u8> {
-    let mut scopes = Vec::new();
-    for (body, lamp) in pairs {
-        scopes.push(Value::Map([(1, lamp.to_value())].into()));
-        scopes.push(Value::Map([(2, body.to_value())].into()));
-    }
+/// A subscription for everything (#3292): the lamps world's root node held, at level 1 (full), with a budget far above
+/// the world's. The root is the first id the world's minter makes (`worldd::checkers::toggles::World::build`).
+fn everything(_pairs: &[(Id, Id)]) -> Vec<u8> {
+    let root = replica::ids::Minter::new(Scope([0x2b; 16]))
+        .mint()
+        .unwrap_or_else(|_| fail("the root's id"));
     let request = Value::Map(
         [
-            (1, Value::Array(scopes)),
+            (1, Value::Array(vec![Value::Map([(1, root.to_value())].into())])),
             (2, Value::Uint(1)),
             (3, Value::Uint(u32::MAX as u64)),
         ]
