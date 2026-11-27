@@ -213,6 +213,7 @@ type Synced = (Vec<u8>, u64, Vec<u8>);
 
 /// What became of an intent handed to the link.
 #[derive(Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)] // `Sent::Sent` reads as meant; the lint fires from a third variant on
 pub enum Sent {
     /// Sent (or kept to send again): the world answers it.
     Sent,
@@ -898,9 +899,10 @@ mod kept_tests {
     use super::*;
     use replica::ids::{Id, Scope};
 
+    /// A Soul's actor and the bytes the link keys it by (any bytes; the gateway uses the grant's).
     fn soul(n: u64) -> (Vec<u8>, Actor) {
         let a = Actor::Soul(Id::new(Scope([0x52; 16]), n).unwrap());
-        (encode(&a.to_value()).unwrap(), a)
+        (n.to_be_bytes().to_vec(), a)
     }
 
     /// O8 (#2805): one agent's kept intents are bounded by KEPT_MOST, refused past it without being kept, and freed by

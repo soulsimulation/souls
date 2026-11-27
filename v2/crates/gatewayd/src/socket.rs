@@ -497,8 +497,10 @@ async fn serve(
                     let _ = send(&mut socket, control(token::REFUSED)).await;
                     break;
                 }
-                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
-                    gw.receipts.write(&who, Outcome::Refusal);
+                if let Some((answer, counted)) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
+                    if counted {
+                        gw.receipts.write(&who, Outcome::Refusal);
+                    }
                     ok = send_agent(&mut socket, binary(answer), &behind, &mut let_go).await;
                 }
             }
@@ -756,7 +758,9 @@ async fn stopped(closing: &mut tokio::sync::watch::Receiver<bool>) {
 }
 
 /// Reads an intent from the socket signed in as `session` and hands it to the world; the gateway's own answer to send
-/// now, if it gives one not kept (always a refusal).
+/// now, if it gives one not kept (always a refusal), and whether it is a line in the receipts file. Answers to bytes
+/// that are not an intent, to a sync request and [`SLOW_DOWN`] are not (O8, #2805): a flood of them would fill the
+/// file and the disk under it at the sender's rate, and none is usage.
 fn take_intent(
     gw: &Gateway,
     actor: Actor,
@@ -765,7 +769,7 @@ fn take_intent(
     bytes: Vec<u8>,
     received: u64,
     read: &mut u64,
-) -> Option<Vec<u8>> {
+) -> Option<(Vec<u8>, bool)> {
     // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
     if let Ok(d) = decode(&bytes)
         && let Value::Map(mut m) = d.value
@@ -778,14 +782,14 @@ fn take_intent(
         return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
             // A sync request is never charged against KEPT_MOST; it is not kept.
-            Sent::Restarting | Sent::Full(_) => Some(sync_refused(n, RESTARTING)),
+            Sent::Restarting | Sent::Full(_) => Some((sync_refused(n, RESTARTING), false)),
         };
     }
     let intent = match decode_intent(&bytes) {
         Ok(i) => i,
         Err(r) => {
             let reason = Name::new(r.name).unwrap_or_else(|| unreachable!("a refusal's name"));
-            return Some(own_answer(Answer::Unread { reason }));
+            return Some((own_answer(Answer::Unread { reason }), false));
         }
     };
     *read = (*read).max(intent.sequence);
@@ -796,11 +800,12 @@ fn take_intent(
             intent.actor,
             intent.sequence,
             "intent-not-granted",
-        );
+        )
+        .map(|a| (a, true));
     }
     // I2: a kind definition naming an uploaded model this world does not hold as allowed never reaches the world
     if let Some(reason) = crate::uploads::edit_refusal(gw, &intent) {
-        return refuse(gw, grant, actor, intent.sequence, reason);
+        return refuse(gw, grant, actor, intent.sequence, reason).map(|a| (a, true));
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
@@ -817,7 +822,7 @@ fn take_intent(
         gw.holding(grant, sequence, session, crate::digest(&bytes))
     };
     if let Err(reason) = turn {
-        return Some(refused(actor, sequence, reason, gw.link.now()));
+        return Some((refused(actor, sequence, reason, gw.link.now()), true));
     }
     match gw
         .link
@@ -833,7 +838,7 @@ fn take_intent(
             if own.is_some() {
                 gw.unsent(grant, sequence);
             }
-            own
+            own.map(|a| (a, true))
         }
         // O8 (#2805): its agent's kept intents are at their bound. Answered on this socket alone, not kept: the gauge
         // is logged at each power of two, so a flood writes a few lines, not one each.
@@ -845,7 +850,7 @@ fn take_intent(
                     KEPT_MOST >> 10
                 ));
             }
-            Some(own_answer(Answer::Refused {
+            let answer = own_answer(Answer::Refused {
                 actor,
                 sequence,
                 reason: Name::new(SLOW_DOWN).unwrap_or_else(|| unreachable!("a fixed name")),
@@ -853,7 +858,8 @@ fn take_intent(
                 changed: Vec::new(),
                 op: None,
                 detail: Some(SLOW_DOWN_WORDS.to_owned()),
-            }))
+            });
+            Some((answer, false))
         }
     }
 }
