@@ -986,9 +986,18 @@ mod tests {
         assert!(low(5 * G, true), "once low, 5 % is still low (the margin)");
         assert!(!low(6 * G, true), "cleared past 5.5 %");
         // A small disk: the bytes threshold binds first.
-        assert!(disk_low(900 << 20, 10 * G, G, 5, false), "900 MiB of 10 GiB is low");
-        assert!(disk_low(1100 << 20, 10 * G, G, 5, true), "under 1.1 GiB stays low");
-        assert!(!disk_low(1200 << 20, 10 * G, G, 5, true), "cleared past 1.1 GiB and 5.5 %");
+        assert!(
+            disk_low(900 << 20, 10 * G, G, 5, false),
+            "900 MiB of 10 GiB is low"
+        );
+        assert!(
+            disk_low(1100 << 20, 10 * G, G, 5, true),
+            "under 1.1 GiB stays low"
+        );
+        assert!(
+            !disk_low(1200 << 20, 10 * G, G, 5, true),
+            "cleared past 1.1 GiB and 5.5 %"
+        );
         // Zero thresholds never say low; an unread total is not a division by zero.
         assert!(!disk_low(0, 0, 0, 0, false));
     }
@@ -1008,15 +1017,27 @@ mod tests {
         d.json(&mut o);
         assert_eq!(o, "", "no field before the first reading");
         assert_eq!(d.reading(50, 100, 10, 20), (false, false));
-        assert_eq!(d.reading(5, 100, 10, 20), (true, true), "entering is a change");
-        assert_eq!(d.reading(5, 100, 10, 20), (true, false), "staying low is not");
+        assert_eq!(
+            d.reading(5, 100, 10, 20),
+            (true, true),
+            "entering is a change"
+        );
+        assert_eq!(
+            d.reading(5, 100, 10, 20),
+            (true, false),
+            "staying low is not"
+        );
         d.json(&mut o);
         assert_eq!(
             o,
             ",\"disk\":{\"state\":\"low\",\"free_bytes\":5,\"total_bytes\":100,\"free_pct\":5,\"low_bytes\":10,\
              \"low_pct\":20,\"went_low\":1}"
         );
-        assert_eq!(d.reading(90, 100, 10, 20), (false, true), "leaving is a change");
+        assert_eq!(
+            d.reading(90, 100, 10, 20),
+            (false, true),
+            "leaving is a change"
+        );
     }
 
     #[test]

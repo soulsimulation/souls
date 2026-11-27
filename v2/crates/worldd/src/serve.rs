@@ -274,7 +274,10 @@ fn watch_disk(dir: PathBuf, sheds: bool) {
             }
         });
     if let Err(e) = started {
-        let _ = writeln!(std::io::stderr(), "worldd: the disk watch did not start: {e}");
+        let _ = writeln!(
+            std::io::stderr(),
+            "worldd: the disk watch did not start: {e}"
+        );
     }
 }
 

@@ -617,13 +617,21 @@ fn o10_b_a_low_disk_is_said_before_it_is_full() {
 cp -a "$2" "$1/w" || exit 98
 "$3" serve --dir "$1/w" --socket "$4" --checkpoint-every 2048; echo "o10: exited $?""#;
     let mut c = Command::new("unshare");
-    c.args(["--user", "--map-root-user", "--mount", "sh", "-c", script, "sh"])
-        .arg(&mnt)
-        .arg(&seed)
-        .arg(env!("CARGO_BIN_EXE_worldd"))
-        .arg(&socket)
-        .env("WORLDD_DISK_LOW_BYTES", LOW.to_string())
-        .env("WORLDD_DISK_LOW_PCT", "0");
+    c.args([
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "sh",
+        "-c",
+        script,
+        "sh",
+    ])
+    .arg(&mnt)
+    .arg(&seed)
+    .arg(env!("CARGO_BIN_EXE_worldd"))
+    .arg(&socket)
+    .env("WORLDD_DISK_LOW_BYTES", LOW.to_string())
+    .env("WORLDD_DISK_LOW_PCT", "0");
     let world = run(c);
     if world
         .line_within("listening", Duration::from_secs(60))
@@ -676,7 +684,9 @@ cp -a "$2" "$1/w" || exit 98
     let named = world.line_within("disk.low:", Duration::from_secs(3));
     println!("B: named {named:?} at {} ms", world.at());
     assert!(
-        named.as_deref().is_some_and(|l| l.contains("nothing is safe to shed")),
+        named
+            .as_deref()
+            .is_some_and(|l| l.contains("nothing is safe to shed")),
         "disk.low is named within 3 s, with what is shed: {named:?}"
     );
     let in_health = health_says("low", Duration::from_secs(3));
@@ -712,7 +722,11 @@ cp -a "$2" "$1/w" || exit 98
     assert!(a.is_some(), "a walk is answered after");
     let said = world.said();
     println!("B: it printed:\n{said}");
-    assert_eq!(said.matches("o10: exited").count(), 0, "the world never restarts");
+    assert_eq!(
+        said.matches("o10: exited").count(),
+        0,
+        "the world never restarts"
+    );
     drop(c.take());
     drop(world);
     let _ = std::fs::remove_dir_all(&d);
