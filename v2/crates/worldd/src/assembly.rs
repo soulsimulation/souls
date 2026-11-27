@@ -38,12 +38,11 @@
 //!
 //! - **Every carrier within reach of its grip (#5067 item 3).** The set-in track and the way back move the crew's node
 //!   while its carriers stand, so a put is refused before anyone moves when it would take a carrier's grip out of its
-//!   reach ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above its feet): every
-//!   carrier must be within reach where the track starts and where it ends (`part.grip-out-of-reach`, naming it); on a
+//!   reach ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above its feet): each carrier
+//!   within reach where the track starts must be within reach where it ends (`part.grip-out-of-reach`, naming it); on a
 //!   straight track a carrier who stands is farthest from its grip at one end or the other. A carrier already out of
-//!   reach where the set-in would start (one who took a frame from 2 m off, say, or stepped back from its grip) is
-//!   refused by name: it walks back to its grip and the crew puts again. While a set-in runs, a carrier who moves out
-//!   of reach stops it by name: it goes
+//!   reach at the start (one who took a frame from 2 m off, say: how near a take must be is the take's own admission)
+//!   is not held to it. While a set-in runs, a carrier held to its reach who moves out of it stops it by name: it goes
 //!   back as a refused seating does, to where it started, which every carrier who stood could reach; there its carry
 //!   goes on, or breaks off when its carriers have gone (`crate::engine`).
 //!
@@ -504,10 +503,14 @@ impl Assembly {
                 ),
             ));
         }
-        // #5067 item 3: every carrier is within reach of its grip where the set-in starts and where it ends (on a straight
-        // track, so all the way). One already out of reach where it starts is refused by name, never named as holding.
-        let holding = carriers.to_vec();
-        out_of_reach(&holding, from)?;
+        // #5067 item 3: every carrier within reach of its grip where the set-in starts is within reach where it ends (on
+        // a straight track, so all the way). One already out of reach there is not held to it (how near a take must be
+        // is the take's own admission, #5067 item 4).
+        let holding: Vec<Carrier> = carriers
+            .iter()
+            .filter(|c| out_of_reach(&[**c], from).is_ok())
+            .copied()
+            .collect();
         out_of_reach(&holding, (at, from.1))?;
         // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
         // (its rails), which it rests on.
