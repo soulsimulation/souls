@@ -405,6 +405,9 @@ impl Sight<'_> {
                     at.z + p.position.z,
                 );
             }
+            if let Some(s) = slot_at(self.tree, &n) {
+                at = at.plus(s).ok()?;
+            }
             match n.parent() {
                 Some(p) => id = p,
                 None => return Some(at),
@@ -1200,19 +1203,36 @@ impl Sight<'_> {
         p: Vec3,
         keep: &dyn Fn(Id) -> bool,
     ) -> Option<(Id, Vec3)> {
-        if let Some((f, at, _)) = view.on_floor(target, p).filter(|(f, ..)| keep(*f)) {
-            return Some((f, at));
+        if let Some(found) = self.on_floor(view, target, p).filter(|(f, _)| keep(*f)) {
+            return Some(found);
         }
         let n = self.tree.node(self.tree.handle(target)?)?;
-        let place = n.place()?;
-        let up = place
-            .position
-            .plus(place.orientation.rotate(p).ok()?)
-            .ok()?;
-        if let Some((f, at, _)) = view.on_floor(n.parent()?, up).filter(|(f, ..)| keep(*f)) {
-            return Some((f, at));
+        let (parent, up) = up_one(self.tree, &n, p)?;
+        if let Some(found) = self.on_floor(view, parent, up).filter(|(f, _)| keep(*f)) {
+            return Some(found);
         }
-        self.floor_of(n.parent()?, up).filter(|(f, _)| keep(*f))
+        self.floor_of(parent, up).filter(|(f, _)| keep(*f))
+    }
+
+    /// Point `at` of node `node`'s frame carried up the tree to the first node the view has a surface for (the open
+    /// ground, or a building's floor), each slot's point included ([`up_one`]). #4120: up the world's own tree, which
+    /// holds every part committed, not the town's: the town takes only parts that change its ground, so a take, a
+    /// thing made into a slot, or a thing set down that walkers do not go round never reach it, and a take right
+    /// after one was measured to where the thing had been (or to its holder's origin). The town's tree is read only
+    /// for a node the world's does not hold.
+    fn on_floor(&self, view: &View<'_>, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
+        let surfaces = view.surfaces();
+        let (mut on, mut p) = (node, at);
+        for _ in 0..64 {
+            if surfaces.contains_key(&on) {
+                return Some((on, p));
+            }
+            let Some(n) = self.tree.handle(on).and_then(|h| self.tree.node(h)) else {
+                break;
+            };
+            (on, p) = up_one(self.tree, &n, p)?;
+        }
+        view.on_floor(node, at).map(|(f, p, _)| (f, p))
     }
 
     /// The entry of the thing `node` is.
@@ -1645,8 +1665,8 @@ pub(crate) fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
     )
 }
 
-/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included
-/// (a seated body's controller pose is in its seat's frame).
+/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included,
+/// and the point of each slot a node stands in ([`slot_at`]) (a seated body's controller pose is in its seat's frame).
 fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
     let mut at = local;
     let mut up = frame;
@@ -1656,9 +1676,36 @@ fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
         if let Some(pp) = pn.place() {
             at = pp.orientation.rotate(at).ok()?.plus(pp.position).ok()?;
         }
+        if let Some(s) = slot_at(tree, &pn) {
+            at = at.plus(s).ok()?;
+        }
         up = pn.parent();
     }
     None
+}
+
+/// The point, in its parent's frame, of the slot node `n` stands in (`F_SLOTS`, as [`xform_to`] carries it): a thing
+/// in a slot stands from its slot's point, and a thing a form makes or puts into one stands at its zero (#4120).
+/// `None` outside a slot, or in one its parent gives no point (a hand).
+fn slot_at(tree: &Tree, n: &replica::tree::NodeRef<'_>) -> Option<Vec3> {
+    sim::ground::scene::slot_point(tree, tree.handle(n.parent()?)?, n.slot()?)
+}
+
+/// Point `p` of node `n`'s frame in its parent's frame, with the parent: turned and moved by its place, from its
+/// slot's point ([`slot_at`]).
+fn up_one(tree: &Tree, n: &replica::tree::NodeRef<'_>, p: Vec3) -> Option<(Id, Vec3)> {
+    let place = n.place()?;
+    let at = place
+        .orientation
+        .rotate(p)
+        .ok()?
+        .plus(place.position)
+        .ok()?;
+    let at = match slot_at(tree, n) {
+        Some(s) => at.plus(s).ok()?,
+        None => at,
+    };
+    Some((n.parent()?, at))
 }
 
 /// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
