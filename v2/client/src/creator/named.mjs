@@ -17,8 +17,7 @@
 //   move-to-ground {node, from_ground: [x,z] | from_roof: [x,y,z], at_ground: [x,z], from_r?, r?}   to that point on
 //                  the open ground, resting on the terrain. A thing on the open ground moves keeping its height over
 //                  it; one on a building's floor (a roof) is removed and placed again on the open ground with its
-//                  fields (a new parent is not a move: replica `edit::Op::Move`), so it takes a new id, and a new
-//                  origin (field 1), which the page draws it by
+//                  fields (a new parent is not a move: replica `edit::Op::Move`), so it takes a new id
 //   set-param      {node, param, from, to}                     one of its def's params (field 19, JSON); `height`
 //                  also moves the walked surfaces of its floors that stood at `from` (field 14); a floor with no room
 //                  brought to a step or less is ground cover, as import-eden makes it: it goes, and what stood on it
@@ -233,9 +232,6 @@ export function planOp(ix, op, lift) {
   return { status: 'bad-op', detail: `no op ${op.op}`, ops: [] };
 }
 
-/** The origin a thing placed again on the open ground takes: `e_` and 8 hex of its old one's hash, as import-eden's. */
-export const originOnGround = (origin) => `${origin.startsWith('h_') ? 'h' : 'e'}_${sha(`${origin}:ground`).slice(0, 8)}`;
-
 /** A step, mm: a floor no higher is ground cover (`sim::ground::STEP`, import-eden `BODY_SPAN.0`). */
 export const STEP_MM = 220;
 
@@ -244,10 +240,6 @@ export const STEP_MM = 220;
 function onGround(ix, n, atUm, q, name) {
   const fields = {}, dropped = [];
   for (const [k, v] of Object.entries(n.fields ?? {})) { const b = batchValue(v, new Map(), ix.words ?? {}); if (b === null) dropped.push(Number(k)); else fields[k] = b; }
-  // A new origin (field 1): the page draws a thing by its origin, so a copy sharing the removed thing's was taken away
-  // with it (live Eden, 27 Nov: the re-placed planters were in the world and not drawn). The same each run.
-  const origin = text(fields[F.ORIGIN]);
-  if (origin) fields[F.ORIGIN] = { hex: Buffer.from(originOnGround(origin)).toString('hex') };
   const deep = Object.keys(fields).filter((k) => depthOf(fields[k]) > PLACE_DEPTH).map((k) => { const value = fields[k]; delete fields[k]; return { op: 'set', node: name, field: Number(k), value }; });
   return { ops: [{ op: 'place', name, kind: n.kind, in: ix.ground.id, atUm: atUm.map(Math.round), orientation: signed(q.map(Math.round)), support: { which: 1, node: ix.ground.id, height: 0 }, fields }, ...deep], dropped };
 }
