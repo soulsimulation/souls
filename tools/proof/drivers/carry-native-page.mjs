@@ -1,4 +1,8 @@
 // One actual native two-carrier lifecycle. Resources belong to runOwnedAttempt; controls are ordinary UI/CLI input.
+// The scene (from attempt 7): the camp's loose rack beam on open ground, lifted by its two ends, carried south along its
+// own length and then east round a corner, and set down. The front's `carry to` walks the whole crew (the world keeps
+// each carrier's place), so one command starts a leg and the driver waits out its walk. A rack frame is not the scene:
+// the world carries a frame standing, its native hand contacts at its foot's middle, out of its carriers' reach.
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync, fsyncSync, renameSync } from 'node:fs';
@@ -8,6 +12,8 @@ import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
 import { entityId } from '../../../apps/web/src/v2-engine/entity-id.ts';
 import { layerDraws } from '../../../apps/web/src/v2-engine/layer-draws.ts';
 import { nativeCameraMode } from './camera-native-page.mjs';
+const SCENE = { load: 'rack-beam-4', kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
+  view: 'post=0&hour=12:00&eye=5.5,4.5,27.5&at=-2.2,.8,21.8', liftMs: 2500, legs: [['-3.1,23.5', 4500], ['-0.5,23.5', 3500]] };
 const states = new Map();
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const native = id => id.replace(/-(\d+)$/, '.$1');
@@ -74,7 +80,7 @@ export async function prepare({ paths, recipe, signal }) {
     const until = Date.now() + 10000;
     while (!state.bodies[who]) { state.bodies[who] = (await cli(state, who, 'status')).body; if (Date.now() > until) throw Error('carry-proof.body-admission'); if (!state.bodies[who]) await delay(50, signal); }
   }));
-  state.grips = Promise.all([cli(state, 'ada', 'carry', 'grip', 'pallet-crates-1', 'front'), cli(state, 'bo', 'carry', 'grip', 'pallet-crates-1', 'back')]).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  state.grips = Promise.all([cli(state, 'ada', 'carry', 'grip', SCENE.load, 'front'), cli(state, 'bo', 'carry', 'grip', SCENE.load, 'back')]).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   return { dir: paths.dir };
 }
 async function offer(state) {
@@ -82,9 +88,17 @@ async function offer(state) {
   state.crew = (await cli(state, 'ada', 'carry', 'offer', state.bodies.bo)).crew;
   if (!state.crew) throw Error('carry-proof.crew');
   await cli(state, 'bo', 'carry', 'accept', state.crew);
-  const query = await cli(state, 'ada', 'query', JSON.stringify([{ find: 'pallet-crates-1' }]));
-  state.load = (query.answers ?? []).flatMap(a => a.found ?? []).find(n => n.kind.split('@')[0] === 'mars:pallet_crates');
+  const query = await cli(state, 'ada', 'query', JSON.stringify([{ find: SCENE.load }]));
+  state.load = (query.answers ?? []).flatMap(a => a.found ?? []).find(n => n.name === SCENE.load && n.kind.split('@')[0] === SCENE.kind);
   if (!state.load) throw Error('carry-proof.load');
+}
+/** The front's ordinary `carry to` for each leg, its walk waited out, with one still as the leg ends. */
+async function walk(state, page, paths, signal) {
+  for (const [i, [to, ms]] of SCENE.legs.entries()) {
+    await cli(state, 'ada', 'carry', 'to', state.crew, to);
+    await delay(ms, signal);
+    await page.screenshot({ path: join(paths.dir, `carry-leg-${i + 1}.png`) });
+  }
 }
 const diagnostic = (state, stage, detail = {}) => {
   appendFileSync(join(state.paths.dir, 'carry-install-diagnostic.jsonl'), JSON.stringify({ stage, at: new Date().toISOString(), ...detail }) + '\n', { mode: 0o600 });
@@ -188,7 +202,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   // This is a published optional client document route, not a waived asset/stream/measurement failure.
   expectHttp('/safety.md', 404, 'Optional standalone client documentation is not routed by the old-page front door.');
   const snapshot = async label => writeFileSync(join(paths.dir, `accessibility-before-${label}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
-  const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=22,4.2,25.2&at=16.4,.8,24';
+  const url = new URL(page.url()); url.search = SCENE.view;
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__soulsEntity?.gameFrame().souls.length >= 2 && !document.querySelector('.viewer-arrival') && document.querySelector('.viewer-history[data-viewer-ready="true"]'), null, { timeout: 30000 });
   await nativeCameraMode(page, 'manual', snapshot);
@@ -198,11 +212,12 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
     save(state, 'baseline-contact-limits.json', { source: manifest.sourceHead, contactStatus: 'UNPROVED', reason: 'Pre-carry source has no native contact observer feed; this arm records the same ordinary actions, not an active-contact pass.' });
     await setupGate(state, page, signal);
     check('baseline-no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
-    await cli(state, 'ada', 'carry', 'lift', state.crew, 'pallet-crates-1');
+    await cli(state, 'ada', 'carry', 'lift', state.crew, SCENE.load);
+    await delay(SCENE.liftMs, signal);
     await page.screenshot({ path: join(paths.dir, 'first-lift.png') });
-    const go = String(Date.now() + 12000);
-    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'to', state.crew, '17,24', '--go', go)));
+    await walk(state, page, paths, signal);
     await cli(state, 'ada', 'carry', 'set-down', state.crew);
+    await delay(3000, signal);
     await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'leave', state.crew)));
     check('baseline-ordinary-lifecycle-only', state.pageErrors.length === 0, 'Native CLI accepted the matched baseline actions; no native-pair or load-clock certification is claimed.');
     return;
@@ -211,7 +226,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   await page.waitForFunction(({ load, crew }) => window.__soulsCarry?.evidence?.[load] && window.__soulsCarry.contactStates.some(s => s.crew === crew && s.field === 'absent' && s.members?.length === 2), { load: native(state.load.id), crew: native(state.crew) }, { timeout: 15000 });
   const scene = await page.evaluate(() => ({ frame: window.__soulsEntity.gameFrame(), carry: window.__soulsCarry, viewport: { width: innerWidth, height: innerHeight, touch: navigator.maxTouchPoints } }));
   const node = scene.carry.evidence[native(state.load.id)].frames[0].record;
-  const entryFile = join(root, 'content/kinds/construction/pallet_crates.json'), bytes = readFileSync(entryFile), entry = JSON.parse(bytes);
+  const entryFile = join(root, SCENE.entry), bytes = readFileSync(entryFile), entry = JSON.parse(bytes);
   const binding = { crew: native(state.crew), load: { native: native(state.load.id), entity: layerDraws(node) && node.origin ? node.origin : entityId(node.id), kind: state.load.kind, entrySha256: hash(bytes) },
     bodies: Object.entries(state.seats).map(([who, seat]) => { const shown = scene.frame.souls.filter(s => s.id === seat.soul); if (shown.length !== 1) throw Error('carry-proof.body-mapping'); return { native: native(state.bodies[who]), soul: seat.soul, entity: shown[0].entityId }; }) };
   const manifest = await verifyAssets(state, check);
@@ -232,12 +247,12 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   }, 50);
   const wait = async (predicate, ms) => { const until = Date.now() + ms; while (!await page.evaluate(predicate)) { journeySignal.throwIfAborted(); if (Date.now() > until) throw Error('carry-proof.draw-timeout'); await delay(50, journeySignal); } journeySignal.throwIfAborted(); };
   try {
-    await cli(state, 'ada', 'carry', 'lift', state.crew, 'pallet-crates-1');
+    await cli(state, 'ada', 'carry', 'lift', state.crew, SCENE.load);
     await wait(() => window.__carryContactObserver.counts['passed-native-pair'] > 0, 10000);
+    await delay(SCENE.liftMs, journeySignal);
     await page.screenshot({ path: join(paths.dir, 'first-lift.png') }); console.log('FIRST_CONTACT ' + paths.dir);
-    // Short ordinary relative walk keeps both participants in the reviewed view; full loading/rack proof remains separate.
-    const go = String(Date.now() + 12000);
-    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'to', state.crew, '17,24', '--go', go)));
+    // Two short legs keep both carriers whole in the reviewed view; loading, seating and larger crews remain separate.
+    await walk(state, page, paths, journeySignal);
     await cli(state, 'ada', 'carry', 'set-down', state.crew);
     await wait(() => window.__carryContactObserver.samples.some(s => s.result.releaseComplete), 10000);
     await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'leave', state.crew)));
