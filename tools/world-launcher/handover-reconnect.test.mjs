@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChildPool, defaultCommand } from './children.mjs';
 import { decorateCommand } from './production.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const BAR_MS = 6500;   // deploy/release-probe.mjs RECONNECT_BAR_MS
 const root = new URL('../../', import.meta.url).pathname;

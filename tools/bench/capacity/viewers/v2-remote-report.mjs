@@ -23,7 +23,9 @@ for (const r of rows) {
   w.loopP99Ms = Math.max(w.loopP99Ms, r.loopP99Ms ?? 0);
   byT.set(r.t, w);
 }
-const windows = [...byT.values()].sort((a, b) => a.t - b.t), steady = windows.filter((w) => w.t > 40);
+// steady: 10 s after the arrivals (30 s, or the arm's --arrive-secs)
+const ARRIVED = (head.arriveSecs ?? 30) + 10;
+const windows = [...byT.values()].sort((a, b) => a.t - b.t), steady = windows.filter((w) => w.t > ARRIVED);
 const sum = (ws, f) => ws.reduce((s, w) => s + f(w), 0), secs = 10 * steady.length;
 const all = (k, type) => { const h = {}; for (const w of steady) merge(h, type ? w[k][type] ?? {} : w[k]); return h; };
 const anyW = (k) => { const h = {}; for (const w of windows) merge(h, w[k]); return h; };
@@ -41,8 +43,8 @@ const out = {
   pointerRtt: q(all('rtt', 'pointer')), partRtt: q(all('rtt', 'part')), baselineRtt: q(windows.reduce((h, w) => merge(h, w.rtt.baseline ?? {}), {})),
   streamLatency: q(all('latency')), firstPicture: q(anyW('firstPicture')),
   // the first arrivals (the first minute) and, on uneven, the churn wave's joiners (after it) apart
-  firstPictureArrivals: q(windows.filter((w) => w.t <= 60).reduce((h, w) => merge(h, w.firstPicture), {})),
-  firstPictureLater: q(windows.filter((w) => w.t > 60).reduce((h, w) => merge(h, w.firstPicture), {})), baselineDrawn: q(anyW('installed')),
+  firstPictureArrivals: q(windows.filter((w) => w.t <= ARRIVED + 20).reduce((h, w) => merge(h, w.firstPicture), {})),
+  firstPictureLater: q(windows.filter((w) => w.t > ARRIVED + 20).reduce((h, w) => merge(h, w.firstPicture), {})), baselineDrawn: q(anyW('installed')),
   hitRatio: cached ? +((cacheAll.HIT ?? 0) / cached).toFixed(4) : null,
   cacheByType: Object.fromEntries(Object.entries(cache).map(([t, h]) => [t, { ...h, hit: +((h.HIT ?? 0) / hcount(h)).toFixed(4) }])),
   hitRatioWithJoins: (() => { const h = {}; for (const w of windows) for (const x of Object.values(w.cache)) merge(h, x); const n = hcount(h); return n ? +((h.HIT ?? 0) / n).toFixed(4) : null; })(),
@@ -53,12 +55,33 @@ const out = {
   encodings: (() => { const e = {}; for (const w of windows) for (const [t, h] of Object.entries(w.enc ?? {})) merge((e[t] ??= {}), h); return e; })(),
   readerCores: +(sum(windows, (w) => w.cpuSeconds) / (10 * windows.length)).toFixed(2), readerLoopP99Ms: Math.max(...windows.map((w) => w.loopP99Ms)),
 };
+// per source address (rows carry a hash of the machine's address when the launcher ran --by-address): the reads a second
+// each address sent while steady, and the readers it carried
+if (rows.some((x) => x.addr)) {
+  const per = new Map();
+  for (const x of rows) {
+    if (!x.addr) continue;
+    if (x.t > ARRIVED) per.set(x.addr, (per.get(x.addr) ?? 0) + Object.values(x.requests ?? {}).reduce((a, b) => a + b, 0));
+  }
+  const byShare = new Map(); for (const x of rows) if (x.addr && x.viewers != null && x.t > ARRIVED) byShare.set(x.share, [x.addr, Math.max(byShare.get(x.share)?.[1] ?? 0, x.viewers)]);
+  const held = new Map(); for (const [a, v] of byShare.values()) held.set(a, (held.get(a) ?? 0) + v);
+  const rates = [...per.values()].map((n) => n / secs).sort((a, b) => a - b);
+  const qq = (s, f) => +s[Math.min(s.length - 1, Math.floor(f * s.length))].toFixed(1);
+  const hv = [...held.values()].sort((a, b) => a - b);
+  out.sourceAddresses = per.size;
+  out.machinesReading = new Set(rows.filter((x) => x.addr && x.t != null).map((x) => x.share)).size;
+  out.readsPerSPerAddress = rates.length ? { p50: qq(rates, 0.5), p95: qq(rates, 0.95), max: qq(rates, 1) } : null;
+  out.readersPerAddress = hv.length ? { p50: hv[Math.floor(hv.length / 2)], max: hv.at(-1) } : null;
+}
+out.stopped = head.stopped ?? lines.slice(1).find((x) => x.stopped)?.stopped ?? null;
 // baseline joins: bytes per baseline as sent (br when the reader asks for it)
 const jb = windows.reduce((s, w) => s + (w.bytes.baseline ?? 0), 0), jn = windows.reduce((s, w) => s + (w.requests.baseline ?? 0), 0);
 out.baselineBytesEach = jn ? Math.round(jb / jn) : null;
 const hostFile = opt('host');
 if (hostFile) {
-  const from = head.start_at + 40_000, to = head.start_at + head.secs * 1000;
+  // the steady span; an arm stopped at a refusal is read from its start to its last window
+  const cut = out.stopped ? windows.at(-1)?.t ?? 0 : null;
+  const from = head.start_at + (cut != null ? 0 : ARRIVED * 1000), to = head.start_at + (cut != null ? cut * 1000 + 5_000 : head.secs * 1000);
   const hs = readFileSync(hostFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).sort((a, b) => a.t - b.t);
   const span = (a, b) => { const s = hs.filter((x) => x.t >= a && x.t <= b); return s.length >= 2 ? [s[0], s.at(-1)] : null; };
   const inSpan = (a, b) => hs.filter((x) => x.t >= a.t && x.t <= b.t);

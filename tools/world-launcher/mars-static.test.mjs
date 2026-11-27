@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { buildOverlay } from '../playtest/arena/assets-overlay.mjs';
 import { MARS_STATIC_CACHE } from '../../apps/server/src/mars-static.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(8);
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');

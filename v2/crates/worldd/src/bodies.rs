@@ -472,7 +472,12 @@ impl Bodies {
             forms_out: BTreeMap::new(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
-            runner: Runner::new(tick),
+            // The controller's input log is a test's: a served world keeps its inputs in its own log (#2803).
+            runner: {
+                let mut runner = Runner::new(tick);
+                runner.controller.forget_log();
+                runner
+            },
             form_map: Arc::new(town.versions.clone()),
             form_answers: BTreeMap::new(),
             form_questions: BTreeMap::new(),

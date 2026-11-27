@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const P = await testPort(3), base = `http://127.0.0.1:${P}`, dir = mkdtempSync(join(tmpdir(), 'site-switches-'));
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;

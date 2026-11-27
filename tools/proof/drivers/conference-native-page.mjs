@@ -1,15 +1,142 @@
 // Actual-page conference composition diagnostic. Receipts/canvas readiness do not qualify animation/contact.
 // The unchanged runOwnedAttempt owns the sole native world, all registered clients/commands and the browser.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
-import { assembleConference, discoverConference, explainConference } from '../../playtest/conference/rehearse.mjs';
-import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
+import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
+import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
 const save = (paths, file, value) => writeFileSync(join(paths.dir, file), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+
+// Self-contained, served only by this proof driver. Reads submitted geometry; never poses or moves it.
+export function conferenceClearanceTools({ vector, drawnLoad, bodyGeometry, maxVertices = 100000, maxTriangles = 2048, maxTests = 250000, uncertaintyM = .001 }) {
+  const fail = why => { throw Error(`conference clearance: ${why}`); };
+  if(![maxVertices,maxTriangles,maxTests].every(n=>Number.isSafeInteger(n)&&n>0)||!Number.isFinite(uncertaintyM)||uncertaintyM<=0||uncertaintyM>.001)fail('invalid measurement bounds');
+  const finite = p => p.length === 3 && p.every(Number.isFinite);
+  const sub = (a, b) => a.map((n, i) => n - b[i]), dot = (a, b) => a.reduce((s, n, i) => s + n * b[i], 0);
+  const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const length = p => Math.hypot(...p), add = (p, v, k) => p.map((n, i) => n + v[i] * k);
+  const bounds = points => ({ min: [0,1,2].map(i => Math.min(...points.map(p => p[i]))), max: [0,1,2].map(i => Math.max(...points.map(p => p[i]))) });
+  const nearBox = (p, b) => p.every((n, i) => n >= b.min[i]-uncertaintyM && n <= b.max[i]+uncertaintyM);
+  const attached = (o, scene) => { for (; o; o=o.parent) { if (!o.visible) return false; if (o===scene) return true; } return false; };
+  const materialOn = m => m?.visible && m.opacity > 0 && m.colorWrite !== false && m.name !== 'shadow-proxy';
+  const cache = new WeakMap();
+  const submissions = new WeakMap();
+  function submitted(mesh, scene) {
+    if (!attached(mesh, scene) || !mesh.isMesh || mesh.userData.shadowProxy || !mesh.geometry?.attributes.position) fail('mesh hidden, detached or unavailable');
+    const g=mesh.geometry, pos=g.attributes.position, index=g.index, count=index?.count ?? pos.count;
+    if(count>(mesh.isSkinnedMesh?maxVertices*12:maxTriangles*3))fail('submitted geometry limit exceeded');
+    const start=g.drawRange.start, end=Math.min(count, start+g.drawRange.count), ranges=[];
+    if (!Number.isInteger(start) || start<0 || start%3 || !Number.isFinite(end) || end<start || end%3) fail('invalid submitted triangle range');
+    if (Array.isArray(mesh.material)) {
+      for (const group of g.groups) if (materialOn(mesh.material[group.materialIndex])) ranges.push([Math.max(start,group.start),Math.min(end,group.start+group.count)]);
+    } else if (materialOn(mesh.material)) ranges.push([start,end]);
+    const signature=JSON.stringify([g.drawRange,g.groups,ranges]), versions=[pos.version??pos.data?.version,index?.version??index?.data?.version];
+    const known=submissions.get(g);
+    if(known&&known.pos===pos&&known.index===index&&known.signature===signature&&String(known.versions)===String(versions))return known;
+    const refs=[];
+    for (const [a,b] of ranges) { if (a%3 || b%3) fail('partial material triangle'); for(let n=a;n<b;n++) refs.push(index?index.getX(n):n); }
+    if (!refs.length || refs.length/3>maxTriangles && !mesh.isSkinnedMesh || refs.some(i=>!Number.isSafeInteger(i)||i<0||i>=pos.count)) fail('empty, excessive or malformed submitted geometry');
+    const result={g,pos,index,refs,signature,versions};submissions.set(g,result);return result;
+  }
+  function shells(mesh, scene) {
+    const s=submitted(mesh,scene), hit=cache.get(s.g);
+    if(hit){if(hit.pos!==s.pos||hit.index!==s.index||hit.signature!==s.signature||String(hit.versions)!==String(s.versions))fail('immutable lectern topology changed');return hit.parts;}
+    const vertices=new Map(), triangles=[], edges=new Map();
+    for(let n=0;n<s.refs.length;n+=3){
+      const p=s.refs.slice(n,n+3).map(i=>[s.pos.getX(i),s.pos.getY(i),s.pos.getZ(i)]);
+      if(p.some(q=>!finite(q)))fail('nonfinite lectern vertex');
+      if(length(cross(sub(p[1],p[0]),sub(p[2],p[0])))<1e-12)continue; // Zero-area bevel joins submit no surface.
+      const ids=p.map(q=>{const key=q.map(v=>Math.round(v/1e-7)).join(',');if(!vertices.has(key))vertices.set(key,vertices.size);return vertices.get(key);});
+      const id=triangles.length;triangles.push({p,triangle:n/3});
+      for(let k=0;k<3;k++){const a=ids[k],b=ids[(k+1)%3],key=[Math.min(a,b),Math.max(a,b)].join(':');const list=edges.get(key)??[];list.push({id,direction:a<b?1:-1});edges.set(key,list);}
+    }
+    if(!triangles.length)fail('lectern has no surface');
+    const adjacent=triangles.map(()=>[]);
+    for(const list of edges.values()){if(list.length!==2||list[0].direction===list[1].direction)fail('open or ambiguous lectern shell');adjacent[list[0].id].push(list[1].id);adjacent[list[1].id].push(list[0].id);}
+    const seen=new Set(),parts=[];
+    for(let i=0;i<triangles.length;i++)if(!seen.has(i)){
+      const pending=[i],part=[];seen.add(i);
+      while(pending.length){const k=pending.pop();part.push(triangles[k]);for(const j of adjacent[k])if(!seen.has(j)){seen.add(j);pending.push(j);}}
+      const volume=part.reduce((sum,t)=>sum+dot(t.p[0],cross(t.p[1],t.p[2]))/6,0);
+      if(!Number.isFinite(volume)||Math.abs(volume)<1e-12)fail('degenerate lectern shell');parts.push(part);
+    }
+    if(parts.length>16)fail('excessive lectern shells');cache.set(s.g,{...s,parts});return parts;
+  }
+  function lectern(layer, scene, entity) {
+    const load=drawnLoad(layer,scene,entity), draw=layer.drawn.get(entity), rows=[];
+    if(draw.inst){const pool=layer.instancer.pools.get(draw.inst),slot=pool.slots.get(entity);
+      pool.meshes.forEach(mesh=>{if(mesh.userData.shadowProxy||!(Array.isArray(mesh.material)?mesh.material.some(materialOn):materialOn(mesh.material)))return;
+        const instance=mesh.matrixWorld.clone();mesh.getMatrixAt(slot,instance);rows.push({mesh,matrix:mesh.matrixWorld.clone().multiply(instance),slot});});
+    }else draw.obj.traverse(mesh=>{if(mesh.isMesh&&!mesh.userData.shadowProxy&&attached(mesh,scene)&&
+      (Array.isArray(mesh.material)?mesh.material.some(materialOn):materialOn(mesh.material)))rows.push({mesh,matrix:mesh.matrixWorld.clone(),slot:null});});
+    if(!rows.length)fail('no submitted lectern parts');
+    let total=0;
+    const parts=rows.flatMap(({mesh,matrix,slot})=>{
+      if(!matrix.elements.every(Number.isFinite)||Math.abs(matrix.determinant())<1e-12)fail('invalid actual part transform');
+      return shells(mesh,scene).map((part,shell)=>{total+=part.length;if(total>maxTriangles)fail('lectern triangle limit exceeded');
+        const triangles=part.map(t=>({...t,p:t.p.map(p=>vector().set(...p).applyMatrix4(matrix).toArray())}));
+        return {mesh:mesh.uuid,slot,shell,matrix:matrix.toArray(),triangles,...bounds(triangles.flatMap(t=>t.p))};});
+    });
+    return {entity,source:load.source,root:load.matrix.toArray(),parts,triangles:total};
+  }
+  function body(root,scene) {
+    bodyGeometry(root,scene);const points=[];
+    root.traverse(mesh=>{if(!mesh.isSkinnedMesh||!mesh.userData.bodyDraw||!attached(mesh,scene))return;
+      if(!mesh.geometry.index)fail('actual bodyDraw index unavailable');
+      const {refs}=submitted(mesh,scene), weights=mesh.geometry.attributes.skinWeight, indices=mesh.geometry.attributes.skinIndex;
+      if(!weights||!indices)fail('body skin attribution missing');
+      const matrix=mesh.matrixWorld.toArray();
+      for(const index of new Set(refs)){
+        if(points.length>=maxVertices)fail('body vertex limit exceeded');
+        const p=mesh.getVertexPosition(index,vector()).applyMatrix4(mesh.matrixWorld).toArray();if(!finite(p))fail('nonfinite actual body skin');
+        let k=0;for(let j=1;j<4;j++)if(weights.getComponent(index,j)>weights.getComponent(index,k))k=j;
+        const bone=mesh.skeleton.bones[indices.getComponent(index,k)]?.name??'';
+        points.push({p,mesh:mesh.uuid,matrix,index,bone,inferredPart:true,part:/Foot|Toe/.test(bone)?'foot':/Leg/.test(bone)?'leg':'other'});
+      }
+    });
+    if(!points.length)fail('actual submitted bodyDraw skin unavailable');return points;
+  }
+  // Closest point on the actual triangle, including its edges; no enclosing-box penetration inference.
+  function closest(p,[a,b,c]) {
+    const ab=sub(b,a),ac=sub(c,a),ap=sub(p,a),d1=dot(ab,ap),d2=dot(ac,ap);
+    if(d1<=0&&d2<=0)return a;
+    const bp=sub(p,b),d3=dot(ab,bp),d4=dot(ac,bp);if(d3>=0&&d4<=d3)return b;
+    const vc=d1*d4-d3*d2;if(vc<=0&&d1>=0&&d3<=0)return add(a,ab,d1/(d1-d3));
+    const cp=sub(p,c),d5=dot(ab,cp),d6=dot(ac,cp);if(d6>=0&&d5<=d6)return c;
+    const vb=d5*d2-d1*d6;if(vb<=0&&d2>=0&&d6<=0)return add(a,ac,d2/(d2-d6));
+    const va=d3*d6-d5*d4;if(va<=0&&d4-d3>=0&&d5-d6>=0)return add(b,sub(c,b),(d4-d3)/((d4-d3)+(d5-d6)));
+    const den=1/(va+vb+vc);return add(add(a,ab,vb*den),ac,vc*den);
+  }
+  function clearance(points,load) {
+    let tests=0,inside=0,uncertain=0,projected=0,worst=null;
+    for(const point of points){if(!finite(point.p))fail('nonfinite skin query');let definite=false,boundary=false;
+      for(const part of load.parts){if(!nearBox(point.p,part))continue;projected++;
+        let angle=0,nearest=null;
+        for(const t of part.triangles){if(++tests>maxTests)fail('narrowphase work limit exceeded');
+          const surface=closest(point.p,t.p),distance=length(sub(point.p,surface));if(!nearest||distance<nearest.distance)nearest={distance,surface,triangle:t.triangle};
+          const [a,b,c]=t.p.map(p=>sub(p,point.p)),la=length(a),lb=length(b),lc=length(c);
+          angle+=2*Math.atan2(dot(a,cross(b,c)),la*lb*lc+dot(a,b)*lc+dot(b,c)*la+dot(c,a)*lb);
+        }
+        if(nearest.distance<=uncertaintyM){boundary=true;continue;}
+        const winding=Math.abs(angle/(4*Math.PI));if(Math.min(winding,Math.abs(winding-1))>1e-5)fail('ambiguous lectern containment');
+        if(winding>.5){definite=true;const witness={vertex:point,surface:nearest.surface,distanceM:nearest.distance,triangle:nearest.triangle,
+          part:{mesh:part.mesh,slot:part.slot,shell:part.shell,matrix:part.matrix}};
+          if(!worst||witness.distanceM>worst.distanceM)worst=witness;}
+      }
+      inside+=Number(definite);uncertain+=Number(boundary&&!definite);
+    }
+    return {status:inside?'definite-vertex-penetration':uncertain?'surface-uncertain':'no-interior-vertex-detected',vertices:points.length,insideVertices:inside,
+      surfaceUncertainVertices:uncertain,projectedPartOverlaps:projected,triangleTests:tests,worst,uncertaintyM,
+      qualification:'actual visible skin vertices against closed drawn lectern shells; witness distance is to the nearest triangle of its containing shell, not an exact union penetration depth; projected overlap alone is not penetration; vertex-only, not complete triangle intersection or native contact certification'};
+  }
+  return {body,lectern,clearance,limits:{maxVerticesPerBody:maxVertices,maxLecternTriangles:maxTriangles,maxTriangleTestsPerBody:maxTests,
+    maxLecternShells:16,weldToleranceM:1e-7,uncertaintyM}};
+}
 
 export function conferenceFixtures({ lecterns, questions, benches }) {
   assert.equal(lecterns.length, 1, 'conference-proof requires one authored presentation lectern');
@@ -32,7 +159,8 @@ export function conferenceObservation(frame, soul) {
   for (let i = 0; i < phaseID.length; i++) h = Math.imul(h ^ phaseID.charCodeAt(i), 16777619);
   const phase = (((frame.tick * frame.dt + ((h >>> 0) % 10007) / 10007 * 7) * .23) % 3 + 3) % 3;
   return { at: frame.at, tick: frame.tick, renderFrame: frame.renderFrame, entity, activity: resident.activity,
-    renderActivityAge: resident.activityAge, phase: Math.floor(phase) };
+    renderActivityAge: resident.activityAge, phase: Math.floor(phase),
+    seated: frame.entities[entity].state?.baseActivity === 'sit' && frame.entities[entity].state?.seatHeight > 0 };
 }
 export function conferenceJourney(frames, soul) {
   assert(frames.length >= 2, 'conference depicted samples missing');
@@ -45,6 +173,138 @@ export function conferenceJourney(frames, soul) {
   const settled = observed.slice(lastGesture + 1);
   assert(settled.length >= 2 && settled.at(-1).tick > settled[0].tick, 'conference settled endpoint not depicted');
   return { phases: [...phases].sort(), firstTick: observed[0].tick, lastTick: observed.at(-1).tick, entity: observed[0].entity };
+}
+
+// These are observations of the page's public depicted state, not inputs to its animation.
+export function conferenceMeetingStage(frames, stages, event) {
+  const starts = {
+    'attend-done': 'attend-start', 'story-complete': 'story-start',
+    'seated-wave-done': 'seated-wave-start', 'rise-done': 'rise-start',
+    point: 'tell-story', settled: 'tell-story', 'question-posted': 'question-start',
+    'introduction-done': 'introduction-start', 'conference-clean': 'applause-start',
+  };
+  const before = stages.slice(0, stages.indexOf(event));
+  const start = starts[event.stage] && before.findLast(s => s.stage === starts[event.stage] && s.soul === event.soul);
+  if (starts[event.stage]) assert(start, `conference ${event.stage} has no command-start marker`);
+  const window = frames.slice(start?.frameIndex ?? event.frameIndex, event.endFrameIndex === undefined ? undefined : event.endFrameIndex + 1);
+  assert(window.length >= 2, `conference ${event.stage} depicted samples missing`);
+  assert(window.at(-1).tick > window[0].tick && window.at(-1).renderFrame > window[0].renderFrame,
+    `conference ${event.stage} depicted clock stale`);
+  const person = soul => window.map(frame => conferenceObservation(frame, soul));
+  const seen = event.soul ? person(event.soul) : [];
+  const after = predicate => {
+    const index = seen.findLastIndex(predicate), tail = seen.slice(index + 1);
+    assert(index >= 0 && tail.length >= 2 && tail.at(-1).tick > tail[0].tick, `conference ${event.stage} return not depicted`);
+    return tail;
+  };
+  switch (event.stage) {
+    case 'lectern-ready':
+      assert(seen.at(-1).activity === 'idle' && !seen.at(-1).seated, 'standing lectern not depicted'); break;
+    case 'attend-done': {
+      const sat = seen.findIndex(s => s.seated && s.activity === 'sit');
+      assert(sat > 0 && seen.slice(0, sat).some(s => !s.seated), 'conference sit entry not depicted');
+      assert(seen.at(-1).seated && seen.at(-1).activity === 'sit', 'conference seated endpoint missing'); break;
+    }
+    case 'lecture-ready':
+      for (const soul of event.listeners) assert(person(soul).at(-1).seated, 'conference listener not seated'); break;
+    case 'story-complete':
+      assert(after(s => s.activity === 'tell-story').every(s => s.activity === 'idle'), 'conference normal story return missing'); break;
+    case 'tell-story': {
+      const current = seen.at(-1);
+      assert(current.activity === 'tell-story' && Number.isFinite(current.renderActivityAge) && current.renderActivityAge < 1.5,
+        'conference started story not currently depicted'); break;
+    }
+    case 'point': assert(seen.some(s => s.activity === 'point'), 'conference replacement point not depicted'); break;
+    case 'settled':
+      for (const action of ['point', 'clap']) assert(seen.some(s => s.activity === action), `conference next ${action} not depicted`);
+      assert(after(s => s.activity === 'clap').every(s => s.activity === 'idle'), 'conference next-action rest missing'); break;
+    case 'seated-wave-done': {
+      const tail = after(s => s.activity === 'wave');
+      assert(seen.filter(s => s.activity === 'wave').every(s => s.seated), 'wave lost underlying seat');
+      assert(tail.every(s => s.seated && s.activity === 'sit'), 'seated gesture did not return seated'); break;
+    }
+    case 'rise-done': {
+      const tail = seen.slice(-2);
+      assert(seen.some(s => s.seated) && tail.length === 2 && tail[1].tick > tail[0].tick &&
+        tail.every(s => s.activity === 'idle' && !s.seated), 'conference rise from seat not depicted'); break;
+    }
+    case 'question-posted':
+      assert(seen.some(s => s.activity === 'operate' && !s.seated), 'standing question action not depicted'); break;
+    case 'introduction-done':
+      assert(seen.some(s => s.activity === 'point') && person(event.guest).some(s => s.activity === 'bow'),
+        'conference introduction gestures not depicted'); break;
+    case 'conference-clean':
+      for (const soul of event.seats) {
+        const participant = person(soul);
+        assert(participant.some(s => s.activity === 'clap'), 'conference group applause not depicted');
+        const tail = participant.slice(-2);
+        assert(tail.length === 2 && tail.every(s => s.activity === 'idle' && !s.seated) && tail[1].tick > tail[0].tick,
+          'conference final standing rest not depicted');
+      }
+      break;
+    default: throw Error(`unknown conference observation stage ${event.stage}`);
+  }
+  return { stage: event.stage, firstTick: window[0].tick, lastTick: window.at(-1).tick };
+}
+
+export function conferenceMeetingJourney(frames, stages, seats) {
+  assert.equal(seats.length, 5, 'conference meeting requires five participants');
+  const counts = { 'attend-done': 8, 'lectern-ready': 2, 'lecture-ready': 2, 'story-complete': 2,
+    'seated-wave-done': 1, 'rise-done': 8, point: 1, settled: 1,
+    'question-posted': 1, 'question-refused': 1, 'question-recovered': 1, 'introduction-done': 1, 'conference-clean': 1 };
+  for (const [stage, count] of Object.entries(counts)) assert.equal(stages.filter(s => s.stage === stage).length, count,
+    `conference ${stage} stage coverage incomplete`);
+  const assemblies = stages.filter(s => s.stage === 'assembly-start');
+  assert.equal(assemblies.length, 2, 'conference both assemblies must be captured');
+  assert.notEqual(assemblies[0].soul, assemblies[1].soul, 'conference handover must change speaker');
+  for (let i = 0; i < assemblies.length; i++) {
+    const from = stages.indexOf(assemblies[i]), to = i + 1 < assemblies.length ? stages.indexOf(assemblies[i + 1]) : stages.length;
+    assert.deepEqual(stages.slice(from, to).filter(s => s.stage === 'attend-done').map(s => s.soul).sort(),
+      [...assemblies[i].listeners].sort(), 'conference entry coverage must name every listener in that assembly');
+  }
+  for (const event of stages) if (event.observed) conferenceMeetingStage(frames, stages, event);
+  assert(stages.filter(e => counts[e.stage] && !['question-refused', 'question-recovered'].includes(e.stage)).every(e => e.observed),
+    'conference depicted stage unfinished');
+  const refused = stages.find(s => s.stage === 'question-refused');
+  assert(refused.answer?.can === 'no' && refused.answer.reason === 'already_linked' && refused.answer.says === 'question_pending',
+    'conference unrelated refusal cannot qualify question recovery');
+  assert(stages.indexOf(stages.find(s => s.stage === 'question-recovered')) > stages.indexOf(refused), 'conference recovery precedes refusal');
+  return { people: seats.length, entryTransitions: 8, rises: 8, question: 'posted-refused-recovered', presentations: 2,
+    firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
+}
+
+/** Ordinary creator proof: the edit's returned name is the only identity used for readback. */
+export async function proveConferenceCreator({ creator, record = () => {}, signal }) {
+  const cli = async (...words) => {
+    signal?.throwIfAborted(); const answer = await creator.cli(...words);
+    record({ person: creator.label, words, answer });
+    assert.equal(answer.ok, true, `conference creator ${words[0]}: ${answer.code ?? 'refused'}`);
+    return answer;
+  };
+  let described, kinds, grounds;
+  for (const until = Date.now() + 10000;;) {
+    described = await cli('describe');
+    kinds = Object.keys(described.kinds ?? {}).filter(kind => kind.split('@')[0] === 'eden:conference_question');
+    grounds = (described.nodes ?? []).filter(node => /^(?:[a-z][a-z0-9_-]*:)?ground$/.test(node.kind.split('@')[0]));
+    if (kinds.length && grounds.length) break;
+    assert(Date.now() < until, 'conference creator copy never lists the boot family kind and ground');
+    await new Promise(ok => setTimeout(ok, 100));
+  }
+  assert.equal(kinds.length, 1, 'conference creator family revision must be unambiguous');
+  assert.equal(grounds.length, 1, 'conference creator ground must be unambiguous');
+  const kind = kinds[0], ground = grounds[0].id;
+  // Declared once: flat, unused ground outside the demonstration area. Never retry a refused placement elsewhere.
+  const place = await cli('place', kind, '--in', String(ground), '--at', '12,0,12');
+  assert(Number.isSafeInteger(place.sequence) && place.sequence > 0, 'conference creator terminal edit sequence missing');
+  assert.deepEqual(Object.keys(place.names ?? {}), ['1'], 'conference creator place must return exactly its named thing');
+  const id = place.names['1']; assert(typeof id === 'string' && id, 'conference creator returned no placed identity');
+  const readback = await cli('describe', id);
+  assert.equal(readback.id, id, 'conference creator readback changed the returned identity');
+  assert.equal(readback.kind, kind, 'conference creator readback changed the selected kind revision');
+  assert.equal(String(readback.in?.[0]?.id), String(ground), 'conference creator readback is in another parent');
+  assert.deepEqual(readback.at, [12, 0, 12], 'conference creator readback differs from the declared placement');
+  return { kind, id, parent: ground, at: readback.at, sequence: place.sequence,
+    qualification: 'ordinary describe/place/readback receipt; boot furniture supplies the clip, post-boot drawing is not claimed' };
 }
 
 export async function prepare({ base, paths, recipe, signal }) {
@@ -69,8 +329,11 @@ export async function prepare({ base, paths, recipe, signal }) {
   ]);
   state.fixtures = conferenceFixtures({ lecterns, questions, benches });
   state.discovery = await discoverConference({ seat: state.seats[0], ...state.fixtures, record: state.record });
-  await assembleConference({ seats: state.seats, ...state.fixtures, record: state.record });
-  save(paths, 'conference-discovery.json', { fixtures: state.fixtures, discovery: state.discovery, rows: state.rows });
+  state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
+  state.creatorProof = await proveConferenceCreator({ creator: state.creator, record: state.record, signal });
+  save(paths, 'command-conference-creator.json', state.creatorProof);
+  save(paths, 'command-conference-discovery.json', { fixtures: state.fixtures, discovery: state.discovery, rows: state.rows,
+    servedClient: JSON.parse(readFileSync(join(paths.dir, 'conference-served-client.json'), 'utf8')) });
   return { people: state.seats.length, fixtures: state.fixtures };
 }
 
@@ -87,20 +350,25 @@ export function conferenceBrowserStop() {
     observer.stopRender();
     if (observer.prototype.show !== observer.show) throw Error('conference people observer ownership changed');
     observer.prototype.show = observer.original;
+    const measurementSummary = observer.samples.reduce((summary, sample) => {
+      const ms = sample.measurementMs;
+      if (!Number.isFinite(ms) || ms < 0) { summary.missing++; return summary; }
+      summary.count++; summary.totalMs += ms; summary.maxMs = Math.max(summary.maxMs ?? 0, ms); return summary;
+    }, { count: 0, totalMs: 0, maxMs: null, missing: 0, basis: 'retained successful samples; failed callbacks are not timed' });
     return observer.stopResult = { cadenceMs: 250, sampleLimit: observer.sampleLimit, meshStride: 1,
-      samples: observer.samples, failures: observer.failures,
-      qualification: observer.qualification };
+      samples: observer.samples, failures: observer.failures, measurementSummary,
+      lecternEntry: observer.lecternEntry, measurementLimits: observer.measurementLimits, qualification: observer.qualification };
   } catch (error) { observer.stopError = error; throw error; }
 }
 
 export function conferenceFinalization(page, paths, state) {
   state.persistSequence = () => {
     if (state.sequenceSaved) return;
-    save(paths, 'conference-sequence.json', {
-      qualification: 'concise storytelling diagnostic; full question, handover and independent-agent acceptance remain open',
+    save(paths, 'command-conference-sequence.json', {
+      qualification: 'ordinary fixed-sequence conference diagnostic; independent-agent, creator and actual visual/contact acceptance remain separate',
       stage: 'before-observer-collection',
       result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
-      depictedJourney: state.depictedJourney ?? null,
+      depictedJourney: state.depictedJourney ?? null, stages: state.stages ?? [],
       frameReads: state.frameReads ?? [], frameReadErrors: state.frameReadErrors ?? [], finalizationError: state.finalizationError ?? null,
     });
     state.sequenceSaved = true;
@@ -112,14 +380,14 @@ export function conferenceFinalization(page, paths, state) {
       const draw = await page.evaluate(conferenceBrowserStop);
       assert(draw || !state.observerInstalled, 'conference installed observer collection missing');
       if (draw) {
-        save(paths, 'conference-final-draw.json', draw);
+        save(paths, 'command-conference-final-draw.json', draw);
         assert(draw.samples?.length >= 2 && draw.failures?.length === 0, 'conference final collection missing or failed');
       }
       state.finalizationOutcome = { ok: Boolean(draw), samples: draw?.samples?.length ?? 0, failures: draw?.failures ?? [], reason: draw ? null : 'observer not installed' };
     } catch (error) {
       state.finalizationOutcome = { ok: false, error: String(error) }; throw error;
     } finally {
-      save(paths, 'conference-finalization.json', state.finalizationOutcome);
+      save(paths, 'command-conference-finalization.json', state.finalizationOutcome);
     }
   })();
 }
@@ -130,6 +398,11 @@ export async function beforeNavigation({ paths, page, base }) {
   const oracle = readFileSync(new URL('../../playtest/carry-contact/oracle.mjs', import.meta.url), 'utf8');
   await page.route(oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: oracle }));
   state.oracleURL = oracleURL;
+  const geometryURL = new URL('/__proof/conference-clearance.mjs', base).href;
+  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}` }));
+  state.geometryURL = geometryURL;
+  const entryBytes = readFileSync(new URL('../../../content/kinds/hall/lecture.json', import.meta.url));
+  state.lecternEntry = { kind: JSON.parse(entryBytes).kind, sha256: createHash('sha256').update(entryBytes).digest('hex') };
   const response = r => { if (new URL(r.url()).origin === new URL(base).origin && /\/people-kit-[^/]+\.js$/.test(new URL(r.url()).pathname)) state.kitURL = r.url(); };
   page.on('response', response);
   conferenceFinalization(page, paths, state);
@@ -138,7 +411,7 @@ export async function beforeNavigation({ paths, page, base }) {
     try { if (!page.isClosed()) await state.finalizeDraw(); }
     finally {
       try { state.persistSequence(); }
-      finally { try { await page.unroute(oracleURL); } finally { states.delete(paths.dir); } }
+      finally { try { await page.unroute(oracleURL); } finally { try { await page.unroute(geometryURL); } finally { states.delete(paths.dir); } } }
     }
   };
 }
@@ -157,11 +430,16 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   await page.screenshot({ path: join(paths.dir, 'conference-setup.png') });
   signal.throwIfAborted();
   assert(state.kitURL, 'conference production people kit not observed');
-  await page.evaluate(async ({ oracleURL, kitURL, souls }) => {
-    const { observeRender, bodyGeometry } = await import(oracleURL);
+  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, nativeLecture }) => {
+    const { observeRender, bodyGeometry, drawnLoad } = await import(oracleURL);
+    const { conferenceClearanceTools } = await import(geometryURL);
     const { TakePeople } = await import(kitURL), prototype = TakePeople.prototype;
     const world = window.__soulsEntity, original = prototype.show;
     if (!world || !original || window.__conferenceDrawObserver) throw Error('conference final-draw observer unavailable');
+    const lecterns = [...world.layer.model.entities.values()].filter(e => e.name === 'presentation-lectern');
+    if (lecterns.length !== 1 || world.layer.model.resolvedDef(lecterns[0].def)?.name !== 'core-hall_lecture') throw Error('conference drawn lectern identity ambiguous');
+    const lecternEntity = lecterns[0].id;
+    const geometry = conferenceClearanceTools({ vector: () => world.camera.position.clone(), drawnLoad, bodyGeometry });
     let people, previous = -Infinity;
     function show(...args) { const result = original.apply(this, args); people = this; return result; }
     prototype.show = show;
@@ -169,14 +447,14 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     const stopRender = observeRender(world.renderer, world, stamp => {
       const at = performance.now(); if (at - previous < 250) return; previous = at;
       if (samples.length >= sampleLimit) throw Error('conference final-draw90s sample limit exceeded');
-      if (!people?.humans?.meshPoints) throw Error('conference visible body mesh interface missing');
+      if (!people?.bodyObject) throw Error('conference visible body mesh interface missing');
       const frame = world.gameFrame(), diagnostics = world.contactFrame().bones;
+      const lectern = geometry.lectern(world.layer, world.scene, lecternEntity);
       const bodies = souls.map(soul => {
         const matches = frame.souls.filter(s => s.id === soul);
         if (matches.length !== 1) throw Error('conference final-draw identity missing or ambiguous');
         const entity = matches[0].entityId, root = people.bodyObject(entity);
-        bodyGeometry(root, world.scene);
-        const points = people.humans.meshPoints(entity, 1);
+        const points = geometry.body(root, world.scene);
         if (!points.length || points.some(q => q.p.length !== 3 || !q.p.every(Number.isFinite))) throw Error('conference final-draw skin missing');
         const bounds = group => {
           if (!group.length) throw Error('conference empty skin group');
@@ -197,18 +475,24 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
           sides[distance(anchors[0]) <= distance(anchors[1]) ? 0 : 1].push(q);
         }
         return { soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
+          lecternClearance: geometry.clearance(points, lectern),
           // Inferred nearest-rendered-ankle clusters; these are not native contact/rig vertex-side identities.
           footClusters: sides.map((group, index) => ({ inferred: true, nearestRenderedAnkleIndex: index, anchor: anchors[index], ...bounds(group) })),
           activity: frame.entities[entity]?.activity };
       });
       samples.push({ stage: 'after-world-render', units: 'm', at, frame: stamp.frame, tick: frame.tick, dt: frame.dt,
-        currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected, renderTarget: null, bodies });
+        currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected, renderTarget: null,
+        lectern: { entity: lectern.entity, source: lectern.source, root: lectern.root, triangles: lectern.triangles,
+          parts: lectern.parts.map(({mesh,slot,shell,matrix})=>({mesh,slot,shell,matrix})) }, bodies, measurementMs: performance.now() - at });
     }, error => { if (failures.length < 30) failures.push(String(error)); });
     window.__conferenceDrawObserver = { samples, failures, sampleLimit, stopRender, prototype, show, original,
-      qualification: 'all stride1 vertices measured; bounded per-part/foot extrema retained every250ms, not every-frame coverage; no native contact certification; root must visually review all5 bodies/both feet and object clearance' };
-  }, { oracleURL: state.oracleURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul) });
+      measurementLimits: geometry.limits,
+      lecternEntry: { ...entry, nativeLecture, entity: lecternEntity, association: 'unique ordinary fixture name/kind and boot scene definition; canonical bytes are provenance, drawn triangles own the measurement' },
+      qualification: 'actual visible indexed bodyDraw vertices measured; bounded extrema/lectern vertex-inside witnesses every250ms, not every-frame or complete triangle-intersection proof; inferred skin/foot groups are not native identities; no native contact certification; original full-body video remains required. Historical story clips used hidden-source primitive extrema and did not measure actual lectern clearance.' };
+  }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul),
+    entry: state.lecternEntry, nativeLecture: state.fixtures.lecture });
   state.observerInstalled = true;
-  state.frameReads = []; state.frameReadErrors = [];
+  state.frameReads = []; state.frameReadErrors = []; state.stages = [];
   let reading = true;
   const readFrames = (async () => {
     while (reading && !signal.aborted) {
@@ -227,32 +511,37 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     }
   })();
   try {
-    const soul = state.seats[0].soul;
-    const observe = async activity => {
-      const startingTick = state.frameReads.at(-1)?.tick ?? -Infinity;
+    const immediate = new Set(['assembly-start', 'attend-start', 'story-start', 'seated-wave-start', 'rise-start',
+      'question-start', 'question-refused', 'question-recovered', 'departure-start', 'introduction-start', 'applause-start']);
+    const observe = async (stage, details = {}) => {
+      const event = { stage, at: Date.now(), frameIndex: Math.max(0, state.frameReads.length - 1),
+        soul: details.seat?.soul, body: details.seat?.body, person: details.seat?.label,
+        listeners: details.listeners?.map(s => s.soul), guest: details.guest?.soul,
+        seats: details.seats?.map(s => s.soul), sequence: details.sequence, answer: details.answer };
+      state.stages.push(event);
+      if (immediate.has(stage)) return;
+      // Existing bounded observer: admission, short takes or a stalled page remain failures.
       for (const until = Date.now() + 2500;;) {
         assert.equal(state.frameReadErrors.length, 0, 'conference page observation failed');
-        const frames = state.frameReads, last = frames.at(-1);
-        if (last) {
-          const current = conferenceObservation(last, soul);
-          const fresh = Date.now() - last.receivedAt < 500;
-          if (activity === 'tell-story' && fresh && current.tick > startingTick && current.activity === activity && Number.isFinite(current.renderActivityAge) && current.renderActivityAge < 1.5) return;
-          if (activity === 'point' && frames.some(f => conferenceObservation(f, soul).activity === 'point')) return;
-          if (activity === 'settled') {
-            try { state.depictedJourney = conferenceJourney(frames, soul); return; } catch { /* bounded settling below */ }
-          }
+        const last = state.frameReads.at(-1);
+        try {
+          assert(last && Date.now() - last.receivedAt < 500, 'conference page observation stale');
+          conferenceMeetingStage(state.frameReads, state.stages, event);
+          event.observed = true; event.endFrameIndex = state.frameReads.length - 1; return;
+        } catch (error) {
+          assert(Date.now() < until, `conference ${stage} not observed on advancing page: ${error.message}`);
         }
-        assert(Date.now() < until, `conference ${activity} not observed on advancing page`);
         signal.throwIfAborted(); await new Promise(ok => setTimeout(ok, 50));
       }
     };
-    state.result = await explainConference({ speaker: state.seats[0], ...state.fixtures, record: state.record, storyRepeats: 4, interruptStory: true, observe });
-    state.depictedJourney = conferenceJourney(state.frameReads, soul);
+    state.result = await performConference({ seats: state.seats, ...state.fixtures, record: state.record,
+      storyRepeats: 1, interruptStory: true, interruptFirstOnly: true, observe });
+    state.depictedJourney = conferenceMeetingJourney(state.frameReads, state.stages, state.seats);
     const draw = await page.evaluate(() => ({ samples: window.__conferenceDrawObserver?.samples.length, failures: window.__conferenceDrawObserver?.failures }));
     assert(draw.samples >= 2 && draw.failures?.length === 0, 'conference final-draw measurement missing or failed');
     signal.throwIfAborted();
-    check('conference-presentation-receipts', state.result.storyActions === 4 && state.result.interrupted === true,
-      'Ordinary receipts plus advancing depicted story phrases, point, clap and settled endpoint; natural limbs/contact remain visual acceptance.');
+    check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 1 && state.result.handover,
+      'Ordinary receipts and advancing depicted entry, seated gesture/return, rise, questions/recovery, handover and cleanup; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
   finally {

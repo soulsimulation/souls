@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-Conference invitations explain whether you wave, point or bow after the other Soul accepts.
+Souls can rehearse conference invitations, questions and speaker handovers at a lectern facing the audience.

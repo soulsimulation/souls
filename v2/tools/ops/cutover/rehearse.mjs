@@ -22,7 +22,7 @@ import { createServer } from 'node:http';
 import { dirname, join, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { testPort } from '../../../../apps/server/test/test-port.ts';
+import { testPort } from '../../../../tools/lib/test-port.ts';
 import { frontCheck } from '../front-check.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)), repo = resolve(here, '../../../..'), ops = resolve(here, '..');
