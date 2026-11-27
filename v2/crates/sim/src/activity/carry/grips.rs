@@ -51,8 +51,8 @@ pub const HAND_HALF: i64 = 100_000;
 pub const STAND_HAND_HALF: i64 = 150_000;
 
 /// How far above the carry's height (its slot's) a load that stands as it is held is held, µm (#5067): its two hands
-/// [`STAND_HAND_HALF`] below and above that. A frame taken standing has its foot at the carry's height, 1 m above its
-/// carriers' feet, so its hands are 1.0 m and 1.3 m above the ground: both below a standing body's shoulders.
+/// [`STAND_HAND_HALF`] below and above that. A frame taken standing has its foot at the carry's height, 1.05 m above
+/// its carriers' feet, so its hands are 1.05 m and 1.35 m above the ground.
 pub const STAND_HOLD: i64 = 150_000;
 
 /// The phases a carry's holds are in: carried, on a seating's set-in track, on its way back, let go.
