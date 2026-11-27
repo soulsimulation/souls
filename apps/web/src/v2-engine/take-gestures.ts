@@ -2,6 +2,9 @@
 // v2/web/src/source) plays the old renderer's own gesture pose (mars/viewer/app/engine-view/activity-poses.ts) as the
 // body's take activity, from the move's start to its end, or to the run's ending when that comes first. Pure.
 
+import { recordedConsumeMove, type ConsumeMove } from '../../../../mars/viewer/app/engine-view/held-entry.ts';
+import type { MoveRec } from './source/source.ts';
+
 /** Old activity ids by content move name (`content/moves`); the rest of the moves are not gestures and draw nothing. */
 const GESTURES: Readonly<Record<string, string>> = {
   wave: 'wave', bow: 'bow', clap: 'clap', nod: 'nod', shake_head: 'shake-head', cheer: 'cheer', point: 'point',
@@ -31,6 +34,29 @@ export const LOOP_HOLD = 700_000;
 /** The existing humanoid resource names, with the move’s authoritative phase times in world µs. */
 export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
 export type Gesture = { press?: FormPress; start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
+
+export const isConsume = (name: string): boolean => name.slice(name.indexOf(':') + 1).split('@')[0] === 'consume';
+
+/** Replace late move endings without mutating a record already published in a take. */
+export function recordConsume(history: readonly ConsumeMove[] | undefined, move: MoveRec): ConsumeMove[] {
+  const before = history ?? [], prior = before.find(c => c.body === move.body && c.run === move.run && c.start === move.start);
+  const next = recordedConsumeMove({ ...move, ...(prior?.ended && !move.ended ? { ended: prior.ended } : {}), ...(prior?.runEnd ? { runEnd: prior.runEnd } : {}) });
+  if (!next) return [...before];
+  return [...before.filter(c => c !== prior), next].sort((a, b) => a.start - b.start);
+}
+
+/** Keep run termination distinct from the move's own native ending; never invent a completion. */
+export function endConsumes(history: readonly ConsumeMove[] | undefined, end: { at: number; run?: string; how?: string }): ConsumeMove[] | undefined {
+  return history?.map(c => c.start <= end.at && (end.run === undefined || c.run === end.run)
+    ? recordedConsumeMove({ ...c, runEnd: { at: end.at, ...(end.how === undefined ? {} : { how: end.how }) } }) ?? c : c);
+}
+
+/** Last begun observation, including its recorded completion/recovery facts. This is not an active-pose claim. */
+export function consumeAt(history: readonly ConsumeMove[] | undefined, t: number): ConsumeMove | undefined {
+  let out: ConsumeMove | undefined;
+  for (const c of history ?? []) if (c.start <= t && (!out || c.start >= out.start)) out = c;
+  return out;
+}
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
 export function gestureOf(move: string): string | null {

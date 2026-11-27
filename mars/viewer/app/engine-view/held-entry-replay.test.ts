@@ -8,7 +8,9 @@ import { CHARACTER_WIRE } from './character-wire.ts';
 import { templateFromGltf } from './people.ts';
 import { HumanViews, setHumanGround, type SampledHuman } from './humans.ts';
 import { TakePeople } from './take-replay.ts';
-import { recordedHeldSet } from './held-entry.ts';
+import { recordedHeldSet, recordedConsumeMove } from './held-entry.ts';
+import { addAll, emptyWorld, human } from '../../engine/world/factory.ts';
+import { provingGround } from '../../engine/scenes/proving-ground.ts';
 import { chunkOf } from '../../../../apps/web/src/v2-engine/takes.ts';
 import type { Take } from '../../engine/take/types.ts';
 
@@ -86,6 +88,28 @@ async function productionTemplate() {
   const wire = CHARACTER_WIRE.woman, mesh = await load(wire.mesh), clips = await load(wire.clips);
   mesh.animations = clips.animations; return templateFromGltf('woman', mesh);
 }
+
+test('consume observation is stored and cleared on a production human without gaining pose authority', async () => {
+  const source = await productionTemplate(), plain = new HumanViews(), observed = new HumanViews();
+  plain.setTemplates([source]); observed.setTemplates([source]); setHumanGround(() => 0);
+  const record = recordedConsumeMove({ name: 'souls:consume', body: 'native-body', target: 'same-bowl', start: 0,
+    ends: [800_000, 2_000_000, 2_600_000], limbs: ['souls:hand-left', 'souls:voice'], contact: 'bite' })!;
+  const person: SampledHuman = { id: 'consume-person', p: [1, 0, -1], yaw: .25, walk: 0, walkDist: 0, activity: 'nod', activityAge: .7 };
+  try {
+    plain.setFrame([person], 70); plain.render(1);
+    observed.setFrame([{ ...person, consumeMove: record }], 70); observed.render(1);
+    assert.equal(observed.consumeMoveOf(person.id), record);
+    const points = plain.meshPoints(person.id, 1);
+    assert(points.length > 1000);
+    assert.deepEqual(observed.meshPoints(person.id, 1), points, 'metadata adds no consume pose, hand or root displacement');
+    observed.setFrame([person], 70);
+    assert.equal(observed.consumeMoveOf(person.id), undefined, 'legacy sampled input clears a prior observation');
+    observed.setFrame([{ ...person, consumeMove: record }], 70);
+    const world = addAll(emptyWorld('consume-test', provingGround()), human(person.id, 1, -1));
+    observed.onTick(world);
+    assert.equal(observed.consumeMoveOf(person.id), undefined, 'old tick input makes no consume claim');
+  } finally { plain.clear(); observed.clear(); setHumanGround(null); }
+});
 
 test('held metadata adds no pose, attachment or movement authority over standing, seated, native-hand and paired-contact rigs', async () => {
   const source = await productionTemplate(), old = new HumanViews(), current = new HumanViews();
