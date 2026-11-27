@@ -1126,7 +1126,7 @@ export class HumanViews {
     const floorChange = v.postureChange;
     const floorAnchor = !!floorChange && posturePhaseEnds(floorChange,v.base,v.activity).some(end=>end<=floorChange.age&&floorChange.age-end<ACT_BLEND);
     const floorKinds = [postureKind(floorChange?.from??v.activity,floorChange?.fromBase),postureKind(v.activity,v.base)];
-    const freeContactBody = freeBody && !nativeHandOwner && w < .01
+    const freeContactBody = freeBody && !nativeHandOwner && !v.formPress?.length && w < .01
       && a.sitW === 0 && b.sitW === 0 && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible
       && !v.shore && !v.waterTransition?.origins.some(origin=>origin.pose!==null) && !v.transfer && !v.watering && !v.cup && !v.letGo && !v.instrument;
     const floorTransition = !!floorChange && (!!pn || floorAnchor) && floorKinds.some(kind=>kind==='back'||kind==='front')

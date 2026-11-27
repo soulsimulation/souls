@@ -71,6 +71,10 @@ test('free floor transitions retain their body pose beneath independent gestures
    assert(maxDelta(before,after)<=.001,'wave completion retains the attained whole pose');
    for(const age of [0,.3,2]){const a=draw(v,release(Math.max(0,age-1e-5)),clock+2+Math.max(0,age-1e-5)),b=draw(v,release(age+1e-5),clock+2+age+1e-5);assert(maxDelta(a,b)<=.001,'wave release and idle support are continuous');for(const side of ['L','R'])assert(Math.min(...b.filter(p=>/^Foot/.test(p.bone)&&p.bone.endsWith(side)).map(p=>p.p.y))>=-.001,'idle handoff preserves support');}
    const hands={left:[1.2,1.2,-.35]as[number,number,number],right:[1.2,1.2,.35]as[number,number,number]};draw(v,{...person(model,'stargaze','wave',.58),hands,yaw:0},clock+.58);for(const side of ['left','right']as const){const p=new THREE.Vector3();assert(v.palmOf(id,side,p));assert(p.distanceTo(new THREE.Vector3(...hands[side]))<=.001,'native hand targets keep authority');}
+   // Constructed floor-origin metadata cannot give the free fitter ownership of a recorded press.
+   draw(v,{...person(model,'stargaze','operate',.25),formPress:[{hand:'left',start:100_000_000,contact:100_250_000,end:100_550_000}]},100.25);
+   const press=v.bones(id)[id].arms.find(arm=>arm.side==='left')!;
+   assert(press.target&&press.err!==null&&press.err<=.001,'recorded selected-hand target survives floor-origin metadata');
  }finally{v.clear();}}}finally{setHumanGround(null);}
 });
 
