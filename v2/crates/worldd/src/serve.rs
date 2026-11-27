@@ -1167,13 +1167,32 @@ fn keep_header(dir: &Path, built: &Built) -> R<()> {
 fn own_header(
     dir: &Path,
     built: &Built,
-    records: &[Vec<u8>],
+    found: &sim::log::Recovered,
+    disk: &OnDisk,
 ) -> R<(Header, BTreeMap<String, String>)> {
-    let named = match records.iter().rev().find(|b| !recorder::is_input(b)) {
-        Some(bytes) => Some(replica::effects::Part::read(bytes).map_err(refusal)?.header),
-        None => None,
-    };
     let path = dir.join("header");
+    let last_named = |records: &mut dyn Iterator<Item = &[u8]>| -> R<Option<Vec<u8>>> {
+        match records.filter(|b| !recorder::is_input(b)).last() {
+            Some(bytes) => Ok(Some(
+                replica::effects::Part::read(bytes).map_err(refusal)?.header,
+            )),
+            None => Ok(None),
+        }
+    };
+    let mut named = last_named(&mut found.records.iter().map(Vec::as_slice))?;
+    // Read from a checkpoint with no part after it, a world that keeps no header learns the one its log names from
+    // the log before it, read from the disk a batch at a time (rare: a world from before headers were kept).
+    if named.is_none() && found.first > disk.first && !path.exists() {
+        let mut last = None;
+        disk.each_from(disk.first, &mut |_, bytes| {
+            if !recorder::is_input(bytes) {
+                last = Some(bytes.to_vec());
+            }
+            Ok(true)
+        })
+        .map_err(refusal)?;
+        named = last_named(&mut last.iter().map(Vec::as_slice))?;
+    }
     let header = match std::fs::read(&path) {
         Ok(bytes) => Header::read(&bytes).map_err(refusal)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -2763,6 +2782,56 @@ struct LogReader {
     at: Option<sim::log::At>,
 }
 
+/// The world's log on the disk as a [`view_out::History`] (#2803): the records from the first one kept (the log's
+/// cut, or 0) up to `end`, those there when the world started, read a batch at a time ([`LogReader`]), from the
+/// checkpoint's place the start read from when the reader starts at or after it. Nothing holds the whole log.
+#[derive(Clone, Debug)]
+struct OnDisk {
+    path: PathBuf,
+    first: u64,
+    end: u64,
+    at: Option<sim::log::At>,
+}
+
+impl view_out::History for OnDisk {
+    fn first(&self) -> u64 {
+        self.first
+    }
+
+    fn each_from(
+        &self,
+        from: u64,
+        each: &mut dyn FnMut(u64, &[u8]) -> Result<bool, Refusal>,
+    ) -> Result<(), Refusal> {
+        let mut reader = LogReader {
+            path: self.path.clone(),
+            at: self.at.filter(|a| a.record <= from),
+        };
+        let mut n = from.max(self.first);
+        while n < self.end {
+            let was = reader.at;
+            let (records, reached) = reader.batch(n, self.end)?;
+            for (record, bytes) in records {
+                if !each(record, &bytes)? {
+                    return Ok(());
+                }
+            }
+            n = n.max(reached);
+            if n < self.end && reader.at == was {
+                return Err(Refusal {
+                    name: "log-read",
+                    detail: format!(
+                        "{}: the log ends at record {reached}, before record {}",
+                        self.path.display(),
+                        self.end
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 impl LogReader {
     /// The bytes one batch reads; a record longer than that is read whole.
     const BATCH: usize = 8 << 20;
@@ -2773,7 +2842,7 @@ impl LogReader {
         use sim::log::{At, HEAD_LEN, HEADER_LEN, MAX_RECORD};
         use std::io::{Read, Seek, SeekFrom};
         let fault = |detail: String| Refusal {
-            name: "archive-log",
+            name: "log-read",
             detail,
         };
         let io = |e: std::io::Error| fault(format!("{}: {e}", self.path.display()));
@@ -3109,7 +3178,7 @@ fn fork_archive_base<S: Store>(
     dir: &Path,
     header: &Header,
     newest: &[u8],
-    found: &sim::log::Recovered,
+    log: &OnDisk,
 ) -> Result<ArchiveBase, Refusal> {
     let scoped = Under {
         store,
@@ -3162,12 +3231,33 @@ fn fork_archive_base<S: Store>(
     }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(io)?;
-    ArchiveBase::initial_fork(header.stored(), &bytes, newest, found)
+    // A fork's first publication only: its whole log from record 0, read from the disk (#2803). A log kept from a
+    // later record is refused by the base, as it was when the start held the log.
+    let found = if log.first == 0 {
+        sim::log::recover(
+            &std::fs::read(&log.path).map_err(|e| Refusal {
+                name: "archive-source-io",
+                detail: format!("the fork's log: {:?}", e.kind()),
+            })?,
+        )?
+    } else {
+        sim::log::Recovered {
+            header: None,
+            first: log.first,
+            start: 0,
+            records: Vec::new(),
+            end: 0,
+            last_crc: 0,
+            torn: None,
+        }
+    };
+    ArchiveBase::initial_fork(header.stored(), &bytes, newest, &found)
 }
 
 /// Already captured recovery source and the same authoritative text Store, kept together at startup.
 struct SourceContext<'a> {
-    recovered: &'a sim::log::Recovered,
+    /// The log on the disk, from its first kept record (#2803).
+    log: &'a OnDisk,
     /// The archive's first part number after the log's cut (the cut file's note; 0 for a log never compacted).
     parts_from: u64,
     checkpoint: Option<&'a [u8]>,
@@ -3185,12 +3275,12 @@ fn off_machine(
     source: SourceContext<'_>,
 ) -> R<Off> {
     let SourceContext {
-        recovered,
+        log,
         parts_from,
         checkpoint,
         text,
     } = source;
-    let (first, records) = (recovered.first, recovered.records.as_slice());
+    let (first, end) = (log.first, log.end);
     let (world, generation) = placed(name, dir)?;
     let store: Bucket = Shared(Arc::new(Patient::new(Generation::new(
         supervisor::bucket::Bucket::from_spec(spec)
@@ -3212,14 +3302,13 @@ fn off_machine(
     let fork_base = checkpoint
         .map(|newest| {
             until_answered("the fork's archive base", &measures::ARCHIVE, || {
-                fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered)
+                fork_archive_base(&store, &prefix, dir, &built.header, newest, log)
             })
         })
         .transpose()
         .map_err(refusal)?;
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
-    let end = first + records.len() as u64;
     // R17: the claim and the shipper's open read the store, so they are made on the shipper's own thread, tried until
     // the store answers, while the world listens and serves. Records wait in `ship` meanwhile, every one from the
     // log's first; the shipper passes over those its claim already holds. Until it opens, its marks hold the whole
@@ -3430,9 +3519,11 @@ fn off_machine(
         floor: archive_floor,
     };
     // Every record to both: the shipper passes over those under its claim's start, which it learns on its own thread.
-    for (k, bytes) in records.iter().enumerate() {
-        off.take(first + k as u64, bytes, recorder::is_input(bytes));
-    }
+    view_out::History::each_from(log, first, &mut |record, bytes| {
+        off.take(record, bytes, recorder::is_input(bytes));
+        Ok(true)
+    })
+    .map_err(refusal)?;
     Ok(off)
 }
 
@@ -3627,25 +3718,53 @@ fn serve(args: &[String]) -> R<()> {
         .collect();
     println!("activities: {}", names.join(", "));
     let mut built = built;
-    // The log read through once: its records feed the stream from record 0; then the loop opens it.
+    // The newest checkpoint first, so the log is read from its place (K4b): only the records after it are read and
+    // held, so a restart's read follows the log since the last checkpoint, never the world's age (#2803). A fork's
+    // checkpoint is its authoritative base; any other world's is the one the engine resumes from.
+    let fork_restored = match &stored_header {
+        Some(_) => Some(
+            sim::checkpoint::restore(&dir.join("checkpoints"))
+                .map_err(refusal)?
+                .ok_or("served-fork-checkpoint-missing")?,
+        ),
+        None => None,
+    };
+    let newest = match restoring {
+        Some(r) => r
+            .join()
+            .map_err(|_| "checkpoint-restore-panicked")?
+            .map_err(refusal)?,
+        None => None,
+    };
+    let place = fork_restored
+        .as_ref()
+        .or(newest.as_ref())
+        .and_then(|r| r.root.log);
     let log_path = dir.join("log");
-    let (log, found) =
-        Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
-    // Shared with the public stream's thread, which reads it after the world has started (#3746).
-    let found = Arc::new(found);
+    let (log, found) = Log::open_at(FileStore::open(&log_path).map_err(refusal)?, EPOCH, place)
+        .map_err(refusal)?;
     let store = log.close();
+    // The log on the disk, for the readers that start before the checkpoint (the public stream, the shipper, the
+    // archive): they read it a batch at a time, so nothing holds the whole log (#2803).
+    let disk = OnDisk {
+        path: log_path.clone(),
+        first: sim::log::compact::read_cut(&log_path)
+            .map_err(refusal)?
+            .map_or(0, |c| c.at.record),
+        end: found.first + found.records.len() as u64,
+        at: place.filter(|a| a.record == found.first && a.offset == found.start as u64),
+    };
+    stamp("log read from the checkpoint");
     // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
     // A fork's is its `header`, checked above against this build's kinds.
     if stored_header.is_none() {
-        let (header, owners) = own_header(&dir, &built, &found.records)?;
+        let (header, owners) = own_header(&dir, &built, &found, &disk)?;
         let _ = adopt(&mut built, header, &owners);
     }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
     let started = if let Some(header) = stored_header {
-        let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
-            .map_err(refusal)?
-            .ok_or("served-fork-checkpoint-missing")?;
+        let restored = fork_restored.ok_or("served-fork-checkpoint-missing")?;
         if restored.root.version.lineage != header.lineage
             || restored.root.version.zone != header.zone
         {
@@ -3712,12 +3831,7 @@ fn serve(args: &[String]) -> R<()> {
         // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
         // the views' hub start from it too, with only the log after it applied: a restart's work follows the log
         // since the last checkpoint, never the world's age (#3837). Without one, the log from record 0.
-        let restored = restoring
-            .ok_or("checkpoint-restore-missing")?
-            .join()
-            .map_err(|_| "checkpoint-restore-panicked")?
-            .map_err(refusal)?;
-        match restored {
+        match newest {
             Some(r) => {
                 if r.root.version.lineage != built.header.lineage
                     || r.root.version.zone != built.header.zone
@@ -3939,7 +4053,7 @@ fn serve(args: &[String]) -> R<()> {
                 &name,
                 &dir,
                 SourceContext {
-                    recovered: &found,
+                    log: &disk,
                     parts_from,
                     checkpoint: checkpoint.as_deref(),
                     text: Arc::clone(&text),
@@ -3988,6 +4102,8 @@ fn serve(args: &[String]) -> R<()> {
             feed.record(bytes.clone());
         }
     }
+    // Every record read at the start is applied: they are given back now, never held for the world's life (#2803).
+    drop(found);
     cfg.served = Some(feed.clone());
     worldd::views::served::listen(feed, &socket.with_extension("views")).map_err(refusal)?;
     // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
@@ -4134,7 +4250,7 @@ fn serve(args: &[String]) -> R<()> {
         text: cfg_text,
         names: Some(Arc::clone(&built.public_names)),
         clock_seed: stream_mapping.map(|s| s.mapping),
-        history: Some(&*found),
+        history: Some(&disk),
     };
     public_start
         .earlier_legacy_checkpoint(&dir.join("checkpoints"))
@@ -4197,7 +4313,7 @@ fn serve(args: &[String]) -> R<()> {
     // `true` once the stream serves, `false` for each refused try while it is degraded (R12).
     let (ready_tx, ready_rx) = channel::<bool>();
     let stream_header = built.header.clone();
-    let stream_found = Arc::clone(&found);
+    let stream_history = disk.clone();
     // What a closed container holds stays out of the public stream too (#3948).
     let stream_closed = closed_kinds.clone();
     // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
@@ -4209,7 +4325,6 @@ fn serve(args: &[String]) -> R<()> {
         &built.header,
         &key,
     )?;
-    drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // O2 (0.133 S3b): the sleep watch asks the public stream to say the world is still until its next due change.
     let (sleep_tx, sleep_rx) = channel::<crate::sleep::Ask>();
@@ -4245,7 +4360,7 @@ fn serve(args: &[String]) -> R<()> {
                         text: stream_text.clone(),
                         names: stream_names.clone(),
                         clock_seed: stream_clock,
-                        history: Some(&*stream_found),
+                        history: Some(&stream_history),
                     };
                     // Its recovery reads are the world's start: patient (#1960). Its recovery chain is written to the
                     // spool beside `views/` and backed up to the store behind the stream (R15).
@@ -4269,13 +4384,13 @@ fn serve(args: &[String]) -> R<()> {
                     view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
                     // Physical cursor includes input records; public effect versions are independently validated by
                     // the observer.
-                    writer.bridge_to(stream_found.first)?;
-                    for (offset, bytes) in stream_found.records.iter().enumerate() {
-                        let record = stream_found.first + offset as u64;
+                    writer.bridge_to(stream_history.first)?;
+                    stream_history.each_from(writer.source_cursor(), &mut |record, bytes| {
                         if record >= writer.source_cursor() {
                             writer.push(record, bytes)?;
                         }
-                    }
+                        Ok(true)
+                    })?;
                     writer.flush()?;
                     Ok(writer)
                 };
@@ -4357,7 +4472,6 @@ fn serve(args: &[String]) -> R<()> {
                 published(&writer);
                 stamp("public stream");
                 let _ = ready_tx.send(true);
-                drop(stream_found);
                 loop {
                     // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
                     if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
@@ -5386,7 +5500,7 @@ mod tests {
             path: dir.join("log"),
             at: None,
         };
-        assert_eq!(early.batch(5, 50).unwrap_err().name, "archive-log");
+        assert_eq!(early.batch(5, 50).unwrap_err().name, "log-read");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
