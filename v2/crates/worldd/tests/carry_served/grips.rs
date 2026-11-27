@@ -823,6 +823,42 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         .expect("taken from beside its edges");
     let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
     assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
+    // The take moved nothing in one step: the crew's node was first set where the frame stood (the frame in its slot
+    // exactly there), then went into its carriers' hands, 0.9 m up, a sample a tick, none more than 0.1 m from the last.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let track: Vec<Vec3> = effects(&dir)
+        .into_iter()
+        .filter_map(|e| match e.body {
+            Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                Change::Motion(h) if h.node == carry => Some(h.pose.position),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+    let first = track.first().copied().expect("the crew's node was placed");
+    println!(
+        "the take's track: {} samples from ({}, {}, {}) mm to {:?}",
+        track.len(),
+        first.x / 1000,
+        first.y / 1000,
+        first.z / 1000,
+        track.last()
+    );
+    assert!(
+        (first.x - at.x).abs() <= 1_000 && (first.z - at.z).abs() <= 1_000 && first.y.abs() <= 1_000,
+        "the node starts where the frame stood: {first:?}"
+    );
+    assert!(track.len() >= 12, "a track, not a step: {} samples", track.len());
+    assert!(
+        track.windows(2).all(|p| {
+            let d = |a: i64, b: i64| i128::from(a - b).pow(2);
+            (d(p[0].x, p[1].x) + d(p[0].y, p[1].y) + d(p[0].z, p[1].z)).isqrt() <= 100_000
+        }),
+        "no sample more than 0.1 m from the last: {track:?}"
+    );
+    let last = track.last().copied().unwrap();
+    assert!((last.y - 900_000).abs() <= 5_000, "in its carriers' hands: {last:?}");
     // Each carrier turned to face its hold (the back walked past the frame and stood with its back to it): its
     // body's own turn, as a turn toward the frame's middle would have it, within 2 s.
     let end = Instant::now() + Duration::from_secs(5);

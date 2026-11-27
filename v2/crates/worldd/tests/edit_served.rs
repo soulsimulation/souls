@@ -3109,25 +3109,9 @@ fn a2_parts_rest_at_the_grounds_height() {
     let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
         let (p, q) = frame_ends_of(&w, fa);
         both(hands, ab, p, q, what);
-        let lying = rest_of(&w, fa, 1_219).2;
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
         assert_eq!(got.kind, 1, "{what}: taken: {got:?}");
-        if lying {
-            // Taken lying where it was laid: carried 3 m out past the bay's end and laid there first, then taken
-            // again. A take leaves a part on the walkers' ground where it lay (only a part come to rest moves there),
-            // and a frame laid at its slot lies where its carriers stand to seat it.
-            let out = v3(ua.x, 0, ua.z - 3_000_000);
-            let now = stand_now(&w, hands[ab.0].soul, hands[ab.1].soul).expect("the crew stands");
-            let (p, q) = moved_to(now, out);
-            both(hands, ab, p, q, what);
-            let got = hands[ab.0].act("part:put", c, laid_at(g, out));
-            assert_eq!(got.kind, 1, "{what}: laid 3 m out: {got:?}");
-            let (p, q) = frame_ends_of(&w, fa);
-            both(hands, ab, p, q, what);
-            let got = hands[ab.0].act("part:take", c, part(fa));
-            assert_eq!(got.kind, 1, "{what}: taken again: {got:?}");
-        }
         let (p, q) = ends(ua);
         both(hands, ab, p, q, what);
         println!(
@@ -4351,28 +4335,12 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     // Crew B again (Souls 3, 4) takes it up and puts it back; Soul 3 lets go, Soul 4 holds it.
     let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
-    let lying = rest_of(&w, fb, 1_219).2;
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
         hands[2].act("part:take", crew_b, part(fb)).kind,
         1,
         "frame B taken up"
     );
-    if lying {
-        // Taken lying where it was laid, at its slot: carried 3 m out and laid there first, then taken again. A take
-        // leaves a part on the walkers' ground where it lay (only a part come to rest moves there), and a frame laid
-        // at its slot lies where its carriers stand to seat it.
-        let out = v3(ub.x, 0, ub.z + 3_000_000);
-        let now = stand_now(&w, hands[2].soul, hands[3].soul).expect("the crew stands");
-        let (p, q) = moved_to(now, out);
-        both(&mut hands, (2, 3), p, q, "frame B carried out");
-        let got = hands[2].act("part:put", crew_b, laid_at(g, out));
-        assert_eq!(got.kind, 1, "frame B laid 3 m out: {got:?}");
-        let (p, q) = frame_ends_of(&w, fb);
-        both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B again");
-        let got = hands[2].act("part:take", crew_b, part(fb));
-        assert_eq!(got.kind, 1, "frame B taken up again: {got:?}");
-    }
     let (p, q) = ends(ub, 0);
     both(&mut hands, (2, 3), p, q, "frame B back to upright_b");
     let got = hands[2].act("part:put", crew_b, into("upright_b"));
@@ -4439,28 +4407,12 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     );
     let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
-    let lying = rest_of(&w, fb, 1_219).2;
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
         hands[2].act("part:take", crew_b, part(fb)).kind,
         1,
         "frame B taken up"
     );
-    if lying {
-        // Taken lying where it was laid, at its slot: carried 3 m out and laid there first, then taken again. A take
-        // leaves a part on the walkers' ground where it lay (only a part come to rest moves there), and a frame laid
-        // at its slot lies where its carriers stand to seat it.
-        let out = v3(ub.x, 0, ub.z + 3_000_000);
-        let now = stand_now(&w, hands[2].soul, hands[3].soul).expect("the crew stands");
-        let (p, q) = moved_to(now, out);
-        both(&mut hands, (2, 3), p, q, "frame B carried out");
-        let got = hands[2].act("part:put", crew_b, laid_at(g, out));
-        assert_eq!(got.kind, 1, "frame B laid 3 m out: {got:?}");
-        let (p, q) = frame_ends_of(&w, fb);
-        both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B again");
-        let got = hands[2].act("part:take", crew_b, part(fb));
-        assert_eq!(got.kind, 1, "frame B taken up again: {got:?}");
-    }
     let (p, q) = ends(ub, 0);
     both(&mut hands, (2, 3), p, q, "frame B back to upright_b");
     let got = hands[2].act("part:put", crew_b, into("upright_b"));
@@ -6080,9 +6032,12 @@ fn frame_legs(now: Option<(Vec3, Vec3)>, to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> 
                 )
             })
             .collect();
-        // On the slot's line it keeps its own span (as wide as it took the frame), not a standing frame's.
+        // It keeps its own span (as wide as it took the frame), and stops 0.45 m short of the slot's line, from where
+        // each still reaches its hold where the frame goes: a take leaves a part on the walkers' ground where it
+        // lay (only a part come to rest moves there), and a frame laid flat at its slot lies along that line.
         let wide = |z: i64| (v3(to_x + half as i64, 0, z), v3(to_x - half as i64, 0, z));
-        legs.extend([wide(to_z), wide(to.0.z)]);
+        let short = to.0.z + if to_z < to.0.z { -450_000 } else { 450_000 };
+        legs.extend([wide(to_z), wide(short)]);
         return legs;
     }
     let from_z = out((now.0.z + now.1.z) / 2);
@@ -6133,20 +6088,6 @@ fn settled(w: &Seeded, soul: Id, at: Vec3, what: &str) {
         );
         std::thread::sleep(Duration::from_millis(200));
     }
-}
-
-/// A pair's places with their middle moved to `to`, each as it stands from the other.
-fn moved_to((p, q): (Vec3, Vec3), to: Vec3) -> (Vec3, Vec3) {
-    let (dx, dz) = (to.x - (p.x + q.x) / 2, to.z - (p.z + q.z) / 2);
-    (v3(p.x + dx, 0, p.z + dz), v3(q.x + dx, 0, q.z + dz))
-}
-
-/// `part:put` parameters: on the ground `g` at `at`.
-fn laid_at(g: Id, at: Vec3) -> BTreeMap<u64, Value> {
-    BTreeMap::from([
-        (1, g.to_value()),
-        (3, Value::Array(vec![int(at.x), int(0), int(at.z)])),
-    ])
 }
 
 /// Where Souls `a` and `b` stand now, when they carry a part between them: a crew's node on the open ground with a
