@@ -97,6 +97,51 @@ fn a_seek_gives_the_public_state_at_its_moment() {
     );
 }
 
+/// 27 Nov (Eden on soul.game at 00:24 UTC, 404 for the new day's index): a day's index was first written with the day's
+/// first bundle, which a still world writes late or never, so Pause and Back 1 min in a day's first minute asked for an
+/// index not there (the seek's walk, and the next bundle's lookup after the day before's last). The next day's index is
+/// written, empty, with the day before's: in the first minute of a new day every index those ask for is there, still
+/// world or busy, and once the day's first bundle closes its index names it over the empty one.
+#[test]
+fn the_first_minute_of_a_new_day_asks_no_index_that_is_not_there() {
+    const DAY: i64 = 86_400_000_000;
+    let index = |store: &Memory, day: i64| {
+        store
+            .get(&format!("{PREFIX}bundles/{day:08}/index"))
+            .expect("get")
+            .map(|o| replica::history::DayIndex::read(&o.bytes).expect("a day index"))
+    };
+    // Still after day 0's twelve minutes; then busy for day 1's first thirty seconds.
+    for next in [0, 30] {
+        let (store, header, log, start) = recorded_with(7, next);
+        let day1 = index(&store, 1).expect("day 1's index, from its first minute");
+        assert_eq!(day1.day, 1);
+        assert_eq!(
+            day1.bundles.is_empty(),
+            next == 0,
+            "{next} s of day 1: {day1:?}"
+        );
+        if next > 0 {
+            assert!(index(&store, 2).expect("day 2's, ahead").bundles.is_empty());
+        }
+        // Back 1 min and Pause, 30 s into day 1, and midnight itself
+        for at in [DAY + 30_000_000 - 60_000_000, DAY + 30_000_000, DAY] {
+            let got = seek(&store, PREFIX, &header, at).expect("seeks");
+            assert_eq!(
+                got.requests as usize,
+                got.keys.len(),
+                "{next} s of day 1, at {at} µs: every key asked is there: {:?}",
+                got.keys
+            );
+            assert_eq!(
+                public_snapshot(&got.state, &Redactions::default()),
+                truth(&header, &log, &start, at),
+                "{next} s of day 1, at {at} µs"
+            );
+        }
+    }
+}
+
 /// 24 Nov (Eden on soul.game, "That moment could not be loaded"): a bundle's snapshot holds no timers, so a timer set
 /// before its window and cleared in it is not refused (`timer-missing`); the seek gives the state it gives without it.
 #[test]
