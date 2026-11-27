@@ -728,7 +728,9 @@ impl Ladder {
     /// each walker the tick refused ended, the walk-outs ended, then each walker's clock and rungs, as [`Ladder::step`]
     /// does after its own tick.
     pub fn after(&mut self, runner: &mut Runner, town: &mut Town) {
+        let t0 = std::time::Instant::now();
         self.faults(runner);
+        prof(0, t0);
         self.climb(runner, town);
     }
 
@@ -793,6 +795,7 @@ impl Ladder {
         // Every body's place by node, read once the same way: what a step aside keeps apart from.
         let mut placed: Option<BTreeMap<Id, Vec<(Id, Vec3)>>> = None;
         let mut asked: BTreeSet<(Id, Id)> = BTreeSet::new();
+        let t0 = std::time::Instant::now();
         let ids: Vec<Id> = self.walkers.keys().copied().collect();
         // Each walker's own reads, on the runner's threads (N17b): nothing below changes another walker's.
         let reads = crate::par::map(&ids, runner.threads, 256, |&who| {
@@ -805,7 +808,9 @@ impl Ladder {
                 )
             })
         });
+        prof(1, t0);
         for (who, read) in ids.into_iter().zip(reads) {
+            let t0 = std::time::Instant::now();
             let Some((body, carried, runs, waits)) = read else {
                 continue;
             };
@@ -912,6 +917,7 @@ impl Ladder {
                     .insert(F_SHOULDER, Value::Array(past));
                 self.record(now, who, order, Rung::Shoulder);
             } else if idle >= MAKE_WAY && c.rung < 2 {
+                let t0 = std::time::Instant::now();
                 c.rung = 2;
                 let (node, p) = (node_of(&body), body.pose.position);
                 let far = waits.and_then(|(l, _)| town.far_end(l, node, p));
@@ -989,7 +995,9 @@ impl Ladder {
                         }
                     }
                 }
+                prof(2, t0);
             } else if idle >= REROUTE && c.rung < 1 {
+                let t0 = std::time::Instant::now();
                 c.rung = 1;
                 self.record(now, who, order, Rung::Reroute);
                 let _ = self.reroute(runner, town, who);
@@ -1008,9 +1016,19 @@ impl Ladder {
                         c.rerouted();
                     }
                 }
+                prof(3, t0);
             }
+            prof(4, t0);
         }
     }
+}
+
+/// PROFILING ONLY (tick-budget-1000): sums and maxima of the ladder's parts, µs. Not for merge.
+pub static PROF: [std::sync::atomic::AtomicU64; 10] = [const { std::sync::atomic::AtomicU64::new(0) }; 10];
+fn prof(i: usize, t0: std::time::Instant) {
+    let us = t0.elapsed().as_micros() as u64;
+    PROF[2 * i].fetch_add(us, std::sync::atomic::Ordering::Relaxed);
+    PROF[2 * i + 1].fetch_max(us, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(test)]

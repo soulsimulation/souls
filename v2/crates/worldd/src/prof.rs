@@ -58,6 +58,11 @@ pub fn tick() {
         let tops = replica::tree::PROF[4].swap(0, Ordering::Relaxed);
         let timers = replica::tree::PROF[5].swap(0, Ordering::Relaxed);
         eprintln!("prof-n: tops={} timers={}", tops / n.max(1), timers / n.max(1));
+        let u: Vec<u64> = sim::unstick::PROF.iter().map(|a| a.swap(0, Ordering::Relaxed)).collect();
+        eprintln!(
+            "prof-u: faults={}/{} reads={}/{} makeway={}/{} reroute={}/{} walker={}/{}",
+            u[0] / n, u[1], u[2] / n, u[3], u[4] / n, u[5], u[6] / n, u[7], u[8] / n, u[9]
+        );
         let mut s = String::from("prof:");
         for i in 0..39 {
             let v = SUM[i].swap(0, Ordering::Relaxed);
