@@ -575,56 +575,102 @@ impl Carry {
         encode(&Value::Map(m)).unwrap_or_default()
     }
 
-    /// The carry a checkpoint's seed holds; an empty or unread seed carries nothing (a checkpoint from before K18c).
-    fn read(seed: &[u8]) -> Option<Carry> {
-        let Value::Map(m) = decode(seed).ok()?.value else {
-            return None;
+    /// The carry a checkpoint's seed holds. A seed that is not a map is no carry (`None`): an empty one (a checkpoint
+    /// from before K18c) or a fork's random seed (`sim::checkpoint::fork`). A carry is read whole or refused
+    /// (`checkpoint-carry`): a key this build does not read, a field of another type, or a row in a shape it does not
+    /// read is never dropped. A build put back after a newer one would otherwise restart the world from part of what
+    /// the newer one kept, and checkpoint it again without the rest (#5211: Eden's terrain went that way). Fields 4
+    /// to 7 may be absent, as in a carry from before each was added. A body's row in a known shape whose id or pose
+    /// its own reader refuses is passed over, as before: the body is still in the tree.
+    fn read(seed: &[u8]) -> R<Option<Carry>> {
+        fn bad(what: String) -> Refusal {
+            Refusal {
+                name: "checkpoint-carry",
+                detail: what,
+            }
+        }
+        fn rows(m: &BTreeMap<u64, Value>, k: u64) -> R<&[Value]> {
+            match m.get(&k) {
+                None => Ok(&[]),
+                Some(Value::Array(rows)) => Ok(rows),
+                Some(_) => Err(bad(format!("the carry's field {k} is not a list"))),
+            }
+        }
+        fn uint(m: &BTreeMap<u64, Value>, k: u64) -> R<Option<u64>> {
+            match m.get(&k) {
+                None => Ok(None),
+                Some(Value::Uint(n)) => Ok(Some(*n)),
+                Some(_) => Err(bad(format!(
+                    "the carry's field {k} is not an unsigned integer"
+                ))),
+            }
+        }
+        let Ok(Value::Map(m)) = decode(seed).map(|d| d.value) else {
+            return Ok(None);
         };
+        if let Some(k) = m.keys().find(|k| !(1..=7).contains(*k)) {
+            return Err(bad(format!(
+                "the carry holds key {k}, which this build does not read"
+            )));
+        }
         let mut c = Carry {
             tick: -1,
             ..Carry::default()
         };
-        if let Some(Value::Array(rows)) = m.get(&1) {
-            for r in rows {
-                let Value::Array(r) = r else { continue };
-                let [Value::Bytes(a), Value::Uint(last), Value::Array(kept)] = r.as_slice() else {
-                    continue;
-                };
-                let kept = kept
-                    .iter()
-                    .filter_map(|k| match k {
-                        Value::Array(p) => match p.as_slice() {
-                            [Value::Uint(s), Value::Bytes(f)] => Some((*s, f.clone())),
-                            _ => None,
-                        },
-                        _ => None,
-                    })
-                    .collect();
-                c.sequences.push((a.clone(), *last, kept));
+        for r in rows(&m, 1)? {
+            let shape =
+                || bad("a kept answers row is not [actor, last, [[sequence, frame], ...]]".into());
+            let Value::Array(r) = r else {
+                return Err(shape());
+            };
+            let [Value::Bytes(a), Value::Uint(last), Value::Array(kept)] = r.as_slice() else {
+                return Err(shape());
+            };
+            let kept = kept
+                .iter()
+                .map(|k| match k {
+                    Value::Array(p) => match p.as_slice() {
+                        [Value::Uint(s), Value::Bytes(f)] => Ok((*s, f.clone())),
+                        _ => Err(shape()),
+                    },
+                    _ => Err(shape()),
+                })
+                .collect::<R<Vec<_>>>()?;
+            c.sequences.push((a.clone(), *last, kept));
+        }
+        c.next_intent = uint(&m, 2)?.unwrap_or(0);
+        for r in rows(&m, 3)? {
+            // `bodies::row`: `[body, pose]`, or `[body, pose, stance]` with a stance this build knows.
+            let known = match r {
+                Value::Array(p) => {
+                    p.len() == 2 || (p.len() == 3 && matches!(p[2], Value::Uint(1..=3)))
+                }
+                _ => false,
+            };
+            if !known {
+                return Err(bad(
+                    "a body's row is not [body, pose] or [body, pose, stance 1 to 3]".into(),
+                ));
             }
-        }
-        if let Some(Value::Uint(n)) = m.get(&2) {
-            c.next_intent = *n;
-        }
-        if let Some(Value::Array(rows)) = m.get(&3) {
-            for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+            if let Some((id, pose, stance)) = bodies::read_row(r) {
                 c.placed.insert(id, (pose, stance));
             }
         }
-        if let Some(Value::Uint(t)) = m.get(&4) {
-            c.tick = i64::try_from(*t).unwrap_or(i64::MAX);
+        if let Some(t) = uint(&m, 4)? {
+            c.tick = i64::try_from(t).unwrap_or(i64::MAX);
         }
-        if let Some(Value::Array(rows)) = m.get(&5) {
-            c.orders = rows.clone();
-        }
-        if let Some(Value::Array(rows)) = m.get(&6) {
-            c.wind = rows.clone();
-        }
-        if let Some(Value::Uint(t)) = m.get(&7) {
-            c.wind_since = i64::try_from(*t).ok();
-        }
-        Some(c)
+        c.orders = rows(&m, 5)?.to_vec();
+        c.wind = rows(&m, 6)?.to_vec();
+        c.wind_since = uint(&m, 7)?.and_then(|t| i64::try_from(t).ok());
+        Ok(Some(c))
     }
+}
+
+/// The newest checkpoint in `dir` that this build reads whole: its records ([`checkpoint::restore`]) and its carry
+/// ([`Carry::read`]). One whose carry is refused is passed over for the one before, like one whose record is. Every
+/// reader of a served world's checkpoints takes them through here, so each starts from the same one.
+pub fn restore(dir: &std::path::Path) -> R<Option<checkpoint::Restored>> {
+    checkpoint::restore_checked(dir, &|seed| Carry::read(seed).map(|_| ()))
 }
 
 /// The wind-down's records and the Souls' acts reduced to what its resume reads (S6): each body's last record of the
@@ -691,6 +737,7 @@ pub struct Config {
     /// The tick's length (K7: the loop runs at this rate).
     pub tick: Duration,
     /// The longest an act stays open, from its arrival, when its expiry is later.
+    /// A release's rehearsal waits this long for the last fed intents (`supervisor::deploy::ACT_WITHIN`).
     pub deadline: Micros,
     pub checkers: usize,
     /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
@@ -6479,7 +6526,7 @@ pub fn start<S: Storage + 'static>(
             name: "checkpoint-restore-panicked",
             detail: "the checkpoint's reader stopped".into(),
         })??,
-        (Some((dir, _)), None) if dir.exists() => checkpoint::restore(dir)?,
+        (Some((dir, _)), None) if dir.exists() => restore(dir)?,
         _ => None,
     };
     for (name, why) in restored.iter().flat_map(|r| &r.rejected) {
@@ -6525,7 +6572,7 @@ pub fn start<S: Storage + 'static>(
                 );
             }
             world = Replica::restored(world.header().clone(), r.tree, r.root.version.sequence);
-            if let Some(c) = Carry::read(&r.root.seed) {
+            if let Some(c) = Carry::read(&r.root.seed)? {
                 for (actor, last_seq, kept) in c.sequences {
                     sequences.restore(&actor, last_seq, kept);
                 }
@@ -10218,9 +10265,9 @@ mod standing_order_carry_tests {
         );
         assert_eq!(rebuilt(&reduced), rebuilt(&log));
         let mut carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &[], &reduced);
-        assert_eq!(Carry::read(&carry.to_bytes()).unwrap().wind_since, None);
+        assert_eq!(read_carry(&carry.to_bytes()).wind_since, None);
         carry.wind_since = Some(1_795_000_000_000_000);
-        let back = Carry::read(&carry.to_bytes()).unwrap();
+        let back = read_carry(&carry.to_bytes());
         assert_eq!(back.wind, carry.wind);
         assert_eq!(
             back.wind_since,
@@ -10262,14 +10309,13 @@ mod standing_order_carry_tests {
         );
         let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &active, &[]);
         let bytes = carry.to_bytes();
-        assert_eq!(Carry::read(&bytes).unwrap().orders, carry.orders);
+        assert_eq!(read_carry(&bytes).orders, carry.orders);
         let Value::Map(mut old) = decode(&bytes).unwrap().value else {
             panic!("carry")
         };
         old.remove(&5);
         assert!(
-            Carry::read(&encode(&Value::Map(old)).unwrap())
-                .unwrap()
+            read_carry(&encode(&Value::Map(old)).unwrap())
                 .orders
                 .is_empty(),
             "older carry reads without orders"
@@ -10280,6 +10326,129 @@ mod standing_order_carry_tests {
             vec![b],
             "cancelled order cannot restart"
         );
+    }
+
+    /// A carry is read whole or refused by name, as a node's record is (#5211): a build put back after a newer one
+    /// never restarts a world from part of a carry and checkpoints it again without the rest.
+    #[test]
+    fn a_carry_with_a_key_or_a_row_this_build_does_not_read_is_refused() {
+        let body = Id::new(Scope([0x73; 16]), 3).unwrap();
+        let pose = Pose {
+            frame: Frame {
+                node: body,
+                slot: None,
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        };
+        let mut placed = Placed::new();
+        placed.insert(body, (pose, None));
+        let carry = Carry {
+            sequences: vec![(b"actor".to_vec(), 4, vec![(4, b"frame".to_vec())])],
+            next_intent: 9,
+            placed,
+            tick: 12,
+            orders: Vec::new(),
+            wind: Vec::new(),
+            wind_since: Some(7),
+        };
+        let bytes = carry.to_bytes();
+        assert_eq!(
+            read_carry(&bytes).to_bytes(),
+            bytes,
+            "what this build writes it reads back whole, byte for byte"
+        );
+        let with = |change: &dyn Fn(&mut BTreeMap<u64, Value>)| {
+            let Value::Map(mut m) = decode(&bytes).unwrap().value else {
+                panic!("carry")
+            };
+            change(&mut m);
+            Carry::read(&encode(&Value::Map(m)).unwrap())
+        };
+        let refused = |read: R<Option<Carry>>, what: &str| {
+            let e = read.err().unwrap_or_else(|| panic!("{what} is refused"));
+            assert_eq!(e.name, "checkpoint-carry", "{what}");
+            e.detail
+        };
+        let row = |m: &mut BTreeMap<u64, Value>, field: u64, more: Value| {
+            let Some(Value::Array(rows)) = m.get_mut(&field) else {
+                panic!("rows")
+            };
+            let Value::Array(r) = &mut rows[0] else {
+                panic!("a row")
+            };
+            r.push(more);
+        };
+        let later_key = with(&|m| {
+            m.insert(8, Value::Uint(1));
+        });
+        assert!(refused(later_key, "a later build's key").contains("key 8"));
+        refused(
+            with(&|m| {
+                m.insert(2, Value::Bytes(vec![1]));
+            }),
+            "a counter of another type",
+        );
+        refused(
+            with(&|m| {
+                m.insert(5, Value::Uint(1));
+            }),
+            "orders of another type",
+        );
+        refused(
+            with(&|m| row(m, 3, Value::Uint(4))),
+            "a body's row with a stance this build does not know",
+        );
+        refused(
+            with(&|m| row(m, 1, Value::Uint(0))),
+            "a kept answers row of another shape",
+        );
+        // Not a carry at all: an empty seed (before K18c) and a fork's random seed.
+        assert!(Carry::read(b"").unwrap().is_none());
+        assert!(Carry::read(&[0xf3; 32]).unwrap().is_none());
+    }
+
+    /// [`restore`] passes a checkpoint over for its carry, as for a record it does not read whole, and gives the one
+    /// before: every reader of a served world's checkpoints starts from it.
+    #[test]
+    fn a_checkpoint_whose_carry_this_build_does_not_read_is_passed_over_for_the_one_before() {
+        let zone = Id::new(Scope([0x73; 16]), 0).unwrap();
+        let mut tree = replica::tree::Tree::start(zone, name("souls:place"));
+        let dir = std::env::temp_dir().join(format!("souls-carry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let version = Version {
+            lineage: Scope([0x73; 16]),
+            zone,
+            epoch: 1,
+            sequence: 1,
+        };
+        let old = Carry::of(&Sequences::default(), 5, Placed::new(), 3, &[], &[]).to_bytes();
+        let Value::Map(mut later) = decode(&old).unwrap().value else {
+            panic!("carry")
+        };
+        later.insert(8, Value::Uint(1));
+        let later = encode(&Value::Map(later)).unwrap();
+        let mut taken = Checkpoints::open(&dir, 1, Blobs::default()).unwrap();
+        taken.take(&mut tree, version, 1, &old).unwrap();
+        taken.take(&mut tree, version, 2, &later).unwrap();
+        taken.wait().unwrap();
+        drop(taken);
+        let r = restore(&dir).unwrap().expect("the one before");
+        assert_eq!(r.root.record, 1);
+        assert_eq!(r.rejected.len(), 1);
+        assert_eq!(r.rejected[0].1.name, "checkpoint-carry");
+        assert_eq!(read_carry(&r.root.seed).next_intent, 5);
+        assert_eq!(
+            checkpoint::restore(&dir).unwrap().unwrap().root.record,
+            2,
+            "read without the carry's check, the newest"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn read_carry(bytes: &[u8]) -> Carry {
+        Carry::read(bytes).unwrap().expect("a carry")
     }
 }
 

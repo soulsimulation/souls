@@ -167,9 +167,9 @@ jobs:
     # a launcher leg passes in about 9 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
     # Every other kind: about 2x the p95 of its green runs, and never under 1.5x the slowest (the 100 green runs before
     # 21 Nov, job wall time in minutes, p95/max): native 15.0/17.8 -> 30; v2 10.0/29.6 (a cold cargo build) -> 45;
-    # soul-actions legs 14.5/15.5 -> 30; packages 9.2/9.3 and web 8.0/8.1 -> 20; types-web, client-cli, latency
+    # packages 9.2/9.3 and web 8.0/8.1 -> 20; types-web, client-cli, latency
     # and soul-tools all under 2.3 -> 15, room for a cold install. Re-measure before tightening.
-    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || matrix.kind == 'v2' && 45 || matrix.kind == 'native' && 30 || matrix.kind == 'soul-actions' && 30 || matrix.kind == 'packages' && 20 || matrix.kind == 'web' && 20 || 15 }}
+    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || matrix.kind == 'v2' && 45 || matrix.kind == 'native' && 30 || matrix.kind == 'packages' && 20 || matrix.kind == 'web' && 20 || 15 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
@@ -294,7 +294,7 @@ jobs:
               bash tools/test-harness/web-suite.sh
               ;;
             launcher)
-              # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts).
+              # V3-launcher-unit; each test file takes a free block of ports (tools/lib/test-port.ts).
               # restic for backup-restic.test.mjs, the same pinned release binary the gate's image installs
               # (modal_suite.py); without it that test skips (#1463: a skip is not proof). x86_64 only; elsewhere it skips
               # and the release gate runs the step on Modal.
@@ -323,13 +323,6 @@ jobs:
               ;;
             latency)
               pnpm --filter @souls/server exec node --test --test-concurrency=1 src/owner-response-milestones.test.ts
-              ;;
-            soul-actions)
-              # #1061: not a gate step; picked by ci-scope.mjs from its own paths
-              # this leg's share of tools/soul-actions/*.test.mjs (test-legs.mjs)
-              list=$(node .github/scripts/test-legs.mjs soul-actions "$TEST_LEG"); mapfile -t files <<< "$list"
-              echo "soul-actions leg $TEST_LEG: ${#files[@]} files"
-              node --test --test-concurrency=4 "${files[@]}"
               ;;
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths

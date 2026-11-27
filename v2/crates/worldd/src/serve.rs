@@ -44,11 +44,15 @@
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
 //!
-//! **A start** reads the log through once from its cut (its records feed the stream from its own cursor), restores
-//! the newest checkpoint and builds the towns and the views' hub from it and the records after it (#3837), then hands
-//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. With no
-//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies is refused
-//! (`log-compacted-past-checkpoint`). It prints `worldd:
+//! **A start** restores the newest checkpoint, reads the log from that checkpoint's place only (#2803), builds the
+//! towns and the views' hub from the checkpoint and the records after it (#3837), gives those records back, then hands
+//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. Readers
+//! that start before the checkpoint (the public stream from its own cursor, the shipper and the archive from the cut)
+//! read the log from the disk a batch at a time, so no start holds the whole log and its time does not grow with the
+//! world's age. With a store, the shipper is still handed every record from the cut before the world listens, held
+//! until its claim answers: what the compactor keeps (the oldest checkpoint, the slowest reader, 64 MiB). With no
+//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies
+//! is refused (`log-compacted-past-checkpoint`). It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
@@ -155,6 +159,7 @@ use worldd::checkers::Rules;
 use worldd::measures;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out;
+use worldd::view_out::History as _;
 #[cfg(test)]
 use worldd::view_out::Writer;
 #[cfg(test)]
@@ -2659,18 +2664,29 @@ impl Store for Again {
 /// store out of reach for hours costs this much memory at most, never the log's rate times the outage.
 const ARCHIVE_WINDOW: u64 = 64 << 20;
 
-/// What [`Off`] hands the archiver and what it leaves for it in the log, shared by the two.
+/// The most bytes of records that wait in the public stream's channel (#2803). Past it the records stay in the log on
+/// the disk, where each already is before it is handed on and which the compactor keeps until the stream has published
+/// them, and the stream reads them from there once it has taken those queued ([`stream_from_log`]). A stream that
+/// falls behind the world (a slow disk under its syncs, a recovery that takes minutes) costs this much memory at
+/// most, never the log's rate times how far it is behind: at 1,000 agents that was 32 MB a minute for the hour of the
+/// soak. Nothing is dropped: the stream is handed every record, in order, from one place or the other.
+const STREAM_WINDOW: u64 = 64 << 20;
+
+/// What a reader that follows the log is handed in memory and what is left for it in the log, shared by the hander
+/// and the reader: [`Off`] and the archiver, the `synced` thread and the public stream.
 struct Handover {
     window: u64,
+    /// Where its counts are said (`health.json`).
+    gauge: &'static measures::Backlog,
     state: std::sync::Mutex<Handing>,
 }
 
 #[derive(Default)]
 struct Handing {
-    /// Parts in the channel, and their bytes: counted before each send, under the lock, so never off by a race.
+    /// Records in the channel, and their bytes: counted before each send, under the lock, so never off by a race.
     queued: u64,
     queued_bytes: u64,
-    /// While parts are not sent: the first record left in the log, and its number in the archive.
+    /// While records are not sent: the first record left in the log, and the reader's number for it.
     left: Option<(u64, u64)>,
     /// The record after the last one handed or left, and the archive's number after it.
     end: u64,
@@ -2678,9 +2694,16 @@ struct Handing {
 }
 
 impl Handover {
+    /// The archiver's.
     fn new(window: u64) -> Arc<Handover> {
+        Handover::gauged(window, &measures::ARCHIVE_QUEUE)
+    }
+
+    /// One whose counts are said by `gauge`.
+    fn gauged(window: u64, gauge: &'static measures::Backlog) -> Arc<Handover> {
         Arc::new(Handover {
             window,
+            gauge,
             state: std::sync::Mutex::default(),
         })
     }
@@ -2689,47 +2712,59 @@ impl Handover {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn gauge(h: &Handing) {
+    fn gauge(&self, h: &Handing) {
         let in_log = h.left.map_or(0, |(from, _)| h.end.saturating_sub(from));
-        measures::ARCHIVE_QUEUE.set(h.queued, h.queued_bytes, in_log);
+        self.gauge.set(h.queued, h.queued_bytes, in_log);
     }
 
-    /// Record `record`, the archive's `number`: sent on `tx`, unless the channel holds the window already or parts
-    /// are left in the log, when it is left there too.
-    fn hand(&self, tx: &Sender<(u64, Vec<u8>)>, record: u64, number: u64, bytes: &[u8]) {
+    /// Record `record`, the reader's `number` for it: sent on `tx`, unless the channel holds the window already or
+    /// records are left in the log, when it is left there too. Bytes handed owned are sent as they are, not copied.
+    fn hand<B: AsRef<[u8]> + Into<Vec<u8>>>(
+        &self,
+        tx: &Sender<(u64, Vec<u8>)>,
+        record: u64,
+        number: u64,
+        bytes: B,
+    ) {
         let mut h = self.lock();
-        let len = bytes.len() as u64;
+        let len = bytes.as_ref().len() as u64;
         if h.left.is_none() && h.queued > 0 && h.queued_bytes + len > self.window {
             h.left = Some((record, number));
         }
         if h.left.is_none() {
             h.queued += 1;
             h.queued_bytes += len;
-            if tx.send((number, bytes.to_vec())).is_err() {
+            if tx.send((number, bytes.into())).is_err() {
                 h.queued -= 1;
                 h.queued_bytes -= len;
             }
         }
         (h.end, h.next) = (record + 1, number + 1);
-        Handover::gauge(&h);
+        self.gauge(&h);
     }
 
-    /// The archiver took a part of `len` bytes from the channel.
+    /// The reader took a record of `len` bytes from the channel.
     fn took(&self, len: usize) {
         let mut h = self.lock();
         h.queued = h.queued.saturating_sub(1);
         h.queued_bytes = h.queued_bytes.saturating_sub(len as u64);
-        Handover::gauge(&h);
+        self.gauge(&h);
     }
 
-    /// What is left in the log for the archiver: its first record and number, and the record after the last.
+    /// What is left in the log for the reader, once it has taken everything sent: its first record and number, and
+    /// the record after the last. None while a record sent is not yet taken, since those come before what was left: a
+    /// reader that found its channel empty a moment before a record was sent and the next was left would otherwise
+    /// read the later one first.
     fn left(&self) -> Option<(u64, u64, u64)> {
         let h = self.lock();
-        h.left.map(|(from, number)| (from, number, h.end))
+        h.left
+            .filter(|_| h.queued == 0)
+            .map(|(from, number)| (from, number, h.end))
     }
 
-    /// The archiver read the log up to `reached` (its next number `number`): the rest is left, or, once it reached
-    /// the last record taken, parts are sent again from the next.
+    /// The reader read the log up to `reached` (its next number `number`): the rest is left, or, once it reached
+    /// the last record taken, records are sent again from the next. A number that is not the one handed to is refused
+    /// (`archive-handover`); the public stream's number is its record, so it never is.
     fn read_to(&self, reached: u64, number: u64) -> Result<(), Refusal> {
         let mut h = self.lock();
         if reached >= h.end {
@@ -2746,7 +2781,7 @@ impl Handover {
         } else {
             h.left = Some((reached, number));
         }
-        Handover::gauge(&h);
+        self.gauge(&h);
         Ok(())
     }
 }
@@ -2754,13 +2789,100 @@ impl Handover {
 /// A record of the log and its number.
 type Numbered = (u64, Vec<u8>);
 
-/// The world's log read forward from the disk a batch at a time, for the parts left there ([`Handover`]). Its place
-/// is kept between batches; the first read starts at the log's cut, or its first record. Offsets and record numbers
-/// never change when the log is compacted (`sim::log::compact`), and the compactor keeps every record the archive has
-/// not closed, so what it reads is there.
+/// The world's log read forward from the disk a batch at a time, for the records left there ([`Handover`]). Its place
+/// is kept between batches; a read with no place, or with one the log has since been compacted past, starts at the
+/// log's cut, or its first record. Offsets and record numbers never change when the log is compacted
+/// (`sim::log::compact`), and the compactor keeps every record the archive has not closed and the public stream has
+/// not published, so what they read is there.
 struct LogReader {
     path: PathBuf,
     at: Option<sim::log::At>,
+}
+
+/// What takes a record and its number: the public stream's writer.
+type Push<'a> = dyn FnMut(u64, &[u8]) -> Result<(), Refusal> + 'a;
+
+/// One batch of the records left in the log for the public stream ([`Handover`], [`STREAM_WINDOW`]), handed to `push`
+/// in order; whether any were left. The stream calls it when its channel is empty. A batch that reads nothing and
+/// does not move on, with records still left, is refused by name (`log-read`): every record left is on the disk.
+fn stream_from_log(
+    handover: &Handover,
+    log: &mut LogReader,
+    push: &mut Push<'_>,
+) -> Result<bool, Refusal> {
+    let Some((from, _, end)) = handover.left() else {
+        return Ok(false);
+    };
+    let was = log.at;
+    let (records, reached) = log.batch(from, end)?;
+    if records.is_empty() && log.at == was {
+        return Err(Refusal {
+            name: "log-read",
+            detail: format!(
+                "{}: the log ends at record {reached}, before record {end}",
+                log.path.display()
+            ),
+        });
+    }
+    for (record, bytes) in &records {
+        push(*record, bytes)?;
+    }
+    let reached = reached.max(from);
+    handover.read_to(reached, reached)?;
+    Ok(true)
+}
+
+/// The world's log on the disk as a [`view_out::History`] (#2803): the records from the first one kept (the log's
+/// cut, or 0) up to `end`, those there when the world started, read a batch at a time ([`LogReader`]), from the
+/// checkpoint's place the start read from when the reader starts at or after it. Nothing holds the whole log.
+#[derive(Clone, Debug)]
+struct OnDisk {
+    path: PathBuf,
+    first: u64,
+    end: u64,
+    at: Option<sim::log::At>,
+    /// Where the records there at the start end, when the log has any: the records the world appends follow it, so a
+    /// reader of those ([`stream_from_log`]) starts here and never reads what is before.
+    tail: Option<sim::log::At>,
+}
+
+impl view_out::History for OnDisk {
+    fn first(&self) -> u64 {
+        self.first
+    }
+
+    fn each_from(
+        &self,
+        from: u64,
+        each: &mut dyn FnMut(u64, &[u8]) -> Result<bool, Refusal>,
+    ) -> Result<(), Refusal> {
+        let mut reader = LogReader {
+            path: self.path.clone(),
+            at: self.at.filter(|a| a.record <= from),
+        };
+        let mut n = from.max(self.first);
+        while n < self.end {
+            let was = reader.at;
+            let (records, reached) = reader.batch(n, self.end)?;
+            for (record, bytes) in records {
+                if !each(record, &bytes)? {
+                    return Ok(());
+                }
+            }
+            n = n.max(reached);
+            if n < self.end && reader.at == was {
+                return Err(Refusal {
+                    name: "log-read",
+                    detail: format!(
+                        "{}: the log ends at record {reached}, before record {}",
+                        self.path.display(),
+                        self.end
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl LogReader {
@@ -2773,26 +2895,27 @@ impl LogReader {
         use sim::log::{At, HEAD_LEN, HEADER_LEN, MAX_RECORD};
         use std::io::{Read, Seek, SeekFrom};
         let fault = |detail: String| Refusal {
-            name: "archive-log",
+            name: "log-read",
             detail,
         };
         let io = |e: std::io::Error| fault(format!("{}: {e}", self.path.display()));
         let mut file = std::fs::File::open(&self.path).map_err(io)?;
         let mut header = [0u8; HEADER_LEN];
         file.read_exact(&mut header).map_err(io)?;
+        // The cut is read after the file is opened: a compaction writes its cut file before it puts the compacted log
+        // in place, so the cut read here is never older than the file's hole. A place kept from an earlier batch that
+        // the log has since been compacted past lies in that hole (zeros): the cut is read from instead.
+        let cut = sim::log::compact::read_cut(&self.path)?.map(|c| c.at);
         let at = match self.at {
-            Some(at) if at.record <= from => at,
-            _ => match sim::log::compact::read_cut(&self.path)? {
-                Some(cut) => cut.at,
-                None => At {
-                    record: 0,
-                    offset: HEADER_LEN as u64,
-                    crc: sim::log::Header::new(u64::from_le_bytes(
-                        header[16..24].try_into().expect("8 bytes"),
-                    ))
-                    .salt,
-                },
-            },
+            Some(at) if at.record <= from && cut.is_none_or(|c| c.record <= at.record) => at,
+            _ => cut.unwrap_or(At {
+                record: 0,
+                offset: HEADER_LEN as u64,
+                crc: sim::log::Header::new(u64::from_le_bytes(
+                    header[16..24].try_into().expect("8 bytes"),
+                ))
+                .salt,
+            }),
         };
         if at.record > from {
             return Err(fault(format!(
@@ -2808,9 +2931,38 @@ impl LogReader {
                 .take(chunk as u64)
                 .read_to_end(&mut tail)
                 .map_err(io)?;
-            let found = sim::log::recover_from(&header, &tail, at)?.ok_or_else(|| {
-                fault(format!("the log does not continue at record {}", at.record))
-            })?;
+            // Only whole records go to the check (#2803). A chunk that ends inside a record (a long one, or one the
+            // writer is still appending) would be judged a torn tail, and the search for a valid record after one
+            // checks every byte to the chunk's end: an import record longer than a chunk held a fresh world's public
+            // stream for 20 minutes. The rest is the next batch's; a first record longer than the chunk is read whole.
+            let mut whole = 0usize;
+            while let Some(head) = tail.get(whole..whole + HEAD_LEN) {
+                let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
+                match whole.checked_add(HEAD_LEN + len) {
+                    Some(e) if len <= MAX_RECORD && e <= tail.len() => whole = e,
+                    _ => break,
+                }
+            }
+            if whole == 0
+                && let Some(head) = tail.get(..HEAD_LEN)
+            {
+                let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
+                if len <= MAX_RECORD && HEAD_LEN + len > chunk && tail.len() == chunk {
+                    chunk = HEAD_LEN + len;
+                    continue;
+                }
+            }
+            let recover = |bytes: &[u8]| {
+                sim::log::recover_from(&header, bytes, at)?.ok_or_else(|| {
+                    fault(format!("the log does not continue at record {}", at.record))
+                })
+            };
+            let mut found = recover(&tail[..if whole > 0 { whole } else { tail.len() }])?;
+            // A first record that does not check is judged on every byte read, as before: damage is refused by name
+            // (`log-corrupt`) when a valid record follows it, never read as the log's end. A clean log never comes here.
+            if found.records.is_empty() && whole > 0 {
+                found = recover(&tail)?;
+            }
             if found.records.is_empty() {
                 if tail.len() < chunk || chunk > MAX_RECORD {
                     self.at = Some(at);
@@ -3109,7 +3261,7 @@ fn fork_archive_base<S: Store>(
     dir: &Path,
     header: &Header,
     newest: &[u8],
-    found: &sim::log::Recovered,
+    log: &OnDisk,
 ) -> Result<ArchiveBase, Refusal> {
     let scoped = Under {
         store,
@@ -3162,12 +3314,31 @@ fn fork_archive_base<S: Store>(
     }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(io)?;
-    ArchiveBase::initial_fork(header.stored(), &bytes, newest, found)
+    // A fork's first publication only: its whole log from record 0, read from the disk (#2803). A log kept from a
+    // later record is refused by the base, as it was when the start held the log.
+    let found = if log.first == 0 {
+        sim::log::recover(&std::fs::read(&log.path).map_err(|e| Refusal {
+            name: "archive-source-io",
+            detail: format!("the fork's log: {:?}", e.kind()),
+        })?)?
+    } else {
+        sim::log::Recovered {
+            header: None,
+            first: log.first,
+            start: 0,
+            records: Vec::new(),
+            end: 0,
+            last_crc: 0,
+            torn: None,
+        }
+    };
+    ArchiveBase::initial_fork(header.stored(), &bytes, newest, &found)
 }
 
 /// Already captured recovery source and the same authoritative text Store, kept together at startup.
 struct SourceContext<'a> {
-    recovered: &'a sim::log::Recovered,
+    /// The log on the disk, from its first kept record (#2803).
+    log: &'a OnDisk,
     /// The archive's first part number after the log's cut (the cut file's note; 0 for a log never compacted).
     parts_from: u64,
     checkpoint: Option<&'a [u8]>,
@@ -3185,12 +3356,12 @@ fn off_machine(
     source: SourceContext<'_>,
 ) -> R<Off> {
     let SourceContext {
-        recovered,
+        log,
         parts_from,
         checkpoint,
         text,
     } = source;
-    let (first, records) = (recovered.first, recovered.records.as_slice());
+    let (first, end) = (log.first, log.end);
     let (world, generation) = placed(name, dir)?;
     let store: Bucket = Shared(Arc::new(Patient::new(Generation::new(
         supervisor::bucket::Bucket::from_spec(spec)
@@ -3212,14 +3383,13 @@ fn off_machine(
     let fork_base = checkpoint
         .map(|newest| {
             until_answered("the fork's archive base", &measures::ARCHIVE, || {
-                fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered)
+                fork_archive_base(&store, &prefix, dir, &built.header, newest, log)
             })
         })
         .transpose()
         .map_err(refusal)?;
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
-    let end = first + records.len() as u64;
     // R17: the claim and the shipper's open read the store, so they are made on the shipper's own thread, tried until
     // the store answers, while the world listens and serves. Records wait in `ship` meanwhile, every one from the
     // log's first; the shipper passes over those its claim already holds. Until it opens, its marks hold the whole
@@ -3430,9 +3600,11 @@ fn off_machine(
         floor: archive_floor,
     };
     // Every record to both: the shipper passes over those under its claim's start, which it learns on its own thread.
-    for (k, bytes) in records.iter().enumerate() {
-        off.take(first + k as u64, bytes, recorder::is_input(bytes));
-    }
+    log.each_from(first, &mut |record, bytes| {
+        off.take(record, bytes, recorder::is_input(bytes));
+        Ok(true)
+    })
+    .map_err(refusal)?;
     Ok(off)
 }
 
@@ -3557,7 +3729,7 @@ fn serve(args: &[String]) -> R<()> {
     let read_newest = || {
         let d = dir.join("checkpoints");
         std::thread::spawn(move || match d.is_dir() {
-            true => sim::checkpoint::restore(&d),
+            true => answers::restore(&d),
             false => Ok(None),
         })
     };
@@ -3627,25 +3799,96 @@ fn serve(args: &[String]) -> R<()> {
         .collect();
     println!("activities: {}", names.join(", "));
     let mut built = built;
-    // The log read through once: its records feed the stream from record 0; then the loop opens it.
+    // The newest checkpoint first, so the log is read from its place (K4b): only the records after it are read and
+    // held, so a restart's read follows the log since the last checkpoint, never the world's age (#2803). A fork's
+    // checkpoint is its authoritative base; any other world's is the one the engine resumes from.
+    let fork_restored = match &stored_header {
+        Some(_) => Some(
+            answers::restore(&dir.join("checkpoints"))
+                .map_err(refusal)?
+                .ok_or("served-fork-checkpoint-missing")?,
+        ),
+        None => None,
+    };
+    let newest = match restoring {
+        Some(r) => r
+            .join()
+            .map_err(|_| "checkpoint-restore-panicked")?
+            .map_err(refusal)?,
+        None => None,
+    };
+    let place = fork_restored
+        .as_ref()
+        .or(newest.as_ref())
+        .and_then(|r| r.root.log);
     let log_path = dir.join("log");
-    let (log, found) =
-        Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
-    // Shared with the public stream's thread, which reads it after the world has started (#3746).
-    let found = Arc::new(found);
+    let (log, found) = Log::open_at(FileStore::open(&log_path).map_err(refusal)?, EPOCH, place)
+        .map_err(refusal)?;
     let store = log.close();
+    // The log on the disk, for the readers that start before the checkpoint (the public stream, the shipper, the
+    // archive): they read it a batch at a time, so nothing holds the whole log (#2803).
+    let disk = OnDisk {
+        path: log_path.clone(),
+        first: sim::log::compact::read_cut(&log_path)
+            .map_err(refusal)?
+            .map_or(0, |c| c.at.record),
+        end: found.first + found.records.len() as u64,
+        at: place.filter(|a| a.record == found.first && a.offset == found.start as u64),
+        // As the log's writer takes its first durable place from what it recovers (`Log::open_at`).
+        tail: found.header.map(|_| sim::log::At {
+            record: found.first + found.records.len() as u64,
+            offset: found.end as u64,
+            crc: found.last_crc,
+        }),
+    };
+    // A start from the checkpoint's place does not read the log's cut: that it continues the chain is checked here,
+    // one batch from it, so a bad cut is still refused at the start (`log-read`), not later by a reader that needs it.
+    if let Some(cut) = sim::log::compact::read_cut(&log_path).map_err(refusal)?
+        && cut.at.record < found.first
+    {
+        let (_, reached) = LogReader {
+            path: log_path.clone(),
+            at: Some(cut.at),
+        }
+        .batch(cut.at.record, cut.at.record + 1)
+        .map_err(refusal)?;
+        // Records follow the cut, so none read there means the cut's record does not check.
+        if reached <= cut.at.record {
+            return Err(format!(
+                "log-cut-bad: the log's record {} at its cut does not check",
+                cut.at.record
+            ));
+        }
+    }
+    stamp("log read from the checkpoint");
     // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
     // A fork's is its `header`, checked above against this build's kinds.
     if stored_header.is_none() {
-        let (header, owners) = own_header(&dir, &built, &found.records)?;
+        // Read from a checkpoint with no part after it (an idle world), the header is checked against the newest
+        // part in the log before it, read from the disk a batch at a time: the log kept from its cut, which the
+        // compactor bounds, as a start from the cut read it.
+        let mut earlier = Vec::new();
+        if found.records.iter().all(|b| recorder::is_input(b)) && found.first > disk.first {
+            disk.each_from(disk.first, &mut |_, bytes| {
+                if !recorder::is_input(bytes) {
+                    earlier = vec![bytes.to_vec()];
+                }
+                Ok(true)
+            })
+            .map_err(refusal)?;
+        }
+        let named = if earlier.is_empty() {
+            &found.records
+        } else {
+            &earlier
+        };
+        let (header, owners) = own_header(&dir, &built, named)?;
         let _ = adopt(&mut built, header, &owners);
     }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
     let started = if let Some(header) = stored_header {
-        let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
-            .map_err(refusal)?
-            .ok_or("served-fork-checkpoint-missing")?;
+        let restored = fork_restored.ok_or("served-fork-checkpoint-missing")?;
         if restored.root.version.lineage != header.lineage
             || restored.root.version.zone != header.zone
         {
@@ -3712,12 +3955,7 @@ fn serve(args: &[String]) -> R<()> {
         // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
         // the views' hub start from it too, with only the log after it applied: a restart's work follows the log
         // since the last checkpoint, never the world's age (#3837). Without one, the log from record 0.
-        let restored = restoring
-            .ok_or("checkpoint-restore-missing")?
-            .join()
-            .map_err(|_| "checkpoint-restore-panicked")?
-            .map_err(refusal)?;
-        match restored {
+        match newest {
             Some(r) => {
                 if r.root.version.lineage != built.header.lineage
                     || r.root.version.zone != built.header.zone
@@ -3939,7 +4177,7 @@ fn serve(args: &[String]) -> R<()> {
                 &name,
                 &dir,
                 SourceContext {
-                    recovered: &found,
+                    log: &disk,
                     parts_from,
                     checkpoint: checkpoint.as_deref(),
                     text: Arc::clone(&text),
@@ -3988,6 +4226,8 @@ fn serve(args: &[String]) -> R<()> {
             feed.record(bytes.clone());
         }
     }
+    // Every record read at the start is applied: they are given back now, never held for the world's life (#2803).
+    drop(found);
     cfg.served = Some(feed.clone());
     worldd::views::served::listen(feed, &socket.with_extension("views")).map_err(refusal)?;
     // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
@@ -4134,7 +4374,7 @@ fn serve(args: &[String]) -> R<()> {
         text: cfg_text,
         names: Some(Arc::clone(&built.public_names)),
         clock_seed: stream_mapping.map(|s| s.mapping),
-        history: Some(&*found),
+        history: Some(&disk),
     };
     public_start
         .earlier_legacy_checkpoint(&dir.join("checkpoints"))
@@ -4197,7 +4437,7 @@ fn serve(args: &[String]) -> R<()> {
     // `true` once the stream serves, `false` for each refused try while it is degraded (R12).
     let (ready_tx, ready_rx) = channel::<bool>();
     let stream_header = built.header.clone();
-    let stream_found = Arc::clone(&found);
+    let stream_history = disk.clone();
     // What a closed container holds stays out of the public stream too (#3948).
     let stream_closed = closed_kinds.clone();
     // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
@@ -4209,8 +4449,14 @@ fn serve(args: &[String]) -> R<()> {
         &built.header,
         &key,
     )?;
-    drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
+    // At most [`STREAM_WINDOW`] of records wait in that channel; past it they stay in the log for the stream to read.
+    let stream_hand = Handover::gauged(STREAM_WINDOW, &measures::STREAM_QUEUE);
+    let stream_handed = Arc::clone(&stream_hand);
+    let mut stream_log = LogReader {
+        path: disk.path.clone(),
+        at: disk.tail,
+    };
     // O2 (0.133 S3b): the sleep watch asks the public stream to say the world is still until its next due change.
     let (sleep_tx, sleep_rx) = channel::<crate::sleep::Ask>();
     // Shipping/archive delivery remains independent of a stopped public observer.
@@ -4221,12 +4467,13 @@ fn serve(args: &[String]) -> R<()> {
                 if let Some(o) = &mut off {
                     o.take(s.record, &s.bytes, s.input);
                 }
-                let _ = stream_tx.send((s.record, s.bytes));
+                stream_handed.hand(&stream_tx, s.record, s.record, s.bytes);
             }
         })
         .map_err(|e| e.to_string())?;
     // The public stream recovers its history on its own thread, as it already follows the world there: on a restarted
-    // full-Eden fork that replay takes seconds, and the world serves meanwhile; records wait in `stream_rx` (#3746).
+    // full-Eden fork that replay takes seconds, and the world serves meanwhile; records wait in `stream_rx` (#3746),
+    // and past its window in the log.
     // The world's clock, not the machine's: a step of the machine's clock, or one a restart carried (O10), never makes
     // the stream cut a stretch early or hold one late.
     let world_clock = world.real;
@@ -4245,7 +4492,7 @@ fn serve(args: &[String]) -> R<()> {
                         text: stream_text.clone(),
                         names: stream_names.clone(),
                         clock_seed: stream_clock,
-                        history: Some(&*stream_found),
+                        history: Some(&stream_history),
                     };
                     // Its recovery reads are the world's start: patient (#1960). Its recovery chain is written to the
                     // spool beside `views/` and backed up to the store behind the stream (R15).
@@ -4269,20 +4516,20 @@ fn serve(args: &[String]) -> R<()> {
                     view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
                     // Physical cursor includes input records; public effect versions are independently validated by
                     // the observer.
-                    writer.bridge_to(stream_found.first)?;
-                    for (offset, bytes) in stream_found.records.iter().enumerate() {
-                        let record = stream_found.first + offset as u64;
+                    writer.bridge_to(stream_history.first)?;
+                    stream_history.each_from(writer.source_cursor(), &mut |record, bytes| {
                         if record >= writer.source_cursor() {
                             writer.push(record, bytes)?;
                         }
-                    }
+                        Ok(true)
+                    })?;
                     writer.flush()?;
                     Ok(writer)
                 };
                 // R12: a refused recovery (the store out of reach or refusing, as a read past its cap did on 23 Nov)
                 // never ends the world, which systemd would only start again into the same refusal. It stays up,
                 // degraded: no public pointer, so no viewers; `health.json` names the fault; tried again with back-off
-                // until the store answers. Records wait in `stream_rx` meanwhile.
+                // until the store answers. Records wait in `stream_rx` meanwhile, and past its window in the log.
                 measures::STREAM.recovering();
                 let mut tries = 0u64;
                 let mut writer = loop {
@@ -4357,7 +4604,8 @@ fn serve(args: &[String]) -> R<()> {
                 published(&writer);
                 stamp("public stream");
                 let _ = ready_tx.send(true);
-                drop(stream_found);
+                // Whether the last batch read from the log left more there: the next is read at once.
+                let mut reading = false;
                 loop {
                     // Stopping (SIGTERM, SIGINT): nothing more is cut or published; the process ends from the stop.
                     if stopping.0.load(std::sync::atomic::Ordering::Acquire) {
@@ -4366,30 +4614,65 @@ fn serve(args: &[String]) -> R<()> {
                             std::thread::park();
                         }
                     }
-                    match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
+                    let wait = std::time::Duration::from_millis(if reading { 0 } else { 20 });
+                    match stream_rx.recv_timeout(wait) {
                         Ok((record, bytes)) => {
+                            stream_hand.took(bytes.len());
                             if record >= writer.source_cursor() {
                                 writer.push(record, &bytes)?;
                             }
                             // What is already waiting first: a writer behind would cut a part a record (#3799).
                             while let Ok((record, bytes)) = stream_rx.try_recv() {
+                                stream_hand.took(bytes.len());
                                 if record >= writer.source_cursor() {
                                     writer.push(record, &bytes)?;
                                 }
                             }
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            // What was left in the log first; what it has is flushed whether or not that read.
+                            let left = (|| -> Result<(), Refusal> {
+                                while stream_from_log(&stream_hand, &mut stream_log, &mut |record, bytes| {
+                                    if record >= writer.source_cursor() {
+                                        writer.push(record, bytes)?;
+                                    }
+                                    Ok(())
+                                })? {}
+                                Ok(())
+                            })();
                             writer.flush()?;
-                            return Ok(());
+                            return left;
                         }
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        // The channel is empty: what was sent before records were left in the log is taken, so
+                        // those come next, a batch at a time (#2803).
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            reading = stream_from_log(&stream_hand, &mut stream_log, &mut |record, bytes| {
+                                if record >= writer.source_cursor() {
+                                    writer.push(record, bytes)?;
+                                }
+                                Ok(())
+                            })?;
+                        }
                     }
                     // Going to sleep (S4w, #2731): what is waiting first, then the pointer still until `due`; once
                     // written, the world exits and this thread with it. Refused (`stream-sleep`): it stays awake.
                     if let Ok((due, answer)) = sleep_rx.try_recv() {
-                        while let Ok((record, bytes)) = stream_rx.try_recv() {
-                            if record >= writer.source_cursor() {
-                                writer.push(record, &bytes)?;
+                        // Each record handed is in the channel or left in the log: the channel is emptied, a batch of
+                        // the log is read, and so on until neither holds one.
+                        loop {
+                            while let Ok((record, bytes)) = stream_rx.try_recv() {
+                                stream_hand.took(bytes.len());
+                                if record >= writer.source_cursor() {
+                                    writer.push(record, &bytes)?;
+                                }
+                            }
+                            if !stream_from_log(&stream_hand, &mut stream_log, &mut |record, bytes| {
+                                if record >= writer.source_cursor() {
+                                    writer.push(record, bytes)?;
+                                }
+                                Ok(())
+                            })? {
+                                break;
                             }
                         }
                         let slept = writer.sleep(world_clock.now_us(), due).map_err(refusal);
@@ -5087,15 +5370,20 @@ mod tests {
         assert!(raw.get(&head.newest).unwrap().is_none());
         let missing = dir.join("no-local-checkpoint");
         assert!(!missing.exists());
-        let recovered =
-            sim::log::recover(&sim::log::Header::new(world.header.epoch).to_bytes()).unwrap();
+        let log = OnDisk {
+            path: missing.join("log"),
+            first: 0,
+            end: 0,
+            at: None,
+            tail: None,
+        };
         let reopened = fork_archive_base(
             &raw,
             prefix,
             &missing,
             &world.header,
             b"not a replacement checkpoint",
-            &recovered,
+            &log,
         )
         .unwrap();
         assert_eq!(
@@ -5386,7 +5674,365 @@ mod tests {
             path: dir.join("log"),
             at: None,
         };
-        assert_eq!(early.batch(5, 50).unwrap_err().name, "archive-log");
+        assert_eq!(early.batch(5, 50).unwrap_err().name, "log-read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2803: the log a start reads from its checkpoint's place gives the readers before it (the stream, the shipper)
+    /// the same records from the disk, a batch at a time, from any record: from the place on without reading what is
+    /// before it, from before it out of the log's first record, and no further than the records there at the start.
+    #[test]
+    fn the_log_on_the_disk_gives_every_reader_the_records_a_whole_read_held() {
+        use worldd::view_out::History;
+        let dir = std::env::temp_dir().join(format!("on-disk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        // Records over two batches, so a read crosses one; the first longer than a batch, as an import's is.
+        let records: Vec<Vec<u8>> = (0..40u8)
+            .map(|i| match i {
+                0 => (0..LogReader::BATCH + 1000).map(|n| n as u8).collect(),
+                _ => vec![i; (LogReader::BATCH / 16) + i as usize],
+            })
+            .collect();
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records[..25] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(25).unwrap();
+        let place = log.durable_at();
+        for r in &records[25..] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(40).unwrap();
+        let store = log.close();
+        // A start from the place holds only the records after it.
+        let (log, found) = Log::open_at(store, EPOCH, Some(place)).unwrap();
+        drop(log.close());
+        assert_eq!((found.first, found.records.len()), (25, 15));
+        let disk = OnDisk {
+            path: path.clone(),
+            first: 0,
+            end: 38,
+            at: Some(place),
+            tail: None,
+        };
+        let read = |from: u64| {
+            let mut out = Vec::new();
+            disk.each_from(from, &mut |n, b| {
+                out.push((n, b.to_vec()));
+                Ok(true)
+            })
+            .unwrap();
+            out
+        };
+        let want = |from: u64| {
+            (from..38)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        };
+        for from in [0, 3, 24, 25, 30, 37, 38] {
+            assert_eq!(read(from), want(from), "from record {from}");
+        }
+        // A reader that has what it needs stops the read.
+        let mut seen = 0;
+        disk.each_from(10, &mut |_, _| {
+            seen += 1;
+            Ok(seen < 3)
+        })
+        .unwrap();
+        assert_eq!(seen, 3);
+        // A log shorter than the start said is refused by name, never read as fewer records.
+        let short = OnDisk { end: 41, ..disk };
+        let e = short.each_from(30, &mut |_, _| Ok(true)).unwrap_err();
+        assert_eq!(e.name, "log-read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2803 review: a record whose length or bytes were damaged is refused by name (`log-corrupt`), never read as the
+    /// log's end, whether the damage is inside a batch or the first record of one.
+    #[test]
+    fn a_damaged_record_is_refused_not_read_as_the_logs_end() {
+        use sim::log::{At, HEAD_LEN, HEADER_LEN};
+        use worldd::view_out::History;
+        let dir = std::env::temp_dir().join(format!("damaged-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records: Vec<Vec<u8>> = (0..30u8).map(|i| vec![i; 1000 + i as usize]).collect();
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(30).unwrap();
+        drop(log.close());
+        // Record 12's place, and its length one byte longer than it is.
+        let offset = HEADER_LEN
+            + records[..12]
+                .iter()
+                .map(|r| HEAD_LEN + r.len())
+                .sum::<usize>();
+        let mut bytes = std::fs::read(&path).unwrap();
+        let prev = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
+        let len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        bytes[offset..offset + 4].copy_from_slice(&(len + 1).to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+        let disk = OnDisk {
+            path: path.clone(),
+            first: 0,
+            end: 30,
+            at: None,
+            tail: None,
+        };
+        let e = disk.each_from(0, &mut |_, _| Ok(true)).unwrap_err();
+        assert_eq!(e.name, "log-corrupt", "{e}");
+        // The damaged record first in a batch, as a reader that stopped before it reads on.
+        let mut reader = LogReader {
+            path: path.clone(),
+            at: Some(At {
+                record: 12,
+                offset: offset as u64,
+                crc: prev,
+            }),
+        };
+        let e = reader.batch(12, 30).unwrap_err();
+        assert_eq!(e.name, "log-corrupt", "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The records of a test log: `n` of them, each of its own bytes and length.
+    fn stream_records(n: u64) -> Vec<Vec<u8>> {
+        (0..n)
+            .map(|i| vec![(i % 251) as u8; 600 + (i % 7) as usize * 100])
+            .collect()
+    }
+
+    /// What the public stream's loop does with its channel and the log (`serve`): everything in the channel, then one
+    /// batch of what was left in the log. Each record must be the one after the last (as the stream's writer refuses
+    /// any other, `stream-source-gap`) with the bytes the world wrote. Whether anything was read.
+    fn stream_takes(
+        rx: &Receiver<(u64, Vec<u8>)>,
+        handover: &Handover,
+        log: &mut LogReader,
+        records: &[Vec<u8>],
+        next: &mut u64,
+    ) -> bool {
+        let mut read = false;
+        let mut push = |record: u64, bytes: &[u8]| {
+            assert_eq!(record, *next, "each record follows the last");
+            assert_eq!(bytes, records[record as usize], "record {record}'s bytes");
+            *next += 1;
+            Ok(())
+        };
+        while let Ok((record, bytes)) = rx.try_recv() {
+            handover.took(bytes.len());
+            push(record, &bytes).unwrap();
+            read = true;
+        }
+        read | stream_from_log(handover, log, &mut push).unwrap()
+    }
+
+    /// #2803, the soak at 1,000 agents: a public stream slower than the world (its disk busy under its syncs) held
+    /// every record it had not written yet in memory, 32 MB a minute for the hour. Its channel now holds its window at
+    /// most; the records past it stay in the log, and the stream reads them from there, in order and none missed,
+    /// then is handed records again. A second time behind, it reads on from the place it kept.
+    #[test]
+    fn a_public_stream_behind_reads_from_the_log_what_its_window_did_not_hold() {
+        let dir = std::env::temp_dir().join(format!("stream-window-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records = stream_records(907);
+        let largest = records.iter().map(Vec::len).max().unwrap() as u64;
+        let window = 16 << 10;
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        // Seven records are there at the start: the reader starts at the place they end, as `serve`'s does
+        // (`OnDisk::tail`), and never reads them.
+        for r in &records[..7] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(7).unwrap();
+        let handover = Handover::gauged(window, &measures::STREAM_QUEUE);
+        let (tx, rx) = channel();
+        let mut reader = LogReader {
+            path: path.clone(),
+            at: Some(log.durable_at()),
+        };
+        assert_eq!(reader.at.unwrap().record, 7);
+        let mut next = 7u64;
+        // The world writes on while the stream takes nothing, three times; between them the stream catches up.
+        for stretch in [7..407u64, 407..417, 417..907] {
+            let mut most = 0;
+            for n in stretch.clone() {
+                log.append(records[n as usize].clone()).unwrap();
+                log.wait_durable(n + 1).unwrap();
+                handover.hand(&tx, n, n, records[n as usize].clone());
+                most = most.max(handover.lock().queued_bytes);
+            }
+            assert!(
+                most <= window + largest,
+                "memory stays in the window: {most}"
+            );
+            let h = handover.lock();
+            let in_log = h.left.map_or(0, |(from, _)| h.end - from);
+            drop(h);
+            if stretch.end - stretch.start > 100 {
+                assert!(
+                    in_log > 300,
+                    "the records past the window wait in the log: {in_log}"
+                );
+            } else {
+                assert_eq!(in_log, 0, "a stream that keeps up is handed every record");
+            }
+            while stream_takes(&rx, &handover, &mut reader, &records, &mut next) {}
+            assert_eq!(next, stretch.end, "every record so far, in order");
+            let h = handover.lock();
+            assert_eq!(
+                (h.queued, h.queued_bytes, h.left),
+                (0, 0, None),
+                "nothing waits once all is taken"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same with the world and the stream each on its own thread, the stream slower by spells: whichever way the
+    /// two interleave, the stream takes every record once, in order.
+    #[test]
+    fn a_public_stream_takes_every_record_in_order_however_the_two_threads_interleave() {
+        let dir = std::env::temp_dir().join(format!("stream-threads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records = Arc::new(stream_records(3000));
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        let handover = Handover::gauged(8 << 10, &measures::STREAM_QUEUE);
+        let (tx, rx) = channel();
+        let (handed, written) = (Arc::clone(&handover), Arc::clone(&records));
+        let world = std::thread::spawn(move || {
+            for (n, r) in written.iter().enumerate() {
+                let n = n as u64;
+                log.append(r.clone()).unwrap();
+                // Several records a sync, as a tick's batch is.
+                if n % 3 == 2 || n + 1 == written.len() as u64 {
+                    log.wait_durable(n + 1).unwrap();
+                    for k in n - n % 3..=n {
+                        handed.hand(&tx, k, k, written[k as usize].clone());
+                    }
+                }
+            }
+        });
+        let mut reader = LogReader { path, at: None };
+        let mut next = 0u64;
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // The stream starts late: the window is full and records are left in the log before it takes its first.
+        while handover.lock().left.is_none() {
+            assert!(std::time::Instant::now() < end, "the window fills");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        while next < records.len() as u64 {
+            assert!(
+                std::time::Instant::now() < end,
+                "the stream reaches the end: {next}"
+            );
+            let before = next;
+            if !stream_takes(&rx, &handover, &mut reader, &records, &mut next) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            // Slower by spells: a pause every few hundred records lets the window fill again.
+            if next / 400 != before / 400 {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+        }
+        world.join().unwrap();
+        assert!(!stream_takes(
+            &rx,
+            &handover,
+            &mut reader,
+            &records,
+            &mut next
+        ));
+        let h = handover.lock();
+        assert_eq!((h.queued, h.queued_bytes, h.left), (0, 0, None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A record sent and not yet taken comes before the records left in the log: nothing is read from the log until
+    /// the channel's are taken, even when the reader found its channel empty a moment before.
+    #[test]
+    fn nothing_is_read_from_the_log_while_a_record_sent_is_not_taken() {
+        let handover = Handover::gauged(4, &measures::STREAM_QUEUE);
+        let (tx, rx) = channel();
+        handover.hand(&tx, 7, 7, b"one".to_vec());
+        handover.hand(&tx, 8, 8, b"two".to_vec());
+        assert_eq!(
+            handover.lock().left,
+            Some((8, 8)),
+            "the second is left in the log"
+        );
+        assert_eq!(handover.left(), None, "the first is not taken yet");
+        let (record, bytes) = rx.try_recv().unwrap();
+        handover.took(bytes.len());
+        assert_eq!((record, bytes.as_slice()), (7, &b"one"[..]));
+        assert_eq!(handover.left(), Some((8, 8, 9)));
+    }
+
+    /// A reader's kept place that the log has since been compacted past is in the compacted log's hole: the next batch
+    /// reads from the cut, not from zeros (the archiver or the stream behind again after hours of keeping up).
+    #[test]
+    fn a_log_reader_whose_place_was_compacted_past_reads_from_the_cut() {
+        let dir = std::env::temp_dir().join(format!("reader-cut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records = stream_records(60);
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(60).unwrap();
+        // The reader's place is record 5; the log is then compacted at record 20.
+        let mut reader = LogReader {
+            path: path.clone(),
+            at: None,
+        };
+        assert_eq!(reader.batch(0, 5).unwrap().1, 5);
+        let mut to_cut = LogReader {
+            path: path.clone(),
+            at: None,
+        };
+        assert_eq!(to_cut.batch(0, 20).unwrap().1, 20);
+        let durable = log.durable_mark();
+        let cut = sim::log::compact::Cut {
+            at: to_cut.at.unwrap(),
+            note: 0,
+        };
+        durable.compact(
+            sim::log::compact::prepare(&path, cut, durable.at())
+                .unwrap()
+                .unwrap(),
+        );
+        // The writer finishes the compaction after its next sync; the deadline only stops a hung test.
+        log.append(vec![9; 100]).unwrap();
+        log.wait_durable(61).unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match durable.compacted() {
+                Some(done) => break assert!(done.is_ok(), "compacted: {done:?}"),
+                None => {
+                    assert!(std::time::Instant::now() < end, "the compaction finishes");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+        let (rest, reached) = reader.batch(25, 60).unwrap();
+        assert_eq!(reached, 60);
+        assert_eq!(
+            rest,
+            (25..60)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

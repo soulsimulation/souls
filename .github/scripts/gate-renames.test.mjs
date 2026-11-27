@@ -24,7 +24,7 @@ test('fileStep follows the gate commands in one-validation.sh; files the gate do
   };
   for (const [path, step] of Object.entries(cases)) assert.equal(fileStep(path)?.step, step, path);
   assert.equal(fileStep('packages/kernel/src/k.test.ts').prefix, 'kernel');
-  for (const path of ['packages/engine-mars/src/project/p.test.ts', 'packages/client/src/c.test.ts', 'tools/soul-actions/a.test.mjs',
+  for (const path of ['packages/engine-mars/src/project/p.test.ts', 'packages/client/src/c.test.ts',
     'tools/god-skill/e2e/scenarios.mjs', 'apps/server/src/a.ts', 'docs/x.md', 'tools/test-harness/walk/other.test.mjs', 'tools/edge-skill/e.test.mjs'])
     assert.equal(fileStep(path), null, path);
 });

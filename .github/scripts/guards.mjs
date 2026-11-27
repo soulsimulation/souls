@@ -134,7 +134,9 @@ export function checkScrub(lines) {
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────────────────────────
 // ── ledger ──────────────────────────────────────────────────────────────────────────────────────────────────────
-export const LEDGER_FILE = 'apps/server/src/edge/body/core-revisions.ts';
+export const LEDGER_FILE = 'tools/body-authoring/admit/core-revisions.ts';
+/** Where the ledger lived before (#2839): a base that predates the move is read there, so the move itself is checked. */
+export const PREVIOUS_LEDGER_FILES = ['apps/server/src/edge/body/core-revisions.ts'];
 const LEDGER_ENTRY = /\{\s*id:\s*['"]([^'"]+)['"]\s*,\s*family:\s*['"]([^'"]+)['"]\s*,\s*n:\s*(\d+)\s*,\s*asset:\s*['"]([^'"]+)['"]\s*,?\s*\}/g;
 
 /** The entries of CORE_REVISIONS in `source`, comments ignored, so a commented-out entry reads as removed. */
@@ -158,7 +160,7 @@ export function checkLedger(base, head) {
   });
 }
 
-const showFile = (ref, file) => { try { return git('show', `${ref}:${file}`); } catch { return null; } };
+const showFile = (ref, file) => { try { return execFileSync('git', ['show', `${ref}:${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
 
 function main([mode, ...argv]) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
@@ -178,7 +180,7 @@ function main([mode, ...argv]) {
     const base = opt('--base'), head = opt('--head') || 'HEAD';
     if (!base || /^0+$/.test(base)) { console.log('ledger guard: no base to compare with; nothing to check'); return 0; }
     const from = git('merge-base', base, head).trim();
-    problems = checkLedger(showFile(from, LEDGER_FILE), showFile(head, LEDGER_FILE));
+    problems = checkLedger([LEDGER_FILE, ...PREVIOUS_LEDGER_FILES].reduce((t, f) => t ?? showFile(from, f), null), showFile(head, LEDGER_FILE));
     console.log(`ledger guard: released core revisions at ${from} against ${head}, ${problems.length} problem(s)`);
   } else if (mode === 'staged') {
     const files = git('diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z').split('\0').filter(Boolean);

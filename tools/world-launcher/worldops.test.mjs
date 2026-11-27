@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { defaultCommand } from './children.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const PORT = Number(process.env.WORLDOPS_TEST_PORT ?? await testPort(10)), RANGE = [PORT + 1, PORT + 7], OFF_PORT = PORT + 8, OFF_RANGE = [PORT + 9, PORT + 9];
 const dir = mkdtempSync(join(tmpdir(), 'launcher-worldops-test-'));

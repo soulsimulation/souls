@@ -400,7 +400,7 @@ The CLI does not run the compiler locally (it imports only `obbOverlap`), contra
 **Launcher** (`tools/world-launcher`): `openLauncher()` binds 4980 by default, children on 5101–5149 (`launcher.mjs:
 145-146`; production uses `--range 4621-4659`, staging `4601-4619`, `deploy/install.sh`). `Registry` keeps
 `<data>/worlds.json` (`world-launcher-registry/1`); templates are `worlds/templates/*.json` (`genesis/1`).
-`createWorld` verifies the creator (`creator-auth.mjs` spawning `verify-creator.mjs`), applies `creation-policy.mjs`
+`createWorld` verifies the creator (`creator-auth.mjs` spawning `verify-session.mjs`, or `verify-creator.mjs` while `<data>/creator-verifier` says `old`), applies `creation-policy.mjs`
 (5 worlds per account; new accounts 2 and one per hour), then `pool.ensure` and `POST /w/<slug>/v1/god/claim` with the
 creator's own token. `children.mjs defaultCommand` (`:405-454`) starts `node apps/server/src/main.ts` with
 `BRAIN_MODE=fake`, empty provider keys, `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`, `WORLD_KEY=<slug>`, `DATA_DIR`,

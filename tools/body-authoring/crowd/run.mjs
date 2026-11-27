@@ -18,8 +18,8 @@ const {createServer}=await import(pathToFileURL(require.resolve('vite')).href);
 const threeDir=dirname(dirname(require.resolve('three')));
 const media=resolve(process.env.CROWD_MEDIA??'.lane/mars-web');
 const models=resolve(process.env.CROWD_MARTIANS??'worlds/littlemartians/characters');
-const {pipBytes}=await import('../../../apps/server/src/edge/body/pip.ts');
-const {monsterBytes,ghostBytes,centaurBytes,GHOST_PRESET,GHOST_ASSET}=await import('../../../apps/server/src/edge/body/shared-bodies.ts');
+const {pipBytes}=await import('../admit/pip.ts');
+const {monsterBytes,ghostBytes,centaurBytes,GHOST_PRESET,GHOST_ASSET}=await import('../admit/shared-bodies.ts');
 // Shared bodies built and pinned exactly as the world serves them; the ghost loads from its admitted asset path.
 const shared={'/fixtures/pip.glb':pipBytes,'/fixtures/monster.glb':monsterBytes,'/fixtures/centaur.glb':centaurBytes,[`/v1/edge/body/assets/${GHOST_ASSET}.glb`]:ghostBytes},built=new Map();
 const timings=process.argv.includes('--timings');

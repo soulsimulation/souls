@@ -1,4 +1,4 @@
-// The launcher and soul-actions test inventories split into parallel CI legs (ci-scope.mjs TEST_LEGS, ci.yml), balanced by
+// The launcher test inventory splits into parallel CI legs (ci-scope.mjs TEST_LEGS, ci.yml), balanced by
 // measured seconds per file (test-leg-durations.json, from one hosted run). The durations only balance the split: a
 // missing or stale entry can make a leg slower but can never drop or repeat a file, because every leg reads the same
 // directory listing and each file goes to exactly one leg.
@@ -10,8 +10,6 @@ import { fileURLToPath } from 'node:url';
 /** Each kind's test directories (the files directly in them, like the shell glob `<dir>/*.test.mjs`) and its leg count. */
 export const TEST_LEGS = {
   launcher: { legs: 3, dirs: ['tools/world-launcher', 'tools/world-launcher/soul'], base: 'tools/world-launcher/' },
-  // shared-bay.test.mjs alone is about 13 minutes under the job's 4-way concurrency; with 4 legs it keeps one to itself.
-  'soul-actions': { legs: 4, dirs: ['tools/soul-actions'], base: 'tools/soul-actions/' },
 };
 
 export function legTestFiles(kind, root = '.') {
