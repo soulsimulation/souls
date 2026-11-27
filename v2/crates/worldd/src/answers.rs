@@ -8857,7 +8857,7 @@ mod tests {
             world.events.send(Event::RunTo { tick, done }).unwrap();
             ran.recv().unwrap();
         };
-        run_to(12 * 3600_000_000 / tick_us);
+        run_to(12 * 3_600_000_000 / tick_us);
         world.stop();
         // The world node's fields and E6's weather timer: before the storm, after its undo, after the redo.
         let at = |live: &Replica| {
@@ -8970,7 +8970,7 @@ mod tests {
         // fires at the storm's end.
         let next = sky::as_int(&before.0[&sky::F_WEATHER_NEXT]).unwrap();
         assert!(
-            10 * tick_us < next && next < 12 * 3600_000_000 && next < until,
+            10 * tick_us < next && next < 12 * 3_600_000_000 && next < until,
             "the run passes the old next change {next} µs, before the storm's end"
         );
         let fires: Vec<i64> = log
