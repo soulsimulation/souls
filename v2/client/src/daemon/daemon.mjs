@@ -142,7 +142,7 @@
 //   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in
 //   (#4980). One whose frames still arrive while a sync's answer is late is behind, not gone: it stays, says
 //   `gap.why` `behind`, and its acts go on it (#4979: on a link slower than the world's speech, reconnecting only fell
-//   behind again). Frames heard only in the 2 s after the sync was asked were already on their way and are no such
+//   behind again). Frames heard only in the 1 s after the sync was asked were already on their way and are no such
 //   sign: a network that stalls then is let go 10 s after the last of them, not found slow. One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
 //   once, and answers say `gap.why` `behind` until its copy is current again (#4979). A `wait` under way is told when
 //   a signed-in socket is lost (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is
@@ -413,7 +413,7 @@ let slowLink = false;
 const SLOW_QUIET = 60_000;
 // A frame heard within this of a sync's ask was on its way before the answer could have come, as on any link: it shows
 // the socket was alive when it asked, not that frames still arrive ahead of a late answer (`awaitAnswer`).
-const IN_FLIGHT = 2_000;
+const IN_FLIGHT = 1_000;
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.

@@ -41,16 +41,14 @@ let relay, arrivals, roots, rt;
 /**
  * A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile;
  * `refuse` closes each new connection at once; `stall(true)` moves no byte either way on any connection, new ones too,
- * and closes none (a stalled network), until `stall(false)` lets what waited through. `onUp` is called once, as the
- * next frame of data a client sends passes; `hush()` drops what the gateway sends from then on to the connections
- * there are (new ones hear it); `say(text)` gives each client a text frame of the relay's own, as if the gateway's.
+ * and closes none (a stalled network), until `stall(false)` lets what waited through. `onUp(down)` is called once, as
+ * the next frame of data a client sends passes; with `down.instead` set to a text, the client gets that text as a
+ * frame in place of what the gateway sends it next, and nothing of that connection's after it.
  */
 function makeRelay(port) {
   const pairs = new Set();
   const r = {
     deaf: false, refuse: false, stalled: false, port: 0, onUp: null,
-    hush: () => { for (const [down] of pairs) down.hushed = true; },
-    say: (text) => { for (const [down] of pairs) if (!down.destroyed) down.write(Buffer.concat([Buffer.from([0x81, text.length]), Buffer.from(text)])); },
     cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); },
     stall: (on) => { r.stalled = on; for (const pair of pairs) for (const s of pair) if (on) s.pause(); else s.resume(); },
   };
@@ -59,8 +57,13 @@ function makeRelay(port) {
     const up = createConnection(port, '127.0.0.1');
     pairs.add([down, up]);
     if (r.stalled) { down.pause(); up.pause(); }
-    down.on('data', (d) => { up.write(d); if ((d[0] & 0x0f) === 2) { const f = r.onUp; r.onUp = null; f?.(); } }); // 2: binary
-    up.on('data', (d) => { if (!r.deaf && !down.hushed) down.write(d); });
+    down.on('data', (d) => { up.write(d); if ((d[0] & 0x0f) === 2) { const f = r.onUp; r.onUp = null; f?.(down); } }); // 2: binary
+    up.on('data', (d) => {
+      if (r.deaf || down.hushed) return;
+      if (down.instead === undefined) { down.write(d); return; }
+      down.write(Buffer.concat([Buffer.from([0x81, down.instead.length]), Buffer.from(down.instead)])); // one text frame
+      down.hushed = true;
+    });
     for (const s of [down, up]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); up.destroy(); }); }
   });
   r.server = server;
@@ -541,11 +544,11 @@ test('#4980: a frame heard just after a sync was asked, then nothing: the socket
   const said = () => readFileSync(rt.log, 'utf8').split('\n');
   const from = said().length;
   let t0 = null, letGoMs;
-  // As the sync's ask passes, the gateway is heard no more, but for one frame that was on its way: it reaches the daemon
-  // 100 ms after its ask (a text frame that says nothing to it). CI's failures were this order: a sync asked at
-  // sign-in, the subscription's frames just after it, and the test before this one stalling the network then. The
-  // frame after the ask had the socket found behind, as on a slow link, and kept for 60 s.
-  relay.onUp = () => { relay.hush(); t0 = performance.now(); setTimeout(() => relay.say('{}'), 100); };
+  // From the sync's ask on the gateway is heard no more, but for one frame that was on its way: it reaches the daemon
+  // just after its ask, when the sync's answer would have (a text frame that says nothing to it). CI's failures were
+  // this order: a sync asked at sign-in, the subscription's frames just after it, and the test before this one
+  // stalling the network then. The frame after the ask had the socket found behind, as on a slow link, and kept 60 s.
+  relay.onUp = (down) => { down.instead = '{}'; t0 = performance.now(); };
   try {
     // A look asks the world once the copy is over 1 s old: asked again until a sync's ask has passed.
     for (let i = 0; t0 === null; i++) {
