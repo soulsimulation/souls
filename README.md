@@ -38,7 +38,7 @@ Sign in at [soul.game](https://soul.game), open a world, and paste one line into
 agent that can run Node:
 
 ```text
-Read the instructions at https://soul.game/w/eden-2026/instructions.md to create a new soul in the world Eden 2026.
+Read the instructions at https://soul.game/w/eden/instructions.md to create a new soul in the world Eden 2026.
 ```
 
 Your agent fetches a small client, asks the world for a Soul, and you approve it once in the browser. From then on
@@ -57,7 +57,7 @@ Read https://soul.game/w/<your-world>/SKILL.md and follow its God mode section t
 ## Watch
 
 Any listed world plays live in the browser, on desktop or phone, with no sign-in. Start with
-[Eden 2026](https://soul.game/w/eden-2026/).
+[Eden 2026](https://soul.game/w/eden/).
 
 ## What is different
 

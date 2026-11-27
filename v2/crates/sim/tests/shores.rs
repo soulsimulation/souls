@@ -586,3 +586,394 @@ fn eden_shores_and_crossings() {
     );
     assert!(failed.is_empty(), "failed: {failed:?}");
 }
+
+// Walkers across shores (#3225): the walk skill through the runner and the controller, wading and swimming.
+
+mod common;
+
+use replica::host::Progress;
+use sim::gaits::{SWIM as SWIM_GAIT, WADE as WADE_GAIT};
+use sim::host::Runner;
+use sim::walk::town::Town;
+
+const TICK: i64 = 50_000;
+const WALK: i64 = 1_400_000;
+
+/// What one walk did, tick by tick: the ground the body stood on at each tick's end, how far it moved in the tick
+/// (µm, along the surface) and on which ground it began and ended the tick; how the walk ended and where.
+struct Walked {
+    grounds: Vec<Ground>,
+    steps: Vec<(Ground, Ground, i64)>,
+    end: Option<Progress>,
+    at: Vec3,
+}
+
+impl Walked {
+    /// The grounds stood on, each run of one written once.
+    fn path(&self) -> Vec<Ground> {
+        let mut out: Vec<Ground> = Vec::new();
+        for g in &self.grounds {
+            if out.last() != Some(g) {
+                out.push(*g);
+            }
+        }
+        out
+    }
+
+    /// The median move a tick on ground `g` (begun and ended on it, moving), m/s.
+    fn median(&self, g: Ground) -> Option<f64> {
+        let mut v: Vec<i64> = (self.steps.iter())
+            .filter(|s| s.0 == g && s.1 == g && s.2 > 0)
+            .map(|s| s.2)
+            .collect();
+        v.sort_unstable();
+        v.get(v.len() / 2)
+            .map(|&d| d as f64 * 1e6 / TICK as f64 / 1e6)
+    }
+}
+
+/// The fastest a body moves in a tick on `g`, µm: its gait's speed in water, else the walk's.
+fn most(g: Ground) -> i64 {
+    match g {
+        Ground::Dry => WALK,
+        Ground::Wading => WADE_GAIT.speed,
+        Ground::Water => SWIM_GAIT.speed,
+    }
+}
+
+/// Runs `who`'s walk on `r` over `t` until it ends (at most `ticks`), checking every tick: no move longer than the
+/// fastest of the grounds it began and ended the tick on (within 2 %, the mover's walk again for a slope), and never
+/// on ground the body may not stand on.
+fn run(r: &mut Runner, t: &mut Town, who: Id, has: Mask, ticks: usize) -> Walked {
+    let tick = r.tick;
+    let mut w = Walked {
+        grounds: Vec::new(),
+        steps: Vec::new(),
+        end: None,
+        at: Vec3::ZERO,
+    };
+    let at = |r: &Runner| r.controller.body(who).expect("the body").pose.position;
+    for _ in 0..ticks {
+        let (was, g0) = (at(r), r.controller.ground(who));
+        r.tick(t).expect("a tick");
+        let (now, g1) = (at(r), r.controller.ground(who));
+        let d = common::dist(was, now);
+        assert!(
+            d <= most(g0).max(most(g1)) * tick / 1_000_000 * 102 / 100 + 1,
+            "no jump: {d} µm in a tick from {g0:?} to {g1:?}"
+        );
+        assert!(sim::routes::may_stand(g1, has), "{g1:?} with {has}");
+        w.grounds.push(g1);
+        w.steps.push((g0, g1, d));
+        if let Some((_, p)) = r.ended.get(&who) {
+            w.end = Some(p.clone());
+            break;
+        }
+    }
+    w.at = at(r);
+    w
+}
+
+/// A town and a runner on `im`, ticks of `tick` µs.
+fn walkers(im: Import, tick: i64) -> (Town, Runner) {
+    let (t, _) = common::town_of(im, b"souls/shores-walk/1");
+    (t, Runner::new(tick))
+}
+
+/// `who` stood at `from` (µm) on the open ground, with abilities `has`, walks to `to`: planned by the town (or given
+/// `legs`), run to its end.
+fn cross(
+    im: Import,
+    who: Id,
+    has: Mask,
+    from: Vec3,
+    to: Vec3,
+    legs: Option<&[sim::walk::Leg]>,
+) -> (Walked, Vec<sim::walk::Leg>, Town) {
+    cross_ticked(im, who, has, from, to, legs, TICK)
+}
+
+/// [`cross`] with ticks of `tick` µs.
+fn cross_ticked(
+    im: Import,
+    who: Id,
+    has: Mask,
+    from: Vec3,
+    to: Vec3,
+    legs: Option<&[sim::walk::Leg]>,
+    tick: i64,
+) -> (Walked, Vec<sim::walk::Leg>, Town) {
+    let (mut t, mut r) = walkers(im, tick);
+    let ground = t.ground;
+    t.allow(who, has);
+    let body = common::stand(&t, who, ground, from);
+    let legs = match legs {
+        Some(l) => {
+            r.add(common::humanoid(), body, common::route(l, WALK, tick))
+                .expect("a walker");
+            l.to_vec()
+        }
+        None => common::walk(&mut r, &mut t, body, WALK, ground, to).expect("a route"),
+    };
+    let w = run(&mut r, &mut t, who, has, 20_000);
+    (w, legs, t)
+}
+
+fn shores(t: &Town, legs: &[sim::walk::Leg]) -> Vec<&'static str> {
+    legs.iter()
+        .filter_map(|l| t.map.shore(l.link?).map(|s| s.0.move_name()))
+        .collect()
+}
+
+/// A1 and A2 on the pond (a bowl: wading ground round its edge, water in the middle): a swimmer walks across it
+/// through the runner, wading and swimming at the gaits' speeds, and leaves the water on the far shore; a body that
+/// may not swim walks round on dry ground; given the swimmer's route, it is refused by name at the first shore and
+/// stays on dry ground.
+#[test]
+fn walkers_cross_the_pond() {
+    let (from, to) = (
+        Vec3::new(1_500_000, 0, 8_000_000),
+        Vec3::new(14_500_000, 0, 8_000_000),
+    );
+    let swimmer = common::id(1);
+    let (w, legs, t) = cross(world(Pond::Bowl), swimmer, ALL, from, to, None);
+    let names = shores(&t, &legs);
+    println!(
+        "swimmer: legs {}, shores {names:?}; grounds {:?}; {} ticks; median m/s dry {:?}, wading {:?}, water {:?}; ended {:?} at ({:.2}, {:.2}) m",
+        legs.len(),
+        w.path(),
+        w.grounds.len(),
+        w.median(Ground::Dry),
+        w.median(Ground::Wading),
+        w.median(Ground::Water),
+        w.end,
+        w.at.x as f64 / 1e6,
+        w.at.z as f64 / 1e6
+    );
+    assert_eq!(
+        names,
+        ["souls:wade", "souls:swim", "souls:swim", "souls:wade"]
+    );
+    assert_eq!(
+        w.path(),
+        [
+            Ground::Dry,
+            Ground::Wading,
+            Ground::Water,
+            Ground::Wading,
+            Ground::Dry
+        ]
+    );
+    assert_eq!(w.end, Some(Progress::Done), "arrived");
+    assert!(common::dist(w.at, Vec3::new(to.x, w.at.y, to.z)) <= 300_000);
+    for (g, gait) in [(Ground::Wading, WADE_GAIT), (Ground::Water, SWIM_GAIT)] {
+        let v = w.median(g).expect("moved on it") * 1e6;
+        assert!(
+            (v / gait.speed as f64 - 1.0).abs() <= 0.03,
+            "{g:?}: {v} µm/s"
+        );
+    }
+
+    // A body that may not swim (nor wade) walks round the pond on dry ground.
+    let walker = common::id(2);
+    let (d, dry_legs, t2) = cross(world(Pond::Bowl), walker, DRY, from, to, None);
+    println!(
+        "walker: legs {}, shores {:?}; grounds {:?}; {} ticks; ended {:?}",
+        dry_legs.len(),
+        shores(&t2, &dry_legs),
+        d.path(),
+        d.grounds.len(),
+        d.end
+    );
+    assert!(shores(&t2, &dry_legs).is_empty());
+    assert_eq!(d.path(), [Ground::Dry]);
+    assert_eq!(d.end, Some(Progress::Done), "arrived round the pond");
+
+    // Given the swimmer's route anyway, it is refused at the first shore by name, and stands on dry ground.
+    let (o, _, t3) = cross(world(Pond::Bowl), walker, DRY, from, to, Some(&legs));
+    println!(
+        "walker offered the swimmer's route: grounds {:?}; {} ticks; ended {:?} at ({:.2}, {:.2}) m",
+        o.path(),
+        o.grounds.len(),
+        o.end,
+        o.at.x as f64 / 1e6,
+        o.at.z as f64 / 1e6
+    );
+    assert_eq!(o.path(), [Ground::Dry]);
+    match &o.end {
+        Some(Progress::Failed(n)) => assert_eq!(n.as_str(), "link-needs-wade"),
+        other => panic!("ended {other:?}"),
+    }
+    let ground = t3.ground;
+    let frame = replica::pose::Frame {
+        node: ground,
+        slot: None,
+    };
+    assert!(
+        t3.surfaces[&ground]
+            .place(walker, frame, o.at, replica::pose::Quat::IDENTITY)
+            .is_ok(),
+        "on dry ground"
+    );
+    assert!(t3.map.spot(ground, o.at).is_some(), "on a dry piece");
+}
+
+/// A1 on Eden: a swimmer walks across the west lake shore to shore, and across the river bank to bank where it wades
+/// and where it swims, through the runner, at the gaits' speeds; a body that may not swim walks round the lake dry.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn walkers_cross_eden_waters() {
+    let im = eden();
+    let ground = im.nodes["ground"];
+    let scene = Scene::of(&im.tree, ground).unwrap();
+    let map = Map::build(&im.tree, ground, &|_| 0).expect("the map");
+    let at = |s: Spot| Vec3::new(s.at[0] * 1000, 0, s.at[2] * 1000);
+    let spot = |m: [f64; 2]| find(&map, ground, m, Ground::Dry, 4.0).expect("dry ground");
+    let mut runs = vec![(
+        "the west lake".to_owned(),
+        at(spot([-196.5, 2.0])),
+        at(spot([-99.5, 2.0])),
+        Ground::Water,
+    )];
+    // The river, bank to bank: the first place a swimmer's route wades only, and the first it swims.
+    let river = scene
+        .waters
+        .iter()
+        .find(|w| !w.line.is_empty())
+        .expect("the river");
+    let mut m2 = Map::build(&im.tree, ground, &|_| 0).expect("the map");
+    let (mut waded, mut swum) = (None, None);
+    for k in (10..river.line.len() - 10).step_by(6) {
+        let (a, b) = (river.line[k], river.line[k + 1]);
+        let (dx, dz) = ((b[0] - a[0]) as f64, (b[1] - a[1]) as f64);
+        let l = dx.hypot(dz);
+        let (nx, nz) = (-dz / l, dx / l);
+        let mid = [a[0] as f64 / 1e6, a[1] as f64 / 1e6];
+        let half = river.width as f64 / 2e6 + 1.5;
+        let bank = |s: f64| {
+            find(
+                &map,
+                ground,
+                [mid[0] + nx * half * s, mid[1] + nz * half * s],
+                Ground::Dry,
+                1.5,
+            )
+        };
+        let (Some(u), Some(v)) = (bank(1.0), bank(-1.0)) else {
+            continue;
+        };
+        let Ok(r) = m2.route(&im.tree, u, v, ALL) else {
+            continue;
+        };
+        let p = path(&m2, &r);
+        if r.length > 30_000 || !p.iter().any(|s| s == "wading" || s == "water") {
+            continue;
+        }
+        let name = format!("the river at ({:.1}, {:.1}) m", mid[0], mid[1]);
+        if p.iter().any(|s| s == "water") {
+            swum.get_or_insert((name, at(u), at(v), Ground::Water));
+        } else {
+            waded.get_or_insert((name, at(u), at(v), Ground::Wading));
+        }
+    }
+    runs.extend(waded);
+    runs.extend(swum);
+    assert_eq!(runs.len(), 3, "the lake, and the river waded and swum");
+    for (k, (name, from, to, deepest)) in runs.into_iter().enumerate() {
+        let (w, legs, t) = cross(eden(), common::id(10 + k as u64), ALL, from, to, None);
+        let names = shores(&t, &legs);
+        let secs = w.grounds.len() as f64 * TICK as f64 / 1e6;
+        println!(
+            "{name}: shores {names:?}; grounds {:?}; {secs:.1} s; median m/s dry {:?}, wading {:?}, water {:?}; ended {:?}",
+            w.path(),
+            w.median(Ground::Dry),
+            w.median(Ground::Wading),
+            w.median(Ground::Water),
+            w.end
+        );
+        assert_eq!(w.end, Some(Progress::Done), "{name}: arrived");
+        assert!(w.path().contains(&deepest), "{name}: in the water");
+        assert_eq!(w.path().first(), Some(&Ground::Dry));
+        assert_eq!(
+            w.path().last(),
+            Some(&Ground::Dry),
+            "{name}: out on the far shore"
+        );
+        for (g, gait) in [(Ground::Wading, WADE_GAIT), (Ground::Water, SWIM_GAIT)] {
+            if let Some(v) = w.median(g) {
+                assert!(
+                    (v * 1e6 / gait.speed as f64 - 1.0).abs() <= 0.03,
+                    "{name}: {g:?} at {v} m/s"
+                );
+            }
+        }
+        if k == 0 {
+            let (d, dl, t2) = cross(eden(), common::id(20), DRY, from, to, None);
+            println!(
+                "{name}, a body that may not swim: shores {:?}; grounds {:?}; {:.1} s; ended {:?}",
+                shores(&t2, &dl),
+                d.path(),
+                d.grounds.len() as f64 * TICK as f64 / 1e6,
+                d.end
+            );
+            assert_eq!(d.path(), [Ground::Dry]);
+            assert_eq!(d.end, Some(Progress::Done));
+        }
+    }
+}
+
+/// The review's two cases (#3225): a shore crossed with ticks twice as long still lands where the walk sees it (no
+/// crossing back and forth), and a body in the water is found again on the water's surface (an edit's regrounding),
+/// not on dry ground.
+#[test]
+fn a_swimmer_with_long_ticks_and_found_again_in_the_water() {
+    let (from, to) = (
+        Vec3::new(1_500_000, 0, 8_000_000),
+        Vec3::new(14_500_000, 0, 8_000_000),
+    );
+    let (w, _, _) = cross_ticked(
+        world(Pond::Bowl),
+        common::id(3),
+        ALL,
+        from,
+        to,
+        None,
+        100_000,
+    );
+    println!("100 ms ticks: grounds {:?}; ended {:?}", w.path(), w.end);
+    assert_eq!(
+        w.path(),
+        [
+            Ground::Dry,
+            Ground::Wading,
+            Ground::Water,
+            Ground::Wading,
+            Ground::Dry
+        ]
+    );
+    assert_eq!(w.end, Some(Progress::Done));
+
+    let (mut t, _) = walkers(world(Pond::Bowl), TICK);
+    let (who, ground) = (common::id(4), t.ground);
+    t.allow(who, ALL);
+    let water = t
+        .surfaces_on(replica::kinds::sizes::Size::Standard, Ground::Water)
+        .expect("the water's surface")[&ground]
+        .clone();
+    let frame = replica::pose::Frame {
+        node: ground,
+        slot: None,
+    };
+    let b = water
+        .place(
+            who,
+            frame,
+            Vec3::new(8_000_000, 0, 8_000_000),
+            replica::pose::Quat::IDENTITY,
+        )
+        .expect("afloat");
+    t.water.grounds.insert(who, Ground::Water);
+    let again = t.relocate(&b).expect("found again in the water");
+    assert_eq!(again.pose.position, b.pose.position);
+    assert_eq!(water.pieces()[again.piece as usize].ground, Ground::Water);
+}

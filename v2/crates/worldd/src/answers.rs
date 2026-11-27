@@ -1237,6 +1237,58 @@ pub fn state_hash(tree: &[(Audience, Hash)], bodies: &[(Id, Pose)]) -> [u8; 32] 
     out
 }
 
+/// Each body's row of the state hash, `[id, pose]` encoded, with the pose it encodes: kept between ticks so a tick
+/// encodes again only the bodies whose pose changed ([`state_hash_kept`]).
+type PoseRows = BTreeMap<Id, (Pose, Vec<u8>)>;
+
+/// [`state_hash`], the same bytes taken by SHA-256 piece by piece: the bodies' rows come from `kept`, and only a body
+/// whose pose changed since is encoded again (with 1,000 Souls, most stand still in a tick). `kept` keeps no body
+/// that is not in `bodies` once it is longer than it. Any row that will not encode gives [`state_hash`]'s answer.
+pub fn state_hash_kept(
+    tree: &[(Audience, Hash)],
+    bodies: &[(Id, Pose)],
+    kept: &mut PoseRows,
+) -> [u8; 32] {
+    let audience = |a: &Audience| match a {
+        Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+        Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+    };
+    let listed = Value::Array(
+        tree.iter()
+            .map(|(a, h)| Value::Array(vec![audience(a), Value::Bytes(h.to_bytes())]))
+            .collect(),
+    );
+    let Ok(listed) = encode(&listed) else {
+        return state_hash(tree, bodies);
+    };
+    if kept.len() > bodies.len() {
+        let here: std::collections::BTreeSet<Id> = bodies.iter().map(|(id, _)| *id).collect();
+        kept.retain(|id, _| here.contains(id));
+    }
+    let mut sha = Hash::taking(Purpose::Fixture);
+    sha.update(&replica::encode::head(4, 2));
+    sha.update(&listed);
+    sha.update(&replica::encode::head(
+        4,
+        u64::try_from(bodies.len()).unwrap_or(u64::MAX),
+    ));
+    for (id, p) in bodies {
+        let row = match kept.get_mut(id) {
+            Some(row) if row.0 == *p => row,
+            _ => {
+                let Ok(bytes) = encode(&Value::Array(vec![id.to_value(), p.to_value()])) else {
+                    kept.remove(id);
+                    return state_hash(tree, bodies);
+                };
+                kept.insert(*id, (*p, bytes));
+                kept.get_mut(id).expect("just kept")
+            }
+        };
+        sha.update(&row.1);
+    }
+    Hash::of_taken(sha).digest()
+}
+
 struct Open {
     actor: Actor,
     key: Vec<u8>,
@@ -1363,12 +1415,17 @@ struct Clock {
     forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
     /// The sits by kind among them (#3178): each one's selector and its intent, bound to a seat when its form starts.
     by_kind: BTreeMap<Id, (Selector, Intent)>,
+    /// Each sit by kind bound on the open ground to a seat in a place there: the words its end writes (field 8), which
+    /// name that place and how far it was ([`Clock::seat_by_kind`]).
+    sat_in: BTreeMap<Id, String>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
     /// Engine acts written this tick, answered with a receipt once their entries are applied.
     engine_done: Vec<Id>,
     order_records: Vec<Effect>,
+    /// Each body's row of the state hash as last encoded, with the pose it encodes ([`state_hash_kept`]).
+    pose_rows: PoseRows,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -1616,6 +1673,18 @@ impl Heavens {
     }
 }
 
+/// Whether `part` sets one of the creator's weather fields or E6's next weather change (`sim::edit::weather::FIELDS`,
+/// `sky::F_WEATHER_NEXT`): an undo or redo of a creator's weather, after which E6 takes the weather back.
+fn sets_weather(part: &Part) -> bool {
+    part.effects.iter().any(|e| match &e.body {
+        Body::Changes(cs) => cs.iter().any(|c| {
+            matches!(&c.change, Change::Set { field, .. }
+                if *field == sky::F_WEATHER_NEXT || sim::edit::weather::FIELDS.contains(field))
+        }),
+        _ => false,
+    })
+}
+
 /// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
 /// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
 /// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
@@ -1771,6 +1840,27 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name; 8, a done act's
 /// words when its move was made from afar (#5063).
+/// The place on `top` (the open ground) that holds `thing`, for a sit by kind's words (#5152 follow-up): the innermost
+/// node above it and below `top` that `look` shows as a place (a room or a place; a floor or a building is not one),
+/// named by its id so the log holds no words and each reader's copy names it by its title, as `look` does. `None` for
+/// a thing in no such place on `top` (a seat right on the open ground), or not in `tree`.
+fn place_of(tree: &replica::tree::Tree, thing: Id, top: Id) -> Option<Id> {
+    let node = |id: Id| tree.node(tree.handle(id)?);
+    let mut at = node(thing)?.parent()?;
+    for _ in 0..64 {
+        if at == top {
+            return None;
+        }
+        let n = node(at)?;
+        let kind = replica::world_model::plain(n.kind().as_str());
+        if kind.ends_with(":room") || kind.ends_with(":place") {
+            return Some(at);
+        }
+        at = n.parent()?;
+    }
+    None
+}
+
 pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -2083,6 +2173,7 @@ impl Clock {
             return;
         };
         self.walks.remove(&id);
+        self.sat_in.remove(&id);
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
         self.progress.retain(|p| p.0 != id);
@@ -3068,7 +3159,11 @@ impl Clock {
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
+                    let weather = sets_weather(&c.part);
                     self.parts.push(c.part);
+                    if weather {
+                        self.weather_back(now);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -3196,7 +3291,7 @@ impl Clock {
             let step = self.steps.remove(&id);
             match committed {
                 Ok((c, mine, places, before)) => {
-                    self.history.record(&before, &self.replica, &c.part, step);
+                    let part = Arc::clone(&c.part);
                     if let Some(b) = &mut self.bodies {
                         if let Err(e) = places.install(&mut b.slots, &c.names) {
                             self.faults += 1;
@@ -3217,6 +3312,9 @@ impl Clock {
                     if let Some(w) = weather {
                         self.put_weather(now, w);
                     }
+                    // Kept for its undo after E6's write, so its inverse sets the weather's next change back too and
+                    // the world node's hash it left is the one that write left (#5073 follow-up).
+                    self.history.record(&before, &self.replica, &part, step);
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -4316,6 +4414,54 @@ impl Clock {
         Ok(Some(asked))
     }
 
+    /// After an undo or redo that set the weather back (#5073 follow-up): E6 takes the world node's weather as it now
+    /// stands, its creator's end (none at 0) and its weather timer due at the next change the node holds (at once, if
+    /// that has passed). The fields are the undo's; only the timer is written, so the node's hash stays the one the undo
+    /// left and its redo is not refused as a conflict.
+    fn weather_back(&mut self, now: Micros) {
+        let tree = self.replica.tree();
+        let Some(f) = tree.node(tree.root()).map(|n| n.fields().clone()) else {
+            return;
+        };
+        let Some(h) = self.sky.as_mut() else { return };
+        let Some(next) = f.get(&sky::F_WEATHER_NEXT).and_then(sky::as_int) else {
+            return;
+        };
+        h.daylight.cfg.until = f.get(&sky::F_WEATHER_UNTIL).and_then(sky::as_int);
+        let Ok(id) = h.mint.mint() else {
+            eprintln!("worldd: the sky's timer ids are spent");
+            return;
+        };
+        let (world, name) = (
+            h.daylight.world,
+            Name::new(sky::T_WEATHER).expect("a constant name"),
+        );
+        let due = next.max(now);
+        let mut recs = Vec::new();
+        if let Some(old) = h.timers.insert(name.clone(), id) {
+            let _ = h.due.clear(world, old);
+            recs.push(TimerRec::Clear { timer: old });
+        }
+        recs.push(TimerRec::Set {
+            timer: id,
+            due,
+            name: name.clone(),
+        });
+        let _ = h.due.set(Timer {
+            node: world,
+            id,
+            due,
+            name,
+        });
+        let timers = Effect {
+            envelope: Clock::own(world, now),
+            body: Body::Timers(recs),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write_own(vec![timers], "the sky's weather timer");
+    }
+
     /// After the creator's batch commits: E6's weather write (its event, and the weather timer set for its end).
     fn put_weather(&mut self, now: Micros, w: sim::edit::weather::Asked) {
         let Some(h) = self.sky.as_mut() else { return };
@@ -4547,6 +4693,10 @@ impl Clock {
     /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
     fn step_bodies(&mut self, now: Micros) {
         let Some(b) = self.bodies.as_mut() else {
+            // A world with no bodies still fires its forms' timers (#3991): a form with no steps there sets one (a
+            // bell's fade), and one never fired stayed due, so the world never slept and the thing stayed as it was.
+            let tick = u64::try_from(self.tick).unwrap_or(0);
+            self.forms.tick(self.replica.tree(), None, tick, now);
             return;
         };
         // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule
@@ -4644,13 +4794,19 @@ impl Clock {
     /// every seat. None free is refused `place.none-free`, naming the next step: the nearest free seat of another
     /// kind there, else to wait for a seat to be left; no seat of the kind there at all, `place.none-of-kind`, which
     /// waiting never clears.
+    ///
+    /// From the open ground (the selector's node is the town's ground) a seat in a place on it (a hall, a room of a
+    /// building) is named by that place's id ([`Clock::place_named`]), which the client reads as its title as `look`
+    /// names places, and how far it is: the bound seat's, in the words its act's end writes (the second of the pair);
+    /// none free, the nearest seat of the kind the Soul may use, in the refusal. Elsewhere, and for a seat right on
+    /// the open ground, the words are as before.
     fn seat_by_kind(
         &self,
         selector: &Selector,
         asked: &Intent,
         body: Id,
         now: Micros,
-    ) -> Result<(Id, String), Refusal> {
+    ) -> Result<((Id, String), Option<String>), Refusal> {
         let Selector::FreeSlot { kind, node, .. } = selector;
         let kind = kind.as_str();
         let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
@@ -4670,29 +4826,42 @@ impl Clock {
             parameters: BTreeMap::new(),
             ..asked.clone()
         });
+        let mine = |t: Id| replica::who_may::private_to(tree, t, soul).is_none();
         let fits = |t: Id| {
             probe.borrow_mut().target = Some(Target::Node(t));
-            replica::who_may::private_to(tree, t, soul).is_none()
-                && self.forms.fixture_sit(tree, &probe.borrow())
+            mine(t) && self.forms.fixture_sit(tree, &probe.borrow())
         };
         let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
-        if let Some(t) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
+        // From the open ground: the place on it holding seat `t`, `gap` µm² away, and how far, in metres to 0.1 m.
+        let outdoors = *node == b.town.ground;
+        let place = |t: Id, gap: i128| {
+            let named = replica::world_model::show(place_of(tree, t, *node)?);
+            let dm = (u128::try_from(gap).unwrap_or(0).isqrt() + 50_000) / 100_000;
+            Some(format!("in {named}, {}.{} m away", dm / 10, dm % 10))
+        };
+        if let Some((t, gap)) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
             let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
-            return Ok((t, form.to_owned()));
+            let words = outdoors
+                .then(|| place(t, gap))
+                .flatten()
+                .map(|p| format!("{kind} {} {p}", replica::world_model::show(t)));
+            return Ok(((t, form.to_owned()), words));
         }
         // The next step: the nearest free seat of any kind there, else to wait (only where a seat of the kind is).
-        let other = b.seat_by_kind(*node, None, body, &fits, &taken).map(|t| {
-            let of = tree
-                .handle(t)
-                .and_then(|h| tree.node(h))
-                .map_or(String::new(), |n| {
-                    replica::world_model::plain(n.kind().as_str()).to_owned()
-                });
-            format!(
-                "the nearest free place to sit there is {} ({of}): sit on it",
-                replica::world_model::show(t)
-            )
-        });
+        let other = b
+            .seat_by_kind(*node, None, body, &fits, &taken)
+            .map(|(t, _)| {
+                let of = tree
+                    .handle(t)
+                    .and_then(|h| tree.node(h))
+                    .map_or(String::new(), |n| {
+                        replica::world_model::plain(n.kind().as_str()).to_owned()
+                    });
+                format!(
+                    "the nearest free place to sit there is {} ({of}): sit on it",
+                    replica::world_model::show(t)
+                )
+            });
         if !b.has_kind(*node, kind) {
             return refused(
                 "place.none-of-kind",
@@ -4702,11 +4871,21 @@ impl Clock {
                 ),
             );
         }
+        // From the open ground, the place holding the nearest seat of the kind the Soul may use (each one held).
+        let near = outdoors
+            .then(|| b.nearest_of_kind(*node, kind, body, &|t| mine(t)))
+            .flatten()
+            .and_then(|(t, gap)| place(t, gap))
+            .map_or(String::new(), |p| format!(" (the nearest {kind} is {p})"));
         refused(
             sim::commit::bind::NONE_FREE,
             match other {
-                Some(o) => format!("no {kind} free in {room}; {o}, or wait for one to be left"),
-                None => format!("every place to sit in {room} is held: wait for one to be left"),
+                Some(o) => {
+                    format!("no {kind} free in {room}{near}; {o}, or wait for one to be left")
+                }
+                None => {
+                    format!("every place to sit in {room} is held{near}: wait for one to be left")
+                }
             },
         )
     }
@@ -4740,7 +4919,12 @@ impl Clock {
             };
             if let Some((selector, asked)) = by_kind {
                 match self.seat_by_kind(&selector, &asked, act.body, now) {
-                    Ok(c) => candidates = vec![c],
+                    Ok((c, place)) => {
+                        candidates = vec![c];
+                        if let Some(p) = place {
+                            self.sat_in.insert(id, p);
+                        }
+                    }
                     Err(r) => {
                         self.end(id, |c| c.refused(actor, sequence, &r));
                         continue;
@@ -4877,6 +5061,13 @@ impl Clock {
                     continue;
                 };
                 eprintln!("worldd: a form's entries were not written: {r}");
+                // A timer's run has no intent to answer (#3991): its refusal is written on its thing, by name.
+                let at = group.first().map_or(now, |e| e.envelope.at);
+                if let Some(e) = of.and_then(|id| self.forms.timer_unwritten(id, &r, at))
+                    && let Err(e) = self.commit_forms(vec![e])
+                {
+                    eprintln!("worldd: a refused timer's entry was not written: {e}");
+                }
                 // A run that ended with them still ends (0.133 F1b): its end, which unlinks its reservation, goes in a
                 // part of its own and names the refusal, so a refused effect never leaves its thing reserved.
                 let (ends, group) = refused_ends(group, r.name, self.replica.tree());
@@ -4996,6 +5187,9 @@ impl Clock {
         };
         // #5063: a done act whose move was made from afar says so on its end (field 8), which its receipt names.
         self.words_next = why.clone().filter(|_| how == "done");
+        if how == "done" && self.words_next.is_none() {
+            self.words_next = self.sat_in.remove(&id);
+        }
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -5530,12 +5724,17 @@ impl Clock {
     /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
     fn state(&mut self) -> [u8; 32] {
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
+        self.state_of(&poses)
+    }
+
+    /// [`Clock::state`] with the bodies' poses already read (the tick's record reads them once, with what moved).
+    fn state_of(&mut self, poses: &[(Id, Pose)]) -> [u8; 32] {
         let tree = self
             .replica
             .tree_for_seal()
             .state_hashes()
             .unwrap_or_default();
-        state_hash(&tree, &poses)
+        state_hash_kept(&tree, poses, &mut self.pose_rows)
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -5740,10 +5939,14 @@ impl Clock {
             i if i.is_empty() => None,
             i => recorder::record(u64::try_from(n).unwrap_or(0), &i).ok(),
         };
-        let moved = self.bodies.as_mut().map(Bodies::moved).unwrap_or_default();
+        let (moved, poses) = self
+            .bodies
+            .as_mut()
+            .map(Bodies::moved_and_poses)
+            .unwrap_or_default();
         let record =
             (!self.rows.is_empty() || !self.effects.is_empty() || !moved.is_empty()).then(|| {
-                let state = self.state();
+                let state = self.state_of(&poses);
                 let v = Value::Map(BTreeMap::from([
                     (1, Value::Bytes(self.replica.header().hash().to_bytes())),
                     (
@@ -6864,6 +7067,7 @@ pub fn start<S: Storage + 'static>(
         },
         forming: Vec::new(),
         by_kind: BTreeMap::new(),
+        sat_in: BTreeMap::new(),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
@@ -6876,6 +7080,7 @@ pub fn start<S: Storage + 'static>(
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
         order_records,
+        pose_rows: PoseRows::new(),
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
@@ -8680,6 +8885,424 @@ mod tests {
         );
     }
 
+    /// #5073 follow-up: a creator's weather (the panel's Lightning: with a strike) is undone to the weather before it,
+    /// through the same served undo the page and the agent send: the kind, its levels and E6's next change as they
+    /// were, the creator's end and the strike read as none (0 and [], as T6 has no unset), and E6's weather timer due
+    /// where it was. The edit log names the undo (`souls:undone`) and the redo (`souls:redone`) by the creator, and
+    /// the redo gives the storm and its end back.
+    #[test]
+    fn a_creators_weather_is_undone_to_the_weather_before_it_and_redone() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        // One-second ticks (the longest a tick may be), so the run reaches the weather's next change after the undo.
+        cfg.tick = Duration::from_secs(1);
+        let tick_us: i64 = 1_000_000;
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let until: i64 = 40 * 3_600_000_000;
+        let storm: Vec<Op> = [
+            (
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            (sky::F_CLOUD, int(100)),
+            (sky::F_RAIN, int(90)),
+            (sky::F_WIND, int(80)),
+            (sky::F_WEATHER_UNTIL, int(until)),
+            // The panel's Lightning: the storm and one strike, in one batch (#5006 row 13).
+            (
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ]
+        .into_iter()
+        .map(|(field, to)| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        })
+        .collect();
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let run = |i: Intent, tick: i64| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&storm)), 2);
+        assert_eq!(kind, 2, "stale");
+        let (kind, reason, now) = run(intent(2, now, parameters(&storm)), 4);
+        assert_eq!(kind, 1, "the storm is set: {reason:?}");
+        let (kind, reason, now) = run(intent(3, now, parameters_of(&Asked::Undo)), 6);
+        assert_eq!(kind, 1, "the storm is undone: {reason:?}");
+        let (kind, reason, now) = run(intent(4, now, parameters_of(&Asked::Redo)), 8);
+        assert_eq!(kind, 1, "and redone: {reason:?}");
+        let (kind, reason, _) = run(intent(5, now, parameters_of(&Asked::Undo)), 10);
+        assert_eq!(kind, 1, "and undone again: {reason:?}");
+        // Then the clock runs on past the weather's next change before the storm (read below from the log).
+        let run_to = |tick: i64| {
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+        };
+        run_to(12 * 3_600_000_000 / tick_us);
+        world.stop();
+        // The world node's fields and E6's weather timer: before the storm, after its undo, after the redo.
+        let at = |live: &Replica| {
+            let tree = live.tree();
+            let f = tree.node(tree.root()).unwrap().fields().clone();
+            let due: Vec<i64> = tree
+                .timers()
+                .iter()
+                .filter(|(_, t)| t.name.as_str() == sky::T_WEATHER)
+                .map(|(_, t)| t.due)
+                .collect();
+            (f, due)
+        };
+        let mut live = initial;
+        let mut snaps = Vec::new();
+        let mut log = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            let named: Vec<(Actor, String, i64)> = part
+                .effects
+                .iter()
+                .flat_map(|e| {
+                    e.events.iter().flatten().map(move |ev| {
+                        (e.envelope.actor, ev.name.as_str().to_owned(), e.envelope.at)
+                    })
+                })
+                .collect();
+            // Snapshots just before the storm's part, the undo's and the redo's (each by the creator).
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                snaps.push(at(&live));
+            }
+            log.extend(named);
+            live.apply(&part).unwrap();
+        }
+        snaps.push(at(&live));
+        let [before, stormy, undone, redone, _] = &snaps[..] else {
+            panic!(
+                "the storm, its undo and its redo: {} snapshots",
+                snaps.len()
+            )
+        };
+        let weather = [
+            sky::F_WEATHER,
+            sky::F_CLOUD,
+            sky::F_RAIN,
+            sky::F_WIND,
+            sky::F_WEATHER_NEXT,
+        ];
+        let of = |f: &BTreeMap<u64, Value>| weather.map(|k| f.get(&k).cloned());
+        assert_ne!(
+            of(&before.0),
+            of(&stormy.0),
+            "the storm changed the weather"
+        );
+        assert_eq!(
+            of(&undone.0),
+            of(&before.0),
+            "the undo gives the weather before the storm back"
+        );
+        assert_eq!(before.0.get(&sky::F_WEATHER_UNTIL), None);
+        assert_eq!(
+            undone.0.get(&sky::F_WEATHER_UNTIL),
+            Some(&Value::Uint(0)),
+            "the creator's end reads as none"
+        );
+        assert_eq!(
+            undone.0.get(&sky::F_STRIKE),
+            Some(&Value::Array(Vec::new())),
+            "no strike"
+        );
+        let mut same = undone.0.clone();
+        same.remove(&sky::F_WEATHER_UNTIL);
+        same.remove(&sky::F_STRIKE);
+        assert_eq!(same, before.0, "nothing else on the world node moved");
+        assert_eq!(undone.1, before.1, "E6's weather timer is due where it was");
+        assert_eq!(
+            of(&redone.0),
+            of(&stormy.0),
+            "the redo gives the storm back"
+        );
+        assert_eq!(redone.0.get(&sky::F_WEATHER_UNTIL), Some(&int(until)));
+        assert_eq!(
+            redone.1,
+            [until],
+            "the storm's timer is due at its end again"
+        );
+        let mine: Vec<&str> = log
+            .iter()
+            .filter(|(a, ..)| *a == Actor::Creator(creator))
+            .map(|(_, n, _)| n.as_str())
+            .collect();
+        assert!(
+            mine.contains(&sim::edit::undo::EV_UNDONE)
+                && mine.contains(&sim::edit::undo::EV_REDONE),
+            "the edit log names the undo and the redo: {mine:?}"
+        );
+        let first = |e: &str| mine.iter().position(|n| *n == e);
+        assert!(
+            first(sim::edit::undo::EV_UNDONE) < first(sim::edit::undo::EV_REDONE),
+            "the undo before the redo: {mine:?}"
+        );
+        // Live, after the second undo: E6's table resumes at the next change it held before the storm, and nothing
+        // fires at the storm's end.
+        let next = sky::as_int(&before.0[&sky::F_WEATHER_NEXT]).unwrap();
+        assert!(
+            10 * tick_us < next && next < 12 * 3_600_000_000 && next < until,
+            "the run passes the old next change {next} µs, before the storm's end"
+        );
+        let fires: Vec<i64> = log
+            .iter()
+            .filter(|(a, n, _)| *a == Actor::World && n == sky::EV_WEATHER)
+            .map(|(.., at)| *at)
+            .collect();
+        assert!(
+            fires.contains(&next),
+            "the table resumes at {next}: {fires:?}"
+        );
+        assert!(
+            !fires.contains(&until),
+            "nothing at the storm's end: {fires:?}"
+        );
+        let (f, _) = snaps.last().expect("the end");
+        assert_ne!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap())),
+            "no storm"
+        );
+    }
+
+    /// #5177's review: a second Undo after one that left an unset value. A god claims an area (an edit of the world
+    /// node, field 140 new), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each admitted,
+    /// as the page and the agent send them (`souls:edit` `{5: 1}` / `{5: 2}`): before, the second Undo was refused
+    /// `undo.conflict`, since the storm's undo left 65 at `0` and 69 at `[]`. The world node ends as the storm left it.
+    #[test]
+    fn undo_twice_and_redo_twice_across_a_weather_edit_and_a_claim() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let set = |field, to| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        };
+        let claim = Value::Array(vec![Value::Array(vec![
+            Value::Text(Name::new("c:a").unwrap()),
+            Value::Text(Name::new("part:a").unwrap()),
+            Value::Nint(9_999),
+            Value::Nint(9_999),
+            Value::Uint(10_000),
+            Value::Uint(10_000),
+        ])]);
+        let claimed = vec![set(replica::edit::claims::F_CLAIMS, claim.clone())];
+        let storm = vec![
+            set(
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            set(sky::F_CLOUD, int(100)),
+            set(sky::F_RAIN, int(90)),
+            set(sky::F_WIND, int(80)),
+            set(sky::F_WEATHER_UNTIL, int(40 * 3_600_000_000)),
+            set(
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ];
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let mut tick = 0;
+        let mut run = |i: Intent| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            tick += 2;
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&claimed)));
+        assert_eq!(kind, 2, "stale");
+        let steps = [
+            ("the area is claimed", parameters(&claimed)),
+            ("the storm is set", parameters(&storm)),
+            ("the storm is undone", parameters_of(&Asked::Undo)),
+            (
+                "the claim is undone, past the storm's unset values",
+                parameters_of(&Asked::Undo),
+            ),
+            ("the claim is redone", parameters_of(&Asked::Redo)),
+            ("the storm is redone", parameters_of(&Asked::Redo)),
+        ];
+        let mut now = now;
+        for (n, (what, p)) in steps.into_iter().enumerate() {
+            let (kind, reason, v) = run(intent(2 + n as u64, now, p));
+            assert_eq!(kind, 1, "{what}: {reason:?}");
+            now = v;
+        }
+        world.stop();
+        let mut live = initial;
+        let mut roots = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            live.apply(&part).unwrap();
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                let tree = live.tree();
+                roots.push(tree.node(tree.root()).unwrap().fields().clone());
+            }
+        }
+        // The claim, the storm, the two undos and the two redos.
+        let [claimed, stormy, _, undone, reclaimed, redone] = &roots[..] else {
+            panic!("six creator parts: {}", roots.len())
+        };
+        let weather = |f: &BTreeMap<u64, Value>| {
+            [
+                sky::F_WEATHER,
+                sky::F_RAIN,
+                sky::F_WEATHER_UNTIL,
+                sky::F_STRIKE,
+                replica::edit::claims::F_CLAIMS,
+            ]
+            .map(|k| f.get(&k).cloned())
+        };
+        assert_eq!(
+            undone.get(&sky::F_WEATHER),
+            claimed.get(&sky::F_WEATHER),
+            "both undone: the weather before the storm"
+        );
+        assert_eq!(undone.get(&sky::F_STRIKE), Some(&Value::Array(Vec::new())));
+        assert_eq!(
+            undone.get(&replica::edit::claims::F_CLAIMS),
+            Some(&Value::Array(Vec::new())),
+            "both undone: no claim"
+        );
+        assert_eq!(
+            reclaimed.get(&replica::edit::claims::F_CLAIMS),
+            Some(&claim),
+            "the claim is back"
+        );
+        assert_eq!(
+            weather(redone),
+            weather(stormy),
+            "both redone: the storm and the claim are back"
+        );
+    }
+
     /// S10c: the clock thread's queue to the edit checker dropped (the clock ended, for any reason, `run_due`'s error
     /// among them) wakes a checker waiting for bodies with no deadline, as in lockstep: refused, never blocked.
     #[test]
@@ -9740,5 +10363,61 @@ mod no_brick_tests {
             names > 100 && not_names > 100,
             "both kinds tried: {names} names, {not_names} not"
         );
+    }
+}
+
+#[cfg(test)]
+mod state_hash_kept_tests {
+    use super::*;
+
+    fn pose(ground: Id, x: i64) -> Pose {
+        Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: Vec3::new(x, 0, -x),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        }
+    }
+
+    /// The kept rows give the same state hash as the whole encoding, tick after tick, as bodies move, arrive and
+    /// leave, with one audience or two.
+    #[test]
+    fn kept_rows_hash_as_the_whole() {
+        let id = |n| Id::new(Scope([0x5b; 16]), n).unwrap();
+        let ground = id(1);
+        let mut kept = PoseRows::new();
+        let mut bodies: Vec<(Id, Pose)> =
+            (10..30).map(|n| (id(n), pose(ground, n as i64))).collect();
+        let tree = [
+            (Audience::Everyone, Hash::of(Purpose::Fixture, b"a")),
+            (Audience::Of(id(2)), Hash::of(Purpose::Fixture, b"b")),
+        ];
+        for tick in 0..8i64 {
+            match tick {
+                2 => bodies[3].1 = pose(ground, 900),
+                3 => bodies.push((id(40), pose(ground, 40))),
+                4 => {
+                    bodies.remove(0);
+                    bodies.remove(5);
+                }
+                5 => bodies.iter_mut().for_each(|b| b.1.position.x += 1),
+                6 => bodies.clear(),
+                7 => bodies.push((id(11), pose(ground, 11))),
+                _ => {}
+            }
+            let t = if tick % 2 == 0 { &tree[..1] } else { &tree[..] };
+            assert_eq!(
+                state_hash_kept(t, &bodies, &mut kept),
+                state_hash(t, &bodies),
+                "tick {tick}"
+            );
+            assert!(kept.len() <= bodies.len().max(20) + 1);
+        }
     }
 }

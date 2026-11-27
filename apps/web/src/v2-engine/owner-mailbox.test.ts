@@ -30,6 +30,10 @@ test('a message written in the box is put for the Soul\'s grant and its answer s
 
   sock.onText!(JSON.stringify({ mail: { id: 'm1', state: 'picked' } }));
   let inbox = await mb.read();
+  assert.equal(inbox.latest?.state, 'sent', 'first-day 27 Nov: given to its client is not read by the agent');
+  assert.equal(inbox.doing, undefined, 'not Thinking…');
+  sock.onText!(JSON.stringify({ mail: { id: 'm1', state: 'read' } }));
+  inbox = await mb.read();
   assert.equal(inbox.latest?.state, 'delivered');
   assert.deepEqual(inbox.doing, { phase: 'thinking' });
 
@@ -84,7 +88,7 @@ test('the card is told whether the Soul\'s agent is connected (the gateway\'s {"
   const before = await mb.read();
   assert.equal(before.link, undefined, 'not told yet: no claim, the card says Checking…');
   assert.equal(before.connected, false);
-  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: true } }));
   assert.deepEqual((await mb.read()).link, { state: 'connected', reason: 'listening', since: null, holder: null });
   assert.equal((await mb.read()).connected, true);
   sock.onText!(JSON.stringify({ agent: { grant: `soul-${'9'.repeat(32)}-0`, connected: false } }));
@@ -177,4 +181,51 @@ test('signed in, owning nothing: the directory\'s empty answer (and an older dir
   await assert.rejects(viewToken(place, older, async () => 'dev:Ada'), (e) => e instanceof NothingOwned);
   const other = (async () => new Response(JSON.stringify({ refused: 'no-view-key' }), { status: 404 })) as unknown as typeof fetch;
   await assert.rejects(viewToken(place, other, async () => 'dev:Ada'), (e) => !(e instanceof NothingOwned) && /no-view-key/.test(String(e)));
+});
+
+test('first-day 27 Nov: a client connected with nobody reading is asleep, never listening; Thinking… only once the agent read it', async () => {
+  const sock = fakeSocket((f) => (f.startsWith('put ') ? { sent: { id: 'm7' } } : null));
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT));
+  await mb.read();
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: false } }));
+  assert.deepEqual((await mb.read()).link, { state: 'connected', reason: 'asleep', since: null, holder: null });
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.equal(((await mb.read()).link as { reason?: string }).reason, 'asleep', 'no word on a reader: not claimed');
+  await mb.send('walk Juniper over to the pond');
+  sock.onText!(JSON.stringify({ mail: { id: 'm7', state: 'picked' } }));
+  const given = await mb.read();
+  assert.equal(given.latest?.state, 'sent'); assert.equal(given.doing, undefined);
+  assert.equal(given.waitsMs, 15 * 60_000, 'the directory keeps it open 15 min');
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: true } }));
+  assert.equal(((await mb.read()).link as { reason?: string }).reason, 'listening');
+  sock.onText!(JSON.stringify({ mail: { id: 'm7', state: 'read' } }));
+  assert.deepEqual((await mb.read()).doing, { phase: 'thinking' });
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: false, listening: true } }));
+  assert.equal(((await mb.read()).link as { state?: string }).state, 'disconnected');
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.equal(((await mb.read()).link as { reason?: string }).reason, 'asleep', 'a new sign-in has no reader until it says so');
+});
+
+test('first-day 27 Nov: read before the put\'s answer still makes it Thinking…', () => {
+  const box = new OwnerBox();
+  box.put(GRANT, 'wave');
+  box.text(JSON.stringify({ mail: { id: 'm8', state: 'read' } }));
+  box.text(JSON.stringify({ sent: { id: 'm8' } }));
+  assert.equal(box.messages[0].state, 'thinking');
+});
+
+test('first-day 27 Nov: a read message carries when it was read, also when read before the put\'s answer', () => {
+  const box = new OwnerBox();
+  box.put(GRANT, 'wave');
+  const before = Date.now();
+  box.text(JSON.stringify({ mail: { id: 'm9', state: 'read' } }));
+  box.text(JSON.stringify({ sent: { id: 'm9' } }));
+  assert.ok((box.messages[0].readAt ?? 0) >= before);
+  box.put(GRANT, 'sit');
+  box.text(JSON.stringify({ sent: { id: 'm10' } }));
+  assert.equal(box.messages[1].readAt, undefined);
+  box.text(JSON.stringify({ mail: { id: 'm10', state: 'read' } }));
+  assert.ok((box.messages[1].readAt ?? 0) >= before);
+  const inbox = inboxOf(box.messages, new Map(), true, true);
+  assert.equal(inbox.latest?.readAt, box.messages[1].readAt);
 });

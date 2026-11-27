@@ -221,7 +221,7 @@ pub struct NodeRef<'a> {
     rec: &'a NodeRec,
 }
 
-impl NodeRef<'_> {
+impl<'a> NodeRef<'a> {
     pub fn id(&self) -> Id {
         self.rec.id
     }
@@ -248,7 +248,8 @@ impl NodeRef<'_> {
         u32::from(self.rec.depth)
     }
 
-    pub fn fields(&self) -> &BTreeMap<u64, Value> {
+    /// The node's fields, borrowed for as long as the tree is.
+    pub fn fields(&self) -> &'a BTreeMap<u64, Value> {
         &self.rec.fields
     }
 

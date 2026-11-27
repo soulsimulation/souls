@@ -25,6 +25,10 @@ async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   const dir = mkdtempSync(new URL('w1-create-', scratch)), data = join(dir, 'data'), file = join(dir, 'binding.json'), routes = join(dir, 'routes.json');
   const client = join(dir, 'client'), bodies = join(dir, 'bodies'), web = join(dir, 'web');
   for (const d of [data, client, bodies, web]) mkdirSync(d, { recursive: true });
+  // the new engine's published templates: a folder per template holding its manifest; `source` and `.aside` are not ones
+  const published = join(dir, 'templates');
+  for (const id of ['mars-camp', 'eden-2026', 'hello-hamlet']) { mkdirSync(join(published, id), { recursive: true }); writeFileSync(join(published, id, 'template'), 'manifest'); }
+  for (const d of ['source', '.aside/eden-2026']) mkdirSync(join(published, d), { recursive: true });
   const described = (name, text) => { const bytes = Buffer.from(text); writeFileSync(join(client, name), bytes); return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
   const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
   writeFileSync(join(client, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
@@ -80,7 +84,7 @@ async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, started = [];
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {}, cutoverBindingFile: file, webDir: web,
-    v2DirectoryUrl: `http://127.0.0.1:${D}`, v2Create: true, v2CreatePollMs: 20, v2CreateBudgetMs: 2000, ...extra,
+    v2DirectoryUrl: `http://127.0.0.1:${D}`, v2TemplatesDir: published, v2Create: true, v2CreatePollMs: 20, v2CreateBudgetMs: 2000, ...extra,
     command: (w) => { started.push(w.slug); throw new Error('no old world may start'); } });
   t.after(async () => { await launcher.close(); directory.close(); rmSync(dir, { recursive: true, force: true }); });
   const create = async (body, authorization) => {
@@ -221,6 +225,23 @@ test('W1: on by default where a cutover binding is in place (Gene\'s yes, 24 Nov
   const out = await create({ name: 'Default On', template: 'hello-hamlet' }, 'Bearer dev:ada');
   assert.equal(stub.asks.length, 1, 'no flag: New world is the directory\'s create');
   assert.equal(out.status, 202, JSON.stringify(out.body));
+});
+
+test('27 Nov: New world offers the new engine\'s published templates, by plain titles, in worlds.json and templates.json', async t => {
+  const { base } = await fixture(t);
+  const want = [['eden-2026', 'Eden village'], ['hello-hamlet', 'Hello hamlet'], ['mars-camp', 'Mars camp']];
+  for (const path of ['/__sim/worlds.json', '/__sim/templates.json']) {
+    const { templates } = await (await fetch(`${base}${path}`)).json();
+    assert.deepEqual(templates.map(t => [t.id, t.name]), want, `${path}: only folders with a manifest, never the old genesis files or the empty plain`);
+    assert.ok(templates.every(t => t.engine === 'new' && typeof t.description === 'string' && !('file' in t)), path);
+    assert.ok(templates.find(t => t.id === 'eden-2026').description.length > 0);
+  }
+});
+
+test('27 Nov: where New world stays on the old engine, the old genesis templates are offered', async t => {
+  const { base } = await fixture(t, { launcher: { v2Create: false } });
+  const ids = (await (await fetch(`${base}/__sim/templates.json`)).json()).templates.map(t => t.id);
+  assert.equal(ids[0], 'empty'); assert.ok(ids.includes('hello-hamlet')); assert.ok(!ids.includes('eden-2026'), 'hidden genesis files stay hidden');
 });
 
 test('W1: with the flag off, New world is not sent to the directory', async t => {

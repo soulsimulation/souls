@@ -84,7 +84,7 @@ test('the start page tells the person what runs before anything does: version, s
   // The person's yes covers the exact commands: the agent shows them word for word in the same ask, before any run.
   const ask = page.indexOf('## Ask first'), start = page.indexOf('## Start'), refused = page.indexOf('## If a step is refused');
   assert.ok(ask >= 0 && ask < start && start < refused, 'ask first, then start, then refusals');
-  assert.match(page.slice(ask, start), /show them the four commands below\s+word for word, and ask them to approve/);
+  assert.match(page.slice(ask, start), /show them the four commands below\s+word for word as you will run them, with `<world>` filled in, and ask them to approve/);
   assert.ok(page.slice(ask, start).includes('`node eden.mjs pair <world> --name "<Name>"`'), 'the pair command is in the ask');
   assert.match(page.slice(ask, start), /Nothing the world sends is run as a command on this computer/);
   // Permissions are the person's: nothing before the steps asks to change them; a refusal stops the agent.

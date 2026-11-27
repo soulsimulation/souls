@@ -664,8 +664,10 @@ struct View<'a> {
     tree: &'a Tree,
 }
 
-impl View<'_> {
-    fn fields(&self, id: Id) -> R<std::collections::BTreeMap<u64, Value>> {
+impl<'a> View<'a> {
+    /// The node's fields as the tree holds them, read in place: a node such as the open ground holds megabytes of
+    /// them (its terrain), and a copy for each read made a burst of 1,000 Souls' acts stop the clock (#5199).
+    fn fields(&self, id: Id) -> R<&'a std::collections::BTreeMap<u64, Value>> {
         let h = self.tree.handle(id).ok_or_else(|| Refusal {
             name: "node-missing",
             detail: show(id),
@@ -674,7 +676,7 @@ impl View<'_> {
             name: "node-missing",
             detail: show(id),
         })?;
-        Ok(n.fields().clone())
+        Ok(n.fields())
     }
 
     /// The move from `id`'s frame into the root's: the poses on its path, composed from the top down, a slot's own
