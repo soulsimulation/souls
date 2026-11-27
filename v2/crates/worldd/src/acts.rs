@@ -1110,9 +1110,22 @@ impl Geometry for Sight<'_> {
     }
 
     /// A body where the controller has it; a seated, lying or riding one at its slot's point in the frame of the thing
-    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin.
+    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin. A
+    /// thing in a slot its holder gives a point likewise at that point (#4120: a walk to a thing just made into a
+    /// bench's slot goes to the slot); any other thing is read from the tree by the host.
     fn read(&self, node: Id) -> Option<Seen> {
-        let b = self.bodies.get(&node)?;
+        let Some(b) = self.bodies.get(&node) else {
+            let n = self.tree.node(self.tree.handle(node)?)?;
+            let slot = slot_at(self.tree, &n)?;
+            let at = n.place().map_or(Vec3::ZERO, |p| p.position);
+            return Some(Seen {
+                id: node,
+                kind: n.kind().clone(),
+                parent: n.parent(),
+                position: at.plus(slot).ok()?,
+                fields: n.fields().clone(),
+            });
+        };
         let mut fields = BTreeMap::new();
         if self.carrying.contains(&node) {
             fields.insert(F_CROSSING, replica::encode::Value::Uint(1));
