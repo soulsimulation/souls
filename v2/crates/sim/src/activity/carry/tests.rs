@@ -1194,7 +1194,10 @@ mod each_step {
         let [b, f] = load.places();
         let at = |x: i64| ([x + f, 0], [x + b, 0]);
         let band = load.as_held().unwrap().1;
-        assert!(band[0] < super::super::HEIGHT && band[1] > super::super::HEIGHT, "{band:?}");
+        assert!(
+            band[0] < super::super::HEIGHT && band[1] > super::super::HEIGHT,
+            "{band:?}"
+        );
         let low = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[254_000, 356_000]]);
         assert!(way(&low, &load, at(0), at(8 * M), &[]).is_ok());
         let seated = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[863_000, 965_000]]);
@@ -1232,7 +1235,10 @@ mod each_step {
         assert!(near(e, Vec3::new(609_500, 1_219_000, 38_000)), "{e:?}");
         let (plan, band) = standing.as_held().unwrap();
         assert_eq!((plan.half_length, plan.half_width), (e.x, e.z));
-        assert_eq!(band, [super::super::HEIGHT - e.y, super::super::HEIGHT + e.y]);
+        assert_eq!(
+            band,
+            [super::super::HEIGHT - e.y, super::super::HEIGHT + e.y]
+        );
     }
 
     /// What its load already met where the carry began (a part taken from beside the parts of its bay) is passed, so
