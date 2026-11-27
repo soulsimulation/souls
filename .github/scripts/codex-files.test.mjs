@@ -35,9 +35,6 @@ test('the checked-in list: each shared pose file fails; its tests, its neighbour
   ];
   for (const file of free) assert.deepEqual(check({ files: [file], labels: [], rules, claude: true }), { ok: true, exempt: '', failing: [], warnings: [] }, file);
 });
-  assert.equal(shared.ok, true);
-  assert.deepEqual(shared.warnings.map(w => w.file), ['apps/web/src/WorldEntityLayer.ts']);
-});
 
 test('a lane PR (Claude trailer) touching takes.ts fails; a Codex PR with no label passes; codex:files-ok passes', () => {
   const files = ['apps/web/src/v2-engine/takes.ts', 'docs/x.md'];
