@@ -6,15 +6,16 @@
 //! - **Hold** (`souls:hold`): claims the legs (the stance is theirs, B1) and the hands named, and stands still. The
 //!   world sets the stance under its driver. Cancelled by a claim on the legs or on a hand.
 //! - **Follow** (`souls:follow`): N13's follow ([`crate::close::Follow`]) with the order's expiry; it claims the legs.
-//! - **Queue** (`souls:queue`): claims the legs and walks straight to the spot in the line the world gave it (field
-//!   [`F_LINE`] on its own body), then stands. When the line moves up, the world gives it the next spot. Taking the
-//!   slot at the head is the world's act, named by the order, once (`sim::orders`).
+//! - **Queue** (`souls:queue`): claims the legs and walks to the spot in the line the world gave it (field [`F_LINE`]
+//!   on its own body) by the town's supported route (`Ask::Toward`, B7c), then stands. With no supported way it ends
+//!   `souls:no-way`. When the line moves up, the world gives it the next spot. Taking the slot at the head is the
+//!   world's act, named by the order, once (`sim::orders`).
 //!
 //! None of them waits for a time or a condition: the expiry is when the order ends, never when it starts.
 
 use replica::bodies::{Class, SkillShape, Want};
 use replica::encode::{Name, Value};
-use replica::host::{Host, Progress, Skill};
+use replica::host::{Answer, Ask, Host, Progress, Skill};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
@@ -89,7 +90,8 @@ pub fn follow(
     }
 }
 
-/// Standing in a queue until `until`: walks to the spot the world gives it in the line and stands there.
+/// Standing in a queue until `until`: walks to the spot the world gives it in the line, by the supported route, and
+/// stands there.
 pub struct Queue {
     pub until: Micros,
 }
@@ -134,11 +136,20 @@ impl Skill for Queue {
             return Progress::Going;
         };
         let gap = apart(me.position, to);
+        // The next corner of the town's supported way, never a straight line through what stands between (B7c).
+        let aim = if gap <= THERE {
+            to
+        } else if let Some(Answer::Point(p)) = host.ask(&Ask::Toward { from: body, to }) {
+            p
+        } else {
+            go(host, Vec3::ZERO);
+            return Progress::Failed(name("souls:no-way"));
+        };
         // Slowing as it comes in, so it stops on its spot: the gap closed in half a second, at most FAST.
         let speed = if gap <= THERE { 0 } else { (gap * 2).min(FAST) };
         go(
             host,
-            along(to.x - me.position.x, to.z - me.position.z, speed),
+            along(aim.x - me.position.x, aim.z - me.position.z, speed),
         );
         Progress::Going
     }

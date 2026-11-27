@@ -21,8 +21,8 @@ use replica::time::Micros;
 use replica::world_model::show;
 
 use super::{
-    ARRIVED, CANCELLED, DISPLACED, DONE, EXPIRED, INPUT, NO_EXPIRY, Orders, REPLACED, SlotAt, TAKE,
-    TARGET_GONE, Take, Where, end_reason,
+    ARRIVED, CANCELLED, DISPLACED, DONE, EXPIRED, INPUT, NO_EXPIRY, NO_WAY, Orders, REPLACED,
+    SlotAt, TAKE, TARGET_GONE, Take, Where, end_reason,
 };
 use crate::controller::{Controller, Driver, Part as Set, Stance};
 use crate::ground::Piece;
@@ -103,6 +103,10 @@ impl Ground for W<'_> {
 }
 
 impl Where for W<'_> {
+    fn toward(&self, _: Id, to: Vec3) -> Option<Vec3> {
+        // This floor is flat and nothing stands on it: its supported way is straight.
+        self.stand(self.floor, to).map(|(on, _)| on)
+    }
     fn slot(&self, thing: Id) -> Option<SlotAt> {
         if self.gone {
             return None;
@@ -908,4 +912,93 @@ fn served_soul_body_is_resolved_internally_and_restored_without_a_wire_body_fiel
         .expect("restore trusted body");
     assert_eq!(back, vec![id]);
     assert_eq!(w.orders.open(body).unwrap().actor, Actor::Soul(soul));
+}
+
+/// The ordinary fixture with no supported way anywhere: its ground and slots are the same.
+struct NoWay<'a>(W<'a>);
+
+impl Ground for NoWay<'_> {
+    fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.stand(n, p)
+    }
+    fn passage(&self, n: Id, p: Vec3) -> bool {
+        self.0.passage(n, p)
+    }
+    fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        self.0.walk(an, a, bn, b)
+    }
+}
+
+impl Where for NoWay<'_> {
+    fn toward(&self, _: Id, _: Vec3) -> Option<Vec3> {
+        None
+    }
+    fn slot(&self, thing: Id) -> Option<SlotAt> {
+        self.0.slot(thing)
+    }
+}
+
+/// B7c (#3593): a queue with no supported way to its spot ends `souls:no-way`, at once: its driver is released, it
+/// takes nothing, and an unrelated body keeps walking.
+#[test]
+fn b7c_no_supported_way_ends_by_name_and_releases_the_legs() {
+    let mut w = world();
+    let blocked = w.body(5_000, 8_000);
+    let other = w.body(-8_000, -8_000);
+    let source = w.intent(
+        blocked,
+        "souls:queue",
+        Some(w.chair),
+        vec![(1, Value::Text(name("eden:sit")))],
+        10_000_000,
+    );
+    let order = w.accept(&source).unwrap();
+    w.script(other, Vec3::new(1_000_000, 0, 0), 20);
+    let before = w.at(other);
+    let no_way = NoWay(W {
+        floor: w.floor,
+        slots: &w.slots,
+        gone: false,
+    });
+    assert!(w.orders.step(&mut w.c, &no_way, w.now).is_empty());
+    assert_eq!(w.ends().get(&order).map(String::as_str), Some(NO_WAY));
+    assert!(w.orders.open(blocked).is_none());
+    assert!(w.c.claims(blocked).unwrap().running().is_empty());
+    for _ in 0..10 {
+        assert!(w.tick().is_empty());
+    }
+    assert!(w.at(other).x > before.x);
+    assert!(w.orders.log.iter().all(|e| event(e).name.as_str() != TAKE));
+}
+
+/// B7c: the slot's stand point at the same coordinates on another floor is not reached: the queue ends `souls:no-way`
+/// and takes nothing.
+#[test]
+fn b7c_same_point_on_another_floor_takes_nothing() {
+    let mut w = world();
+    let body = w.body(0, 300);
+    let mut place = w.slots.place(w.chair).unwrap().clone();
+    place.floor = w.mint.mint().unwrap();
+    w.slots = Slots::new();
+    w.slots.add(place).unwrap();
+    let source = w.intent(
+        body,
+        "souls:queue",
+        Some(w.chair),
+        vec![(1, Value::Text(name("eden:sit")))],
+        10_000_000,
+    );
+    let order = w.accept(&source).unwrap();
+    w.orders.freed(
+        &W {
+            floor: w.floor,
+            slots: &w.slots,
+            gone: false,
+        },
+        w.chair,
+    );
+    assert!(w.tick().is_empty());
+    assert_eq!(w.ends().get(&order).map(String::as_str), Some(NO_WAY));
+    assert!(w.c.claims(body).unwrap().running().is_empty());
+    assert!(w.orders.log.iter().all(|e| event(e).name.as_str() != TAKE));
 }

@@ -254,11 +254,13 @@ pub struct Bodies {
     pub schedule: BTreeMap<Micros, u64>,
     /// Where a free-running clock took fewer batches than were out, for the recorder: body time and batches taken.
     late: Vec<(Micros, u64)>,
-    /// The planner's answers for the next tick.
-    planned: Planned,
+    /// The planner's answers for the next tick; a queue's approach reads them too (`crate::orders::step`, B7c).
+    pub(crate) planned: Planned,
     /// Batches sent to the planner and taken back so far (S8): a request still out is not asked again.
     sent: u64,
     taken: u64,
+    /// The lines queues asked of the planner still out (S8): the spot asked and the batch it went in (B7c).
+    order_out: BTreeMap<Id, (Vec3, u64)>,
     /// Form questions out at the planner (S8): each cursor's generation and the batch it went in.
     forms_out: BTreeMap<FormKey, (u64, u64)>,
     pub(crate) form_map: Arc<Versions>,
@@ -434,6 +436,7 @@ impl Bodies {
             planned: Planned::default(),
             sent: 0,
             taken: 0,
+            order_out: BTreeMap::new(),
             forms_out: BTreeMap::new(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
@@ -1845,7 +1848,7 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
-            crate::orders::step(self, at);
+            let order_lines = crate::orders::step(self, at);
             self.wind_step(at);
             let mut planned = std::mem::take(&mut self.planned);
             planned.batches = Some(Batches {
@@ -1854,6 +1857,21 @@ impl Bodies {
             });
             self.unstuck.planned(&self.runner, &planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            // A queue's approach whose straight way was not clear asks the same planner batch for its line (B7c), and
+            // as a walker's, asks again only once the batch it went in has been taken without it (S8).
+            if let Some(batch) = planned.batches {
+                let out = &mut self.order_out;
+                out.retain(|_, (_, sent)| *sent >= batch.taken);
+                wants
+                    .lines
+                    .extend(order_lines.into_iter().filter(|(body, to)| {
+                        if out.get(&body.id).is_some_and(|(t, _)| t == to) {
+                            return false;
+                        }
+                        out.insert(body.id, (*to, batch.next));
+                        true
+                    }));
+            }
             // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
             let rungs = self.unstuck.after(&mut self.runner, &mut self.town);
             self.wind_log.extend(rungs);
