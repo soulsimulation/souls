@@ -1,8 +1,11 @@
 /** Experimental camera policy and bounded rendered-geometry queries. No actor or scene writes. */
 import {Box3,Matrix4,Mesh,Quaternion,Ray,Vector3} from 'three';
 import type {Object3D,BufferGeometry,InstancedMesh,PerspectiveCamera} from 'three';
+import {cameraGroundSampler} from '../WorldCameraGround.ts';
+import type {SceneInfo} from '../WorldGeometry.ts';
 import type {CameraSubject} from '../../../../packages/camera/src/observation.ts';
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
+export function publishedFollowGround(info:Pick<SceneInfo,'scene'|'shore'>|null){return !info||(info.scene?.surfaces.length??0)>256?undefined:cameraGroundSampler(info);}
 export type Sight='clear'|'blocked'|'unknown';
 export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8});
 type Scan={node:Object3D;child:number;entered:boolean};
@@ -37,28 +40,28 @@ export class FollowGeometry{
   this.stats.meshes=this.meshes.length;this.stats.complete=!this.failed&&!this.stack.length&&this.nextRoot===this.roots.length&&!incomplete;this.stats.unknown=this.stats.complete?null:this.failed?'geometry-cap':'geometry-warming';
  }
  segment(from:Vector3,to:Vector3):Sight{
-  this.stats.queries++;if(!this.stats.complete)return'unknown';const length=from.distanceTo(to);if(length===0)return'clear';let unknown=false;
-  for(const mesh of this.meshes){if(!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return'unknown';if(materials.every(m=>!m.visible||m.transparent&&m.opacity<.5))continue;
-   const g=mesh.geometry,bounds=this.bounds.get(g),p=g.attributes.position;if(!bounds||bounds.next<p.count)return'unknown';
+  const unknown=(reason:string):Sight=>{this.stats.unknown=reason;return'unknown';};this.stats.queries++;if(!this.stats.complete)return'unknown';const length=from.distanceTo(to);if(length===0)return'clear';let invalidMatrix=false;
+  for(const mesh of this.meshes){if(!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap');if(materials.every(m=>!m.visible||m.transparent&&m.opacity<.5))continue;
+   const g=mesh.geometry,bounds=this.bounds.get(g),p=g.attributes.position;if(!bounds||bounds.next<p.count)return unknown('bounds-incomplete');
    // Unsupported deformation has no proven conservative bounds. Refuse before culling.
-   if((mesh as Mesh&{isSkinnedMesh?:boolean}).isSkinnedMesh||g.morphAttributes.position?.length||mesh.raycast!==Mesh.prototype.raycast&&!(mesh as InstancedMesh).isInstancedMesh)return'unknown';
+   if((mesh as Mesh&{isSkinnedMesh?:boolean}).isSkinnedMesh||g.morphAttributes.position?.length||mesh.raycast!==Mesh.prototype.raycast&&!(mesh as InstancedMesh).isInstancedMesh)return unknown('unsupported-deformation-or-raycast');
    const instances=(mesh as InstancedMesh).isInstancedMesh?(mesh as InstancedMesh).count:1;
    for(let n=0;n<instances;n++){
-    if((mesh as InstancedMesh).isInstancedMesh&&++this.stats.instances>FOLLOW_LIMITS.instances)return'unknown';this.matrix.copy(mesh.matrixWorld);if((mesh as InstancedMesh).isInstancedMesh){(mesh as InstancedMesh).getMatrixAt(n,this.instance);this.matrix.multiply(this.instance);}
-    if(!this.matrix.elements.every(Number.isFinite)||Math.abs(this.matrix.determinant())<1e-12){unknown=true;continue;}
+    if((mesh as InstancedMesh).isInstancedMesh&&++this.stats.instances>FOLLOW_LIMITS.instances)return unknown('instance-cap');this.matrix.copy(mesh.matrixWorld);if((mesh as InstancedMesh).isInstancedMesh){(mesh as InstancedMesh).getMatrixAt(n,this.instance);this.matrix.multiply(this.instance);}
+    if(!this.matrix.elements.every(Number.isFinite)||Math.abs(this.matrix.determinant())<1e-12){invalidMatrix=true;continue;}
     this.inverse.copy(this.matrix).invert();this.a.copy(from).applyMatrix4(this.inverse);this.b.copy(to).applyMatrix4(this.inverse);const localLength=this.a.distanceTo(this.b);this.ray.set(this.a,this.c.copy(this.b).sub(this.a).normalize());
     const entry=this.ray.intersectBox(bounds.box,this.hit);if(!entry||!bounds.box.containsPoint(this.ray.origin)&&entry.distanceTo(this.ray.origin)>localLength)continue;
     const ix=g.index,start=Math.max(0,g.drawRange.start),end=Math.min(ix?.count??p.count,start+g.drawRange.count);
-    for(let i=start;i+2<end;i+=3){if(++this.stats.triangles>FOLLOW_LIMITS.triangles)return'unknown';this.a.fromBufferAttribute(p,ix?ix.getX(i):i);this.b.fromBufferAttribute(p,ix?ix.getX(i+1):i+1);this.c.fromBufferAttribute(p,ix?ix.getX(i+2):i+2);const h=this.ray.intersectTriangle(this.a,this.b,this.c,false,this.hit);if(h){const d=h.distanceTo(this.ray.origin);if(d<=localLength+1e-9*Math.max(1,localLength))return'blocked';}}
+    for(let i=start;i+2<end;i+=3){if(++this.stats.triangles>FOLLOW_LIMITS.triangles)return unknown('triangle-cap');this.a.fromBufferAttribute(p,ix?ix.getX(i):i);this.b.fromBufferAttribute(p,ix?ix.getX(i+1):i+1);this.c.fromBufferAttribute(p,ix?ix.getX(i+2):i+2);const h=this.ray.intersectTriangle(this.a,this.b,this.c,false,this.hit);if(h){const d=h.distanceTo(this.ray.origin);if(d<=localLength+1e-9*Math.max(1,localLength))return'blocked';}}
    }
   }
-  return unknown?'unknown':'clear';
+  return invalidMatrix?unknown('invalid-transform'):'clear';
  }
 }
 function approach(value:Vector3,velocity:Vector3,goal:Vector3,dt:number,speed:number,acceleration:number,tau:number){
  const desired=goal.clone().sub(value).multiplyScalar(1/tau).clampLength(0,speed),change=desired.sub(velocity).clampLength(0,acceleration*dt);velocity.add(change);value.addScaledVector(velocity,dt);
 }
-export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number};
+export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number;motion:{groundY:number|null;sweep:Sight|null;unknown:string|null}|null};
 /** Persistent world-space viewpoints let the subject turn inside a portrait dead/soft zone. */
 export class FollowCamera{
  private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;
@@ -68,7 +71,7 @@ export class FollowCamera{
   if(!this.initialized)this.reset(camera.position,aim);dt=Math.max(0,Math.min(.05,dt));this.clock+=dt;
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
-  const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates});
+  let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
   if(!centre||!geometry.stats.complete){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown');}
   const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y)||projected.z>1)return result('projection-unavailable');
   const screen:[number,number]=[projected.x,projected.y];
@@ -78,7 +81,7 @@ export class FollowCamera{
   const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
   let reason='tracking';
   const goal=centre.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
-  const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next);if(groundY!==null&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=sweep==='blocked'?'motion-obstructed':'motion-unknown';}
+  const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next);motion={groundY,sweep,unknown:sweep==='unknown'?geometry.stats.unknown:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?'motion-obstructed':'motion-unknown';}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
   if(dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;

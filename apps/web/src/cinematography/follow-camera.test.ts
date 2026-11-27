@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {Group,Mesh,BoxGeometry,MeshBasicMaterial,Vector3,PerspectiveCamera,PlaneGeometry} from 'three';
-import{FollowGeometry,FollowCamera,FOLLOW_LIMITS}from'./follow-camera.ts';import{DisplayedCameraObserver}from'./observation.ts';
+import{FollowGeometry,FollowCamera,FOLLOW_LIMITS,publishedFollowGround}from'./follow-camera.ts';import{DisplayedCameraObserver}from'./observation.ts';
 const v=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 function box(){return new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());}
 function space(){const g=new Group();g.updateMatrixWorld(true);const q=new FollowGeometry();q.prepare([g],'1');return{g,q};}
@@ -15,3 +15,6 @@ test('optional view-search exhaustion cannot consume the movement safety check f
 test('material arrays are refused before unbounded opacity inspection',()=>{const {g,q}=space(),m=box();(m as Mesh).material=Array(65).fill(new MeshBasicMaterial());g.add(m);g.updateMatrixWorld(true);q.prepare([g],'1');assert.equal(q.segment(v(-4),v(4)),'unknown');});
 
 test('millimetre and short motion segments cannot cross a thin wall at varied world scales',()=>{for(const scale of [.01,1,100]){const {g,q}=space(),wall=new Mesh(new PlaneGeometry(10,10),new MeshBasicMaterial());wall.rotation.y=Math.PI/2;wall.scale.setScalar(scale);g.add(wall);g.updateMatrixWorld(true);q.prepare([g],'1');for(const half of [.0001,.01,1])assert.equal(q.segment(v(-half),v(half)),'blocked',`scale ${scale}, half ${half}`);}});
+
+test('selected published ground remains bounded and distinct across recorded scene replacements',()=>{const info=(y:number,n=1)=>({scene:{surfaces:Array.from({length:n},()=>({level:0,y,obb:{c:[0,0],half:[20,20],yaw:0}}))}} as unknown as NonNullable<Parameters<typeof publishedFollowGround>[0]>);assert.equal(publishedFollowGround(info(0))?.(1,2),0);assert.equal(publishedFollowGround(info(4))?.(1,2),4);assert.equal(publishedFollowGround(info(4))?.(100,2),null);assert.equal(publishedFollowGround(info(0,257)),undefined);assert.equal(publishedFollowGround(null),undefined);});
+test('ground refusal and sweep refusal remain distinct in actual policy output',()=>{const {q}=space(),camera=new PerspectiveCamera(45,1,.1,100);camera.position.set(0,5,10);const aim=v(0,1,0);camera.lookAt(aim);camera.updateMatrixWorld(true);let r=new FollowCamera().step(subject(2),camera,aim,1/60,q,()=>null);assert.equal(r.reason,'ground-unavailable');assert.deepEqual(r.motion,{groundY:null,sweep:'clear',unknown:null});q.segment=()=>{q.stats.unknown='unsupported-deformation-or-raycast';return'unknown';};r=new FollowCamera().step(subject(2),camera,aim,1/60,q,()=>0);assert.equal(r.reason,'motion-unknown');assert.equal(r.motion?.unknown,'unsupported-deformation-or-raycast');});
