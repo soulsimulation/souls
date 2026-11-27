@@ -1493,7 +1493,32 @@ pub struct PublicStart<'a> {
     /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
     pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
-    pub history: Option<&'a sim::log::Recovered>,
+    pub history: Option<&'a dyn History>,
+}
+
+/// The world's log records from its first kept one on, as a reader recovering from them needs them (#2803): held in
+/// memory ([`sim::log::Recovered`], a test's), or read from the disk a batch at a time (`worldd serve`'s), so a
+/// restart never holds the whole log.
+pub trait History {
+    /// The first record held.
+    fn first(&self) -> u64;
+    /// Hands each record from `from` on to `each`, in order, while it returns `Ok(true)`.
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()>;
+}
+
+impl History for sim::log::Recovered {
+    fn first(&self) -> u64 {
+        self.first
+    }
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()> {
+        let from = from.max(self.first);
+        for (n, raw) in (from..).zip(self.after(from)) {
+            if !each(n, raw)? {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 impl PublicStart<'_> {
     /// Only the public legacy transition may choose an older retained source. The engine's newest restore stays
@@ -1934,18 +1959,18 @@ impl<S: ObjectStore> PublicWriter<S> {
                     )
                 })?;
                 if w.migration_state.is_none() {
-                    w.bridge_to(history.first)?;
+                    w.bridge_to(history.first())?;
                 }
-                for (offset, raw) in history.records.iter().enumerate() {
-                    let n = history.first + offset as u64;
+                history.each_from(w.cursor, &mut |n, raw| {
                     if n < w.cursor {
-                        continue;
+                        return Ok(true);
                     }
                     if w.migration_state.is_some() {
-                        break;
+                        return Ok(false);
                     }
                     w.apply_record(n, raw)?;
-                }
+                    Ok(true)
+                })?;
                 let prefix = w.migration_state.take().ok_or_else(|| {
                     fault(
                         "stream-legacy-source-missing",

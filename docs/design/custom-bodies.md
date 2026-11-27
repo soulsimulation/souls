@@ -24,7 +24,7 @@ content address `body_<sha256>`.
 monster (`tools/body-authoring/monster/`, original geometry on the canonical rig with its core canonical clips: idle, walk, solo dance, seat, ground sit, lying and swimming; the
 plain humanoid profile) and Wisp the ghost (`tools/body-authoring/ghost/`, dependency-free rigid mesh with
 `body-motion/1` adapters). The server builds their bytes lazily from that source, through ordinary admission, and
-refuses drift from the pinned asset ids in `apps/server/src/edge/body/shared-bodies.ts`. They are appended to the
+refuses drift from the pinned asset ids in `tools/body-authoring/admit/shared-bodies.ts`. They are appended to the
 presets, so existing preset ids and Pip's asset id are unchanged. The ghost's hover is appearance only.
 
 [#723](https://github.com/soulsimulation/souls/issues/723) adds Juniper, a compact centaur foal (`tools/body-authoring/centaur/`),
@@ -62,7 +62,7 @@ The remainder of #589 below is future scope; this slice does not claim arbitrary
 
 Source inspected at `6134d3c8`:
 
-- [Body admission](../../apps/server/src/edge/body/admission.ts) validates self-contained GLB files, resource
+- [Body admission](../../tools/body-authoring/admit/admission.ts) validates self-contained GLB files, resource
   budgets, geometry, images and rig/clip structure. Humanoids require the canonical rig and Idle/Walk clips;
   rigid ceramic/floating uploads currently reject skeletons and animation clips.
 - [Body routes](../../apps/server/src/edge/body/routes.ts) expose limits and presets, accept moderated owner
@@ -116,7 +116,7 @@ database). See [collections.ts](../../apps/server/src/edge/body/collections.ts).
 ### Versioned core presets (#795 A1, D027)
 
 A core preset id names one immutable, content-addressed definition, recorded in an append-only ledger
-([core-revisions.ts](../../apps/server/src/edge/body/core-revisions.ts)). The core listing and lookup show it as
+([core-revisions.ts](../../tools/body-authoring/admit/core-revisions.ts)). The core listing and lookup show it as
 `<preset>@<n> → body_<sha>` (`version: "pip@1"`, `asset: "body_0ac8…"`), and `PUT /v1/edge/body {preset: "pip@1"}`
 selects that exact revision. A released revision is never re-pinned: a changed preset ships as a new id, `<family>-<n>`
 (`pip-2`, shown as `pip@2`), and the old id keeps its source in `tools/body-authoring`, stays selectable and stays served
