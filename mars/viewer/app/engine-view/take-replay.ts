@@ -43,6 +43,9 @@ import {NativeBoatViews} from './native-boat.ts';
 import type {NativeBoatLayoutV1} from '../../../../packages/engine-contract/src/boat.ts';
 import type {ShoreDesign} from './shore-preview.ts';
 
+/** Shared hand owners suppress both cosmetic origins and native carry; grip/walk and seated/paired exclusions stay at their own call sites. */
+const hasHandOwner=(p:SampledHuman):boolean=>!!(p.itemPose||p.handActuator||p.transfer||p.watering||p.cup||p.letGo||p.on||p.prop||p.instrument||p.handHold||p.rps||p.hands?.left||p.hands?.right||p.formPress?.length);
+
 export { takeLog, type LogLine, type TakeStep } from './take-log.ts';
 export type TakeManifestEntry = {
   id: string;
@@ -367,7 +370,7 @@ export class TakePeople {
   }
 
   private clipOrigin(id: string, tick: number, current: SampledHuman): SampledHuman['clipOrigin'] {
-    if(current.itemPose||current.handActuator||current.transfer||current.watering||current.cup||current.letGo||current.grip||current.on||current.prop||current.instrument||current.handHold||current.rps||current.hands?.left||current.hands?.right||current.formPress?.length||current.walk>=.01)return undefined;
+    if(hasHandOwner(current)||current.grip||current.walk>=.01)return undefined;
     const a=this.acts.get(id);if(!a)return undefined;
     const index=this.runAt(a,tick),newest=a.t[index],boundary=(this.take.startTick+newest)*this.take.dt;
     const age=(tick-newest)*this.take.dt;
@@ -644,7 +647,7 @@ export class TakePeople {
       delete e.state.nativeCarryIdentity;
       delete e.state.nativeCarry; // sampled frames may be reused: ownership must end on release/seek.
       const nativeCarry=this.nativeCarry[id];
-      if(nativeCarry&&!person.itemPose&&!person.handActuator&&!person.transfer&&!person.watering&&!person.cup&&!person.letGo&&!person.prop&&!person.handHold&&!person.rps&&!person.on&&!person.formPress?.length&&!person.partner&&!person.instrument&&!person.shore&&!person.seatHeight&&person.baseActivity!=='sit'&&!/^(sit|sleep|lie|bench-press)(-|$)/.test(person.activity??'')&&!e.hands?.left&&!e.hands?.right){
+      if(nativeCarry&&!hasHandOwner(person)&&!person.partner&&!person.shore&&!person.seatHeight&&person.baseActivity!=='sit'&&!/^(sit|sleep|lie|bench-press)(-|$)/.test(person.activity??'')){
         person.hands=nativeCarry.hands;person.carryWeight=nativeCarry.weight;
         e.state.nativeCarry=true;
         if(nativeCarry.crew&&nativeCarry.load)e.state.nativeCarryIdentity={crew:nativeCarry.crew,load:nativeCarry.load,sinceUs:nativeCarry.sinceUs,preparing:!!nativeCarry.preparing};

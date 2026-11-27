@@ -14,3 +14,10 @@ test('sanitized canonical lift packet uses a frame array at its exact transfer b
 });
 
 test('native node keys retain exact public u64 counters',()=>{assert.equal(nativeId([new Uint8Array(16),2n**64n-1n]),'00000000000000000000000000000000.18446744073709551615');assert.throws(()=>nativeId([new Uint8Array(16),2n**64n]),/native id range/);});
+
+// Motion itself comes from the validated pose samples; carry-track labels have no page consumer.
+test('unused track labels do not replace the release event when the crew is removed in that entry',()=>{
+ const released=new Map([...grips,[3,'souls:released'],[4,200]]);
+ const end=m({2:200,6:id(8),7:[m({1:2,2:id(8)})],8:[m({1:'souls:carry-track',2:m({1:id(8),2:id(9),3:'souls:set-down',4:100,5:200})}),m({1:'souls:carry-grips',2:released})]});
+ const out=carryChanges([end]);assert.equal(out.length,1);assert.equal(out[0].at,200);assert.equal(out[0].node,nativeId(id(8)));assert.equal(out[0].grips?.phase,'souls:released');assert.deepEqual(out[0].grips?.holds,carryGrips(grips)?.holds);
+});

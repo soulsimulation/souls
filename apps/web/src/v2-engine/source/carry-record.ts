@@ -6,8 +6,7 @@ export type Q4=[number,number,number,number];
 export type CrewMember={role:string;body:string;soul:string;link:string;intent:string};
 export type CarryHold={body:string;grip:string;gripUm:V3;handsUm:[V3,V3]};
 export type CarryGrips={crew:string;load:string;phase:string;sinceUs:number;untilUs?:number;holds:CarryHold[]};
-export type CarryTrack={crew:string;load:string;phase:string;t0:number;t1:number;why?:string};
-export type CarryChange={at:number;node:string;members?:CrewMember[];grips?:CarryGrips;track?:CarryTrack;pose?:{parent:string;slot:number|null;pos:V3;rot:Q4}};
+export type CarryChange={at:number;node:string;members?:CrewMember[];grips?:CarryGrips;pose?:{parent:string;slot:number|null;pos:V3;rot:Q4}};
 const whole=(v:unknown):number=>{const n=typeof v==='bigint'?Number(v):v;if(typeof n!=='number'||!Number.isSafeInteger(n))throw Error('carry-record: whole number required');return n;};
 export function nativeId(v:unknown):string{
  if(!Array.isArray(v)||v.length!==2||!(v[0] instanceof Uint8Array)||v[0].length!==16)throw Error('carry-record: native id required');
@@ -29,9 +28,6 @@ export function carryGrips(v:unknown):CarryGrips|undefined{
  if(new Set(holds.map(h=>h.body)).size!==holds.length)return;
  return{crew:nativeId(m.get(1)),load:nativeId(m.get(2)),phase:m.get(3)as string,sinceUs:whole(m.get(4)),...(m.has(5)?{untilUs:whole(m.get(5))}:{}),holds};}catch{return;}
 }
-export function carryTrack(v:unknown):CarryTrack|undefined{
- try{const m=map(v);if(typeof m.get(3)!=='string')return;return{crew:nativeId(m.get(1)),load:nativeId(m.get(2)),phase:m.get(3)as string,t0:whole(m.get(4)),t1:whole(m.get(5)),...(typeof m.get(6)==='string'?{why:m.get(6)as string}:{})};}catch{return;}
-}
 /** The native field-4 Set retains its OWN entry timestamp, independently of grip events. */
 export function carryChanges(entries:unknown[]):CarryChange[]{
  const out:CarryChange[]=[];
@@ -42,7 +38,6 @@ export function carryChanges(entries:unknown[]):CarryChange[]{
   }
   for(const raw of (e.get(8)as unknown[]|undefined)??[]){const ev=map(raw);
    if(ev.get(1)==='souls:carry-grips'){const grips=carryGrips(ev.get(2));if(grips)out.push({at:grips.sinceUs,node:nativeId(e.get(6)),grips});}
-   if(ev.get(1)==='souls:carry-track'){const track=carryTrack(ev.get(2));if(track)out.push({at:track.t0,node:nativeId(e.get(6)),track});}
   }
   const transfer=e.get(9);if(transfer instanceof Map&&transfer.get(1)===1){const p=map(transfer.get(6)),f=frame(p.get(1)),q=p.get(3);if(!Array.isArray(q)||q.length!==4)throw Error('carry-record: transfer rotation');out.push({at,node:nativeId(transfer.get(3)),pose:{parent:f.parent,slot:f.slot,pos:point(p.get(2)),rot:q.map(whole)as Q4}});}
  }
