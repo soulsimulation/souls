@@ -401,7 +401,14 @@ pub fn wire_intent(
             return Err(JsError::new("target-not-an-id"));
         };
         let rule = crate::selector::Rule::Nearest;
-        Ok(Some(crate::selector::Selector::FreeSlot { kind, node: room, rule }.target()))
+        Ok(Some(
+            crate::selector::Selector::FreeSlot {
+                kind,
+                node: room,
+                rule,
+            }
+            .target(),
+        ))
     };
     let mut targets = target
         .split(' ')
