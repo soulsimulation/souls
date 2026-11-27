@@ -16,7 +16,7 @@ import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
 import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
-import {carryGrips,crewMembers,carryChangesInPart} from './carry-record.ts';
+import {nativeId as key,carryGrips,crewMembers,carryChangesInPart} from './carry-record.ts';
 import { moveRec } from './move-record.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
@@ -35,7 +35,6 @@ const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, tra
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 type IdValue = [Uint8Array, number];
-const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 
 /** How long a pointer or part read may take before it is given up (25 Nov): a read that never answers would hold the

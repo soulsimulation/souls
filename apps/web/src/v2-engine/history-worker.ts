@@ -7,7 +7,7 @@ import init, { historyTimeline } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
-import {carryGrips,crewMembers,carryChangesInBundle,type CarryChange,type CarryGrips,type CrewMember} from './source/carry-record.ts';
+import {nativeId as key,carryGrips,crewMembers,carryChangesInBundle,type CarryChange,type CarryGrips,type CrewMember} from './source/carry-record.ts';
 import {fieldsOf} from './source/kinds-state.ts';
 import type {NodeRec} from './source/source.ts';
 import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
@@ -27,7 +27,6 @@ const post = (m: HistoryMsg) => (self as unknown as Worker).postMessage(m);
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 type IdValue = [Uint8Array, number];
-const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 const text = new TextDecoder();
 

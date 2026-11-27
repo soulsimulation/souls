@@ -12,3 +12,5 @@ test('sanitized canonical lift packet uses a frame array at its exact transfer b
  const entry=decode(Buffer.from('pwEZAeUCGH0DogEBAoJQAAAAAAAAAAAAAAAAAAAAAAEEogEBAoJQAAAAAAAAAAAAAAAAAAAAAAIFoQEBBoJQAAAAAAAAAAAAAAAAAAAAAAMJpgEBAoJQAAAAAAAAAAAAAAAAAAAAAAQDglAAAAAAAAAAAAAAAAAAAAAAAwRQAAAAAAAAAAAAAAAAAAAAAAWCUAAAAAAAAAAAAAAAAAAAAAAFBqQBgoJQAAAAAAAAAAAAAAAAAAAAAAYBAoMAOgAIZG8AA4QaLUE8zQAaLUE8zQAEoQEC','base64'),{useMaps:true}),body=encode(m({2:[entry]})),v=(n:number)=>{const out=[];do{const b=n%128;n=Math.floor(n/128);out.push(b|(n?128:0));}while(n);return out;},packed=Uint8Array.from([...v(body.length),...v(body.length),...body,0]);
  assert.deepEqual(carryChangesInPart(encode(m({6:packed}))),[{at:125,node:nativeId(id(3)),pose:{parent:nativeId(id(6)),slot:1,pos:[0, -550000, 0],rot:[759250125, 0, 759250125, 0]}}]);
 });
+
+test('native node keys retain exact public u64 counters',()=>{assert.equal(nativeId([new Uint8Array(16),2n**64n-1n]),'00000000000000000000000000000000.18446744073709551615');assert.throws(()=>nativeId([new Uint8Array(16),2n**64n]),/native id range/);});
