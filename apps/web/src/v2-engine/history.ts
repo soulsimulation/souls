@@ -37,7 +37,7 @@ export class V2History {
   /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
   private floor: number | undefined;
   private headerAsked = false;
-  private post(m: { seq: number; at: number; now: number; ahead?: true }): void {
+  private post(m: { seq: number; at: number; now: number; ahead?: true; floor?: number }): void {
     if (!this.worker) {
       this.worker = this.make();
       this.worker.onmessage = (e: MessageEvent<HistoryMsg>) => {
@@ -46,7 +46,7 @@ export class V2History {
         done?.(m.t === 'seeked' ? m.s : new Error(m.message));
       };
     }
-    this.worker.postMessage({ base: new URL(this.base, location.href).href, ...m, floor: this.floor });
+    this.worker.postMessage({ base: new URL(this.base, location.href).href, ...m, floor: m.floor ?? this.floor });
   }
   /** The moment `at` (µs), with the world's time `now` (µs): no seek asks for a day after now's. */
   private seek(at: number, now: number): Promise<Seeked> {
@@ -72,11 +72,16 @@ export class V2History {
    *  is open. On soul.game a bundle is Eden whole, about 1.8 MB, and reading it was the slowest step of a cold seek
    *  (0.9 to 1.7 s of about 2.1). Nothing is applied or drawn, and nothing is said back.
    *  The world's header is asked for here too, once: the worker reads it at its first seek (0.25 to 0.5 s on soul.game),
-   *  and it is immutable, so that read is then answered from the browser's cache. */
-  async prepare(tick: number, nowTick?: number | null): Promise<void> {
+   *  and it is immutable, so that read is then answered from the browser's cache.
+   *  `atOnce` (a link's moment, asked for as the page starts): the worker is asked before the world's first moment is
+   *  known (two requests one after the other, 0.5 to 0.7 s on soul.game), for the moment's own day only, so it never
+   *  walks back over days a young world does not have; asked again only when the first moment moves the window. */
+  async prepare(tick: number, nowTick?: number | null, atOnce = false): Promise<void> {
     if (!this.headerAsked) { this.headerAsked = true; void fetch(new URL(headerKey(), new URL(this.base, location.href))).then((r) => r.arrayBuffer()).catch(() => {}); }
-    const now = Math.max(tick, nowTick ?? tick) * TICK_US, at = await this.start(tick * TICK_US - LEAD_US, now);
-    this.post({ seq: 0, at, now, ahead: true });
+    const now = Math.max(tick, nowTick ?? tick) * TICK_US, wanted = tick * TICK_US - LEAD_US;
+    if (atOnce && wanted >= 0) this.post({ seq: 0, at: wanted, now, ahead: true, floor: wanted - (wanted % DAY_US) });
+    const at = await this.start(wanted, now);
+    if (!atOnce || at !== wanted || wanted < 0) this.post({ seq: 0, at, now, ahead: true });
   }
 
   /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them.

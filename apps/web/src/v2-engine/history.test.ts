@@ -294,6 +294,17 @@ test('#3358: a read ahead asks the worker for the window\'s first bundle, from t
     assert.equal(posted[2].now, back * TICK_US);
     assert.ok(posted.every((m) => m.ahead && m.seq === 0), 'a read ahead is never a seek the page waits on');
     assert.equal(asked.filter((x) => x === 'header').length, 1, 'the immutable header is asked for once, ahead of the worker\'s first seek');
+    // a link's moment, as the page starts: the worker is asked at once, for the moment's own day only, and not again
+    // unless the world's first moment moves the window
+    const link = new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' }), n = posted.length, wanted = back * TICK_US - 10_000_000;
+    asked.length = 0;
+    const reading = link.prepare(back, null, true);
+    assert.deepEqual(posted.slice(n), [{ base: 'http://example.invalid/s/x/history/', seq: 0, at: wanted, now: back * TICK_US, ahead: true, floor: day * DAY }],
+      'asked before any of the world\'s first moment is read');
+    await reading;
+    assert.equal(posted.length, n + 1, 'the same window is not asked for twice');
+    await link.prepare(first / TICK_US - 100, null, true); // a link to before the world began: its day at once, then from the first moment
+    assert.deepEqual(posted.slice(n + 1).map((m) => [m.at, m.floor]), [[first - 100 * TICK_US - 10_000_000, day * DAY], [first, first]]);
   } finally {
     globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
   }

@@ -88,24 +88,29 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // Until it lands, the arrival card stays up and the pill says Loading…: the present is never shown first. It lifts
   // anyway when the world keeps no history, or a while after a seek that found nothing, so a link never holds the page.
   const [landing, setLanding] = useState(landingMoment !== null), [seeked, setSeeked] = useState(false);
-  useEffect(() => {
-    if (opened.current || !handle || state?.shownTick == null || state.loading) return;
-    if (!v2History()) { opened.current = true; setLanding(false); return; }
-    // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: an hour back), and
-    // a seek is never past the world's now: the wall clock's on a real-time world, else the shown clock once it reaches
-    // the moment or is about now (moment-link.ts landingNow). The seek does not wait for the catch-up (about 6 s of 11).
-    const now = landingMoment === null ? null : landingNow(state.shownTick, landingMoment, Date.now() * 1000);
-    if (landingMoment !== null && now === null) return;
+  // A link's seek does not wait for the live stream: the moment is read from the world's history, and the page's first
+  // picture is then the recording's (LiveWorld's arrival takes whichever take it is given first). Opened cold on
+  // soul.game, the stream starts at its last checkpoint (Eden: an hour back) and reached now 10 to 11 s in, and the
+  // seek waited for that; now it leaves as soon as the view and the history are there, about 1 s in. The world's now a
+  // seek is never past is then the wall clock's (moment-link.ts landingNow); a world whose clock is its own waits for
+  // the stream's clock to reach the moment or now, as before.
+  const open = () => {
+    if (opened.current || !handle) return;
+    const drawn = state?.shownTick != null && !state.loading, h = v2History();
+    if (!h || landingMoment === null) { if (drawn) { opened.current = true; setLanding(false); } return; }
+    // #3358: the moment's bundle is read ahead, at once, so a seek that has to wait for the stream only applies it
+    if (!readAhead.current) { readAhead.current = true; void h.prepare(landingMoment, null, true).catch(() => {}); }
+    const now = landingNow(drawn ? state!.shownTick : null, landingMoment, Date.now() * 1000);
+    if (now === null) return;
     opened.current = true;
-    if (landingMoment !== null) void handle.seek(landingMoment, now!).finally(() => setSeeked(true));
-  }, [handle, state?.shownTick, state?.loading]);
-  // #3358: the moment's bundle is read ahead, so the seek above only applies it; from the page's start (the history is
-  // known as the stream starts), not from the first frame drawn, about 3 s later
+    void handle.seek(landingMoment, now).finally(() => setSeeked(true));
+  };
+  const openNow = useRef(open); openNow.current = open;
+  useEffect(() => { openNow.current(); }, [handle, state?.shownTick, state?.loading]);
+  // the history is known a moment after the view is (use-v2-souls.ts sets it as the stream starts), with no render to say so
   useEffect(() => {
     if (landingMoment === null) return;
-    const read = () => { const h = v2History(); if (!h || readAhead.current) return !!h; readAhead.current = true; void h.prepare(landingMoment).catch(() => {}); return true; };
-    if (read()) return;
-    const id = setInterval(() => { if (read()) clearInterval(id); }, 100);
+    const id = setInterval(() => { openNow.current(); if (opened.current) clearInterval(id); }, 100);
     return () => clearInterval(id);
   }, []);
   useEffect(() => {

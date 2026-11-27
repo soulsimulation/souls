@@ -162,20 +162,24 @@ function serverNow(sim: Souls): number | null {
   if (!t || typeof t.serverTick !== 'number') return null;
   return t.serverTick + Math.min(2, Math.max(0, (performance.now() - t.receivedAt) / 1000)) * tpsOf(sim);
 }
-/** The world's tick now for a rewind: the stream's, or a later one a seek was given (`floor`: a cold moment link opened
- *  while the stream still catches up from its checkpoint, moment-link.ts landingNow), moved on at the world's rate. The
- *  live view itself never reads it: it plays what the stream has. */
-function headNow(sim: Souls, floor: { tick: number; at: number } | null): number | null {
-  const live = serverNow(sim);
-  if (!floor) return live;
-  const known = floor.tick + (performance.now() - floor.at) / 1000 * tpsOf(sim);
-  return live === null ? known : Math.max(live, known);
+/** The world's tick now for a rewind: the stream's, or a later one a seek was given (`floor.current`: a moment link's,
+ *  opened before the stream has reached now from its checkpoint, moment-link.ts landingNow), moved on at the world's
+ *  rate. Kept only until the stream is within two minutes of it: from then on the stream's own clock is the world's.
+ *  The live view itself never reads it: it plays what the stream has. */
+function headNow(sim: Souls, floor: { current: { tick: number; at: number } | null }): number | null {
+  const live = serverNow(sim), f = floor.current;
+  if (!f) return live;
+  const known = f.tick + (performance.now() - f.at) / 1000 * tpsOf(sim);
+  if (live !== null && known - live < 120 / dtOf(sim)) { floor.current = null; return live; }
+  return known;
 }
 /** Live playback sits this many ticks behind the server, so the next chunk has arrived before it is needed; a source
  *  with shorter chunks says how far (`playDelay`, the v2 bridge's, B3-4). */
 const LIVE_DELAY = 30;
 const liveDelayOf = (sim: Souls) => takesOf(sim)?.playDelay ?? LIVE_DELAY;
 const HOUR_SECONDS = 3600;
+/** How far past a sought moment a moved world's first window reads, s (seek, below). */
+const V2_FIRST_WINDOW_S = 30;
 
 type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolean; retryAt: number; ended: boolean };
 /** What is on screen, for the panels (written by the frame loop, read on React renders). */
@@ -877,11 +881,16 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const end = p.chunks.at(-1)!;
         // replays run at the world's normal speed, or as many times it as the viewer chose (K3, a moved world); a gap in
         // what was recorded (a world stopped for a while) is crossed to the next chunk
+        const liveHead = headNow(s, nowFloor), before = p.tick;
         if (p.playing) { p.tick = Math.min(end.toTick, p.tick + step / dt * playSpeed()); const n = p.chunks.find((c) => c.toTick > p.tick); if (n && n.fromTick > p.tick) p.tick = n.fromTick; }
+        // A replay never plays past the world's now: a moved world's history gives a still world's time on to the end
+        // of the window asked for, and a link's replay can reach now before the stream has a chunk to go live on (the
+        // stream late, or a replay at ×8 from a minute ago): it waits there for the stream.
+        if (p.playing && liveHead !== null && p.tick > liveHead - liveDelayOf(s)) p.tick = Math.max(Math.min(before, p.tick), liveHead - liveDelayOf(s));
         // A paused recent seek remains history. Playing history catches the actual
-        // delayed live moment, not merely the oldest buffered chunk boundary.
-        const liveHead = headNow(s, nowFloor.current);
-        if (p.playing && liveList.length && liveHead !== null &&
+        // delayed live moment, not merely the oldest buffered chunk boundary; and only once the stream itself has
+        // reached now (no floor: headNow), never the stream's hour-old first picture.
+        if (p.playing && liveList.length && liveHead !== null && !nowFloor.current &&
           p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
           p.extending = true;
@@ -893,7 +902,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }).catch(() => { p.retryAt = performance.now() + 5000; }).finally(() => { p.extending = false; });
         }
         if (p.ended && p.tick >= end.toTick && p.playing) {
-          const at = headNow(s, nowFloor.current);
+          const at = headNow(s, nowFloor);
           if (at !== null && at - end.toTick < 120 / dt) { goLive(); return; } // only the last moments are missing: they are live
           p.playing = false;
           setNote('This is the end of what was recorded here. Go back to live to continue.');
@@ -1461,7 +1470,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
   useEffect(() => () => { seeking.current?.abort(); if (commitTimer.current) clearTimeout(commitTimer.current); }, []);
 
   // ------------------------------------------------------------------ rewind
-  const dt = dtOf(sim), now = headNow(sim, nowFloor.current), hour = HOUR_SECONDS / dt;
+  const dt = dtOf(sim), now = headNow(sim, nowFloor), hour = HOUR_SECONDS / dt;
   const p = past.current;
   const shownTick = p ? p.tick : (now ?? 0);
   const lo = Math.max(0, Math.floor((now ?? 0) - hour)), hi = Math.max(lo + 1, Math.floor(now ?? 0));
@@ -1469,8 +1478,11 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
   const seek = async (wanted: number, knownNow?: number) => {
     controlsApi.current?.releaseInput();
     const s = context.current.sim, dts = dtOf(s);
-    if (knownNow !== undefined && Number.isFinite(knownNow) && knownNow > (serverNow(s) ?? -Infinity)) nowFloor.current = { tick: knownNow, at: performance.now() };
-    const at = headNow(s, nowFloor.current);
+    // a now the caller knows better than the stream (a moment link's) holds for later seeks too, unless this one finds nothing
+    const floorBefore = nowFloor.current, given = knownNow !== undefined && Number.isFinite(knownNow) && knownNow > (serverNow(s) ?? -Infinity) ? { tick: knownNow, at: performance.now() } : null;
+    if (given) nowFloor.current = given;
+    const ungive = () => { if (given && nowFloor.current === given) nowFloor.current = floorBefore; };
+    const at = headNow(s, nowFloor);
     if (at === null) { setDraft(null); return; }
     // An explicit seek chooses a recorded moment even inside the live buffer.
     // The separate live command resumes the delayed live view.
@@ -1484,14 +1496,20 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
     seeking.current = ctl;
     setLoading(true); setNote(null);
     try {
-      const { from, to } = rewindWindow(tick, 1 / dts);
+      const { from, to: whole } = rewindWindow(tick, 1 / dts);
+      // A moved world's past is read a bundle at a time, each the world whole (Eden on soul.game: about 1.8 MB for a
+      // minute or three), one after the other: the first picture waits for the bundles of the next 30 s, not of two
+      // minutes (a day-old moment: one bundle, not three, about 1.5 s less). The rest is read as it plays (the frame
+      // loop extends a playing recording 20 s before its end).
+      const to = v2History() ? Math.min(whole, Math.ceil(tick + V2_FIRST_WINDOW_S / dts)) : whole;
       const got = await fetchChunks(from, to, MAX_PAST_CHUNKS, ctl.signal, at);
       if (ctl.signal.aborted) return;
-      if (!got.length) { setNote('Nothing was recorded at that moment. Try a later time.'); return; }
+      if (!got.length) { ungive(); setNote('Nothing was recorded at that moment. Try a later time.'); return; }
       past.current = { tick: Math.max(got[0].fromTick, Math.min(got.at(-1)!.toTick, tick)), playing: cur?.playing ?? true, chunks: got, extending: false, retryAt: 0, ended: false };
       setMode('past');
       if (got[0].fromTick > tick + 5 / dts) setNote('The recording starts later than that, so this is the earliest moment kept.');
     } catch {
+      ungive();
       if (!ctl.signal.aborted) setNote('That moment could not be loaded. Check the connection and try again.');
     } finally {
       if (seeking.current === ctl) { seeking.current = null; setLoading(false); setDraft(null); }

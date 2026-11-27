@@ -23,18 +23,21 @@ export const seekTick = (wanted: number, now: number, hourTicks: number, anyTime
 
 /** How near now the stream's clock is taken to have caught up (a link names a past time), µs. */
 const NEAR_US = 120e6;
-/** How far behind the wall clock a stream still catching up from its last checkpoint may be, µs. */
-const CATCHING_US = 86_400e6;
+/** World times from here on (1 January 2000, µs since the Unix epoch) are a real-time world's: its clock reads as the
+ *  wall's (an imported world, Eden). A world made through New world keeps its own clock, in its day 0 whatever the date
+ *  (history-keys.ts walk), and reaches this after thirty years. */
+const WALL_FROM_US = 946_684_800e6;
 
-/** A cold link's seek does not wait for the live stream to catch up. Opened cold, the stream starts at its last
- *  checkpoint, up to hours before now (Eden on soul.game: an hour), and reaches now only seconds later; the seek used
- *  to wait for that, although the moment is read from the world's history and needs nothing the catch-up gives. This
- *  is the world's take tick now that a link's seek goes by, or null to wait for the stream: the shown clock once it has
- *  reached the moment or is about now, and the wall clock's (`wallUs`, µs since the Unix epoch) while the stream is
- *  behind a moment already past and its own clock reads as the wall's (a real-time world's, less than a day behind it).
- *  A world whose clock is its own (made through New world: in its day 0 whatever the date) waits as before. */
-export function landingNow(shown: number, moment: number, wallUs: number): number | null {
-  const behind = wallUs - shown * TICK_US;
-  if (shown >= moment || behind <= NEAR_US) return shown;
-  return moment * TICK_US <= wallUs && behind < CATCHING_US ? Math.floor(wallUs / TICK_US) : null;
+/** A link's seek does not wait for the live stream. Opened cold, the stream starts at its last checkpoint, up to hours
+ *  before now (Eden on soul.game: an hour), and reaches now only seconds later (10 to 11 s into the page); the seek used
+ *  to wait for that, although the moment is read from the world's history and needs nothing the stream gives. This is
+ *  the world's take tick now that the link's seek goes by, or null to wait for the stream. A past moment of a real-time
+ *  world: the wall clock's (`wallUs`, µs since the Unix epoch), whatever the stream has shown, nothing at all included
+ *  (`shown` null). Otherwise the shown clock, once it has reached the moment or is about now: a world whose clock is
+ *  its own, and a moment the wall clock has not reached. */
+export function landingNow(shown: number | null, moment: number, wallUs: number): number | null {
+  const at = moment * TICK_US;
+  if (at >= WALL_FROM_US && at <= wallUs) return Math.max(shown ?? 0, Math.floor(wallUs / TICK_US));
+  if (shown === null) return null;
+  return shown >= moment || wallUs - shown * TICK_US <= NEAR_US ? shown : null;
 }
