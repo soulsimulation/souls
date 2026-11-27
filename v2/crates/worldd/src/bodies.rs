@@ -1234,6 +1234,25 @@ impl Bodies {
         out
     }
 
+    /// [`Bodies::moved`] and [`Bodies::poses`] from one pass over the bodies: the tick's record reads both. The poses
+    /// are those `poses` gives after `moved` (a carried body's is where it was last logged, which `moved` keeps).
+    pub fn moved_and_poses(&mut self) -> (Vec<(Id, Pose, Option<Stance>)>, Vec<(Id, Pose)>) {
+        let every = self.every();
+        let mut out = Vec::new();
+        let mut poses = Vec::with_capacity(every.len());
+        for (id, (pose, stance)) in every {
+            poses.push((id, pose));
+            if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
+                continue;
+            }
+            if self.logged.get(&id) != Some(&pose) {
+                self.logged.insert(id, pose);
+                out.push((id, pose, stance));
+            }
+        }
+        (out, poses)
+    }
+
     /// The bodies' motion to write on their nodes at this tick's end (#3799), in id order: a sample at each hand-off
     /// (a start, a stop, a turn or change of pace, a change of frame or support, a still body set somewhere new), and
     /// one at least every [`KEYFRAME_US`] of world time, in whole ticks, while a body moves. A still or seated body
@@ -1952,7 +1971,9 @@ impl Bodies {
         }
         while self.runner.now + self.runner.tick <= now {
             // The planner's answers to the last tick's wants (K18b): this tick reads them.
+            let mut pt = crate::prof::t();
             self.take();
+            pt.lap(24);
             // The tick's order (K18, #3160): due timers first, at the tick's start, then the skills through the
             // host and the controller.
             let at = self.runner.now;
@@ -1990,15 +2011,20 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
+            pt.lap(25);
             let order_lines = crate::orders::step(self, at);
+            pt.lap(26);
             self.wind_step(at);
+            pt.lap(27);
             let mut planned = std::mem::take(&mut self.planned);
             planned.batches = Some(Batches {
                 taken: self.taken,
                 next: self.sent,
             });
             self.unstuck.planned(&self.runner, &planned);
+            pt.lap(28);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            pt.lap(29);
             // A queue's approach whose straight way was not clear asks the same planner batch for its line (B7c), and
             // as a walker's, asks again only once the batch it went in has been taken without it (S8).
             if let Some(batch) = planned.batches {
@@ -2017,6 +2043,7 @@ impl Bodies {
             // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
             let rungs = self.unstuck.after(&mut self.runner, &mut self.town);
             self.wind_log.extend(rungs);
+            pt.lap(30);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
             let mut seated: Vec<(Id, Id, Id)> = self
                 .live
@@ -2031,6 +2058,7 @@ impl Bodies {
                     .filter_map(|w| Some((w.body, w.place?, w.id))),
             );
             wants.reach = self.reach_of(seated);
+            pt.lap(31);
             // One metadata snapshot per map revision, shared by all form questions in the batch.
             if *self.form_map != self.town.versions {
                 self.form_map = Arc::new(self.town.versions.clone());
@@ -2046,6 +2074,7 @@ impl Bodies {
             );
             debug_assert_eq!(planned.batches.map(|b| b.next), Some(self.sent));
             self.send(wants);
+            pt.lap(32);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
             // zone, a seated or lying one included (#3393).
             let said = std::mem::take(&mut self.runner.said);
@@ -2055,6 +2084,7 @@ impl Bodies {
             for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
                 self.heard.push((speaker, s, at));
             }
+            pt.lap(33);
             let walks: Vec<(Id, Id)> = self
                 .live
                 .iter()
@@ -2102,6 +2132,7 @@ impl Bodies {
                 }
                 out.push((id, how));
             }
+            pt.lap(34);
         }
         out
     }
