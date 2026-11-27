@@ -20,7 +20,7 @@ const values: unknown[] = [
   new Map<number, unknown>([[1, 5], [2, 123456]]),                                            // what changed since a version
   new Map<number, unknown>([[1, 7], [2, Array.from({ length: 300 }, (_, k) => id(k * 1000))]]), // many nodes at once
   new Map<number, unknown>([[1, 7], [2, [id(2n ** 64n - 1n), id(2n ** 53n + 1n)]]]),
-  new Map<number, unknown>([[2, 'souls:course'], [1, [0, -1, -24, -25, -256, -257, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER]],
+  new Map<number, unknown>([[2, 'souls:course'], [1, [0, -1, -24, -25, -256, -257, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, -(2n ** 53n), -(2n ** 53n) - 1n, 2n ** 53n]],
     [80, new Map<number, unknown>([[3, new Uint8Array(40)], [1, -(2n ** 64n)], [70000, 'mars:carry_activity@1220ab'], [2 ** 40, [[], new Map(), '', new Uint8Array(0)]]])]]),
   [], new Map(), '', new Uint8Array(0), 0, -1, new Uint8Array(70000).fill(9), 'x'.repeat(300),
 ];
@@ -45,6 +45,12 @@ test('what the workers write is written as cborg wrote it, and read back the sam
     assert.deepStrictEqual(decode(bytes), cborgDecode(bytes, { useMaps: true }));
   }
   assert.equal(hex(encode(new Map([[2, 0], [1, 0]]))), 'a201000200', 'a map is written in ascending key order, however it was built');
+  // −2^53 is past what a number holds safely: read as a BigInt, as cborg reads it, so it is written back (a course's field)
+  const edge = unhex('3b001fffffffffffff');
+  assert.deepStrictEqual(decode(edge), cborgDecode(edge, { useMaps: true }));
+  assert.equal(decode(edge), -(2n ** 53n));
+  assert.equal(hex(encode(decode(edge))), hex(edge));
+  assert.equal(decode(unhex('63efbbbf')), '\ufeff', 'text is kept whole, a leading byte order mark too');
 });
 
 test('bytes read are a copy of their own, and a value inside a larger buffer reads from its own range', () => {

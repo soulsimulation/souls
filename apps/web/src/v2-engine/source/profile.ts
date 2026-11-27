@@ -6,7 +6,7 @@
 // copy, never a view of the source); text as a string; an array; a Map. Anything outside the profile is refused.
 
 const refuse = (what: string): never => { throw new Error(`encoding: ${what}`); };
-const utf8 = new TextEncoder(), text = new TextDecoder('utf-8', { fatal: true });
+const utf8 = new TextEncoder(), text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const whole = (v: unknown): v is number | bigint => typeof v === 'bigint' || (typeof v === 'number' && Number.isSafeInteger(v));
 
 /** A head: the major type and its argument in the shortest form that holds it (rule 3). */
@@ -54,7 +54,7 @@ export function decode(bytes: Uint8Array): unknown {
     else if (info === 27) { const wide = view.getBigUint64(take(8)); n = wide <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(wide) : wide; }
     else if (info > 27) refuse('an indefinite length or a reserved head');
     if (major === 0) return n;
-    if (major === 1) return typeof n === 'bigint' ? -1n - n : -1 - n;
+    if (major === 1) return typeof n === 'bigint' || n >= Number.MAX_SAFE_INTEGER ? -1n - BigInt(n) : -1 - n; // −2^53 and beyond: a BigInt
     if (major > 5) refuse('a tag, a float or a simple value');
     if (typeof n === 'bigint') return refuse('a length out of range');
     if (major === 2) { const from = take(n); return new Uint8Array(bytes.subarray(from, from + n)); } // a copy, whatever `bytes` is

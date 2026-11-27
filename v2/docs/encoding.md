@@ -36,7 +36,9 @@ The profile is CBOR ([RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html)) cu
     over stored bytes, never over a re-encoding.
 11. **One encoder.** Only `replica` encodes or decodes, natively and in WASM. Lengths are written from a 64-bit type,
     since `usize` is 32 bits in WASM. The JavaScript library is used by the vector check alone, never by the client
-    or the page.
+    or the v2 page. The old page's workers (`apps/web/src/v2-engine`) read what the replica hands them and write its
+    queries, never anything hashed: the stream worker reads with that library, and both write, and the history worker
+    reads, with a small reader and writer of this profile (`source/profile.ts`), held to the same vectors.
 12. **Vectors are fixed.** A vector file changes only in its own commit, with the reason.
 
 ## The vectors
