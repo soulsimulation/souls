@@ -879,14 +879,25 @@ fn w7_the_command_on_a_stopped_worlds_folder() {
 }
 
 /// W7 follow-up (#2826): a running world, holding its store, takes `remove-words` on a thread of its own within 60 s,
-/// while its store goes on taking words (the clock's own work stands in a thread writing all the while).
+/// while its store goes on taking words (the clock's own work stands in a thread writing all the while): 2,002 of A's
+/// references hidden at once, in one sync of the list, the writer never waiting through it.
 #[test]
 fn w7_a_running_world_takes_the_removal_on_its_own_thread() {
     use std::time::Instant;
-    let (folder, _, asker, views, log, args) = w7_world("w7-running");
+    let (folder, a, asker, views, log, args) = w7_world("w7-running");
     let before = files_of(&folder);
     let store =
         Arc::new(Store::open_dir(&folder.join("log.text"), Minter::new(Scope([1; 16]))).unwrap());
+    // More of A's words, on the disk and in no part: a removal of thousands of references at once.
+    let mut last = 0;
+    for n in 0..2000 {
+        let words = format!("more of mine, {n}");
+        last = store
+            .write_queued(words.as_bytes(), Audience::Everyone, a)
+            .unwrap()
+            .1;
+    }
+    store.wait(last).unwrap();
     worldd::removal::watch(folder.clone(), Arc::clone(&store)).unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let talker = Id::new(Scope([0x79; 16]), 1).unwrap();
@@ -906,14 +917,14 @@ fn w7_a_running_world_takes_the_removal_on_its_own_thread() {
             (n, worst)
         })
     };
-    let started = Instant::now();
-    assert_eq!(worldd::removal::run(&args(&["--erase", "--dry-run"])), 0);
+    assert_eq!(worldd::removal::run(&args(&["--dry-run"])), 0);
     for (p, b) in &before {
         if p.starts_with(&views) {
             assert_eq!(&std::fs::read(p).unwrap(), b, "a dry run writes nothing");
         }
     }
-    assert_eq!(worldd::removal::run(&args(&["--erase"])), 0);
+    let started = Instant::now();
+    assert_eq!(worldd::removal::run(&args(&["--hide"])), 0);
     let took = started.elapsed();
     assert!(took < Duration::from_secs(60), "{took:?}");
     let now = words_now(&views);
@@ -924,14 +935,14 @@ fn w7_a_running_world_takes_the_removal_on_its_own_thread() {
         assert!(now.contains(&l.to_owned()), "{l:?} stays");
     }
     let list = store.removals();
-    assert_eq!(list.len(), 2, "the two erasures");
+    assert_eq!(list.len(), 2002, "A's two sentences and 2,000 more, hidden");
     assert!(list.iter().all(|x| x.by == asker));
     stop.store(true, Ordering::Relaxed);
     let (n, worst) = writer.join().unwrap();
     eprintln!(
-        "w7 running: removal answered in {took:?}; {n} words written meanwhile, the slowest in {worst:?}"
+        "w7 running: 2,002 references hidden, answered in {took:?}; {n} words written meanwhile, the slowest in {worst:?}"
     );
-    assert!(n > 0 && worst < Duration::from_secs(1), "{n} {worst:?}");
+    assert!(n > 0 && worst < Duration::from_millis(250), "{n} {worst:?}");
     assert_eq!(
         std::fs::read(folder.join("log")).unwrap(),
         log,
@@ -947,9 +958,11 @@ fn w7_a_running_world_takes_the_removal_on_its_own_thread() {
             );
         }
     }
-    let left: Vec<_> = std::fs::read_dir(worldd::removal::asks_dir(&folder))
-        .unwrap()
-        .flatten()
-        .collect();
-    assert!(left.is_empty(), "every ask answered and its answer read");
+    // Every ask answered, and its answer read: the folder empties (the world takes its `.taking` away as it answers).
+    let asks = worldd::removal::asks_dir(&folder);
+    let until = Instant::now() + Duration::from_secs(5);
+    while std::fs::read_dir(&asks).unwrap().flatten().next().is_some() {
+        assert!(Instant::now() < until, "an ask left in {}", asks.display());
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }

@@ -5059,3 +5059,61 @@ fn w7_a_purged_text_file_is_written_again_without_its_removed_words_on_a_start()
     assert_eq!((rows("0.text"), rows("1.text")), (vec![gone], vec![kept]));
     drop(again);
 }
+
+/// W7 (#2826): a text file whose words and list were read before a removal, and written after it (a part cut as the
+/// removal ran, so the removal's own pass found no file), is settled by its writer without the removed row.
+#[test]
+fn w7_a_text_file_written_as_a_removal_lands_is_settled_without_its_words() {
+    use sim::text::Grade;
+    let d = scratch("w7-settle");
+    let words = Store::open_dir(
+        &d.join("words"),
+        replica::ids::Minter::at(Scope([60; 16]), 0),
+    )
+    .unwrap();
+    let a = Id::new(Scope([95; 16]), 1).unwrap();
+    let gone = words
+        .write(b"cut before the removal", Audience::Everyone, a)
+        .unwrap();
+    let kept = words.write(b"stays", Audience::Everyone, a).unwrap();
+    let row = |r: Id, w: &[u8]| Value::Array(vec![r.to_value(), Value::Bytes(w.to_vec())]);
+    let bytes = wire(Value::Array(vec![
+        row(gone, b"cut before the removal"),
+        row(kept, b"stays"),
+    ]))
+    .unwrap();
+    let path = d.join("g").join("7.text");
+    let rows = || -> Vec<Id> {
+        let Value::Array(rows) = decode(&fs::read(&path).unwrap()).unwrap().value else {
+            panic!("a text file is a list")
+        };
+        rows.iter()
+            .map(|r| match r {
+                Value::Array(p) => replica::effects::read_id(&p[0]).unwrap(),
+                _ => panic!("a row"),
+            })
+            .collect()
+    };
+    let list = words.redactions();
+    words.remove(gone, a, 1, Grade::Hidden).unwrap();
+    derive(
+        &path,
+        purge_text(&bytes, &list)
+            .unwrap()
+            .as_deref()
+            .unwrap_or(&bytes),
+    )
+    .unwrap();
+    assert_eq!(
+        rows(),
+        vec![gone, kept],
+        "written with the list read before"
+    );
+    settle(&words, &path, &bytes, list).unwrap();
+    assert_eq!(rows(), vec![kept], "settled with the list now");
+    let settled = fs::read(&path).unwrap();
+    settle(&words, &path, &bytes, words.redactions()).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), settled, "nothing changed since");
+    words.close();
+    fs::remove_dir_all(&d).unwrap();
+}

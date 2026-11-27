@@ -29,11 +29,11 @@
 //!    cut, an erasure cut short finished).
 //! 6. **On a running world too, its clock never stopped.** A running world holds its store's files locked, so the
 //!    command hands the ask to it through its asks folder (`removal.asks/`, [`asks_dir`]) and waits for the answer.
-//!    The world takes it on a thread of its own ([`watch`]), never its clock's: the same steps on its open store, each
-//!    reference's removal one short hold of the store's index; then, [`AGAIN`] later, the text files once more, for
-//!    a part being cut as it ran (V1 writes a part's words from the store, so a part cut after the removal has none
-//!    of them). A world that takes no ask within [`TAKEN_WITHIN`] gets it taken back: the command is refused
-//!    (`world-running`) and nothing changes.
+//!    The world takes it on a thread of its own ([`watch`]), never its clock's: the same steps on its open store, all
+//!    the references in one append and one sync of the list, under the list's own lock (`Store::remove_all`), so
+//!    the clock's writes never wait through a sync. A text file the stream writes as the removal runs is settled by
+//!    its writer (V1 rule 10). A world that takes no ask within [`TAKEN_WITHIN`] gets it taken back: the command is
+//!    refused (`world-running`) and nothing changes.
 //!
 //! Who may remove whose words is the directory's to say (`directoryd::pairing::removal`): `--by` is recorded as
 //! given. Not here: a profile's removal, the copies the recovery chain, O20's backups and caches keep until they are
@@ -207,9 +207,8 @@ pub fn remove(store: &Store, views: &Path, ask: &Ask, ranged: Option<&BTreeSet<I
             _ => Redactions::new(store.redactions().iter().chain(changing.iter().copied())),
         }
     } else {
-        for r in &changing {
-            store.remove(*r, ask.by, ask.when_us, ask.grade)?;
-        }
+        // One append and one sync for them all, under the list's own lock (`Store::remove_all`).
+        store.remove_all(&changing, ask.by, ask.when_us, ask.grade)?;
         store.redactions()
     };
     if ask.grade != Grade::Restored {
@@ -256,7 +255,7 @@ pub fn purge(dir: &Path, list: &Redactions, dry: bool) -> R<(usize, usize)> {
             files += 1;
             gone += rows(&bytes)? - rows(&purged)?;
             if !dry {
-                crate::view_out::write_whole(&path, &purged)?;
+                crate::view_out::write_text(&path, &purged)?;
             }
         }
     }
@@ -454,10 +453,8 @@ pub fn asks_dir(world: &Path) -> PathBuf {
     world.join("removal.asks")
 }
 
-/// How often a running world looks for asks, and how long after a removal it writes the stream's text files again
-/// (rule 6).
+/// How often a running world looks for asks.
 pub const EVERY: Duration = Duration::from_millis(250);
-pub const AGAIN: Duration = Duration::from_secs(2);
 /// How long the command waits for the world to take its ask, and then for the world's answer (the promise is 60 s).
 pub const TAKEN_WITHIN: Duration = Duration::from_secs(5);
 pub const ANSWER_WITHIN: Duration = Duration::from_secs(60);
@@ -491,7 +488,8 @@ fn ask_running(world: &Path, flags: &[String]) -> Result<String, String> {
         let waited = asked.elapsed();
         if waited >= TAKEN_WITHIN && !taking.exists() && std::fs::remove_file(&ask).is_ok() {
             return Err(format!(
-                "world-running: the world holds its text store and took no ask within {} s; nothing changed",
+                "world-running: the world holds its text store and did not take the ask within {} s (it may be busy with \
+                 another); nothing changed",
                 TAKEN_WITHIN.as_secs()
             ));
         }
@@ -506,22 +504,17 @@ fn ask_running(world: &Path, flags: &[String]) -> Result<String, String> {
 }
 
 /// A running world takes removals (rule 6) on a thread of its own, never its clock's: every [`EVERY`] it applies each
-/// ask in its asks folder to its open store, oldest first, writes the answer, and [`AGAIN`] after a removal writes
-/// the stream's text files again without the removed rows, for a part that was being cut as it ran. One left
-/// `.taking` by a stop is taken again at the next start (a removal done twice changes nothing more).
+/// ask in its asks folder to its open store, oldest first, and writes the answer. An ask older than twice
+/// [`TAKEN_WITHIN`] (its command gave up, or was killed) is deleted, never applied. One left `.taking`
+/// by a stop is taken again at the next start (a removal done twice changes nothing more). A text file the stream
+/// writes as the removal runs is settled by the writer itself (V1 rule 10, `view_out`'s `settle`).
 pub fn watch(world: PathBuf, store: Arc<Store>) -> std::io::Result<()> {
     let dir = asks_dir(&world);
+    std::fs::create_dir_all(&dir)?;
     std::thread::Builder::new()
         .name("removal".into())
         .spawn(move || {
-            let mut again: Option<std::time::Instant> = None;
             loop {
-                if again.is_some_and(|t| std::time::Instant::now() >= t) {
-                    again = None;
-                    if let Err(e) = purge(&world.join("views"), &store.redactions(), false) {
-                        eprintln!("worldd: removal: the text files again: {}", said(e));
-                    }
-                }
                 let mut found: Vec<PathBuf> = match std::fs::read_dir(&dir) {
                     Ok(e) => e
                         .flatten()
@@ -533,34 +526,58 @@ pub fn watch(world: PathBuf, store: Arc<Store>) -> std::io::Result<()> {
                 found.sort();
                 for path in found {
                     let taking = path.with_extension("taking");
+                    let stale = path != taking
+                        && asked_at(&path).is_none_or(|at| {
+                            u64::try_from(crate::answers::now())
+                                .unwrap_or(0)
+                                .saturating_sub(at)
+                                > 2 * TAKEN_WITHIN.as_micros() as u64
+                        });
+                    if stale {
+                        // No command waits for it: it goes, unanswered, and nothing changes.
+                        if std::fs::remove_file(&path).is_ok() {
+                            eprintln!(
+                                "worldd: removal: an ask too old to take: {}",
+                                path.display()
+                            );
+                        }
+                        continue;
+                    }
                     if path != taking && std::fs::rename(&path, &taking).is_err() {
                         continue; // taken back by the command
                     }
-                    let answer = match std::fs::read_to_string(&taking) {
-                        Ok(text) => {
-                            let flags: Vec<String> = text.lines().map(str::to_owned).collect();
-                            let changes = parse(&flags).is_ok_and(|a| !a.dry_run);
-                            match apply(&world, &store, &flags) {
-                                Ok(line) => {
-                                    if changes {
-                                        again = Some(std::time::Instant::now() + AGAIN);
-                                    }
-                                    eprintln!("worldd: removal: {line}");
-                                    format!("ok {line}")
-                                }
-                                Err(why) => format!("refused {why}"),
-                            }
-                        }
-                        Err(e) => format!("refused removal-io: {e}"),
-                    };
+                    let answer = take(&world, &store, &taking);
+                    let _ = std::fs::remove_file(&taking);
                     let done = taking.with_extension("done");
                     if let Err(e) = crate::view_out::write_whole(&done, answer.as_bytes()) {
                         eprintln!("worldd: removal: the answer: {}", said(e));
                     }
-                    let _ = std::fs::remove_file(&taking);
                 }
                 std::thread::sleep(EVERY);
             }
         })
         .map(|_| ())
+}
+
+/// When an ask was asked (wall µs), from its name, `<µs>-<pid>.ask`.
+fn asked_at(path: &Path) -> Option<u64> {
+    path.file_stem()?.to_str()?.split('-').next()?.parse().ok()
+}
+
+/// Applies the ask in the file `taking`; its answer, `ok <line>` or `refused <why>`. A panic is an answer too, and
+/// the thread goes on.
+fn take(world: &Path, store: &Store, taking: &Path) -> String {
+    let text = match std::fs::read_to_string(taking) {
+        Ok(t) => t,
+        Err(e) => return format!("refused removal-io: {e}"),
+    };
+    let flags: Vec<String> = text.lines().map(str::to_owned).collect();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| apply(world, store, &flags))) {
+        Ok(Ok(line)) => {
+            eprintln!("worldd: removal: {line}");
+            format!("ok {line}")
+        }
+        Ok(Err(why)) => format!("refused {why}"),
+        Err(_) => "refused removal-panicked: the world's removal thread goes on".to_owned(),
+    }
 }

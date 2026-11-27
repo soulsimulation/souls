@@ -410,14 +410,15 @@ struct Index {
     removed: BTreeMap<Id, Removal>,
     /// Every entry of the redaction list, in order.
     history: Vec<Removal>,
-    /// The `removed` file, written and synced under this lock.
-    list: Disk,
 }
 
 /// A world's text store, open: recovered, its torn tails cut, its writer running.
 pub struct Store {
     place: Place,
     index: Mutex<Index>,
+    /// The `removed` file, written and synced under this lock alone, never the index's (W7, #2826): a removal on a
+    /// running world never holds the clock's writes through a sync. It also keeps removals one at a time.
+    list: Mutex<Disk>,
     shared: Arc<Shared>,
     writer: Option<JoinHandle<()>>,
 }
@@ -533,8 +534,8 @@ impl Store {
                 entries,
                 removed,
                 history,
-                list,
             }),
+            list: Mutex::new(list),
             shared,
             writer: Some(writer),
         };
@@ -696,41 +697,71 @@ impl Store {
     /// Removes the words under `reference` (rule 5): the redaction list's entry is synced first; an erasure then
     /// deletes the bytes (rule 6). Refused as `text-unknown`, `erased` (erased words stay erased) or `not-removed`.
     pub fn remove(&self, reference: Id, by: Id, when_us: u64, grade: Grade) -> R<()> {
-        let mut ix = lock(&self.index);
-        let Some(e) = ix.entries.get(&reference).copied() else {
-            return refuse("text-unknown", "no words under this reference");
-        };
-        if lock(&self.shared.q).durable < e.n {
-            return refuse("text-unknown", "not on the disk yet");
+        self.remove_all(&[reference], by, when_us, grade)
+    }
+
+    /// Removes the words under each of `references` at once (rule 5; W7, #2826): every entry is checked first, and
+    /// any refusal ([`Store::remove`]'s) refuses them all; then their entries go on the list in one append and one
+    /// sync, under the list's own lock, the index's held only to check them and to take them in after the sync, so
+    /// the clock's writes never wait through a sync; an erasure then deletes each one's bytes (rule 6).
+    pub fn remove_all(&self, references: &[Id], by: Id, when_us: u64, grade: Grade) -> R<()> {
+        if references.is_empty() {
+            return Ok(());
         }
-        match (ix.removed.get(&reference).map(|r| r.grade), grade) {
-            (Some(Grade::Erased), _) => return refuse("erased", "erased words stay erased"),
-            (None, Grade::Restored) => return refuse("not-removed", "nothing to restore"),
-            _ => {}
+        let mut list = lock(&self.list);
+        let mut found = Vec::with_capacity(references.len());
+        {
+            let ix = lock(&self.index);
+            let durable = lock(&self.shared.q).durable;
+            for reference in references {
+                let Some(e) = ix.entries.get(reference).copied() else {
+                    return refuse("text-unknown", "no words under this reference");
+                };
+                if durable < e.n {
+                    return refuse("text-unknown", "not on the disk yet");
+                }
+                match (ix.removed.get(reference).map(|r| r.grade), grade) {
+                    (Some(Grade::Erased), _) => {
+                        return refuse("erased", "erased words stay erased");
+                    }
+                    (None, Grade::Restored) => return refuse("not-removed", "nothing to restore"),
+                    _ => {}
+                }
+                found.push((*reference, e));
+            }
         }
-        let mut body = vec![KIND_REMOVAL];
-        put_id(&mut body, reference);
-        put_id(&mut body, by);
-        body.extend_from_slice(&when_us.to_le_bytes());
-        body.push(grade as u8);
-        let mut rec = Vec::new();
-        frame(&mut rec, &body);
-        ix.list.append(&rec).and_then(|_| ix.list.sync())?;
-        let r = Removal {
-            reference,
-            by,
-            when_us,
-            grade,
-        };
-        match grade {
-            Grade::Restored => ix.removed.remove(&reference),
-            _ => ix.removed.insert(reference, r),
-        };
-        ix.history.push(r);
-        drop(ix);
+        let mut recs = Vec::new();
+        for (reference, _) in &found {
+            let mut body = vec![KIND_REMOVAL];
+            put_id(&mut body, *reference);
+            put_id(&mut body, by);
+            body.extend_from_slice(&when_us.to_le_bytes());
+            body.push(grade as u8);
+            frame(&mut recs, &body);
+        }
+        list.append(&recs).and_then(|_| list.sync())?;
+        {
+            let mut ix = lock(&self.index);
+            for (reference, _) in &found {
+                let r = Removal {
+                    reference: *reference,
+                    by,
+                    when_us,
+                    grade,
+                };
+                match grade {
+                    Grade::Restored => ix.removed.remove(reference),
+                    _ => ix.removed.insert(*reference, r),
+                };
+                ix.history.push(r);
+            }
+        }
         if grade == Grade::Erased {
-            self.wipe(reference, e)?;
+            for (reference, e) in found {
+                self.wipe(reference, e)?;
+            }
         }
+        drop(list);
         Ok(())
     }
 

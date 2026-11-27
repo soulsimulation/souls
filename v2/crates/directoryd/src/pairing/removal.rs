@@ -10,8 +10,9 @@
 //! 3. **A site owner** ([`Role::Site`]): the account is one of the site's owners (`SIM_SITE_OWNERS`, the canonical
 //!    account ids the ops page admits), anywhere.
 //!
-//! Their own is checked first, then a site owner (before the world's owner is read, so a slow world store never
-//! holds one back), then the creator. Anyone else is refused `removal.not-allowed`, and nothing is removed.
+//! A site owner is checked first (so neither store ever holds one back), then their own, then the creator. Anyone
+//! else is refused `removal.not-allowed`, and nothing is removed. The caller passes `holds` from the signed-in
+//! account's own grants, never from the request.
 
 use super::{Pairing, is_soul_grant};
 use rusqlite::{OptionalExtension, params};
@@ -52,6 +53,10 @@ impl Pairing {
         if souls.iter().any(|s| !is_soul_grant(s)) {
             return Err("soul-grant");
         }
+        // A site owner first: neither the pairing store nor a slow world store ever holds one back.
+        if site.contains(account) {
+            return Ok(Role::Site);
+        }
         let own = {
             let db = self.db.lock().expect("the store");
             let mut q = db
@@ -69,10 +74,6 @@ impl Pairing {
         };
         if own {
             return Ok(Role::Own);
-        }
-        // A site owner is answered before the world's owner is read, so a slow world store never holds one back.
-        if site.contains(account) {
-            return Ok(Role::Site);
         }
         match self.authority(Some(world)) {
             Ok(Some(a)) if !a.creator.is_empty() && holds(&a.creator_grant()) => Ok(Role::Creator),
