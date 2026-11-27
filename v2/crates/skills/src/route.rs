@@ -11,7 +11,7 @@
 //!   most half the gap beyond two radii ([`ROOM`] each), and not at all when already inside; the other keeps its own
 //!   half, so no step ends inside another body's space. A step the guard holds is a wait, never a jump. Under the
 //!   ladder's shoulder turn the still bodies the world names keep one radius and [`SLACK`], not two (E16), so one
-//!   standing in the only way never walls a walker in; it squeezes past through the widest gap there is.
+//!   standing in the only way never walls a walker in; it squeezes past, one radius off.
 //! - **A way round** (A2-2). Held [`DETOUR_AFTER`] ticks by a body standing ahead (seen at rest [`STANDING`] ticks),
 //!   it walks first to a point beside that body, or sideways past the end of a row of them, that a straight walk
 //!   reaches clear of every body; hemmed in, it steps back and looks again from there. A standing body never pushes it
@@ -783,7 +783,7 @@ impl Skill for Route {
         };
         // The shoulder turn (N10's rung, E16): a body the world named as it began keeps one radius and slack, not two,
         // so one standing still in the only way (a doorway, the one gap, by its own order to stay) never walls it in:
-        // it squeezes past, through the widest gap there is. One on the move again, one within CROWDED of the walk's
+        // it squeezes past, one radius off (the guard picks no gap). One on the move again, one within CROWDED of the walk's
         // last goal (no walk ends inside a Soul standing on its goal), every other body and every carried load keep
         // their whole space.
         let goal = (leg.link.is_none() && self.leg + 1 == self.legs.len()).then_some(leg.to);

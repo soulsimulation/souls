@@ -68,7 +68,10 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    `[link, distance µm]`, and clears it with `[]`; the world shows field 42 (1) on such a link and field 43, the body
    its owning node lets in, both read with `read(link)`. The owner reads the marks as of the last tick and writes
    its grants; a walker never writes the link. **N10 and N9 (T9c #3127).** The world sets on a walker's body field
-   44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
+   44 (the shoulder turn, no body pushes it: an array of the ids of the still bodies within 1.2 m of it when the turn
+   began, staying by their own order or with no walk, which it may squeeze past at one radius and slack while they
+   stay still and are more than 3 m from its last goal, E16; every other body and every carried load keeps its whole
+   space), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
    ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
    world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
    granted spot. Ending a walk by name is the world's: it ends the run. Field 48 is the queue spot the world assigns
