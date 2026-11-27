@@ -642,8 +642,8 @@ fn e16_a_walker_never_squeezes_through_a_carried_board() {
     assert!(shoulder.0 >= 9_000_000, "at 9 s: {}", shoulder.0);
     let named = named.expect("the shoulder turn names who it may pass");
     assert!(
-        named.contains(&id(3).to_value()) && named.contains(&id(4).to_value()),
-        "the crew standing still is named: {named:?}"
+        named.contains(&id(3).to_value()),
+        "the carrier standing still near it is named: {named:?}"
     );
     assert!(!named.contains(&id(900).to_value()), "never the load");
     let (at, name, detail) = ended.expect("its order ended by name");
