@@ -4259,12 +4259,16 @@ impl Clock {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
+        let mut pt = crate::prof::t();
         let samples = b.motion(self.replica.tree());
+        pt.lap(8);
+        crate::prof::add(19, samples.len() as u64);
         if samples.is_empty() {
             return;
         }
         let all = motion_effects(self.replica.header(), self.replica.version(), &samples);
         if self.try_own_motion(all).is_ok() {
+            pt.lap(9);
             return;
         }
         for s in samples {
@@ -4647,10 +4651,13 @@ impl Clock {
         };
         // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule
         // 3), as the walkers' map learns a load's place only when it is set down or seated.
+        let mut pt = crate::prof::t();
         if let Some(e) = self.engine.as_ref() {
             b.runner.carrying(e.carried_loads());
         }
+        pt.lap(0);
         let mut ended = b.step(now);
+        pt.lap(1);
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
         let mut deadlines = Vec::new();
@@ -4675,6 +4682,7 @@ impl Clock {
                 }
             }
         }
+        pt.lap(2);
         // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
         for (at, taken) in b.late() {
             self.inputs.push(Input::Planned {
@@ -4700,15 +4708,18 @@ impl Clock {
                 .collect();
             self.write_own(made, "a still body stepped aside");
         }
+        pt.lap(3);
         for (id, due) in deadlines {
             self.run_started(id, due, now);
         }
         for (id, how) in ended {
             self.settle(id, how, now);
         }
+        pt.lap(4);
         let tick = u64::try_from(self.tick).unwrap_or(0);
         self.forms
             .tick(self.replica.tree(), self.bodies.as_mut(), tick, now);
+        pt.lap(5);
         if let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) {
             e.tick(
                 self.replica.tree(),
@@ -4717,6 +4728,7 @@ impl Clock {
                 &b.town.versions,
                 now,
             );
+            pt.lap(6);
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
             // A walk to a place no longer pending (its member left) ends here too. A member of any activity with
             // places that is already acting on its own (a harvest's pick sent as the offer was accepted, a tea made
@@ -4730,6 +4742,7 @@ impl Clock {
             let mut done = b.take_places(&todo);
             done.extend(acting.iter().map(|t| (t.0, t.1)));
             e.placed(self.replica.tree(), &mut b.runner.controller, &done, now);
+            pt.lap(7);
         }
     }
 
@@ -5669,13 +5682,20 @@ impl Clock {
 
     /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
     fn state(&mut self) -> [u8; 32] {
+        let mut pt = crate::prof::t();
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
+        pt.lap(13);
         let tree = self
             .replica
             .tree_for_seal()
             .state_hashes()
             .unwrap_or_default();
-        state_hash(&tree, &poses)
+        pt.lap(14);
+        crate::prof::add(20, poses.len() as u64);
+        crate::prof::add(21, tree.len() as u64);
+        let h = state_hash(&tree, &poses);
+        pt.lap(15);
+        h
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -5874,13 +5894,18 @@ impl Clock {
             }
         }
         at[5] = mark();
+        let mut pt = crate::prof::t();
         remember_orders(&mut self.order_records, &self.effects);
+        pt.lap(10);
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
             i if i.is_empty() => None,
             i => recorder::record(u64::try_from(n).unwrap_or(0), &i).ok(),
         };
+        pt.lap(11);
         let moved = self.bodies.as_mut().map(Bodies::moved).unwrap_or_default();
+        pt.lap(12);
+        crate::prof::add(18, moved.len() as u64);
         let record =
             (!self.rows.is_empty() || !self.effects.is_empty() || !moved.is_empty()).then(|| {
                 let state = self.state();
@@ -5903,10 +5928,17 @@ impl Clock {
                     (TICK, Value::Uint(u64::try_from(n).unwrap_or(0))),
                     (STATE, Value::Bytes(state.to_vec())),
                 ]));
-                encode(&v).unwrap_or_default()
+                let mut pe = crate::prof::t();
+                let e = encode(&v).unwrap_or_default();
+                pe.lap(16);
+                crate::prof::add(22, e.len() as u64);
+                e
             });
+        pt = crate::prof::t();
         // The next tick's writes start with a whole record's room.
         sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
+        pt.lap(17);
+        crate::prof::tick();
         if record.is_some() {
             self.unsealed = true;
         }
