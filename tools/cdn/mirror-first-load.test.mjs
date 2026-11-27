@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { brotliDecompressSync } from 'node:zlib';
-import { allowedKey, check, namedReplica, plan, planApp, store } from './mirror-first-load.mjs';
+import { allowedKey, check, mirror, namedReplica, plan, planApp, store } from './mirror-first-load.mjs';
 import { APP_FILES, setOf } from '../world-launcher/app-files.mjs';
 
 const JS = Buffer.from('export default async function init() {}\n'.repeat(40)), WASM = Buffer.from('\0asm' + 'w'.repeat(4000));
@@ -150,4 +150,29 @@ test('check: the CDN copy as a browser on the page gets it', async () => {
   assert.match((await check(p, { fetcher: cdn({ headers: { 'content-type': 'application/octet-stream' } }) }))[1].problems[0], /content-type/);
   assert.deepEqual((await check(p, { fetcher: cdn({ body: 'other' }) }))[0].problems, ['bytes differ from the origin']);
   assert.deepEqual((await check(p, { fetcher: cdn({ status: 404, body: '' }) }))[0].problems, ['status 404']);
+});
+
+test('mirror: a web build\'s marker is written only after its files pass the CDN check, never before', async () => {
+  const p = await planApp('https://soul.game/w/eden/', { fetcher: origin().fetcher }), markerKey = `assets/app/sets/${p.set}.json`;
+  const run = async (acao) => {
+    const b = bucket(), order = [];
+    const fetcher = async (url, init) => { order.push(`${init.method} ${new URL(url).pathname.replace(/^\/[^/]+\//, '')}`); return b.fetcher(url, init); };
+    const cdnFetcher = async (url) => {
+      const o = p.objects.find((x) => url.endsWith(x.key)); order.push(`CDN ${o.key}`);
+      return new Response(o.body, { status: 200, headers: { 'content-type': o.contentType, 'cache-control': IMMUTABLE, 'access-control-allow-origin': acao } });
+    };
+    return { ...(await mirror(p, { credentials, fetcher, cdnFetcher })), order, b };
+  };
+  const good = await run('https://soul.game');
+  assert.equal(good.marked, true); assert.deepEqual(good.wrong, []);
+  const markerFirst = good.order.indexOf(`HEAD ${markerKey}`), lastFileCheck = good.order.lastIndexOf(`CDN assets/app/${Object.keys(BUILD).at(-1)}`);
+  assert.ok(lastFileCheck >= 0 && lastFileCheck < markerFirst, 'every file is checked on the CDN before the marker is touched');
+  assert.equal(good.order.at(-1), `CDN ${markerKey}`, 'then the marker itself is checked');
+  assert.equal(good.receipt.results.at(-1).key, markerKey);
+  // the CDN serves the files wrong for the page (CORS): the files are stored, the marker is not, pages stay on the host
+  const bad = await run('https://elsewhere.example');
+  assert.equal(bad.marked, false); assert.equal(bad.receipt.ok, false);
+  assert.equal(bad.wrong.length, Object.keys(BUILD).length);
+  assert.equal(bad.b.objects.has(markerKey), false);
+  assert.equal(bad.order.some((l) => l.includes('assets/app/sets/')), false, 'the marker is never asked for');
 });

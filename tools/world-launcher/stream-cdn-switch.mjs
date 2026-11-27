@@ -6,7 +6,8 @@
 //   sudo node tools/world-launcher/stream-cdn-switch.mjs [--binding /etc/souls/cutover-binding.json] <slug> on|off
 // Prints the world's entry after the change. Refuses a slug the binding does not name.
 // #4986: with `--first-load` it switches the world's `firstLoadOrigin` (https://cdn.soul.game) instead: the asset CDN the
-// launcher looks on for a copy of the replica it serves, and names to the page once it is there (cutover.mjs replicaAtEdge).
+// launcher looks on for copies of the replica it serves and of the web build's own files, and names each to the page
+// (`v2ReplicaCdn`, `appCdn`) once it has seen it there (cutover.mjs edgeLook).
 //   sudo node tools/world-launcher/stream-cdn-switch.mjs --first-load <slug> on|off
 import { chownSync, copyFileSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { cutoverFence } from './cutover.mjs';

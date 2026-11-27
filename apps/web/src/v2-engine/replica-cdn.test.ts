@@ -79,3 +79,23 @@ test('no origin copy after the #, or one that is not a replica path: a replica t
     await assert.rejects(init, Error, tag);
   }
 });
+
+test('#4986 review: a CDN copy that hangs: the origin copy after 8 s, once', async (t) => {
+  const g = globalThis as Record<string, unknown>, suite = Object.getOwnPropertyDescriptor(g, 'location');
+  const dir = scratch(), origin = join(dir, 'w/eden/v2/replica', V);
+  mkdirSync(origin, { recursive: true });
+  writeFileSync(join(origin, 'replica.js'), REPLICA('origin'));
+  writeFileSync(join(dir, 'hangs.js'), 'await new Promise(() => {});\nexport default async function init() {} export const readPointer = () => "cdn";\n');
+  Object.defineProperty(g, 'location', { value: { origin: pathToFileURL(dir).href }, configurable: true, writable: true });
+  after(() => { if (suite) Object.defineProperty(g, 'location', suite); else delete g.location; });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+  const { m, init } = await worker('hang', `${pathToFileURL(join(dir, 'hangs.js')).href}#${new URL(pathToFileURL(dir).href).pathname}/w/eden/v2/replica/${V}/replica.js`);
+  assert.ok(m.REPLICA_CDN_HANG_MS >= 5_000 && m.REPLICA_CDN_HANG_MS <= 10_000, 'a few seconds');
+  let done = false; init.then(() => { done = true; }, () => { done = true; });
+  await settle(); t.mock.timers.tick(m.REPLICA_CDN_HANG_MS - 1); await settle();
+  assert.equal(done, false, 'still waiting on the CDN just before the limit');
+  t.mock.timers.tick(1);
+  await init;
+  assert.equal(m.readPointer(), 'origin', 'the origin copy');
+});

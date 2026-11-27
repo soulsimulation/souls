@@ -15,7 +15,8 @@
 // What it may read and write is fixed here, never taken from the page. From the origin: the page, its two versioned
 // replica files, the file list and the listed files under `assets/`. On the CDN: `assets/replica/<version>/replica.js`
 // and `…/replica_bg.wasm`; `assets/app/<name>` for a listed build file; and `assets/app/sets/<set>.json`, the set's
-// marker, written last, once every file of the set is stored and read back. Every file is hashed against what names it
+// marker, written last, once every file of the set is stored, read back and served right by the CDN to a browser on the
+// page's origin (mirror below: the launcher names the CDN once it sees the marker). Every file is hashed against what names it
 // before anything is stored (the replica's version is the first 16 hex of sha256 over both files, the launcher's rule; a
 // build file's sha256 is in the list, and the set id is the hash of the list), so a key always holds the bytes its name
 // says. Objects are written once (`If-None-Match: *`) with `Cache-Control: public, max-age=31536000, immutable`, text and
@@ -150,6 +151,20 @@ export async function check(planned, { cdn = CDN, fetcher = fetch } = {}) {
   return rows;
 }
 
+/** Stores a set and checks it on the CDN as a browser gets it (check). A web build's marker, its last object, is stored
+ *  only after its files pass that check, so the launcher (which names the CDN once it sees the marker) never names files
+ *  a browser could not use. `fetcher` speaks to the bucket, `cdnFetcher` to the CDN. → { receipt, wrong, marked } */
+export async function mirror(planned, { credentials, fetcher = fetch, cdnFetcher = fetch, cdn = CDN, now } = {}) {
+  const { set, ...rest } = planned, files = set ? { ...rest, objects: planned.objects.slice(0, -1) } : planned;
+  const receipt = await store(files, { credentials, fetcher, now }), problems = async (p) => (await check(p, { cdn, fetcher: cdnFetcher })).filter((r) => r.problems.length);
+  let wrong = await problems(files);
+  if (!set) return { receipt, wrong, marked: false };
+  if (wrong.length) return { receipt: { ...receipt, set, ok: false }, wrong, marked: false };
+  const marker = { ...planned, objects: planned.objects.slice(-1) }, last = await store(marker, { credentials, fetcher, now });
+  wrong = await problems(marker);
+  return { receipt: { ...receipt, set, results: [...receipt.results, ...last.results] }, wrong, marked: true };
+}
+
 if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), flag = (name) => { const i = argv.indexOf(name); if (i < 0) return false; argv.splice(i, 1); return true; };
   const o = argv.indexOf('--out'), out = o < 0 ? null : argv.splice(o, 2)[1];
@@ -159,23 +174,28 @@ if (isMain(import.meta.url)) {
   const total = (objects) => objects.reduce((n, x) => n + (x.storedBytes ?? x.bytes), 0);
   console.log(`replica ${replica.version}: ${replica.objects.length} files, ${total(replica.objects)} bytes stored`);
   console.log(app ? `web build set ${app.set}: ${app.objects.length - 1} files and its marker, ${total(app.objects)} bytes stored` : 'web build: the origin lists no file set (an older launcher, or a build that cannot be copied whole); skipped');
-  const sets = [replica, ...(app ? [app] : [])], receipts = [];
+  const sets = [replica, ...(app ? [app] : [])], receipts = [], name = (set) => set.version ? 'replica' : 'web build';
+  const report = (set, rows, wrong) => console.log(`${name(set)} on ${CDN}: ${rows - wrong.length} of ${rows} as a browser needs them${wrong.length ? '\n' + JSON.stringify(wrong, null, 1) : ''}`);
   if (apply) {
     requireAccount();
     const credentials = await loadCredentials();
+    let bad = 0;
     for (const set of sets) {
-      const receipt = await store(set, { credentials });
+      const { receipt, wrong, marked } = await mirror(set, { credentials });
       receipts.push(receipt);
       const count = (d) => receipt.results.filter((r) => r.disposition === d).length;
-      console.log(`${set.version ? 'replica' : 'web build'}: ${count('uploaded')} uploaded, ${count('existing')} already there, all read back`);
+      console.log(`${name(set)}: ${count('uploaded')} uploaded, ${count('existing')} already there, all read back`);
+      report(set, receipt.results.length, wrong);
+      if (set.set && !marked) console.log('web build: its marker is not written, so pages keep loading the host\'s files');
+      bad += wrong.length;
     }
     if (out) writeFileSync(out, JSON.stringify(receipts, null, 1) + '\n', { flag: 'wx' });
-  }
-  if (apply || only) {
+    if (bad) process.exit(1);
+  } else if (only) {
     let bad = 0;
     for (const set of sets) {
       const rows = await check(set), wrong = rows.filter((r) => r.problems.length);
-      console.log(`${set.version ? 'replica' : 'web build'} on ${CDN}: ${rows.length - wrong.length} of ${rows.length} as a browser needs them${wrong.length ? '\n' + JSON.stringify(wrong, null, 1) : ''}`);
+      report(set, rows.length, wrong);
       bad += wrong.length;
     }
     if (bad) process.exit(1);

@@ -320,9 +320,19 @@ over every file name and sha256 in its `assets/` folder). Only then does it name
 until the mirror below has run, pages load the host's files exactly as before. A build whose `assets/` folder holds
 anything that cannot be copied by name (a subfolder, a file without a content hash) has no set and stays on the host.
 
-**The page still arrives when the CDN does not answer.** An entry script that does not load from the CDN reloads the
-page once with `?appcdn=0`, which loads the host's files; the stream worker loads the host's replica when the CDN's
-does not load. A visitor can add `?appcdn=0` or `?replicacdn=0` to ask for the host's copies.
+**The page still arrives when the CDN fails or hangs.** The page reloads once with `?appcdn=0`, which loads the
+host's files, when an entry script does not load from the CDN; when no file of the CDN has arrived 8 s after the loader
+asked and the early entry is not in (a hung CDN; a slow one has delivered something by then, so a slow link is never
+made to download everything again); and, after the entry has loaded, when a lazy chunk or style fails (Vite's
+`vite:preloadError`) or a worker started from the CDN does not load. `?appcdn=0` turns all of these off, so the reload
+happens at most once per load. The stream worker loads the host's replica when the CDN's does not load, or its module
+has not loaded in 8 s. Data files the app fetches itself keep their own handling. A visitor can add `?appcdn=0` or
+`?replicacdn=0` to ask for the host's copies.
+
+**No subresource integrity, on purpose.** Every name on the CDN carries the hash of its bytes, the mirror hashes each
+file against that name before storing it, stores it once (`If-None-Match: *`, never overwritten) and reads it back; so a
+key can only ever hold the bytes the build produced. The page trusts whoever can write to the bucket, which is the same
+trust it gives the host.
 
 | Part | Where |
 |---|---|
@@ -348,7 +358,8 @@ rule already lets `https://soul.game` read it.
 
    It reads the page, the replica and the listed files from the live origin (about 160 requests, once), stores what
    the CDN does not have yet (a file whose name did not change since the last release is found, not stored again),
-   writes the marker last, and reads every copy back through `cdn.soul.game` as a browser on `soul.game` gets it.
+   reads every copy back through `cdn.soul.game` as a browser on `soul.game` gets it, and writes the build's marker
+   only after that check passes, so pages are never told of files a browser could not use.
    Without `--apply` it only reads the origin and prints the plan; `--check` reads the CDN's copies without
    credentials. Within a minute the launcher names the copies to new pages.
 3. Check with one cold load: `node tools/cdn/first-load.mjs <outDir> https://soul.game/w/eden/`. `byClass` should

@@ -26,16 +26,27 @@ export let historyAt: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export let courseAt: any;
 
+/** #4986 review: a CDN copy whose module has not loaded this long after the worker asked is taken as hung, and the
+ *  origin's copy is loaded instead. 8 s, as the page's own (phased-entry.ts APP_CDN_HANG_MS): replica.js is the small
+ *  glue (the 2.4 MB WASM comes after it, untimed), so a link that cannot bring it in 8 s is not slow but stuck, and the
+ *  head script asked the CDN for it before the page's code had even run. */
+export const REPLICA_CDN_HANG_MS = 8_000;
+
 /** Loads the served replica.js, which fetches replica_bg.wasm beside itself (wasm-bindgen's `--target web` init).
  *  #4986: an address on the asset CDN carries the origin's copy after a `#` (`<cdn address>#<origin path>`,
- *  replica-cdn.ts): that one is loaded when the CDN's does not load (its module or its WASM), so a viewer whose network
- *  cannot reach the CDN still gets the stream. */
+ *  replica-cdn.ts): that one is loaded when the CDN's does not load (its module, in REPLICA_CDN_HANG_MS, or its WASM),
+ *  so a viewer whose network cannot reach the CDN still gets the stream. */
 export default async function init(): Promise<void> {
   const url = await served, at = url.indexOf('#'), origin = at < 0 ? '' : url.slice(at + 1);
-  const load = async (from: string) => { const m = await import(/* @vite-ignore */ from) as Replica; await m.default(); return m; };
-  const m = await load(at < 0 ? url : url.slice(0, at)).catch((error: unknown) => {
+  const load = async (from: string, hang = 0) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const module = import(/* @vite-ignore */ from) as Promise<Replica>;
+    const m = await (hang ? Promise.race([module, new Promise<never>((_, no) => { timer = setTimeout(() => no(Error(`replica: ${from} did not load in ${hang} ms`)), hang); })]).finally(() => clearTimeout(timer)) : module);
+    await m.default(); return m;
+  };
+  const m = await (at < 0 ? load(url) : load(url.slice(0, at), REPLICA_CDN_HANG_MS).catch((error: unknown) => {
     if (!/^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(origin) || origin.includes('..')) throw error;
     return load(new URL(origin, location.origin).href);
-  });
+  }));
   ({ StreamPlayer, readPointer, historyAt, courseAt } = m);
 }
