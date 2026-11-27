@@ -271,8 +271,10 @@ impl Raise {
     /// lying and standing as [`Spec::tilt`] says.
     pub fn node(&self, r: i64) -> R<(Vec3, Quat)> {
         let [lean, rise] = self.spec.tilt(r);
-        let n = i128::from(rise) * 1_000_000_000;
-        let d = S45 * i128::from(M + lean) + C45 * i128::from(rise);
+        // The blend's weight that turns it `rise` of the way up (a quarter turn's blend is not even in its angle), in
+        // millionths: small enough for the blend's own squares.
+        let n = i128::from(rise);
+        let d = (S45 * i128::from(M + lean) + C45 * i128::from(rise)) / 1_000_000_000;
         let q = blend(self.lie, self.stand, n, d.max(1))?;
         let up = i128::from(self.spec.half_thick) * i128::from(lean) / i128::from(M);
         Ok((Vec3::new(self.foot.x, self.foot.y + up as i64, self.foot.z), q))

@@ -22,15 +22,23 @@ fn phases(dir: &Path, carry: Id) -> Vec<String> {
         .collect()
 }
 
-/// Waits until `phase` has been said of `carry` `times` times, at most `secs` seconds.
-async fn said(dir: &Path, carry: Id, phase: &str, times: usize, secs: u64) {
+/// Waits until `phase` has been said of `carry` `times` times, at most `secs` seconds; else fails, with what the
+/// served world said on its own lines of a raise.
+async fn said(dir: &Path, served: &Served, carry: Id, phase: &str, times: usize, secs: u64) {
     let end = Instant::now() + Duration::from_secs(secs);
     loop {
         let all = phases(dir, carry);
         if all.iter().filter(|p| *p == phase).count() >= times {
             return;
         }
-        assert!(Instant::now() < end, "no {phase} within {secs} s: {all:?}");
+        if Instant::now() > end {
+            while let Ok(l) = served.lines.try_recv() {
+                if l.contains("worldd:") || l.contains("panick") || l.contains("rais") {
+                    println!("served: {l}");
+                }
+            }
+            panic!("no {phase} within {secs} s: {all:?}");
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -197,7 +205,7 @@ async fn raise_two_souls_carry_a_lying_upright_raise_it_hold_it_and_lower_it() {
         .act("part:raise", carry, BTreeMap::from([(1, frame.to_value())]))
         .await
         .expect("the raise begins");
-    said(&dir, carry, "souls:raised", 1, 30).await;
+    said(&dir, &served, carry, "souls:raised", 1, 30).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     // The track: a sample a tick, the foot where it was on the plan, the top never more than 60 mm from the last.
     let top = |q: replica::pose::Quat| dir_of(q, Vec3::new(0, spec.height, 0));
@@ -260,7 +268,7 @@ async fn raise_two_souls_carry_a_lying_upright_raise_it_hold_it_and_lower_it() {
         .act("part:lower", carry, BTreeMap::new())
         .await
         .expect("the lowering begins");
-    said(&dir, carry, "souls:lowered", 1, 30).await;
+    said(&dir, &served, carry, "souls:lowered", 1, 30).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let all = samples(&dir, carry);
     checked(&all[before..], "lowered");

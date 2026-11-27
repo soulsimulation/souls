@@ -7,7 +7,7 @@
 //! - **The commit** is a take's (`Assembly::pivot`): the crew's node is set at the part's foot, turned as the part
 //!   is, and the part rides its slot, so nothing moves. The intent is answered then.
 //! - **The track.** The world walks the lifter beside the part at `raise::PACE`, over ground checked for its body
-//!   before it starts. Each tick the part is raised toward where the lifter has come ([`Raise::node`]), at most
+//!   before it starts, and the footer the step to its own place beside the base. Each tick the part is raised toward where the lifter has come ([`Raise::node`]), at most
 //!   `raise::FOLLOW` and `raise::TURN` a tick: one motion sample of the crew's node, its position the foot (which never moves on the
 //!   plan), its turn about the base line. A carrier who no longer reaches its hold turns a raise back: the lifter is
 //!   walked back and the part laid down where it lay.
@@ -488,6 +488,25 @@ impl Engine {
             match c.carry_on(ra.lifter, track) {
                 Ok(()) => ra.walking = true,
                 Err(e) => eprintln!("worldd: {} was not walked beside its part: {e}", show(ra.lifter)),
+            }
+            // And the footer the step to its own place beside the base, so that both stand clear of the ground the
+            // part takes when it stands; one with no ground straight there stays where it is.
+            let place = ra.geo.footer_at();
+            if let Some(f) = ff
+                && apart(f, place) > 0
+                && way_is_ground(c, town, ra.ground, ra.footer, f, place)
+            {
+                let track = Track {
+                    link: None,
+                    line: vec![place],
+                    speed: PACE,
+                    to: ra.ground,
+                    arrive: None,
+                    hold: false,
+                };
+                if let Err(e) = c.carry_on(ra.footer, track) {
+                    eprintln!("worldd: {} was not walked to the foot: {e}", show(ra.footer));
+                }
             }
         }
         // The part follows its lifter, only ever the way it is going, a step a tick at most. With no lifter on its
