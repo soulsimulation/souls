@@ -9006,9 +9006,9 @@ mod tests {
     }
 
     /// #5177's review: a second Undo after one that left an unset value. A god clears the arrival (an edit of the
-    /// world node), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each
-    /// admitted, as the page and the agent send them (`souls:edit` `{5: 1}` / `{5: 2}`), and the world node ends as
-    /// the storm left it.
+    /// world node), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each admitted,
+    /// as the page and the agent send them (`souls:edit` `{5: 1}` / `{5: 2}`): before, the second Undo was refused
+    /// `undo.conflict`, since the storm's undo left 65 at `0` and 69 at `[]`. The world node ends as the storm left it.
     #[test]
     fn undo_twice_and_redo_twice_across_a_weather_edit_and_an_arrival() {
         use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
@@ -9131,10 +9131,11 @@ mod tests {
                 roots.push(tree.node(tree.root()).unwrap().fields().clone());
             }
         }
-        let [_, stormy, .., redone] = &roots[..] else {
-            panic!("six creator parts: {}", roots.len())
+        // The arrival's clear, the storm, the two undos and the storm's redo. The arrival's redo has nothing to
+        // write: the clear and the unset arrival read alike (the empty list).
+        let [cleared, stormy, _, undone, redone] = &roots[..] else {
+            panic!("five creator parts: {}", roots.len())
         };
-        assert_eq!(roots.len(), 6, "six creator parts");
         let weather = |f: &BTreeMap<u64, Value>| {
             [
                 sky::F_WEATHER,
@@ -9146,9 +9147,15 @@ mod tests {
             .map(|k| f.get(&k).cloned())
         };
         assert_eq!(
+            undone.get(&sky::F_WEATHER),
+            cleared.get(&sky::F_WEATHER),
+            "both undone: the weather before the storm"
+        );
+        assert_eq!(undone.get(&sky::F_STRIKE), Some(&Value::Array(Vec::new())));
+        assert_eq!(
             weather(redone),
             weather(stormy),
-            "the storm and the arrival are back"
+            "both redone: the storm and the arrival are back"
         );
     }
 
