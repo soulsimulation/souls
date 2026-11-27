@@ -2054,7 +2054,14 @@ fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
 impl Acts {
     /// Whether slot `slot` of `thing` is not `body`'s to pick now, as a form's own pick skips it: held, or another run
     /// on its way to it (#4575), or its cabin away from its stop (N14). A sit by kind binds by it (#3178).
-    pub(crate) fn seat_reserved(&self, b: &Bodies, thing: Id, slot: u64, body: Id, now: Micros) -> bool {
+    pub(crate) fn seat_reserved(
+        &self,
+        b: &Bodies,
+        thing: Id,
+        slot: u64,
+        body: Id,
+        now: Micros,
+    ) -> bool {
         self.forms.seat_taken(&b.slots, thing, slot, body) || !b.slots.at_own_stop(thing, slot, now)
     }
 

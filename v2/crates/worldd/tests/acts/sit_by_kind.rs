@@ -64,7 +64,12 @@ fn hall_part(header: &Header, next: u64, ground: Id) -> Part {
         .into_iter()
         .map(|(n, at)| (n, pinned(CHAIR), at))
         .chain(std::iter::once((stool().0, pinned(STOOL), stool().1)))
-        .chain(souls().into_iter().skip(2).map(|(n, at)| (n, fullname(WALKER), at)));
+        .chain(
+            souls()
+                .into_iter()
+                .skip(2)
+                .map(|(n, at)| (n, fullname(WALKER), at)),
+        );
     let effects = things
         .enumerate()
         .map(|(k, (node, kind, position))| {
@@ -199,11 +204,17 @@ fn hall(tag: &str) -> (answers::World, Mem, Replica, std::path::PathBuf) {
     };
     loaded.push((
         CHAIR.into(),
-        parse(include_str!("../../../../../content/kinds/seating/chair.json")).unwrap(),
+        parse(include_str!(
+            "../../../../../content/kinds/seating/chair.json"
+        ))
+        .unwrap(),
     ));
     loaded.push((
         STOOL.into(),
-        parse(include_str!("../../../../../content/kinds/seating/stool.json")).unwrap(),
+        parse(include_str!(
+            "../../../../../content/kinds/seating/stool.json"
+        ))
+        .unwrap(),
     ));
     let store = Mem::default();
     let world = answers::start(
@@ -222,13 +233,18 @@ fn hall(tag: &str) -> (answers::World, Mem, Replica, std::path::PathBuf) {
 
 /// `eden:sit` aimed at any free chair in the hall, nearest the Soul: I5's selector as the target.
 fn sit_by_kind(c: &mut Client) {
+    sit_by(c, CHAIR);
+}
+
+/// `eden:sit` aimed at any free seat of `kind` in the hall, nearest the Soul.
+fn sit_by(c: &mut Client, kind: &str) {
     c.2 += 1;
     let i = Intent {
         actor: Actor::Soul(c.1),
         verb: name("eden:sit"),
         target: Some(
             Selector::FreeSlot {
-                kind: name(CHAIR),
+                kind: name(kind),
                 node: ground(),
                 rule: Rule::Nearest,
             }
@@ -253,9 +269,17 @@ fn sit_by_kind(c: &mut Client) {
     c.raw(&encode(&i.to_value()).unwrap());
 }
 
-#[test]
-fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
-    let (world, store, initial, path) = hall("burst");
+/// The hall served on a socket, and a client for each Soul.
+fn served(
+    tag: &str,
+) -> (
+    answers::World,
+    Mem,
+    Replica,
+    std::path::PathBuf,
+    Vec<Client>,
+) {
+    let (world, store, initial, path) = hall(tag);
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).unwrap();
     let door = world.door();
@@ -265,7 +289,7 @@ fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
             std::thread::spawn(move || answers::serve(door, stream));
         }
     });
-    let mut clients: Vec<Client> = souls()
+    let clients = souls()
         .into_iter()
         .map(|(soul, _)| {
             let s = UnixStream::connect(&path).unwrap();
@@ -273,6 +297,50 @@ fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
             Client(s, soul, 0, Vec::new(), Vec::new())
         })
         .collect();
+    (world, store, initial, path, clients)
+}
+
+/// One Soul alone takes the chair whose seat's front is nearest it (I5's `Nearest`): the back row's east chair, 2.5 m
+/// south and 0.5 m west of the first walker. A sit by a kind the hall has no seat of is refused `place.none-of-kind`,
+/// which waiting never clears, and told the nearest free seat there.
+#[test]
+fn i3178_a_sit_by_kind_takes_the_nearest_chair_and_a_kind_not_there_is_named() {
+    let (world, store, initial, path, mut clients) = served("nearest");
+    sit_by_kind(&mut clients[0]);
+    let sat = clients[0].answer();
+    println!("#3178 nearest: {sat:?}");
+    sat.expect("seated");
+    sit_by(&mut clients[1], "eden:pew");
+    let pew = clients[1].answer();
+    let detail = clients[1].detail().unwrap_or_default();
+    println!("#3178 no pew: {pew:?} {detail}");
+    let log = store.0.lock().unwrap().bytes.clone();
+    let mut r = initial.frozen();
+    for rec in recover(&log).unwrap().records {
+        if !sim::recorder::is_input(&rec) {
+            let p = Part::read(&rec).unwrap();
+            if !p.effects.is_empty() {
+                r.apply(&p).expect("the log replays");
+            }
+        }
+    }
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(
+        parent(&r, w1()),
+        (Some(id(131)), Some(1)),
+        "the nearest chair"
+    );
+    assert_eq!(pew, Err("place.none-of-kind".to_owned()));
+    assert!(
+        detail.contains("the nearest free seat there is"),
+        "a next step: {detail}"
+    );
+}
+
+#[test]
+fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
+    let (world, store, initial, path, mut clients) = served("burst");
     // All thirteen at once, then every answer.
     for c in &mut clients {
         sit_by_kind(c);
@@ -300,7 +368,10 @@ fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
     let mut taken = BTreeSet::new();
     for (soul, entries) in &seated {
         let at = parent(&r, *soul);
-        println!("#3178: {} seated in {at:?}, entries {entries:?}", replica::world_model::show(*soul));
+        println!(
+            "#3178: {} seated in {at:?}, entries {entries:?}",
+            replica::world_model::show(*soul)
+        );
         assert!(
             at.0.is_some_and(|c| chairs.contains(&c)) && at.1 == Some(1),
             "seated in a chair's seat: {at:?}"
@@ -318,7 +389,11 @@ fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
         detail.contains(&replica::world_model::show(stool().0)),
         "the next step names the stool: {detail}"
     );
-    assert_eq!(parent(&r, *soul), (Some(ground()), None), "the thirteenth stands");
+    assert_eq!(
+        parent(&r, *soul),
+        (Some(ground()), None),
+        "the thirteenth stands"
+    );
     world.stop();
     let _ = std::fs::remove_file(&path);
 }

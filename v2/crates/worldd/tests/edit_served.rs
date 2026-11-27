@@ -2328,6 +2328,9 @@ mod k18d;
 #[path = "edit_served/shade.rs"]
 mod shade;
 
+#[path = "edit_served/sit_by_kind.rs"]
+mod sit_by_kind;
+
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
     let mut out = std::collections::BTreeSet::new();
