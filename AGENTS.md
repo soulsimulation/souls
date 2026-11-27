@@ -144,6 +144,9 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
   instruct, approved on the page. Judge by the screen, never by a client's or another agent's report.
 - No freeze, no gate receipt, no rehearsal. The coordinator releases when a release's tasks are done.
 - Never touch services, users, DNS or proxies on the host that aren't Soul's. [docs/operations.md](docs/operations.md)
+- Shell on the production host (soul.game): `bash -c 'source tools/world-launcher/deploy/deploy-env.sh && ssh "$(deploy_target)"'`
+  from the repo root. The target lives only in the untracked `deploy.env`; never write it into the repo.
+  [Runbook](docs/operations/runbook.md)
 
 ## Visitor analytics
 

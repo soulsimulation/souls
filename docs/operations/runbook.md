@@ -8,6 +8,12 @@ Commands for the running site. They run on the production host as root unless no
 with `ssh "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST"` (the same target the release scripts read from `deploy.env`). Stage names, paths and units are
 described in [operations](../operations.md); releases are in [release](../release.md).
 
+An interactive shell on the production host, from the repo root (needs `deploy.env` and your key on the host):
+
+```sh
+bash -c 'source tools/world-launcher/deploy/deploy-env.sh && ssh "$(deploy_target)"'
+```
+
 Paths below use the stage's release link, so they always run the live code:
 
 ```sh
