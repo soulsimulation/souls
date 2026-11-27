@@ -2863,6 +2863,27 @@ impl LogReader {
                 .take(chunk as u64)
                 .read_to_end(&mut tail)
                 .map_err(io)?;
+            // Only whole records go to the check (#2803). A chunk that ends inside a record (a long one, or one the
+            // writer is still appending) would be judged a torn tail, and the search for a valid record after one
+            // checks every byte to the chunk's end: an import record longer than a chunk held a fresh world's public
+            // stream for 20 minutes. The rest is the next batch's; a first record longer than the chunk is read whole.
+            let mut whole = 0usize;
+            while let Some(head) = tail.get(whole..whole + HEAD_LEN) {
+                let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
+                match whole.checked_add(HEAD_LEN + len) {
+                    Some(e) if len <= MAX_RECORD && e <= tail.len() => whole = e,
+                    _ => break,
+                }
+            }
+            if whole > 0 {
+                tail.truncate(whole);
+            } else if let Some(head) = tail.get(..HEAD_LEN) {
+                let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
+                if len <= MAX_RECORD && HEAD_LEN + len > chunk && tail.len() == chunk {
+                    chunk = HEAD_LEN + len;
+                    continue;
+                }
+            }
             let found = sim::log::recover_from(&header, &tail, at)?.ok_or_else(|| {
                 fault(format!("the log does not continue at record {}", at.record))
             })?;
@@ -5532,9 +5553,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("log");
-        // Records over two batches, so a read crosses one.
+        // Records over two batches, so a read crosses one; the first longer than a batch, as an import's is.
         let records: Vec<Vec<u8>> = (0..40u8)
-            .map(|i| vec![i; (LogReader::BATCH / 16) + i as usize])
+            .map(|i| match i {
+                0 => (0..LogReader::BATCH + 1000).map(|n| n as u8).collect(),
+                _ => vec![i; (LogReader::BATCH / 16) + i as usize],
+            })
             .collect();
         let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
         for r in &records[..25] {
