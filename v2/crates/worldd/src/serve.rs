@@ -156,6 +156,7 @@ use worldd::measures;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out;
 #[cfg(test)]
+use worldd::view_out::History as _;
 use worldd::view_out::Writer;
 #[cfg(test)]
 use worldd::views::Tier;
@@ -1167,32 +1168,13 @@ fn keep_header(dir: &Path, built: &Built) -> R<()> {
 fn own_header(
     dir: &Path,
     built: &Built,
-    found: &sim::log::Recovered,
-    disk: &OnDisk,
+    records: &[Vec<u8>],
 ) -> R<(Header, BTreeMap<String, String>)> {
-    let path = dir.join("header");
-    let last_named = |records: &mut dyn Iterator<Item = &[u8]>| -> R<Option<Vec<u8>>> {
-        match records.filter(|b| !recorder::is_input(b)).last() {
-            Some(bytes) => Ok(Some(
-                replica::effects::Part::read(bytes).map_err(refusal)?.header,
-            )),
-            None => Ok(None),
-        }
+    let named = match records.iter().rev().find(|b| !recorder::is_input(b)) {
+        Some(bytes) => Some(replica::effects::Part::read(bytes).map_err(refusal)?.header),
+        None => None,
     };
-    let mut named = last_named(&mut found.records.iter().map(Vec::as_slice))?;
-    // Read from a checkpoint with no part after it, a world that keeps no header learns the one its log names from
-    // the log before it, read from the disk a batch at a time (rare: a world from before headers were kept).
-    if named.is_none() && found.first > disk.first && !path.exists() {
-        let mut last = None;
-        disk.each_from(disk.first, &mut |_, bytes| {
-            if !recorder::is_input(bytes) {
-                last = Some(bytes.to_vec());
-            }
-            Ok(true)
-        })
-        .map_err(refusal)?;
-        named = last_named(&mut last.iter().map(Vec::as_slice))?;
-    }
+    let path = dir.join("header");
     let header = match std::fs::read(&path) {
         Ok(bytes) => Header::read(&bytes).map_err(refusal)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -3519,7 +3501,7 @@ fn off_machine(
         floor: archive_floor,
     };
     // Every record to both: the shipper passes over those under its claim's start, which it learns on its own thread.
-    view_out::History::each_from(log, first, &mut |record, bytes| {
+    log.each_from(first, &mut |record, bytes| {
         off.take(record, bytes, recorder::is_input(bytes));
         Ok(true)
     })
@@ -3758,7 +3740,27 @@ fn serve(args: &[String]) -> R<()> {
     // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
     // A fork's is its `header`, checked above against this build's kinds.
     if stored_header.is_none() {
-        let (header, owners) = own_header(&dir, &built, &found, &disk)?;
+        // Read from a checkpoint with no part after it, a world that keeps no header file learns the one its log
+        // names from the log before it, read from the disk a batch at a time (rare: a world from before headers).
+        let mut earlier = Vec::new();
+        if found.records.iter().all(|b| recorder::is_input(b))
+            && found.first > disk.first
+            && !dir.join("header").exists()
+        {
+            disk.each_from(disk.first, &mut |_, bytes| {
+                if !recorder::is_input(bytes) {
+                    earlier = vec![bytes.to_vec()];
+                }
+                Ok(true)
+            })
+            .map_err(refusal)?;
+        }
+        let named = if earlier.is_empty() {
+            &found.records
+        } else {
+            &earlier
+        };
+        let (header, owners) = own_header(&dir, &built, named)?;
         let _ = adopt(&mut built, header, &owners);
     }
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
@@ -5201,15 +5203,19 @@ mod tests {
         assert!(raw.get(&head.newest).unwrap().is_none());
         let missing = dir.join("no-local-checkpoint");
         assert!(!missing.exists());
-        let recovered =
-            sim::log::recover(&sim::log::Header::new(world.header.epoch).to_bytes()).unwrap();
+        let log = OnDisk {
+            path: missing.join("log"),
+            first: 0,
+            end: 0,
+            at: None,
+        };
         let reopened = fork_archive_base(
             &raw,
             prefix,
             &missing,
             &world.header,
             b"not a replacement checkpoint",
-            &recovered,
+            &log,
         )
         .unwrap();
         assert_eq!(
