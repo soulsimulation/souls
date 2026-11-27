@@ -3,11 +3,11 @@ import {Matrix4,Vector3} from 'three';
 import type {Object3D} from 'three';
 export type AuthoredRoom=Readonly<{id:string;floor:number;y:number;height:number;poly:readonly (readonly number[])[]}>;
 type Room=AuthoredRoom;
-type Opening={kind:'door'|'window'|'arch';floor:number;at:readonly number[];width:number;height:number;sill:number;from:string|null;to:string|null};
-type Hints={schema:string;revision:string;reason?:string;extent?:readonly number[]|null;open:boolean;rooms:readonly Room[];openings:readonly Opening[]};
+export type AuthoredOpening={kind:'door'|'window'|'arch';floor:number;at:readonly number[];width:number;height:number;sill:number;from:string|null;to:string|null};
+type Hints={schema:string;revision:string;reason?:string;extent?:readonly number[]|null;open:boolean;rooms:readonly Room[];openings:readonly AuthoredOpening[]};
 export const ENCLOSURE_LIMITS=Object.freeze({buildings:64,rooms:32,edges:2048,entry:.15,exit:.15,proposalMargin:.4});
-export type EnclosureResult={status:string;reason:string;building:string|null;revision:string|null;sourceRevision:string|null;room:string|null;floor:number|null;canonical:number[]|null;worldMatrix:number[]|null;region:AuthoredRoom|null;proposalMarginM:number;proposals:number[][];openings:Record<string,number>;connectivity:'unknown';validation:'full-authored-geometry-required';work:{buildings:number;rooms:number;edges:number};retained:number};
-const blank=(reason:string):EnclosureResult=>({status:'unknown',reason,building:null,revision:null,sourceRevision:null,room:null,floor:null,canonical:null,worldMatrix:null,region:null,proposalMarginM:ENCLOSURE_LIMITS.proposalMargin,proposals:[],openings:{door:0,window:0,arch:0},connectivity:'unknown',validation:'full-authored-geometry-required',work:{buildings:0,rooms:0,edges:0},retained:0});
+export type EnclosureResult={status:string;reason:string;building:string|null;revision:string|null;sourceRevision:string|null;room:string|null;floor:number|null;canonical:number[]|null;worldMatrix:number[]|null;region:AuthoredRoom|null;proposalMarginM:number;openingProposals:readonly AuthoredOpening[];proposals:number[][];openings:Record<string,number>;connectivity:'unknown';validation:'full-authored-geometry-required';work:{buildings:number;rooms:number;edges:number};retained:number};
+const blank=(reason:string):EnclosureResult=>({status:'unknown',reason,building:null,revision:null,sourceRevision:null,room:null,floor:null,canonical:null,worldMatrix:null,region:null,proposalMarginM:ENCLOSURE_LIMITS.proposalMargin,openingProposals:[],proposals:[],openings:{door:0,window:0,arch:0},connectivity:'unknown',validation:'full-authored-geometry-required',work:{buildings:0,rooms:0,edges:0},retained:0});
 /** Signed distance to the polygon boundary; positive inside. */
 function polygon(point:Vector3,poly:readonly (readonly number[])[],budget:{edges:number},matrix?:Matrix4){
  let inside=false,distance=Infinity;const world=matrix?point.clone().applyMatrix4(matrix):null;
@@ -42,7 +42,7 @@ export class EnclosureContext{
   }
   if(found.length!==1||uncertain){this.reset();out.status=found.length||uncertain?'ambiguous':'outside';out.reason=found.length>1?'overlapping-room-context':uncertain?'boundary-or-unsupported-metadata':'outside-examined-authored-rooms';return out;}
   const {node,h,r,local,distance}=found[0];this.prior={node,hints:h,matrix:[...node.matrixWorld.elements],room:r.id,revision:source.revision};
-  out.status=h.open?'open':'enclosed';out.reason=distance<ENCLOSURE_LIMITS.entry?'boundary-held':'authored-membership';out.building=String(node.userData.cameraEnclosureId??node.parent?.name??node.name).slice(0,96);out.revision=h.revision;out.room=r.id;out.floor=r.floor;out.canonical=local.toArray();out.worldMatrix=[...node.matrixWorld.elements];out.retained=1;out.region=r;
+  out.status=h.open?'open':'enclosed';out.reason=distance<ENCLOSURE_LIMITS.entry?'boundary-held':'authored-membership';out.building=String(node.userData.cameraEnclosureId??node.parent?.name??node.name).slice(0,96);out.revision=h.revision;out.room=r.id;out.floor=r.floor;out.canonical=local.toArray();out.worldMatrix=[...node.matrixWorld.elements];out.retained=1;out.region=r;out.openingProposals=h.openings.filter(o=>o.floor===r.floor&&(o.from===r.id||o.to===r.id||o.from===null&&o.to===null)).sort((a,b)=>Number(a.kind==='window')-Number(b.kind==='window')).slice(0,8);
   for(const o of h.openings)if(o.floor===r.floor&&(o.from===r.id||o.to===r.id)&&Object.hasOwn(out.openings,o.kind))out.openings[o.kind]++;
   let x=0,z=0;for(const p of r.poly){x+=p[0]/r.poly.length;z+=p[1]/r.poly.length;}
   for(const dx of[-.5,0,.5])for(const dz of[-.5,0,.5]){const p=new Vector3(x+dx,r.y+Math.min(1.6,r.height-.4),z+dz),d=polygon(p,r.poly,out.work,node.matrixWorld);if(d===null){out.proposals=[];out.reason+=':proposal-work-cap';return out;}if(d>=ENCLOSURE_LIMITS.proposalMargin)out.proposals.push(p.applyMatrix4(node.matrixWorld).toArray());}
