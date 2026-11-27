@@ -269,16 +269,51 @@ struct Walker {
 
 /// The newest world time of an effect in the log on the disk, µs.
 fn log_reached(log: &Path) -> i64 {
+    reached_from(log, 0).expect("a tick with an effect")
+}
+
+/// The newest world time of an effect in the log's records from record `from` on, µs, and how many records it holds.
+fn reached_from(log: &Path, from: usize) -> Option<i64> {
     let bytes = std::fs::read(log).expect("the log");
     sim::log::recover(&bytes)
         .expect("the log")
         .records
         .iter()
+        .skip(from)
         .filter(|r| !sim::recorder::is_input(r))
         .filter_map(|r| Part::read(r).ok())
         .flat_map(|p| p.effects.into_iter().map(|e| e.envelope.at))
         .max()
-        .expect("a tick with an effect")
+}
+
+fn records(log: &Path) -> usize {
+    sim::log::recover(&std::fs::read(log).expect("the log"))
+        .expect("the log")
+        .records
+        .len()
+}
+
+/// How far the public stream shows the world, world µs: its pointer's newest part's end or its quiet mark.
+fn shown(dir: &Path) -> Option<i64> {
+    let world = json::parse(&std::fs::read_to_string(dir.join("views/world.json")).ok()?).ok()?;
+    let stream = world.get("stream")?.str()?.to_owned();
+    let p = replica::stream::Pointer::read(&std::fs::read(dir.join(stream).join("pointer")).ok()?)
+        .ok()?;
+    p.newest_to.max(p.quiet_until)
+}
+
+/// Waits up to `within` for the public stream to show world time `t`: how long it took, or `None`.
+// A real process on the real clock.
+#[allow(clippy::disallowed_methods)]
+fn shown_by(dir: &Path, t: i64, within: Duration) -> Option<u128> {
+    let began = Instant::now();
+    while began.elapsed() < within {
+        if shown(dir).is_some_and(|s| s >= t) {
+            return Some(began.elapsed().as_millis());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    None
 }
 
 /// Walks `sequence` and waits up to `within` for its answer, reconnecting once when the socket is gone: (ms it took,
@@ -367,7 +402,11 @@ fn o10_a_stepped_host_clock_never_freezes_a_world() {
             "{label}: clock.stepped is named within 2 s"
         );
         let ms = next(&mut c, label, Duration::from_secs(10));
-        assert!(ms < 2_000, "{label}: {ms} ms");
+        // Viewers: the public stream shows the walk's last effect within 5 s, whatever the machine's clock says.
+        let viewed = shown_by(&dir, log_reached(&log), Duration::from_secs(5));
+        println!("A3 {label}: shown in {viewed:?} ms");
+        assert!(ms < 5_000, "{label}: {ms} ms");
+        assert!(viewed.is_some(), "{label}: viewers see the walk within 5 s");
     }
     std::fs::write(&step, "0").unwrap();
     drop(c.take());
@@ -378,6 +417,7 @@ fn o10_a_stepped_host_clock_never_freezes_a_world() {
         ("restart, stepped forward 120 s", 120),
     ] {
         let reached = log_reached(&log);
+        let kept = records(&log);
         std::fs::write(&step, (by * 1_000_000).to_string()).unwrap();
         let world = serve(&dir, &socket, &env);
         world.line("listening");
@@ -385,12 +425,22 @@ fn o10_a_stepped_host_clock_never_freezes_a_world() {
         println!("A3 {label}: named {named:?} at {} ms", world.at());
         let ms = next(&mut c, label, Duration::from_secs(30));
         let started = world.line_within("started at tick", Duration::from_secs(1));
-        println!("A3 {label}: {started:?}; it printed:\n{}", world.said());
+        // World time from the effects written since the restart only, never those before it.
+        let after = reached_from(&log, kept);
+        // Viewers: the public stream shows the walk's last effect within 5 s.
+        let viewed = after.and_then(|t| shown_by(&dir, t, Duration::from_secs(5)));
+        println!(
+            "A3 {label}: {started:?}; world time {reached} before, {after:?} after; shown in {viewed:?} ms; it \
+             printed:\n{}",
+            world.said()
+        );
         drop(c.take());
         drop(world);
-        let after = log_reached(&log);
-        println!("A3 {label}: world time {reached} before, {after} after");
-        assert!(after >= reached, "{label}: world time went back");
+        assert!(
+            after.is_some_and(|a| a >= reached),
+            "{label}: world time went back"
+        );
+        assert!(viewed.is_some(), "{label}: viewers see the walk within 5 s");
         assert!(ms < 5_000, "{label}: the walk waited {ms} ms");
         if by < 0 {
             assert!(named.is_some(), "{label}: clock.stepped is named");

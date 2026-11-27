@@ -252,12 +252,7 @@ pub fn run(args: &[String]) -> i32 {
     let hard = arg("--watchdog-hard-ms")
         .and_then(|m| m.parse().ok())
         .unwrap_or(crate::watchdog::HARD_MS);
-    crate::watchdog::watch_to(
-        world.beat.clone(),
-        crate::watchdog::Real::start().ahead(world.ahead),
-        limit,
-        hard,
-    );
+    crate::watchdog::watch_to(world.beat.clone(), world.real, limit, hard);
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

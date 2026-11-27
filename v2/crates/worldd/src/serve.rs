@@ -178,7 +178,7 @@ fn stamp(stage: &str) {
 }
 /// O10 (#2806): the room a start needs on its world's disk beyond a checkpoint (the largest one's size): the files it
 /// writes before it listens and the log's first ticks.
-const START_ROOM: u64 = 16 << 20;
+const START_ROOM: u64 = 4 << 20;
 
 /// O10 (#2806): a start waits until its world's disk has room. A full disk ended the running world once
 /// (`disk-failed`, exit 87: nothing unwritten is acknowledged) and then every start, at its first write (exit 1), and
@@ -4111,11 +4111,7 @@ fn serve(args: &[String]) -> R<()> {
         }
     });
     worldd::directory::watch(told, world.events.clone(), answers);
-    crate::watchdog::watch(
-        world.beat.clone(),
-        crate::watchdog::Real::start().ahead(world.ahead),
-        crate::watchdog::LIMIT_MS,
-    );
+    crate::watchdog::watch(world.beat.clone(), world.real, crate::watchdog::LIMIT_MS);
     let views_dir = views.clone();
     // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
     // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
@@ -4155,6 +4151,9 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| e.to_string())?;
     // The public stream recovers its history on its own thread, as it already follows the world there: on a restarted
     // full-Eden fork that replay takes seconds, and the world serves meanwhile; records wait in `stream_rx` (#3746).
+    // The world's clock, not the machine's: a step of the machine's clock, or one a restart carried (O10), never makes
+    // the stream cut a stretch early or hold one late.
+    let world_clock = world.real;
     std::thread::Builder::new()
         .name("public-stream".into())
         .spawn(move || {
@@ -4317,7 +4316,7 @@ fn serve(args: &[String]) -> R<()> {
                                 writer.push(record, &bytes)?;
                             }
                         }
-                        let slept = writer.sleep(answers::now(), due).map_err(refusal);
+                        let slept = writer.sleep(world_clock.now_us(), due).map_err(refusal);
                         let done = slept.is_ok();
                         // R15: before the world exits to sleep, its backup is given a little time to hold the spool's
                         // head, so a move finds the store current; best effort, and well inside the sleep watch's own
@@ -4333,7 +4332,7 @@ fn serve(args: &[String]) -> R<()> {
                             return Ok(());
                         }
                     }
-                    writer.idle(answers::now())?;
+                    writer.idle(world_clock.now_us())?;
                     published(&writer);
                 }
             })();
@@ -4389,6 +4388,7 @@ fn serve(args: &[String]) -> R<()> {
             PathBuf::from(alarms),
             Arc::clone(&world.quiet),
             world.durable.clone(),
+            world.real,
             sleep_tx,
             STARTED.get().map_or(0, |t| {
                 i64::try_from(t.elapsed().as_micros()).unwrap_or(i64::MAX)
