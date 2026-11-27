@@ -334,6 +334,8 @@ Configure these names in the origin's existing `origin.env` (the origin service 
   default directory listener; adjust it if that listener changes. No path, credentials, query or fragment is allowed.
 - `SIM_SITE_OWNERS`: explicit comma-separated canonical account ids. `CATALOG_GENE_OWNER_ID` remains the
   compatibility fallback only when `SIM_SITE_OWNERS` is empty. Neither setting grants a world-owner fallback.
+  The directory reads `SIM_SITE_OWNERS` too (no fallback), as a line in `/etc/souls/directory.args`: New world's
+  per-account limits do not apply to these accounts. Imported worlds count toward no account's limits.
 - `SOULS_DATA`: the existing data location; its `owner-overview.json` is the existing collector's snapshot.
 
 The directory must use the same production provider and allowed application origins. The origin forwards only the
