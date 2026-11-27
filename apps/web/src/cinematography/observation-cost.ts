@@ -36,6 +36,13 @@ export class ObservationCostRing {
   refuse(reason: string) { this.failure ??= reason; }
   status() { return { epoch: this.epoch, total: this.sequence, failure: this.failure, witnessPlan: [...this.witnessPlan], witnessCount: this.witnesses.size }; }
   private identities: string[][] = [];
+  private sampleWitness: number | null = null;
+  armSampleWitness() {
+    if (this.sampleWitness !== null || this.witnessPlan.size >= 8 || this.failure) fail('sample-witness-already-armed-or-full');
+    this.sampleWitness = this.sequence + 1; this.witnessPlan.add(this.sampleWitness);
+    return { sequence: this.sampleWitness, at: performance.now(), epoch: this.epoch };
+  }
+  private witnessScene = new Map<number, { tick: number; history: boolean; seek: number; subjects: number; represented: number }>();
   private witnessPlan: Set<number>; private witnesses = new Map<number, Witness>();
   constructor(witnessSequences: readonly number[] = []) {
     if (witnessSequences.length > 8 || new Set(witnessSequences).size !== witnessSequences.length || witnessSequences.some(n => !Number.isSafeInteger(n) || n < 1)) fail('witness-plan');
@@ -51,7 +58,9 @@ export class ObservationCostRing {
     if (draw.cameraWorld.length !== 16 || draw.projection.length !== 16 || draw.viewport.length !== 5) fail('draw-layout');
     row.set(draw.cameraWorld, 16); row.set(draw.projection, 32); row.set(draw.viewport, 48); row[53] = draw.mode; row.set([identityIndex + 1, Number(draw.history ?? false), draw.seek ?? 0, draw.takeStart ?? 0, draw.takeTicks ?? 0, draw.dt ?? 0], 54);
     let before: ReturnType<typeof costWitness> | null = null;
-    if (this.witnessPlan.has(seq)) { try { if (!witness) fail('witness-missing'); before = costWitness(witness!()); } catch { this.witnesses.set(seq, { status: 'refused', reason: 'camera-cost-witness-refused' }); } }
+    if (this.witnessPlan.has(seq)) { try { if (!witness) fail('witness-missing'); const value = witness!(); before = costWitness(value);
+      const scene = value as { tick?: number; history?: boolean; seek?: number; holders?: { represented?: boolean }[] };
+      if (scene && Number.isFinite(scene.tick) && typeof scene.history === 'boolean' && Number.isSafeInteger(scene.seek) && Array.isArray(scene.holders)) this.witnessScene.set(seq, { tick: scene.tick!, history: scene.history, seek: scene.seek!, subjects: scene.holders.length, represented: scene.holders.filter(h => h.represented === true).length }); } catch { this.witnesses.set(seq, { status: 'refused', reason: 'camera-cost-witness-refused' }); } }
     return { seq, offset, before };
   }
   end(token: ReturnType<ObservationCostRing['begin']>, span: { invoked: boolean; start: number; end: number; outcome: number }, witness?: () => unknown) {
@@ -67,5 +76,5 @@ export class ObservationCostRing {
     let binary = ''; for (let i = 0; i < bytes.length; i += 16384) binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
     const encoded = btoa(binary); return { version: COST_LAYOUT.version, epoch: this.epoch, first, last: this.sequence, total: this.sequence, count, dropped: Math.max(0, first - after - 1), overwrites: Math.max(0, this.sequence - 600), exports: ++this.exports, exportMs: performance.now() - started, numericBufferBytes: this.numericBufferBytes, failure: this.failure, identities: this.identities.map(v => [...v]), encoding: 'float64-le-base64', data: encoded };
   }
-  readWitnesses() { return [...this.witnesses].map(([sequence, value]) => ({ sequence, ...value })); }
+  readWitnesses() { return [...this.witnesses].map(([sequence, value]) => ({ sequence, phase: sequence === this.sampleWitness ? 'sample' : 'declared-sequence', scene: this.witnessScene.get(sequence) ?? null, ...value })); }
 }

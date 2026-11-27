@@ -333,6 +333,7 @@ async function run(o, d) {
       report.network.push({ kind: 'requestfailed', method: request.method(), url: request.url(), error: request.failure()?.errorText ?? 'unknown', inFlightAtDriverNavigation: at !== undefined && navigation.epoch > at }); });
     page.on('response', response => { if (response.status() >= 400) report.network.push({ kind: 'http', status: response.status(), url: response.url() }); });
     observationStop = await bounded(() => driver.beforeNavigation?.({ page, base: world.base, paths, signal: controller.signal }), controller.signal, o.phaseTimeoutMs ?? 30000, 'before-navigation', timeout);
+    if (observationStop?.ready) await bounded(() => observationStop.ready, controller.signal, o.phaseTimeoutMs ?? 30000, 'observation-ready', timeout);
     await bounded(() => page.goto((o.world.kind === 'v2-bodies' || o.world.kind === 'native-page') ? world.viewer : o.world.kind === 'v2-account' ? new URL('/src/account/', world.base).href : world.base + '?dev=1', { waitUntil: 'domcontentloaded', timeout: o.navigationTimeoutMs ?? 30000 }), controller.signal, o.navigationTimeoutMs ?? 30000, 'navigation', timeout);
     // From here on, a goto or reload is the driver's: requests in flight when one starts may be aborted by it.
     for (const name of ['goto', 'reload']) if (typeof page[name] === 'function') { const call = page[name].bind(page); page[name] = (...args) => { navigation.epoch++; return call(...args); }; }
@@ -369,6 +370,7 @@ async function run(o, d) {
       try { if (observationStop) await bounded(observationStop, null, o.cleanupTimeoutMs ?? 8000, 'observer-close'); } catch (e) { report.teardown.observerError = String(e); cleanupFailed = true; }
       browserCleanupStarted = true;
       try { if (browser) await bounded(() => browser.close(), null, o.cleanupTimeoutMs ?? 8000, 'browser-close'); report.teardown.browserClosed = !report.teardown.browserOpenPending; } catch (e) { report.teardown.browserError = String(e); cleanupFailed = true; }
+      if (role.role === 'measurement' && observationStop?.afterBrowserClose) try { evidence('cost-process-after-close.json', await bounded(() => observationStop.afterBrowserClose(), null, o.cleanupTimeoutMs ?? 8000, 'measurement-after-close')); } catch (e) { report.evidenceError = String(e); report.status = 'EVIDENCE_FAIL'; }
       try {
         for (const event of report.network) event.expected = expectedNetwork(event, report, report.ownedOrigin);
         for (const event of report.console) if (event.kind === 'error') event.expected = expectedResourceError(event, report, report.ownedOrigin);
@@ -395,7 +397,7 @@ async function run(o, d) {
       }
       try {
         if (existsSync(paths.log)) report.evidence.push({ file: paths.log, hash: digest(readFileSync(paths.log)) });
-        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json|native-page-provenance\.json|native-input-facts\.json|native-manual\.png|native-document\.html)$/.test(f))) { const at = join(paths.dir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
+        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json|native-page-provenance\.json|native-input-facts\.json|native-manual\.png|native-document\.html|cost-[a-z0-9-]+\.(?:json|png))$/.test(f))) { const at = join(paths.dir, file); if (!report.evidence.some(e => e.file === at)) report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
         const captureDir = join(paths.dir, 'capture');
         if (existsSync(captureDir)) for (const file of readdirSync(captureDir)) { const at = join(captureDir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
         for (const file of readdirSync(paths.video)) {
