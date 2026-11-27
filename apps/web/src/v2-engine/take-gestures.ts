@@ -47,7 +47,7 @@ export function recordConsume(history: readonly ConsumeMove[] | undefined, move:
 
 /** Keep run termination distinct from the move's own native ending; never invent a completion. */
 export function endConsumes(history: readonly ConsumeMove[] | undefined, end: { at: number; run?: string; how?: string }): ConsumeMove[] | undefined {
-  return history?.map(c => c.start <= end.at && (end.run === undefined || c.run === end.run)
+  return history?.map(c => end.run !== undefined && c.run === end.run && c.start <= end.at && c.runEnd === undefined
     ? recordedConsumeMove({ ...c, runEnd: { at: end.at, ...(end.how === undefined ? {} : { how: end.how }) } }) ?? c : c);
 }
 

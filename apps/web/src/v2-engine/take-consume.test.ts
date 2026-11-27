@@ -118,3 +118,30 @@ test('bridge trims old consume history while retaining the last observation befo
   assert.deepEqual(at(takeAt(bridge, 96.25), 96.25).state.consumeMove, last,
     'a completed consume remains observable after its original chunks/history have expired');
 });
+
+test('a run ending without its native run identity cannot claim any prior consume', () => {
+  const previous = { ...move(), run: 'previous-run', ended: { at: T0 + 300_000, how: 'released' } };
+  const current = { ...move(), run: 'current-run', start: T0 + 400_000 };
+  const unknown = move(); delete unknown.run;
+  const history = recordConsume(recordConsume(recordConsume(undefined, previous), current), unknown);
+  const result = endConsumes(history, { at: T0 + 900_000, how: 'done' })!;
+  assert.deepEqual(result, history);
+  for (let i = 0; i < history.length; i++) {
+    assert.equal(result[i], history[i]); assert.equal(result[i].runEnd, undefined);
+  }
+  assert.deepEqual(result.find(c => c.run === previous.run)?.ended, previous.ended, 'a known move ending is not a guessed run ending');
+});
+
+test('bridge preserves the first matching run termination against later duplicate and unrelated events', () => {
+  const bridge = new V2Bridge({ rulesVersion: 'consume-test' });
+  bridge.receive({ t: 'snapshot', s: { nodes: [world, diner], removed: [] } as never });
+  bridge.receive(part(0, { moves: [move()] }));
+  bridge.receive(part(1, { runEnds: [{ body: 'diner', at: T0 + 800_000, how: 'unknown-run' }] }));
+  bridge.receive(part(2, { runEnds: [{ body: 'diner', run: 'meal-run', at: T0 + 1_100_000, how: 'cancelled' }] }));
+  bridge.receive(part(3, { runEnds: [{ body: 'diner', run: 'meal-run', at: T0 + 1_700_000, how: 'later-terminal' },
+    { body: 'diner', run: 'different-run', at: T0 + 1_800_000, how: 'done' }] }));
+  for (let n = 4; n < 16; n++) bridge.receive(part(n));
+  const record = recordedConsumeMove(at(takeAt(bridge, 5.25), 5.25).state.consumeMove)!;
+  assert.deepEqual(record.runEnd, { at: T0 + 1_100_000, how: 'cancelled' });
+  assert.equal(record.ended, undefined, 'form termination never creates a native move ending');
+});
