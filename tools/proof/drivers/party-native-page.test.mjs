@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { silentPartyTemplate } from '../../playtest/party/rehearse.mjs';
 import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyCaptureMs } from './party-native-page.mjs';
 
 const souls = ['s0','s1','s2','s3','s4'];
@@ -10,9 +11,12 @@ const sample = (n, activities) => ({ at:n*250, tick:n*5, frame:n, currentCanvas:
 const idle = Array(5).fill('idle'), dance = Array(5).fill('dance');
 const event = (stage, details={}) => ({stage,sampleIndex:0,...details});
 
-test('object-free party template adds no thing, def, model, jukebox or operation', () => {
+test('party template uses a named open park area, without furniture or a new model', () => {
   const t=JSON.parse(readFileSync(new URL('../../../worlds/templates/party-rehearsal.json',import.meta.url)));
-  assert.equal(t.name,'Silent party rehearsal');assert.equal(t.constants.ground,'land');assert.deepEqual(t.batches,[]);
+  assert.deepEqual(t,silentPartyTemplate());
+  assert.equal(t.batches[0].ops.length,1);
+  const area=t.batches[0].ops[0];assert.equal(area.def,'core/zone@1');assert.equal(area.params.use,'park');
+  assert.deepEqual(area.shape.area,[[-8,-8],[8,-8],[8,8],[-8,8]]);
   assert.equal(partyCaptureMs,90000);
 });
 

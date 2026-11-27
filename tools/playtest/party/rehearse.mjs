@@ -18,6 +18,19 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const names = ['Cedar', 'Maple', 'Willow', 'Birch', 'Aspen'];
 
+/** A real, geometry-free park zone: the existing template operation also names the dance space. */
+export function partyDanceArea() {
+  return { op: 'place', def: 'core/zone@1', name: 'party-dance-space', params: { use: 'park' },
+    shape: { area: [[-8, -8], [8, -8], [8, 8], [-8, 8]] } };
+}
+
+export function silentPartyTemplate() {
+  return { schema: 'genesis/1', name: 'Silent party rehearsal',
+    description: 'An open, flat park dance space for five Souls greeting and dancing without a jukebox or sound claim.',
+    constants: { extent: 50, ground: 'land' },
+    batches: [{ group: 'party-dance-space', ops: [partyDanceArea()] }] };
+}
+
 export function partyTemplate(jukeboxEntry) {
   assert.equal(jukeboxEntry.kind, 'eden:jukebox', 'use the shipped jukebox');
   const def = defOf(jukeboxEntry);
@@ -28,6 +41,7 @@ export function partyTemplate(jukeboxEntry) {
     batches: [{ group: 'party-rehearsal', ops: [
       { op: 'define', def },
       { op: 'place', def: 'core/jukebox@1', name: 'party-jukebox', p: [4, 0, -2] },
+      partyDanceArea(),
     ] }],
   };
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { completed, partyTemplate, performParty } from './rehearse.mjs';
+import { completed, partyTemplate, partyDanceArea, silentPartyTemplate, performParty } from './rehearse.mjs';
 
 const receipt = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
@@ -16,6 +16,24 @@ test('the scene uses the existing jukebox shape and places it outside the dance 
   assert.equal(definition.def.name, 'core-jukebox');
   assert.equal(definition.def.make.args.shapes.length, entry.looks.shape.shapes.length);
   assert(placement.p[0] - entry.geometry.bounds_mm[0] / 2000 > 3);
+});
+
+test('dance area uses the shipped geometry-free zone operation and encloses the entry and formation', () => {
+  const area = partyDanceArea();
+  const kit = JSON.parse(readFileSync(new URL('../../../packages/world-compiler/src/core-kit/layers.json', import.meta.url)));
+  const zone = kit.find(def => def.name === 'core-zone');
+  assert.equal(zone.form, 'area'); assert.deepEqual(zone.make, { kind: 'none' });
+  assert.deepEqual(zone.components.place, { kind: 'zone', enclosed: false });
+  assert(zone.params.use.values.includes(area.params.use));
+  const example = JSON.parse(readFileSync(new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url)))
+    .batches.flatMap(batch => batch.ops).find(op => op.name === 'lab-start');
+  assert.equal(area.op, example.op); assert.equal(area.def, example.def);
+  assert.deepEqual(area.params, example.params); assert.deepEqual(Object.keys(area.shape), Object.keys(example.shape));
+  const xs=area.shape.area.map(p=>p[0]), zs=area.shape.area.map(p=>p[1]);
+  assert(Math.min(...xs)<-5 && Math.max(...xs)>5 && Math.min(...zs)<-5 && Math.max(...zs)>5);
+  assert.deepEqual(silentPartyTemplate().batches[0].ops, [area]);
+  const entry=JSON.parse(readFileSync(new URL('../../../content/kinds/music/jukebox.json',import.meta.url)));
+  assert.deepEqual(partyTemplate(entry).batches[0].ops.at(-1),area);
 });
 
 // Independent public reply fixtures: these intentionally do not import the client catalogue/member builders.

@@ -1,7 +1,44 @@
 {
   "schema": "genesis/1",
   "name": "Silent party rehearsal",
-  "description": "An open, flat space for five Souls greeting and dancing together without a jukebox or sound claim.",
-  "constants": { "extent": 50, "ground": "land" },
-  "batches": []
+  "description": "An open, flat park dance space for five Souls greeting and dancing without a jukebox or sound claim.",
+  "constants": {
+    "extent": 50,
+    "ground": "land"
+  },
+  "batches": [
+    {
+      "group": "party-dance-space",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/zone@1",
+          "name": "party-dance-space",
+          "params": {
+            "use": "park"
+          },
+          "shape": {
+            "area": [
+              [
+                -8,
+                -8
+              ],
+              [
+                8,
+                -8
+              ],
+              [
+                8,
+                8
+              ],
+              [
+                -8,
+                8
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ]
 }
