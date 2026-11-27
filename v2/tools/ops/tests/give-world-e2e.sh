@@ -3,14 +3,15 @@
 # account signs in (the test sign-in) and gets a principal of its own; a world whose creator no account holds has a
 # gateway with no creator flags, so its creator's page gets no creator token. give-world then gives the world to the
 # account; the account's sign-in gets the token and anyone else's is refused. systemctl is a stand-in that starts and
-# stops these two programs. Nothing leaves the scratch folder.
+# stops these two programs. Nothing leaves its scratch folder (removed after a pass).
 #
 #   bash v2/tools/ops/tests/give-world-e2e.sh <folder with directoryd and gatewayd>   (cargo build -p directoryd -p gatewayd)
 set -euo pipefail
 B=$(cd "${1:?a folder with directoryd and gatewayd}" && pwd)
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-mkdir -p "$HERE/../../../.local"
-R=$(mktemp -d "$HERE/../../../.local/give-world-e2e.XXXXXX"); R=$(cd "$R" && pwd)
+# A short folder: the gateway's control socket sits beside the world's tokens file, and a socket's path has at most 107
+# bytes (a world folder under a checkout's .local is longer).
+R=$(mktemp -d /tmp/gw-e2e.XXXXXX); R=$(cd "$R" && pwd)
 free() { node -e 's=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'; }
 DP=$(free) GP=$(free)
 X=$(printf '9%.0s' {1..32}) I=$(printf 'a%.0s' {1..32})-$(printf 'a%.0s' {1..32})-0
@@ -52,18 +53,18 @@ trap finish EXIT
 "$R/systemctl" start souls-directory.service
 curl -s -XPOST -H 'content-type: application/json' -d '{"name":"gene"}' "http://127.0.0.1:$DP/v1/account/test-sign-in" > /dev/null
 "$R/systemctl" start souls-gateway@$I.service
-ACCOUNT=$(node -e '
+ACCOUNT=$(node --no-warnings -e '
   const fs=require("fs"),os=require("os"),p=require("path"),{DatabaseSync}=require("node:sqlite"),d=fs.mkdtempSync(p.join(os.tmpdir(),"e2e-"));
   for (const s of ["","-wal","-shm"]) if (fs.existsSync(process.argv[1]+s)) fs.copyFileSync(process.argv[1]+s,p.join(d,"db"+s));
   console.log(new DatabaseSync(p.join(d,"db")).prepare("SELECT account_id a FROM provider_accounts_v1").get().a)' "$R$STORE" 2>/dev/null)
 [[ "$ACCOUNT" =~ ^acct_ ]] && ok "the test sign-in made an account with a principal of its own" || no "no account ($ACCOUNT)"
 [ "$(token gene)" = 404 ] && ok "before: the gateway has no creator flags, so the account gets no creator token (404)" || no "before: $(token gene)"
 
-node "$HERE/give-world.mjs" eden "$ACCOUNT" check > "$R/check.out"
+node --no-warnings "$HERE/give-world.mjs" eden "$ACCOUNT" check > "$R/check.out"
 [ ! -s "$R/systemctl.log.after-check" ] && grep -q 'check only' "$R/check.out" && ok "check: $(grep -c give-world "$R/check.out") lines, nothing changed" || no "check"
-node "$HERE/give-world.mjs" eden "$ACCOUNT" run > "$R/run.out" 2>&1 && ok "run: $(tail -1 "$R/run.out")" || { cat "$R/run.out"; no "run failed"; }
+node --no-warnings "$HERE/give-world.mjs" eden "$ACCOUNT" run > "$R/run.out" 2>&1 && ok "run: $(tail -1 "$R/run.out")" || { cat "$R/run.out"; no "run failed"; }
 [ "$(token gene)" = 200 ] && ok "after: the account's sign-in gets the world's creator token (200)" || no "after: $(token gene)"
 [ "$(token someone)" = 403 ] && ok "after: another account's sign-in is refused not-the-creator (403)" || no "another: $(token someone)"
 ls "$R/var/lib/souls/directory/" | grep -q 'before-give-eden' && ls "$ETC" | grep -q "gateway-$I.env.before-creator" && ok "the store and the gateway file were backed up" || no "backups"
-node "$HERE/give-world.mjs" eden "$ACCOUNT" run > "$R/again.out" 2>&1 && [ "$(grep -c 'no change' "$R/again.out")" = 2 ] && ok "a second run changes nothing" || no "second run"
+node --no-warnings "$HERE/give-world.mjs" eden "$ACCOUNT" run > "$R/again.out" 2>&1 && [ "$(grep -c 'no change' "$R/again.out")" = 2 ] && ok "a second run changes nothing" || no "second run"
 exit $fail
