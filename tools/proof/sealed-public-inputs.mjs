@@ -16,21 +16,22 @@ const safe = p => {
   if (typeof p !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(p) || p.startsWith('/') || p.split('/').some(s => !s || s.startsWith('.') || s === '_private' || /^(credentials(?:\.json)?|deploy\.env)$/.test(s))) fail('path');
   return p;
 };
-function file(root, name) {
-  safe(name); let at = resolve(root);
+function file(root, name, asset = false) {
+  if (!(asset && name === '.vite/manifest.json')) safe(name); let at = resolve(root);
   if (!lstatSync(at).isDirectory() || lstatSync(at).isSymbolicLink()) fail('root');
   for (const part of name.split('/')) { at = join(at, part); if (lstatSync(at).isSymbolicLink()) fail('symlink'); }
   if (!lstatSync(at).isFile()) fail('file-kind');
   return at;
 }
-function names(root, prefix, max) {
+function names(root, prefix, max, asset = false) {
   const out = [], pending = [prefix];
   while (pending.length) {
     const at = pending.pop(), info = lstatSync(join(root, at));
     if (info.isSymbolicLink()) fail('symlink');
     if (info.isDirectory()) {
       for (const name of readdirSync(join(root, at)).sort()) {
-        safe(name); if (out.length + pending.length >= max) fail('file-limit'); pending.push(at ? at + '/' + name : name);
+        if (!(asset && at === '' && name === '.vite')) safe(name);
+        if (out.length + pending.length >= max) fail('file-limit'); pending.push(at ? at + '/' + name : name);
       }
     } else if (info.isFile()) out.push(at); else fail('file-kind');
   }
@@ -127,8 +128,8 @@ function verifyAssets(bindings, sourceHead) {
   if (!bindings || bindings.sourceHead !== sourceHead || !/^[a-f0-9]{64}$/.test(bindings.artifactHash) || !Array.isArray(bindings.trees) || !bindings.trees.length) fail('asset-binding');
   for (const tree of bindings.trees) {
     if (!isAbsolute(tree.root) || !tree.files || !Object.keys(tree.files).length) fail('asset-binding');
-    if (JSON.stringify(names(tree.root, '', 100000)) !== JSON.stringify(Object.keys(tree.files).sort())) fail('asset-files');
-    for (const [name, expected] of Object.entries(tree.files)) if (hash(readFileSync(file(tree.root, name))) !== expected) fail('asset-hash');
+    if (JSON.stringify(names(tree.root, '', 100000, true)) !== JSON.stringify(Object.keys(tree.files).sort())) fail('asset-files');
+    for (const [name, expected] of Object.entries(tree.files)) if (hash(readFileSync(file(tree.root, name, true))) !== expected) fail('asset-hash');
   }
   return bindings;
 }

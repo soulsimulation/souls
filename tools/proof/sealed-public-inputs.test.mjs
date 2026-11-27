@@ -94,6 +94,15 @@ test('file and byte admission limits fail closed, and assets bind the original s
   const f = fixture(t); assert.throws(() => collectPublicInputs({ ...f, maxFiles: 2 }), /file-limit/); assert.throws(() => collectPublicInputs({ ...f, maxBytes: 1 }), /byte-limit/);
   f.assetBindings.sourceHead = 'c'.repeat(40); assert.throws(() => collectPublicInputs(f), /asset-binding/);
 });
+test('only exact pinned asset .vite/manifest.json is admitted; public paths and other hidden assets stay refused', t => {
+  const f = fixture(t), tree = f.assetBindings.trees[0]; mkdirSync(join(tree.root, '.vite')); writeFileSync(join(tree.root, '.vite/manifest.json'), 'unit manifest'); tree.files['.vite/manifest.json'] = sha('unit manifest');
+  assert.doesNotThrow(() => collectPublicInputs(f));
+  writeFileSync(join(tree.root, '.vite/other'), 'other'); tree.files['.vite/other'] = sha('other'); assert.throws(() => collectPublicInputs(f), /path/);
+  rmSync(join(tree.root, '.vite/other')); delete tree.files['.vite/other'];
+  rmSync(join(tree.root, '.vite/manifest.json')); symlinkSync(join(tree.root, 'asset'), join(tree.root, '.vite/manifest.json')); assert.throws(() => collectPublicInputs(f), /symlink/);
+  const g = fixture(t); g.write('history/bundles/00000000/index', encode(new Map([[1, 1], [2, 0], [3, [[0, new TextEncoder().encode('.vite/manifest.json'), new Uint8Array(32)]]]]))); assert.throws(() => collectPublicInputs(g), /path/);
+  const h = fixture(t), assets = h.assetBindings.trees[0]; writeFileSync(join(assets.root, '.hidden'), 'hidden'); assets.files['.hidden'] = sha('hidden'); assert.throws(() => collectPublicInputs(h), /path/);
+});
 test('missing text reference refuses even when a text file exists', t => {
   const f = fixture(t); f.native.StreamPlayer.prototype.snapshot = () => encode([new Map([[6, new Map([[30, new Map([[21, [new Uint8Array(16), 1]]])]])]])]);
   assert.throws(() => collectPublicInputs(f), /text-reference-missing/);
