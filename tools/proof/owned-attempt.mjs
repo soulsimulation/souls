@@ -190,7 +190,7 @@ async function run(o, d) {
     }
     state = existsSync(ledger) ? json(ledger) : { version: 1, owner: o.owner, historicalCaptures: o.history?.count ?? 0, historicalEvidence: o.history?.evidence ?? [], captures: 0, attempts: [], cycles: [] };
     const importIdentity = o.importedBudget ? { historyFile: resolve(o.importedBudget.historyFile), historyHash: o.importedBudget.historyHash } : null;
-    let imported, continuation;
+    let imported, continuation, effectiveReview = o.review ?? null;
     if (state.importedBudget) requireThat(digest(state.importedBudget) === digest(importIdentity), 'imported-budget-required-and-pinned');
     if (o.importedBudget) {
       // Authoritative check is under this ledger's exclusive lock; an outside preflight can be stale.
@@ -233,6 +233,7 @@ async function run(o, d) {
     }) ?? [];
     requireThat(planned.product.root === current.product.root || relocations.some(r => (r.kind ?? 'product') === 'product'), 'planned-source-mismatch');
     const chain = state.attempts.filter(a => a.cycle === cycle.id && a.slot === cycle.cursor);
+    if (imported?.latestSource) requireThat(!sameSource(imported.latestSource, current), 'unchanged-retry');
     if (chain.length || !sameSource(planned, current)) {
       requireThat(o.repair, 'planned-source-mismatch-or-material-change-required');
       changed(o.repair, current, d.changed);
@@ -242,9 +243,11 @@ async function run(o, d) {
     }
     if (continuation && imported?.nextTotalAttempt >= 3) {
       const review = o.importedBudget.thirdReview;
-      reviewThird({ ...review, evidence: review.evidenceHashes, source: current },
+      effectiveReview = { ...review, evidence: review.evidenceHashes, source: structuredClone(current) };
+      reviewThird(effectiveReview,
         imported.previous.map(a => ({ reportHash: a.hash, endedAt: a.endedAt, hypothesis: a.hypothesis })), o.owner, current, o.repair, d.now(), d.lineChanged);
     } else if (cycle.chain === 2 || continuation && cycle.chain >= 2) reviewThird(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    if (imported?.nextTotalAttempt >= 3) effectiveReview = { ...o.importedBudget.thirdReview, evidence: o.importedBudget.thirdReview.evidenceHashes, source: structuredClone(current) };
     checkPort(o.world.port);
     requireThat(await d.portFree(o.world.port), 'occupied-resource');
     controller.signal.throwIfAborted();
@@ -256,9 +259,9 @@ async function run(o, d) {
     if (continuation) (state.continuationAuthorities ??= []).push(continuation.pin);
     report = { version: 1, qualified: false, injected: d.test, owner: o.owner, cycle: cycle.id, slot: cycle.cursor,
       arm: slot.arm, repeat: slot.repeat, repairAttempt: cycle.chain, cumulativeRun: state.attempts.length + 1,
-      startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: o.review?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
+      startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: effectiveReview?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
       paths, driver: o.driver ?? null, browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [],
-      evidence: continuation ? [continuation.pin] : [], teardown: {}, review: o.review ?? null,
+      evidence: [...(continuation ? [continuation.pin] : []), ...(effectiveReview && imported ? imported.reviewEvidence : [])], teardown: {}, review: effectiveReview ? structuredClone(effectiveReview) : null,
       ...(continuation ? { continuationAuthority: continuation.pin } : {}) };
     cycle.inFlight = paths.dir; save(); // a crash remains an explicit unfinished ownership record
     requireThat(!state.attempts.some(a => a.runDir === paths.dir), 'reused-run-directory');

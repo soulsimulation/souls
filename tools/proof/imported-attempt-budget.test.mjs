@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,rmSync,existsSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {createTestRunner} from './owned-attempt.mjs';
 import {assertImportedAttemptBudget,assertContinuationAuthority} from './imported-attempt-budget.mjs';
 const digest=b=>createHash('sha256').update(b).digest('hex');
@@ -15,7 +16,7 @@ function fixture(t){
  const save=()=>writeFileSync(ledgerFile,JSON.stringify(state));
  const o={historyFile,historyHash:'',ledgerFile,plan,arm:'baseline',repeat:1,currentHeads:{product:'p2',tool:'t2',driver:'d2'}};
  const pin=()=>{writeFileSync(historyFile,JSON.stringify(h));o.historyHash=digest(readFileSync(historyFile));};pin();
- const attempt=(arm,repeat,status)=>{const report=join(root,`new-${state.attempts.length}.json`);writeFileSync(report,JSON.stringify({arm,repeat,status,hypothesis:'new '+state.attempts.length,endedAt:'2026-01-02T00:00:00Z'}));state.attempts.push({report,reportHash:digest(readFileSync(report))});save();};
+ const attempt=(arm,repeat,status)=>{const report=join(root,`new-${state.attempts.length}.json`);writeFileSync(report,JSON.stringify({arm,repeat,status,source:Object.fromEntries(Object.entries(o.currentHeads).map(([k,head])=>[k,{root:join(root,k),head}])),hypothesis:'new '+state.attempts.length,endedAt:'2026-01-02T00:00:00Z'}));state.attempts.push({report,reportHash:digest(readFileSync(report))});save();};
  return{root,h,state,o,save,pin,attempt};
 }
 test('frozen baseline slots each retain one consumed try; all new statuses count and third needs evidence-bound review',t=>{
@@ -123,4 +124,40 @@ test('ledger relocation requires identical frozen bytes and refuses old stopped,
  writeFileSync(fromFile,'{}');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-ledger/);
  for(const ownership of [{stopped:'cleanup failed'},{inFlight:'unfinalized'}]){f.state.cycles=[ownership];f.save();o.continuationAuthority=pin();assert.throws(()=>assertContinuationAuthority(o),/continuation-old-ledger-ownership/);}
  f.state.cycles=[];f.save();o.continuationAuthority=pin();mkdirSync(fromFile+'.lock');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-ledger/);
+});
+
+test('an empty local chain cannot replay the latest imported source, and the validated review becomes immutable history',async t=>{
+ const f=fixture(t),snapshot=head=>({product:{root:f.root,head},tool:{root:f.root,head},driver:{root:f.root,head}}),reports=[];
+ for(let i=0;i<3;i++){
+  const file=join(f.root,`imported-${i}.json`),report={arm:'baseline',repeat:1,source:snapshot('p1'),hypothesis:'old diagnosis '+i,endedAt:`2026-01-0${i+1}T00:00:00Z`};
+  writeFileSync(file,JSON.stringify(report));reports.push({file,hash:digest(readFileSync(file)),report});
+ }
+ f.h.evidence=[...reports.map(({file,hash})=>({file,hash})),f.h.evidence[1]];
+ f.h.slots[0]={arm:'baseline',repeat:1,consumed:3,attemptEvidence:reports.map(({hash,report})=>({hash,hypothesis:report.hypothesis,endedAt:report.endedAt}))};
+ f.state.historicalEvidence=f.h.evidence;f.pin();writeFileSync(join(f.root,'driver.mjs'),'export default async () => {};\n');
+ for(const args of [['init','-q'],['add','driver.mjs'],['-c','user.name=Fixture','-c','user.email=fixture@example.com','commit','-qm','fixture']])execFileSync('git',['-c','gc.auto=0','-C',f.root,...args]);
+ const arms=Object.fromEntries(['baseline','candidate'].map(arm=>[arm,{root:f.root,head:'p0'}]));
+ const cycle={id:'same-original-cycle',plan:f.h.plan,arms,fix:{root:f.root,from:'before',to:'p0',paths:['driver.mjs'],scope:'original fix'}};
+ f.state.cycles=[{...cycle,cursor:0,chain:0,armSources:arms,toolSource:{root:f.root,head:'p0'},driverSource:{root:f.root,head:'p0'},driverPath:'driver.mjs'}];f.save();
+ let head='p1',boots=0;
+ const runner=createTestRunner({source:root=>({root,head}),changed:()=>['driver.mjs'],portFree:async()=>true,boot:async()=>{boots++;throw Error('controlled boot abort');}});
+ const options={owner:f.h.owner,sourceRoot:f.root,toolRoot:f.root,ledger:f.o.ledgerFile,arm:'baseline',repeat:1,cycle,
+  world:{port:19044,slug:'fixture'},history:{count:f.h.captures,evidence:f.h.evidence},driver:{root:f.root,path:'driver.mjs'},
+  repair:{root:f.root,from:'p0',to:head,paths:['driver.mjs'],scope:'actual repair',hypothesis:'unvalidated repair description'},
+  importedBudget:{historyFile:f.o.historyFile,historyHash:f.o.historyHash}};
+ const file=join(f.root,'authority.json'),review={reviewer:'independent-reviewer',evidenceOnly:true,decision:'TRY',at:new Date().toISOString(),
+  evidenceHashes:reports.slice(-2).map(a=>a.hash),currentHeads:{product:head,tool:head,driver:head},hypothesis:'validated distinct diagnosis',change:{path:'driver.mjs',line:1}};
+ options.importedBudget.thirdReview=review;
+ const pin=maximum=>{const a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,
+  ledger:{file:options.ledger,hash:digest(readFileSync(options.ledger))},cycle,current:snapshot(head),importedBudget:{historyFile:f.o.historyFile,historyHash:f.o.historyHash},slot:{arm:'baseline',repeat:1,maxTotalAttempts:maximum},frozenEvidence:f.h.evidence,relocations:[]};
+  writeFileSync(file,JSON.stringify(a));options.continuationAuthority={file,hash:digest(readFileSync(file))};};
+ pin(4);await assert.rejects(runner(options),/unchanged-retry/);assert.equal(boots,0);
+ head='p2';options.repair.to=head;review.currentHeads={product:head,tool:head,driver:head};pin(4);
+ const report=await runner(options);assert.equal(report.status,'BOOT_ABORT');assert.equal(boots,1);
+ assert.equal(report.hypothesis,review.hypothesis);assert.deepEqual(report.review.evidence,review.evidenceHashes);
+ assert.deepEqual(report.review.source,snapshot(head));assert.deepEqual(report.evidence.filter(e=>review.evidenceHashes.includes(e.hash)),reports.slice(-2).map(({file,hash})=>({file,hash})));
+ review.hypothesis='later mutation';assert.equal(report.review.hypothesis,'validated distinct diagnosis');
+ const state=JSON.parse(readFileSync(options.ledger));head='p3';options.repair.to=head;review.currentHeads={product:head,tool:head,driver:head};
+ review.evidenceHashes=[reports.at(-1).hash,state.attempts.at(-1).reportHash];review.at=new Date(Date.now()+1).toISOString();review.hypothesis=report.hypothesis;pin(5);
+ await assert.rejects(runner(options),/third-hypothesis/);assert.equal(boots,1);
 });

@@ -61,14 +61,16 @@ export function assertImportedAttemptBudget({historyFile,historyHash,ledgerFile,
   const state=JSON.parse(readFileSync(ledgerFile,'utf8'));
   need(state.owner===h.owner&&state.historicalCaptures===h.captures&&same(state.historicalEvidence,h.evidence),'ledger-history-mismatch');
   need(!state.cycles?.some(c=>c.inFlight),'in-flight');
-  rows=state.attempts.map(a=>({hash:a.reportHash,report:readPinned(a.report,a.reportHash)}));
+  rows=state.attempts.map(a=>({hash:a.reportHash,file:a.report,report:readPinned(a.report,a.reportHash)}));
   need(rows.every(a=>h.plan.some(s=>key(s)===key(a.report))),'unknown-recorded-slot');
  }
  const attempts=rows.filter(a=>a.report.arm===arm&&a.report.repeat===repeat),total=selected.consumed+attempts.length;
  const continuation=assertContinuationAuthority({continuationAuthority,ledgerFile,owner,cycle,current,importedBudget:{historyFile,historyHash},arm,repeat,source,now});
  const maximum=continuation?.slot.maxTotalAttempts??3;
  need(total<maximum,'ceiling');
- const previous=[...selected.attemptEvidence,...attempts.map(a=>({hash:a.hash,hypothesis:a.report.hypothesis,endedAt:a.report.endedAt}))].slice(-2);
+ const previous=[...selected.attemptEvidence.map(a=>({...a,file:h.evidence.find(e=>e.hash===a.hash).file})),...attempts.map(a=>({hash:a.hash,file:a.file,hypothesis:a.report.hypothesis,endedAt:a.report.endedAt}))].slice(-2);
+ const latestSource=previous.length?readPinned(previous.at(-1).file,previous.at(-1).hash).source:undefined;
+ if(continuation&&total>=2)need(latestSource&&Object.keys(current).every(k=>latestSource[k]?.root&&latestSource[k]?.head)&&same(Object.keys(latestSource).sort(),Object.keys(current).sort()),'latest-source-required');
  if(total===2||continuation&&total>=2){
   need(thirdReview?.evidenceOnly===true&&thirdReview.reviewer&&thirdReview.reviewer!==h.owner&&thirdReview.decision==='TRY','third-review-required');
   need(currentHeads&&['product','tool','driver'].every(k=>typeof currentHeads[k]==='string'&&currentHeads[k])&&same(thirdReview.evidenceHashes,previous.map(a=>a.hash))&&same(thirdReview.currentHeads,currentHeads),'third-review-binding');
@@ -76,6 +78,7 @@ export function assertImportedAttemptBudget({historyFile,historyHash,ledgerFile,
   need(Date.parse(thirdReview.at)>Math.max(...previous.map(a=>Date.parse(a.endedAt)))&&Date.parse(thirdReview.at)<=now+1000,'third-review-stale');
   need(thirdReview.change?.path&&Number.isSafeInteger(thirdReview.change.line)&&thirdReview.change.line>0,'third-file-line');
  }
- return {priorAttempts:selected.consumed,newAttempts:attempts.length,nextTotalAttempt:total+1,remaining:maximum-total,previous,continuation,
+ return {priorAttempts:selected.consumed,newAttempts:attempts.length,nextTotalAttempt:total+1,remaining:maximum-total,previous,latestSource,continuation,
+  reviewEvidence:total>=2?previous.map(a=>({file:a.file,hash:a.hash})):[],
   history:{count:h.captures,evidence:h.evidence}};
 }
