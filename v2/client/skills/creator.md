@@ -204,7 +204,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 - `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
   `--bounds x0,z0,x1,z1` (metres) to cover a box.
 - The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
-  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  carries only the new tiles, so one grow adds at most about 390 of Eden 2026's 64 m tiles; a larger one is refused
   `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
   land edit, so a ground past about 16 MB is refused `edit.too-large`.
 
