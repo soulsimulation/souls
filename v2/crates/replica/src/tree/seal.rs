@@ -24,6 +24,13 @@
 //!   a seal walks down from the tops into marked nodes only. The tops, loose links, timers and flights are listed
 //!   again at each seal: a scan without hashing, small beside hashing every node.
 //! - **Timers are the smallest seam** while K9 builds the due list: written whole, per audience, at each seal.
+//! - **A record is read whole or refused** ([`Tree::unseal`], `checkpoint-record`; #5211): a node's, an audience's,
+//!   a link's, a timer's, a flight's or a big field's record that holds a key this build does not read is never read
+//!   in part. A build that left the key out would run the world without what it held and write the next checkpoint
+//!   without it (Eden's terrain, 25 Nov). So a new key in any of these records is a change of format: a build from
+//!   before it refuses the checkpoint by name and uses an older one, or does not start. A node's fields (field 6)
+//!   are data, carried whole whatever their numbers. A newer build reads every older record: 3, 4, 7, 8 and 0 may
+//!   be absent.
 //! - **The state hash each tick** (K20, #3395; [`Tree::state_hashes`]) is the same audiences' hashes, worked out the
 //!   same way under a mark of its own: a change clears both marks, the state hash sets only its own and keeps no
 //!   record, so it never takes a record from the next checkpoint; a seal sets both. A tree no part has touched since
@@ -695,14 +702,13 @@ impl Tree {
                 let (id, v) = id_pair(p)?;
                 let mut t = map(v)?;
                 let due = read_i64(&take(&mut t, 2)?)?;
-                timers.insert(
-                    id,
-                    TimerState {
-                        node: read_id(&take(&mut t, 1)?)?,
-                        due,
-                        name: text(take(&mut t, 3)?)?,
-                    },
-                );
+                let timer = TimerState {
+                    node: read_id(&take(&mut t, 1)?)?,
+                    due,
+                    name: text(take(&mut t, 3)?)?,
+                };
+                closed(&t, "a timer")?;
+                timers.insert(id, timer);
             }
             for p in array(take(&mut m, 5)?)? {
                 flights.push(id_pair(p)?);
@@ -722,6 +728,7 @@ impl Tree {
                     .collect::<R<Vec<_>>>()?;
                 zone = Some((next, arrived, time));
             }
+            closed(&m, "an audience's record")?;
         }
         let Some((next, arrived, time)) = zone else {
             return refuse("checkpoint-record", "no public record");
@@ -759,6 +766,7 @@ impl Tree {
                 let (lid, l) = link_in(p)?;
                 carried.insert(lid, l);
             }
+            closed(&f, "a flight")?;
             let links = carried
                 .into_iter()
                 .map(|(lid, l)| (lid, t.link_rec(l)))
@@ -990,6 +998,18 @@ fn take(m: &mut BTreeMap<u64, Value>, k: u64) -> R<Value> {
         .map_or_else(|| bad(&format!("field {k} is missing")), Ok)
 }
 
+/// A record read whole holds no key this build does not read (`checkpoint-record`): a key left in `m` once every
+/// key read is taken out is refused, never dropped. A build that read a newer build's record in part would run the
+/// world without what the key held, and its next checkpoint would leave it out for good (#5211: Eden's terrain).
+fn closed(m: &BTreeMap<u64, Value>, what: &str) -> R<()> {
+    match m.keys().next() {
+        None => Ok(()),
+        Some(k) => bad(&format!(
+            "{what} holds key {k}, which this build does not read"
+        )),
+    }
+}
+
 fn hash_bytes(v: Value) -> R<Vec<u8>> {
     let b = bytes(v)?;
     if b.len() == 34 && b[0] == crate::ids::SHA2_256 && b[1] == 32 {
@@ -1012,6 +1032,11 @@ fn read_audience(v: &Value) -> R<Audience> {
     let Value::Map(m) = v else {
         return bad("an audience is not a map");
     };
+    if let Some(k) = m.keys().find(|k| **k != 1 && **k != 2) {
+        return bad(&format!(
+            "an audience holds key {k}, which this build does not read"
+        ));
+    }
     match (m.get(&1), m.get(&2)) {
         (Some(Value::Uint(1)), None) => Ok(Audience::Everyone),
         (Some(Value::Uint(2)), Some(id)) => Ok(Audience::Of(read_id(id)?)),
@@ -1030,19 +1055,18 @@ fn link_in(v: Value) -> R<(Id, LinkIn)> {
     let [a, b] = ends.as_slice() else {
         return bad("a link has two ends");
     };
-    Ok((
-        id,
-        LinkIn {
-            ty: text(take(&mut m, 1)?)?,
-            ends: [read_id(a)?, read_id(b)?],
-            owner: if uint(&take(&mut m, 3)?)? == 1 {
-                End::Second
-            } else {
-                End::First
-            },
-            audience: read_audience(&take(&mut m, 4)?)?,
+    let l = LinkIn {
+        ty: text(take(&mut m, 1)?)?,
+        ends: [read_id(a)?, read_id(b)?],
+        owner: match uint(&take(&mut m, 3)?)? {
+            0 => End::First,
+            1 => End::Second,
+            _ => return bad("a link's owning end is 0 or 1"),
         },
-    ))
+        audience: read_audience(&take(&mut m, 4)?)?,
+    };
+    closed(&m, "a link")?;
+    Ok((id, l))
 }
 
 /// A node's record; the links it owns go into `links`.
@@ -1067,10 +1091,21 @@ fn with_bigs(v: Value, read: &mut dyn FnMut(&[u8]) -> R<Value>) -> R<Value> {
                 "a big field's record is another node's",
             );
         }
-        let v = map(take(&mut r, 6)?)?.remove(&n).map_or_else(
+        let mut held = map(take(&mut r, 6)?)?;
+        let v = held.remove(&n).map_or_else(
             || refuse("checkpoint-record", "a big field's record without it"),
             Ok,
         )?;
+        // Its record is `{1: id, 5: audience, 6: {field: value}}` and nothing more.
+        r.remove(&1);
+        if r.remove(&5).as_ref() != m.get(&5) {
+            return refuse(
+                "checkpoint-record",
+                "a big field's record is of another audience",
+            );
+        }
+        closed(&held, "a big field's record, among its fields,")?;
+        closed(&r, "a big field's record")?;
         fields.insert(n, v);
     }
     m.insert(6, Value::Map(fields));

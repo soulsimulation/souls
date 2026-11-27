@@ -20,7 +20,11 @@
 //! 5. **Restart** ([`restore`]) reads the newest checkpoint that verifies (its CRC-32C, then every record against the
 //!    hash that names it), else the one before, naming each it rejected; [`replay`] then applies the log after it.
 //!    It brings back what the log holds: nodes, parents, links, holds, motion, timers, transfers and time. A skill in
-//!    progress is not stored; handing each active intent back to its skill is K13's.
+//!    progress is not stored; handing each active intent back to its skill is K13's. A checkpoint is read whole or
+//!    not at all (#5211): a record with a key this build does not read is refused by name (`checkpoint-record` in the
+//!    tree's records, `checkpoint-root-bad` in the root's), and the seed's keeper may refuse a seed it does not read
+//!    ([`restore_checked`]). A build that read a newer build's checkpoint in part would run the world without the
+//!    rest and write its next checkpoint without it.
 //! 6. **A failed write is final** for this process, as the log's sync is (`log` rule 6): the writer stops and says so.
 //! 7. **Where to resume** (K4b, #3136), two more root fields when the writer gives them ([`Checkpoints::take_at`]):
 //!    `6: [record, byte, checksum]`, the log's durable place when it was taken, so a restart opens the log from
@@ -144,6 +148,12 @@ fn read_audience(v: &Value) -> R<Audience> {
     let Value::Map(m) = v else {
         return refuse("checkpoint-root-bad", "an audience is not a map");
     };
+    if let Some(k) = m.keys().find(|k| **k != 1 && **k != 2) {
+        return refuse(
+            "checkpoint-root-bad",
+            format!("an audience holds key {k}, which this build does not read"),
+        );
+    }
     match (m.get(&1), m.get(&2)) {
         (Some(Value::Uint(1)), None) => Ok(Audience::Everyone),
         (Some(Value::Uint(2)), Some(id)) => Ok(Audience::Of(read_id(id)?)),
@@ -296,8 +306,10 @@ fn listed(dir: &Path) -> R<Vec<(u64, PathBuf)>> {
     Ok(out)
 }
 
-/// Reads one checkpoint file and its tree, every record checked against its hash.
-fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
+/// Reads one checkpoint file and its tree, every record checked against its hash. The root record is read whole: a
+/// key this build does not read is refused (`checkpoint-root-bad`), never dropped, as a node's is (#5211), and the
+/// seed's keeper says whether it reads the seed (`seed_reads`; [`restore_checked`]).
+fn read_one(bytes: &[u8], seed_reads: &dyn Fn(&[u8]) -> R<()>) -> R<(Tree, Root, Blobs)> {
     if bytes.len() < 4 {
         return refuse("checkpoint-crc", "shorter than its checksum");
     }
@@ -331,6 +343,15 @@ fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
             _ => return refuse("checkpoint-root-bad", "not [audience, hash]"),
         }
     }
+    let log = m.remove(&6).as_ref().map(read_at).transpose()?;
+    let minter = m.remove(&7).as_ref().map(read_minter).transpose()?;
+    if let Some(k) = m.keys().next() {
+        return refuse(
+            "checkpoint-root-bad",
+            format!("the root record holds key {k}, which this build does not read"),
+        );
+    }
+    seed_reads(&seed)?;
     let mut stored: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
     for r in recs {
         match r {
@@ -361,15 +382,15 @@ fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
         record,
         seed,
         audiences,
-        log: m.remove(&6).as_ref().map(read_at).transpose()?,
-        minter: m.remove(&7).as_ref().map(read_minter).transpose()?,
+        log,
+        minter,
     };
     Ok((tree, root, blobs))
 }
 
 /// Reads an immutable recovery checkpoint with exactly the normal CRC, hash and root validation.
 pub fn read_bytes(bytes: &[u8]) -> R<Restored> {
-    let (tree, root, blobs) = read_one(bytes)?;
+    let (tree, root, blobs) = read_one(bytes, &|_| Ok(()))?;
     Ok(Restored {
         tree,
         root,
@@ -380,6 +401,14 @@ pub fn read_bytes(bytes: &[u8]) -> R<Restored> {
 
 /// The newest checkpoint in `dir` that verifies, else the one before (rule 5). `None` when there is none at all.
 pub fn restore(dir: &Path) -> R<Option<Restored>> {
+    restore_checked(dir, &|_| Ok(()))
+}
+
+/// As [`restore`], with the seed's keeper saying whether it reads each checkpoint's seed (the seed is opaque here;
+/// a served world keeps what its restart needs besides the tree in it). A checkpoint whose seed it refuses is passed
+/// over under that name, like any other that does not verify, for the one before: a world never starts from a
+/// checkpoint its build reads only in part.
+pub fn restore_checked(dir: &Path, seed_reads: &dyn Fn(&[u8]) -> R<()>) -> R<Option<Restored>> {
     let mut rejected = Vec::new();
     for (_, path) in listed(dir)? {
         let name = path
@@ -388,7 +417,7 @@ pub fn restore(dir: &Path) -> R<Option<Restored>> {
             .unwrap_or_default();
         let read = fs::read(&path)
             .or_else(|e| refuse("checkpoint-io", format!("{name}: {e}")))
-            .and_then(|b| read_one(&b));
+            .and_then(|b| read_one(&b, seed_reads));
         match read {
             Ok((tree, root, blobs)) => {
                 return Ok(Some(Restored {
