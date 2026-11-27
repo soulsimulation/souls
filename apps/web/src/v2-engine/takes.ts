@@ -8,7 +8,7 @@
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
 import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
-import { LOOPS, SEATED_GESTURES, gestureNow, type Gesture } from './take-gestures.ts';
+import { LOOPS, SEATED_GESTURES, gestureNow, pressAt, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
 
 /** Seconds a tick, as the old engine's takes. */
@@ -135,11 +135,16 @@ function turnedAt(turns: readonly Turn[], t: number, last: { heading: number; at
   for (const r of turns) {
     if (r.at > t) { if (!to && last.at === -Infinity) from = r.from; break; }
     if (r.at < last.at) continue;
-    if (to) from = to.to;
+    if (to) from = turnFrom(to, from, r.at);
     else if (last.at === -Infinity) from = r.from;
     to = r;
   }
   if (!to) return from;
+  return turnFrom(to, from, t);
+}
+
+/** A retarget starts from the heading already drawn, including an unfinished earlier turn. */
+function turnFrom(to: Turn, from: number, t: number): number {
   const d = ((to.to - from) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
   const u = Math.min(1, (t - to.at) / 1e6 * TURN_RATE / Math.max(Math.abs(d), 1e-9));
   return from + d * u * u * (3 - 2 * u);
@@ -195,6 +200,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
     const track: number[][] = [];
     let baseActivity: string | null | undefined;
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
+    let pressKey: string | undefined;
     let seatH: number | null | undefined, prop: string | null | undefined, partner: string | null | undefined, hold: string | null | undefined;
     for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
@@ -216,6 +222,8 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
         : null;
       const nextPartner = lead ?? (g && !g.hold && other ? other.entity : null);
       if (k < ticks && nextPartner !== (partner ?? null)) { changes.push([k, b.entity, 'partner', nextPartner]); partner = nextPartner; }
+      const press = pressAt(b.gestures, t), nextPress = JSON.stringify(press);
+      if (k < ticks && nextPress !== pressKey) { changes.push([k, b.entity, 'formPress', press]); pressKey = nextPress; }
       const held = holdState(b, byNode, t), nextHold = held ? JSON.stringify(held) : null;
       if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', held]); hold = nextHold; }
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(drawn * ANG_Q)]);

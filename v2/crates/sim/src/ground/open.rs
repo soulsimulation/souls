@@ -21,7 +21,7 @@ use super::Turn;
 use super::scene::{Doorway, Scene, Terrain, Xz};
 use super::{Meet, OpenGround, Piece, SQUARE, prepare};
 use replica::ids::Id;
-use replica::tree::Tree;
+use replica::tree::{Handle, Tree};
 use replica::world_model::show;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -192,7 +192,7 @@ pub fn off_ground(
     };
     for k in index.children(before, changed) {
         if let Some(h) = before.handle(k)
-            && let Some(b) = bounds(&Scene::of_child(before, gb, h, None)?)
+            && let Some(b) = reach(before, gb, h)?
         {
             extent = Some(join(extent, b));
         }
@@ -202,7 +202,7 @@ pub fn off_ground(
     };
     for k in index.children(after, changed) {
         let Some(h) = after.handle(k) else { continue };
-        let Some(b) = bounds(&Scene::of_child(after, ga, h, None)?) else {
+        let Some(b) = reach(after, ga, h)? else {
             continue;
         };
         if b[0] < extent[0] || b[1] < extent[1] || b[2] > extent[2] || b[3] > extent[3] {
@@ -221,6 +221,17 @@ pub fn off_ground(
         }
     }
     Ok(None)
+}
+
+/// Where the ground's child at `h` reaches on the ground's plan (ground at `gh`), µm: the box of its geometry, or, with
+/// none (a thing no walker meets, a loose beam), its origin.
+fn reach(tree: &Tree, gh: Handle, h: Handle) -> Result<Option<[i64; 4]>, String> {
+    if let Some(b) = bounds(&Scene::of_child(tree, gh, h, None)?) {
+        return Ok(Some(b));
+    }
+    Ok(super::scene::xform_to(tree, h, gh)
+        .ok()
+        .map(|x| [x.pos.x, x.pos.z, x.pos.x, x.pos.z]))
 }
 
 /// The square (i, j) as a box, µm.

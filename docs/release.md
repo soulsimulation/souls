@@ -77,11 +77,13 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
    (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release. The link
    is the release's id: a retry that finds it in the feed posts nothing. It posts before the browser checks' verdict
    and whatever that verdict is; a failed verdict still fails the run and prints the rollback command.
-9. **Explore's place pictures.** Once the release is live, on a machine with a GPU:
-   `tools/world-launcher/deploy/place-shots.sh --dry-run`, then `tools/world-launcher/deploy/place-shots.sh`. It draws
-   each moved world's places that have no kept picture from the public page and copies them to the host's
-   `<data>/place-shots/<slug>/` ([cutover](../v2/docs/cutover.md)); with nothing new it draws nothing. The launcher logs
-   `place-shots: <slug> has N of M places without a kept picture` while any are missing.
+9. **Explore's place pictures.** Nothing to do: a minute after it starts, the launcher draws each moved world's places
+   that have no kept picture in the background (one run at a time, its own headless browser at the lowest CPU priority;
+   [cutover](../v2/docs/cutover.md)); kept pictures survive releases. `/__sim/launcher`'s `placeShots` shows the run and
+   what is still missing. A run needs the release's Playwright Chromium in the launcher's `PLAYWRIGHT_BROWSERS_PATH`
+   (`browserType.launch: Executable doesn't exist` in `<data>/place-shots/<slug>/draw.log` means it is not installed).
+   If the host cannot draw them (its log says `still missing`), draw them on another machine:
+   `tools/world-launcher/deploy/place-shots.sh --dry-run`, then `tools/world-launcher/deploy/place-shots.sh`.
 10. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
@@ -214,7 +216,7 @@ Its jobs:
    nothing in the release pushes to `main` directly; the pull request merges through the queue.
 
 **Receipt.** The workflow runs no gate: one full gate per head runs through `gate.yml` or the laptop, and the V7 walk
-needs real Chrome on a GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
+needs Playwright Chromium on a hardware GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
 leave the machine. The release owner derives the publishable release receipt from them. It holds only shas, the build
 id, statuses, counts, timestamps and the sha256 of each raw receipt, and `ship-receipt.mjs` refuses to write it unless
 it passes the publication check. The ship job checks it again, and ship.sh's preflight verifies it for the exact head

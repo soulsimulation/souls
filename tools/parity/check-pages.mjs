@@ -14,7 +14,7 @@ const {chromium}=createRequire(resolve(root,'mars/viewer/package.json'))('@playw
 const release=await chromeLease('parity');let browser;
 const report={at:new Date().toISOString(),pages:[]};
 try{
-  browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+  browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
   for(const world of ['mars','littlemartians']){
     const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
     page.on('pageerror',e=>errors.push(String(e)));

@@ -337,6 +337,59 @@ fn an_ask_from_a_body_mid_crossing_waits_for_its_landing() {
     assert_eq!(spots.of(id(1), &t), Some(Err("spot-none-free")));
 }
 
+/// [`Block`] whose start, as the town's (`Map::spot_near` within the walk's 20 mm), is the block's nearest edge for a
+/// point no more than 20 mm inside it; and a walk only from where a body stands.
+struct Edged(Block);
+
+impl Ground for Edged {
+    fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.stand(n, p)
+    }
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, n: Id, a: Vec3, m: Id, b: Vec3) -> Option<i64> {
+        self.stand(n, a)?;
+        self.0.walk(n, a, m, b)
+    }
+    fn start(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.stand(n, p).or_else(|| {
+            let h = self.0.half;
+            (p.x.abs() <= h && p.z.abs() <= h && h - p.x.abs() <= 20_000).then(|| {
+                let q = Vec3::new(p.x.signum() * (h + 1), p.y, p.z);
+                (q, q)
+            })
+        })
+    }
+}
+
+/// The 0.137 trial: a body pressed on a stump's edge, its centre a hair inside the stump's cut, was refused every walk
+/// `spot-none-free` (where it stood is no standing point), though its walk leaves from the edge beside it. Its ask
+/// now leaves from there and is granted; a body further in is refused as before.
+#[test]
+fn an_asker_a_hair_off_the_ground_leaves_from_the_edge_beside_it() {
+    let mut g = Edged(Block { half: 1_000_000 });
+    let id = |n| Id::new(replica::ids::Scope([0x69; 16]), n).unwrap();
+    let t = target(5_000_000);
+    let ask = |from| Ask {
+        who: id(1),
+        order: id(2),
+        node: node(),
+        from,
+        target: t,
+        carried: false,
+    };
+    let pressed = Vec3::new(999_500, 0, 0);
+    assert!(g.stand(node(), pressed).is_none(), "not a standing point");
+    let mut spots = Spots::new();
+    spots.write(&mut g, &[ask(pressed)], 0).unwrap();
+    assert_eq!(spots.of(id(1), &t), Some(Ok(t.point())), "granted");
+    let inside = Vec3::new(500_000, 0, 0);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &[ask(inside)], 0).unwrap();
+    assert_eq!(spots.of(id(1), &t), Some(Err("spot-none-free")));
+}
+
 /// A 4 m bench (#4072 follow-up) against a wall: no standing behind it (z below -0.6 m), on it or within 0.2 m of it
 /// (|x| up to 2.2 m, |z| up to 0.6 m), nor in front of its middle, where a row of stools stands (|x| below 1.5 m, z
 /// up to 2 m). Every walk is straight.
@@ -838,4 +891,66 @@ fn a2_5_overflow_points_are_released_on_retarget_and_kept_across_a_ground_change
         e,
         Entry::Release { who, why: "spot-left", .. } if *who == asks[1].who
     )));
+}
+
+/// A cottage's kitchen west of a doorway (#5003's Eden audit): its table, chairs and counter leave no standing west of
+/// x = -1 m. The doorway's passage runs from x = -1 m to 1 m: its mouth on the kitchen's side (x up to -0.3 m), the
+/// doorway itself east of that. East of x = 1 m is the living room; with `room`, also a strip of kitchen floor at
+/// z from 1.2 m to 1.6 m, clear of the doorway. Every walk is straight.
+struct Kitchen {
+    room: bool,
+}
+
+impl Ground for Kitchen {
+    fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        let strip = self.room && (1_200_000..=1_600_000).contains(&p.z);
+        (p.x > -1_000_000 || strip).then_some((p, p))
+    }
+    fn passage(&self, _: Id, p: Vec3) -> bool {
+        p.x > -1_000_000 && p.x < 1_000_000
+    }
+    fn mouth(&self, n: Id, p: Vec3) -> bool {
+        self.passage(n, p) && p.x <= -300_000
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        Some(flat(a, b))
+    }
+}
+
+#[test]
+fn a_thing_whose_room_has_floor_only_by_its_doorway_is_acted_at_from_the_doorways_mouth() {
+    let mut g = Kitchen { room: false };
+    // A bowl on the table, 1.2 m west of the doorway's mouth.
+    let t = target(-1_500_000);
+    let ring = box_ring(150_000, 150_000).map(|c| Vec3::new(c.x - 1_500_000, 0, c.z));
+    let from = Some((node(), Vec3::new(5_000_000, 0, 0)));
+    for p in [
+        within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place by the outline"),
+        within(&mut g, t, REACH, from).expect("a place by the middle"),
+    ] {
+        assert!(g.mouth(node(), p), "at the doorway's mouth: {p:?}");
+        assert!(p.x <= -300_000, "never in the doorway itself: {p:?}");
+        assert!(to_outline(p, &ring) <= REACH, "within reach: {p:?}");
+    }
+    // A mouth is a walker's only: with no asker, by the gap alone, none.
+    assert_eq!(within_footprint(&mut g, t, &ring, false, REACH, None), None);
+    assert_eq!(within(&mut g, t, REACH, None), None);
+    // Floor clear of the doorway within reach is taken first, though the mouth is nearer the asker.
+    let mut g = Kitchen { room: true };
+    let p = within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place");
+    assert!(!g.passage(node(), p), "clear of the doorway: {p:?}");
+    // The spot tables never give a mouth: a plain walk there is granted a place clear of every passage.
+    let mut g = Kitchen { room: false };
+    let mut spots = Spots::new();
+    let ask = Ask {
+        who: node(),
+        order: node(),
+        node: node(),
+        from: Vec3::new(5_000_000, 0, 0),
+        target: t,
+        carried: false,
+    };
+    spots.write(&mut g, &[ask], 0).unwrap();
+    let granted = spots.of(node(), &t).expect("answered").expect("granted");
+    assert!(!g.passage(node(), granted), "{granted:?}");
 }

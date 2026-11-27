@@ -10,7 +10,9 @@
 //! 3. **A request key.** Each create carries the page's key for that one click. Creates are made one at a time, and
 //!    the answer is kept by key, so the same key twice makes one world and answers the second with the first's world.
 //! 4. **Per-account limits** ([`Limits`], today's): five worlds an account; an account in its first day two, and one
-//!    an hour. A refusal names the limit and when to retry. They stop abuse and count toward no bar.
+//!    an hour. A refusal names the limit and when to retry. They stop abuse and count toward no bar. They count only
+//!    worlds made through New world: an imported world (its row's template [`IMPORTED`], [`register`]) counts toward
+//!    no account's limits. A site owner ([`SITE_OWNERS_ENV`]) has none.
 //! 5. **The label is free text, not identity.** A label already on another account's world is refused.
 //! 6. **A world's settings** (W9, #2827), today's two owner switches, by its creator alone: `unlisted` takes the row
 //!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
@@ -22,6 +24,21 @@
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 //! 8. **The welcome** (#3702), set by the creator ([`Worlds::set_welcome`]): words a visitor is shown on arrival, one
 //!    field of the row, `welcome`, so the list carries it and a Soul's pairing answer names it.
+//! 9. **The Souls in it now** (26 Nov), `souls` on each row: what the world's `health.json` on this machine says
+//!    (worldd's count of the Souls embodied there, written every 2 s), under [`SOULS_ROOT_ENV`]'s folder of world
+//!    folders. The files are read at most every [`SOULS_EVERY`] seconds, outside the directory's lock, so the list
+//!    still asks no world anything. A world with no such file here (on another machine, never started, or the
+//!    variable unset), or one written more than [`SOULS_FRESH`] seconds ago (not running here now), lists
+//!    `souls: null`. The home page's card shows it.
+//! 10. **A create ends** (27 Nov). A create the placement has not finished within [`PLACE_WITHIN`] of its `made` is
+//!     asked of the placement once more ([`Start::probe`]): placed, its row is ready; not placed, it ends, its row
+//!     taken off the list and its name record removed, and its click is answered `create-failed`. Every create checks
+//!     the others ([`Worlds::end_stale_creates`]), and so does the directory at its start, so no unplaced name is held
+//!     for good. A placement not known (its status unreadable or unparseable, or written in the last ten minutes)
+//!     keeps the create, and so does a row any ready row shares a name and lineage with. The name record goes only after
+//!     the row itself was removed and a second probe still finds no placement. The probe reads this machine's placement
+//!     folder: rule 10 assumes the one directory, on the machine that places (today's production). A directory on
+//!     another machine over a shared store ends other machines' unplaced creates.
 
 pub mod archive;
 pub mod handoff;
@@ -45,6 +62,11 @@ use crate::worlds::create::{Create, NameRecord, Source, create};
 
 /// The list's one object.
 pub const KEY: &str = "world-list";
+/// The template an imported world's row names ([`register`]): made by no create, so it counts toward no limit.
+pub const IMPORTED: &str = "imported";
+/// The site's owners, canonical account ids, comma separated (the variable the ops page and the launcher read): no
+/// limit of rule 4 applies to them.
+pub const SITE_OWNERS_ENV: &str = "SIM_SITE_OWNERS";
 /// The folder the list is kept in when no bucket is set ([`from_env`]), and its default.
 pub const WORLD_STORE_ENV: &str = "DIRECTORYD_WORLD_STORE";
 pub const WORLD_STORE_DEFAULT: &str = "directory";
@@ -54,6 +76,13 @@ pub const PICTURE_BYTES: u64 = 131_072;
 pub const PICTURE_SIDE: u64 = 1280;
 /// The most characters a world's welcome may have (#3702).
 pub const WELCOME_MOST: usize = 500;
+/// The folder that holds this machine's world folders (`<lineage hex>-<zone scope hex>-<counter>`), whose
+/// `health.json` gives each listed world's Souls (rule 9); unset, the list gives none.
+pub const SOULS_ROOT_ENV: &str = "DIRECTORYD_WORLDS_ROOT";
+/// How old, in seconds, the Souls the list gives may be (rule 9).
+pub const SOULS_EVERY: u64 = 30;
+/// A world's `health.json` written longer ago than this, in seconds, gives no Souls (rule 9).
+pub const SOULS_FRESH: u64 = 120;
 
 /// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
 /// bytes as a `data:` URL, or the refusal's name.
@@ -86,6 +115,10 @@ pub fn list_picture(file: &[u8]) -> Result<String, String> {
     b.push_str(&"=".repeat((4 - b.len() % 4) % 4));
     Ok(format!("data:image/{};base64,{b}", checked.format.name()))
 }
+
+/// How long, in seconds from its `made`, a create may stay unplaced (rule 10). Past it, a create the placement never
+/// finished ends: the same click is refused `create-failed`, the row leaves the list and the name is free again.
+pub const PLACE_WITHIN: u64 = 15 * 60;
 
 /// Per-account limits (rule 4), as settings.
 #[derive(Clone, Copy, Debug)]
@@ -172,6 +205,9 @@ pub struct Start<'a> {
     pub claim: Option<&'a Claim>,
     /// Stable, creator-bound durable request identity.
     pub request: &'a str,
+    /// Only ask whether this world was placed (Ok) or not (`world-starting`); nothing is started. Any other refusal is
+    /// not known. A probe names no request: it is matched by name and lineage.
+    pub probe: bool,
 }
 
 pub type Starter = Box<dyn Fn(&Start) -> R<()> + Send + Sync>;
@@ -221,7 +257,32 @@ pub struct Worlds<S: Store> {
     cache: Mutex<Option<(String, Vec<Json>)>>,
     pub templates: BTreeMap<String, Template>,
     pub limits: Limits,
+    /// Rule 4: accounts no limit applies to ([`SITE_OWNERS_ENV`]).
+    pub site_owners: std::collections::BTreeSet<String>,
     starter: Starter,
+    /// Rule 9: the folder of this machine's world folders, and the counts read from it: when (seconds) and by folder.
+    pub souls_root: Option<PathBuf>,
+    souls_read: Mutex<(u64, BTreeMap<String, Option<u64>>)>,
+}
+
+/// A world's folder name from its row: `<lineage hex>-<zone scope hex>-<zone counter>` (`worldd serve`'s).
+fn folder_of(row: &Json) -> Option<String> {
+    let lineage = row.get("lineage")?.as_str()?;
+    let (scope, counter) = row.get("zone")?.as_str()?.split_once(':')?;
+    Some(format!("{lineage}-{scope}-{counter}"))
+}
+
+/// The Souls a world's `health.json` says are embodied in it (rule 9), if it says and was written within
+/// [`SOULS_FRESH`] seconds of `now`: an older file is a world not running here (asleep, stopped or moved away), whose
+/// count may no longer hold.
+fn souls_in(root: &Path, folder: &str, now: u64) -> Option<u64> {
+    let text = std::fs::read(root.join(folder).join("health.json")).ok()?;
+    let health = serde_json::from_slice::<Json>(&text).ok()?;
+    let at = health.get("at_unix_ms")?.as_u64()? / 1000;
+    if at.saturating_add(SOULS_FRESH) < now {
+        return None;
+    }
+    health.get("souls")?.as_u64()
 }
 
 fn row_creator(row: &Json) -> Option<&str> {
@@ -240,8 +301,32 @@ impl<S: Store> Worlds<S> {
             cache: Mutex::new(None),
             templates,
             limits: Limits::default(),
+            site_owners: Default::default(),
             starter,
+            souls_root: None,
+            souls_read: Mutex::new((0, BTreeMap::new())),
         }
+    }
+
+    /// Rule 9: each folder's Souls, read again once [`SOULS_EVERY`] seconds have passed since the last read, or the
+    /// clock went back past it (a folder not read before is read now).
+    fn souls_of(&self, folders: &[String], now: u64) -> BTreeMap<String, Option<u64>> {
+        let Some(root) = &self.souls_root else {
+            return BTreeMap::new();
+        };
+        let mut read = self.souls_read.lock().unwrap_or_else(|e| e.into_inner());
+        if now < read.0 || now - read.0 >= SOULS_EVERY {
+            *read = (now, BTreeMap::new());
+        }
+        for f in folders {
+            if !read.1.contains_key(f) {
+                read.1.insert(f.clone(), souls_in(root, f, now));
+            }
+        }
+        folders
+            .iter()
+            .map(|f| (f.clone(), read.1.get(f).copied().flatten()))
+            .collect()
     }
 
     /// Every world's lineage (hex) and creator (a principal's text), unlisted ones too: whom a world's prayers go to
@@ -259,6 +344,149 @@ impl<S: Store> Worlds<S> {
             ));
         }
         Ok(out)
+    }
+
+    /// Rule 10 for every unplaced create past [`PLACE_WITHIN`] at `now` (seconds): the creates it ended.
+    pub fn end_stale_creates(&self, now: u64) -> R<usize> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.end_stale(&mut inner, now)
+    }
+
+    fn end_stale(&self, inner: &mut Inner<S>, now: u64) -> R<usize> {
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        let mut ended = 0;
+        for row in &rows {
+            if self.end_if_stale(inner, row, now)? {
+                ended += 1;
+            }
+        }
+        Ok(ended)
+    }
+
+    /// Rule 10 for a click asked again: whether its create ended before (past [`PLACE_WITHIN`], unready, and no row of
+    /// its name and lineage left on the list), so the click never makes its world again.
+    fn ended(&self, inner: &Inner<S>, row: &Json, now: u64) -> R<bool> {
+        let made = row.get("made").and_then(Json::as_u64);
+        if row.get("ready") != Some(&Json::Bool(false))
+            || made.is_none_or(|m| now < m.saturating_add(PLACE_WITHIN))
+        {
+            return Ok(false);
+        }
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        if rows
+            .iter()
+            .any(|r| r.get("name") == row.get("name") && r.get("lineage") == row.get("lineage"))
+        {
+            return Ok(false);
+        }
+        // A name record of this lineage still there (a stop between the row's removal and the record's): the click
+        // goes on, lists the row again, and a later ask ends it whole.
+        let Some(name) = row.get("name").and_then(Json::as_str) else {
+            return Ok(true);
+        };
+        Ok(match inner.dir.store.get(&NameRecord::key(name))? {
+            None => true,
+            Some(o) => NameRecord::read(&o.bytes).map_or(true, |n| {
+                Some(to_hex(&n.lineage).as_str()) != row.get("lineage").and_then(Json::as_str)
+            }),
+        })
+    }
+
+    /// Rule 10 for one row: whether its create ended now. A row that is ready, has no `ready: false`, is within
+    /// [`PLACE_WITHIN`] or whose placement is not known stays; one the placement did place is marked ready.
+    fn end_if_stale(&self, inner: &mut Inner<S>, row: &Json, now: u64) -> R<bool> {
+        let made = row.get("made").and_then(Json::as_u64);
+        if row.get("ready") != Some(&Json::Bool(false))
+            || made.is_none_or(|m| now < m.saturating_add(PLACE_WITHIN))
+        {
+            return Ok(false);
+        }
+        let text = |k| row.get(k).and_then(Json::as_str);
+        let (Some(name), Some(lineage_text), Some(creator_text)) =
+            (text("name"), text("lineage"), text("creator"))
+        else {
+            return Ok(false);
+        };
+        let lineage: Option<[u8; 16]> = from_hex(lineage_text).ok().and_then(|b| b.try_into().ok());
+        let (Some(lineage), Some(creator)) =
+            (lineage, crate::accounts::principal_from_text(creator_text))
+        else {
+            return Ok(false);
+        };
+        let template = text("template")
+            .and_then(|t| self.templates.get(t))
+            .map(|t| t.dir.clone())
+            .unwrap_or_default();
+        let ours = |r: &Json| {
+            r.get("name").and_then(Json::as_str) == Some(name)
+                && r.get("lineage").and_then(Json::as_str) == Some(lineage_text)
+        };
+        let same = |r: &Json| ours(r) && r.get("ready") == Some(&Json::Bool(false));
+        let probe = || match (self.starter)(&Start {
+            name,
+            template: &template,
+            lineage,
+            creator,
+            claim: None,
+            request: "",
+            probe: true,
+        }) {
+            Ok(()) => Some(true),
+            Err(e) if e.name == "world-starting" => Some(false),
+            Err(_) => None,
+        };
+        let Some(placed) = probe() else {
+            return Ok(false);
+        };
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        if !rows.iter().any(same) {
+            // No unready row of this world (another create's, ready, or gone already): nothing ends here, and the
+            // name record is never touched (it may name a listed, ready world).
+            return Ok(false);
+        }
+        let ((etag, rows), removed) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            if placed {
+                for r in rows.iter_mut().filter(|r| same(r)) {
+                    r["ready"] = json!(true);
+                }
+                return Ok(Vec::new());
+            }
+            // Only while no row of this world is ready: then the unready one alone goes.
+            if rows.iter().any(|r| ours(r) && !same(r)) {
+                return Ok(Vec::new());
+            }
+            let removed: Vec<Json> = rows.iter().filter(|r| same(r)).cloned().collect();
+            rows.retain(|r| !same(r));
+            Ok(removed)
+        })?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((etag, rows));
+        if placed || removed.is_empty() {
+            return Ok(false);
+        }
+        // The row went first, then the placement is asked again: a placement writes its status before it re-reads the
+        // row (place-created-world.mjs), so one of the two sees the other. A status that appeared meanwhile puts the
+        // row back and keeps the name; the placement, seeing the row back, goes on.
+        if probe() != Some(false) {
+            let (etag, rows) = read_rows(&inner.dir.store)?;
+            let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+                if !rows
+                    .iter()
+                    .any(|r| r.get("name").and_then(Json::as_str) == Some(name))
+                {
+                    rows.extend(removed.iter().cloned());
+                }
+                Ok(())
+            })?;
+            *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+            return Ok(false);
+        }
+        // Matched on name and lineage alone: a pending world handed off has a new row creator, never a new founder.
+        if let Some(o) = inner.dir.store.get(&NameRecord::key(name))?
+            && NameRecord::read(&o.bytes).is_ok_and(|n| n.lineage == lineage)
+        {
+            inner.dir.store.delete(&NameRecord::key(name))?;
+        }
+        Ok(true)
     }
 
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
@@ -303,6 +531,14 @@ impl<S: Store> Worlds<S> {
                 row["picture"] = Json::Null;
             }
         }
+        drop(inner);
+        // Rule 9: the Souls in each world now, read outside the directory's lock.
+        let folders: Vec<String> = rows.iter().filter_map(folder_of).collect();
+        let souls = self.souls_of(&folders, crate::accounts::serve::now());
+        for row in &mut rows {
+            let n = folder_of(row).and_then(|f| souls.get(&f).copied().flatten());
+            row["souls"] = json!(n);
+        }
         Ok(json!({"worlds": rows, "templates": self.templates.keys().collect::<Vec<_>>()}))
     }
 
@@ -315,7 +551,21 @@ impl<S: Store> Worlds<S> {
         now: u64,
     ) -> Result<Json, Refusal> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        self.make(&mut inner, ask, creator, account_made, now)
+        self.make(&mut inner, ask, creator, account_made, now, true)
+    }
+
+    /// [`Worlds::create`] for the signed-in `account`: a site owner ([`Worlds::site_owners`]) has no limits.
+    pub fn create_for(
+        &self,
+        ask: &Ask,
+        creator: Id,
+        account: &str,
+        account_made: u64,
+        now: u64,
+    ) -> Result<Json, Refusal> {
+        let limited = !self.site_owners.contains(account);
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.make(&mut inner, ask, creator, account_made, now, limited)
     }
 
     fn make(
@@ -325,6 +575,7 @@ impl<S: Store> Worlds<S> {
         creator: Id,
         account_made: u64,
         now: u64,
+        limited: bool,
     ) -> Result<Json, Refusal> {
         if ask.key.is_empty() || ask.key.len() > 64 {
             return refuse(
@@ -357,17 +608,31 @@ impl<S: Store> Worlds<S> {
                         "this click already names a different world request",
                     );
                 }
+                if self.end_if_stale(inner, &value["row"], now)?
+                    || self.ended(inner, &value["row"], now)?
+                {
+                    return refuse(
+                        "create-failed",
+                        format!(
+                            "{} was not placed within {} minutes; the name is free again",
+                            ask.name,
+                            PLACE_WITHIN / 60
+                        ),
+                    );
+                }
                 value
             }
             None => {
                 crate::worlds::create::check_name(&ask.name)?;
+                self.end_stale(inner, now)?;
                 let (_, rows) = read_rows(&inner.dir.store)?;
                 let made: Vec<u64> = rows
                     .iter()
                     .filter(|r| row_creator(r) == Some(&who))
+                    .filter(|r| r.get("template").and_then(Json::as_str) != Some(IMPORTED))
                     .filter_map(|r| r.get("made").and_then(Json::as_u64))
                     .collect();
-                if let Err(o) = self.limits.check(account_made, &made, now) {
+                if limited && let Err(o) = self.limits.check(account_made, &made, now) {
                     return Err(Refusal {
                         name: o.name,
                         detail: json!({"limit": o.limit, "retry_after": o.retry_after}).to_string(),
@@ -480,6 +745,7 @@ impl<S: Store> Worlds<S> {
             creator,
             claim: claim.as_ref(),
             request: &request,
+            probe: false,
         })?;
         row["ready"] = json!(true);
         let (etag, rows) = read_rows(&inner.dir.store)?;
@@ -675,6 +941,12 @@ fn write_rows<S: Store, T>(
 /// --through <creator> --scope <lineage>`.
 pub fn worldd_starter(worldd: PathBuf, worlds: PathBuf) -> Starter {
     Box::new(move |s: &Start| {
+        if s.probe {
+            return refuse(
+                "start-failed",
+                "this starter cannot say whether a world was placed",
+            );
+        }
         let out = std::process::Command::new(&worldd)
             .arg("fork")
             .arg("--from")
@@ -697,6 +969,15 @@ pub fn worldd_starter(worldd: PathBuf, worlds: PathBuf) -> Starter {
     })
 }
 
+/// The site owners [`SITE_OWNERS_ENV`] names: its comma-separated account ids, trimmed, empty ones dropped.
+pub fn site_owners(text: &str) -> std::collections::BTreeSet<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The list and create the environment names, or `None` when `DIRECTORYD_TEMPLATES` is not set:
 /// `DIRECTORYD_TEMPLATES` (a folder of published templates, one folder each), `DIRECTORYD_WORLDS` (where new worlds'
 /// folders go), `DIRECTORYD_WORLDD` (the world program). The directory's store is the one W8's environment names, or
@@ -715,7 +996,8 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
         let entries =
             std::fs::read_dir(&templates).or_else(|e| refuse("template-io", e.to_string()))?;
         for e in entries.flatten() {
-            if e.path().join("template").is_file() {
+            // A folder named as imported rows are is no template: its worlds would count toward no limit (rule 4).
+            if e.path().join("template").is_file() && e.file_name() != IMPORTED {
                 found.insert(
                     e.file_name().to_string_lossy().into_owned(),
                     Template::read(&e.path())?,
@@ -727,11 +1009,25 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
             name: "machine-name",
             detail: machine.to_owned(),
         })?;
-        Ok(Worlds::new(
+        let mut worlds = Worlds::new(
             Directory::new(store, machine),
             found,
             placement::starter(var("DIRECTORYD_PLACEMENT", "placement")),
-        ))
+        );
+        worlds.souls_root = std::env::var_os(SOULS_ROOT_ENV).map(PathBuf::from);
+        // Rule 10 at the start: a create left unplaced by an earlier run ends now, not at the next create.
+        match worlds.end_stale_creates(crate::accounts::serve::now()) {
+            Ok(0) => {}
+            Ok(n) => eprintln!(
+                "directoryd: worlds: {n} unplaced create(s) ended (create-failed), their names free"
+            ),
+            Err(e) => eprintln!(
+                "directoryd: worlds: unplaced creates not checked: {}",
+                e.name
+            ),
+        }
+        worlds.site_owners = site_owners(&std::env::var(SITE_OWNERS_ENV).unwrap_or_default());
+        Ok(worlds)
     };
     Some(run())
 }

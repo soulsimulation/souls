@@ -53,6 +53,7 @@ pub(super) struct Reads<'a> {
     pub now: Micros,
     pub seed: u64,
     pub planned: Option<&'a Planned>,
+    pub carried: &'a [super::Carried],
 }
 
 /// A chunk's runs: index in the sorted runs, body, driver and skill.
@@ -336,6 +337,7 @@ fn run<S: Skill + ?Sized>(
                 controller: reads.controller,
                 fields: reads.fields,
                 settled: reads.settled,
+                carried: reads.carried,
                 kind: kind.clone(),
                 planned: reads.planned.map(|p| (p, RefCell::new(Vec::new()))),
             };

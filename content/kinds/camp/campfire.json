@@ -7,9 +7,17 @@
   },
   "points": {
     "logs": { "role": "contact", "at_mm": [0, 250, 0] },
-    "stand": { "role": "stand", "at_mm": [0, 0, 1250], "yaw_mdeg": 180000 }
+    "stand": { "role": "stand", "at_mm": [0, 0, 1250], "yaw_mdeg": 180000 },
+    "by_log_1": { "role": "stand", "at_mm": [1178, 0, 757] },
+    "by_log_2": { "role": "stand", "at_mm": [58, 0, -1399] },
+    "by_log_3": { "role": "stand", "at_mm": [-1237, 0, 656] }
   },
-  "geometry": { "bounds_mm": [1100, 600, 1100] },
+  "slots": {
+    "log_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [1683, 400, 1081], "stand": "by_log_1" },
+    "log_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [83, 400, -1998], "stand": "by_log_2" },
+    "log_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-1767, 400, 937], "stand": "by_log_3" }
+  },
+  "geometry": { "bounds_mm": [4200, 600, 4200] },
   "forms": {
     "light": {
       "who": "anyone",
@@ -46,6 +54,22 @@
         { "step": "wait", "us": 20000000 }
       ],
       "effects": []
+    },
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
     }
   },
   "motion": { "how": "fixed" },

@@ -12,7 +12,7 @@ export const STUCK = new Set(['walk.blocked', 'goal-unreachable']);
 export const ORDER_ENDED = 'souls:order-ended';
 
 /** A text field as the daemon's entry JSON gives it: a name as itself, bytes as the hex of their encoding. */
-function textOf(v) {
+export function textOf(v) {
   if (typeof v !== 'string') return null;
   if (!/^[0-9a-f]+$/.test(v) || v.length % 2) return v;
   try {

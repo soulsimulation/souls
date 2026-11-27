@@ -93,6 +93,8 @@ export function worldRow(root, world, now) {
       over_budget: h.over_budget ?? null,
       health_age_s: Number.isFinite(h.at_unix_ms) ? Math.max(0, Math.round((now - h.at_unix_ms) / 1000)) : null,
     } : null,
+    // `disk.low` (#2806 follow-up): free space under the world, `ok` or `low`, from the world's own reading.
+    disk: h?.disk ? { state: h.disk.state, free_bytes: h.disk.free_bytes, free_pct: h.disk.free_pct } : null,
     watcher: json(join(root, 'watcher.json'))?.at_unix_ms ?? null,
     cost: null,
   };

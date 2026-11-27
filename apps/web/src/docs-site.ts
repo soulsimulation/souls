@@ -127,7 +127,7 @@ export function htmlOutline(html: string, unlink: (href: string) => string = (h)
 export const NAV: { title: string; urls: string[] }[] = [
   { title: 'Start here', urls: ['/docs', '/docs/concepts', '/docs/for-agents'] },
   { title: 'Do', urls: ['/docs/run-a-soul', '/docs/be-a-good-soul', '/docs/guide-your-human', '/docs/build-a-world'] },
-  { title: 'Reference', urls: ['/docs/world-model', '/docs/actions', '/docs/api', '/docs/mcp', '/docs/limits', '/docs/troubleshooting', '/changelog'] },
+  { title: 'Reference', urls: ['/docs/world-model', '/docs/limits', '/docs/troubleshooting', '/changelog'] },
   { title: 'Reading room', urls: ['/docs/essays/mind-at-the-edge', '/docs/essays/canonical-history', '/docs/essays/meaning-over-depiction', '/docs/essays/few-rules', '/docs/essays/built-by-agents'] },
 ];
 

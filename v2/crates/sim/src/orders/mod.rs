@@ -59,6 +59,12 @@ type R<T> = Result<T, Refusal>;
 pub const LONGEST: Micros = 3_600_000_000;
 /// A follow's band when the intent names none, µm: nearest and furthest along the leader's trail.
 pub const BAND: (i64, i64) = (1_000_000, 2_500_000);
+/// The farthest a follow's place may be from its leader, µm, beside or at an offset on either axis: well past a crew's
+/// widest span, and far from where a step's sum could overflow.
+pub const PLACE_MOST: i64 = 20_000_000;
+/// The farthest a turning follow's goal may be from the frame's origin on either axis, µm (about 137 km): past any
+/// world, and where the swing's sums stay in range.
+pub const GOAL_MOST: u64 = 1 << 37;
 /// A queue's head counts as on the stand point this near, µm.
 pub const ARRIVED: i64 = 50_000;
 /// The most spots tried along a line.
@@ -72,6 +78,8 @@ pub const CANCELLED: &str = "souls:order-cancelled";
 pub const REPLACED: &str = "souls:order-replaced";
 pub const TARGET_GONE: &str = "souls:order-target-gone";
 pub const DISPLACED: &str = "souls:order-displaced";
+/// A queue with no supported way to its spot: the planner refused the route, or the body is on another floor (B7c).
+pub const NO_WAY: &str = "souls:no-way";
 /// A queue's head took its slot.
 pub const DONE: &str = "souls:done";
 /// An input an order produced: `{1: intent, 2: velocity [x, y, z] µm/s}` or `{1: intent, 3: stance}`.
@@ -115,11 +123,16 @@ pub enum What {
     /// Hold `stance` (parameter 1: 1 stand, 2 sit, 3 lie) and the hands named (parameter 2).
     Hold { stance: Stance, hands: Vec<Name> },
     /// Follow `leader` (the target) within `band` µm (parameters 1 and 2), or keep a place `beside` it, that many µm
-    /// to its side (parameter 3, 0.135 R1: walking hand in hand).
+    /// to its side (parameter 3, 0.135 R1: walking hand in hand), or a place `at` an offset from it on the plan
+    /// (parameter 4, `[x, z]` µm: carrying together, `v2/docs/moving-group.md` rule 3), turning as the leader nears
+    /// its goal when parameter 5 names it and the offset there (`[goal x, goal z, x, z]` µm: a crew turned with its
+    /// front).
     Follow {
         leader: Id,
         band: (i64, i64),
         beside: Option<i64>,
+        at: Option<[i64; 2]>,
+        turn: Option<([i64; 2], [i64; 2])>,
     },
     /// Stand in line for the slot of `slot` (the target), and take it at the head by `act` (parameter 1), if named.
     Queue { slot: Id, act: Option<Name> },
@@ -148,6 +161,9 @@ pub struct SlotAt {
 
 /// The world as orders read it: N9's ground, and the slots that are there.
 pub trait Where: Ground {
+    /// Where `body` aims next on the town's supported way to `to` (its floor's frame): the existing planner's corner,
+    /// prepared for this body's class and this exact goal. None is no supported way (the queue ends `souls:no-way`).
+    fn toward(&self, body: Id, to: Vec3) -> Option<Vec3>;
     fn slot(&self, thing: Id) -> Option<SlotAt>;
 }
 
@@ -237,19 +253,61 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
             What::Hold { stance, hands }
         }
         FOLLOW => {
-            has(&[1, 2, 3])?;
+            has(&[1, 2, 3, 4, 5])?;
             let near = p.get(&1).map_or(Some(BAND.0), read_int);
             let far = p.get(&2).map_or(Some(BAND.1), read_int);
             let beside = match p.get(&3).map(read_int) {
                 None => None,
-                Some(Some(w)) if w > 0 => Some(w),
-                Some(_) => return bad("a place beside is a width over 0, µm"),
+                Some(Some(w)) if w > 0 && w <= PLACE_MOST => Some(w),
+                Some(_) => return bad("a place beside is a width over 0, µm, at most 20 m"),
+            };
+            let at = match p.get(&4) {
+                None => None,
+                Some(Value::Array(a)) => match a.iter().map(read_int).collect::<Option<Vec<_>>>() {
+                    Some(v)
+                        if v.len() == 2
+                            && beside.is_none()
+                            && v.iter()
+                                .all(|c| c.unsigned_abs() <= PLACE_MOST.unsigned_abs()) =>
+                    {
+                        Some([v[0], v[1]])
+                    }
+                    _ => {
+                        return bad(
+                            "a place at is [x, z] µm from the leader, each at most 20 m, and not beside",
+                        );
+                    }
+                },
+                Some(_) => return bad("a place at is [x, z] µm from the leader"),
+            };
+            let turn = match p.get(&5) {
+                None => None,
+                Some(Value::Array(a)) => match a.iter().map(read_int).collect::<Option<Vec<_>>>() {
+                    Some(v)
+                        if v.len() == 4
+                            && at.is_some()
+                            && v[0].unsigned_abs() <= GOAL_MOST
+                            && v[1].unsigned_abs() <= GOAL_MOST
+                            && v[2].unsigned_abs() <= PLACE_MOST.unsigned_abs()
+                            && v[3].unsigned_abs() <= PLACE_MOST.unsigned_abs() =>
+                    {
+                        Some(([v[0], v[1]], [v[2], v[3]]))
+                    }
+                    _ => {
+                        return bad(
+                            "a turn is [goal x, goal z, x, z] µm, the place at the goal at most 20 m from the leader, with a place at",
+                        );
+                    }
+                },
+                Some(_) => return bad("a turn is [goal x, goal z, x, z] µm"),
             };
             match (near, far) {
                 (Some(n), Some(f)) if 0 <= n && n <= f => What::Follow {
                     leader: node()?,
                     band: (n, f),
                     beside,
+                    at,
+                    turn,
                 },
                 _ => return bad("a band is 0 <= nearest <= furthest, µm"),
             }
@@ -300,11 +358,18 @@ impl Default for Orders {
 struct Seeing<'a> {
     c: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
+    world: &'a dyn Where,
 }
 
 impl Geometry for Seeing<'_> {
-    fn ask(&self, _: Id, _: &Ask) -> Option<Answer> {
-        None
+    /// A queue's way to its spot is the town's supported route ([`Where::toward`]), never a straight line (B7c).
+    fn ask(&self, body: Id, ask: &Ask) -> Option<Answer> {
+        match ask {
+            Ask::Toward { from, to } if *from == body => {
+                self.world.toward(body, *to).map(Answer::Point)
+            }
+            _ => None,
+        }
     }
 
     fn read(&self, node: Id) -> Option<Seen> {
@@ -362,6 +427,26 @@ impl Orders {
             .get(&slot)
             .map(|l| l.bodies.clone())
             .unwrap_or_default()
+    }
+
+    /// Each queueing body whose order is running on its line's floor, with its spot: the goals the world asks the
+    /// existing planner's way to, before the tick's skills step (B7c).
+    pub fn approaches<'a>(
+        &'a self,
+        c: &'a Controller,
+        now: Micros,
+    ) -> impl Iterator<Item = (&'a crate::mover::Body, Option<Vec3>)> + 'a {
+        self.open.iter().filter_map(move |(id, open)| {
+            let What::Queue { slot, .. } = &open.order.what else {
+                return None;
+            };
+            let body = c.body(*id)?;
+            let line = self.lines.get(slot)?;
+            (now < open.order.expires
+                && node_of(body) == line.at.floor
+                && c.claims(*id)?.running().contains_key(&open.driver))
+            .then(|| (body, self.spot(*id)))
+        })
     }
 
     /// The spot `body` was given in its line, if any (µm, its floor's frame).
@@ -467,7 +552,9 @@ impl Orders {
                 leader,
                 band,
                 beside,
-            } => Box::new(follow(*leader, *band, *beside, until)),
+                at,
+                turn,
+            } => Box::new(follow(*leader, *band, *beside, *at, *turn, until)),
             What::Queue { .. } => Box::new(Queue { until }),
         };
         let driver = c.claim(body, &skill.shape())?;
@@ -666,10 +753,21 @@ impl Orders {
                     What::Follow { leader, .. } => c.body(*leader).is_none(),
                     What::Queue { slot, .. } => w.slot(*slot).is_none(),
                 };
+                // A body on another floor than its line's has no way to it on this one (B7c): ended by name.
+                let elsewhere = match &o.order.what {
+                    What::Queue { slot, .. } => c.body(*b).is_some_and(|body| {
+                        self.lines
+                            .get(slot)
+                            .is_some_and(|l| node_of(body) != l.at.floor)
+                    }),
+                    _ => false,
+                };
                 if now >= o.order.expires {
                     Some((*b, EXPIRED))
                 } else if gone {
                     Some((*b, TARGET_GONE))
+                } else if elsewhere {
+                    Some((*b, NO_WAY))
                 } else {
                     None
                 }
@@ -686,10 +784,10 @@ impl Orders {
             .map(|(s, _)| *s)
             .collect();
         for slot in free {
-            let Some((head, stand)) = self
+            let Some((head, floor, stand)) = self
                 .lines
                 .get(&slot)
-                .and_then(|l| Some((*l.bodies.first()?, l.at.stand)))
+                .and_then(|l| Some((*l.bodies.first()?, l.at.floor, l.at.stand)))
             else {
                 continue;
             };
@@ -701,7 +799,7 @@ impl Orders {
             };
             let there = c
                 .body(head)
-                .is_some_and(|b| apart(b.pose.position, stand) <= ARRIVED);
+                .is_some_and(|b| node_of(b) == floor && apart(b.pose.position, stand) <= ARRIVED);
             if !there {
                 continue;
             }
@@ -731,6 +829,7 @@ impl Orders {
             let seeing = Seeing {
                 c,
                 fields: &self.fields,
+                world: w,
             };
             step(
                 &self.tree,

@@ -2,7 +2,7 @@
 // NAV acceptance (lane NAV): Souls walk the whole world. One fresh 1000 m world; the harness plays the god (eden-god CLI)
 // and a Soul (the unchanged Soul CLI). The god extends the world 800 m east and builds a hut there, 950 m from the
 // arrival — far past the old 384 m walking window — and the Soul walks from the arrival to the hut in one walk, without
-// stopping. The viewer is real Chrome (GPU, Chrome lease): Ana by the hut, looked at.
+// stopping. The viewer is Chromium (GPU, Chrome lease): Ana by the hut, looked at.
 //
 //   node tools/god-skill/e2e/nav-far.mjs [--port 5671] [--keep] [--dpr 1,2]
 //
@@ -129,7 +129,7 @@ try {
   if (chromium) for (const dpr of dprs) {
     const release = await chromeLease('nav-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

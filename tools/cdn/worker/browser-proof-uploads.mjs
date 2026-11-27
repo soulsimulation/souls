@@ -8,7 +8,7 @@
 // serve: a fresh local /worlds world `upload-proof` (dev auth mints a local god token, fake minds); a god upload of a cow GLB made unique (a new
 // node name, so its sha is in no manifest), defined and placed at the arrival. The Worker stand-in runs the real handler
 // (god-uploads.js) with an in-memory R2 and the page server as its origin; it only rewrites Access-Control-Allow-Origin to
-// the loopback page origin (the real Worker names https://soul.game). `check` loads the page in real Chrome:
+// the loopback page origin (the real Worker names https://soul.game). `check` loads the page in Chromium:
 //   miss (dpr 1)    the upload comes from the Worker (x-eden-cdn miss), the page never asks the origin for it;
 //   hit (dpr 2)     a fresh context: x-eden-cdn hit (stored by the miss);
 //   off (dpr 1)     ?godcdn=0: no Worker request, the origin serves it;
@@ -125,7 +125,7 @@ if (mode === 'serve') {
   const report = { at: new Date().toISOString(), sha: s, bytes: ready.bytes, runs: [] };
   let browser;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     for (const [scenario, dpr, fixture, query] of [['miss', 1, 'up', ''], ['hit', 2, 'up', ''], ['off', 1, 'up', '&godcdn=0'], ['down', 1, 'down', ''], ['corrupt', 2, 'corrupt', '']]) {
       await fetch(`${page}/__fixture/cdn/${fixture}`);
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });

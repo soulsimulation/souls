@@ -586,6 +586,9 @@ pub struct Slots {
     /// What each ride's trip end sets back (`crate::courses::rides::trip_ends`), and whether its seats were between
     /// stops when last asked ([`Slots::trip_ended`]).
     trips: BTreeMap<Id, (Vec<(u64, replica::encode::Value)>, bool)>,
+    /// The courses the world gives at its start to rides on none yet ([`Slots::give_course`]), drained by its next
+    /// tick ([`Slots::courses_given`]), which writes each and starts it moving.
+    given: Vec<(Id, crate::courses::Course)>,
 }
 
 impl Slots {
@@ -610,6 +613,18 @@ impl Slots {
     pub fn moving(&mut self, thing: Id, course: &crate::courses::Course, home: Vec3) -> R<()> {
         self.moving.insert(thing, (course.load()?, home));
         Ok(())
+    }
+
+    /// Thing `thing`, a ride that flies a loop from its stop with no course in the tree (a world seeded before its rides
+    /// flew), is to be given `course`: the world's next tick takes it ([`Slots::courses_given`]), starts it from that
+    /// tick at its home, writes it into the tree and moves the thing on it ([`Slots::moving`]). Until then it stands.
+    pub fn give_course(&mut self, thing: Id, course: crate::courses::Course) {
+        self.given.push((thing, course));
+    }
+
+    /// The courses given since this was last asked ([`Slots::give_course`]), each with its thing.
+    pub fn courses_given(&mut self) -> Vec<(Id, crate::courses::Course)> {
+        std::mem::take(&mut self.given)
     }
 
     /// The slot `slot` of `thing` moves with its cabin on `course` (N14, the thing's frame), standing where riders get on
@@ -1013,6 +1028,16 @@ impl Slots {
     /// The thing whose seat `body` holds, if any.
     pub fn held_by(&self, body: Id) -> Option<Id> {
         self.by_body.get(&body).map(|k| k.0)
+    }
+
+    /// Whether `thing` moves (on a course, #3603) or has seats that move with their cabin (N14): a ride or a boat.
+    pub fn moves(&self, thing: Id) -> bool {
+        self.moving.contains_key(&thing)
+            || self
+                .runs
+                .range((thing, 0)..=(thing, u64::MAX))
+                .next()
+                .is_some()
     }
 
     /// The seat `body` holds, if any.

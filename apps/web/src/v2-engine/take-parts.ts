@@ -19,6 +19,8 @@
 // Such a bay's record carries no slot points either (an imported bay's does), so the parts in it would all stand at its
 // origin: it is handed to CreatorKinds with its kind's slot points (`slotPoints`: the entry's slots in order, from 1).
 
+import { layerDraws, OLD_ENTITY } from './layer-draws.ts';
+
 /** A node record, the fields read here (the reader's NodeRec). */
 export type PartNode = { id: string; kind: string; parent: string | null; slot?: number | null; pos?: [number, number, number];
   rot?: [number, number, number, number]; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array };
@@ -32,8 +34,6 @@ const Q = 2 ** 30;
 const KEEP_US = 30_000_000;
 const plain = (k: string) => k.split('@')[0];
 const isBody = (n: PartNode) => !!n.soul || /:(humanoid|body)$/.test(plain(n.kind));
-/** An old entity's id (world-state.ts, stream-scene.ts): a node whose origin is one is the layer's to draw. */
-const OLD_ENTITY = /^[eh]_[a-z0-9]{4,12}$/;
 /** Whether an entry is a part's: it names the points it joins by. */
 const isPart = (entry: Uint8Array | undefined) => {
   if (!entry) return false;
@@ -152,8 +152,9 @@ export class CarriedParts {
       if (n.origin && !OLD_ENTITY.test(n.origin) && this.partKinds.has(k)) this.unheld.add(n.id); else this.unheld.delete(n.id);
       // a part of a kind the layer has no def for: its own entry, as the definition CreatorKinds reads. A part's entry
       // is its look before the library's (`part:`, kept with the kinds' own defs): the library's rack defs are another
-      // frame (core-rack-upright lies flat along x, 3.66 m; the kind's upright stands 2.44 m along y).
-      if (n.origin && !this.unheld.has(n.id)) continue;
+      // frame (core-rack-upright lies flat along x, 3.66 m; the kind's upright stands 2.44 m along y). Any thing the
+      // layer does not draw itself is CreatorKinds' (a furnished piece named `e_…/bedroom-bed` too), so its kind's too.
+      if (layerDraws(n)) continue;
       const own = this.partKinds.get(k), seen = own ? undefined : this.entries.get(k), entry = own ?? (seen && (this.holders.get(k) ?? this.looks.get(k) ?? seen));
       if (entry && !this.defined.has(n.kind)) {
         this.defined.add(n.kind);

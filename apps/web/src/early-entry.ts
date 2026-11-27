@@ -6,11 +6,14 @@ import { installAssetTransport } from './boot-assets.ts';
 import { earlyLayerWanted, startEarlyLayer } from './early-layer.ts';
 import { callPhase2 } from './phased-entry.ts';
 import { followBootLight } from './boot-light.ts';
+import { startEarlyReader } from './v2-engine/early-stream.ts';
 
 const phase2 = (hold = false) => callPhase2(hold ? true : undefined);
 /** P7d: phase two's entry waits at most this long after the snapshot for the early renderer's poster. */
 const POSTER_WAIT_MS = 5_000;
 let started = false;
+// time to Live: a v2 world's stream reader and its /v1/scene leave now, not with phase two (v2-engine/early-stream.ts)
+try { startEarlyReader(); } catch { /* useV2Souls starts its own */ }
 try {
   // P7d: when the snapshot is in, the early renderer's chunk is asked for first (ahead of phase two on the link); phase
   // two downloads (and its socket opens) meanwhile, but its entry (React, the Shell, LiveWorld: ~1 s of a phone's CPU)

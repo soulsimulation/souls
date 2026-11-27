@@ -26,11 +26,11 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 
 | eden-god | souls-god | Status |
 |---|---|---|
-| `describe <ref>`, `map`, `history`, `resolve` | `describe` gives every node (id, kind, parent, text) from the daemon's copy | partial: no per-ref read; `history` gap: #3694 |
+| `describe <ref>`, `map`, `history`, `resolve` | `describe` gives every node (id, kind, parent, its own name when it has one, text) from the daemon's copy | partial: no per-ref read; `history` gap: #3694 |
 | `mirror`, `snapshot`, `query`, `follow`, `stream` | the daemon keeps a live copy; `describe` reads it | retired: the copy is local |
 | `defs <words>`, `catalog`, `find`, `recommend`, `taxonomy` | `describe` kinds only | gap: #3696 |
-| `where`, `reach`, `clear`, `free`, `verify-use` | `check` runs any edit on the copy and names the refusal | partial: no free-space or reach read; no task |
-| `look`, `thumbnail`, `kit look` | none on souls-god; the web viewer and `souls view` show a Soul's sight | gap: no task (creator pictures; list picture is G10's setting) |
+| `where`, `reach`, `clear`, `free`, `verify-use` | `where`, `clear` and `free`, read from the creator's copy with no browser (#5006); `check` runs any edit on the copy and names the refusal | partial: no `reach` read |
+| `look`, `thumbnail`, `kit look` | `look`: a picture drawn here from the public stream, or with no picture the copy's words for it (what, where, what is in it, what is near, with ids and metres) | partial: no `thumbnail` or `kit look` |
 | `examples`, `gallery`, `parts` | the creator skill teaches by example | retired: docs |
 
 ## Building

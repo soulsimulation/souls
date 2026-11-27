@@ -70,7 +70,7 @@ async function shot(name, { eye, at, q = {} }) {
   if (!chromium) return;
   const t0 = t();
   try {
-    if (!browser) { releaseChrome = await chromeLease('buildings-e2e'); browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] }); const ctx = await browser.newContext({ viewport: { width: 1100, height: 700 } }); await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); }); page = await ctx.newPage(); }
+    if (!browser) { releaseChrome = await chromeLease('buildings-e2e'); browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] }); const ctx = await browser.newContext({ viewport: { width: 1100, height: 700 } }); await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); }); page = await ctx.newPage(); }
     // one page load; the interior view switches live (window.__buildingView) so views do not reload
     if (!lastUrl) {
       lastUrl = `${base}?${new URLSearchParams({ dev: '1', eye: eye.join(','), at: at.join(',') })}`;

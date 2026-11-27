@@ -3,13 +3,15 @@
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
 import { activityAt, chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type Thing, type Turn, type WorldSample } from './takes.ts';
-import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
+import { bodySlotsOf, defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
 import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
+import type { MoveRec } from './source/source.ts';
 import { reloadForFormat } from './stream-format.ts';
+import { KIND_SLOTS, type BodySlot } from './source/kind-bounds.ts';
 import { localIsoAt } from './source/sky-record.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
@@ -17,6 +19,8 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   at: number | null; origin?: string; soul?: string | null; name?: string | null; description?: string | null; sky?: Record<number, unknown>;
   /** Slots `[n, x, y, z, yaw mdeg, capacity]`, mm in its own frame. */
   slots?: number[][];
+  /** Creator-defined canonical entry, already supplied by the stream reader. */
+  defines?: string; entry?: Uint8Array;
   /** Exact recorded body-kind hash (field 32); absent is the stated default. */
   body?: string;
   /** V3: the Soul's own look's params (field 33, G2's `life:look`), JSON. */
@@ -30,7 +34,7 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number; run?: string }[];
+  moves?: MoveRec[]; runEnds?: { body: string; at: number; run?: string }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces;
   /** First-day round 4: when each still node on a course moves on, world µs (course-samples.ts `courseLeaves`). */
@@ -141,6 +145,7 @@ const KEEP_CHUNKS_US = 12_000_000;
 export class V2Bridge {
   readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [], conversations: [], ticker: [], world: null };
   private readonly nodes = new Map<string, NodeRec>();
+  private readonly kindSlots = new Map<string, BodySlot[]>(Object.entries(KIND_SLOTS));
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
   private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[]; gestures: Gesture[]; turns?: Turn[] }>();
@@ -243,7 +248,10 @@ export class V2Bridge {
     // samples of that body (its walk there), so the walk's last sample never draws a seated body standing again
     // A live part spans its time and its records are as at its end; a history bundle's state (history.ts) spans none:
     // its records are as at the moment it was read from, so a walker's is drawn there, before the bundle's motion.
-    const moved = this.nodesChanged(p.nodes, p.removed, p.from, p.to > p.from ? 'walk' : 'frame');
+    // Only a live part's nodes describe its end; a history bundle's nodes precede its motion.
+    const sampleTimes = p.to > p.from ? new Map<string, number>() : undefined;
+    if (sampleTimes) for (const [id, , , at] of p.samples) sampleTimes.set(id, Math.max(at, sampleTimes.get(id) ?? -Infinity));
+    const moved = this.nodesChanged(p.nodes, p.removed, p.from, p.to > p.from ? 'walk' : 'frame', sampleTimes);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
     for (const n of moved) this.sample(n.id, n.parent!, n.slot, Math.max(n.at ?? p.from, p.from, this.tracks.get(n.id)?.samples.at(-1)?.at ?? -Infinity), n.pos);
     // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then, and a held move
@@ -273,12 +281,17 @@ export class V2Bridge {
 
   /** `defer`: a body's record that changes its frame or slot ('frame'), or any place ('walk'), is returned, to be
    *  sampled after the part's motion samples. */
-  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer: 'frame' | 'walk' | null = null): NodeRec[] {
+  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer: 'frame' | 'walk' | null = null, sampleTimes?: ReadonlyMap<string, number>): NodeRec[] {
     const moved: NodeRec[] = [];
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
     // V5 (0.133): every record first, so a body listed before the seat or room it is in is placed in it (a history
     // bundle's state lists a seated body before its bench: it was drawn nowhere for the whole bundle)
-    for (const n of nodes) this.nodes.set(n.id, n);
+    for (const n of nodes) {
+      this.nodes.set(n.id, n);
+      if (n.defines && n.entry) {
+        try { this.kindSlots.set(n.defines, bodySlotsOf(JSON.parse(new TextDecoder().decode(n.entry)))); } catch { /* malformed entry supplies no metadata */ }
+      }
+    }
     if (this.onCourse && nodes.some((n) => n.course || n.seats)) { const f = this.onCourse; this.onCourse = null; f(); }
     for (const n of nodes) {
       if (n.parent === null) this.view.world = n.id;
@@ -305,7 +318,9 @@ export class V2Bridge {
         if (was && was.parent === n.parent && was.slot === null && n.slot === null && was.rot.some((v, i) => v !== n.rot[i])) {
           const up = this.world(n.parent);
           const yaw = (r: NodeRec['rot']) => { const q = mul(up!.q, [r[0] / Q, r[1] / Q, r[2] / Q, r[3] / Q]); return -2 * Math.atan2(q[2], q[0]); };
-          if (up) (t.turns ??= []).push({ at: Math.max(n.at ?? at, at), from: yaw(was.rot), to: yaw(n.rot) });
+          // A completed motion clears the node's `at`; its part still carries the actual final body sample.
+          // Using the overlapping part's start would put this turn before its last step, so takes would discard it.
+          if (up) (t.turns ??= []).push({ at: Math.max(n.at ?? sampleTimes?.get(n.id) ?? at, at), from: yaw(was.rot), to: yaw(n.rot) });
         }
         t.node = n; t.gone = null;
       }
@@ -425,13 +440,20 @@ export class V2Bridge {
     return out;
   }
 
-  /** A frame moved to one of its node's slots: the slot's point only, as the v2 page adds it (its yaw does not turn
-   *  what is in it). */
+  private declaredSlot(n: NodeRec | undefined, slot: number | null): BodySlot | undefined {
+    return n && slot !== null ? (this.kindSlots.get(n.kind) ?? this.kindSlots.get(n.kind.split('@')[0]))?.find((s) => s.row[0] === slot) : undefined;
+  }
+
+  private slotRow(n: NodeRec | undefined, slot: number | null): number[] | undefined {
+    return n?.slots?.find((s) => s[0] === slot) ?? this.declaredSlot(n, slot)?.row;
+  }
+
+  /** A frame moved to its declared/recorded slot; slot yaw does not turn the child frame. */
   private inSlot(f: Mat | null, id: string | null, slot: number | null, t?: number): Mat | null {
     if (!f || slot === null || id === null) return f;
     // N14: a seat that moves with its cabin is where its course has it at `t`
     const run = t !== undefined ? this.seatPos(id, slot, t) : null;
-    const s = this.nodes.get(id)?.slots?.find((x) => x[0] === slot);
+    const s = this.slotRow(this.nodes.get(id), slot);
     if (!s && !run) return f;
     const r = rotate(f.q, run ?? [s![1] * 1000, s![2] * 1000, s![3] * 1000]);
     return { p: [f.p[0] + r[0], f.p[1] + r[1], f.p[2] + r[2]], q: f.q };
@@ -457,16 +479,16 @@ export class V2Bridge {
     }
     const r = rotate(f.q, pos);
     const p: [number, number, number] = [(f.p[0] + r[0]) / 1000, (f.p[1] + r[1]) / 1000, (f.p[2] + r[2]) / 1000];
-    // In a slot a body sits (or lies) on it: the take has its feet on the floor under the seat and the seat's height.
+    // A declared standing slot keeps its root; a seat/bed supplies the floor-relative root and seat height.
     const thing = slot !== null ? this.nodes.get(frame) : undefined;
     let seat: Seat | undefined;
     // a slot of a thing on a course is a ride's place: the body stands in it and rides (take-bodies.ts postureOf)
     if (thing) {
-      const row = thing.slots?.find((x) => x[0] === slot);
-      seat = thing.course ? { height: 0, lie: false, ride: true } : seatOf(thing.kind, row);
-      p[1] -= seat.height;
+      const row = this.slotRow(thing, slot);
+      seat = thing.course ? { height: 0, lie: false, ride: true } : seatOf(thing.kind, row, this.declaredSlot(thing, slot));
+      if (seat) p[1] -= seat.height;
       // A sitter faces out of its seat: the thing's +z turned by the slot's yaw (as a stand point lies in front of it)
-      if (!seat.lie && !seat.ride) {
+      if (seat && !seat.lie && !seat.ride) {
         const half = (row?.[4] ?? 0) / 1000 * Math.PI / 360, out = rotate(mul(f.q, [Math.cos(half), 0, Math.sin(half), 0]), [0, 0, 1]);
         seat.heading = Math.atan2(out[2], out[0]);
       }

@@ -15,7 +15,7 @@ const release=await chromeLease('L1 light-motion verification');let browser,toke
 const report={status:'blocked',errors:[],blockedOrigins:[],measures:{}};
 const post=async(path,body,auth=token)=>{const r=await fetch(base+path,{method:'POST',headers:{authorization:'Bearer '+auth,'content-type':'application/json'},body:JSON.stringify(body)});const data=await r.json();assert.ok(r.ok,JSON.stringify(data));return data;};
 try{
- browser=await pw.chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist','--disable-background-networking','--disable-sync','--proxy-server=http://127.0.0.1:5363','--proxy-bypass-list=127.0.0.1','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1']});
+ browser=await pw.chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist','--disable-background-networking','--disable-sync','--proxy-server=http://127.0.0.1:5363','--proxy-bypass-list=127.0.0.1','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1']});
  report.status='fail';
  const context=await browser.newContext({viewport:{width:1352,height:800},deviceScaleFactor:1});
  await context.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5363')return route.continue();report.blockedOrigins.push(u.origin);return route.abort();});

@@ -393,6 +393,151 @@ async fn a4_a_client_resumes_from_its_cursor_or_is_told_it_cannot() {
     assert_eq!(o, "stream.cannot-resume");
 }
 
+/// The last device wins, and the socket let go is told so by name (`agent.replaced`, 4001), so its client does not
+/// sign in again at once and take the Soul back: two clients of one Soul did, about seven times a second each.
+#[tokio::test]
+async fn a_socket_replaced_by_a_newer_sign_in_is_closed_as_replaced() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(21));
+    let r = start("replaced", tokens).await;
+    let (mut first, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let (mut second, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let close = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match first.next().await {
+                Some(Ok(Message::Close(c))) => {
+                    return c.map(|c| (u16::from(c.code), c.reason.to_string()));
+                }
+                Some(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        close,
+        Some((gatewayd::REPLACED, "agent.replaced".to_owned()))
+    );
+    // The newer socket goes on.
+    put(&mut second, intent(soul(21), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(1));
+}
+
+/// #4978: two clients of one Soul share its one numbering. A sign-in is told the newest sequence sent for the Soul with
+/// its outcome (key 5); the socket it replaces is told the newest intent read from it before its 4001 close; another
+/// intent under a sequence already sent is refused by name and never reaches the world; the same intent sent again is
+/// not refused.
+#[tokio::test]
+async fn two_clients_of_a_soul_share_one_numbering() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(22));
+    let r = start("numbering", tokens).await;
+    let (mut first, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    put(&mut first, intent(soul(22), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut first).await.unwrap()), Some(1));
+    // The other client signs in: its outcome names sequence 1.
+    let (mut second, _) = tokio_tungstenite::connect_async(r.url.as_str())
+        .await
+        .unwrap();
+    put(&mut second, hello()).await;
+    next(&mut second).await.unwrap();
+    put(&mut second, sign_in(t.reveal(), None, None)).await;
+    let Value::Map(o) = next(&mut second).await.unwrap() else {
+        panic!("an outcome");
+    };
+    assert_eq!(
+        o.get(&5),
+        Some(&Value::Uint(1)),
+        "the newest sent for the Soul"
+    );
+    // The first is told what was read from it, then closed as replaced.
+    let told = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut text = None;
+        loop {
+            match first.next().await {
+                Some(Ok(Message::Text(t))) => text = Some(t.as_str().to_owned()),
+                Some(Ok(Message::Close(c))) => return (text, c.map(|c| u16::from(c.code))),
+                Some(Ok(_)) => continue,
+                _ => return (text, None),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        told,
+        (
+            Some(r#"{"replaced":{"read":1}}"#.to_owned()),
+            Some(gatewayd::REPLACED)
+        )
+    );
+    // Another intent under sequence 1: refused by name, the world not asked.
+    let before = r.answered.load(Ordering::SeqCst);
+    put(&mut second, intent_to(soul(22), 1, "eden:other")).await;
+    assert_eq!(
+        refusal(&next(&mut second).await.unwrap()),
+        (Some(1), gatewayd::SEQUENCE_IN_USE.to_owned())
+    );
+    // The same intent sent again (after a lost socket) goes as it did; the next number is the other client's own.
+    put(&mut second, intent(soul(22), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(1));
+    put(&mut second, intent(soul(22), 2)).await;
+    assert_eq!(frame_sequence(&next(&mut second).await.unwrap()), Some(2));
+    assert!(r.answered.load(Ordering::SeqCst) > before);
+}
+
+/// A sign-in that asks only if the Soul is free (`?free=1`, a client another took the Soul from) is closed as
+/// `agent.held` while a live socket holds it, and that socket goes on; once none holds it, the same sign-in takes it.
+#[tokio::test]
+async fn a_sign_in_that_asks_if_free_never_takes_the_soul_from_a_live_socket() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(22));
+    let r = start("free", tokens).await;
+    let free = format!("{}?{}", r.url, gatewayd::FREE);
+    let (mut holder, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let (mut asking, _) = tokio_tungstenite::connect_async(&free).await.unwrap();
+    put(&mut asking, hello()).await;
+    next(&mut asking).await.unwrap();
+    put(&mut asking, sign_in(t.reveal(), None, None)).await;
+    let close = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match asking.next().await {
+                Some(Ok(Message::Close(c))) => {
+                    return c.map(|c| (u16::from(c.code), c.reason.to_string()));
+                }
+                Some(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(close, Some((gatewayd::REPLACED, "agent.held".to_owned())));
+    // The holder goes on.
+    put(&mut holder, intent(soul(22), 1)).await;
+    assert_eq!(frame_sequence(&next(&mut holder).await.unwrap()), Some(1));
+    // Once it has gone, the same sign-in takes the Soul.
+    holder.close(None).await.unwrap();
+    while next(&mut holder).await.is_some() {}
+    let o = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let (_ws, o) = connect(&free, t.reveal(), None).await;
+            if o == "stream.started" {
+                return o;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(o, "stream.started");
+}
+
 /// The wall clock, µs from the Unix epoch, for an intent's expiry (world time is real time).
 #[allow(clippy::disallowed_methods)] // a test that sets real expiries reads the wall clock
 fn unix_us() -> i64 {
@@ -611,6 +756,107 @@ async fn the_gateways_own_refusal_lost_on_a_drop_is_replayed_once_on_resume() {
     );
     put(&mut ws, intent(soul(32), 2)).await;
     assert_eq!(frame_sequence(&soon(&mut ws).await), Some(2), "once");
+}
+
+/// A frame of `grant`'s stream at version `sequence`: the world's receipt for its intent `sequence`.
+fn receipt_frame(grant: Grant, sequence: u64) -> Vec<u8> {
+    let Grant::Actor(actor) = grant;
+    let answer = Answer::Receipt {
+        actor,
+        sequence,
+        intent: Id::new(LINEAGE, sequence).unwrap(),
+        entries: vec![sequence],
+        names: BTreeMap::new(),
+    };
+    encode(&Value::Map(
+        [(1, version(sequence).to_value()), (2, answer.to_value())].into(),
+    ))
+    .unwrap()
+}
+
+/// #4979: an agent's socket let go for a full queue is closed at once with 1013 and the reason `agent.behind`, as a
+/// view socket that fell behind is (#4078), and is not first sent the frames still queued for it. Before, it was sent
+/// all of them and then dropped with no close frame, so its client could not tell it from a network drop and learned
+/// only by its own sync bound, 10 to 15 s later. Its client resumes from its cursor and is sent each frame once.
+#[tokio::test]
+async fn a_socket_let_go_for_a_full_queue_is_closed_as_behind_and_resumes_each_frame_once() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(33));
+    let r = start("behind", tokens).await;
+    let (mut ws, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let deliver = |s: u64| {
+        let at = gatewayd::resume::Cursor::from_value(&version(s).to_value()).unwrap();
+        let a = gatewayd::Answering {
+            sequence: s,
+            ends: true,
+        };
+        r.gw.deliver(soul(33).key(), a, at, receipt_frame(soul(33), s));
+    };
+    deliver(1);
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(1));
+    // More frames than its queue holds, queued while its task cannot send any (this runtime has one thread).
+    let last = gatewayd::OUTBOUND as u64 + 8;
+    for s in 2..=last {
+        deliver(s);
+    }
+    assert!(
+        r.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("agent.behind")),
+        "let go for its full queue"
+    );
+    // Told at once, by name: at most a frame or two that its task had in hand before the close.
+    let (got, close) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut got = Vec::new();
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Binary(b))) => {
+                    got.push(frame_sequence(&decode(&b).unwrap().value).unwrap());
+                }
+                Some(Ok(Message::Close(c))) => {
+                    return (got, c.map(|c| (u16::from(c.code), c.reason.to_string())));
+                }
+                Some(Ok(_)) => {}
+                _ => return (got, None),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        close,
+        Some((gatewayd::BEHIND, gatewayd::AGENT_BEHIND.to_owned())),
+        "closed by name after {} frames",
+        got.len()
+    );
+    assert!(
+        got.len() < gatewayd::OUTBOUND / 4,
+        "the close is not held behind what was queued: {} frames first",
+        got.len()
+    );
+    // It resumes after the frames it applied, and is sent each of the rest once, in order.
+    let applied = got.last().copied().unwrap_or(1);
+    let cursor = Some(version(applied).to_value());
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), cursor, Some(1)).await;
+    assert_eq!(o, "stream.resumed");
+    let mut replay = Vec::new();
+    for _ in applied + 1..=last {
+        replay.push(frame_sequence(&soon(&mut ws).await).unwrap());
+    }
+    assert_eq!(
+        replay,
+        (applied + 1..=last).collect::<Vec<_>>(),
+        "each once"
+    );
+    deliver(last + 1);
+    assert_eq!(
+        frame_sequence(&soon(&mut ws).await),
+        Some(last + 1),
+        "none twice"
+    );
 }
 
 fn tmp(name: &str) -> PathBuf {

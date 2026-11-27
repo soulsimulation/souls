@@ -36,7 +36,8 @@
 //!   granted walk's legs and each walker's line are the planner's (`crate::planner`), answered from the last tick's
 //!   [`Wants`]; the clock asks only whether a straight walk is clear (the controller's dry run). A walk gets its place
 //!   and legs a tick after it asks, and stands a tick wherever it would have searched for a new line (a new leg whose
-//!   straight way is not clear, pushed off its line, a line's end, a refused check).
+//!   straight way is not clear, pushed off its line, a line's end, a refused check). A walk the world's commit sends
+//!   asks in the tick it is sent ([`Runner::ask_places`], #4974), so the next tick reads its place and legs.
 //!
 //! - **Changed ground** (G3, #2760). At the start of each tick, after an edit's ground is installed
 //!   (`Town::install`), each body not carried whose node's ground version moved since it last stood is found again
@@ -129,6 +130,10 @@ pub trait Links {
     /// for a body standing where it lands (#4215).
     fn in_turns(&self, _link: Id) -> bool {
         false
+    }
+    /// The ground the track last given for `body` lands it on, when not dry (#3225: across a shore), taken once.
+    fn lands_on(&mut self, _body: Id) -> Option<crate::gaits::Ground> {
+        None
     }
 }
 
@@ -568,7 +573,10 @@ pub fn carry_past(
                 if links.in_turns(link)
                     || !controller.landing_taken(body, &t, LANDING_ROOM, &leaving) =>
             {
-                controller.cross(body, driver, t)
+                let lands = links.lands_on(body);
+                controller
+                    .cross(body, driver, t)
+                    .and_then(|()| lands.map_or(Ok(()), |g| controller.lands_on(body, g)))
             }
             // A shut door being opened, or a body standing where it would land (#4215): it stands and asks again.
             Ok(_) => controller.set(
@@ -636,6 +644,80 @@ pub struct Runner {
     out_places: BTreeMap<Id, (Id, u64)>,
     /// The walkers' line requests still out at the planner (S8): each walker's leg end and the batch it went in.
     out_lines: BTreeMap<Id, (Vec3, u64)>,
+    /// The loads being carried, as the world last sampled them ([`Carried`]): a walker keeps apart from each as from
+    /// bodies standing in a row, unless it carries it. Set by the world each tick ([`Runner::carrying`]).
+    carried: Vec<Carried>,
+}
+
+/// A load being carried (moving-group rule 3: a carry's rider), as a walker's `Ask::Near` sees it: the walkers' map
+/// learns where a load rests only when it is set down or seated, so while it is carried it stands among the bodies
+/// near instead, as points across its outline on the plan, each under the load's own id, at the load's height and
+/// moving with it. Its carriers do not see it: they stand at its ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Carried {
+    pub load: Id,
+    /// The node it is carried over, whose frame its points are in.
+    pub node: Id,
+    pub points: Vec<Vec3>,
+    pub velocity: Vec3,
+    pub carriers: Vec<Id>,
+}
+
+/// The most apart two points that stand for a carried load are, µm: a walker's two radii and their slack (the route
+/// skill's own space, [`skills::route::ROOM`]) twice over are more, so no walker passes between them.
+pub const CARRIED_GAP: i64 = 400_000;
+
+impl Carried {
+    /// A load whose long axis runs from `back` to `front` on the plan (µm) and that is `half_width` wide each side of
+    /// it, at height `y`: points every [`CARRIED_GAP`] at most, along its length and across its width, drawn in a
+    /// walker's own space ([`skills::route::ROOM`]) from its outline, so a walker kept two spaces from each keeps clear
+    /// of the outline.
+    pub fn new(
+        load: Id,
+        node: Id,
+        (front, back): ([i64; 2], [i64; 2]),
+        half_width: i64,
+        y: i64,
+        velocity: Vec3,
+        carriers: Vec<Id>,
+    ) -> Carried {
+        let room = skills::route::ROOM;
+        let d = [front[0] - back[0], front[1] - back[1]];
+        let l = i128::from(d[0]).pow(2) + i128::from(d[1]).pow(2);
+        let l = i64::try_from(l.isqrt()).unwrap_or(0);
+        let mut points = Vec::new();
+        if l > 0 {
+            let inset = |half: i64| (half - room).max(0);
+            let (along, across) = (inset(l / 2), inset(half_width));
+            let count = |half: i64| (half * 2 + CARRIED_GAP - 1) / CARRIED_GAP + 1;
+            let (na, nc) = (count(along), count(across));
+            let mid = [(front[0] + back[0]) / 2, (front[1] + back[1]) / 2];
+            let at = |k: i64, n: i64, half: i64| {
+                if n == 1 {
+                    0
+                } else {
+                    -half + 2 * half * k / (n - 1)
+                }
+            };
+            for i in 0..na {
+                let a = at(i, na, along);
+                for j in 0..nc {
+                    let c = at(j, nc, across);
+                    let x = i128::from(a) * i128::from(d[0]) - i128::from(c) * i128::from(d[1]);
+                    let z = i128::from(a) * i128::from(d[1]) + i128::from(c) * i128::from(d[0]);
+                    let v = |n: i128| i64::try_from(n / i128::from(l)).unwrap_or(0);
+                    points.push(Vec3::new(mid[0] + v(x), y, mid[1] + v(z)));
+                }
+            }
+        }
+        Carried {
+            load,
+            node,
+            points,
+            velocity,
+            carriers,
+        }
+    }
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -827,6 +909,8 @@ struct Here<'a> {
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     settled: &'a BTreeSet<Id>,
+    /// The loads being carried ([`Carried`]).
+    carried: &'a [Carried],
     /// A body's kind, named once a tick, not at each read (#3213).
     kind: Name,
     /// With a planner (K18b): its lines of the last tick, and the lines asked for in this one. Without, the town
@@ -863,7 +947,12 @@ impl Geometry for Here<'_> {
                     z,
                 ))
             }),
-            Ask::Near { radius } => Some(Answer::Near(near(self.controller, body, *radius))),
+            Ask::Near { radius } => Some(Answer::Near(near(
+                self.controller,
+                self.carried,
+                body,
+                *radius,
+            ))),
         }
     }
 
@@ -912,12 +1001,34 @@ impl Geometry for Here<'_> {
 }
 
 /// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
-/// the controller's index holds them: where the mover left them at the end of the last tick (N16).
-fn near(controller: &Controller, body: Id, radius: i64) -> Vec<Near> {
+/// the controller's index holds them: where the mover left them at the end of the last tick (N16). Then the points of
+/// each load being carried over that node within `radius` ([`Carried`]), unless `body` carries it, in load order.
+fn near(controller: &Controller, carried: &[Carried], body: Id, radius: i64) -> Vec<Near> {
     let Some(me) = controller.body(body) else {
         return Vec::new();
     };
     let (node, p) = crate::index::place_of(me);
+    let mut out = near_bodies(controller, body, node, p, radius);
+    let r = i128::from(radius).pow(2);
+    for c in carried {
+        if c.node != node || c.carriers.contains(&body) {
+            continue;
+        }
+        for q in &c.points {
+            if i128::from(q.x - p[0]).pow(2) + i128::from(q.z - p[1]).pow(2) <= r {
+                out.push(Near {
+                    id: c.load,
+                    position: *q,
+                    velocity: c.velocity,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The other bodies not carried across a link on `node` within `radius` of `p`, in id order.
+fn near_bodies(controller: &Controller, body: Id, node: Id, p: [i64; 2], radius: i64) -> Vec<Near> {
     let found = controller.near().bodies_within(node, p, radius);
     // Sized once: in a crowd each walker has many near it, every tick.
     let mut out = Vec::with_capacity(found.len());
@@ -964,6 +1075,7 @@ impl Runner {
             chunk: CHUNK,
             out_places: BTreeMap::new(),
             out_lines: BTreeMap::new(),
+            carried: Vec::new(),
         }
     }
 
@@ -1072,6 +1184,84 @@ impl Runner {
         self.runs.iter().map(|r| r.body).collect()
     }
 
+    /// The bodies of a class other than standard, as the spot tables and the planner size them.
+    fn classes(&self) -> BTreeMap<Id, replica::kinds::sizes::Size> {
+        self.controller
+            .ids()
+            .filter_map(|id| {
+                let size = self.controller.build(id)?.size;
+                (size != replica::kinds::sizes::Size::Standard).then_some((id, size))
+            })
+            .collect()
+    }
+
+    /// Every body's mark as it stands now, for the turns and the spot tables. Read on the runner's threads (N17b):
+    /// each mark reads one body alone.
+    fn marks(&self) -> Vec<Mark> {
+        let (controller, fields, staying, asks) =
+            (&self.controller, &self.fields, &self.staying, &self.asks);
+        let bodies: Vec<&Moved> = controller.bodies().collect();
+        crate::par::map(&bodies, self.threads, CHUNK * 4, |b| Mark {
+            who: b.id,
+            node: node_of(b),
+            at: b.pose.position,
+            waiting: waiting(fields.get(&b.id)),
+            crossing: controller.carrying(b.id),
+            carried: controller.carried(b.id),
+            staying: staying.contains(&b.id),
+            // An ask stands while its order lasts and the body is not held (walked out by the world).
+            spot: asks
+                .get(&b.id)
+                .filter(|_| !fields.get(&b.id).is_some_and(|f| f.contains_key(&F_HELD)))
+                .copied(),
+        })
+    }
+
+    /// Whether a running walk on `who` still waits for its place: none granted, and not carried by the world's own rule
+    /// (a rise's step off its seat, a climb out), from where no walk can start until it has landed.
+    fn waits_for_place(&self, who: Id) -> bool {
+        let world_carried = self.controller.carried(who) && self.controller.carrying(who).is_none();
+        !(self.granted.contains_key(&who) || world_carried)
+    }
+
+    /// The place questions of walks sent in this tick, asked now rather than with the next tick's wants (#4974): for
+    /// each of `walks` (body and order) still running and waiting for its place, the body as it stands and its target,
+    /// with every body's mark for the spot tables at the next tick's end, as the next tick would ask them. The planner
+    /// answers them while the clock finishes this tick, so the next tick reads the place and legs, and the walk is
+    /// planned (and its act answered, W11) a tick after it starts, not two. Each is counted out in batch `next`, the
+    /// batch these wants go in (S8): the next tick asks it again only once that batch has been taken without its
+    /// answer. Empty (no marks) when none waits.
+    pub fn ask_places(&mut self, walks: &[(Id, Id)], next: u64) -> Wants {
+        let mut wants = Wants::default();
+        for &(who, order) in walks {
+            let Some(&(target, o)) = self.asks.get(&who) else {
+                continue;
+            };
+            // Asked once (S8): an order already out was asked for in this tick.
+            if o != order
+                || !self.running(who)
+                || !self.waits_for_place(who)
+                || self
+                    .out_places
+                    .get(&who)
+                    .is_some_and(|&(out, _)| out == order)
+            {
+                continue;
+            }
+            let Some(body) = self.controller.body(who).copied() else {
+                continue;
+            };
+            self.out_places.insert(who, (order, next));
+            wants.places.push((body, target, order));
+        }
+        if !wants.places.is_empty() {
+            wants.classes = self.classes();
+            wants.at = self.now + self.tick;
+            wants.marks = Some(self.marks());
+        }
+        wants
+    }
+
     /// The world ends `body`'s run by `name` (N10's last rung): its driver ends, and its walk's marks go.
     pub fn end(&mut self, body: Id, name: Name) {
         let Some(k) = self.runs.iter().position(|r| r.body == body) else {
@@ -1115,7 +1305,13 @@ impl Runner {
     /// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
     /// they stood at the end of the last tick.
     pub fn near(&self, body: Id, radius: i64) -> Vec<Near> {
-        near(&self.controller, body, radius)
+        near(&self.controller, &self.carried, body, radius)
+    }
+
+    /// The loads being carried now, as the world sampled them at the end of the last tick ([`Carried`]): what the
+    /// next tick's walkers keep apart from, besides each other.
+    pub fn carrying(&mut self, carried: Vec<Carried>) {
+        self.carried = carried;
     }
 
     /// The paired edit already rebound these exact bodies off-clock; ordinary reground remains for other callers.
@@ -1211,40 +1407,12 @@ impl Runner {
         planned: Option<&Planned>,
         wants: &mut Wants,
     ) -> Result<(), Refusal> {
-        town.body_classes = self
-            .controller
-            .ids()
-            .filter_map(|id| {
-                let size = self.controller.build(id)?.size;
-                (size != replica::kinds::sizes::Size::Standard).then_some((id, size))
-            })
-            .collect();
+        town.body_classes = self.classes();
+        town.water.grounds = self.controller.grounds();
         wants.classes.clone_from(&town.body_classes);
         self.reground(town);
         let at = self.now + self.tick;
-        // Read on the runner's threads (N17b): each mark reads one body alone.
-        let bodies: Vec<&Moved> = self.controller.bodies().collect();
-        let marks: Vec<Mark> = crate::par::map(&bodies, self.threads, CHUNK * 4, |b| Mark {
-            who: b.id,
-            node: node_of(b),
-            at: b.pose.position,
-            waiting: waiting(self.fields.get(&b.id)),
-            crossing: self.controller.carrying(b.id),
-            carried: self.controller.carried(b.id),
-            staying: self.staying.contains(&b.id),
-            // An ask stands while its order lasts and the body is not held (walked out by the world).
-            spot: self
-                .asks
-                .get(&b.id)
-                .filter(|_| {
-                    !self
-                        .fields
-                        .get(&b.id)
-                        .is_some_and(|f| f.contains_key(&F_HELD))
-                })
-                .copied(),
-        });
-        drop(bodies);
+        let marks = self.marks();
         // The world's own refusals: the tick goes on, and the first is returned at its end. With a planner the spot
         // tables are its own (K18b).
         let world = town.turns(&marks, at).err();
@@ -1266,14 +1434,10 @@ impl Runner {
         // carries by its own rule (a rise's step off its seat, a climb out) is asked for once it has landed: until then
         // it stands nowhere a walk can start from.
         let running = self.running_bodies();
-        let world_carried =
-            |who: Id| self.controller.carried(who) && self.controller.carrying(who).is_none();
         let waiting: Vec<(Id, Target, Id)> = self
             .asks
             .iter()
-            .filter(|(who, _)| {
-                running.contains(*who) && !self.granted.contains_key(who) && !world_carried(**who)
-            })
+            .filter(|(who, _)| running.contains(*who) && self.waits_for_place(**who))
             .map(|(who, (t, o))| (*who, *t, *o))
             .collect();
         // Requests out at the planner are kept only while their walk waits on the same order, or the walker's
@@ -1358,6 +1522,7 @@ impl Runner {
                 now: self.now,
                 seed: self.seed,
                 planned,
+                carried: &self.carried,
             },
             &mut self.minter,
             &mut self.runs,
@@ -1436,8 +1601,15 @@ impl Runner {
             self.ended.insert(*who, (self.now, p.clone()));
         }
         let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));
+        // Wading ground and water, the standard class's only (#3225).
+        let wet = [crate::gaits::Ground::Wading, crate::gaits::Ground::Water]
+            .map(|g| town.surfaces_on(replica::kinds::sizes::Size::Standard, g));
         let stepped = self.controller.step_on_selected(
-            move |_, size| {
+            move |_, size, ground| {
+                if ground != crate::gaits::Ground::Dry {
+                    return wet[usize::from(ground == crate::gaits::Ground::Water)]
+                        .filter(|_| size == replica::kinds::sizes::Size::Standard);
+                }
                 surfaces[match size {
                     replica::kinds::sizes::Size::Small => 0,
                     replica::kinds::sizes::Size::Standard => 1,
@@ -1450,6 +1622,8 @@ impl Runner {
             self.threads,
         );
         refused.extend(stepped.refused);
+        // Read again for whatever plans before the next tick (#3225): a body that landed across a shore stands there.
+        town.water.grounds = self.controller.grounds();
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {
             if self.running(*who) {

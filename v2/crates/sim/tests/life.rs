@@ -521,3 +521,50 @@ fn a_birth_no_ground_holds_is_named_off_surface_and_withdrawn() {
     assert_eq!((life.waiting(), life.held_back(soul)), (0, None));
     assert!(!life.withdraw(soul), "withdrawn once");
 }
+
+/// #5006: a spot on ground sealed off from the main ground (`Floors::sealed`: a walled pen) is passed over, as a spot
+/// the ground does not hold is: a body born there could not walk away.
+#[test]
+fn a_birth_passes_over_a_spot_sealed_off_from_the_main_ground() {
+    use replica::kinds::sizes::Build;
+    use sim::mover::Floors;
+    /// The floor, with everything east of the entry walled in.
+    struct Pen<'a>(&'a BTreeMap<Id, Surface>);
+    impl Floors for Pen<'_> {
+        fn for_build(&self, build: Build) -> Option<&BTreeMap<Id, Surface>> {
+            self.0.for_build(build)
+        }
+        fn sealed(&self, _: Id, at: Vec3, _: Build) -> bool {
+            at.x > 0
+        }
+    }
+    let (floor, surface) = floor_of(40_000);
+    let entry = fixture(2);
+    let ring = Ring {
+        entries: BTreeMap::from([(entry, (floor, Vec3::ZERO))]),
+        radius: 1_000_000,
+        gap: 1_000_000,
+        rings: 8,
+    };
+    let floors = BTreeMap::from([(floor, surface)]);
+    let mut runner = Runner::new(TICK);
+    let mut life = Life::new(WORLD, 8);
+    life.ask(Birth {
+        soul: soul(1),
+        entry,
+        asked: 0,
+    })
+    .expect("asked");
+    let born = life.tick_built(TICK, &mut runner, &Pen(&floors), &ring, &family(), &|_| {
+        Build::STANDARD
+    });
+    assert_eq!(born.len(), 1, "born");
+    let at = runner
+        .controller
+        .body(born[0].body)
+        .expect("body")
+        .pose
+        .position;
+    println!("the first spot east is walled in; born at {at:?}");
+    assert!(at.x <= 0, "born outside the pen: {at:?}");
+}

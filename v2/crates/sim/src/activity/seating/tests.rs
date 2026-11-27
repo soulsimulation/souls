@@ -53,6 +53,8 @@ const WALKER: &str =
 const CREW_KIND: &str =
     "mars:carry_activity@12200000000000000000000000000000000000000000000000000000000000000b19";
 const ROLES: [&str; 2] = ["mars:crew-front", "mars:crew-back"];
+/// The crew's role several take beside its part (0.135 C5's sides), after its front and its back.
+const SIDE: &str = "mars:crew-side";
 /// The test world's yard and site (`v2/tools/testworld`, B17), µm on the ground.
 const YARD: Vec3 = Vec3 {
     x: 40_000_000,
@@ -146,7 +148,7 @@ fn family() -> Family {
         .expect("a family with hands")
 }
 
-/// The crew: a front and a back carrier, each taking its body's hands.
+/// The crew: a front and a back carrier, each taking its body's hands, and sides beside the part (0.135 C5), up to six.
 fn crew_kind() -> ActivityKind {
     let role = |r: &str| {
         Value::Map(BTreeMap::from([
@@ -164,9 +166,13 @@ fn crew_kind() -> ActivityKind {
     ActivityKind::from_value(&Value::Map(BTreeMap::from([
         (1, Value::Text(n(CREW_KIND))),
         (2, Value::Uint(1)),
-        (3, Value::Array(ROLES.iter().map(|r| role(r)).collect())),
+        (
+            3,
+            Value::Array(ROLES.iter().chain([&SIDE]).map(|r| role(r)).collect()),
+        ),
         (4, Value::Uint(600_000_000)),
         (5, Value::Uint(400_000)),
+        (6, Value::Uint(6)),
     ])))
     .expect("the crew")
 }
@@ -526,7 +532,7 @@ impl W {
         self.acts.next = self.tree.next();
     }
 
-    /// A crew of Souls `ks` on `place`: proposed, joined and started (B5).
+    /// A crew of Souls `ks` on `place`: proposed, joined and started (B5); a third joins as its side.
     fn crew(&mut self, place: Id, ks: &[usize]) -> Id {
         self.sync();
         let a = self.ask(ks[0]);
@@ -544,12 +550,12 @@ impl W {
                     a,
                     self.bodies[*k],
                     act,
-                    &n(ROLES[i]),
+                    &n(ROLES.get(i).copied().unwrap_or(SIDE)),
                     1,
                 )
                 .expect("joined");
         }
-        if ks.len() == 2 {
+        if ks.len() >= 2 {
             self.sync();
             let a = self.ask(ks[0]);
             self.acts
@@ -1044,6 +1050,31 @@ fn a1_to_a4_two_frames_and_two_beams_seated_held_released_and_taken_back_to_the_
             println!("trace written: {file}, {} ticks", to - from);
         }
     }
+}
+
+/// `part` takes the crew that carries (0.135 C5): a crew of three, a side beside its front and back, passes the
+/// checks a pair passes. One Soul alone is still too few.
+#[test]
+fn a5_a_crew_with_a_side_moves_a_part() {
+    let mut w = world();
+    let ground = w.ground;
+    let fa = w.frames[0];
+    let act = w.crew(ground, &[0, 1, 2]);
+    assert_eq!(w.acts.members(act).map(<[_]>::len), Some(3));
+    assert!(w.acts.started(act), "a crew of three starts");
+    let t = w.in_bay("upright_a", vec![], true);
+    let mut m = w.mint.clone();
+    let r = named(
+        w.seating
+            .check(&w.tree, &w.acts, &mut m, act, fa, &t, REACH),
+    );
+    assert!(r.is_ok(), "a crew of three is a crew: {r:?}");
+    let alone = w.crew(ground, &[3]);
+    let r = named(
+        w.seating
+            .check(&w.tree, &w.acts, &mut m, alone, fa, &t, REACH),
+    );
+    assert_eq!(r.err().map(|e| e.0).as_deref(), Some("crew.size"));
 }
 
 #[test]

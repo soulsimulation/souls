@@ -9,15 +9,15 @@ export const MENU_CLASS = 'phone-menu';
 
 export type MenuSection = 'time' | 'search' | 'souls' | 'god' | 'music' | 'camera' | 'extra' | 'account';
 
-/** The rows after Worlds, in the issue's order. `value` reads the control's current state for the row's second line. */
+/** The rows after Worlds, in the issue's order. A row says what the desktop control is called (Explore, Audio: 27 Nov). `value` reads the control's current state for the row's second line. */
 export const MENU_TARGETS: readonly { key: string; section: MenuSection; selector: string; label?: string; value?: (root: MenuRoot) => string; fallback?: () => void; unless?: string }[] = [
   { key: 'time', section: 'time', selector: '.hud-status .time-pill', label: 'Time', value: (root) => text(root, '.hud-status [data-viewer-status]') },
-  { key: 'search', section: 'search', selector: '.hud-explore-group .explore-open:not(.god-open)', label: 'Search' },
+  { key: 'search', section: 'search', selector: '.hud-explore-group .explore-open:not(.god-open)', label: 'Explore' },
   // the Souls list (part b) carries its own New Soul; this row stands in when you have no Souls yet
   { key: 'new-soul', section: 'souls', selector: '.hud-explore-group .bring-agent-open', label: 'New Soul', unless: '.hud-menu-souls' },
   { key: 'god', section: 'god', selector: '[data-god-open]', label: 'God mode' },
   { key: 'claim', section: 'god', selector: '[data-god-panel-toggle]' },
-  { key: 'music', section: 'music', selector: '.hud-left .navbar-audio .navbar-menu-trigger', label: 'Music' },
+  { key: 'music', section: 'music', selector: '.hud-left .navbar-audio .navbar-menu-trigger', label: 'Audio' },
   { key: 'camera', section: 'camera', selector: '.hud-camera-slot .camera-menu .navbar-menu-trigger', label: 'Camera', value: (root) => text(root, '.hud-camera-slot .camera-main span') },
   // the same two as HudMore's More: Feedback lives in the account menu when signed in, so signed out the row asks directly
   { key: 'feedback', section: 'extra', selector: '[data-feedback-open]', label: 'Feedback', fallback: requestFeedback },

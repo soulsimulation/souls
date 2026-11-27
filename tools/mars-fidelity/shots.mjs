@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local-only matched-camera proof. The shared real Chrome lease belongs to lane mars.
+// Local-only matched-camera proof. The shared Chrome lease belongs to lane mars.
 import {createRequire} from 'node:module';
 import {mkdirSync,writeFileSync,readFileSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
@@ -22,7 +22,7 @@ export const VIEWS={
 const release=await chromeLease('mars');let browser;const rows=[];let failure;
 try{
  for(const dpr of flag('dpr',null)?[Number(flag('dpr'))]:[1,2])for(const dust of ['dust','review'].includes(mode)?['clear','faint','heavy']:['clear']){
-  browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+  browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
   const ctx=await browser.newContext({viewport:{width:1280,height:800},deviceScaleFactor:dpr});
   const page=await ctx.newPage();page.setDefaultTimeout(60000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   page.on('console',m=>{if(m.type()==='error'&&/WebGL|shader|ERROR/.test(m.text()))errors.push(m.text().slice(0,300));});

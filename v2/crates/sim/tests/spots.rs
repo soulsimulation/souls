@@ -244,8 +244,9 @@ fn inside(p: Vec3, r: [i64; 4]) -> bool {
 }
 
 /// A3's check on every table a town holds: no place within `CLEAR` of a link's end on its node, nor within half the
-/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; on
-/// a building's floor, a flight's line where it lies from a step below the place to a body's height above it).
+/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; a
+/// doorway's between its ends within half its widest end and half `CLEAR`, past them within half `CLEAR`; on a
+/// building's floor, a flight's line where it lies from a step below the place to a body's height above it).
 /// Returns how many places it checked.
 fn no_place_in_a_passage(t: &Town) -> usize {
     let mut n = 0;
@@ -270,10 +271,30 @@ fn no_place_in_a_passage(t: &Town) -> usize {
                                 "A3: a place at a link's end"
                             );
                         }
-                        let reach = if l.kind == Kind::Step {
-                            CLEAR / 2
-                        } else {
-                            l.width / 2 + CLEAR / 2
+                        // A doorway's band between its ends is as wide as its widest end; past them, half CLEAR.
+                        let framed = |q: Vec3| {
+                            if *node == t.ground {
+                                b.place.point(q).unwrap()
+                            } else {
+                                q
+                            }
+                        };
+                        let between = match (l.line.first(), l.line.last()) {
+                            (Some(&a), Some(&c)) => {
+                                let (a, c) = (framed(a), framed(c));
+                                let (ex, ez) = (i128::from(c.x - a.x), i128::from(c.z - a.z));
+                                let k =
+                                    i128::from(p.at.x - a.x) * ex + i128::from(p.at.z - a.z) * ez;
+                                k > 0 && k < ex * ex + ez * ez
+                            }
+                            _ => false,
+                        };
+                        let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
+                        let reach = match l.kind {
+                            Kind::Step => CLEAR / 2,
+                            Kind::Doorway if between => held.unwrap_or(0) + CLEAR / 2,
+                            Kind::Doorway => CLEAR / 2,
+                            _ => l.width / 2 + CLEAR / 2,
                         };
                         let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
                         for s in l.line.windows(2) {
@@ -719,10 +740,94 @@ fn c8_the_boxes_give_the_same_passages() {
     assert!(inside > 0 && checked > inside);
 }
 
+/// #5003's Eden audit: a doorway's passage is its ends' and its line's, not a disc of its width. A point at an end, on
+/// the room's side, is in the passage and at the doorway's mouth; one between the ends is in the doorway, no mouth; and
+/// one 1.5 m out past an end is in neither, though the doorway be 11.6 m wide (a market pavilion's open side, whose
+/// width counted out from its line swallowed the pavilion).
+#[test]
+fn a_doorways_passage_is_its_ends_and_its_line_and_its_mouth_is_on_the_rooms_side() {
+    use sim::walk::town::{in_mouth_indexed, in_passage, passages_of};
+    let (t, nodes) = town();
+    let f0 = nodes["building/floor-0"];
+    let door = nodes["door-building-a-b"];
+    let (bi, li) = t
+        .buildings
+        .iter()
+        .enumerate()
+        .find_map(|(bi, b)| Some((bi, b.links.iter().position(|l| l.door == Some(door))?)))
+        .expect("the doorway a-b");
+    let l = &t.buildings[bi].links[li];
+    let (a, c) = (l.line[0], l.line[l.line.len() - 1]);
+    let len = flat(a, c);
+    // `k` µm from end 0 along the line toward end 1 (out past it when below 0).
+    let along = |k: i64| {
+        Vec3::new(
+            a.x + (i128::from(c.x - a.x) * i128::from(k) / i128::from(len)) as i64,
+            a.y,
+            a.z + (i128::from(c.z - a.z) * i128::from(k) / i128::from(len)) as i64,
+        )
+    };
+    let passages = passages_of(&t.buildings, t.ground);
+    let mouth = |bs: &[sim::links::Building], p: Vec3| {
+        in_mouth_indexed(bs, &passages, t.ground, f0, p, None)
+    };
+    let at_end = along(-400_000);
+    assert!(
+        in_passage(&t.buildings, &[], t.ground, f0, at_end),
+        "at an end"
+    );
+    assert!(
+        mouth(&t.buildings, at_end),
+        "at an end, on the room's side: the mouth"
+    );
+    let inside = along(len / 2);
+    assert!(
+        in_passage(&t.buildings, &[], t.ground, f0, inside),
+        "in the doorway"
+    );
+    assert!(!mouth(&t.buildings, inside), "in the doorway: no mouth");
+    // Between the ends 0.2 m in from the wider one, 0.1 m to the side of the band: at that end, in the doorway, no mouth.
+    let halves: Vec<i64> = l
+        .ends
+        .iter()
+        .flatten()
+        .map(|e| flat(e.a, e.b) / 2)
+        .collect();
+    let held = *halves.iter().max().expect("its ends");
+    let on_line = if halves[0] >= halves[1] {
+        along(200_000)
+    } else {
+        along(len - 200_000)
+    };
+    let side = held + CLEAR / 2 + 100_000;
+    let aside = Vec3::new(
+        on_line.x - (i128::from(c.z - a.z) * i128::from(side) / i128::from(len)) as i64,
+        a.y,
+        on_line.z + (i128::from(c.x - a.x) * i128::from(side) / i128::from(len)) as i64,
+    );
+    assert!(
+        in_passage(&t.buildings, &[], t.ground, f0, aside),
+        "beside the band, at an end, between the ends"
+    );
+    assert!(!mouth(&t.buildings, aside), "between the ends: no mouth");
+    let out = along(-1_500_000);
+    let mut wide = t.buildings.clone();
+    wide[bi].links[li].width = 11_600_000;
+    for (name, bs) in [("as built", &t.buildings), ("11.6 m wide", &wide)] {
+        assert!(
+            !in_passage(bs, &[], t.ground, f0, out),
+            "{name}: 1.5 m out past an end"
+        );
+        assert!(!mouth(bs, out), "{name}: 1.5 m out past an end, no mouth");
+    }
+}
+
 /// #1960 (#3688's class): a move at a door aimed in its wall, short of the doorway, from a room on either side. Every
 /// floor place within an arm of the aim lies within [`CLEAR`] of the doorway's ends, so the plain search finds none
-/// (the bedroom close's `out-of-reach` on served Eden, 783 mm against 600). With the move's own door, its doorway
-/// counts and each side gets a place on its own side, within the arm; another thing's id changes nothing.
+/// clear of the doorway (the bedroom close's `out-of-reach` on served Eden, 783 mm against 600): since #5003's Eden
+/// audit it finds one at the doorway's mouth, on the walker's own side, never in the doorway itself; another thing's
+/// id changes nothing. With the move's own door, its doorway counts and each side gets a place on its own side,
+/// within the arm.
 #[test]
 fn a_door_is_reached_from_a_room_on_either_side() {
     let (mut t, nodes) = town();
@@ -741,17 +846,31 @@ fn a_door_is_reached_from_a_room_on_either_side() {
         .collect();
     let (west, east) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
     let (aim, reach) = (Vec3::new((west + east) / 2, 0, -3_400_000), 600_000);
+    let (buildings, ground) = (t.buildings.clone(), t.ground);
     for (side, from) in [("west", west - 1_000_000), ("east", east + 1_000_000)] {
         let body = stand(&t, id(1), f0, Vec3::new(from, 0, -3_000_000));
         let v = t.view();
-        assert_eq!(
-            v.stand_near(f0, aim, reach, Some(&body)),
-            None,
-            "{side}: no place out of the doorway"
+        let mouth = v
+            .stand_near(f0, aim, reach, Some(&body))
+            .unwrap_or_else(|| panic!("{side}: a place at the doorway's mouth"));
+        let own_side = |p: Vec3| {
+            if side == "west" {
+                p.x <= west
+            } else {
+                p.x >= east
+            }
+        };
+        assert!(
+            flat(mouth, aim) <= reach && own_side(mouth),
+            "{side}: {mouth:?} within an arm of {aim:?}, on the walker's side of the doorway"
+        );
+        assert!(
+            sim::walk::town::in_passage(&buildings, &[], ground, f0, mouth),
+            "{side}: {mouth:?} by the doorway's end, as no place clear of it is"
         );
         assert_eq!(
             v.stand_near_door(f0, aim, reach, Some(&body), Some(f0)),
-            None,
+            Some(mouth),
             "{side}: another thing's id frees no doorway"
         );
         let p = v
@@ -995,5 +1114,37 @@ fn a2_5_walkers_beyond_a_full_place_end_done_on_overflow_points() {
         done,
         over.len(),
         "each arrived, done as near as the crowd allows, holding its point"
+    );
+}
+
+/// PR #5012's short walk (`rack-bay.mjs local --crew 6`, bay 2's third beam): a walker on one 16 m square, east of a
+/// pond that stands across its straight way, sent to a point 2.8 m past the edge of the square beside it, is granted
+/// that point itself. The coarse search measured the way across the squares' edge at the middle of the whole stretch
+/// they share (7.4 m off the way here), so the point's 9.8 m walk cost 18.1 m, and a place 2.1 m short of it was
+/// granted instead (in the trial, one 3.5 m short on the walker's own square: the walk ended `done` there).
+#[test]
+fn a_point_past_a_squares_edge_is_granted_itself_not_a_place_short_of_it() {
+    // On the test world's open square: a pond 2 m wide, 4 m to 6 m east and 0.45 m to 9 m south of the origin. The
+    // squares' edge is x = 0, their shared stretch from z = -16 m to 0 (its middle at z = -8 m).
+    let pond = "{\"id\":\"pond\",\"kind\":\"pond\",\"level\":0,\"name\":\"a pond\",\"of\":\"water\",\
+                \"polygon\":[[4000,-9000],[6000,-9000],[6000,-450],[4000,-450]]},";
+    let w = testworld::generate(1, 0).expect("the test world");
+    let text = w
+        .text
+        .replacen("\"places\":[", &format!("\"places\":[{pond}"), 1);
+    let (mut t, _) = town_of(import_eden::load(&text).expect("the pond world loads"));
+    let ground = t.ground;
+    let (from, point) = (
+        Vec3::new(7_000_000, 0, -600_000),
+        Vec3::new(-2_800_000, 0, -600_000),
+    );
+    let got = bind(&mut t, 1, ground, from, Target::new(ground, point)).expect("a place");
+    println!(
+        "#5012: sent from {from:?} to {point:?}: granted {got:?}, {} mm from it",
+        flat(got, point) / 1000
+    );
+    assert!(
+        flat(got, point) <= 1_000,
+        "the point itself, not a place short of it on the walker's own square: {got:?}"
     );
 }

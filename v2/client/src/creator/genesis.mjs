@@ -9,10 +9,12 @@
 //   links    the links a node owns (a doorway, a stair): { id, type, ends, owner }; its row is in a field of its owner
 //            end (`[link, ...]`) and a door standing in it names it in field 7
 //   names    the public names the copy was told (`sha256 hex` -> words), so the file reads as the world does
+//   words    the words a field names by its words record (`{ map: [[21, { id }]] }`: a title, a calendar entry's
+//            words), by that record's id; an import sends them as words, so the world it goes into keeps them
 //
 // Bodies (a node owning a `souls:body-of` link) and what they hold are left out: a Soul is not content.
 
-import { allFields, decode, idText, plainKind } from '../brief/copy.mjs';
+import { allFields, decode, idText, plainKind, publicWordsOf } from '../brief/copy.mjs';
 
 export const FORMAT = 'souls-world/1';
 /** The most operations one edit carries (`replica::edit::OPS_MOST`). */
@@ -49,7 +51,7 @@ function poseOf(p) {
 /** Every node of the copy, parents first, bodies and what they hold left out; and the bodies' count. */
 export function exportOf(copy, { names = new Map(), world = null, at = null } = {}) {
   const roots = Object.values(JSON.parse(copy.roots()));
-  const todo = [...roots].reverse(), seen = new Set(), nodes = [];
+  const todo = [...roots].reverse(), seen = new Set(), nodes = [], words = {}, said = publicWordsOf(copy);
   let bodies = 0;
   while (todo.length) {
     const hash = todo.pop();
@@ -60,7 +62,10 @@ export function exportOf(copy, { names = new Map(), world = null, at = null } = 
     const m = decode(bytes);
     const owned = (m.get(9) ?? []).filter(([, l]) => l instanceof Map);
     if (owned.some(([, l]) => plainKind(l.get(1)) === 'souls:body-of')) { bodies++; continue; }
-    const fields = m.get(6) instanceof Map ? Object.fromEntries([...allFields(copy, m)].map(([k, v]) => [Number(k), plainValue(v)])) : {};
+    const all = m.get(6) instanceof Map ? [...allFields(copy, m)] : [];
+    const fields = Object.fromEntries(all.map(([k, v]) => [Number(k), plainValue(v)]));
+    // #5006 row 33: the words a field names (a title, a calendar entry's), so an import can send them as words
+    for (const [, v] of all) { const ref = wordsRef(v); if (ref && said.has(ref)) words[ref] = said.get(ref); }
     const pose = poseOf(m.get(7));
     nodes.push({
       id: idText(m.get(1)), kind: String(m.get(2)), parent: m.has(3) ? idText(m.get(3)) : null, fields,
@@ -70,21 +75,29 @@ export function exportOf(copy, { names = new Map(), world = null, at = null } = 
     const children = (m.get(10) ?? []).map(hex);
     for (let k = children.length - 1; k >= 0; k--) todo.push(children[k]);
   }
-  return { format: FORMAT, world, at, nodes, bodies, names: Object.fromEntries(names) };
+  return { format: FORMAT, world, at, nodes, bodies, names: Object.fromEntries(names), words };
 }
+
+/** The id of the words record a field value names (`{21: id}`, as `brief/copy.mjs` `wordsAt` reads it), or null. */
+const wordsRef = (v) => (v instanceof Map && v.size === 1 && isId(v.get(21)) ? idText(v.get(21)) : null);
 
 // --- import --------------------------------------------------------------------------------------------------------
 
 /** A file value as a batch's value, ids mapped through `ids`; `null` when it names something not brought over (a
- *  doorway's or a stair's link) or has no batch form. */
-export function batchValue(v, ids) {
+ *  doorway's or a stair's link) or has no batch form. A words record's reference is sent as its words (`words`: the
+ *  file's, by the record's id), as `about --title` and `event` send them (#5006 row 33). */
+export function batchValue(v, ids, words = {}) {
   if (Array.isArray(v)) {
     const out = [];
-    for (const x of v) { const y = batchValue(x, ids); if (y === null) return null; out.push(y); }
+    for (const x of v) { const y = batchValue(x, ids, words); if (y === null) return null; out.push(y); }
     return out;
   }
   if (v && typeof v === 'object') {
     if (v.hex !== undefined) return { hex: v.hex };
+    if (Array.isArray(v.map)) {
+      const [one] = v.map;
+      return v.map.length === 1 && one[0] === 21 && typeof words[one[1]?.id] === 'string' ? { words: words[one[1].id] } : null;
+    }
     if (v.id !== undefined) {
       const to = ids.get(v.id);
       if (!to) return null;
@@ -170,7 +183,7 @@ export function importOf(file, target) {
     for (const [k, v] of Object.entries(n.fields ?? {})) {
       if (n.parent === null && !ROOT_CARRIED.includes(Number(k))) continue;
       if (namesLink(v)) continue; // its link's operation writes it
-      const b = batchValue(v, ids);
+      const b = batchValue(v, ids, file.words ?? {});
       if (b === null || depthOf(b) > SET_DEPTH) drop(n, k); else out[k] = b;
     }
     return out;
@@ -178,7 +191,7 @@ export function importOf(file, target) {
   // The matched nodes' fields that differ, one set each (the open ground's tiles are one large set).
   const sets = [];
   for (const [s, t] of matched) {
-    for (const [k, v] of Object.entries(fieldsOf(s))) if (!same(batchValue(t.fields?.[k] ?? null, SELF), v)) sets.push({ op: 'set', node: t.id, field: Number(k), value: v });
+    for (const [k, v] of Object.entries(fieldsOf(s))) if (!same(batchValue(t.fields?.[k] ?? null, SELF, target.words ?? {}), v)) sets.push({ op: 'set', node: t.id, field: Number(k), value: v });
   }
   // Places by level: a level goes once every node above it is answered.
   const levels = [];
@@ -220,7 +233,7 @@ export function importOf(file, target) {
         // The links, once every place is answered: their ends and doors are there.
         for (let k = 0; k < pending.length && ops.length < OPS_MOST;) {
           const l = pending[k], ends = l.ends.map((e) => ids.get(e)), door = l.door ? ids.get(l.door) : null;
-          const row = batchValue(l.row, ids);
+          const row = batchValue(l.row, ids, file.words ?? {});
           if (ends.some((e) => !e) || (l.door && !door) || row === null) { k++; continue; }
           pending.splice(k, 1);
           const name = names.size + 1;

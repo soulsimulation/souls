@@ -30,8 +30,12 @@
 //!    tail: cut back and synced (bytes after the last sync, never a returned reference). One that does not check with
 //!    bytes after it is `text-corrupt`, refused and never trimmed.
 //!
+//! 8. **A person's words are found by their author** ([`Store::written_by`], W7 #2826): each record keeps its author,
+//!    so the references one person's Souls wrote are listed from the store alone, with how each is removed now.
+//!
 //! Not here: a fork opening its parent's store (T8 rule 10, K6), checking and naming uploads (G6), who may remove
-//! whose words and purging caches (W7), the view tier (R3), copies off the machine (O20).
+//! whose words and purging the stream's text files (W7, `worldd::removal`), the view tier (R3), copies off the machine
+//! (O20).
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -94,6 +98,15 @@ impl Grade {
             .into_iter()
             .find(|g| *g as u8 == b)
     }
+}
+
+/// One record the store holds, as [`Store::written_by`] lists it: its reference, whether it is an upload, and its
+/// latest removal not restored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Written {
+    pub reference: Id,
+    pub upload: bool,
+    pub removed: Option<Grade>,
 }
 
 /// One entry of the redaction list: a reference, who removed it (a principal id), when (µs of real time, a recorded
@@ -382,6 +395,8 @@ fn write_loop(mut disk: Disk, shared: Arc<Shared>) {
 struct Entry {
     kind: u8,
     audience: Audience,
+    /// Who wrote it (a principal id: a Soul's body, or a creator).
+    author: Id,
     /// The record's first byte, its body's length, and its number: it is on the disk once `durable` reaches `n`.
     at: u64,
     len: u32,
@@ -395,14 +410,15 @@ struct Index {
     removed: BTreeMap<Id, Removal>,
     /// Every entry of the redaction list, in order.
     history: Vec<Removal>,
-    /// The `removed` file, written and synced under this lock.
-    list: Disk,
 }
 
 /// A world's text store, open: recovered, its torn tails cut, its writer running.
 pub struct Store {
     place: Place,
     index: Mutex<Index>,
+    /// The `removed` file, written and synced under this lock alone, never the index's (W7, #2826): a removal on a
+    /// running world never holds the clock's writes through a sync. It also keeps removals one at a time.
+    list: Mutex<Disk>,
     shared: Arc<Shared>,
     writer: Option<JoinHandle<()>>,
 }
@@ -469,7 +485,7 @@ impl Store {
         let mut entries = BTreeMap::new();
         let mut finish = Vec::new();
         for (i, r) in raws.iter().enumerate() {
-            let Some((kind, id, audience, _author)) = read_meta(r.body) else {
+            let Some((kind, id, audience, author)) = read_meta(r.body) else {
                 return refuse("text-corrupt", format!("text: record at byte {}", r.at));
             };
             if erased(r.body) && r.body[META..].iter().any(|x| *x != 0) {
@@ -481,6 +497,7 @@ impl Store {
             let e = Entry {
                 kind,
                 audience,
+                author,
                 at: r.at as u64,
                 len: r.body.len() as u32,
                 n: i as u64 + 1,
@@ -517,8 +534,8 @@ impl Store {
                 entries,
                 removed,
                 history,
-                list,
             }),
+            list: Mutex::new(list),
             shared,
             writer: Some(writer),
         };
@@ -583,6 +600,7 @@ impl Store {
                 Entry {
                     kind,
                     audience,
+                    author,
                     at,
                     len,
                     n,
@@ -679,41 +697,71 @@ impl Store {
     /// Removes the words under `reference` (rule 5): the redaction list's entry is synced first; an erasure then
     /// deletes the bytes (rule 6). Refused as `text-unknown`, `erased` (erased words stay erased) or `not-removed`.
     pub fn remove(&self, reference: Id, by: Id, when_us: u64, grade: Grade) -> R<()> {
-        let mut ix = lock(&self.index);
-        let Some(e) = ix.entries.get(&reference).copied() else {
-            return refuse("text-unknown", "no words under this reference");
-        };
-        if lock(&self.shared.q).durable < e.n {
-            return refuse("text-unknown", "not on the disk yet");
+        self.remove_all(&[reference], by, when_us, grade)
+    }
+
+    /// Removes the words under each of `references` at once (rule 5; W7, #2826): every entry is checked first, and
+    /// any refusal ([`Store::remove`]'s) refuses them all; then their entries go on the list in one append and one
+    /// sync, under the list's own lock, the index's held only to check them and to take them in after the sync, so
+    /// the clock's writes never wait through a sync; an erasure then deletes each one's bytes (rule 6).
+    pub fn remove_all(&self, references: &[Id], by: Id, when_us: u64, grade: Grade) -> R<()> {
+        if references.is_empty() {
+            return Ok(());
         }
-        match (ix.removed.get(&reference).map(|r| r.grade), grade) {
-            (Some(Grade::Erased), _) => return refuse("erased", "erased words stay erased"),
-            (None, Grade::Restored) => return refuse("not-removed", "nothing to restore"),
-            _ => {}
+        let mut list = lock(&self.list);
+        let mut found = Vec::with_capacity(references.len());
+        {
+            let ix = lock(&self.index);
+            let durable = lock(&self.shared.q).durable;
+            for reference in references {
+                let Some(e) = ix.entries.get(reference).copied() else {
+                    return refuse("text-unknown", "no words under this reference");
+                };
+                if durable < e.n {
+                    return refuse("text-unknown", "not on the disk yet");
+                }
+                match (ix.removed.get(reference).map(|r| r.grade), grade) {
+                    (Some(Grade::Erased), _) => {
+                        return refuse("erased", "erased words stay erased");
+                    }
+                    (None, Grade::Restored) => return refuse("not-removed", "nothing to restore"),
+                    _ => {}
+                }
+                found.push((*reference, e));
+            }
         }
-        let mut body = vec![KIND_REMOVAL];
-        put_id(&mut body, reference);
-        put_id(&mut body, by);
-        body.extend_from_slice(&when_us.to_le_bytes());
-        body.push(grade as u8);
-        let mut rec = Vec::new();
-        frame(&mut rec, &body);
-        ix.list.append(&rec).and_then(|_| ix.list.sync())?;
-        let r = Removal {
-            reference,
-            by,
-            when_us,
-            grade,
-        };
-        match grade {
-            Grade::Restored => ix.removed.remove(&reference),
-            _ => ix.removed.insert(reference, r),
-        };
-        ix.history.push(r);
-        drop(ix);
+        let mut recs = Vec::new();
+        for (reference, _) in &found {
+            let mut body = vec![KIND_REMOVAL];
+            put_id(&mut body, *reference);
+            put_id(&mut body, by);
+            body.extend_from_slice(&when_us.to_le_bytes());
+            body.push(grade as u8);
+            frame(&mut recs, &body);
+        }
+        list.append(&recs).and_then(|_| list.sync())?;
+        {
+            let mut ix = lock(&self.index);
+            for (reference, _) in &found {
+                let r = Removal {
+                    reference: *reference,
+                    by,
+                    when_us,
+                    grade,
+                };
+                match grade {
+                    Grade::Restored => ix.removed.remove(reference),
+                    _ => ix.removed.insert(*reference, r),
+                };
+                ix.history.push(r);
+            }
+        }
         if grade == Grade::Erased {
-            self.wipe(reference, e)?;
+            for (reference, e) in found {
+                self.wipe(reference, e)?;
+            }
         }
+        drop(list);
         Ok(())
     }
 
@@ -745,6 +793,21 @@ impl Store {
     /// The redaction list every view is built with (T7; T8 rule 8): the references hidden or erased now.
     pub fn redactions(&self) -> Redactions {
         Redactions::new(lock(&self.index).removed.keys().copied())
+    }
+
+    /// The records `authors` wrote that are on the disk, in reference order, each with how it is removed now (rule 8).
+    pub fn written_by(&self, authors: &std::collections::BTreeSet<Id>) -> Vec<Written> {
+        let ix = lock(&self.index);
+        let durable = lock(&self.shared.q).durable;
+        ix.entries
+            .iter()
+            .filter(|(_, e)| e.n <= durable && authors.contains(&e.author))
+            .map(|(r, e)| Written {
+                reference: *r,
+                upload: e.kind == KIND_UPLOAD,
+                removed: ix.removed.get(r).map(|x| x.grade),
+            })
+            .collect()
     }
 
     /// Every entry of the redaction list, in the order written.

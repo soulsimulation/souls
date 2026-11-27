@@ -1,32 +1,12 @@
-// #897: the MCP discovery document and the root llms.txt Worlds section.
+// The retired MCP card's answer, and the root llms.txt Worlds section (#897).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { MCP_SCHEMA, MCP_TOOLS, mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
+import { mcpGone, siteLlmsTxt } from './mcp-card.mjs';
 
-test('server.json meets the registry schema (2025-12-11) constraints', () => {
-  const d = mcpServerJson({ origin: 'https://soul.game', version: '0.118.0' });
-  assert.equal(d.$schema, MCP_SCHEMA);
-  for (const k of ['name', 'description', 'version']) assert.ok(typeof d[k] === 'string' && d[k].length, k);
-  assert.match(d.name, /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/); assert.ok(d.name.length >= 3 && d.name.length <= 200);
-  assert.ok(d.description.length >= 1 && d.description.length <= 100, `description is ${d.description.length} characters`);
-  assert.ok(d.version.length <= 255 && !/[\^~><=*]|\.x(\.|$)/.test(d.version), 'an exact version, not a range');
-  assert.equal(mcpServerJson({ origin: 'https://soul.game', version: 'dev' }).version, '0.0.0-dev', 'a dev build: a semver prerelease');
-  assert.equal(mcpServerJson({ origin: 'https://soul.game', version: 'we-9c6cec5397a2' }).version, '0.0.0-we-9c6cec5397a2', 'a release build id');
-  assert.equal(d.remotes.length, 1);
-  const [r] = d.remotes;
-  assert.equal(r.type, 'streamable-http'); assert.match(r.url, /^https?:\/\/[^\s]+$/); assert.equal(r.url, 'https://soul.game/w/{world}/mcp');
-  for (const v of r.url.match(/\{([^}]+)\}/g).map((m) => m.slice(1, -1))) assert.ok(r.variables[v]?.isRequired, `variable ${v} declared`);
-  assert.deepEqual(r.headers.map((h) => [h.name, h.isRequired, h.isSecret]), [['Authorization', true, true]]);
-  assert.deepEqual(Object.keys(d._meta), ['io.modelcontextprotocol.registry/publisher-provided']);
-  assert.equal(mcpServerJson({ origin: 'https://x.test', base: '/worlds' }).remotes[0].url, 'https://x.test/worlds/w/{world}/mcp');
-});
-
-test('the tool list is exactly what apps/server/src/mcp.ts registers', () => {
-  const src = readFileSync(new URL('../../apps/server/src/mcp.ts', import.meta.url), 'utf8');
-  const registered = [...src.matchAll(/registerTool\('([a-z0-9_]+)'/g)].map((m) => m[1]);
-  assert.deepEqual([...MCP_TOOLS].sort(), [...new Set(registered)].sort());
-  assert.deepEqual(mcpServerJson({ origin: 'https://soul.game' })._meta['io.modelcontextprotocol.registry/publisher-provided'].tools, [...MCP_TOOLS]);
+test('no MCP card: the answer is plain text naming the client and the For agents page, on the public origin and base', () => {
+  assert.equal(mcpGone({ origin: 'https://soul.game' }), 'Souls does not serve MCP. To run a Soul, use the client each world serves, eden.mjs. Start here: https://soul.game/docs/for-agents\n');
+  assert.match(mcpGone({ origin: 'https://x.test', base: '/worlds' }), /Start here: https:\/\/x\.test\/worlds\/docs\/for-agents\n$/);
+  assert.doesNotMatch(mcpGone({ origin: 'https://soul.game' }), /eden_|soul_|server\.json/, 'no tool and no card is named');
 });
 
 test('root llms.txt: the docs index plus one reader line per listed world; nothing added without worlds', () => {

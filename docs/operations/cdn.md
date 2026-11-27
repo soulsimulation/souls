@@ -144,7 +144,7 @@ is skipped. `manifest` merges only receipt-verified paths into the manifest's `w
   Chrome's `Accept-Encoding` (must stay br), identity and gzip (must arrive decoded). `--allow-warm` labels a recheck
   of an already warm object.
 - `node tools/cdn/cdn-walk.mjs <outDir> <url>... [--manifest <file>] [--wait <ms>] [--devices desktop1,phone2]`: the
-  release's runtime check. Real Chrome, desktop and phone, asset worker on. It fails when the origin answers an asset
+  release's runtime check. Playwright Chromium, desktop and phone, asset worker on. It fails when the origin answers an asset
   the manifest maps, a CDN request is not 200, a `br` object arrives without `Content-Encoding: br`, the worker
   delivered GLBs but none from the CDN, a god upload came from the origin without a Worker request first, or a
   same-origin immutable response lacks a long-lived cache policy (`origin-cache.mjs`).
@@ -207,6 +207,88 @@ The god folder may name either allowed site with `/w/<slug>/` or `/worlds/w/<slu
 
 **Rollback:** delete the route. Clients get a 404 from the bucket and fall back to the origin. Objects under `w/` are
 inert and may stay.
+
+## The stream hostname
+
+A world's live stream (`/s/*`: its pointer, bundle headers, baselines and parts) is public, the same for every viewer,
+and already sent with cache headers: parts, baselines and headers `immutable` for a year, the pointer `max-age=1`,
+a missing file or a query string `no-store` ([viewer cache](../../v2/docs/viewer-cache.md)). The `soul.game` record is
+DNS only, so without this every viewer's reads reach the host: about 6 requests a second (the page reads the pointer
+every 250 ms, plus 2 parts), 14 to 16 kB a second, and 9 to 13.5 MB to join. On the viewers bench (#4159) the origin
+answered 34,000 requests and 333 MB a second at 5,000 viewers, and 215 reads timed out.
+
+`https://stream.soul.game` is a proxied record in the `soul.game` zone whose only paths are the stream's. Its cache
+rule keeps each file at the edge for as long as the origin's header says, so a location sends the host about one
+pointer read and two parts a second however many viewers it serves (with Tiered Cache, about that many in all). The
+page reads there only when the world's cutover binding names it (`v2StreamOrigin`, read again within a second, no
+restart); a visitor can add `?streamcdn=0` to read from `soul.game` itself. The history (`v2History`) stays on
+`soul.game`.
+
+| Part | Where |
+|---|---|
+| The page reads its stream from the named origin, and only `https://stream.soul.game` | `apps/web/src/v2-engine/stream-cdn.ts` |
+| The launcher writes `v2StreamOrigin` into the routed page | `tools/world-launcher/cutover.mjs` (`v2Fields`), switched by `stream-cdn-switch.mjs` |
+| The host: `/s/*` to the viewers' origin (7320) with `Access-Control-Allow-Origin: *`, a preflight answered, no cookie, anything else a `no-store` 404 | `v2/tools/ops/proxy/stream-soul-game.caddy` (its test runs it in a real Caddy) |
+
+**Why not a Worker on `cdn.soul.game/s/*`:** a Worker runs on every request it routes, before the cache, and is
+billed per request (the free plan stops at 100,000 a day). At 5,000 viewers the page makes about 30,000 requests a
+second, about 78 billion a month. A cache rule on a proxied record costs nothing per request. `cdn.soul.game` itself is
+the R2 bucket's custom domain and cannot send a path to the host without a Worker or an origin rule.
+
+**Steps, in this order.** Nothing changes for a viewer until the last one. The page and launcher parts ship in a release
+first; until then the binding field is ignored.
+
+1. Gene, Cloudflare dashboard, zone `soul.game`, **DNS**, **Records**, **Add record**: Type `CNAME`, Name `stream`,
+   Target `soul.game`, Proxy status **DNS only** for now, TTL Auto. **Save**.
+2. Release owner, on the production host, once a release that carries the site file is live:
+
+   ```bash
+   sudo cp /srv/sim-worlds/production/v2/tools/ops/proxy/stream-soul-game.caddy /etc/caddy/sites/stream-soul-game.caddy
+   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+   ```
+
+   Caddy gets the name's certificate while the record is still DNS only. Check from any computer:
+   `curl -s -o /dev/null -w '%{http_code}\n' https://stream.soul.game/s/check` prints `404`.
+3. Gene: set the `stream` record to **Proxied**. Then **Caching**, **Cache Rules**, **Create rule**: name `souls stream`,
+   **Custom filter expression**, **Edit expression**: `(http.host eq "stream.soul.game")`. Cache eligibility
+   **Eligible for cache**; Edge TTL **Use cache-control header if present, bypass cache if not**; Browser TTL
+   **Respect origin TTL**; cache key default. **Deploy**. Optional and free: **Caching**, **Tiered Cache**, **Smart
+   Tiered Cache Topology** on. Make sure no bot challenge, Browser Integrity Check or Rocket Loader applies to this name.
+4. Check from any computer (public reads only):
+
+   ```bash
+   S=$(curl -s https://soul.game/w/eden/ | grep -o '"v2Stream":"[^"]*"' | cut -d'"' -f4)
+   for i in 1 2; do curl -s -o /dev/null -D - -H 'cache-control: no-cache' -H 'pragma: no-cache' "https://stream.soul.game${S}pointer" | grep -iE '^(HTTP/|cf-cache-status:|cache-control:|age:|access-control-allow-origin:)'; sleep 0.3; done
+   curl -s -o /dev/null -D - "https://stream.soul.game${S}99999999" | grep -iE '^(HTTP/|cf-cache-status:|cache-control:)'
+   ```
+
+   Expected: both pointer reads `HTTP/2 200`, `cache-control: public, max-age=1, no-transform`,
+   `access-control-allow-origin: *`, the second with `cf-cache-status: HIT` (the first `MISS`, `HIT` or `EXPIRED`) even
+   though it asked `no-cache`, as a browser's stream reader does. The last is `HTTP/2 404`, `cache-control: no-store`,
+   never `HIT`. `DYNAMIC` means the rule is missing; a `403` means a challenge is in the way.
+5. Release owner: turn it on for a world, on the production host:
+   `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs eden on`. Open
+   `https://soul.game/w/eden/` in a browser: in DevTools, Network, filtered on `stream.soul.game`, the pointer and the
+   parts answer `200` with `cf-cache-status: HIT` once warm, and the world moves.
+
+**Measured through the real CDN (#4985, 27 Nov 2026).** Remote readers (the page's stream worker without the
+drawing, asking `br, gzip` as a browser does) on Modal machines of 250 readers each, which Cloudflare's anycast spread
+over 6 to 10 edge locations on three continents, read Eden through `stream.soul.game` at 1,000, 2,500 and 5,000, each
+even (arrivals over 30 s, then held) and uneven (one join wave within 5 s, a churn wave of a quarter at the middle,
+2 % slow readers), two repeats. Up to 5,000 even and 2,500 uneven, the edges answered up to 20,000 requests a second
+at a 99.97 to 99.99 % hit ratio, first picture p95 under 3 s, and the origin host saw what it sees with no viewers:
+about 6 requests a second, under 0.01 of a core for the origin, the host near 7 % busy, Eden at 20 ticks a second with
+no tick over budget. To join, a reader downloads about 1.27 MB (the baseline 1.12 MB as br) against 9.2 MB without
+compression. **What breaks first is Cloudflare's security, not the host:** 5,000 readers joining within 5 s get
+"Sorry, you have been blocked" (403) on every read within 10 s and for the rest of the arm, from 20 machines and from
+100; the host and Eden saw nothing. Which rule fires is in the dashboard's Security Events for `stream.soul.game`.
+The rerun: `REMOTE_PKG=<the world's replica package> modal run tools/bench/capacity/viewers/v2-remote-modal.py
+--base https://stream.soul.game --stream <v2Stream> --viewers 5000 --arm uneven --per-share 250 --slow 100 --out
+<file>`, then `node tools/bench/capacity/viewers/v2-remote-report.mjs <file>`. The per-arm table is on #4985.
+
+**Rollback:** `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs eden off` (pages loaded
+after it read `soul.game/s/` again; an open page reads the CDN until it reloads). If the CDN itself is wrong, also set
+the record to DNS only. The site file can stay.
 
 ## The site behind the CDN
 

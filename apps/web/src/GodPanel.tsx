@@ -6,7 +6,7 @@
 // Explore) are gone; flags, previews and the Constitution are switched off (god-ui/features.ts) but their code stays.
 // Everyone else has no God Mode (U3: the God button is the god's only): the claim card of a godless world and the offer
 // links keep their small floating card. The approval link (#approve/<id>) is a modal on top for everyone (lane HF).
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiPath, worldKey } from './world-path.ts';
 import * as G from './god-ui/god-api.ts';
 import { flyTo } from './god-ui/camera.ts';
@@ -17,9 +17,10 @@ import { ApprovalDialog } from './god-ui/ApprovalDialog.tsx';
 import { offerApproval, useCardIsOpen } from './pairing-slot.ts';
 import { OwnerGod, ago as since } from './god-ui/GodModal.tsx';
 import { closeGod, openGod, useGod, watchInbox } from './god-ui/god-store.ts';
+import { agentPaired } from './god-ui/god-agent-state.ts';
 import { ConstitutionBody } from './god-ui/Constitution.tsx';
 import { ForsakeWorld } from './god-ui/WorldOwnerOps.tsx';
-import { PrayersWaiting } from './god-ui/Prayers.tsx';
+import { PrayersWaiting, soulIdOf, type PrayerSource } from './god-ui/Prayers.tsx';
 import { godFeature } from './god-ui/features.ts';
 import { approvalFromHash, landingHash } from './god-ui/join-api.ts';
 import { closeApproval, closedApprovals, pickWindowApproval, useWindowApprovals } from './god-ui/window-approvals.ts';
@@ -35,6 +36,10 @@ const landingPreviewKey = typeof location === 'undefined' ? null : takePreviewKe
 const PAIRED_KEY = `sim.godPaired:${worldKey}`;
 // 0.133 item 6: loaded when the creator opens Build, not with the panel
 const BuildBar = lazy(() => import('./god-ui/BuildBar.tsx').then((m) => ({ default: m.BuildBar })));
+// #5006 row 14: loaded when the creator opens God Mode on a world the new engine runs
+const EditLog = lazy(() => import('./god-ui/EditLog.tsx').then((m) => ({ default: m.EditLog })));
+// #5006: Forsake on a new-engine world is loaded when the creator opens it, not with the panel
+const V2ForsakeWorld = lazy(() => import('./god-ui/V2ForsakeWorld.tsx').then((m) => ({ default: m.V2ForsakeWorld })));
 const PHONE = () => typeof matchMedia === 'function' && matchMedia(SMALL_SCREEN).matches;  // P6: landscape phones (coarse pointer) too
 // Phones keep their own remembered choice and start compact: the open panel covers most of a small screen.
 const openKey = () => 'sim.godPanel.open' + (PHONE() ? '.phone' : '');
@@ -48,7 +53,7 @@ const UNDO = <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5 2.5 6
 const REDO = <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5l3 3-3 3M13.2 6.5H6.5a3.5 3.5 0 0 0 0 7H9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 const ago = (t: number) => { const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`; };
 
-export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boolean; onFlagMode: (v: boolean) => void; entitiesAt?: (seq: number) => Iterable<G.FlagSource> | null }) {
+export function GodPanel({ flagMode, onFlagMode, entitiesAt, soulName }: { flagMode: boolean; onFlagMode: (v: boolean) => void; entitiesAt?: (seq: number) => Iterable<G.FlagSource> | null; soulName?: (soulId: string) => string | null }) {
   const [status, setStatus] = useState<G.Status | null>(null);
   // #join (the link a god shares): open the panel on the Join section / the Souls tab
   const joinHash = landingHash === '#join';
@@ -153,9 +158,18 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   const who = (session.label ?? 'you').replace(/^dev:/, '');
   const claim = () => run('claim', G.claim, () => 'This world is yours.');
   // G1 (0.133): on a v2 world undo, redo and the weather are the creator's own edits on its socket; the note shows the
-  // receipt's words or the refusal's name. Strike, flags and Forsake have no creator verb there and are not shown.
+  // receipt's words or the refusal's name. Strike and flags have no creator verb there and are not shown; Forsake asks
+  // the world's directory, which holds its creator (V2ForsakeWorld, #5006).
   // 0.133 item 6: Build (BuildBar.tsx) places, moves and removes things with the same socket's edits.
   const v2 = G.v2Creator();
+  // #5006 row 15: a v2 world's prayers on the creator's socket (the directory's list for this creator's worlds), each
+  // named as the page names its Soul
+  const nameRef = useRef(soulName); nameRef.current = soulName;
+  const prayerSource = useMemo<PrayerSource | undefined>(() => v2 ? {
+    waiting: async () => (await v2).prayers(),
+    answer: async (id, text) => (await v2).answerPrayer(id, text),
+    nameOf: (grant) => nameRef.current?.(soulIdOf(grant)) ?? null,
+  } : undefined, [v2]);
   const undoRedo = (which: 'undo' | 'redo') => v2 ? run(which, async () => (await v2).undo(which), (r) => r as string) : run(which, () => (which === 'undo' ? G.undo() : G.redo()), (r) => { const x = r as G.UndoResult; return x.accepted ? `${which === 'undo' ? 'Undid' : 'Redid'} edit ${x.reverted}.` : (x.failures?.[0]?.detail ?? `nothing to ${which}`); });
 
   const signedIn = session.authed && !!status && status.you !== 'anonymous';
@@ -240,7 +254,8 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
 
   // ---- the world's god: everything in the one God Mode view ----
   const env = (body: unknown) => G.god('/v1/god/env', { method: 'POST', body: JSON.stringify(body) });
-  const weather = (kind: 'rain' | 'lightning' | 'haze') => v2 && kind !== 'lightning' ? run(kind, async () => (await v2).weather(kind === 'rain' ? 'rain' : 'fog'), (r) => r as string) : run(kind, async () => {
+  // #5006 row 13: on a v2 world Lightning too is the creator's own edit, a storm and a strike where the camera looks
+  const weather = (kind: 'rain' | 'lightning' | 'haze') => v2 ? run(kind, async () => (kind === 'lightning' ? (await v2).lightning(viewCentre()) : (await v2).weather(kind === 'rain' ? 'rain' : 'fog')), (r) => r as string) : run(kind, async () => {
     if (kind === 'rain') return env({ weather: { kind: 'rain', intensity: 0.8 }, note: 'weather' });
     if (kind === 'haze') return env({ weather: { kind: 'fog', intensity: 0.6 }, note: 'weather' });
     await env({ weather: { kind: 'storm', intensity: 0.8 }, note: 'weather' });
@@ -250,7 +265,9 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     await G.approve(code); countEvent('god connected'); try { localStorage.setItem(PAIRED_KEY, '1'); } catch { /* storage disabled */ }
     if (hashCode === code) history.replaceState(null, '', location.pathname + location.search);
   }, () => `Approved. Your agent is now this world's god.`);
-  const agentsPaired = (status.agents ?? 0) > 0;
+  // until the agent is connected (never paired, paired and away, or its inbox not known yet): the gateway, naming this world's creator guide
+  const connected = !!god.inbox?.connected;
+  const agentsPaired = agentPaired(status.agents, god.inbox);
   const fly = (x: number, y: number, z: number, distance: number) => { closeGod(); flyTo(x, y, z, { distance }); };
   const banner = <>
     {hashCode && !status.pending.some((p) => p.code === hashCode) && <p className="gm-banner gp-bad">Pairing request <code>{hashCode}</code> is not pending (expired, or already approved).</p>}
@@ -267,9 +284,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     )}
     {note && <p className={'gm-banner gm-note ' + (note.bad ? 'gp-bad' : 'gp-ok')} role="status">{note.text}</p>}
   </>;
-  // until the agent is connected (never paired, paired and away, or its inbox not known yet): the gateway, naming this world's skill
-  const connected = !!god.inbox?.connected;
-  const connectUrl = !agentsPaired || !connected ? `${status.base || location.origin + apiPath('')}/SKILL.md` : null;
+  const connectUrl = !agentsPaired || !connected ? G.creatorGuide(status.base) : null;
   const tools = <>
     <div className="gm-tool-group" role="group" aria-label="Undo and redo">
       <button type="button" className="gm-tool" data-undo="1" disabled={!canUndo || !!busy} onClick={() => undoRedo('undo')} title="Undo the newest edit">{UNDO}Undo</button>
@@ -277,7 +292,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     </div>
     <div className="gm-tool-group" role="group" aria-label="Weather" data-weather="1" title="The same as your agent's weather and strike: each press is one edit">
       <button type="button" className="gm-tool" data-weather-kind="rain" disabled={!!busy} onClick={() => weather('rain')}>Rain</button>
-      {!v2 && <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>}
+      <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>
       <button type="button" className="gm-tool" data-weather-kind="haze" disabled={!!busy} onClick={() => weather('haze')}>Haze</button>
     </div>
     {v2 && <div className="gm-tool-group" role="group" aria-label="Build" data-build="1" title="Place, move and remove things yourself: each change is one edit">
@@ -319,8 +334,9 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     {approvalModal}
     {ghostBar}
     {build && v2 && !god.open && <Suspense fallback={null}><BuildBar creator={v2} start={build} onClose={endBuild} /></Suspense>}
-    {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
-      forsake={v2 ? null : <ForsakeWorld name={name} />} />}
+    {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} grant={status.creatorGrant ?? null} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting source={prayerSource} />} more={more}
+      edits={v2 ? <Suspense fallback={null}><EditLog grant={status.creatorGrant ?? null} /></Suspense> : null}
+      forsake={v2 ? <Suspense fallback={null}><V2ForsakeWorld name={name} /></Suspense> : <ForsakeWorld name={name} />} />}
   </>;
 }
 
