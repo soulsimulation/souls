@@ -40,7 +40,9 @@
 //! - A client nobody trusts (O8, #2805): an agent's intents kept here, unanswered, are bounded in bytes
 //!   (`world_link::KEPT_MOST`, far above an honest agent's few at a time); one past it is refused at once
 //!   `agent.slow-down`, with plain words and when to send again, as `{2: answer}`, not kept and never sent to the
-//!   world. A message over the intent limits' `frame_bytes` closes the socket 1009 `message.too-big`, refused from its
+//!   world. An agent's sync requests waiting for the world are bounded the same way, apart
+//!   (`world_link::SYNCS_MOST`): one past it is answered `{20: n, 24: "agent.slow-down"}` and never sent. A message
+//!   over the intent limits' `frame_bytes` closes the socket 1009 `message.too-big`, refused from its
 //!   length unread; a frame the WebSocket protocol cannot read closes it 1002 `frame.unreadable`. The bench is
 //!   `v2/tools/bench/hostile`.
 //! - both ways, after sign-in, R5's sync by hash (R5b, #3164; `replica::sync::wire`): a frame with key 20 is a sync

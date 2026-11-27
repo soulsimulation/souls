@@ -251,6 +251,13 @@ and CPUWeight 100 inside the same slice; it does not change the slice or any wor
 Directoryd stays at 256M. The root phase writes only protected placement metadata and the existing per-world unit
 configuration. A fixed child clears supplementary groups and drops to the installed Souls account before touching
 world data, forking, exporting streams or updating world route metadata. No request chooses a program, path or unit.
+Each request leaves `attempts/<request>` (a new attempt replaces the last). A run that refuses a request, or is
+refused before its drain, lasts at least 3 s, so a page retrying a failing create stays under systemd's start limit
+(5 starts in 10 s). A program that cannot load at all still fails at once and can fail `souls-place.path`; each
+release resets a failed path unit, says so, and warns if it does not stay active. A create the placement has not
+finished 15 minutes after it was made ends: the directory answers its click `create-failed`, takes its row off the
+list, asks the placement once more, and only then removes its name record, so the name is free again (the directory
+also checks at its start). This assumes the one directory, on the machine that places.
 
 Package the **existing public Eden template**, with serving support made by the same build, before enabling creation:
 
