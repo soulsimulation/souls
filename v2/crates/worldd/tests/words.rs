@@ -582,8 +582,7 @@ fn w7_one_persons_words_go_from_the_store_and_the_stream_and_the_rest_stays() {
     }
     let store = r.store.clone();
     let (log, dir) = r.end(|_, _| {});
-    let said = said(&log);
-    let refs: Vec<Id> = said.iter().map(|s| s.words).collect();
+    let refs: Vec<Id> = said(&log).iter().map(|s| s.words).collect();
     assert_eq!(refs.len(), 3);
     let mut at = BTreeMap::new();
     let records: Vec<Vec<u8>> = recover(&log).unwrap().records;
