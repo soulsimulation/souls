@@ -38,6 +38,11 @@ fn timer_due(run: &Run) -> Option<i64> {
 
 /// The log's entries on the rack that carry the event `name`: each one's world time and its event's text fields.
 fn rack_events(run: &Run, name: &str) -> Vec<(i64, BTreeMap<u64, String>)> {
+    events_on(run, rack(), name)
+}
+
+/// [`rack_events`] on `node`.
+fn events_on(run: &Run, node: Id, name: &str) -> Vec<(i64, BTreeMap<u64, String>)> {
     let log = run.store.0.lock().unwrap().bytes.clone();
     let mut out = Vec::new();
     for rec in recover(&log).unwrap().records {
@@ -46,7 +51,7 @@ fn rack_events(run: &Run, name: &str) -> Vec<(i64, BTreeMap<u64, String>)> {
         }
         for e in Part::read(&rec).unwrap().effects {
             for ev in e.events.iter().flatten() {
-                if e.envelope.node != rack() || ev.name.as_str() != name {
+                if e.envelope.node != node || ev.name.as_str() != name {
                     continue;
                 }
                 let text = ev
@@ -285,31 +290,30 @@ fn i3991_a_world_with_no_bodies_woken_late_fires_its_forms_timer_at_its_due_time
     run.stop();
 }
 
-/// #3991 review: the bell is rung and then scrapped before its fade is due. The removal takes the bell's timer from
-/// the tree, so when the forms' due list reaches it the world writes nothing on the bell that is gone: before, its
-/// clear was written on a missing node, refused, and sank that tick's other world entries with it.
+/// #3991 review: a vessel chimes (a 2 s timer), then is taken and discarded before the timer is due. The removal
+/// takes its timer from the tree, so when the forms' due list reaches it the world writes nothing on the vessel that
+/// is gone: before, its clear was written on a missing node, refused, and sank that tick's other world entries with it.
 #[test]
 // A real world on the real clock: an answer's time is real time.
 #[allow(clippy::disallowed_methods)]
 fn i3991_a_timer_whose_thing_was_removed_writes_nothing() {
-    let (run, mut a, _) = serve("i3991-scrap");
-    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
-    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
-    let due = timer_due(&run).expect("the ring set its timer");
-    let scrapped = a.act("test:scrap", Some(rack()), BTreeMap::new());
+    let (run, mut a, _) = serve("i3991-gone");
+    let chimed = a.act("test:chime", Some(vessel()), BTreeMap::new());
+    assert!(!chimed.expect("the chime lands").is_empty(), "one receipt");
+    let due = timer_due(&run).expect("the chime set its timer");
+    let taken = a.act("test:take", Some(vessel()), BTreeMap::new());
+    assert!(!taken.expect("the take lands").is_empty(), "one receipt");
+    let gone = a.act("test:discard", Some(vessel()), BTreeMap::new());
+    assert!(!gone.expect("the discard lands").is_empty(), "one receipt");
     assert!(
-        !scrapped.expect("the scrap lands").is_empty(),
-        "one receipt"
-    );
-    assert!(
-        run.replay().tree().handle(rack()).is_none(),
-        "the bell is gone"
+        run.replay().tree().handle(vessel()).is_none(),
+        "the vessel is gone"
     );
     std::thread::sleep(Duration::from_secs(3));
-    let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
+    let refused = events_on(&run, vessel(), worldd::acts::TIMER_REFUSED);
     let quiet = run.world.quiet.read();
     println!(
-        "#3991 scrapped: cleared {:?}, refused {refused:?}, quiet {quiet:?}, due {due}",
+        "#3991 gone: cleared {:?}, refused {refused:?}, quiet {quiet:?}, due {due}",
         timer_cleared_at(&run)
     );
     assert_eq!(timer_cleared_at(&run), None, "no clear on a thing gone");
