@@ -1,7 +1,7 @@
 // #5063: a done look or point made from afar says so on its receipt (afar.mjs), read from its act-end entry.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { afarFor, afarOf } from './afar.mjs';
+import { afarFor, afarOf, satInOf } from './afar.mjs';
 
 /** Bytes as the world writes them (T0's byte string: its length in the head), as hex. */
 const hexOf = (s) => { const b = Buffer.from(s); return Buffer.concat([Buffer.from(b.length < 24 ? [0x40 + b.length] : [0x58, b.length]), b]).toString('hex'); };
@@ -23,4 +23,12 @@ test('a receipt takes the act end between its send and its version, the newest t
   assert.equal(afarFor(seen, 20, 43), FAR, 'sent after entry 20, answered at version 43: entry 42');
   assert.equal(afarFor(seen, 42, 80), null, 'none after its send and before its version');
   assert.equal(afarFor([], -1, Infinity), null);
+});
+
+test('a sit by kind from the open ground names the place of its seat; a look from afar is not that', () => {
+  const SAT = 'eden:chair cd:120 in the bandstand, 3.2 m away';
+  assert.equal(satInOf(ended('b-1', SAT), ['s-1', 'b-1']), SAT);
+  assert.equal(satInOf(ended('b-2', SAT), ['s-1', 'b-1']), null, 'another body\'s');
+  assert.equal(satInOf(ended('b-1', FAR), ['b-1']), null, 'a look from afar');
+  assert.equal(satInOf(ended('b-1', null), ['b-1']), null, 'a sit indoors: no words');
 });
