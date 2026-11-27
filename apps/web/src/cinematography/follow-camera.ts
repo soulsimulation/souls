@@ -128,19 +128,20 @@ function approach(value:Vector3,velocity:Vector3,goal:Vector3,dt:number,speed:nu
  const desired=goal.clone().sub(value).multiplyScalar(1/tau).clampLength(0,speed),change=desired.sub(velocity).clampLength(0,acceleration*dt);velocity.add(change);value.addScaledVector(velocity,dt);
 }
 export type FollowPreview={status:string;shift:number[];current:number|null;alternative:number|null;selected:boolean};
-export type FollowResult={preview:FollowPreview;eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number;motion:{groundY:number|null;sweep:Sight|null;unknown:string|null;unknownMesh:Record<string,unknown>|null;radius:number|null;surfaceStartOverlap:boolean;containment:'unproved'}|null};
+export type FollowResult={searchSeconds:number;preview:FollowPreview;eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number;motion:{groundY:number|null;sweep:Sight|null;unknown:string|null;unknownMesh:Record<string,unknown>|null;radius:number|null;surfaceStartOverlap:boolean;containment:'unproved'}|null};
 /** Persistent world-space viewpoints let the subject turn inside a portrait dead/soft zone. */
 export class FollowCamera{
- private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;private travel=new Vector3();private travelAge=0;
- reset(eye?:Vector3,aim?:Vector3){this.travel.set(0,0,0);this.travelAge=0;this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(eye:Vector3,aim:Vector3){this.travel.set(0,0,0);this.travelAge=0;if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
- step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport,projection?:FollowProjection):FollowResult{
+ private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;private travel=new Vector3();private travelAge=0;private searchClear=false;private searchAt=0;
+ reset(eye?:Vector3,aim?:Vector3){this.searchClear=false;this.searchAt=0;this.travel.set(0,0,0);this.travelAge=0;this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
+ invalidateVisibility(){this.searchClear=false;this.nextSearch=Math.min(this.nextSearch,this.clock+.25);}
+ gesture(eye:Vector3,aim:Vector3){this.searchClear=false;this.travel.set(0,0,0);this.travelAge=0;if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport,projection?:FollowProjection,searchSeconds=.25):FollowResult{
   if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
-  const preview:FollowPreview={status:'unavailable',shift:[0,0,0],current:null,alternative:null,selected:false};let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({preview,eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
-  if(invalidStep){this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
-  if(!centre||(!geometry.stats.complete&&manual)){this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
+  const preview:FollowPreview={status:'unavailable',shift:[0,0,0],current:null,alternative:null,selected:false};let effectiveSearch=.25;let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({searchSeconds:effectiveSearch,preview,eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
+  if(invalidStep){this.searchClear=false;this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
+  if(!centre||(!geometry.stats.complete&&manual)){this.searchClear=false;this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
@@ -149,9 +150,10 @@ export class FollowCamera{
   const travel=subject.travelMps,observed=travel?.value,valid=!!travel&&Number.isFinite(travel.confidence)&&travel.confidence>=.5&&observed?.length===3&&observed.every(Number.isFinite),direction=valid?new Vector3(observed![0],0,observed![2]):null,speed=direction?.length()??0;
   if(manual||!direction||speed<.1||speed>FOLLOW_LIMITS.previewMaxSpeed){this.travel.set(0,0,0);this.travelAge=0;preview.status=manual?'manual':!direction?'unavailable':speed<.1?'stopped':'discontinuity';}
   else{if(this.travelAge===0||this.travel.clone().normalize().dot(direction.clone().normalize())<.8){this.travel.copy(direction);this.travelAge=0;}else this.travel.lerp(direction,1-Math.exp(-dt/.3));this.travelAge+=dt;preview.status=this.travelAge>=FOLLOW_LIMITS.previewStableSeconds?'stable':'stabilizing';if(preview.status==='stable')preview.shift=this.travel.clone().multiplyScalar(FOLLOW_LIMITS.previewSeconds).clampLength(0,FOLLOW_LIMITS.previewDistance).toArray();}
-  const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y))return result('projection-unavailable');
-  if(!manual&&centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
-  if(!manual&&projected.z>1)return result('projection-unavailable');
+  effectiveSearch=preview.status==='stopped'&&valid&&Math.hypot(...observed!)<.1&&this.searchClear&&Number.isFinite(searchSeconds)?Math.max(.25,Math.min(.5,searchSeconds)):.25;this.nextSearch=Math.min(this.nextSearch,this.searchAt+effectiveSearch);
+  const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y)){this.invalidateVisibility();effectiveSearch=.25;return result('projection-unavailable');}
+  if(!manual&&centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near){this.invalidateVisibility();effectiveSearch=.25;return result('subject-behind-view');}
+  if(!manual&&projected.z>1){this.invalidateVisibility();effectiveSearch=.25;return result('projection-unavailable');}
   const screen:[number,number]=[projected.x,projected.y];
   const manualEye=manual?this.eye.clone():null;
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
@@ -160,8 +162,9 @@ export class FollowCamera{
   let reason='tracking';
   if(geometry.stats.complete){
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
-  const radius=followClearanceRadius(camera,projection,next);if(radius===null){this.velocity.set(0,0,0);return result('clearance-projection-unavailable');}
+  const radius=followClearanceRadius(camera,projection,next);if(radius===null){this.velocity.set(0,0,0);this.invalidateVisibility();effectiveSearch=.25;return result('clearance-projection-unavailable');}
   const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next,radius);motion={groundY,sweep,radius,surfaceStartOverlap:geometry.stats.surfaceStartOverlap,containment:'unproved',unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?(geometry.stats.surfaceStartOverlap?'camera-envelope-overlap':'motion-obstructed'):'motion-unknown';}
+  if(reason!=='tracking'){this.invalidateVisibility();effectiveSearch=.25;}
   if(motion.surfaceStartOverlap){this.aimVelocity.set(0,0,0);return result(manual?'user-hold:camera-envelope-overlap':'camera-envelope-overlap',screen);}
   // A Follow gesture changes its orbit/zoom, not the subject's world translation.
   // Carry eye and aim together so orientation stays exactly the user's, while the
@@ -169,7 +172,7 @@ export class FollowCamera{
   if(manualEye){this.aim.add(this.eye.clone().sub(manualEye));return result(reason==='tracking'?'user-hold':'user-hold:'+reason,screen);}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
-  if(!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
+  if(!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.searchAt=this.clock;this.nextSearch=this.clock+effectiveSearch;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
    const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,Math.max(radius,passageRadius));
    if(preview.status==='stable'&&current!==null&&alternative!==null&&alternative>=current&&passage==='clear'){
@@ -177,10 +180,11 @@ export class FollowCamera{
     // A maximal or unknown incumbent cannot justify extra alternative preview work.
     const shift=new Vector3().fromArray(preview.shift);preview.current=query(root.clone().add(this.offset).add(shift),shift,true);if(preview.current!==null&&preview.current<1)preview.alternative=query(eye.clone().add(shift),shift,true);if(preview.current===null||preview.current<1&&preview.alternative===null)preview.status='query-unknown';
    }
+   this.searchClear=current===1&&reason==='tracking';if(!this.searchClear){effectiveSearch=.25;this.nextSearch=Math.min(this.nextSearch,this.clock+.25);}
    const anticipated=preview.current===0&&preview.alternative===1;
    if(current!==null&&alternative!==null&&alternative>=current&&(alternative>current+.25||anticipated)&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';preview.selected=anticipated&&alternative<=current+.25;}
   }
-  }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
+  }else{this.invalidateVisibility();effectiveSearch=.25;this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
   // Unavailable obstruction geometry forbids eye movement/search, not a bounded
   // turn toward a fresh depicted subject. Manual input still owns its whole pose.
   // Rebase from the previous drawn eye along its actual viewing ray onto the
