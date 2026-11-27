@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Adds a repeatable three-Soul camp-meal playtest using existing entries and the world's served client. It checks cooking and serving quantities, consented bowl handoff, seated consumption, same-bowl washing and final table placement. Cooking and ladling waits, and the wash's lack of persistent bowl dirt state, are explicitly disclosed.
+Adds a three-Soul meal rehearsal with ordinary public discovery, explicit cook/server/diner responsibilities, raw-soup refusal recovery and same-bowl quantities/ownership through cooking, consented serving, seated eating, washing and table return; existing cards explain portions and water use, while missing cook/ladle animation and persistent dish cleanliness remain disclosed.

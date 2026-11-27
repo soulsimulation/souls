@@ -68,6 +68,7 @@ export function writeScene(dir) {
 export function foundId(answer, name) {
   const rows = (answer.found ?? []).filter((r) => r.name === name);
   if (rows.length !== 1) throw new Error(`find ${name}: expected one named thing, got ${rows.length}`);
+  if (typeof rows[0].id !== 'string' || !rows[0].id) throw new Error(`find ${name}: missing public id`);
   return rows[0].id;
 }
 export function requireDone(answer, step) {
@@ -79,6 +80,49 @@ export function requireField(answer, field, expected, step) {
   // Captured entry defaults may be integer 0/1 in inspect; changed fields may be actual booleans.
   const actual = typeof expected === 'boolean' && (read === 0 || read === 1) ? read === 1 : read;
   if (actual !== expected) throw Object.assign(new Error(`${step}: ${field} expected ${expected}, got ${JSON.stringify(actual)}`), { answer, step });
+}
+
+/** The public inspect reply teaches the act word and named arguments, without client implementation imports. */
+export function mealOffer(answer, name, args = {}) {
+  const offer = answer.offers?.find((o) => o.name === name);
+  if (!offer || typeof offer.act !== 'string') throw new Error(`meal discovery: missing ${name} offer`);
+  for (const key of Object.keys(args)) {
+    if (offer.params?.[key]?.type !== 'thing') throw new Error(`meal discovery: ${name} needs a public thing parameter ${key}`);
+  }
+  return [offer.act, ...Object.entries(args).map(([key, value]) => `${key}=${value}`)];
+}
+
+/** Each role reads its own public copy before acting; cards describe responsibilities, offers supply syntax. */
+export async function discoverMeal({ seats, record }) {
+  const names = ['soup-pot', 'meal-bowl', 'wash-sink', 'meal-table', 'diner-chair'];
+  const discovery = {};
+  for (const seat of seats) {
+    const help = await record(seat, 'discover commands', 'help');
+    for (const command of ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt']) {
+      if (!help.commands?.includes(command)) throw new Error(`meal discovery: missing ${command} command`);
+    }
+    const look = await record(seat, 'look before meal', 'look');
+    if (look.ok !== true) throw new Error('meal discovery: look failed');
+    const things = {};
+    for (const name of names) {
+      const id = foundId(await record(seat, `find ${name}`, 'find', name), name);
+      const answer = await record(seat, `discover ${name}`, 'inspect', id);
+      if (answer.ok !== true || answer.id !== id || typeof answer.card !== 'string') throw new Error(`meal discovery: missing public card for ${name}`);
+      things[name] = answer;
+    }
+    mealOffer(things['soup-pot'], 'cook'); mealOffer(things['soup-pot'], 'ladle', { bowl: things['meal-bowl'].id });
+    mealOffer(things['meal-bowl'], 'take'); mealOffer(things['meal-bowl'], 'bite');
+    if (things['meal-bowl'].offers.find((o) => o.name === 'bite').who !== 'holder') throw new Error('meal discovery: bite must name the holder');
+    mealOffer(things['wash-sink'], 'turn_on'); mealOffer(things['wash-sink'], 'turn_off');
+    mealOffer(things['wash-sink'], 'wash', { thing: things['meal-bowl'].id });
+    mealOffer(things['diner-chair'], 'sit');
+    discovery[seat.label] = { things, responsibility: {
+      cook: 'Cook once; confirm six soup units and clear the serving point.',
+      server: 'Ladle two units into the shelf bowl; take and offer that same bowl to the diner.',
+      diner: 'Accept the offered bowl; sit and bite twice; wash it and return it empty.',
+    }[seat.label] };
+  }
+  return discovery;
 }
 
 /** A sent sequence is not success: only the last authoritative receipt can finish a non-act command. */
@@ -117,22 +161,42 @@ export async function meal({ seats, report, log = () => {} }) {
     if (status.ok !== true) throw Object.assign(new Error(`arrival status: ${status.code ?? 'failed read'}`), { answer: status, step: 'arrival status' });
     if (!status.in_world || !status.body) await act(seat, 'join', 'life:join');
   }
-  const ids = {};
-  for (const name of ['soup-pot', 'meal-bowl', 'wash-sink', 'meal-table', 'diner-chair']) ids[name] = foundId(await record(cook, `find ${name}`, 'find', name), name);
-  const inspect = (seat, name) => record(seat, `inspect ${name}`, 'inspect', ids[name]);
+  const discovery = await discoverMeal({ seats, record });
+  report.discovery = discovery;
+  const ids = Object.fromEntries(Object.entries(discovery.cook.things).map(([name, thing]) => [name, thing.id]));
+  for (const seat of seats) for (const [name, thing] of Object.entries(discovery[seat.label].things)) {
+    if (thing.id !== ids[name]) throw new Error(`meal discovery: roles disagree on ${name}`);
+  }
+  const words = (seat, name, form, args) => mealOffer(discovery[seat.label].things[name], form, args);
+  const use = (seat, label, name, form, args) => act(seat, label, ...words(seat, name, form, args));
+  const inspect = async (seat, name) => {
+    const answer = await record(seat, `inspect ${name}`, 'inspect', ids[name]);
+    if (answer.ok !== true || answer.id !== ids[name]) throw new Error(`inspect ${name}: missing exact object readback`);
+    return answer;
+  };
   const before = await inspect(cook, 'soup-pot');
   for (const [field, expected] of Object.entries({ soup: 0, vegetables: 3, water: 1500, fuel: 1, cooked: false })) requireField(before, field, expected, 'raw pot');
-  await act(cook, 'cook (ten-second wait)', `cook:${ids['soup-pot']}`);
+  const tooSoon = await record(server, 'cannot ladle raw soup', 'can', ...words(server, 'soup-pot', 'ladle', { bowl: ids['meal-bowl'] }));
+  if (tooSoon.can !== 'no' || tooSoon.reason !== 'field_differs' || tooSoon.current !== true) throw new Error('raw soup: expected a current state refusal');
+  await use(cook, 'cook (ten-second wait)', 'soup-pot', 'cook');
   const cooked = await inspect(cook, 'soup-pot');
   for (const [field, expected] of Object.entries({ soup: 6, vegetables: 0, water: 0, fuel: 0, cooked: true })) requireField(cooked, field, expected, 'cooked pot');
-  await act(cook, 'leave the serving point', `walk:${ids['meal-table']}`);
-  await act(server, 'ladle two units (four-second wait)', `ladle:${ids['soup-pot']}`, `bowl=${ids['meal-bowl']}`);
+  await use(cook, 'leave the serving point', 'meal-table', 'walk');
+  const recovered = await record(server, 'ladle available after cooking', 'can', ...words(server, 'soup-pot', 'ladle', { bowl: ids['meal-bowl'] }));
+  if (recovered.can !== 'yes') throw new Error('cooked soup: ladle has not recovered');
+  report.recovery = { before: tooSoon, after: recovered, action: words(cook, 'soup-pot', 'cook') };
+  await use(server, 'ladle two units (four-second wait)', 'soup-pot', 'ladle', { bowl: ids['meal-bowl'] });
   requireField(await inspect(server, 'soup-pot'), 'soup', 4, 'served pot');
   requireField(await inspect(server, 'meal-bowl'), 'soup', 2, 'filled bowl');
-  await act(server, 'approach bowl', `walk:${ids['meal-bowl']}`);
-  await act(server, 'take filled bowl', `take:${ids['meal-bowl']}`);
+  await use(server, 'approach bowl', 'meal-bowl', 'walk');
+  await use(server, 'take filled bowl', 'meal-bowl', 'take');
+  const serverBody = (await record(server, 'body before offering', 'status')).body;
+  const servingBowl = await inspect(server, 'meal-bowl');
+  if (!serverBody || servingBowl.parent !== serverBody) throw new Error('filled bowl is not parented to the server');
+  requireField(servingBowl, 'soup', 2, 'same filled bowl');
   const dinerBody = (await record(diner, 'body', 'status')).body;
-  await act(diner, 'approach server', `walk:${(await record(server, 'body', 'status')).body}`);
+  if (!dinerBody) throw new Error('diner body is not known');
+  await act(diner, 'approach server', `walk:${serverBody}`);
   await record(server, 'offer bowl', 'give', ids['meal-bowl'], '--to', dinerBody);
   let offer;
   for (let n = 0; n < 10 && !offer; n++) {
@@ -143,20 +207,27 @@ export async function meal({ seats, report, log = () => {} }) {
   requireDone(await record(diner, 'accept bowl', 'give', 'accept', offer, '--wait'), 'accept bowl');
   const heldBowl = await inspect(diner, 'meal-bowl');
   if (heldBowl.parent !== dinerBody) throw new Error('accepted bowl is not parented to the diner');
-  await act(diner, 'carry bowl to chair', `walk:${ids['diner-chair']}`);
-  await act(diner, 'sit holding bowl', `sit:${ids['diner-chair']}`);
+  requireField(heldBowl, 'soup', 2, 'accepted filled bowl');
+  await use(diner, 'carry bowl to chair', 'diner-chair', 'walk');
+  await use(diner, 'sit holding bowl', 'diner-chair', 'sit');
   for (const expected of [1, 0]) {
-    await act(diner, 'consume one soup unit', `bite:${ids['meal-bowl']}`);
-    requireField(await inspect(diner, 'meal-bowl'), 'soup', expected, 'bowl consumed');
+    await use(diner, 'consume one soup unit', 'meal-bowl', 'bite');
+    const consumed = await inspect(diner, 'meal-bowl');
+    requireField(consumed, 'soup', expected, 'bowl consumed');
+    if (consumed.parent !== dinerBody) throw new Error('consumed bowl left the diner');
   }
   await act(diner, 'rise holding empty bowl', 'rise');
-  await act(diner, 'carry empty bowl to sink', `walk:${ids['wash-sink']}`);
-  await act(diner, 'turn on tap', `turn_on:${ids['wash-sink']}`);
+  await use(diner, 'carry empty bowl to sink', 'wash-sink', 'walk');
+  await use(diner, 'turn on tap', 'wash-sink', 'turn_on');
   const water = await inspect(diner, 'wash-sink');
-  await act(diner, 'wash same held bowl', `wash:${ids['wash-sink']}`, `thing=${ids['meal-bowl']}`);
+  await use(diner, 'wash same held bowl', 'wash-sink', 'wash', { thing: ids['meal-bowl'] });
   requireField(await inspect(diner, 'wash-sink'), 'water', (water.state?.water ?? water.fields?.water) - 1000, 'wash water used');
-  await act(diner, 'turn off tap', `turn_off:${ids['wash-sink']}`);
-  await act(diner, 'return empty bowl to table', `walk:${ids['meal-table']}`);
+  const washedBowl = await inspect(diner, 'meal-bowl');
+  if (washedBowl.parent !== dinerBody) throw new Error('washed bowl left the diner');
+  requireField(washedBowl, 'soup', 0, 'same washed empty bowl');
+  await use(diner, 'turn off tap', 'wash-sink', 'turn_off');
+  requireField(await inspect(diner, 'wash-sink'), 'running', false, 'tap left off');
+  await use(diner, 'return empty bowl to table', 'meal-table', 'walk');
   const setDown = await record(diner, 'set down empty bowl', 'set-down', ids['meal-bowl'], 'on', ids['meal-table']);
   if (setDown.ok === false || !Number.isInteger(setDown.sequence)) throw new Error('set-down sent no sequence');
   let finished = null;
@@ -169,8 +240,9 @@ export async function meal({ seats, report, log = () => {} }) {
   if (finalBowl.parent !== ids['meal-table']) throw new Error('empty bowl was not left on the meal table');
   requireField(finalBowl, 'soup', 0, 'empty bowl returned');
   requireField(await inspect(cook, 'soup-pot'), 'soup', 4, 'food conserved');
+  report.bowlIdentity = { id: ids['meal-bowl'], server: serverBody, diner: dinerBody, returnedTo: finalBowl.parent };
   report.quantities = { cooked: 6, remaining: 4, eaten: 2, washWaterUsed: 1000 };
-  report.complete = true; report.limitations = ['Cook and ladle contain waits, with no stir/pour moves.', 'The sink wash spends water but soup bowls have no persistent dirt/clean state.', 'Natural holding, consumption and furniture clearance require the accompanying actual-page review.'];
+  report.complete = true; report.limitations = ['Cook and ladle contain waits, with no stir/pour moves.', 'The sink wash spends water but soup bowls have no persistent dirt/clean state.', 'Natural holding, consumption and furniture clearance require the accompanying actual-page review.', 'This scripted rehearsal does not establish independent agent collaboration.'];
   return report;
 }
 
