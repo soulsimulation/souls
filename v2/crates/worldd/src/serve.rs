@@ -5646,7 +5646,11 @@ mod tests {
         log.wait_durable(30).unwrap();
         drop(log.close());
         // Record 12's place, and its length one byte longer than it is.
-        let offset = HEADER_LEN + records[..12].iter().map(|r| HEAD_LEN + r.len()).sum::<usize>();
+        let offset = HEADER_LEN
+            + records[..12]
+                .iter()
+                .map(|r| HEAD_LEN + r.len())
+                .sum::<usize>();
         let mut bytes = std::fs::read(&path).unwrap();
         let prev = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
         let len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
