@@ -4,7 +4,17 @@
 
 Every on-screen world render is graded. Raw observations are bounded to 100 (first 50 and rolling latest 50), with eight first failure witnesses, aggregate counts and per-hand maxima continuing after that cap. First and last draw/frame/world/performance stamps bound the measured interval. Shadow, reflection and offscreen renders are excluded. Palms come from the current production wrist transforms after the draw. An instanced load's root is recovered independently from every rendered part, including its mesh parent and authored geometry offset; an unrendered placeholder cannot supply the load transform. Declared millimetre grip points are transformed into metres through that root.
 
-A native authoritative assignment must identify both required hands and their grip names at the sampled world time before a contact result can pass. Either assigned hand missing or more than 3 cm away fails. Current streams do not supply that assignment. Without it, each reported nearest-declared-grip distance is only a lower bound: both palms of one carrier farther than 3 cm from every declared grip prove a miss; any other result remains unproved. The tool does not certify collisions, naturalness, load balance or native positions.
+`gradeContact` accepts the native two-contact contract published in draft #5135: one local micrometre pair per carrier, ordered along the carry, **not** anatomical left/right and **not** the entry grip centre. It transforms those points through the actual drawn load matrix and compares both one-to-one palm/pair permutations, choosing the smallest worst-hand error (then total error). Neither palm may reuse the other palm's target. Either required palm beyond 3 cm fails.
+
+The pure input is normalized measurement data, not a new page or wire API:
+
+- `sample.crew`: `native`, `members` (the complete native body set), `source: 'native-membership'`, `observedWorldUs`.
+- `sample.nativeContacts`: `source: 'souls:carry-grips'`, `units: 'um'`, `space: 'load-local'`, `observedWorldUs`, `crew`, `load`, `phase`, `sinceUs`, optional `untilUs`, and `holds`.
+- Each hold: `body`, `grip` (`point:<name>`), `gripUm` (native field 3), and `handsUm` (the two native field-4 points). Crew/load/phase/since/until/holds preserve native envelope fields 1–6. Observation timestamps are evidence metadata: they must equal the actual draw's world time rounded to whole microseconds, and are not extra native event fields.
+
+The observed bodies, complete membership and holds must name exactly the same native set, without duplicates, with the same crew/load and effective frame. Missing or released contacts and future/expired phases fail measurement. A persistent carry/held phase remains valid while freshly observed; timed set-in/return phases require an unexpired end. This checks numeric contact, not collisions, naturalness, load balance or native positions.
+
+The current browser collector deliberately supplies no native pair or membership: the actual validated live page feed is still #5134's work. It therefore stays **unproved**. Legacy entry-centre distances remain separately labelled diagnostics; they cannot pass or fail the native offset-contact requirement and are not lower bounds on those errors. The earlier baseline's 1,084 `failed-lower-bound` labels are historical results from the pre-contract oracle, measuring entry-point distance only. They are not native-contact failures under this new contract. No new runtime proof is claimed for the fixture-only contract update.
 
 Run the focused fixtures with `node --test tools/playtest/carry-contact/oracle.test.mjs`.
 

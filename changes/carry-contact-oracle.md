@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Carry playtests can measure final drawn palms against actual load grips and refuse stale, missing or unassigned contact certification.
+Carry playtests can compare final drawn palms with both native local load contacts and refuse incomplete, stale or released contact certification.

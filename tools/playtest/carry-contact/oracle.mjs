@@ -1,6 +1,6 @@
 // Production observations only; this self-contained factory also installs through Playwright.evaluate.
 export function contactTools(config) {
-// Final-draw observations only. Native assignments are required to certify contact; any-grip distances prove misses.
+// Final-draw observations only. The native local contact pair is required to certify contact.
 const CONTACT_LIMIT_M = 0.03;
 const finite3 = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
 const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
@@ -73,39 +73,59 @@ function observeRender(renderer, world, sample, onError) {
   return () => { if (renderer.render === wrapped) renderer.render = original; else fail('render observer ownership changed'); };
 }
 
-/** Reject stale or non-final data before distance grading. Unknown assignment never becomes a pass. */
+/** Certify only the native two-point contract. Entry-centre distances are a separate legacy diagnostic. */
 function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM = CONTACT_LIMIT_M } = {}) {
-  const invalid = reason => ({ status: 'failed-measurement', ok: false, reason, contacts: [] });
+  const invalid = reason => ({ status: 'failed-measurement', basis: 'unavailable', ok: false, reason, contacts: [] });
+  const id = v => typeof v === 'string' && v.length > 0;
+  const distinct = xs => new Set(xs).size === xs.length;
   if (!sample || sample.stage !== 'after-world-render' || sample.units !== 'm' || !sample.currentCanvas || sample.renderTarget !== null) return invalid('not an actual final world draw in metres');
   if (![sample.frame, sample.at, sample.worldSeconds, now].every(Number.isFinite) || sample.frame <= previousFrame || now < sample.at || now - sample.at > maxAgeMs) return invalid('stale or missing draw');
-  if (!sample.load?.native || !sample.load?.entity || !sample.load?.entrySha256 || !sample.load?.kind || !sample.load?.parts || !sample.grips?.length || !sample.bodies?.length || !Number.isFinite(limitM) || limitM <= 0 || limitM > CONTACT_LIMIT_M) return invalid('missing identity, geometry or threshold');
-  if (new Set(sample.grips.map(g => g.name)).size !== sample.grips.length || sample.grips.some(g => !g.name || !finite3(g.world))) return invalid('invalid declared grip points');
-  const contacts = [];
+  if (!id(sample.load?.native) || !id(sample.load?.entity) || !sample.load?.entrySha256 || !sample.load?.kind || !sample.load?.parts || !sample.bodies?.length || !Number.isFinite(limitM) || limitM <= 0 || limitM > CONTACT_LIMIT_M) return invalid('missing identity, geometry or threshold');
   for (const body of sample.bodies) {
-    if (!body.native || !body.entity || !body.soul || !body.visibleSkin || !finite3(body.palms?.left) || !finite3(body.palms?.right)) return invalid('missing carrier or live palms');
-    for (const hand of ['left', 'right']) {
-      const choices = sample.grips.map(g => ({ grip: g.name, errorM: distance(body.palms[hand], g.world) }));
-      const nearest = choices.reduce((a, b) => a.errorM <= b.errorM ? a : b);
-      contacts.push({ body: body.native, entity: body.entity, hand, palm: body.palms[hand], nearest, interpretation: 'any-grip lower bound; no assigned-contact certification' });
+    if (!id(body.native) || !id(body.entity) || !id(body.soul) || !body.visibleSkin || !finite3(body.palms?.left) || !finite3(body.palms?.right)) return invalid('missing carrier or live palms');
+  }
+  if (['native', 'entity', 'soul'].some(k => !distinct(sample.bodies.map(b => b[k])))) return invalid('ambiguous carrier identity');
+  // A grip centre is not either offset hand contact. Never use this distance to pass or fail the new contract.
+  const legacy = { basis: 'entry-grip-centres-only', certifiesNativeContact: false, contacts: [] };
+  if (Array.isArray(sample.grips) && sample.grips.length && distinct(sample.grips.map(g => g.name)) && sample.grips.every(g => id(g.name) && finite3(g.world))) {
+    for (const body of sample.bodies) for (const hand of ['left', 'right']) {
+      const nearest = sample.grips.map(g => ({ grip: g.name, distanceM: distance(body.palms[hand], g.world) })).reduce((a, b) => a.distanceM <= b.distanceM ? a : b);
+      legacy.contacts.push({ body: body.native, hand, palm: body.palms[hand], nearest, interpretation: 'legacy centre distance; not native contact error or lower bound' });
     }
   }
-  if (new Set(sample.bodies.map(b => b.native)).size !== sample.bodies.length || new Set(sample.bodies.map(b => b.entity)).size !== sample.bodies.length) return invalid('ambiguous carrier identity');
-  const assignments = sample.assignments;
-  if (!Array.isArray(assignments) || !assignments.length) {
-    const missed = sample.bodies.filter(b => contacts.filter(c => c.body === b.native).every(c => c.nearest.errorM > limitM));
-    return { status: missed.length ? 'failed-lower-bound' : 'unproved', ok: false, reason: missed.length ? 'both palms of a carrier miss every declared grip' : 'native hand/grip assignment unavailable', limitM, missed: missed.map(b => b.native), contacts };
+  const native = sample.nativeContacts;
+  if (native == null) return { status: 'unproved', basis: 'unavailable', ok: false, reason: 'native local contact pair unavailable', contacts: [], legacy };
+  const crew = sample.crew, atUs = Math.round(sample.worldSeconds * 1e6);
+  if (native.source !== 'souls:carry-grips' || native.units !== 'um' || native.space !== 'load-local') return invalid('native contact provenance, units or frame unavailable');
+  if (!Number.isSafeInteger(atUs) || native.observedWorldUs !== atUs || !Number.isSafeInteger(native.sinceUs) || native.sinceUs > atUs) return invalid('stale or future native phase observation');
+  if (!['souls:carry', 'souls:set-in', 'souls:return', 'souls:held'].includes(native.phase)) return invalid('native contacts are not in an active holding phase');
+  const timed = native.phase === 'souls:set-in' || native.phase === 'souls:return';
+  if ((timed && native.untilUs == null) || (native.untilUs != null && (!Number.isSafeInteger(native.untilUs) || native.untilUs <= native.sinceUs || atUs >= native.untilUs))) return invalid('native phase interval expired or missing');
+  if (!id(crew?.native) || crew.source !== 'native-membership' || crew.observedWorldUs !== atUs || !Array.isArray(crew.members) || !crew.members.length || !crew.members.every(id) || !distinct(crew.members)) return invalid('whole native crew membership unavailable');
+  if (native.crew !== crew.native || native.load !== sample.load.native) return invalid('native crew or load identity mismatch');
+  const members = new Set(crew.members);
+  if (sample.bodies.length !== members.size || sample.bodies.some(b => !members.has(b.native))) return invalid('drawn carriers do not cover the whole native crew');
+  if (!Array.isArray(native.holds) || native.holds.length !== members.size || !distinct(native.holds.map(h => h?.body)) || native.holds.some(h => !members.has(h?.body))) return invalid('native contact pairs do not cover the whole crew');
+  const m = sample.load.matrix;
+  if (!Array.isArray(m) || m.length !== 16 || !m.every(Number.isFinite) || m[3] !== 0 || m[7] !== 0 || m[11] !== 0 || m[15] !== 1) return invalid('actual drawn load matrix unavailable');
+  const det = m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);
+  if (Math.abs(det) <= 1e-12) return invalid('actual drawn load matrix is degenerate');
+  const worldPoint = p => [0, 1, 2].map(i => m[i] * p[0] / 1e6 + m[i + 4] * p[1] / 1e6 + m[i + 8] * p[2] / 1e6 + m[i + 12]);
+  const contacts = [];
+  for (const hold of native.holds) {
+    if (typeof hold.grip !== 'string' || !/^point:[a-zA-Z0-9_-]+$/.test(hold.grip) || !finite3(hold.gripUm) || !hold.gripUm.every(Number.isSafeInteger) || !Array.isArray(hold.handsUm) || hold.handsUm.length !== 2 || hold.handsUm.some(p => !finite3(p) || !p.every(Number.isSafeInteger)) || hold.handsUm[0].every((n, i) => n === hold.handsUm[1][i])) return invalid('native ordered contact pair missing or malformed');
+    const body = sample.bodies.find(b => b.native === hold.body), targets = hold.handsUm.map(worldPoint);
+    if (targets.some(p => !finite3(p))) return invalid('native world contact unavailable');
+    // Native indices run along the carry, not anatomical left/right. Compare the only two bijections.
+    const candidates = [[0, 1], [1, 0]].map(order => {
+      const pair = ['left', 'right'].map((hand, i) => ({ body: body.native, entity: body.entity, hand, grip: hold.grip, targetIndex: order[i], targetLocalUm: hold.handsUm[order[i]], targetWorld: targets[order[i]], palm: body.palms[hand], errorM: distance(body.palms[hand], targets[order[i]]) }));
+      return { pair, max: Math.max(...pair.map(c => c.errorM)), sum: pair.reduce((n, c) => n + c.errorM, 0) };
+    });
+    candidates.sort((a, b) => a.max - b.max || a.sum - b.sum);
+    contacts.push(...candidates[0].pair);
   }
-  // A native assignment must name each required contact explicitly; tool callers cannot infer it from nearest grip.
-  if (sample.assignmentSource !== 'native-authoritative' || sample.assignmentAt !== sample.worldSeconds) return invalid('assignment provenance/time unavailable');
-  const assigned = [], seen = new Set();
-  for (const a of assignments) {
-    const c = contacts.find(c => c.body === a.body && c.hand === a.hand), grip = sample.grips.find(g => g.name === a.grip), key = `${a.body}:${a.hand}`;
-    if (!c || !grip || seen.has(key)) return invalid('invalid native assignment');
-    seen.add(key);assigned.push({ ...c, assignedGrip: grip.name, errorM: distance(c.palm, grip.world) });
-  }
-  if (sample.bodies.some(b => ['left', 'right'].some(hand => !seen.has(`${b.native}:${hand}`)))) return invalid('required hand assignment missing');
-  const failed = assigned.some(c => c.errorM > limitM);
-  return { status: failed ? 'failed-assigned' : 'passed-assigned', ok: !failed, limitM, contacts: assigned };
+  const failed = contacts.some(c => c.errorM > limitM);
+  return { status: failed ? 'failed-native-pair' : 'passed-native-pair', basis: 'native-local-pair', ok: !failed, limitM, crew: native.crew, load: native.load, phase: native.phase, observedWorldUs: atUs, contacts, legacy };
 }
 
 
@@ -116,7 +136,7 @@ function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM 
     observer.interval.last = stamp;
     observer.counts[result.status] = (observer.counts[result.status] ?? 0) + 1;
     for (const c of result.contacts) {
-      const key = `${c.body}:${c.hand}`, value = c.errorM ?? c.nearest.errorM;
+      const key = `${c.body}:${c.hand}`, value = c.errorM;
       if (!observer.maxima[key] || value > observer.maxima[key].distanceM) observer.maxima[key] = { distanceM: value, frame: sample.frame, worldSeconds: sample.worldSeconds };
     }
     if (observer.samples.length < cap) observer.samples.push({ sample, result });
@@ -166,7 +186,7 @@ function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM 
       const sample = { stage: 'after-world-render', units: 'm', currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected,
         renderTarget: world.renderer.getRenderTarget(), frame: stamp.frame, at: now, tick: frame.tick, worldSeconds: world.worldSeconds,
         load: { ...config.binding.load, parts: load.parts, matrix: load.matrix.toArray(), source: load.source, matrices: load.matrices ?? null }, bodies, grips,
-        assignments: null, assignmentSource: 'unavailable' };
+        nativeContacts: null, crew: null };
       const result = gradeContact(sample, { now: performance.now(), previousFrame: observer.previousFrame });
       observer.previousFrame = stamp.frame;
       retainResult(observer, sample, result);
