@@ -94,7 +94,7 @@ export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number
 export class FollowCamera{
  private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;
  reset(eye?:Vector3,aim?:Vector3){this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(eye:Vector3,aim:Vector3){if(!this.initialized)this.reset(eye,aim);this.eye.copy(eye);this.aim.copy(aim);if(this.anchor)this.offset.copy(eye).sub(this.anchor);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ gesture(eye:Vector3,aim:Vector3){if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
  step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null):FollowResult{
   if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
