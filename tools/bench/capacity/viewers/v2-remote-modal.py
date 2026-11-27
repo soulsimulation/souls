@@ -19,7 +19,6 @@ import signal
 import subprocess
 import threading
 import time
-import urllib.request
 
 import modal
 
@@ -39,8 +38,9 @@ app = modal.App("souls-remote-readers", image=image)
 
 def address() -> str:
     """This machine's egress address as Cloudflare sees it (its own trace, not the tested zone), hashed."""
-    try:
-        t = urllib.request.urlopen("https://cloudflare.com/cdn-cgi/trace", timeout=10).read().decode()
+    try:  # node, which carries its own certificates (the image's python has none)
+        t = subprocess.run(["node", "-e", "fetch('https://cloudflare.com/cdn-cgi/trace').then((r) => r.text()).then((t) => process.stdout.write(t))"],
+                           capture_output=True, text=True, timeout=20).stdout
         ip = dict(l.split("=", 1) for l in t.splitlines() if "=" in l).get("ip", "")
     except Exception:
         ip = ""
@@ -97,6 +97,8 @@ def main(base: str, stream: str, viewers: int, arm: str, out: str, secs: int = 2
     start_at = int(time.time() * 1000) + lead * 1000
     name = f"souls-remote-readers-{start_at}"
     board = modal.Dict.from_name(name, create_if_missing=True) if (by_address or stop_on_refusal) else None
+    if board is not None:
+        board["created"] = start_at  # creates it before any machine looks it up
     shares = [{"i": i, "base": base, "stream": stream, "arm": arm, "headers": headers, "secs": secs, "start_at": start_at,
                "viewers": viewers // n + (1 if i < viewers % n else 0), "procs": procs, "slow": slow // n + (1 if i < slow % n else 0),
                "board": name if board is not None else None, "by_address": by_address, "arrive_secs": arrive_secs, "stop_on_refusal": stop_on_refusal} for i in range(n)]
