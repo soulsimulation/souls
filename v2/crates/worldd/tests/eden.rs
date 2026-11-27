@@ -3268,7 +3268,9 @@ fn walk_by_form(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Wa
     let secs = (answers::now() - t0) as f64 / 1e6;
     let track = track(&dir);
     let end = track.last().map(|t| (t.2, t.3));
-    println!("{tag}: {verb} at {today} from ({at}): {done:?} after {secs:.1} s, at the end {end:?}");
+    println!(
+        "{tag}: {verb} at {today} from ({at}): {done:?} after {secs:.1} s, at the end {end:?}"
+    );
     // Its path, a point each 2 m (and each change of node).
     let mut last: Option<(Id, f64, f64)> = None;
     let mut path = Vec::new();
@@ -3291,8 +3293,12 @@ fn wet_rows(facts: &str, track: &[(u64, Id, f64, f64)]) -> Vec<(u64, f64, f64)> 
     let ground = im.nodes["ground"];
     let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
     let next = im.tree.to_state().next;
-    let town = sim::walk::town::Town::new(im.tree, ground, sim::links::Doors::new(header, im.rules, next))
-        .expect("the town");
+    let town = sim::walk::town::Town::new(
+        im.tree,
+        ground,
+        sim::links::Doors::new(header, im.rules, next),
+    )
+    .expect("the town");
     let all = sim::routes::WADE | sim::routes::SWIM;
     track
         .iter()
@@ -3331,12 +3337,20 @@ fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
             .map(|&(at, tag)| {
                 let facts = &facts;
                 s.spawn(move || {
-                    let w = walk_by_form(facts, at, "e_d10385f7", "eden:cross", &format!("i3890b{tag}"));
+                    let w = walk_by_form(
+                        facts,
+                        at,
+                        "e_d10385f7",
+                        "eden:cross",
+                        &format!("i3890b{tag}"),
+                    );
                     (at, w)
                 })
             })
             .collect();
-        runs.into_iter().map(|r| r.join().unwrap()).collect::<Vec<_>>()
+        runs.into_iter()
+            .map(|r| r.join().unwrap())
+            .collect::<Vec<_>>()
     });
     let mut wrong = Vec::new();
     for (at, w) in &walks {
@@ -3349,7 +3363,11 @@ fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
              the east end, on {}",
             w.done.as_ref().map(|_| "done"),
             w.secs,
-            if end.map(|e| e.0) == Some(deck) { "the deck" } else { "the ground" }
+            if end.map(|e| e.0) == Some(deck) {
+                "the deck"
+            } else {
+                "the ground"
+            }
         );
         if w.done.is_err() || !on_deck || wet > 0 || to_end > 2.5 {
             wrong.push(*at);
@@ -3368,7 +3386,12 @@ fn i3890_the_river_stone_bridge_is_crossed_from_each_bank() {
 fn i3890_a_soul_walks_round_the_park_pond() {
     let facts = facts_path();
     // Its shores as its entry lays them on the water's box: south, east, north, west.
-    let shores = [(-6.0, 120.97), (7.72, 112.0), (-6.0, 103.03), (-19.72, 112.0)];
+    let shores = [
+        (-6.0, 120.97),
+        (7.72, 112.0),
+        (-6.0, 103.03),
+        (-19.72, 112.0),
+    ];
     let starts = [
         ("-6.0,124.0", "s"),
         ("12.0,112.0", "e"),
@@ -3381,12 +3404,20 @@ fn i3890_a_soul_walks_round_the_park_pond() {
             .map(|&(at, tag)| {
                 let facts = &facts;
                 s.spawn(move || {
-                    let w = walk_by_form(facts, at, "e_5c6d4b00", "eden:walk_around", &format!("i3890p{tag}"));
+                    let w = walk_by_form(
+                        facts,
+                        at,
+                        "e_5c6d4b00",
+                        "eden:walk_around",
+                        &format!("i3890p{tag}"),
+                    );
                     (at, w)
                 })
             })
             .collect();
-        runs.into_iter().map(|r| r.join().unwrap()).collect::<Vec<_>>()
+        runs.into_iter()
+            .map(|r| r.join().unwrap())
+            .collect::<Vec<_>>()
     });
     let mut wrong = Vec::new();
     for (at, w) in &walks {
@@ -3407,7 +3438,9 @@ fn i3890_a_soul_walks_round_the_park_pond() {
         }
         let wet = wet.len();
         let end = w.track.last().map(|t| (t.2, t.3));
-        let to_end = end.map_or(f64::INFINITY, |e| (e.0 - shores[0].0).hypot(e.1 - shores[0].1));
+        let to_end = end.map_or(f64::INFINITY, |e| {
+            (e.0 - shores[0].0).hypot(e.1 - shores[0].1)
+        });
         println!(
             "POND from ({at}): {:?} in {:.1} s; {next} of 5 shores in turn; {wet} rows in water; ends {to_end:.2} m \
              from the south shore at {end:?}",
