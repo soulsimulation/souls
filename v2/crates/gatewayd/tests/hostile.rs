@@ -266,3 +266,47 @@ async fn o8_a_sync_flood_past_its_budget_is_refused_by_name_and_never_sent() {
     );
     assert_eq!(gw.link.syncs_waiting(), waiting + 1);
 }
+
+/// #5195 triage: an agent whose sync requests the world never answers, its socket then replaced, syncs again at once:
+/// the ended socket's requests are given up and hold no place for the new one.
+#[tokio::test]
+async fn o8_a_replaced_sockets_unanswered_syncs_never_hold_the_next() {
+    let mut tokens = Tokens::default();
+    let soul_token = issue(&mut tokens, soul(1));
+    let (gw, url) = start("sync-replaced", tokens).await;
+    let mut first = connect(&url, soul_token.reveal()).await;
+    for n in 0..5 {
+        first
+            .send(Message::Binary(sync_ask(n).into()))
+            .await
+            .unwrap();
+    }
+    let by = tokio::time::Instant::now() + Duration::from_secs(5);
+    while gw.link.syncs_waiting() < 5 && tokio::time::Instant::now() < by {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(gw.link.syncs_waiting(), 5, "the world answers none");
+    // The same Soul signs in again: the first socket is replaced, and its requests are given up.
+    let mut second = connect(&url, soul_token.reveal()).await;
+    let by = tokio::time::Instant::now() + Duration::from_secs(5);
+    while gw.link.syncs_waiting() > 0 && tokio::time::Instant::now() < by {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(gw.link.syncs_waiting(), 0);
+    second
+        .send(Message::Binary(sync_ask(1).into()))
+        .await
+        .unwrap();
+    let by = tokio::time::Instant::now() + Duration::from_secs(5);
+    while gw.link.syncs_waiting() < 1 && tokio::time::Instant::now() < by {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(gw.link.syncs_waiting(), 1);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), second.next())
+            .await
+            .is_err(),
+        "nothing refused: it is in the world's line"
+    );
+    drop(first);
+}

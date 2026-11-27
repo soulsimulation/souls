@@ -557,6 +557,8 @@ async fn serve(
         gw.views.end(n);
     }
     gw.detach(grant, attached.session);
+    // O8: its sync requests no longer hold the agent's place in the world's sync line.
+    gw.link.sync_ended(&grant.key(), attached.session);
     // #4979: its reason and close frame, if it can still take them; either way the socket is dropped. A client that
     // fell behind on a slow link may take them only once its backlog is read: it learns by its own bound then. One
     // replaced meanwhile by a newer sign-in is told that instead, so it does not take the Soul back at once.
