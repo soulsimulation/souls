@@ -691,6 +691,7 @@ pub struct Config {
     /// The tick's length (K7: the loop runs at this rate).
     pub tick: Duration,
     /// The longest an act stays open, from its arrival, when its expiry is later.
+    /// A release's rehearsal waits this long for the last fed intents (`supervisor::deploy::ACT_WITHIN`).
     pub deadline: Micros,
     pub checkers: usize,
     /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
