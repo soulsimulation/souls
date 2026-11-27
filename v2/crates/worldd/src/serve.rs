@@ -3661,7 +3661,7 @@ fn serve(args: &[String]) -> R<()> {
     let read_newest = || {
         let d = dir.join("checkpoints");
         std::thread::spawn(move || match d.is_dir() {
-            true => sim::checkpoint::restore(&d),
+            true => answers::restore(&d),
             false => Ok(None),
         })
     };
@@ -3736,7 +3736,7 @@ fn serve(args: &[String]) -> R<()> {
     // checkpoint is its authoritative base; any other world's is the one the engine resumes from.
     let fork_restored = match &stored_header {
         Some(_) => Some(
-            sim::checkpoint::restore(&dir.join("checkpoints"))
+            answers::restore(&dir.join("checkpoints"))
                 .map_err(refusal)?
                 .ok_or("served-fork-checkpoint-missing")?,
         ),
