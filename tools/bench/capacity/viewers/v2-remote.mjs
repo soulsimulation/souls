@@ -13,21 +13,43 @@
 //
 //   node tools/bench/capacity/viewers/v2-remote.mjs --base https://stream.example --stream /s/w/<world>/views/.../everyone/
 //        --pkg <replica wasm-bindgen pkg> --viewers 500 --arm even|uneven [--secs 240] [--procs 2] [--slow 0]
-//        [--encoding 'br, gzip'] [--start-at <unix ms>]
+//        [--encoding 'gzip, deflate, br, zstd'] [--headers browser|bare] [--start-at <unix ms>]
+//
+// --headers browser (the default) sends what a desktop Chrome page's stream worker sends to the stream host: a Chrome
+// User-Agent, Accept, Accept-Language, Accept-Encoding, the client hints, the fetch metadata and the page's Origin and
+// Referer (the stream host without its `stream.` label). The CDN's DDoS rule for unusual headers blocked the 5,000 join
+// wave when readers sent no User-Agent (#4985). --headers bare sends only Accept-Encoding, as the first runs did.
 import { fork } from 'node:child_process';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
 const BASE = opt('base'), STREAM = opt('stream'), PKG = opt('pkg'), N = Number(opt('viewers', 0)), ARM = opt('arm', 'even');
-const SECS = Number(opt('secs', 240)), PROCS = Number(opt('procs', 2)), SLOW = Number(opt('slow', 0)), ENC = opt('encoding', 'br, gzip');
+const SECS = Number(opt('secs', 240)), PROCS = Number(opt('procs', 2)), SLOW = Number(opt('slow', 0)), ENC = opt('encoding', 'gzip, deflate, br, zstd');
+const HEADERS = opt('headers', 'browser');
 const START_AT = Number(opt('start-at', Date.now())), TAKE_MS = 10_000;
-if (!BASE || !STREAM || !PKG || !(N >= 0) || !['even', 'uneven'].includes(ARM)) throw new Error('--base, --stream, --pkg, --viewers and --arm even|uneven');
+if (!BASE || !STREAM || !PKG || !(N >= 0) || !['even', 'uneven'].includes(ARM) || !['browser', 'bare'].includes(HEADERS)) throw new Error('--base, --stream, --pkg, --viewers, --arm even|uneven and --headers browser|bare');
+const page = `https://${new URL(BASE).hostname.replace(/^stream\./, '')}`;
+const CHROME = '142';
+const headers = HEADERS === 'bare' ? { 'accept-encoding': ENC } : {
+  'sec-ch-ua': `"Chromium";v="${CHROME}", "Google Chrome";v="${CHROME}", "Not_A Brand";v="99"`,
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"macOS"',
+  'user-agent': `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME}.0.0.0 Safari/537.36`,
+  accept: '*/*',
+  origin: page,
+  'sec-fetch-site': 'same-site',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-dest': 'empty',
+  referer: `${page}/`,
+  'accept-encoding': ENC,
+  'accept-language': 'en-US,en;q=0.9',
+};
 const READERS = new URL('./v2-readers.mjs', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 
 const kids = await Promise.all(Array.from({ length: PROCS }, () => new Promise((ok) => {
   const k = fork(READERS, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   k.once('message', () => ok(k));
-  k.send({ init: { base: BASE, stream: STREAM, pkg: PKG, encoding: ENC } });
+  k.send({ init: { base: BASE, stream: STREAM, pkg: PKG, encoding: ENC, headers } });
 })));
 kids.forEach((k) => k.on('exit', () => { k.dead = true; }));
 const share = (n, i) => Math.floor(n / PROCS) + (i < n % PROCS ? 1 : 0);

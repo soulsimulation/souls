@@ -4,7 +4,7 @@
 #
 #   REMOTE_PKG=<replica wasm-bindgen pkg dir> modal run tools/bench/capacity/viewers/v2-remote-modal.py \
 #       --base https://stream.example --stream /s/w/<world>/views/.../everyone/ --viewers 1000 --arm even \
-#       [--secs 240] [--per-share 500] [--slow 20] --out <file.jsonl>
+#       [--secs 240] [--per-share 500] [--slow 20] [--headers browser|bare] --out <file.jsonl>
 # REMOTE_CPU (default 2) is each machine's processor share: about 1 per 250 readers.
 import json
 import os
@@ -31,20 +31,20 @@ app = modal.App("souls-remote-readers", image=image)
 def share(a: dict) -> list:
     cmd = ["node", "/app/tools/bench/capacity/viewers/v2-remote.mjs", "--base", a["base"], "--stream", a["stream"], "--pkg", "/app/pkg",
            "--viewers", str(a["viewers"]), "--arm", a["arm"], "--secs", str(a["secs"]), "--procs", str(a["procs"]),
-           "--slow", str(a["slow"]), "--start-at", str(a["start_at"])]
+           "--slow", str(a["slow"]), "--start-at", str(a["start_at"]), "--headers", a["headers"]]
     out = subprocess.run(cmd, capture_output=True, text=True, timeout=a["secs"] + 600)
     lines = [json.loads(x) for x in out.stdout.splitlines() if x.startswith("{")]
     return [{"share": a["i"], **x} for x in lines] + ([{"share": a["i"], "stderr": out.stderr[-2000:]}] if out.returncode else [])
 
 
 @app.local_entrypoint()
-def main(base: str, stream: str, viewers: int, arm: str, out: str, secs: int = 240, per_share: int = 500, slow: int = 0):
+def main(base: str, stream: str, viewers: int, arm: str, out: str, secs: int = 240, per_share: int = 500, slow: int = 0, headers: str = "browser"):
     n = max(1, -(-viewers // per_share))
     start_at = int(time.time() * 1000) + 75_000
-    shares = [{"i": i, "base": base, "stream": stream, "arm": arm, "secs": secs, "start_at": start_at,
+    shares = [{"i": i, "base": base, "stream": stream, "arm": arm, "headers": headers, "secs": secs, "start_at": start_at,
                "viewers": viewers // n + (1 if i < viewers % n else 0), "procs": 2, "slow": slow // n + (1 if i < slow % n else 0)} for i in range(n)]
     with open(out, "w") as f:
-        f.write(json.dumps({"arm": arm, "viewers": viewers, "shares": n, "secs": secs, "start_at": start_at, "slow": slow}) + "\n")
+        f.write(json.dumps({"arm": arm, "viewers": viewers, "shares": n, "secs": secs, "start_at": start_at, "slow": slow, "headers": headers}) + "\n")
         for rows in share.map(shares):
             for r in rows:
                 f.write(json.dumps(r) + "\n")

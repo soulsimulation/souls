@@ -19,7 +19,7 @@ for (const r of rows) {
   for (const k of ['viewers', 'waiting', 'slow', 'behind', 'reinstalls', 'crossed', 'recovered', 'cpuSeconds']) w[k] += r[k] ?? 0;
   for (const k of ['requests', 'bytes', 'errors', 'colo']) merge((w[k] ??= {}), r[k] ?? {});
   for (const k of ['latency', 'firstPicture', 'installed']) merge(w[k], r[k] ?? {});
-  for (const k of ['cache', 'rtt']) for (const [type, h] of Object.entries(r[k] ?? {})) merge((w[k][type] ??= {}), h);
+  for (const k of ['cache', 'rtt', 'enc']) for (const [type, h] of Object.entries(r[k] ?? {})) merge(((w[k] ??= {})[type] ??= {}), h);
   w.loopP99Ms = Math.max(w.loopP99Ms, r.loopP99Ms ?? 0);
   byT.set(r.t, w);
 }
@@ -49,7 +49,8 @@ const out = {
   notHitPerS: +((cached - (cacheAll.HIT ?? 0)) / secs).toFixed(2),
   errors: windows.reduce((s, w) => merge(s, w.errors), {}), behind: sum(windows, (w) => w.behind), reinstalls: sum(windows, (w) => w.reinstalls),
   refusal: rows.find((r) => r.refusal)?.refusal ?? null,
-  edgeLocations: windows.reduce((s, w) => merge(s, w.colo ?? {}), {}),
+  edgeLocations: windows.reduce((s, w) => merge(s, w.colo ?? {}), {}), headers: head.headers ?? 'bare',
+  encodings: (() => { const e = {}; for (const w of windows) for (const [t, h] of Object.entries(w.enc ?? {})) merge((e[t] ??= {}), h); return e; })(),
   readerCores: +(sum(windows, (w) => w.cpuSeconds) / (10 * windows.length)).toFixed(2), readerLoopP99Ms: Math.max(...windows.map((w) => w.loopP99Ms)),
 };
 // baseline joins: bytes per baseline as sent (br when the reader asks for it)
