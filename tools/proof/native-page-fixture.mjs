@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
-import { exportFacts } from '../playtest/arena/new-engine/world.mjs';
+import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 import { startOldPage } from '../playtest/arena/new-engine/old-page.mjs';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = name => { throw Error('proof.native-page-' + name); };
@@ -54,6 +54,10 @@ export function nativePagePorts(port) {
   for (const p of ports) checkPort(p);
   return ports;
 }
+/** Same canonical exporter as the ordinary world helper; its subprocess is registered before waiting. */
+export function nativePageExportArgs(root, manifest, facts) {
+  return [join(root, 'v2/tools/import-eden/export/export.ts'), '--template', inside(root, manifest.template), '--out', facts, '--map', inside(root, manifest.map)];
+}
 /** Controllers stay live until the existing owner's global cleanup; finite commands are monitored as transients. */
 export function nativePageClientRegistration(children, onSpawn) {
   return {
@@ -69,7 +73,8 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   const commandRecords = []; let ordinal = 0;
   const onCommand = event => { const id = ++ordinal; const record = { ...event, id }; commandRecords.push(record); writeFileSync(join(data, '..', `command-native-${id}.json`), JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }); return id; };
   writeFileSync(join(data, '..', 'native-page-provenance.json'), JSON.stringify({ artifactPin: artifacts, ...m }, null, 2), { flag: 'wx', mode: 0o600 });
-  const facts = m.map ? exportFacts(m.template, join(data, 'template.facts.json'), m.map, { checkout: root, onCommand, signal, timeoutMs: until - Date.now() }) : null;
+  const facts = m.map ? join(data, 'template.facts.json') : null;
+  if (facts) await runOwnedCommand(process.execPath, nativePageExportArgs(root, m, facts), { cwd: root, onCommand, onSpawn, signal, timeoutMs: until - Date.now(), name: 'export-facts' });
   const runtime = await startOldPage({ checkout: root, template: m.template, facts, dir: data, port, bin: join(root, 'v2/target/release'),
     marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });

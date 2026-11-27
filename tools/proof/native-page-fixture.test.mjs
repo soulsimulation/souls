@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration, nativePageExportArgs } from './native-page-fixture.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
 import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
@@ -83,4 +83,10 @@ test('foreground controllers and finite commands enter the existing owner with d
   recipe.registerClient(controller); recipe.registerCommand(command);
   assert.deepEqual(children, [controller]);
   assert.deepEqual(calls, [{ child: controller, mode: { processGroup: true } }, { child: command, mode: { transient: true } }]);
+});
+
+test('tracked-map export uses the canonical exporter and fresh owned facts destination', t => {
+  const f = fixture(t, { map: 'content/worlds/mars/map.json' }), facts = join(f.root, '.local/run/data/template.facts.json');
+  assert.deepEqual(nativePageExportArgs(f.root, f.manifest, facts), [join(f.root, 'v2/tools/import-eden/export/export.ts'), '--template', join(f.root, f.manifest.template), '--out', facts, '--map', join(f.root, f.manifest.map)]);
+  assert.throws(() => nativePageExportArgs(f.root, { ...f.manifest, map: '../escape' }, facts), /artifact-path/);
 });

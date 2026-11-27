@@ -22,7 +22,7 @@ async function cli(state, who, ...words) {
   const seat = state.seats[who];
   const result = await new Promise((ok, no) => {
     const child = execFile(process.execPath, [join(state.recipe.checkout, 'v2/client/src/cli/souls.mjs'), ...words, '--soul', seat.soul],
-      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : 15000, maxBuffer: 4 << 20 },
+      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : words[0] === 'carry' && words[1] === 'to' ? 25000 : 15000, maxBuffer: 4 << 20 },
       (error, stdout, stderr) => { const result = { who, words, stdout, stderr, code: child.exitCode, signal: child.signalCode }; save(state, `command-carry-${++state.ordinal}.json`, result); if (error) no(error); else { try { ok(JSON.parse(stdout)); } catch (e) { no(e); } } });
     state.recipe.registerCommand(child);
   });
@@ -108,7 +108,25 @@ export function beforeNavigation({ page, paths, signal }) {
 export function wholeRunFailure(observer, pageErrors) {
   return !observer || !!pageErrors.length || !!observer.failures?.length || !!observer.failedWitnesses?.length || Object.keys(observer.counts ?? {}).some(k => !['passed-native-pair', 'native-release-observation', 'native-inactive-observation'].includes(k));
 }
-export default async function ({ page, paths, signal, fixture, check, expectHttp }) {
+async function verifyAssets(state, check) {
+  await Promise.all(state.pending);
+  const manifest = JSON.parse(readFileSync(join(state.paths.dir, 'native-page-provenance.json')));
+  check('no-missing-cancelled-assets', (state.cancelledLoads ?? []).every(f => state.loaded[f.path]), JSON.stringify(state.cancelledLoads ?? []));
+  for (const [path, actual] of Object.entries(state.loaded)) {
+    const replica = /\/v2\/replica\/[^/]+\/(replica\.js|replica_bg\.wasm)$/.exec(path);
+    const expected = replica ? manifest.trees['v2/target/wasm-load/pkg'][replica[1]] : manifest.trees['apps/web/dist'][path.slice(path.lastIndexOf('/assets/') + 1)];
+    check('served-artifact-' + path, actual === expected, 'Loaded page/replica bytes match their separate pinned artifact trees.');
+  }
+  return manifest;
+}
+async function setupGate(state, page, signal) {
+  const paths = state.paths;
+  await page.screenshot({ path: join(paths.dir, 'setup.png') });
+  console.log('SETUP_READY ' + paths.dir);
+  const gateEnd = Date.now() + 25000;
+  while (!existsSync(join(paths.dir, 'go'))) { signal.throwIfAborted(); if (Date.now() > gateEnd) throw Error('carry-proof.setup-review-timeout'); await delay(100, signal); }
+}
+export default async function ({ page, paths, signal, fixture, check, expectHttp, arm }) {
   const state = states.get(fixture.dir), root = state.recipe.checkout;
   // This is a published optional client document route, not a waived asset/stream/measurement failure.
   expectHttp('/safety.md', 404, 'Optional standalone client documentation is not routed by the old-page front door.');
@@ -118,28 +136,33 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   await page.waitForFunction(() => window.__soulsEntity?.gameFrame().souls.length >= 2 && !document.querySelector('.viewer-arrival') && document.querySelector('.viewer-history[data-viewer-ready="true"]'), null, { timeout: 30000 });
   await nativeCameraMode(page, 'manual', snapshot);
   await offer(state);
+  if (arm === 'baseline') {
+    const manifest = await verifyAssets(state, check);
+    save(state, 'baseline-contact-limits.json', { source: manifest.sourceHead, contactStatus: 'UNPROVED', reason: 'Pre-carry source has no native contact observer feed; this arm records the same ordinary actions, not an active-contact pass.' });
+    await setupGate(state, page, signal);
+    check('baseline-no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+    await cli(state, 'ada', 'carry', 'lift', state.crew, 'pallet-crates-1');
+    await page.screenshot({ path: join(paths.dir, 'first-lift.png') });
+    const go = String(Date.now() + 12000);
+    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'to', state.crew, '17,24', '--go', go)));
+    await cli(state, 'ada', 'carry', 'set-down', state.crew);
+    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'leave', state.crew)));
+    check('baseline-ordinary-lifecycle-only', state.pageErrors.length === 0, 'Native CLI accepted the matched baseline actions; no native-pair or load-clock certification is claimed.');
+    return;
+  }
+  check('candidate-arm', arm === 'candidate');
   await page.waitForFunction(({ load, crew }) => window.__soulsCarry?.evidence?.[load] && window.__soulsCarry.contactStates.some(s => s.crew === crew && s.field === 'absent' && s.members?.length === 2), { load: native(state.load.id), crew: native(state.crew) }, { timeout: 15000 });
   const scene = await page.evaluate(() => ({ frame: window.__soulsEntity.gameFrame(), carry: window.__soulsCarry, viewport: { width: innerWidth, height: innerHeight, touch: navigator.maxTouchPoints } }));
   const node = scene.carry.evidence[native(state.load.id)].frames[0].record;
   const entryFile = join(root, 'content/kinds/construction/pallet_crates.json'), bytes = readFileSync(entryFile), entry = JSON.parse(bytes);
   const binding = { crew: native(state.crew), load: { native: native(state.load.id), entity: layerDraws(node) && node.origin ? node.origin : entityId(node.id), kind: state.load.kind, entrySha256: hash(bytes) },
     bodies: Object.entries(state.seats).map(([who, seat]) => { const shown = scene.frame.souls.filter(s => s.id === seat.soul); if (shown.length !== 1) throw Error('carry-proof.body-mapping'); return { native: native(state.bodies[who]), soul: seat.soul, entity: shown[0].entityId }; }) };
-  await Promise.all(state.pending);
-  const manifest = JSON.parse(readFileSync(join(paths.dir, 'native-page-provenance.json')));
-  check('no-missing-cancelled-assets', (state.cancelledLoads ?? []).every(f => state.loaded[f.path]), JSON.stringify(state.cancelledLoads ?? []));
-  for (const [path, actual] of Object.entries(state.loaded)) {
-    const replica = /\/v2\/replica\/[^/]+\/(replica\.js|replica_bg\.wasm)$/.exec(path);
-    const expected = replica ? manifest.trees['v2/target/wasm-load/pkg'][replica[1]] : manifest.trees['apps/web/dist'][path.slice(path.lastIndexOf('/assets/') + 1)];
-    check('served-artifact-' + path, actual === expected, 'Loaded page/replica bytes match their separate pinned artifact trees.');
-  }
+  const manifest = await verifyAssets(state, check);
   check('desktop-input', scene.viewport.touch === 0 && scene.viewport.width === 1440 && scene.viewport.height === 1000);
   const kitURL = Object.keys(state.loaded).find(path => /\/people-kit-[^/]+\.js$/.test(path)); check('production-kit-loaded', !!kitURL);
   await page.evaluate(contactTools, { kitURL, binding, entry, source: manifest.sourceHead });
   save(state, 'carry-binding.json', binding); save(state, 'carry-scene.json', scene);
-  await page.screenshot({ path: join(paths.dir, 'setup.png') });
-  console.log('SETUP_READY ' + paths.dir);
-  const gateEnd = Date.now() + 25000;
-  while (!existsSync(join(paths.dir, 'go'))) { signal.throwIfAborted(); if (Date.now() > gateEnd) throw Error('carry-proof.setup-review-timeout'); await delay(100, signal); }
+  await setupGate(state, page, signal);
   check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
   await page.evaluate(() => { window.__carryContactObserver.active = true; });
   const abort = new AbortController(), journeySignal = AbortSignal.any([signal, abort.signal]);
@@ -156,7 +179,8 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
     await wait(() => window.__carryContactObserver.counts['passed-native-pair'] > 0, 10000);
     await page.screenshot({ path: join(paths.dir, 'first-lift.png') }); console.log('FIRST_CONTACT ' + paths.dir);
     // Short ordinary relative walk keeps both participants in the reviewed view; full loading/rack proof remains separate.
-    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'to', state.crew, '17,24')));
+    const go = String(Date.now() + 12000);
+    await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'to', state.crew, '17,24', '--go', go)));
     await cli(state, 'ada', 'carry', 'set-down', state.crew);
     await wait(() => window.__carryContactObserver.samples.some(s => s.result.releaseComplete), 10000);
     await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'leave', state.crew)));
