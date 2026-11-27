@@ -134,6 +134,10 @@ pub fn defs(kinds: &Kinds) -> Defs {
         .collect()
 }
 
+/// The field in which a thing names the Soul Actions entry its world's map gives it, when it borrows another kind's
+/// (the import's field 27, `import_eden::F_ENTRY`: a Mars sink borrows `eden:sink`).
+const F_ENTRY: u64 = 27;
+
 /// `kind`'s entry in `by_kind`: by its full name, or, for a kind written without its hash, the one revision loaded of
 /// that `namespace:name`.
 fn of_kind<'m, T>(by_kind: &'m BTreeMap<String, T>, kind: &str) -> Option<&'m T> {
@@ -383,9 +387,16 @@ impl Cx<'_> {
         }
     }
 
-    /// The amount fields of `node`'s kind: by its full name, or, for a kind written without its hash, the one
-    /// revision loaded of that `namespace:name`.
+    /// The amount fields of `node`: those of the entry its map row borrows ([`F_ENTRY`]; W14, #4090), as its needs and
+    /// its forms are read, else its own kind's: by its full name, or, for a kind written without its hash, the one
+    /// revision loaded of that `namespace:name`. Before, a transfer from a thing that borrows its entry (a Mars sink
+    /// that borrows the sink's) was refused `field-unknown`: its own kind has no fields.
     fn fields(&self, node: Id) -> Option<&BTreeMap<u64, Limit>> {
+        if let Some(Value::Text(entry)) = self.view.field(node, F_ENTRY)
+            && let Some(fields) = of_kind(self.limits, entry.as_str())
+        {
+            return Some(fields);
+        }
         of_kind(self.limits, self.view.kind(node)?.as_str())
     }
 
