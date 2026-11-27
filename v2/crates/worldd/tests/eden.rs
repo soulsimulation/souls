@@ -4145,7 +4145,12 @@ fn served_steps_in(entries: &str, at: &str, tag: &str, cases: &[Step]) -> Vec<St
         } else {
             args(&a)
         };
-        let ended = match soul.act(&format!("eden:{form}"), Some(im.nodes[*today]), params) {
+        // `me`: the Soul's own body (a body's form, such as `pick_up`).
+        let target = match *today {
+            "me" => births(&dir).last().expect("its birth logged").0,
+            t => im.nodes[t],
+        };
+        let ended = match soul.act(&format!("eden:{form}"), Some(target), params) {
             Ok(_) => "done".to_owned(),
             Err(name) => name,
         };
@@ -4231,7 +4236,7 @@ fn l42_water_and_the_garden_from_outside() {
 
 /// W14 follow-up (#4090, after #5231): Eden's pie pack (today's e_c698733a, at (103.2, 23.7) m in the café) borrows
 /// `eden:pie`, whose `eat_a_slice` is a set by an amount (`slices` by -1): a Soul takes it and eats a slice, on a served
-/// full Eden.
+/// full Eden. The pack has no take of its own: the body's `pick_up` takes it into a hand.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn w14_a_soul_eats_a_slice_from_edens_borrowed_pie_pack() {
@@ -4239,8 +4244,7 @@ fn w14_a_soul_eats_a_slice_from_edens_borrowed_pie_pack() {
         "96.5,25.0",
         "w14pie",
         &[
-            ("e_c698733a", "walk", &[], "done"),
-            ("e_c698733a", "take", &[], "done"),
+            ("me", "pick_up", &[("thing", "e_c698733a")], "done"),
             ("e_c698733a", "eat_a_slice", &[], "done"),
         ],
     );
@@ -4273,6 +4277,7 @@ fn w14_a_soul_feeds_a_borrowed_planter_box_from_a_borrowed_compost_heap() {
         "72.0,38.0",
         "w14feed",
         &[
+            ("e_3fd122bf", "walk", &[], "done"),
             ("e_3fd122bf", "sow", &[], "done"),
             ("e_3fd122bf", "feed", &[], "done"),
         ],
