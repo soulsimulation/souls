@@ -37,7 +37,7 @@ export class FollowGeometry{
   this.stats.meshes=this.meshes.length;this.stats.complete=!this.failed&&!this.stack.length&&this.nextRoot===this.roots.length&&!incomplete;this.stats.unknown=this.stats.complete?null:this.failed?'geometry-cap':'geometry-warming';
  }
  segment(from:Vector3,to:Vector3):Sight{
-  this.stats.queries++;if(!this.stats.complete)return'unknown';const length=from.distanceTo(to);if(length<.001)return'clear';let unknown=false;
+  this.stats.queries++;if(!this.stats.complete)return'unknown';const length=from.distanceTo(to);if(length===0)return'clear';let unknown=false;
   for(const mesh of this.meshes){if(!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return'unknown';if(materials.every(m=>!m.visible||m.transparent&&m.opacity<.5))continue;
    const g=mesh.geometry,bounds=this.bounds.get(g),p=g.attributes.position;if(!bounds||bounds.next<p.count)return'unknown';
    // Unsupported deformation has no proven conservative bounds. Refuse before culling.
@@ -49,7 +49,7 @@ export class FollowGeometry{
     this.inverse.copy(this.matrix).invert();this.a.copy(from).applyMatrix4(this.inverse);this.b.copy(to).applyMatrix4(this.inverse);const localLength=this.a.distanceTo(this.b);this.ray.set(this.a,this.c.copy(this.b).sub(this.a).normalize());
     const entry=this.ray.intersectBox(bounds.box,this.hit);if(!entry||!bounds.box.containsPoint(this.ray.origin)&&entry.distanceTo(this.ray.origin)>localLength)continue;
     const ix=g.index,start=Math.max(0,g.drawRange.start),end=Math.min(ix?.count??p.count,start+g.drawRange.count);
-    for(let i=start;i+2<end;i+=3){if(++this.stats.triangles>FOLLOW_LIMITS.triangles)return'unknown';this.a.fromBufferAttribute(p,ix?ix.getX(i):i);this.b.fromBufferAttribute(p,ix?ix.getX(i+1):i+1);this.c.fromBufferAttribute(p,ix?ix.getX(i+2):i+2);const h=this.ray.intersectTriangle(this.a,this.b,this.c,false,this.hit);if(h){const d=h.distanceTo(this.ray.origin);if(d>.03&&d<localLength-.03)return'blocked';}}
+    for(let i=start;i+2<end;i+=3){if(++this.stats.triangles>FOLLOW_LIMITS.triangles)return'unknown';this.a.fromBufferAttribute(p,ix?ix.getX(i):i);this.b.fromBufferAttribute(p,ix?ix.getX(i+1):i+1);this.c.fromBufferAttribute(p,ix?ix.getX(i+2):i+2);const h=this.ray.intersectTriangle(this.a,this.b,this.c,false,this.hit);if(h){const d=h.distanceTo(this.ray.origin);if(d<=localLength+1e-9*Math.max(1,localLength))return'blocked';}}
    }
   }
   return unknown?'unknown':'clear';
