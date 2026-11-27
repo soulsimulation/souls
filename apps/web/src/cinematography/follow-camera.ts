@@ -156,7 +156,7 @@ export class FollowCamera{
   const manualEye=manual?this.eye.clone():null;
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
-  const query=(eye:Vector3,shift?:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,shift?p.clone().add(shift):p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
+  const query=(eye:Vector3,shift?:Vector3,coreOnly=false):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of coreOnly?[centre]:points){const s=geometry.segment(eye,shift?p.clone().add(shift):p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/(coreOnly?1:points.length);};
   let reason='tracking';
   if(geometry.stats.complete){
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
@@ -173,7 +173,9 @@ export class FollowCamera{
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
    const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,Math.max(radius,passageRadius));
    if(preview.status==='stable'&&current!==null&&alternative!==null&&alternative>=current&&passage==='clear'){
-    const shift=new Vector3().fromArray(preview.shift);preview.current=query(root.clone().add(this.offset).add(shift),shift);preview.alternative=query(eye.clone().add(shift),shift);if(preview.current===null||preview.alternative===null)preview.status='query-unknown';
+    // Future centre visibility is only a cue; both present-time anchors remain required.
+    // A maximal or unknown incumbent cannot justify extra alternative preview work.
+    const shift=new Vector3().fromArray(preview.shift);preview.current=query(root.clone().add(this.offset).add(shift),shift,true);if(preview.current!==null&&preview.current<1)preview.alternative=query(eye.clone().add(shift),shift,true);if(preview.current===null||preview.current<1&&preview.alternative===null)preview.status='query-unknown';
    }
    const anticipated=preview.current!==null&&preview.alternative!==null&&preview.alternative>preview.current+.25;
    if(current!==null&&alternative!==null&&alternative>=current&&(alternative>current+.25||anticipated)&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';preview.selected=anticipated&&alternative<=current+.25;}
