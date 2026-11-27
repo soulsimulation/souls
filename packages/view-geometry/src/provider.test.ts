@@ -156,3 +156,10 @@ test('hidden and array serialization hooks are refused without executing caller 
     }
     assert.equal(calls, 0);
 });
+test('admitted large skinny triangle retains analytically exact coplanar interior', () => {
+    const p = build(scene([{ ...panel(), vertices: [[0, 0, 0], [1e6, 0, 0], [1e6, 2, 0]], triangles: [[0, 1, 2]] }]));
+    // P=.5A+.25B+.25C: exact positive barycentric weights, not an oracle shared with production.
+    const at: Vec3 = [500000, .5, 0];
+    assert.equal(p.segment(q(p, at, at)).status, 'blocked');
+    assert.equal(p.clearance(q(p, at, at, 0)).status, 'blocked');
+});

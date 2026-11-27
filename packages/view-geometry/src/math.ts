@@ -1,34 +1,28 @@
 import type { Vec3 } from './types.ts';
-/** Squared point/triangle distance, barycentric Voronoi regions; scalar arithmetic, no query scratch allocation. */
+/** Squared point/triangle distance using projected edge orientations, avoiding differences of
+ * nearly equal dot-product products. A negative orientation within its roundoff envelope is unknown. */
 export function pointTriangle(px: number, py: number, pz: number, v: Float64Array, o: number): number {
-    const ax = v[o], ay = v[o + 1], az = v[o + 2], bx = v[o + 3], by = v[o + 4], bz = v[o + 5], cx = v[o + 6], cy = v[o + 7], cz = v[o + 8];
-    const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
-    const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
-    if (d1 <= 0 && d2 <= 0)
-        return apx * apx + apy * apy + apz * apz;
-    const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
-    if (d3 >= 0 && d4 <= d3)
-        return bpx * bpx + bpy * bpy + bpz * bpz;
-    const vc = d1 * d4 - d3 * d2;
-    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
-        const t = d1 / (d1 - d3), x = apx - t * abx, y = apy - t * aby, z = apz - t * abz;
-        return x * x + y * y + z * z;
+    const ax = v[o], ay = v[o + 1], az = v[o + 2], ux = v[o + 3] - ax, uy = v[o + 4] - ay, uz = v[o + 5] - az, wx = v[o + 6] - ax, wy = v[o + 7] - ay, wz = v[o + 8] - az;
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, n2 = nx * nx + ny * ny + nz * nz;
+    let outside = false, uncertain = false, edgeMinimum = Infinity;
+    for (let k = 0; k < 3; k++) {
+        const i = o + k * 3, j = o + (k + 1) % 3 * 3, ex = v[j] - v[i], ey = v[j + 1] - v[i + 1], ez = v[j + 2] - v[i + 2], x = px - v[i], y = py - v[i + 1], z = pz - v[i + 2];
+        const t0 = ey * z * nx, t1 = -ez * y * nx, t2 = ez * x * ny, t3 = -ex * z * ny, t4 = ex * y * nz, t5 = -ey * x * nz;
+        const side = t0 + t1 + t2 + t3 + t4 + t5, error = (Math.abs(t0) + Math.abs(t1) + Math.abs(t2) + Math.abs(t3) + Math.abs(t4) + Math.abs(t5)) * Number.EPSILON * 32;
+        if (side < -error)
+            outside = true;
+        else if (side < 0)
+            uncertain = true;
+        const t = Math.max(0, Math.min(1, (x * ex + y * ey + z * ez) / (ex * ex + ey * ey + ez * ez))), dx = x - t * ex, dy = y - t * ey, dz = z - t * ez;
+        edgeMinimum = Math.min(edgeMinimum, dx * dx + dy * dy + dz * dz);
     }
-    const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
-    if (d6 >= 0 && d5 <= d6)
-        return cpx * cpx + cpy * cpy + cpz * cpz;
-    const vb = d5 * d2 - d1 * d6;
-    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
-        const t = d2 / (d2 - d6), x = apx - t * acx, y = apy - t * acy, z = apz - t * acz;
-        return x * x + y * y + z * z;
+    if (!outside) {
+        if (uncertain)
+            return NaN;
+        const signed = nx * (px - ax) + ny * (py - ay) + nz * (pz - az);
+        return signed * signed / n2;
     }
-    const va = d3 * d6 - d5 * d4;
-    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
-        const t = (d4 - d3) / ((d4 - d3) + (d5 - d6)), x = bpx - t * (cx - bx), y = bpy - t * (cy - by), z = bpz - t * (cz - bz);
-        return x * x + y * y + z * z;
-    }
-    const inv = 1 / (va + vb + vc), u = vb * inv, w = vc * inv, x = apx - u * abx - w * acx, y = apy - u * aby - w * acy, z = apz - u * abz - w * acz;
-    return x * x + y * y + z * z;
+    return edgeMinimum;
 }
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 function edgeDistance(a: Vec3, b: Vec3, v: Float64Array, i: number, j: number): number {
@@ -75,19 +69,23 @@ export function segmentTriangle(a: Vec3, b: Vec3, v: Float64Array, o: number): n
     return Math.max(0, Math.min(pointTriangle(...a, v, o), pointTriangle(...b, v, o), edgeDistance(a, b, v, o, o + 3), edgeDistance(a, b, v, o + 3, o + 6), edgeDistance(a, b, v, o + 6, o)));
 }
 /** Conservative capsule broad phase: segment against a radius-expanded AABB. */
-export function meets(a: Vec3, b: Vec3, box: Float64Array, o: number, r: number): boolean { let lo = 0, hi = 1; for (let k = 0; k < 3; k++) {
-    const d = b[k] - a[k], min = box[o + k] - r, max = box[o + k + 3] + r;
-    if (d === 0) {
-        if (a[k] < min || a[k] > max)
-            return false;
+export function meets(a: Vec3, b: Vec3, box: Float64Array, o: number, r: number): boolean {
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 3; k++) {
+        const d = b[k] - a[k], min = box[o + k] - r, max = box[o + k + 3] + r;
+        if (d === 0) {
+            if (a[k] < min || a[k] > max)
+                return false;
+        }
+        else {
+            let x = (min - a[k]) / d, y = (max - a[k]) / d;
+            if (x > y)
+                [x, y] = [y, x];
+            lo = Math.max(lo, x);
+            hi = Math.min(hi, y);
+            if (lo > hi)
+                return false;
+        }
     }
-    else {
-        let x = (min - a[k]) / d, y = (max - a[k]) / d;
-        if (x > y)
-            [x, y] = [y, x];
-        lo = Math.max(lo, x);
-        hi = Math.min(hi, y);
-        if (lo > hi)
-            return false;
-    }
-} return true; }
+    return true;
+}
