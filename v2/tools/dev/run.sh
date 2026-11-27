@@ -152,7 +152,7 @@ until_ready worldd test -S w.sock -a -f world/views/world.json
 start gatewayd "$BIN/gatewayd" --listen "$GATEWAY" --world "$DIR/w.sock" --tokens world/tokens --build "1220$(printf '%064d' 0)" \
   --entries world/entries --view-key view.key --creator "$CREATOR" --directory "$DIRECTORY" --mailbox "$DIRECTORY" --mailbox-key mailbox.key \
   --uploads world/uploads
-until_ready gatewayd grep -q '^listening' logs/gatewayd.log
+until_ready gatewayd node -e 'const fs = require("node:fs"), marker = "listening " + process.argv[1]; process.exit(fs.readFileSync(process.argv[2], "utf8").split("\n").slice(0, -1).some(line => line.endsWith(marker)) ? 0 : 1)' "$GATEWAY" logs/gatewayd.log
 
 # The origin serves the world's stream and history as a placed world's (place-world.sh's links), and routes the
 # world's name to its gateway (world-routes.mjs). No provider is configured, so the page signs in with `as=`.

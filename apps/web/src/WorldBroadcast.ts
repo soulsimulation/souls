@@ -93,7 +93,8 @@ export function subjectFraction(pose: CameraPose, aspect: number, p: readonly nu
  * Recorded activities nominate shots; selection/private intention never does.
  * It uses the existing safety/readability director, rather than a second mover. */
 export class WorldBroadcast {
-  constructor() { broadcastLog('mount', ''); }
+  constructor(seed?: number) { if(seed!==undefined&&(!Number.isSafeInteger(seed)||seed<0||seed>0xffffffff))throw Error('broadcast-seed-invalid');this.diagnosticSeed=seed;this.picker=new WorldDirector(seed);broadcastLog('mount', ''); }
+  private diagnosticSeed: number | undefined;
   private rendered=new WorldRenderedVisibility();
   // Rendered occluders also bound indoor framing: clearance around the camera
   // and the reach of a blocked sightline (see feasibleShots' enclosed pass).
@@ -106,7 +107,7 @@ export class WorldBroadcast {
   private lastDecisionWall = -Infinity;
   private signature = '';
   private semanticVersion = 0;
-  private picker = new WorldDirector();
+  private picker: WorldDirector;
   private tour = new WorldTour(TOUR_VIEWS);
   private choice: DirectorChoice | null = null;
   private lastPick = -Infinity;
@@ -145,6 +146,7 @@ export class WorldBroadcast {
   openingShown() { this.picker.openingShown = true; }
 
   /** #892: the body the current shot is about (its focus), or null for a landmark or no shot. */
+  get comparisonKey(): string { return this.choice?.key??''; }
   get subject(): string | null { return this.choice?.kind === 'subjects' ? this.choice.focus : null; }
 
   reset() {
@@ -153,7 +155,7 @@ export class WorldBroadcast {
     this.lastTick = this.lastDecisionWall = -Infinity;
     this.signature = '';
     this.semanticVersion = 0;
-    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset(); this.trackPrepared = -Infinity; this.shown = null;
+    if(this.diagnosticSeed!==undefined){const opening=this.picker.openingShown;this.picker=new WorldDirector(this.diagnosticSeed);this.picker.openingShown=opening;}else this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset(); this.trackPrepared = -Infinity; this.shown = null;
   }
 
   /** The shot for this frame, its aim lifted toward the horizon (C1, broadcast-horizon.ts). */

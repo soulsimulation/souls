@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {WorldBroadcast} from './WorldBroadcast.ts';
+test('diagnostic seed repeats picker reset while preserving opening state; defaults retain picker',()=>{const b=new WorldBroadcast(42) as any;const picker=b.picker,first=picker.random();picker.random();b.openingShown();b.reset();assert.notEqual(b.picker,picker);assert.equal(b.picker.random(),first);assert.equal(b.picker.openingShown,true);const normal=new WorldBroadcast() as any,original=normal.picker;normal.reset();assert.equal(normal.picker,original);});
+test('diagnostic seed refuses values outside uint32',()=>{for(const seed of[-1,.5,NaN,Infinity,2**32])assert.throws(()=>new WorldBroadcast(seed),/seed-invalid/);});

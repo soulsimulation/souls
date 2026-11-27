@@ -6,11 +6,17 @@ import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { createTestRunner, runOwnedAttempt } from './owned-attempt.mjs';
+import { createTestRunner, runOwnedAttempt, attemptRole } from './owned-attempt.mjs';
 import { verifyAccountArtifacts } from './v2-account-fixture.mjs';
 import { createHash } from 'node:crypto';
 
 const parent = resolve('.local/proof-owned-attempt-tests'); mkdirSync(parent, { recursive: true });
+test('measurement role bounds and ordinary90second defaults remain separate',()=>{
+ assert.deepEqual(attemptRole({}),{role:'journey',journeyMs:90000,prepareMs:30000,videoSeconds:90});
+ const m={durationMs:600000,warmupMs:300000,sampleMs:180000,setupTimeoutMs:180000},o={role:'measurement',world:{kind:'native-page'},measurement:m};assert.equal(attemptRole(o).videoSeconds,600);assert.equal(attemptRole(o).prepareMs,180000);
+ for(const bad of[{...m,durationMs:600001},{...m,warmupMs:-1},{...m,sampleMs:400000},{...m,setupTimeoutMs:180001}])assert.throws(()=>attemptRole({...o,measurement:bad}),/bounds/);
+ assert.throws(()=>attemptRole({...o,role:'journey'}),/role-required/);assert.throws(()=>attemptRole({...o,journeyTimeoutMs:600001}),/mismatch/);
+});
 function setup(t, overrides = {}) {
   const root = mkdtempSync(join(parent, 'lifecycle-')), product = join(root, 'product'); mkdirSync(product);
   writeFileSync(join(product, 'fix.ts'), 'export const repaired = true;\n');
@@ -33,6 +39,13 @@ function setup(t, overrides = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return { root, product, runner, o, change, children, browsers, ledger, identity, now: () => ++clock };
 }
+test('measurement role keeps failure accounting, cancellation and cleanup with pinned declared limits',async t=>{
+ const f=setup(t);f.o.world.kind='native-page';const base=f.o;const options={...base,role:'measurement',measurement:{durationMs:100,warmupMs:0,sampleMs:1,setupTimeoutMs:100}};
+ // This injected fake retains native lifecycle shape; no process/listener/browser is launched.
+ const runner=createTestRunner({source:f.identity,changed:()=>['fix.ts'],portFree:async()=>true,now:f.now,boot:async o=>{const children=Array.from({length:3},()=>Object.assign(new EventEmitter(),{exitCode:null,signalCode:null}));for(const c of children)o.onSpawn(c);return{child:children[0],children,base:`https://example.com:${o.port}/w/unit`,viewer:`https://example.com:${o.port}/w/unit`,dataDir:o.data,recipe:{verify(){}}};},browser:async(o,p,base)=>({page:{on(){},goto:async()=>{},url:()=>base,screenshot:async()=>Buffer.from('PNG'),locator:()=>({ariaSnapshot:async()=>'- canvas'})},close:async()=>{}}),stop:async c=>{c.exitCode=0;}});
+ const controller=new AbortController();options.signal=controller.signal;options.journey=async()=>{controller.abort(Error('measurement-interrupted'));await new Promise(()=>{});};const r=await runner(options);assert.equal(r.status,'INTERRUPTED');assert.equal(r.videoClass,'measurement-original');assert.equal(r.measurement.durationMs,100);assert.equal(r.teardown.worldStopped,true);assert.equal(r.teardown.browserClosed,true);
+ const changed={...options,measurement:{...options.measurement,sampleMs:2}};await assert.rejects(runner(changed),/measurement-plan-changed/);
+});
 test('fresh success owns directories and teardown; passing scenario cannot be rerun by a commit', async t => {
   const f = setup(t); const r = await f.runner(f.o);
   assert.equal(r.status, 'PASS'); assert.equal(r.qualified, false); assert.equal(r.injected, true);
@@ -54,7 +67,7 @@ test('failed assertion preserves immutable observations, fresh retry, and pins t
   writeFileSync(join(one.paths.dir, 'explanation.md'), 'tampered'); f.o.repeat = 2;
   await assert.rejects(f.runner(f.o), /evidence-changed/);
 });
-test('third attempt requires fresh independent evidence-bound review and is the last attempt', async t => {
+test('third attempt requires fresh independent evidence-bound review and is the last default attempt', async t => {
   let changedLine = true; const f = setup(t, { lineChanged: () => changedLine }); f.o.journey = async c => c.check('contact', false);
   await f.runner(f.o); f.change('p2', 'adjust hand approach'); await f.runner(f.o); f.change('p3', 'repair target fixture');
   await assert.rejects(f.runner(f.o), /independent-review-required/);
@@ -72,6 +85,58 @@ test('third attempt requires fresh independent evidence-bound review and is the 
   changedLine = false; await assert.rejects(f.runner(f.o), /review-line-not-changed/); changedLine = true;
   const third = await f.runner(f.o); assert.equal(third.repairAttempt, 3); assert.equal(third.status, 'FAIL');
   f.change('p4'); await assert.rejects(f.runner(f.o), /repair-ceiling/);
+});
+for (const fourthPasses of [false, true]) test(`reviewed continuation preserves original slot and cumulative failures; fourth passes=${fourthPasses}`, async t => {
+  const f = setup(t), hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  f.o.history = { count: 16, evidence: [] };
+  f.o.journey = async c => c.check('contact', false);
+  await f.runner(f.o); f.change('p2', 'second repair'); await f.runner(f.o); f.change('p3', 'third repair');
+  const review = (attempts, hypothesis) => ({ reviewer: '/test/independent-reviewer', evidenceOnly: true, decision: 'TRY',
+    at: new Date(f.now()).toISOString(), evidence: attempts.map(a => a.reportHash),
+    source: { product: f.identity(f.product), tool: f.identity(f.root) }, hypothesis, change: { path: 'fix.ts', line: 1 } });
+  f.o.review = review(f.ledger().attempts, 'third diagnosis'); await f.runner(f.o);
+  const original = f.ledger().attempts.map(a => ({ ...a, bytes: readFileSync(a.report) }));
+  const authority = join(f.root, 'authorization.json'); writeFileSync(authority, JSON.stringify({ issue: 5175, directive: 'Continue diagnosed recovery with independent review' }));
+  const continuation = () => ({ cycle: f.o.cycle.id, slot: 0, repairAttempt: f.ledger().cycles[0].chain + 1,
+    ledgerHash: hash(readFileSync(f.o.ledger)), authorization: { issue: 'https://github.com/soulsimulation/souls/issues/5175',
+      directive: 'Continue diagnosed recovery with independent review', evidence: { file: authority, hash: hash(readFileSync(authority)) } } });
+  f.o.continuation = continuation(); await assert.rejects(f.runner(f.o), /unchanged-retry/);
+  f.change('p4', 'fourth repair'); f.o.continuation = continuation();
+  f.o.review = { ...review(f.ledger().attempts, 'fourth independent diagnosis'), continuationHash: hash(JSON.stringify(f.o.continuation)) };
+  const good = structuredClone(f.o.continuation), goodReview = structuredClone(f.o.review);
+  for (const edit of [c => c.cycle = 'replacement', c => c.slot = 1, c => c.repairAttempt = 3]) {
+    f.o.continuation = structuredClone(good); edit(f.o.continuation);
+    await assert.rejects(f.runner(f.o), /continuation-slot-mismatch/);
+  }
+  f.o.continuation = { ...good, ledgerHash: 'stale' }; await assert.rejects(f.runner(f.o), /continuation-ledger-mismatch/);
+  f.o.continuation = { ...good, authorization: {} }; await assert.rejects(f.runner(f.o), /continuation-authorization-required/);
+  f.o.continuation = { ...good, authorization: { ...good.authorization, evidence: { file: authority, hash: 'stale' } } };
+  await assert.rejects(f.runner(f.o), /continuation-authorization-changed/);
+  f.o.continuation = { ...good, authorization: { ...good.authorization, directive: 'different permission' } };
+  await assert.rejects(f.runner(f.o), /continuation-review-mismatch/); f.o.continuation = good;
+  for (const [edit, error] of [
+    [r => r.reviewer = f.o.owner, /independent-review-required/],
+    [r => r.evidence = r.evidence.slice(1), /review-evidence-mismatch/],
+    [r => r.source.product.head = 'stale', /review-source-mismatch/],
+    [r => r.at = f.ledger().attempts.at(-1).endedAt, /review-stale/],
+    [r => r.hypothesis = f.ledger().attempts[0].hypothesis, /different-hypothesis-required/],
+    [r => r.change.path = 'not-the-repair.ts', /review-file-line-required/],
+  ]) { f.o.review = structuredClone(goodReview); edit(f.o.review); await assert.rejects(f.runner(f.o), error); }
+  f.o.review = goodReview; assert.equal(f.children.length, 3, 'all refusals precede resource allocation');
+  f.o.journey = async c => c.check('contact', fourthPasses);
+  const fourth = await f.runner(f.o);
+  assert.equal(fourth.repairAttempt, 4); assert.equal(fourth.cumulativeRun, 4); assert.equal(fourth.captureOrdinal, 20);
+  assert.equal(fourth.slot, 0); assert.deepEqual(fourth.continuation, good); assert.equal(fourth.teardown.worldStopped, true);
+  for (const a of original) assert.deepEqual(readFileSync(a.report), a.bytes);
+  assert.equal(f.ledger().attempts.length, 4); assert.equal(f.ledger().cycles.length, 1);
+  f.change('p5', 'fifth repair');
+  await assert.rejects(f.runner(f.o), fourthPasses ? /passing-scenario-rerun/ : /continuation-slot-mismatch/);
+  if (!fourthPasses) {
+    delete f.o.continuation; await assert.rejects(f.runner(f.o), /repair-ceiling/);
+    f.o.continuation = continuation(); f.o.review = { ...review(f.ledger().attempts, 'fifth independent diagnosis'), continuationHash: hash(JSON.stringify(f.o.continuation)) };
+    f.o.journey = async c => c.check('contact', true); const fifth = await f.runner(f.o);
+    assert.equal(fifth.repairAttempt, 5); assert.equal(fifth.captureOrdinal, 21); assert.equal(fifth.status, 'PASS');
+  }
 });
 test('two predeclared repeats per arm allow passes, but a failure cannot be sidestepped and counts all three tries', async t => {
   const f = setup(t); f.o.cycle.arms.baseline = { root: f.product, head: 'p1' };
@@ -508,4 +573,15 @@ test('late onOpened then setup rejection closes the real context without rewriti
     assert.match(evidence.setupError, /calibration-aborted-after-open/);
     if (closeFails) assert.match(evidence.error, /late-close-failed/);
   }
+});
+for (const failAfterClose of [false,true]) test(`measurement readiness is owned before navigation and post-close read cannot prevent world teardown (${failAfterClose})`,async t=>{
+ const f=setup(t),env={...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null',GIT_AUTHOR_NAME:'Proof Fixture',GIT_AUTHOR_EMAIL:'proof@example.com',GIT_COMMITTER_NAME:'Proof Fixture',GIT_COMMITTER_EMAIL:'proof@example.com'},git=(...args)=>execFileSync('git',['-C',f.root,...args],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+ git('init');writeFileSync(join(f.root,'.gitignore'),'runs/\nledger.json*\n');writeFileSync(join(f.root,'driver.mjs'),'export default()=>{};');git('add','.');git('commit','-m','Initial fixture');const from=git('rev-parse','HEAD');
+ writeFileSync(join(f.root,'driver.mjs'),`import{writeFileSync,existsSync}from'node:fs';import{join}from'node:path';export function beforeNavigation({paths}){const stop=async()=>writeFileSync(join(paths.dir,'observer-stopped'),'yes');stop.ready=new Promise(resolve=>setTimeout(()=>{writeFileSync(join(paths.dir,'ready'),'yes');resolve();},2));stop.afterBrowserClose=async()=>{if(!existsSync(join(paths.dir,'browser-closed')))throw Error('browser still open');${failAfterClose?"throw Error('measurement read refused');":"return{supported:true,survivingOriginals:[]};"}};return stop;}export default async c=>c.check('ready',existsSync(join(c.paths.dir,'ready')));`);
+ git('add','.');git('commit','-m','Measurement fixture');const head=git('rev-parse','HEAD');let runPaths;
+ const runner=createTestRunner({source:root=>({root:resolve(root),head}),changed:()=>['driver.mjs'],portFree:async()=>true,
+ boot:async o=>{const children=Array.from({length:3},()=>Object.assign(new EventEmitter(),{exitCode:null,signalCode:null}));for(const child of children)o.onSpawn(child);return{child:children[0],children,base:`https://example.com:${o.port}/w/test`,viewer:`https://example.com:${o.port}/w/test`,dataDir:o.data,recipe:{verify(){}}};},
+ browser:async(o,paths,base)=>{runPaths=paths;return{page:{on(){},goto:async()=>assert.ok(existsSync(join(paths.dir,'ready'))),url:()=>base,screenshot:async()=>Buffer.from('PNG'),locator:()=>({ariaSnapshot:async()=>'- fixture'})},close:async()=>{assert.ok(existsSync(join(paths.dir,'observer-stopped')));writeFileSync(join(paths.dir,'browser-closed'),'yes');}};},stop:async c=>{c.exitCode=0;}});
+ const r=await runner({...f.o,sourceRoot:f.root,driver:{root:f.root,path:'driver.mjs'},role:'measurement',measurement:{durationMs:1000,warmupMs:0,sampleMs:1,setupTimeoutMs:100},world:{kind:'native-page',port:19040},cycle:{id:'lifecycle',fix:{root:f.root,from,to:head,paths:['driver.mjs'],scope:'measurement hooks'},arms:{candidate:{root:f.root,head}},plan:[{arm:'candidate',repeat:1}]}});
+ assert.equal(r.status,failAfterClose?'EVIDENCE_FAIL':'PASS');assert.equal(r.teardown.browserClosed,true);assert.equal(r.teardown.worldStopped,true);if(!failAfterClose)assert.equal(r.evidence.filter(e=>e.file===join(runPaths.dir,'cost-process-after-close.json')).length,1);
 });

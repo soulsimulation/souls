@@ -23,7 +23,7 @@ const writeNew = (file, value) => writeFileSync(file, typeof value === 'string' 
 const requireThat = (ok, why) => { if (!ok) throw new Error(`proof.${why}`); };
 const git = (root, ...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
 const loadedToolHead = git(TOOL_ROOT, 'rev-parse', 'HEAD');
-const loadedFiles = ['tools/proof/owned-attempt.mjs', 'tools/proof/imported-attempt-budget.mjs', 'tools/proof/v2-account-fixture.mjs', 'tools/proof/v2-body-fixture.mjs', 'tools/god-skill/dev-world.mjs', 'e2e/config.mjs', 'e2e/local-smoke.mjs', 'tools/playtest/lib/platform.mjs', 'tools/proof/native-page-fixture.mjs', 'tools/proof/capture-viewport.mjs', 'tools/playtest/arena/new-engine/old-page.mjs', 'tools/playtest/arena/new-engine/world.mjs'].map(path => ({ path, hash: digest(readFileSync(join(TOOL_ROOT, path))) }));
+const loadedFiles = ['tools/proof/owned-attempt.mjs', 'tools/proof/imported-attempt-budget.mjs', 'tools/proof/v2-account-fixture.mjs', 'tools/proof/v2-body-fixture.mjs', 'tools/god-skill/dev-world.mjs', 'e2e/config.mjs', 'e2e/local-smoke.mjs', 'tools/playtest/lib/platform.mjs', 'tools/proof/native-page-fixture.mjs', 'tools/proof/sealed-public-inputs.mjs', 'tools/proof/drivers/camera-native-page.mjs', 'tools/proof/capture-viewport.mjs', 'tools/playtest/arena/new-engine/old-page.mjs', 'tools/playtest/arena/new-engine/world.mjs'].map(path => ({ path, hash: digest(readFileSync(join(TOOL_ROOT, path))) }));
 const source = root => { requireThat(!git(root, 'status', '--porcelain'), 'source-dirty'); return { root: resolve(root), head: git(root, 'rev-parse', 'HEAD') }; };
 const within = (root, path) => { const p = relative(root, resolve(path)); return p && p !== '..' && !p.startsWith('../') && !isAbsolute(p); };
 const sameSource = (a, b) => !!a && !!b && JSON.stringify(Object.keys(a).sort()) === JSON.stringify(Object.keys(b).sort()) && Object.keys(a).every(k => a[k].head === b[k].head && a[k].root === b[k].root);
@@ -67,8 +67,7 @@ function changed(fix, snapshots, inspectChange) {
   const actual = inspectChange(found.root, fix.from, fix.to);
   requireThat(actual.some(Boolean) && fix.paths.every(p => p?.trim() && !isAbsolute(p) && !p.startsWith('../') && actual.includes(p)), 'change-paths-mismatch');
 }
-function reviewThird(review, attempts, owner, current, repair, now, lineChanged) {
-  const previous = attempts.slice(-2);
+function reviewEvidence(review, previous, owner, current, repair, now, lineChanged) {
   requireThat(review?.evidenceOnly === true && review.reviewer && review.reviewer !== owner, 'independent-review-required');
   requireThat(review.decision === 'TRY', 'review-escalate-or-missing');
   requireThat(Date.parse(review.at) > Date.parse(previous.at(-1).endedAt) && Date.parse(review.at) <= now + 1000, 'review-stale');
@@ -79,6 +78,17 @@ function reviewThird(review, attempts, owner, current, repair, now, lineChanged)
   const path = resolve(repair.root, review.change.path);
   requireThat(within(repair.root, path) && readFileSync(path, 'utf8').split('\n').length >= review.change.line, 'review-file-line-invalid');
   requireThat(lineChanged(repair.root, repair.from, repair.to, review.change.path, review.change.line), 'review-line-not-changed');
+}
+function reviewContinuation(continuation, review, cycle, chain, ledger) {
+  requireThat(continuation && continuation.cycle === cycle.id && continuation.slot === cycle.cursor &&
+    continuation.repairAttempt === cycle.chain + 1, 'continuation-slot-mismatch');
+  requireThat(chain.length === cycle.chain && continuation.ledgerHash === digest(readFileSync(ledger)), 'continuation-ledger-mismatch');
+  const authority = continuation.authorization;
+  requireThat(/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[1-9][0-9]*$/.test(authority?.issue ?? '') &&
+    authority?.directive?.trim() && authority.evidence?.file && authority.evidence?.hash, 'continuation-authorization-required');
+  requireThat(digest(readFileSync(authority.evidence.file)) === authority.evidence.hash, 'continuation-authorization-changed');
+  // The independent reviewer approves this exact one-use course decision, not a generic retry allowance.
+  requireThat(review?.continuationHash === digest(continuation), 'continuation-review-mismatch');
 }
 function verifyRecords(state) {
   for (const attempt of state.attempts) {
@@ -142,18 +152,30 @@ const production = { source, changed: (root, from, to) => git(root, 'diff', '--n
   boot: o => o.kind === 'native-page' ? startNativePageFixture(o) : o.kind === 'v2-bodies' ? startV2BodyFixture(o) : o.kind === 'v2-account' ? startV2AccountFixture(o) : (requireThat(o.kind === undefined, 'unknown-fixture-kind'), startWorld(o)), browser: openBrowser, stop: stopOwnedChild, portFree, now: () => Date.now(), test: false };
 
 /** Exactly one invocation = one fresh owned lifecycle. A failed slot cannot be replaced by another sample id.
- * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot's repair loop is capped3.
+ * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot defaults to three attempts; explicit reviewed continuations retain that same slot.
  * A material corrective cycle must be explicit; changing HEAD never starts one. No URL parameter is accepted. */
 export const runOwnedAttempt = options => run(options, production);
 
 /** Injection is deliberately unqualified; test reports can never be presented as browser proof. */
 export const createTestRunner = overrides => options => run(options, { ...production, lineChanged: () => true, ...overrides, test: true });
 
+/** Long measurement originals are separate from ordinary <=90s proof clips. No retry policy changes. */
+export function attemptRole(o) {
+  const role = o.role ?? 'journey'; requireThat(['journey', 'measurement'].includes(role), 'role-invalid');
+  if (role === 'journey') { requireThat(!o.measurement, 'measurement-role-required'); return { role, journeyMs: o.journeyTimeoutMs ?? 90000, prepareMs: o.phaseTimeoutMs ?? 30000, videoSeconds: 90 }; }
+  const m = o.measurement;
+  requireThat(o.world?.kind === 'native-page' && m && [m.durationMs, m.warmupMs, m.sampleMs, m.setupTimeoutMs].every(Number.isSafeInteger), 'measurement-declaration');
+  requireThat(m.durationMs > 0 && m.durationMs <= 600000 && m.warmupMs >= 0 && m.sampleMs > 0 && m.warmupMs + m.sampleMs <= m.durationMs && m.setupTimeoutMs > 0 && m.setupTimeoutMs <= 180000, 'measurement-bounds');
+  requireThat(o.journeyTimeoutMs === undefined || o.journeyTimeoutMs === m.durationMs, 'measurement-duration-mismatch');
+  return { role, journeyMs: m.durationMs, prepareMs: m.setupTimeoutMs, videoSeconds: 600 };
+}
+
 async function run(o, d) {
+  const role = attemptRole(o);
   requireThat(o.world?.kind === undefined || (o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies' || o.world.kind === 'native-page'), 'unknown-fixture-kind');
   requireThat(o.owner?.trim() && o.cycle?.id && o.cycle.plan?.length && o.ledger, 'plan-and-agent-identity-required');
   requireThat(!('url' in o) && !('runDir' in o) && !('dataDir' in o) && !('profileDir' in o), 'existing-resource-override');
-  for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [o.journeyTimeoutMs ?? 90000, 90000], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
+  for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [role.journeyMs, role.role === 'measurement' ? 600000 : 90000], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
   if (o.world.kind === 'v2-bodies') requireThat((o.world.timeoutMs ?? 30000) <= 30000, 'body-boot-timeout-out-of-bounds');
   if (!d.test) requireThat(!o.journey && o.driver?.root && o.driver?.path, 'committed-driver-required');
   const ledger = resolve(o.ledger), toolRoot = resolve(o.toolRoot ?? TOOL_ROOT), lock = ledger + '.lock';
@@ -166,7 +188,7 @@ async function run(o, d) {
   const children = [], transients = new Set(), processGroups = new Set();
   const native = o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies' || o.world.kind === 'native-page';
   const healthy = () => children.every(c => transients.has(c) ? c.signalCode === null && (c.exitCode === null || c.exitCode === 0) : c.exitCode === null && c.signalCode === null);
-  let state, report, paths, browser, child, childError, worldDeath, observationStop, closing = false, cleanupFailed = false, finalized = false, timedOut = false, browserCleanupStarted = false;
+  let state, report, paths, browser, child, childError, worldDeath, observationStop, browserDeadline, closing = false, cleanupFailed = false, finalized = false, timedOut = false, browserCleanupStarted = false;
   const controller = new AbortController(), onAbort = () => controller.abort(o.signal?.reason ?? new Error('proof.interrupted'));
   const timeout = error => { timedOut = true; controller.abort(error); };
   const onSignal = () => controller.abort(new Error('proof.interrupted'));
@@ -213,11 +235,13 @@ async function run(o, d) {
       requireThat(!state.cycles.some(c => c.id === o.cycle.id), 'cycle-id-reused');
       requireThat(new Set(o.cycle.plan.map(s => `${s.arm}:${s.repeat}`)).size === o.cycle.plan.length, 'duplicate-measurement-slot');
       requireThat(o.cycle.plan.every(s => o.cycle.arms?.[s.arm]?.head && isAbsolute(o.cycle.arms[s.arm].root) && Number.isSafeInteger(s.repeat) && s.repeat > 0), 'planned-source-required');
-      cycle = { ...structuredClone(o.cycle), cursor: 0, chain: 0, armSources: structuredClone(o.cycle.arms), toolSource: current.tool,
+      cycle = { ...structuredClone(o.cycle), role: role.role, ...(o.measurement ? { measurement: structuredClone(o.measurement) } : {}), cursor: 0, chain: 0, armSources: structuredClone(o.cycle.arms), toolSource: current.tool,
         ...(o.driver ? { driverSource: current.driver, driverPath: o.driver.path } : {}) }; state.cycles.push(cycle);
     } else requireThat(digest(cycle.plan) === digest(o.cycle.plan) && digest(cycle.arms) === digest(o.cycle.arms) && digest(cycle.fix) === digest(o.cycle.fix), 'cycle-plan-changed');
+    requireThat((cycle.role ?? 'journey') === role.role && digest(cycle.measurement ?? null) === digest(o.measurement ?? null), 'measurement-plan-changed');
     requireThat(cycle.cursor < cycle.plan.length, 'passing-scenario-rerun');
-    requireThat(!cycle.stopped && cycle.chain < config.iterationCap, 'repair-ceiling');
+    requireThat(!cycle.stopped && (cycle.chain < config.iterationCap || o.continuation), 'repair-ceiling');
+    requireThat(!o.continuation || cycle.chain >= config.iterationCap, 'continuation-not-needed');
     const slot = cycle.plan[cycle.cursor];
     requireThat(slot.arm === o.arm && slot.repeat === o.repeat, 'failed-slot-cannot-be-skipped');
     if (cycle.driverPath) requireThat(o.driver?.path === cycle.driverPath, 'driver-path-changed');
@@ -230,7 +254,10 @@ async function run(o, d) {
       if (chain.length) requireThat(!sameSource(chain.at(-1).source, current), 'unchanged-retry');
       requireThat(Object.values(planned).some(s => s.root === resolve(o.repair.root) && s.head === o.repair.from), 'repair-from-mismatch');
     }
-    if (cycle.chain === 2) reviewThird(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    if (cycle.chain >= config.iterationCap) {
+      reviewContinuation(o.continuation, o.review, cycle, chain, ledger);
+      reviewEvidence(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    } else if (cycle.chain === 2) reviewEvidence(o.review, chain.slice(-2), o.owner, current, o.repair, d.now(), d.lineChanged);
     checkPort(o.world.port);
     requireThat(await d.portFree(o.world.port), 'occupied-resource');
     controller.signal.throwIfAborted();
@@ -242,7 +269,7 @@ async function run(o, d) {
     report = { version: 1, qualified: false, injected: d.test, owner: o.owner, cycle: cycle.id, slot: cycle.cursor,
       arm: slot.arm, repeat: slot.repeat, repairAttempt: cycle.chain, cumulativeRun: state.attempts.length + 1,
       startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: o.review?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
-      paths, driver: o.driver ?? null, browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [], evidence: [], teardown: {}, review: o.review ?? null };
+      paths, driver: o.driver ?? null, role: role.role, measurement: o.measurement ?? null, videoClass: role.role === 'measurement' ? 'measurement-original' : 'ordinary-proof-original', browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [], evidence: [], teardown: {}, review: o.review ?? null, continuation: o.continuation ?? null };
     cycle.inFlight = paths.dir; save(); // a crash remains an explicit unfinished ownership record
     requireThat(!state.attempts.some(a => a.runDir === paths.dir), 'reused-run-directory');
     const world = await d.boot({ ...o.world, checkout: current.product.root, data: paths.data, fresh: false, log: paths.log,
@@ -259,7 +286,7 @@ async function run(o, d) {
     report.ownedOrigin = new URL(world.base).origin;
     requireThat(resolve(world.dataDir) === paths.data && new URL(world.base).port === String(o.world.port), 'boot-resource-mismatch');
     controller.signal.throwIfAborted();
-    const fixture = await bounded(() => driver.prepare?.({ base: world.base, paths, signal: controller.signal, recipe: world.recipe, arm: slot.arm, repeat: slot.repeat }), controller.signal, o.phaseTimeoutMs ?? 30000, 'prepare', timeout);
+    const fixture = await bounded(() => driver.prepare?.({ base: world.base, paths, signal: controller.signal, recipe: world.recipe, arm: slot.arm, repeat: slot.repeat }), controller.signal, role.prepareMs, 'prepare', timeout);
     controller.signal.throwIfAborted();
     requireThat(healthy(), 'owned-world-exited');
     let launchSettled = false, lateBrowser, lateOpened, lateCleanup;
@@ -279,6 +306,7 @@ async function run(o, d) {
         void closeLate(context).catch(() => {}); return;
       }
       browser = context; markObservation();
+      if (role.role === 'measurement' && !browserDeadline) browserDeadline = setTimeout(() => timeout(new Error('proof.measurement-browser-deadline')), 600000);
     } }, paths, world.base));
     opening.then(value => { launchSettled = true; lateBrowser = value; }, () => { launchSettled = true; });
     try { browser = await bounded(() => opening, controller.signal, (o.phaseTimeoutMs ?? 30000) + 1000, 'browser-open', timeout); }
@@ -305,12 +333,13 @@ async function run(o, d) {
       report.network.push({ kind: 'requestfailed', method: request.method(), url: request.url(), error: request.failure()?.errorText ?? 'unknown', inFlightAtDriverNavigation: at !== undefined && navigation.epoch > at }); });
     page.on('response', response => { if (response.status() >= 400) report.network.push({ kind: 'http', status: response.status(), url: response.url() }); });
     observationStop = await bounded(() => driver.beforeNavigation?.({ page, base: world.base, paths, signal: controller.signal }), controller.signal, o.phaseTimeoutMs ?? 30000, 'before-navigation', timeout);
+    if (observationStop?.ready) await bounded(() => observationStop.ready, controller.signal, o.phaseTimeoutMs ?? 30000, 'observation-ready', timeout);
     await bounded(() => page.goto((o.world.kind === 'v2-bodies' || o.world.kind === 'native-page') ? world.viewer : o.world.kind === 'v2-account' ? new URL('/src/account/', world.base).href : world.base + '?dev=1', { waitUntil: 'domcontentloaded', timeout: o.navigationTimeoutMs ?? 30000 }), controller.signal, o.navigationTimeoutMs ?? 30000, 'navigation', timeout);
     // From here on, a goto or reload is the driver's: requests in flight when one starts may be aborted by it.
     for (const name of ['goto', 'reload']) if (typeof page[name] === 'function') { const call = page[name].bind(page); page[name] = (...args) => { navigation.epoch++; return call(...args); }; }
-    await bounded(() => driver.default({ page, base: world.base, paths, signal: controller.signal, fixture, arm: slot.arm, repeat: slot.repeat,
+    await bounded(() => driver.default({ page, base: world.base, paths, signal: controller.signal, fixture, measurement: o.measurement, arm: slot.arm, repeat: slot.repeat,
       expectHttp(path, status, reason) { requireThat(native && path.startsWith('/') && Number.isSafeInteger(status) && status >= 400 && reason?.trim(), 'expected-http-invalid'); report.expectedHttp.push({ path, status, reason }); },
-      check(key, ok, detail = '') { report.assertions.push({ key, ok: !!ok, detail }); if (!ok) throw Object.assign(new Error(detail || key), { assertion: key }); } }), controller.signal, o.journeyTimeoutMs ?? 90000, 'journey', timeout);
+      check(key, ok, detail = '') { report.assertions.push({ key, ok: !!ok, detail }); if (!ok) throw Object.assign(new Error(detail || key), { assertion: key }); } }), controller.signal, role.journeyMs, 'journey', timeout);
     requireThat(report.assertions.length && report.assertions.every(a => a.ok), 'no-passing-assertions');
     if (native) {
       requireThat(report.network.every(event => expectedNetwork(event, report, world.base)), 'unexpected-network-error');
@@ -341,6 +370,7 @@ async function run(o, d) {
       try { if (observationStop) await bounded(observationStop, null, o.cleanupTimeoutMs ?? 8000, 'observer-close'); } catch (e) { report.teardown.observerError = String(e); cleanupFailed = true; }
       browserCleanupStarted = true;
       try { if (browser) await bounded(() => browser.close(), null, o.cleanupTimeoutMs ?? 8000, 'browser-close'); report.teardown.browserClosed = !report.teardown.browserOpenPending; } catch (e) { report.teardown.browserError = String(e); cleanupFailed = true; }
+      if (role.role === 'measurement' && observationStop?.afterBrowserClose) try { evidence('cost-process-after-close.json', await bounded(() => observationStop.afterBrowserClose(), null, o.cleanupTimeoutMs ?? 8000, 'measurement-after-close')); } catch (e) { report.evidenceError = String(e); report.status = 'EVIDENCE_FAIL'; }
       try {
         for (const event of report.network) event.expected = expectedNetwork(event, report, report.ownedOrigin);
         for (const event of report.console) if (event.kind === 'error') event.expected = expectedResourceError(event, report, report.ownedOrigin);
@@ -367,14 +397,14 @@ async function run(o, d) {
       }
       try {
         if (existsSync(paths.log)) report.evidence.push({ file: paths.log, hash: digest(readFileSync(paths.log)) });
-        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json|native-page-provenance\.json|native-input-facts\.json|native-manual\.png|native-document\.html)$/.test(f))) { const at = join(paths.dir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
+        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json|native-page-provenance\.json|native-input-facts\.json|native-manual\.png|native-document\.html|cost-[a-z0-9-]+\.(?:json|png))$/.test(f))) { const at = join(paths.dir, file); if (!report.evidence.some(e => e.file === at)) report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
         const captureDir = join(paths.dir, 'capture');
         if (existsSync(captureDir)) for (const file of readdirSync(captureDir)) { const at = join(captureDir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
         for (const file of readdirSync(paths.video)) {
           const at = join(paths.video, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) });
           if (!d.test && native && file.endsWith('.webm')) {
             const seconds = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', at], { encoding: 'utf8', timeout: 5000 }));
-            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= 90, 'video-duration-out-of-bounds');
+            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= role.videoSeconds, 'video-duration-out-of-bounds');
             (report.videoDurations ??= []).push({ file: at, seconds });
           }
         }
@@ -398,6 +428,7 @@ async function run(o, d) {
       delete cycle.inFlight; if (cleanupFailed) cycle.stopped = 'cleanup failed'; save(); finalized = true;
     }
     } finally {
+    clearTimeout(browserDeadline);
     o.signal?.removeEventListener('abort', onAbort); process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); process.removeListener('SIGHUP', onSignal);
     if (report && !finalized) cleanupFailed = true;
     if (!cleanupFailed) rmSync(lock, { recursive: true });

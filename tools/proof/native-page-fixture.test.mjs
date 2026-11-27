@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, waitActorReady } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, waitActorReady, nativeCostSeed, nativeActorName } from './native-page-fixture.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
 import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
@@ -72,3 +72,7 @@ test('actor readiness abort/failure removes listeners and the owner can clean th
  const pending=waitActorReady(child,{signal:controller.signal});controller.abort(Error('actor-abort'));await assert.rejects(pending,/actor-abort/);assert.equal(child.stdio[3].listenerCount('data'),0);assert.equal(child.listenerCount('exit'),0);await stopOwnedChild(child,{processGroup:true});assert.throws(()=>process.kill(-child.pid,0),{code:'ESRCH'});
  const failed=spawn(process.execPath,['-e','process.exit(2)'],{detached:true,stdio:['ignore','ignore','ignore','pipe']});await assert.rejects(waitActorReady(failed),/daemon-exited/);assert.equal(failed.stdio[3].listenerCount('data'),0);await stopOwnedChild(failed,{processGroup:true});
 });
+
+test('optional diagnostic camera seed is bounded without changing absent default',()=>{assert.equal(nativeCostSeed(undefined),undefined);assert.equal(nativeCostSeed(42),42);for(const bad of[-1,.5,NaN,2**32,'42',null])assert.throws(()=>nativeCostSeed(bad),/cost-seed/);});
+
+test('sixteen explicitly labeled actors receive distinct world names while default remains stable',()=>{const names=Array.from({length:16},(_,i)=>nativeActorName('camera-motion-'+String(i).padStart(2,'0')));assert.equal(new Set(names).size,16);assert.ok(names.every(n=>n.length>0&&n.length<=32));assert.equal(nativeActorName('camera-subject'),'Camera Subject');assert.ok(!names.includes(nativeActorName('camera-subject')));});

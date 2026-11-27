@@ -1,3 +1,4 @@
+import { ObservationCostRing, COST_LAYOUT } from './cinematography/observation-cost.ts';
 import { DisplayedCameraObserver, drawnTakeActivity, drawnRepresentation, type DrawnSubject } from './cinematography/observation.ts';
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
 import { setPosterDay } from '../../../mars/viewer/app/engine-view/poster-sheet.ts';
@@ -502,6 +503,14 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // #5022: `shoot` and a creator's `look` (v2/client shoot.mjs) wait for `v2.capture` on a ?shot=1 page, then aim it at a name (v2-engine/capture.ts)
     const observationEnabled=new URLSearchParams(location.search).has('camera-observe');
     const cameraObserver=observationEnabled?new DisplayedCameraObserver():null;
+    let costMeter:ObservationCostRing|null=null;
+    const costQuery=new URLSearchParams(location.search);
+    if(costQuery.has('camera-observation-cost'))try{
+      const plan=costQuery.get('camera-cost-witness'),meter=new ObservationCostRing(plan?plan.split(',').map(Number):[]);costMeter=meter;
+      const api=Object.freeze({layout:COST_LAYOUT,read:(after:number,epoch?:number)=>meter.read(after,epoch),witnesses:()=>meter.readWitnesses(),armSampleWitness:()=>meter.armSampleWitness(),armSampleWitnesses:(offsets:readonly number[])=>meter.armSampleWitnesses(offsets),status:()=>meter.status()});
+      const target=window as unknown as {__cameraObservationCost?:unknown};target.__cameraObservationCost=api;
+      abort.signal.addEventListener('abort',()=>{if(target.__cameraObservationCost===api)delete target.__cameraObservationCost;costMeter=null;},{once:true});
+    }catch{console.warn('camera-cost-unavailable');}
     let observationPast:Past|null=null,observationEpoch=0,observationSeek=-1;
     const observationReadout:{frame:unknown;movement:unknown;costMs:number[];alignment:unknown;drawn:unknown}={frame:null,movement:null,costMs:[],alignment:null,drawn:null};
     if(cameraObserver)(window as unknown as {__cameraObservation?:unknown}).__cameraObservation=observationReadout;
@@ -524,7 +533,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const light = (adopted?.light as Daylight|undefined) ?? new Daylight(scene,{bakedShadow:quality.bakedShadows&&!softGl});if(quality.shadowMapSize!==light.sun.shadow.mapSize.x)light.sun.shadow.mapSize.set(quality.shadowMapSize,quality.shadowMapSize);
     // PERF-BAKED-SHADOWS: still things cast into the sun's cached map (redrawn when the sun turns, the view steps or a still thing changes); the per-frame map draws what moves
     const sunCache=light.baked?new SunShadowCache(renderer,scene,light.sun,light.baked,{enabled:()=>look.enabled&&look.follow&&entityLayer.active&&!expansion&&!eyes&&entityLayer.freezeSettled,statics:()=>{const out=entityLayer.shadowStatics([]);out.push(entityBatches.group,staticBatches.group);return out;},revision:()=>entityLayer.shadowRevision}):null;
-    const broadcast = new WorldBroadcast();if(earlyWanted)broadcast.openingShown();  // phone arrival: the card lifted over the opening view seconds ago; the live world opens on its Souls
+    const seedText=costMeter?costQuery.get('camera-cost-seed'):null;
+    const broadcast = new WorldBroadcast(seedText!==null&&/^\d+$/.test(seedText)&&Number.isSafeInteger(Number(seedText))&&Number(seedText)<=0xffffffff?Number(seedText):undefined);if(earlyWanted)broadcast.openingShown();  // phone arrival: the card lifted over the opening view seconds ago; the live world opens on its Souls
     broadcast.hints=()=>({soulEntity:id=>context.current.sim.conn.replica.souls.get(id)?.entityId??null,eden:!!expansion&&!past.current,daylight:light.daylight,carriers:rideCarriers,...(entityLayer.active&&!expansion?{views:godTourViews(entityLayer,entityLayer.groundPeek)}:{})});  // R4-LIVE: a god world's own landmarks  // VF1/VF5: who speaks; Eden town views; time of day
     const followMotion=new WorldFollowMotion();
     let followTick:number|null=null,followEpoch:string|null=null;
@@ -855,6 +865,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(owner&&active())await warmReadyProgramMetadata(renderer,active,owner.abort.signal);
     };
     const animate = () => {
+      const costCallbackMeter=costMeter,costCallbackStart=costMeter?performance.now():0;let costSequence:number|null=null,costCallbackFailed=true;try{
       officeGuardFrom.copy(camera.position);
       if (abort.signal.aborted) return;
       frame = eyes && !entityLayer.building ? eyes.schedule(animate, cb => pacer.next(cb)) : pacer.next(animate);  // eyes: render on demand (builds keep their pace)
@@ -1253,19 +1264,23 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(geometry.backdropDetailPending&&(!initialGate||initialGate.snapshot().stage==='ready'))geometry.backdropDetailWhenSettled(loader,now);  // W3: the campus's exact furniture after arrival
       if(look.enabled&&entityLayer.active&&!expansion){if(look.follow)light.follow(controls.target,camera.position);renderer.toneMappingExposure=lookExposure(light.daylight,look.nightExposure);}
       if(adaptive&&entityLayer.active&&!eyes)adaptive.frame(now);const draw=()=>{diagnostics.beginRender(renderer);sunCache?.prepare(renderer.shadowMap.autoUpdate||renderer.shadowMap.needsUpdate);if(!eyes)entityLayer.cull(camera,renderer.domElement.clientHeight,renderer.shadowMap.autoUpdate||renderer.shadowMap.needsUpdate,sunCache?.cullCamera??light.sun.shadow.camera);if(distanceDetail&&!eyes)distanceDetail.apply(scene,camera,renderer.domElement.clientHeight);if(meshLod&&!eyes)meshLod.apply(scene,camera,renderer.domElement.clientHeight);if(farStandIns&&!eyes)farStandIns.apply(scene,camera,renderer.domElement.clientHeight);try{if(!eyes?.render()){if(post&&entityLayer.active)post.render(renderer,scene,camera);else renderer.render(scene,camera);}
-      if(cameraObserver&&!holdDraw){
-        const started=performance.now();if(observationPast!==past.current||observationSeek!==observationSeekGeneration.current){observationPast=past.current;observationSeek=observationSeekGeneration.current;observationEpoch++;}
+      const costWitnessState=costMeter?()=>({tick:at.tick,history:!!past.current,seek:observationSeekGeneration.current,entities:at.entities,cameraWorld:camera.matrixWorld.toArray(),projection:camera.projectionMatrix.toArray(),holders:Object.keys(at.entities).filter(id=>records[id]?.kind==='human').map(id=>{const root=drawnRepresentation(people?.bodyObject(id),floaters.object(id),standIns.getObjectByName(id));return{id,represented:!!root,matrix:root?.matrixWorld.toArray()??null};})}):undefined;
+      let costToken:ReturnType<ObservationCostRing['begin']>|undefined;try{costToken=costMeter&&!costMeter.failure?costMeter.begin({tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),controllerClock:now/1000,controllerStep:step,callbackStart:costCallbackStart,shot:JSON.stringify([broadcast.comparisonKey,renderer.domElement.dataset.cameraShot??'']),cameraWorld:camera.matrixWorld.elements,projection:camera.projectionMatrix.elements,viewport:[host.clientWidth,host.clientHeight,renderer.domElement.width,renderer.domElement.height,renderer.getPixelRatio()],publicIdentity:[String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),JSON.stringify([s.conn.welcome?.epoch??null,observationSeekGeneration.current,past.current?'history':'live']),String(sceneKey??'draw')],history:!!past.current,seek:observationSeekGeneration.current,takeStart:shown.current.take?.startTick??0,takeTicks:shown.current.take?.ticks??0,dt:shown.current.take?.dt??dt,mode:eyes?-1:context.current.cameraMode==='broadcast'?0:context.current.cameraMode==='follow'?1:2},costWitnessState):undefined;}catch{costMeter?.refuse('camera-cost-draw-invalid');}
+      if(costToken)costSequence=costToken.seq;
+      let costStart=0,costEnd=0,costOutcome=0,costInvoked=false;
+      try{if(cameraObserver&&!holdDraw){
+        const started=performance.now();costStart=started;costOutcome=3;costInvoked=true;if(observationPast!==past.current||observationSeek!==observationSeekGeneration.current){observationPast=past.current;observationSeek=observationSeekGeneration.current;observationEpoch++;}
         const subjects:DrawnSubject[]=Object.entries(at.entities).filter(([id])=>records[id]?.kind==='human').map(([id,e])=>{
           const human=people?.bodyObject(id)??null,root=drawnRepresentation(human,floaters.object(id),standIns.getObjectByName(id));
           const on=typeof e.state.on==='string'?e.state.on:null,carrier=on&&records[on]?.carrier?{subject:on,relation:'aboard' as const,confidence:1}:null;
           return {id,root,forwardLocal:human&&root===human?[1,0,0] as const:null,bounds:null,activity:drawnTakeActivity(e.activity,e.state,shown.current.take),carrier};});
         const version={world:String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),epoch:JSON.stringify([s.conn.welcome?.epoch??null,observationEpoch,past.current?'history':'live']),revision:String(sceneKey??'draw')};
         observationReadout.drawn={tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt)};
-        observationReadout.frame=cameraObserver.capture({version,tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),subjects});
+        const captured=cameraObserver.capture({version,tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),subjects});observationReadout.frame=captured;costOutcome=captured.status==='observed'?1:2;
         observationReadout.movement=[...cameraObserver.movement];
         observationReadout.alignment=subjects.map(x=>({id:x.id,matrixPosition:x.root?[x.root.matrixWorld.elements[12],x.root.matrixWorld.elements[13],x.root.matrixWorld.elements[14]]:null}));
         observationReadout.costMs.push(performance.now()-started);if(observationReadout.costMs.length>600)observationReadout.costMs.shift();
-      }
+      }}catch(error){costOutcome=3;throw error;}finally{if(costToken&&costMeter){costEnd=costInvoked?performance.now():0;try{costMeter.end(costToken,{invoked:costInvoked,start:costStart,end:costEnd,outcome:costOutcome},costWitnessState);}catch{costMeter.refuse('camera-cost-end-invalid');}}}
 }finally{farStandIns?.restore();meshLod?.restore();distanceDetail?.restore();entityLayer.uncull();diagnostics.endRender();}};
       if(quality.shadowEvery>1&&!eyes){renderer.shadowMap.autoUpdate=false;if(shadowFrame++%quality.shadowEvery===0)renderer.shadowMap.needsUpdate=true;}  // P1 phones: the shadow map every n-th frame
       if(!waterDetailOff&&!holdDraw)try{waterDetail.applyUnderwater(scene,camera,renderer.domElement);}catch{}  // a camera under the water: gradual fog and tint (restored after the draw)
@@ -1345,6 +1360,8 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       }
 
       if(diagnostics.enabled)diagnostics.sample(renderer,now,performance.now()-now,expansion?.wallFrames.inspection()??[],entityLayer.active&&entityBatchEnabled?entityBatches.inspection():batchEnabled?staticBatches.inspection():null);
+      costCallbackFailed=false;
+      }finally{if(costSequence!==null)try{costCallbackMeter?.callbackEnd(costSequence,performance.now(),costCallbackFailed);}catch{costCallbackMeter?.refuse('camera-cost-callback-invalid');}}
     };
 
     // click (not drag) to select a Soul, a thing, or a kin
