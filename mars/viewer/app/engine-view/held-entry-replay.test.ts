@@ -45,6 +45,39 @@ test('take replay delivers sampled held records to the human view through forwar
   } finally { people.dispose(); }
 });
 
+test('actual replay preserves the previous native hand-record projection for absent, falsy and present owners at the sampled clock', () => {
+  const source = chunkOf([{ entity: 'person', soul: 'soul', name: 'Person', heading: 0, samples: [{ at: 0, p: [0, 0, 0] }] }],
+    120, { rulesVersion: 'held-test', datetime: null }, 40).take as unknown as Take;
+  const present = { handActuator: { target: 'lamp', at: [0, 1, 0], startTick: 120 },
+    handTransferV1: { mode: 'take', hand: 'right', startTick: 120, reach: .65 },
+    wateringV1: { item: 'can', target: 'bed', stage: 'pour', face: 0, hold: [0, 1, 0], seconds: 1, levelAfter: .5, startTick: 120 },
+    letGoV1: { startTick: 120, seconds: 1.1 },
+    cupV1: { item: 'cup', stage: 'drink', face: 0, hand: 'right', startTick: 120, cupYaw: 0, spin: 0 } };
+  const states = [{}, { handActuator: null, handTransferV1: false, wateringV1: 0, letGoV1: '', cupV1: undefined }, present];
+  for (const state of states) {
+    const take = structuredClone(source);
+    for (const [key, value] of Object.entries(state)) take.changes.push([0, 'person', key, value]);
+    const people = new TakePeople(take), views = (people as unknown as { humans: HumanViews }).humans;
+    let actual: SampledHuman | undefined;
+    views.setFrame = frame => { actual = frame[0]; };
+    try {
+      // Fractional sample time catches accidentally using the render clock, integer ticks or chunk-relative time.
+      people.show(.675, 9000);
+      const time = (120 + 13.5) * .05; // preserve the old expression's exact floating-point result
+      const old: Partial<SampledHuman> = state === present ? {
+        handActuator: present.handActuator as SampledHuman['handActuator'], handActuatorTime: time,
+        transfer: present.handTransferV1 as SampledHuman['transfer'], transferTime: time,
+        watering: present.wateringV1 as SampledHuman['watering'], wateringTime: time,
+        letGo: present.letGoV1, letGoTime: time, cup: present.cupV1 as SampledHuman['cup'], cupTime: time,
+      } : {};
+      for (const field of ['handActuator', 'transfer', 'watering', 'letGo', 'cup'] as const) {
+        assert.deepEqual(actual![field], old[field], field + ' keeps the previous exact truthiness and key');
+        assert.equal(actual![`${field}Time`], old[`${field}Time`], field + ' keeps its recorded take clock');
+      }
+    } finally { people.dispose(); }
+  }
+});
+
 const rigDir = process.env.HUMAN_RIG_DIR ?? fileURLToPath(new URL('../../public/modular/environment/', import.meta.url));
 async function productionTemplate() {
   const loader = new GLTFLoader();
@@ -59,7 +92,12 @@ test('held metadata adds no pose, attachment or movement authority over standing
   old.setTemplates([source]); current.setTemplates([source]); setHumanGround(() => 0);
   const controls: Partial<SampledHuman>[] = [{ activity: 'nod' }, { activity: 'nod', baseActivity: 'sit', seatHeight: .45 },
     { activity: 'nod', hands: { left: [1.15, 1.1, -.8] } },
-    { activity: 'handshake', partner: 'partner' }, { activity: 'idle', handHold: { with: 'partner', hand: 'left', since: 0 } as SampledHuman['handHold'], handGameTick: 1400, handGameDt: .05 }];
+    { activity: 'handshake', partner: 'partner' }, { activity: 'idle', handHold: { with: 'partner', hand: 'left', since: 0 } as SampledHuman['handHold'], handGameTick: 1400, handGameDt: .05 },
+    { activity: 'idle', handActuator: { target: 'switch', at: [1.3, 1.1, -1], startTick: 1395 }, handActuatorTime: 70 },
+    { activity: 'idle', transfer: { mode: 'take', hand: 'right', startTick: 1395, reach: .65 }, transferTime: 70 },
+    { activity: 'idle', watering: { item: 'can', target: 'bed', stage: 'pour', face: .25, hold: [1.3, 1.1, -1], seconds: 1, levelAfter: .5, startTick: 1395 }, wateringTime: 70 },
+    { activity: 'idle', letGo: { startTick: 1395, seconds: 1.1 }, letGoTime: 70 },
+    { activity: 'idle', cup: { item: 'cup', stage: 'drink', face: .25, hand: 'right', startTick: 1395, sips: 1, from: 1, sip: .5, cupYaw: 0, spin: 0 }, cupTime: 70 }];
   try {
     for (const control of controls) for (const observation of [held(0, 2), held(500_000, 1), held(1_000_000, 0), held(1_500_000), held(0, 2)]) {
       const person: SampledHuman = { id: 'metadata-person', p: [1, 0, -1], yaw: .25, walk: 0, walkDist: 0, activityAge: .7, ...control };
