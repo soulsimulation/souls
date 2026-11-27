@@ -86,5 +86,14 @@ export async function seekCostTarget(slider,target,signal){const min=Number(awai
 
 /** Same page readiness as before, plus the real arrival layer must be gone before input. */
 export function costHistoryReady(doc=globalThis.document){const v=doc.querySelector('.viewer-history');return v?.getAttribute('data-viewer-ready')==='true'&&v?.getAttribute('data-viewer-presentation')==='history'&&!doc.querySelector('.viewer-arrival');}
-/** Responsive real UI; preserve an already-open Menu instead of toggling it shut. */
-export async function openCostTime(page,snapshot){const direct=page.getByRole('button',{name:/time controls$/});if(await direct.isVisible()){await snapshot('time');await direct.click();return;}const menu=page.getByRole('menu',{name:'Menu',exact:true});if(!await menu.isVisible()){await snapshot('time-menu');await page.getByRole('button',{name:'Menu',exact:true}).click();}await snapshot('time-route');await menu.getByRole('menuitem',{name:/^Time(?:\s|$)/}).click();}
+/** Semantic openness, independent of the closing panel's delayed CSS visibility. */
+export function costMenuOpen(doc=globalThis.document){const toggle=doc.querySelector('.hud-menu[aria-label="Menu"]'),panel=doc.getElementById('hud-menu-panel');return toggle?.getAttribute('aria-expanded')==='true'&&panel?.getAttribute('data-open')==='true'&&!panel.hasAttribute('inert');}
+/** Wait for camera dismissal; use semantic Menu state before real actionable input. */
+export async function openCostTime(page,snapshot){
+ await page.getByRole('dialog',{name:'Camera modes and help',exact:true}).waitFor({state:'hidden',timeout:30000});
+ const direct=page.getByRole('button',{name:/time controls$/});if(await direct.isVisible()){await snapshot('time');await direct.click();return;}
+ const toggle=page.getByRole('button',{name:'Menu',exact:true});
+ if(await toggle.getAttribute('aria-expanded')!=='true'){await snapshot('time-menu');await toggle.click();}
+ await page.waitForFunction(costMenuOpen,undefined,{timeout:30000});
+ await snapshot('time-route');await page.getByRole('menu',{name:'Menu',exact:true}).getByRole('menuitem',{name:/^Time(?:\s|$)/}).click();
+}
