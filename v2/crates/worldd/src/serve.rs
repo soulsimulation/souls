@@ -2875,18 +2875,26 @@ impl LogReader {
                     _ => break,
                 }
             }
-            if whole > 0 {
-                tail.truncate(whole);
-            } else if let Some(head) = tail.get(..HEAD_LEN) {
+            if whole == 0
+                && let Some(head) = tail.get(..HEAD_LEN)
+            {
                 let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
                 if len <= MAX_RECORD && HEAD_LEN + len > chunk && tail.len() == chunk {
                     chunk = HEAD_LEN + len;
                     continue;
                 }
             }
-            let found = sim::log::recover_from(&header, &tail, at)?.ok_or_else(|| {
-                fault(format!("the log does not continue at record {}", at.record))
-            })?;
+            let recover = |bytes: &[u8]| {
+                sim::log::recover_from(&header, bytes, at)?.ok_or_else(|| {
+                    fault(format!("the log does not continue at record {}", at.record))
+                })
+            };
+            let mut found = recover(&tail[..if whole > 0 { whole } else { tail.len() }])?;
+            // A first record that does not check is judged on every byte read, as before: damage is refused by name
+            // (`log-corrupt`) when a valid record follows it, never read as the log's end. A clean log never comes here.
+            if found.records.is_empty() && whole > 0 {
+                found = recover(&tail)?;
+            }
             if found.records.is_empty() {
                 if tail.len() < chunk || chunk > MAX_RECORD {
                     self.at = Some(at);
@@ -3764,12 +3772,19 @@ fn serve(args: &[String]) -> R<()> {
     if let Some(cut) = sim::log::compact::read_cut(&log_path).map_err(refusal)?
         && cut.at.record < found.first
     {
-        LogReader {
+        let (_, reached) = LogReader {
             path: log_path.clone(),
             at: Some(cut.at),
         }
         .batch(cut.at.record, cut.at.record + 1)
         .map_err(refusal)?;
+        // Records follow the cut, so none read there means the cut's record does not check.
+        if reached <= cut.at.record {
+            return Err(format!(
+                "log-cut-bad: the log's record {} at its cut does not check",
+                cut.at.record
+            ));
+        }
     }
     stamp("log read from the checkpoint");
     // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
@@ -5610,6 +5625,52 @@ mod tests {
         let short = OnDisk { end: 41, ..disk };
         let e = short.each_from(30, &mut |_, _| Ok(true)).unwrap_err();
         assert_eq!(e.name, "log-read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2803 review: a record whose length or bytes were damaged is refused by name (`log-corrupt`), never read as the
+    /// log's end, whether the damage is inside a batch or the first record of one.
+    #[test]
+    fn a_damaged_record_is_refused_not_read_as_the_logs_end() {
+        use sim::log::{At, HEAD_LEN, HEADER_LEN};
+        use worldd::view_out::History;
+        let dir = std::env::temp_dir().join(format!("damaged-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        let records: Vec<Vec<u8>> = (0..30u8).map(|i| vec![i; 1000 + i as usize]).collect();
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(30).unwrap();
+        drop(log.close());
+        // Record 12's place, and its length one byte longer than it is.
+        let offset = HEADER_LEN + records[..12].iter().map(|r| HEAD_LEN + r.len()).sum::<usize>();
+        let mut bytes = std::fs::read(&path).unwrap();
+        let prev = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
+        let len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        bytes[offset..offset + 4].copy_from_slice(&(len + 1).to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+        let disk = OnDisk {
+            path: path.clone(),
+            first: 0,
+            end: 30,
+            at: None,
+        };
+        let e = disk.each_from(0, &mut |_, _| Ok(true)).unwrap_err();
+        assert_eq!(e.name, "log-corrupt", "{e}");
+        // The damaged record first in a batch, as a reader that stopped before it reads on.
+        let mut reader = LogReader {
+            path: path.clone(),
+            at: Some(At {
+                record: 12,
+                offset: offset as u64,
+                crc: prev,
+            }),
+        };
+        let e = reader.batch(12, 30).unwrap_err();
+        assert_eq!(e.name, "log-corrupt", "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
