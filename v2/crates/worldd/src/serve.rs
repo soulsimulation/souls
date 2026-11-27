@@ -2683,10 +2683,10 @@ struct Handover {
 
 #[derive(Default)]
 struct Handing {
-    /// Parts in the channel, and their bytes: counted before each send, under the lock, so never off by a race.
+    /// Records in the channel, and their bytes: counted before each send, under the lock, so never off by a race.
     queued: u64,
     queued_bytes: u64,
-    /// While parts are not sent: the first record left in the log, and its number in the archive.
+    /// While records are not sent: the first record left in the log, and the reader's number for it.
     left: Option<(u64, u64)>,
     /// The record after the last one handed or left, and the archive's number after it.
     end: u64,
@@ -2762,8 +2762,9 @@ impl Handover {
             .map(|(from, number)| (from, number, h.end))
     }
 
-    /// The archiver read the log up to `reached` (its next number `number`): the rest is left, or, once it reached
-    /// the last record taken, parts are sent again from the next.
+    /// The reader read the log up to `reached` (its next number `number`): the rest is left, or, once it reached
+    /// the last record taken, records are sent again from the next. A number that is not the one handed to is refused
+    /// (`archive-handover`); the public stream's number is its record, so it never is.
     fn read_to(&self, reached: u64, number: u64) -> Result<(), Refusal> {
         let mut h = self.lock();
         if reached >= h.end {
@@ -4626,14 +4627,18 @@ fn serve(args: &[String]) -> R<()> {
                             }
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                            while stream_from_log(&stream_hand, &mut stream_log, &mut |record, bytes| {
-                                if record >= writer.source_cursor() {
-                                    writer.push(record, bytes)?;
-                                }
+                            // What was left in the log first; what it has is flushed whether or not that read.
+                            let left = (|| -> Result<(), Refusal> {
+                                while stream_from_log(&stream_hand, &mut stream_log, &mut |record, bytes| {
+                                    if record >= writer.source_cursor() {
+                                        writer.push(record, bytes)?;
+                                    }
+                                    Ok(())
+                                })? {}
                                 Ok(())
-                            })? {}
+                            })();
                             writer.flush()?;
-                            return Ok(());
+                            return left;
                         }
                         // The channel is empty: what was sent before records were left in the log is taken, so
                         // those come next, a batch at a time (#2803).
@@ -5834,19 +5839,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("log");
-        let records = stream_records(900);
+        let records = stream_records(907);
         let largest = records.iter().map(Vec::len).max().unwrap() as u64;
         let window = 16 << 10;
         let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        // Seven records are there at the start: the reader starts at the place they end, as `serve`'s does
+        // (`OnDisk::tail`), and never reads them.
+        for r in &records[..7] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(7).unwrap();
         let handover = Handover::gauged(window, &measures::STREAM_QUEUE);
         let (tx, rx) = channel();
         let mut reader = LogReader {
             path: path.clone(),
-            at: None,
+            at: Some(log.durable_at()),
         };
-        let mut next = 0u64;
+        assert_eq!(reader.at.unwrap().record, 7);
+        let mut next = 7u64;
         // The world writes on while the stream takes nothing, three times; between them the stream catches up.
-        for stretch in [0..400u64, 400..410, 410..900] {
+        for stretch in [7..407u64, 407..417, 417..907] {
             let mut most = 0;
             for n in stretch.clone() {
                 log.append(records[n as usize].clone()).unwrap();

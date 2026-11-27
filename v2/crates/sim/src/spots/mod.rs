@@ -1001,9 +1001,9 @@ impl Spots {
     }
 
     /// Stops keeping the record, and drops what was kept (#2803). The record is one entry for each grant, release and
-    /// refusal, which nothing drains; tests and tools read it. A world that runs for days (`worldd`) says what it
-    /// granted in its own log, so it keeps none: at 1,000 agents the record grew by about a megabyte a minute. The
-    /// tables, what each asker holds and every answer are the same with or without it.
+    /// refusal, which nothing drains; only tests read it. A world that runs for days (`worldd`) keeps none: at 1,000
+    /// agents the record grew by about a megabyte a minute. The tables, what each asker holds and every answer are the
+    /// same with or without it.
     pub fn forget_record(&mut self) {
         self.unrecorded = true;
         self.record = Vec::new();

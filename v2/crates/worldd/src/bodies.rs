@@ -452,7 +452,7 @@ impl Bodies {
     /// No bodies yet, over `town`, with `copy` (built by [`Town::copy`]) the planner's town (K18b): a world builds the
     /// copy with its town, before its clock and watchdog start, as a large town takes a while to build.
     pub fn with_planner(mut town: Town, mut copy: Town, tick: Micros) -> R<Bodies> {
-        // The spot tables' record is a test's: a served world's grants are in its own log (#2803).
+        // The spot tables' record is a test's: a served world keeps none (#2803).
         town.spots.forget_record();
         copy.spots.forget_record();
         let planner = Thread::spawn(Planner::new(copy)).map_err(|e| Refusal {

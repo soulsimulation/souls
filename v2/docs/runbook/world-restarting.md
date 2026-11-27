@@ -71,12 +71,13 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
 - **A public stream behind the world.** The stream writes each half second of the world as a part, with several
   syncs to the disk, on its own thread. When that is slower than the world makes records (a disk busy under other
   writers, a recovery that takes minutes, a degraded stream), viewers see the world late, and the records wait for
-  the stream: up to 64 MiB of them in memory, the rest in the log on the disk, where every record already is and
+  the stream: up to 64 MiB of them and one record more in memory, the rest in the log on the disk, where every record already is and
   which the compactor keeps until the stream has published it. The stream reads them from there, in order, once it
   has taken those in memory. Being behind by any time costs at most that memory, and nothing is dropped.
   `health.json` has `"stream_queue":{"queued":<records>,"queued_bytes":<bytes>,"in_log":<records>}`: `in_log` that
   stays above 0 is a stream behind the world, and how far is the pointer's newest part against the world's time.
-  Up to 0.147 every waiting record was held in memory: at 1,000 agents on a busy disk that was about 2 GB an hour.
+  Before this (November 2026) every waiting record was held in memory: at 1,000 agents on a busy disk that was
+  about 2 GB an hour.
 - **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
   its words, its recovery objects and the chain's head are written there first: the parts under `views/`, the recovery
   chain in the spool `<world>/stream-backup/` (never served, because it holds the world's records). The store gets
