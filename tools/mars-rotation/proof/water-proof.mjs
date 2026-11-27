@@ -26,7 +26,7 @@ const shoot = async (name, eye, at) => { for (const dpr of [1, 2]) {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${shots}/w5-${name}-dpr${dpr}.png`, timeout: 60000 }); await c.close(); } note('shot', name); };
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const GARDEN = { eye: [95.6, 3.6, -44.2], at: [99.3, 0.5, -40.2] }, FIELD = { eye: [0, 6, -57], at: [-0.5, 0.4, -49.2] };
   note('review', tool('mars-water-20261016', 'water.receipt.json', '--token-file', '/dev/null').mode);
   await shoot('garden-before', GARDEN.eye, GARDEN.at);

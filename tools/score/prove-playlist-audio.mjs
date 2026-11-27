@@ -14,7 +14,7 @@ const args = process.argv.slice(2), value = (k, d) => { const i = args.indexOf(k
 const url = args.find((a) => /^https?:/.test(a)) ?? 'http://localhost:5212/w/eden/', audio = value('--audio', 'http://127.0.0.1:5213'), out = resolve(value('--out', '.local/proof-music.json'));
 const profileS = +value('--profile', 12), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pw = findPlaywright(); if (!pw) throw Error('no Playwright');
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required', '--ignore-gpu-blocklist'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--autoplay-policy=no-user-gesture-required', '--ignore-gpu-blocklist'] });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
 const consoleErrors = []; page.on('pageerror', (e) => consoleErrors.push(String(e).slice(0, 200))); page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)); });
 const target = new URL(url); if (audio) target.searchParams.set('musicAudio', audio);

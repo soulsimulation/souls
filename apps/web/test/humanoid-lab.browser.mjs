@@ -15,7 +15,7 @@ const {chromium} = createRequire(ROOT + 'mars/viewer/package.json')('@playwright
 const {chromeLease} = await import(ROOT + 'tools/god-skill/lib/chrome-lease.mjs');
 const release = await chromeLease('L10-humanoid-lab');
 // real GPU (Metal through ANGLE), never swiftshader (MERGES.md 08:55)
-const browser = await chromium.launch({channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist']});
+const browser = await chromium.launch({channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist']});
 const results = {}, ok = (name, v, detail) => { assert.ok(v, `${name}: ${JSON.stringify(detail)}`); results[name] = detail ?? true; console.log('ok', name, detail === undefined ? '' : JSON.stringify(detail)); };
 async function open(query, w = 1600, h = 1000) {
   const page = await browser.newPage({viewport: {width: w, height: h + 200}}), errors = [];

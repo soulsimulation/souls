@@ -212,9 +212,9 @@ test('B1: while it waits for the release, eyes re-posts ready every heartbeat', 
   assert.equal(p.at(-1), 'success release/eyes run=77.1 pass');
 });
 
-test('GPU runner: launch options are real Chrome by default; SHIP_GPU names a hardware flag set and SwiftShader is off', async () => {
+test('GPU runner: launch options are Playwright Chromium by default; SHIP_GPU names a hardware flag set and SwiftShader is off', async () => {
   const { launchOptions, softwareGl, GPU_CANDIDATES } = await import('./deploy/ship/browser.mjs');
-  assert.deepEqual(launchOptions(['--ignore-gpu-blocklist'], {}), { channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  assert.deepEqual(launchOptions(['--ignore-gpu-blocklist'], {}), { channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const o = launchOptions(['--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'], { SHIP_GPU: 'angle-vulkan' });
   assert.equal(o.channel, undefined, "Playwright's own Chromium");
   assert.ok(o.args.includes('--disable-software-rasterizer') && o.args.includes('--use-angle=vulkan'));

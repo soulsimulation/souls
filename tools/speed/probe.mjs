@@ -81,7 +81,7 @@ if (!['localhost', '127.0.0.1'].includes(target.hostname) || !((Number(target.po
 console.log('Waiting for speed Chrome lease');
 const release = await chromeLease('speed', { waitMs: Number(opt('lease-wait', '2700000')), staleMs: Infinity });
 console.log('Speed Chrome lease acquired');
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--enable-precise-memory-info'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--enable-precise-memory-info'] });
 const results = [];
 try {
   for (const [W, H] of sizes) for (const dpr of dprs) {

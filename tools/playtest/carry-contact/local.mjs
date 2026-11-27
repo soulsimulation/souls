@@ -25,7 +25,7 @@ try {
  const q=await cli('ada','query',JSON.stringify([{find:'pallet-crates-1'}]));out.loadCandidates=q;
  await Promise.all([cli('ada','carry','grip','pallet-crates-1','front'),cli('bo','carry','grip','pallet-crates-1','back')]);
  const offered=await cli('ada','carry','offer',out.bo.native);crew=offered.crew;if(!crew)throw Error('No offered crew');await cli('bo','carry','accept',crew);
- browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:['--use-angle=metal','--ignore-gpu-blocklist','--enable-gpu-rasterization']});
+ browser=await chromium.launch({channel:'chromium',headless:true,args:['--use-angle=metal','--ignore-gpu-blocklist','--enable-gpu-rasterization']});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();
  const loaded={};page.on('response',async response=>{try{const u=new URL(response.url());if(u.pathname.endsWith('.js'))loaded[u.pathname]=sha(await response.body());}catch{}});page.on('pageerror',e=>out.pageErrors.push(String(e)));
  await page.goto(`${world.page}?post=0&hour=12:00`,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.__soulsEntity?.gameFrame().souls.length>=2&&!document.querySelector('.viewer-arrival')&&document.querySelector('.viewer-history[data-viewer-ready="true"]'),null,{timeout:120000});

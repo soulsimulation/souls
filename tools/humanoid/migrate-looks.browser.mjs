@@ -51,7 +51,7 @@ async function shoot(stage,names){
   const {chromium}=createRequire(resolve(root,'mars/viewer/package.json'))('@playwright/test');
   release=await chromeLease('r3d-legacy');
   try{
-    browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+    browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
     for(const dpr of [1,2])for(const name of names){
       const page=await browser.newPage({viewport:{width:1000,height:760},deviceScaleFactor:dpr});
       page.on('pageerror',e=>report.pageErrors.push(e.message));

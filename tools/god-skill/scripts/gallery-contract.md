@@ -42,11 +42,15 @@ Contract 2
 `gallery-language-examples.json` is a ready-to-define JSON array: slit dome, one-shape rose tracery, one-shape curved
 roof, loft canopy and four glow levels. No program or external generator is required for the roof.
 
-Pixel gate (real headless Chrome)
----------------------------------
+Pixel gate (Playwright's headless Chromium)
+-------------------------------------------
 
 From the repository root (unset `NODE_USE_SYSTEM_CA` if your environment sets it). Runs take a machine-wide Chrome
-lease (`tools/god-skill/lib/chrome-lease.mjs`); output defaults to the ignored `.lane/gallery/`.
+lease (`tools/god-skill/lib/chrome-lease.mjs`); output defaults to the ignored `.lane/gallery/`. Pixels render in
+Playwright's own Chromium on the hardware GPU, never the installed Google Chrome, so a stuck run never hides the
+user's Chrome windows ([browser channel](../../../docs/testing.md#browser-channel)). Pixels can drift between browser
+builds, so make the before and after runs of a `--compare` with the same Playwright version. A run still going after
+`--deadline` minutes (default 45) exits 124.
 
 ```
 node tools/god-skill/scripts/gallery.mjs --local --out .lane/gallery-before
