@@ -153,14 +153,15 @@ test('the procedural fallback preserves an intentional crossed leg and grounds i
 const { chunkOf, TICK_US } = await import('../../../../apps/web/src/v2-engine/takes.ts');
 const { TakePeople } = await import(process.env.SEATED_REPLAY_SOURCE ?? './take-replay.ts') as typeof import('./take-replay.ts');
 import type { Take } from '../../engine/take/types.ts';
-const takeOf = (seat: number, root: number, interruptions = false, fromTick = 100e6 / TICK_US, ticks = 120) => {
+const takeBody = (seat: number, root: number, interruptions = false) => {
   const at = (s: number) => (100 + s) * 1e6;
   const sample = (s: number, sitting: boolean) => ({ at: at(s), p: [1000, root * 1000, -1000] as [number, number, number], ...(sitting ? { seat: { height: seat * 1000, lie: false, heading: .25 } } : {}) });
-  return chunkOf([{ entity: base.id, soul: 'source-test', name: 'Seat source', heading: .25,
+  return { entity: base.id, soul: 'source-test', name: 'Seat source', heading: .25,
     samples: interruptions ? [sample(0,false),sample(1,true),sample(1.3,false),sample(1.5,true),sample(4,false),sample(6,false)] : [sample(0,false),sample(1,true),sample(4,false),sample(6,false)],
     gestures: [{ start: at(2.3), end: at(2.5), activity: 'nod' }, { start: at(2.55), end: at(2.8), activity: 'tell-story' }, { start: at(4.15), end: at(4.6), activity: 'clap' }]
-  }], fromTick, { rulesVersion: 'seat-source-test/1', datetime: '2026-01-01T00:00:00.000Z' }, ticks).take as unknown as Take;
+  };
 };
+const takeOf = (seat: number, root: number, interruptions = false, fromTick = 100e6 / TICK_US, ticks = 120) => chunkOf([takeBody(seat,root,interruptions)], fromTick, { rulesVersion: 'seat-source-test/1', datetime: '2026-01-01T00:00:00.000Z' }, ticks).take as unknown as Take;
 
 test('actual v2 take history preserves seated completion and gesture handoffs on drawn production skin', async t => {
   setHumanGround(() => 0);
@@ -249,6 +250,33 @@ test('actual held props and direct native hands retain seated continuity and aut
     for(const p of expected)if(/^(Foot|Toe|LowerLeg)/.test(p.bone))assert(p.p.y>=-.001,owner+' shoe/cuff support '+at);
    }
    draw(3);assert(Math.abs(views.bones()[base.id].hipY-.555)<.001,'native hands retain the recorded465mm seat instead of a default');
+  }finally{views.clear();}
+ }}finally{setHumanGround(null);}
+});
+
+
+test('actual seated active and cancelled form presses keep their selected hand owner through phase boundaries and seeks',async t=>{
+ const {armLen}=await import('./rig.ts');
+ const source=await template('woman');setHumanGround(()=>0);
+ const at=(seconds:number)=>(100+seconds)*1e6;
+ try{for(const cancelled of [false,true]){
+  const body=takeBody(.465,0,cancelled);
+  const presses=[.75,3.75].map(start=>({start:at(start),end:at(start+(cancelled?.37:.8)),activity:'operate',press:{hand:'left' as const,start:at(start),contact:at(start+.25),end:at(start+.8)}}));
+  body.gestures=[...body.gestures,...presses].sort((a,b)=>a.start-b.start);
+  const take=chunkOf([body],2000,{rulesVersion:'seat-source-test/1',datetime:'2026-01-01T00:00:00.000Z'},120).take as unknown as Take;
+  const people=new TakePeople(take);people.setTemplates([source]);const views=(people as unknown as {humans:Views}).humans;
+  const draw=(time:number)=>{people.show(time,100+time);assert.deepEqual(views.bodyObject(base.id)!.position.toArray(),base.p);return skin(views,base.id);};
+  try{
+   for(const time of [1,4]){
+    draw(time);const rig=(views as unknown as {views:Map<string,{arms:import('./rig.ts').Arm[]}>}).views.get(base.id)!;const arm=rig.arms.find(a=>a.upper.name.endsWith('L'))!;assert(arm);
+    const shoulder=arm.upper.getWorldPosition(new THREE.Vector3()),fwd=new THREE.Vector3(Math.cos(.25),0,Math.sin(.25)),right=new THREE.Vector3(-Math.sin(.25),0,Math.cos(.25));
+    const target=shoulder.clone().add(fwd.multiplyScalar(.6).addScaledVector(right,.18).add(new THREE.Vector3(0,-.3,0)).clampLength(0,armLen(arm)*.98));
+    const palm=new THREE.Vector3();assert(views.palmOf(base.id,'left',palm));const error=palm.distanceTo(target);t.diagnostic(JSON.stringify({cancelled,time,contactError:error}));assert(error<.001,'selected press contact cannot be diluted by the seat blend: '+error);
+   }
+   for(const time of [1,1.12,1.3,1.5,1.55,1.9,4,4.12,4.55,4.8]){const change=separation(draw(time-1e-5),draw(time+1e-5));assert(change<.001,'press seated full-skin boundary '+time+' delta '+change);}
+   for(const time of [1.01,1.12,1.25,1.42,1.52,1.92,4.01,4.12,4.25,4.52,4.95]){const expected=draw(time),fresh=new TakePeople(take);fresh.setTemplates([source]);try{fresh.show(time,100+time);assert(separation(expected,skin((fresh as unknown as {humans:Views}).humans,base.id))<1e-5,'press fresh seek '+time);}finally{(fresh as unknown as {humans:Views}).humans.clear();}
+    for(const p of expected)if(/^(Foot|Toe|LowerLeg)/.test(p.bone))assert(p.p.y>=-.001,'press shoe/cuff support '+time);
+   }
   }finally{views.clear();}
  }}finally{setHumanGround(null);}
 });

@@ -109,9 +109,12 @@ function seatFootOffsets(v: View) {
   v.rig.holder.updateMatrixWorld(true);
   return v.legs.map((leg, i) => leg.foot.getWorldPosition(V()).sub(leg.lower.localToWorld(v.ankle[i].clone())));
 }
+function armBases(v: View) {
+  return v.arms.flatMap(a => [...(a.shoulder ? [a.shoulder] : []), a.upper, a.lower, a.hand, ...a.fingers, ...a.thumb]).map(o => ({ name: o.name, p: o.position.clone(), q: o.quaternion.clone() }));
+}
 function blendSeatDrawn(v: View, joints: THREE.Object3D[], target: { bones: DrawnOrigin['bones']; p: THREE.Vector3; q: THREE.Quaternion }, origin: DrawnOrigin, k: number, root: THREE.Vector3, nativeQ: THREE.Quaternion) {
   const offsets = seatFootOffsets(v);
-  const arms = v.cur.hands.left || v.cur.hands.right ? new Map(origin.arms?.map(b => [b.name, b])) : null;
+  const arms = v.cur.hands.left || v.cur.hands.right || v.formPress?.length ? new Map(origin.arms?.map(b => [b.name, b])) : null;
   const input = arms?.size ? { ...origin, bones: origin.bones.map((b, i) => arms.get(joints[i].name) ?? b) } : origin;
   blendDrawn(v.rig.holder, joints, target, input, k, root, nativeQ);
   if (origin.feet) v.legs.forEach((leg, i) => place(leg.foot, leg.lower.localToWorld(v.ankle[i].clone()).add(origin.feet![i].clone().lerp(offsets[i], k))));
@@ -123,7 +126,7 @@ type View = {
   clipOrigin?: ClipOrigin;
   seatSample?: SampledHuman;
   seatOrigins?: Map<string, DrawnOrigin>;
-  nativeArmBase?: NonNullable<DrawnOrigin['arms']>;
+  ownerArmBase?: NonNullable<DrawnOrigin['arms']>;
   clipReference?: {o:THREE.Object3D;p:THREE.Vector3;q:THREE.Quaternion;s:THREE.Vector3}[];
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
@@ -1398,15 +1401,15 @@ export class HumanViews {
         legTo(l, v.ankle[i], ankle.setY(ankle.y + dip), knee.sub(hip.add(ankle).multiplyScalar(0.5)), 0.999, l.foot.getWorldQuaternion(new THREE.Quaternion()));
       });
     }
-    // Seated lower-body continuity precedes the existing direct-hand/held owner,
-    // which solves its authoritative targets and attaches the prop once below.
-    const seatHandOwner = !!(hasHands || v.propWanted) && !v.itemPose && !v.handActuator && !v.transfer && !v.watering && !v.cup && !v.letGo;
+    // Seated continuity precedes existing native-hand, held-prop and selected-press
+    // owners. Each applies once below, after the attained base has been blended.
+    const seatHandOwner = !!(hasHands || v.propWanted || v.formPress?.length) && !v.itemPose && !v.handActuator && !v.transfer && !v.watering && !v.cup && !v.letGo;
     let seatOwnerShare = 1;
     if (v.seatSample && seatHandOwner && freeBody && !gripping && !v.handHold && !v.rps) {
       seatOwnerShare = this.blendSeat(v, tSec, sourcePose);
       if (act && seatOwnerShare < 1) act = blendFrames(null, act, seatOwnerShare);
     }
-    v.nativeArmBase = hasHands && sourcePose ? v.arms.flatMap(a => [...(a.shoulder ? [a.shoulder] : []), a.upper, a.lower, a.hand, ...a.fingers, ...a.thumb]).map(o => ({ name: o.name, p: o.position.clone(), q: o.quaternion.clone() })) : undefined;
+    v.ownerArmBase = sourcePose && (hasHands || v.formPress?.length) ? armBases(v) : undefined;
     if (act && v.spine && !hasHands && !gripping) {
       if (act.lying) {
         if (act.lying.face === 'back' && act.lying.raise > 0) bendTorso(v.spine, act.lying.raise);
@@ -1758,7 +1761,7 @@ export class HumanViews {
     if (clipBoundary) {
       this.blendClipOrigin(v, origin!, tSec, sourcePose);
     }
-    if (v.seatSample && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.handHold && !v.rps && !v.propWanted && !v.instrument && !act?.pairedContact) this.blendSeat(v, tSec, sourcePose);
+    if (v.seatSample && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.handHold && !v.rps && !v.propWanted && !v.formPress?.length && !v.instrument && !act?.pairedContact) this.blendSeat(v, tSec, sourcePose);
     const freeContacts=noOwner||freeFloor&&freeBody&&!engineHands&&!gripping&&!v.handHold&&!v.rps&&!v.partner&&!v.propWanted&&!v.prop?.obj.visible&&!v.shore&&!waterFrom&&sitW===0;
     if (freeContacts && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
@@ -1788,9 +1791,9 @@ export class HumanViews {
             const sample={...source.sample,id:h.name,p:[...v.cur.p] as [number,number,number],yaw:v.cur.yaw,
               ...(origin&&prior?{clipOrigin:{age:prior.age,sample:prior.sample,drawn:origin}}:{})};
             evaluator.setFrame([sample],boundary-source.offset);
-            if(v.seatSample&&(v.cur.hands.left||v.cur.hands.right))evaluator.pose(evaluator.views.get(h.name)!,1,undefined,true);else evaluator.render(1);
+            if(v.seatSample&&(v.cur.hands.left||v.cur.hands.right||v.formPress?.length))evaluator.pose(evaluator.views.get(h.name)!,1,undefined,true);else evaluator.render(1);
             const old=evaluator.bodyObject(h.name)!;origin=drawnOrigin(old,old,root,nativeQ);
-            if(v.seatSample){const view=evaluator.views.get(h.name)!;origin.feet=seatFootOffsets(view);origin.arms=view.nativeArmBase;}
+            if(v.seatSample){const view=evaluator.views.get(h.name)!;origin.feet=seatFootOffsets(view);origin.arms=view.ownerArmBase;}
             if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
           }
         } finally {evaluator.clear();}
@@ -1868,7 +1871,7 @@ export class HumanViews {
       try {
         evaluator.setFrame([{ ...origin, id: h.name, p: [...v.cur.p], yaw: v.cur.yaw }], time - age! - 1e-6);
         const old = evaluator.views.get(h.name)!; evaluator.pose(old, 1, undefined, true);
-        drawn = drawnOrigin(old.rig.model, old.rig.holder, root, nativeQ); drawn.feet = seatFootOffsets(old); drawn.arms = old.nativeArmBase;
+        drawn = drawnOrigin(old.rig.model, old.rig.holder, root, nativeQ); drawn.feet = seatFootOffsets(old); drawn.arms = old.ownerArmBase;
       } finally { evaluator.clear(); }
       if (!sourcePose) { if (cache.size >= 32) cache.delete(cache.keys().next().value!); cache.set(key, drawn); }
     }

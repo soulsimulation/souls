@@ -383,7 +383,7 @@ export class TakePeople {
         const key = JSON.stringify([id, Math.round((this.take.startTick + before) * 1e6), current.p, current.yaw]);
         let sample = this.seatSamples.get(key);
         if (!sample) {
-        sample = { id, p: [...current.p], yaw: current.yaw, walk: 0, walkDist: current.walkDist, activity: e.activity, hands: e.hands, ...(typeof e.state.prop === 'string' ? { prop: e.state.prop } : {}),
+        sample = { id, p: [...current.p], yaw: current.yaw, walk: 0, walkDist: current.walkDist, activity: e.activity, hands: e.hands, ...(Array.isArray(e.state.formPress) ? { formPress: e.state.formPress as SampledHuman['formPress'] } : {}), ...(typeof e.state.prop === 'string' ? { prop: e.state.prop } : {}),
           baseActivity: typeof e.state.baseActivity === 'string' ? e.state.baseActivity : undefined,
           ...(typeof e.state.seatHeight === 'number' ? { seatHeight: e.state.seatHeight } : {}),
           ...(typeof e.state.instrument === 'string' ? { instrument: e.state.instrument } : {}),
@@ -401,7 +401,7 @@ export class TakePeople {
 
   private clipOrigin(id: string, tick: number, current: SampledHuman): SampledHuman['clipOrigin'] {
     const seatPlan=seatTransition(current.postureChange,current.activity??'idle',current.baseActivity), seatOwned=postureKind(current.activity??'idle',current.baseActivity)==='seat'||!!seatPlan&&current.postureChange!.age<seatPlan.end+ACT_BLEND;
-    if(current.itemPose||current.handActuator||current.transfer||current.watering||current.cup||current.letGo||current.grip||current.on||!seatOwned&&(current.prop||current.hands?.left||current.hands?.right)||current.instrument||current.handHold||current.rps||current.formPress?.length||current.walk>=.01)return undefined;
+    if(current.itemPose||current.handActuator||current.transfer||current.watering||current.cup||current.letGo||current.grip||current.on||!seatOwned&&(current.prop||current.hands?.left||current.hands?.right)||current.instrument||current.handHold||current.rps||!seatOwned&&current.formPress?.length||current.walk>=.01)return undefined;
     const a=this.acts.get(id);if(!a)return undefined;
     const index=this.runAt(a,tick),newest=a.t[index],boundary=(this.take.startTick+newest)*this.take.dt;
     const age=(tick-newest)*this.take.dt;
@@ -421,11 +421,11 @@ export class TakePeople {
       const take=before>=0?this.take:this.history.find(t=>{const offset=t.startTick-this.take.startTick;return before>=offset&&before<offset+t.ticks;});
       if(!take)break;
       const e=sampleTake(take,(before+this.take.startTick-take.startTick)*take.dt).entities[id];
-      if(!e||!seatOwned&&(e.hands?.left||e.hands?.right||e.state.prop)||e.state.grip||e.state.on||e.state.handHold||e.state.rps||e.state.handActuator||e.state.itemTransferV1||e.state.heldItemsV1||e.state.handTransferV1||e.state.carryContactV1||e.state.wateringV1||e.state.letGoV1||e.state.cupV1||Array.isArray(e.state.formPress)&&e.state.formPress.length)break;
+      if(!e||!seatOwned&&(e.hands?.left||e.hands?.right||e.state.prop)||e.state.grip||e.state.on||e.state.handHold||e.state.rps||e.state.handActuator||e.state.itemTransferV1||e.state.heldItemsV1||e.state.handTransferV1||e.state.carryContactV1||e.state.wateringV1||e.state.letGoV1||e.state.cupV1||!seatOwned&&Array.isArray(e.state.formPress)&&e.state.formPress.length)break;
       const track=this.walks.get(id),steps=track?this.gaitSteps(id):null,walk=steps?walkWeightAt(steps,before,this.take.dt):0;
       // Every historical context field comes from this boundary's record/history, never the newer frame.
       // Only the native anchor is deliberately current: cosmetic origins cannot own another movement path.
-      const sample:SampledHuman={id,p:current.p,yaw:current.yaw,walk,hands:e.hands,...(typeof e.state.prop==='string'?{prop:e.state.prop}:{}),walkDist:(track?this.walked(track,before):0)+(this.walkOffsets[id]??0),activity,
+      const sample:SampledHuman={id,p:current.p,yaw:current.yaw,walk,hands:e.hands,...(Array.isArray(e.state.formPress)?{formPress:e.state.formPress as SampledHuman['formPress']}:{}),...(typeof e.state.prop==='string'?{prop:e.state.prop}:{}),walkDist:(track?this.walked(track,before):0)+(this.walkOffsets[id]??0),activity,
         baseActivity:typeof e.state.baseActivity==='string'?e.state.baseActivity:undefined,
         ...(typeof e.state.instrument==='string'?{instrument:e.state.instrument}:{}),
         ...(typeof e.state.partner==='string'?{partner:e.state.partner}:{}),
