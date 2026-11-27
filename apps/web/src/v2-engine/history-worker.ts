@@ -7,7 +7,7 @@ import init, { historyAt } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
-import { dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
+import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
@@ -67,13 +67,28 @@ const days = new Map<number, Promise<DayIndex | null>>();
 const ready = init();
 
 /** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. */
+const readIndex = (base: URL, day: number): Promise<DayIndex | null> => get(new URL(dayIndexKey(day), base)).then((b) => {
+  if (!b) return null;
+  const m = decode(b, { useMaps: true }) as Map<number, unknown>;
+  return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
+});
+/** The same, kept while the worker lives. */
 function dayIndex(base: URL, day: number): Promise<DayIndex | null> {
-  if (!days.has(day)) days.set(day, get(new URL(dayIndexKey(day), base)).then((b) => {
-    if (!b) return null;
-    const m = decode(b, { useMaps: true }) as Map<number, unknown>;
-    return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
-  }));
+  if (!days.has(day)) days.set(day, readIndex(base, day));
   return days.get(day)!;
+}
+/** #3358: the stored bytes of the bundles read last (a bundle's key names it for good), so a bundle read ahead, or
+ *  read by the seek before, is not fetched again. A failed read is not kept. */
+const bundles = new Map<string, Promise<Uint8Array>>();
+let reading: Promise<unknown> = Promise.resolve();
+function bundle(base: URL, key: string): Promise<Uint8Array> {
+  let b = bundles.get(key);
+  if (!b) {
+    bundles.set(key, (b = get(new URL(key, base)).then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
+    b.catch(() => bundles.delete(key));
+    while (bundles.size > 4) bundles.delete(bundles.keys().next().value!);
+  }
+  return b;
 }
 
 async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
@@ -81,8 +96,7 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
   // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
   const found = await walk(at, now, floor, (day) => dayIndex(base, day));
   if (!found) throw new Error(`no history in the year before ${at} µs`);
-  const stored = await get(new URL(found.key, base));
-  if (!stored) throw new Error(`no bundle ${found.key}`);
+  const stored = await bundle(base, found.key);
   await ready;
   const out = decode(historyAt(await header, await inflate(stored), found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
   const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
@@ -96,7 +110,15 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
   post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
 }
 
-self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number }>) => {
-  const { base, seq, at, now, floor } = e.data;
+self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number; ahead?: true }>) => {
+  const { base, seq, at, now, floor, ahead } = e.data;
+  // #3358: a read ahead (history.ts prepare) fetches what that seek will read and keeps the bundle, applying nothing,
+  // one at a time in the order asked (the first is the likelier seek); today's index is not kept, so the seek still
+  // reads the bundles written since
+  if (ahead) {
+    const url = new URL(base), today = Math.floor(now / DAY_US);
+    reading = reading.then(() => walk(at, now, floor, (day) => (day < today ? dayIndex(url, day) : readIndex(url, day)))).then((f) => f && bundle(url, f.key)).catch(() => null);
+    return;
+  }
   seek(new URL(base), seq, at, now, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
 };

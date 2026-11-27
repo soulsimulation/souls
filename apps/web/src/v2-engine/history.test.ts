@@ -236,3 +236,34 @@ test('Eden daylight: a world at 15:25 in New York in late November draws dayligh
     assert.ok(elevationDeg > 10, `the sun is up at 15:25 local: ${elevationDeg.toFixed(1)}°`);
   } finally { setEquatorSun(false); }
 });
+
+test('#3358: a read ahead asks the worker for the window\'s first bundle, from the world\'s first moment on, and waits for no answer', async () => {
+  const { encode } = await import('cborg');
+  const DAY = 86_400_000_000, day = 20781, first = day * DAY + 50_000_000_000;
+  const files: Record<string, unknown> = {
+    'history/everyone/counts/year/0056': new Map<number, unknown>([[1, 1], [5, [[day - 56 * 365, 0, 3]]]]),
+    [`bundles/000${day}/index`]: new Map<number, unknown>([[1, 1], [2, day], [3, [[first, 'k', new Uint8Array(32)]]]]),
+  };
+  const realFetch = globalThis.fetch, realLocation = (globalThis as { location?: unknown }).location;
+  (globalThis as { location?: unknown }).location = { href: 'http://example.invalid/w/a/' };
+  globalThis.fetch = (async (u: URL) => {
+    const path = String(u).replace('http://example.invalid/s/x/history/', '');
+    return files[path] ? new Response(encode(files[path])) : new Response(null, { status: 404 });
+  }) as typeof fetch;
+  const posted: { seq: number; at: number; now: number; floor?: number; ahead?: true; base: string }[] = [];
+  const w = { onmessage: null as null | ((e: MessageEvent) => void), postMessage(m: (typeof posted)[number]) { posted.push(m); }, terminate() {} };
+  try {
+    const h = new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' });
+    const now = first + 3_600_000_000, back = (now - 60_000_000) / TICK_US; // Back 1 min, an hour after the world began
+    await h.prepare(back, now / TICK_US);
+    assert.deepEqual(posted, [{ base: 'http://example.invalid/s/x/history/', seq: 0, at: back * TICK_US - 10_000_000, now, ahead: true, floor: first }],
+      'the window\'s start (10 s before the moment, as LiveWorld asks), the world\'s now and first moment');
+    await h.prepare(first / TICK_US, now / TICK_US); // From the start: no earlier than the world's first moment
+    assert.equal(posted[1].at, first);
+    await h.prepare(back); // a moment link, now not known yet: the moment is taken as now
+    assert.equal(posted[2].now, back * TICK_US);
+    assert.ok(posted.every((m) => m.ahead && m.seq === 0), 'a read ahead is never a seek the page waits on');
+  } finally {
+    globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
+  }
+});
