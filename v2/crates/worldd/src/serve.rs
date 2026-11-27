@@ -3220,12 +3220,10 @@ fn fork_archive_base<S: Store>(
     // A fork's first publication only: its whole log from record 0, read from the disk (#2803). A log kept from a
     // later record is refused by the base, as it was when the start held the log.
     let found = if log.first == 0 {
-        sim::log::recover(
-            &std::fs::read(&log.path).map_err(|e| Refusal {
-                name: "archive-source-io",
-                detail: format!("the fork's log: {:?}", e.kind()),
-            })?,
-        )?
+        sim::log::recover(&std::fs::read(&log.path).map_err(|e| Refusal {
+            name: "archive-source-io",
+            detail: format!("the fork's log: {:?}", e.kind()),
+        })?)?
     } else {
         sim::log::Recovered {
             header: None,
