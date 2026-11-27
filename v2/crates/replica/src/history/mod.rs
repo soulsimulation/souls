@@ -15,6 +15,7 @@
 
 pub mod events;
 pub mod seek;
+pub mod timeline;
 
 use std::collections::BTreeMap;
 
