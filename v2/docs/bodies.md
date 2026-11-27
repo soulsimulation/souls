@@ -148,7 +148,7 @@ each resource it holds, and each phase end is one timer in K9's due list. Nothin
 move's resources cancels it at its next phase end (`claim-taken`). worldd measures a thing where the world's tree has
 it as committed, up to the floor under it, from the point of each slot it stands in (#4120): a thing made into a slot
 or set down a tick ago is reached where it is, not where the walkers' town last saw it (the town takes only parts that
-change its ground).
+change its ground), and a form's approach to a thing in a slot walks to the slot's point, not its holder's origin.
 
 **Aimed moves** (0.134 B1). A move that touches nothing says so with the effector `aim` (`{1: 4}`): a point, a wave, a
 nod, a bow and a look aim at their target instead of reaching it. An aimed move has no contact, and its reach is the
