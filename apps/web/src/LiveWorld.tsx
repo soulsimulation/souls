@@ -397,8 +397,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const camera = (adopted?.camera as THREE.PerspectiveCamera|undefined) ?? new THREE.PerspectiveCamera(45, 1, 0.1, 2400);
     const followView=new WorldFollow();
     const followQuery=new URLSearchParams(location.search),experimentalFollow=followQuery.get('camera-follow')==='experimental';
-    let followController:import('./cinematography/controller.ts').FollowController|null=null;
-    if(experimentalFollow||followQuery.get('camera-follow-test')==='1')void import('./cinematography/controller.ts').then(({FollowController})=>{if(abort.signal.aborted)return;followController=new FollowController(experimentalFollow);const probe=()=>followController!.read();Object.defineProperty(window,'__followExperiment',{configurable:true,value:probe});abort.signal.addEventListener('abort',()=>{if((window as unknown as {__followExperiment?:unknown}).__followExperiment===probe)delete (window as unknown as {__followExperiment?:unknown}).__followExperiment;});}).catch(()=>{if(!abort.signal.aborted)console.error('[camera-follow] experimental-controller-load-failed; legacy remains active');});
+    let followController:import('./cinematography/controller.ts').FollowController|null=null,experimentalFollowOwned=false;
+    if(experimentalFollow||followQuery.get('camera-follow-test')==='1')void import('./cinematography/controller.ts').then(({FollowController})=>{if(abort.signal.aborted)return;followController=new FollowController(experimentalFollow);const probe=()=>followController!.read();Object.defineProperty(window,'__followExperiment',{configurable:true,value:probe});abort.signal.addEventListener('abort',()=>{experimentalFollowOwned=false;if((window as unknown as {__followExperiment?:unknown}).__followExperiment===probe)delete (window as unknown as {__followExperiment?:unknown}).__followExperiment;});}).catch(()=>{if(!abort.signal.aborted)console.error('[camera-follow] experimental-controller-load-failed; legacy remains active');});
     // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
     let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
     // #1963, 0.135 P3: ?track=<same-origin file> gives the camera a planned track (a recorded range, or a live take's); nothing loads without it.
@@ -408,7 +408,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,lifecycle:'',
-    },(before,after)=>{followView.userInput(before,after);followController?.gesture(before,after);});
+    },(before,after)=>{if(experimentalFollowOwned&&context.current.cameraMode==='follow')followController?.gesture(before,after);else followView.userInput(before,after);});
     let controls=newControls();
     navigation=new WorldNavigation(renderer.domElement,camera,()=>controls.target,()=>({
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,
@@ -598,7 +598,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const c=context.current,soul=c.sim.conn.replica.souls.get(soulId),p=soul?shown.current.entities[soul.entityId]?.p:null;
         if(!soul||!p||past.current||c.loading||c.graphicsUnavailable||!shown.current.take||(initialGate&&initialGate.snapshot().stage!=='ready'))return false;
         soulFlightChip=!!opts?.chip;  // #892: a touch's follow shows the bottom chip, not the card (same flight)
-        followView.reset();followed=null;  // #1316: Follow couples the camera again, whatever the mode was
+        followView.reset();experimentalFollowOwned=false;followed=null;  // #1316: Follow couples the camera again, whatever the mode was
         navigation?.release();rts.release();groupSelection.clear();c.onSelect(soulId,soulFlightChip?'chip':undefined);c.setThing(null);
         const target=new THREE.Vector3(p[0],p[1]+1,p[2]);
         if(reducedMotionQuery?.matches){soulFlight=null;c.cameraMode='follow';c.follow=true;c.setCameraMode('follow');hapticTick();return true;}
@@ -609,7 +609,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       move: delta => navigation?.move(delta) ?? false,
       inputOwned: () => navigation?.inputOwned ?? false,
       reset: () => {
-        navigation?.release(); broadcast.reset();followView.reset();followMotion.reset();followController?.reset();followed=null;
+        navigation?.release(); broadcast.reset();followView.reset();followMotion.reset();followController?.reset();experimentalFollowOwned=false;followed=null;
         if(context.current.cameraMode==='broadcast')return true;
         if(context.current.cameraMode==='follow'){
           const c=context.current,id=c.selected?c.sim.conn.replica.souls.get(c.selected)?.entityId:c.thing;
@@ -732,7 +732,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       clearNewcomerMarkers();restMarkers?.dispose();restMarkers=null;publication=verifiedPublication??null;expansionSceneInfo=info;
       refreshCameraGround();
       people?.dispose();people=null;applied=null;
-      base=info.scene;nativeBoat=info.shore?.metadata.boat&&info.shore.appearance?{layout:info.shore.metadata.boat.layout,proposal:info.shore.appearance.boat}:undefined;dayTicks=info.clock?.dayTicks??null;dayOrigin=info.clock?.origin??null;broadcast.reset();followView.reset();followed=null;
+      base=info.scene;nativeBoat=info.shore?.metadata.boat&&info.shore.appearance?{layout:info.shore.metadata.boat.layout,proposal:info.shore.appearance.boat}:undefined;dayTicks=info.clock?.dayTicks??null;dayOrigin=info.clock?.origin??null;broadcast.reset();followView.reset();experimentalFollowOwned=false;followed=null;
       capturedPlatforms=info.platforms??null;
       geometry.dispose();geometry=new WorldGeometry(base,info.ground,info.commons,info.shore,info.assetRoot);scene.add(geometry.group);light.fit(geometry.bounds);light.setCommonsReadability(geometry.hasAuthoredCommons);dressForkLand(geometry.group);  // MARSLAND-FORK: layer 3 around the Mars fork
       // Cosmetic paths require the verified full public capture and exact Core
@@ -1048,6 +1048,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const followEligibilityStart=followController?performance.now():0;
       const selectedBody=soulId?s.conn.replica.souls.get(soulId)?.entityId:null;
       const experimentalFollowing=experimentalFollow&&!!followController&&viewing==='follow'&&!!selectedBody&&records[selectedBody]?.kind==='human'&&!eyes&&!shotMode&&!shotTrack;
+      experimentalFollowOwned=experimentalFollowing;
       let followSetupMs=followController?performance.now()-followEligibilityStart:0;
       if(following||soulId&&!groupSelection.has(soulId))groupSelection.clear();
       if (viewing !== previousCameraMode) { broadcast.reset(); previousCameraMode = viewing; renderer.domElement.dataset.cameraShot=''; }
@@ -1371,7 +1372,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
         else speechVisibility.reset();
         emitState(viewerPresentation({room:context.current.edenExpansion?exploreRoom(camera.position.toArray(),EDEN_VIEWER_PLACES,s.conn.replica.souls,at.entities):null,assetDownloads:downloads.snapshot(),soulIds:[...groupSelection],
           drawnTick: drawnTick.current, history: !!past.current, playing: past.current?.playing ?? false,
-          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.turnedAway,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
+          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:!experimentalFollowing&&followView.turnedAway,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
           loading: initialGate?.snapshot().stage!=='ready'||context.current.loading || (!at.take && renderer.domElement.dataset.sceneBinding!=='unavailable'),
           unavailableReason: context.current.graphicsUnavailable ?? context.current.sim.streamNotice ?? sceneReason ?? (coveredNote || (brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null)),
           speechAnchors,
