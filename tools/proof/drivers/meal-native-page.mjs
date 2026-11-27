@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { meal, foundId } from '../../playtest/meal/meal.mjs';
-import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat } from '../../playtest/conference/owned-seats.mjs';
+import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
 // Private archive encoding only; delivered Worker objects and selected checkpoint spelling stay unchanged.
@@ -37,6 +37,46 @@ export async function mealWorldPage({ base, signal }) {
   page.search = ''; page.hash = ''; return page.href;
 }
 
+/** Creator legality comes from the ordinary place receipt; optional admits metadata is evidence only. */
+export async function proveMealCreator({ creator, record = () => {}, signal }) {
+  const cli = async (...words) => {
+    signal?.throwIfAborted();
+    const answer = await creator.cli(...words);
+    record({ role: creator.label, words, answer });
+    assert.equal(answer.ok, true, `meal creator ${words[0]}: ${answer.code ?? 'refused'}`);
+    return answer;
+  };
+  const described = await cli('describe');
+  const bowlKinds = Object.keys(described.kinds ?? {}).filter(kind => kind.split('@')[0] === 'eden:soup_bowl');
+  assert.equal(bowlKinds.length, 1, 'meal creator loaded bowl revision must be unique');
+  const requestedKind = bowlKinds[0];
+  assert(/^eden:soup_bowl@[^\s@]+$/.test(requestedKind), 'meal creator bowl revision must be qualified');
+  const grounds = (described.nodes ?? []).filter(node => node.kind?.split('@')[0] === 'eden:ground');
+  assert.equal(grounds.length, 1, 'meal creator ground must be unique');
+  const ground = grounds[0];
+  assert(typeof ground.id === 'string' && ground.id, 'meal creator ground identity missing');
+  const groundKinds = Object.keys(described.kinds ?? {}).filter(kind => kind.split('@')[0] === 'eden:ground');
+  const groundKey = Object.hasOwn(described.kinds ?? {}, ground.kind) ? ground.kind : groundKinds.length === 1 ? groundKinds[0] : null;
+  const groundMetadata = groundKey ? described.kinds[groundKey] : null;
+  const admissionMetadata = groundMetadata && typeof groundMetadata === 'object' && Object.hasOwn(groundMetadata, 'admits')
+    ? { kind: groundKey, admits: groundMetadata.admits } : null;
+  // One declared unused position, outside the meal workflow. No retry elsewhere on refusal.
+  const at = [12, 0, 12];
+  const placed = await cli('place', requestedKind, '--in', ground.id, '--at', at.join(','));
+  assert(Number.isSafeInteger(placed.sequence) && placed.sequence > 0, 'meal creator edit sequence missing');
+  assert.deepEqual(Object.keys(placed.names ?? {}), ['1'], 'meal creator place must return exactly one identity');
+  const id = placed.names['1'];
+  assert(typeof id === 'string' && id, 'meal creator placed identity missing');
+  const readback = await cli('describe', id);
+  assert.equal(readback.id, id, 'meal creator readback identity differs');
+  assert.equal(readback.kind, 'eden:soup_bowl', 'meal creator readback plain kind differs');
+  assert.equal(readback.in?.[0]?.id, ground.id, 'meal creator readback parent differs');
+  assert.deepEqual(readback.at, at, 'meal creator readback position differs');
+  return { requestedKind, readbackKind: readback.kind, id, parent: ground.id, at: readback.at,
+    sequence: placed.sequence, admissionMetadata,
+    qualification: 'Ordinary exact-revision place and returned-ID plain-kind readback; optional admission metadata may be unknown. No readback revision, post-boot drawing, meal consumption or contact claim.' };
+}
+
 export async function prepare({ base, paths, recipe, signal }) {
   requireConferenceRecipe(recipe);
   const state = { rows: [], checkpoints: [], seats: [], installed: false }; states.set(paths.dir, state);
@@ -48,7 +88,15 @@ export async function prepare({ base, paths, recipe, signal }) {
     const answer = await seat.cli(...words); state.rows.push({ role: seat.label, words, answer }); return answer;
   };
   state.bowl = foundId(await state.seats[0].run('find', 'meal-bowl'), 'meal-bowl');
-  return { people: 3, bowl: state.bowl, creatorProved: false };
+  state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
+  const creatorRows = [];
+  try {
+    state.creatorProof = await proveMealCreator({ creator: state.creator, signal,
+      record: row => { creatorRows.push(row); state.rows.push(row); } });
+  } finally {
+    save(paths, 'command-meal-creator.json', { proof: state.creatorProof ?? null, rows: creatorRows });
+  }
+  return { people: 3, bowl: state.bowl, creatorProved: true, creatorPlaced: state.creatorProof.id };
 }
 
 /** Serialized into the page: passively listen to public messages; never intercept or rewrite their data. */

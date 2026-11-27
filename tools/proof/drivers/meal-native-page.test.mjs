@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { mealWorldPage, mealNodeIdentity, mealArchiveJSON, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
+import { proveMealCreator, mealWorldPage, mealNodeIdentity, mealArchiveJSON, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
 
 class PublicWorker extends EventTarget {
   message(data) { this.dispatchEvent(new MessageEvent('message', { data })); }
@@ -194,3 +194,49 @@ test('the eight-worker cap remains visible without preventing ordinary worker cr
   assert(workers.every(w=>w instanceof PublicWorker));assert.equal(page.__mealPayloadObserver.workers.length,8);
   assert.match(mealBrowserStop().failures[0],/worker observation limit/);
 }));
+
+// Independent ordinary public replies; no client/native projection builders are imported.
+function creatorFixture({ admits = ['thing'], metadata = true, registry = ['eden:soup_bowl@loaded-revision'], refused = false, names = {1:'placed-bowl'}, sequence = 23, readback = {} } = {}) {
+  const calls=[], rows=[];
+  const creator={label:'creator',cli:async(...words)=>{
+    calls.push(words);
+    if(words[0]==='describe' && words.length===1) return {ok:true,nodes:[{id:'ground',kind:'eden:ground',parent:'world'}],
+      kinds:{...Object.fromEntries(registry.map(kind=>[kind,{}])),...(metadata?{'eden:ground@ground-revision':{admits}}:{})}};
+    if(words[0]==='place') return refused?{ok:false,code:'edit.child-not-admitted'}:{ok:true,sequence,names};
+    if(words[0]==='describe') return {ok:true,id:'placed-bowl',kind:'eden:soup_bowl',in:[{id:'ground',kind:'eden:ground'}],at:[12,0,12],...readback};
+    throw Error('unexpected public creator command');
+  }};
+  return {creator,calls,rows,run:()=>proveMealCreator({creator,record:row=>rows.push(row)})};
+}
+
+test('creator places the unique loaded revision and reads back only its returned identity and plain kind', async()=>{
+  const f=creatorFixture(), proof=await f.run();
+  assert.deepEqual(f.calls,[['describe'],['place','eden:soup_bowl@loaded-revision','--in','ground','--at','12,0,12'],['describe','placed-bowl']]);
+  assert.equal(proof.requestedKind,'eden:soup_bowl@loaded-revision');assert.equal(proof.readbackKind,'eden:soup_bowl');
+  assert.equal(proof.sequence,23);assert.equal(f.rows.length,3);assert.deepEqual(proof.admissionMetadata.admits,['thing']);
+});
+
+test('missing optional admission metadata does not override a successful authoritative place',async()=>{
+  const f=creatorFixture({metadata:false});assert.equal((await f.run()).admissionMetadata,null);assert.equal(f.calls.length,3);
+});
+
+test('optional admission hints are recorded without overruling a successful native edit',async()=>{
+  const f=creatorFixture({admits:[]});assert.deepEqual((await f.run()).admissionMetadata.admits,[]);assert.equal(f.calls.length,3);
+});
+
+test('creator retains a native refusal and never retries or changes position',async()=>{
+  const f=creatorFixture({refused:true});await assert.rejects(f.run(),/edit.child-not-admitted/);
+  assert.equal(f.calls.length,2);assert.equal(f.rows.at(-1).answer.code,'edit.child-not-admitted');
+});
+
+for(const registry of [[],['eden:soup_bowl'],['eden:soup_bowl@one','eden:soup_bowl@two']]) test(`creator rejects absent, unqualified or ambiguous loaded revision: ${registry.join(',')}`,async()=>{
+  const f=creatorFixture({registry});await assert.rejects(f.run(),/revision/);assert.equal(f.calls.length,1);
+});
+
+for(const [label,options,why] of [
+  ['missing sequence',{sequence:null},/sequence/],['missing identity',{names:{}},/identity/],
+  ['wrong identity',{readback:{id:'other'}},/identity/],['qualified readback',{readback:{kind:'eden:soup_bowl@guess'}},/plain kind/],
+  ['wrong parent',{readback:{in:[{id:'other-ground'}]}},/parent/],['wrong position',{readback:{at:[12,1,12]}},/position/],
+]) test(`creator rejects ${label} without fallback`,async()=>{
+  const f=creatorFixture(options);await assert.rejects(f.run(),why);assert.equal(f.calls.filter(words=>words[0]==='place').length,1);
+});
