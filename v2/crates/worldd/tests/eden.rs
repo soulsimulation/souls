@@ -4222,6 +4222,38 @@ fn l42_water_and_the_garden_from_outside() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// #4090's follow-up: acts that change an amount on things that borrow their entry, on a served full Eden. A planter
+/// box goes by `eden:planter`, a compost heap by `eden:compost_bin` and a pie pack by `eden:pie` (Eden's map), and
+/// none has state of its own kind. With a watering can in hand a Soul plants the box (its tray set by −1), waters it
+/// and feeds it from the nearest compost heap (a transfer whose two ends number `compost` differently: 34 on the
+/// planter, 28 on the bin). At the café it takes a pie pack off the counter and eats a slice (its slices set by −1).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i4090_amounts_on_borrowed_things_on_a_served_eden() {
+    let mut wrong = served_steps(
+        "84.0,44.0",
+        "i4090garden",
+        &[
+            ("e_5bf741bc", "walk", &[], "done"),
+            ("e_5bf741bc", "take", &[], "done"),
+            ("e_3fd122bf", "walk", &[], "done"),
+            ("e_3fd122bf", "plant", &[], "done"),
+            ("e_3fd122bf", "water", &[], "done"),
+            ("e_3fd122bf", "feed", &[], "done"),
+        ],
+    );
+    wrong.extend(served_steps(
+        "96.5,25.0",
+        "i4090cafe",
+        &[
+            ("e_c698733a", "walk", &[], "done"),
+            ("e_c698733a", "take", &[], "done"),
+            ("e_c698733a", "eat_a_slice", &[], "done"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.
 type Stood = (Id, Option<u64>, i64, Option<sim::controller::Stance>);
 
