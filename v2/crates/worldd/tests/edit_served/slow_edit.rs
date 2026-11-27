@@ -103,7 +103,8 @@ async fn i5216_a_decks_floor_removed_is_checked_on_its_own_squares_not_the_whole
     assert_eq!(got.kind, 1, "the edit commits: {got:?}");
     let e = edit_check(&w, 2);
     println!("#5216 the deck's floor removed: edit_check {}", e.to_json());
-    // The deck is 3 m by 2 m: with a body's clearance it lies on one square of 16 m, or up to four at a corner.
+    // The deck is 3 m by 2 m: with a body's clearance it lies on one square of 16 m, or up to four at a corner. One
+    // building is put on the map again: the deck, leaving it.
     cut_alone(&e, 4);
     assert_eq!(
         gauge(&e, &["last_ground", "buildings"]),
@@ -169,8 +170,17 @@ async fn i5216_edits_past_the_checkers_line_are_refused_by_name_and_the_next_com
         !ends.contains_key("act.timed-out"),
         "none timed out: {ends:?}"
     );
-    // Every edit not refused at the line was checked: the gauge has both, and the line's limit.
-    let e = edit_check(&w, 40 - busy as i128);
+    // Every edit not refused at the line was checked: the gauge has both, and the line's limit. The checker counts
+    // an edit checked before the clock takes it off the line, and the health file is written every 2 s: read until
+    // the line is empty too (review).
+    let end = Instant::now() + Duration::from_secs(30);
+    let e = loop {
+        let e = edit_check(&w, 40 - busy as i128);
+        if gauge(&e, &["waiting"]) == 0 || Instant::now() > end {
+            break e;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
     println!("#5216 the gauge: {}", e.to_json());
     assert_eq!(
         gauge(&e, &["refused_busy"]),

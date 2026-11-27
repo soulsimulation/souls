@@ -1529,9 +1529,13 @@ impl EditQueue {
             .map_or(self.offered.get(), std::cell::Cell::get);
         // Each of these comes back as one `Event::Edited` ([`EditQueue::back`]).
         let edit = matches!(job, CheckJob::Edit(..) | CheckJob::Reprepare(_));
-        self.tx
-            .send((need, job))
-            .map_err(|e| std::sync::mpsc::SendError(e.0.1))?;
+        self.tx.send((need, job)).map_err(|e| {
+            // The checker's thread is gone: nothing waits on it, and the next edit is refused by that name, not
+            // by the line's (review).
+            self.waiting.set(0);
+            measures::EDIT_CHECKS.waiting(0, EDITS_WAITING_MOST);
+            std::sync::mpsc::SendError(e.0.1)
+        })?;
         if edit {
             self.waiting.set(self.waiting.get() + 1);
             measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
