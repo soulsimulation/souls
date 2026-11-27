@@ -160,6 +160,14 @@ test('admitted large skinny triangle retains analytically exact coplanar interio
     const p = build(scene([{ ...panel(), vertices: [[0, 0, 0], [1e6, 0, 0], [1e6, 2, 0]], triangles: [[0, 1, 2]] }]));
     // P=.5A+.25B+.25C: exact positive barycentric weights, not an oracle shared with production.
     const at: Vec3 = [500000, .5, 0];
-    assert.equal(p.segment(q(p, at, at)).status, 'blocked');
-    assert.equal(p.clearance(q(p, at, at, 0)).status, 'blocked');
+    assert.notEqual(p.segment(q(p, at, at)).status, 'clear');
+    assert.notEqual(p.clearance(q(p, at, at, 0)).status, 'clear');
+});
+test('rotated decimal coplanar interior accounts for normal and distance conditioning', () => {
+    const p = build(scene([{ ...panel(), vertices: [[0, 0, 0], [999983.3, 999979.1, 999961.7], [999986.1, 999976.2, 999964.6]], triangles: [[0, 1, 2]] }]));
+    // Decimal P=.5A+.25B+.25C. Rounded coordinates differ by less than 1e-9m;
+    // a 1e-6m sphere must intersect even though the naive computed plane distance is about 1e-5m.
+    const at: Vec3 = [499992.35, 499988.82499999995, 499981.57499999995];
+    assert.equal(p.segment(q(p, at, at)).status, 'unknown');
+    assert.equal(p.clearance(q(p, at, at, 1e-6)).status, 'unknown');
 });

@@ -53,9 +53,44 @@ function edgeDistance(a: Vec3, b: Vec3, v: Float64Array, i: number, j: number): 
     const x = rx + s * dx - t * ex, y = ry + s * dy - t * ey, z = rz + s * dz - t * ez;
     return x * x + y * y + z * z;
 }
+// Condition the complete distance calculation before using any of its plane/endpoint/edge minima.
+// Coordinate subtraction and cross-product errors are amplified by inverse squared angular condition
+// in the projections/closest-pair solves. Reserve a quarter of the provider's 1e-7m boundary band;
+// 64 roundoffs cover the scalar path. This is a refusal guard, not exact arithmetic certification.
+function distanceConditioned(a: Vec3, b: Vec3, v: Float64Array, o: number, nx: number, ny: number, nz: number): boolean {
+    let scale = 0, longest2 = 0;
+    for (let k = 0; k < 3; k++)
+        scale = Math.max(scale, Math.abs(a[k]), Math.abs(b[k]));
+    for (let i = o; i < o + 9; i++)
+        scale = Math.max(scale, Math.abs(v[i]));
+    for (let k = 0; k < 3; k++) {
+        const i = o + k * 3, j = o + (k + 1) % 3 * 3;
+        longest2 = Math.max(longest2, (v[j] - v[i]) ** 2 + (v[j + 1] - v[i + 1]) ** 2 + (v[j + 2] - v[i + 2]) ** 2);
+    }
+    const area = Math.hypot(nx, ny, nz), condition = area / longest2, roundoff = 64 * Number.EPSILON * scale;
+    if (roundoff / (condition * condition) > 2.5e-8)
+        return false;
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 === 0)
+        return true;
+    for (let k = 0; k < 3; k++) {
+        const i = o + k * 3, j = o + (k + 1) % 3 * 3, ex = v[j] - v[i], ey = v[j + 1] - v[i + 1], ez = v[j + 2] - v[i + 2];
+        const cx = dy * ez - dz * ey, cy = dz * ex - dx * ez, cz = dx * ey - dy * ex, c2 = cx * cx + cy * cy + cz * cz, e2 = ex * ex + ey * ey + ez * ez;
+        if (c2 === 0) {
+            // Axis-zero products establish exact parallelism; cancelling nonzero products do not.
+            if (dy * ez !== 0 || dz * ey !== 0 || dz * ex !== 0 || dx * ez !== 0 || dx * ey !== 0 || dy * ex !== 0)
+                return false;
+        }
+        else if (roundoff * d2 * e2 / c2 > 2.5e-8)
+            return false;
+    }
+    return true;
+}
 /** Capsule/triangle distance: plane piercing, endpoints, and three edge pairs. */
 export function segmentTriangle(a: Vec3, b: Vec3, v: Float64Array, o: number): number {
     const ux = v[o + 3] - v[o], uy = v[o + 4] - v[o + 1], uz = v[o + 5] - v[o + 2], wx = v[o + 6] - v[o], wy = v[o + 7] - v[o + 1], wz = v[o + 8] - v[o + 2], nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    if (!distanceConditioned(a, b, v, o, nx, ny, nz))
+        return NaN;
     const da = nx * (a[0] - v[o]) + ny * (a[1] - v[o + 1]) + nz * (a[2] - v[o + 2]), db = nx * (b[0] - v[o]) + ny * (b[1] - v[o + 1]) + nz * (b[2] - v[o + 2]);
     if (da !== db && da * db <= 0) {
         const t = da / (da - db), x = a[0] + t * (b[0] - a[0]), y = a[1] + t * (b[1] - a[1]), z = a[2] + t * (b[2] - a[2]);

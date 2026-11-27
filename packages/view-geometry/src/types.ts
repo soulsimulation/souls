@@ -111,7 +111,7 @@ export type ViewGeometryProvider = Readonly<{
     geometry: ViewGeometry;
     storage: GeometryStorage;
     segment(query: Query): QueryResult;
-    /** Exact swept sphere against supplied triangle surfaces; convex-solid interiors also block. */
+    /** Conservative bounded swept sphere against supplied triangle surfaces; convex-solid interiors also block. */
     clearance(query: ClearanceQuery): QueryResult;
     withOverlay(overlay: GeometryOverlay): GeometryBuild;
 }>;
