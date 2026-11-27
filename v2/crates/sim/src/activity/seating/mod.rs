@@ -52,7 +52,7 @@ use replica::world_model::{Audience, End, show};
 use super::Activities;
 pub use super::carry::SLOT;
 use crate::ground::HUMAN_RADIUS;
-use crate::ground::scene::stands_in;
+use crate::ground::scene::stands_in_but;
 use crate::slots::hands::{Entry, in_slot};
 use crate::structure::Structure;
 
@@ -269,7 +269,8 @@ impl Seating {
 
     /// The refusals before anyone moves, for `part` to go to `target` with `activity`'s crew, whose standing reach is
     /// `reach` µm: `crew.size`, `crew.over-most` (B19's bound, section 11), `slot.occupied`, `reach.too-high`, `site.occupied` (a body stands where the part would
-    /// be, N19), then B18's on the seating as it would be committed. Not a way out: G2 judges that at the commit.
+    /// be, N19; `walking`, the crew's carriers who will walk beside the part on its set-in track, are left out until the
+    /// track ends, #5067), then B18's on the seating as it would be committed. Not a way out: G2 judges that at the commit.
     #[allow(clippy::too_many_arguments)]
     pub fn check(
         &self,
@@ -280,6 +281,7 @@ impl Seating {
         part: Id,
         target: &Target,
         reach: i64,
+        walking: &[Id],
     ) -> R<()> {
         let n = acts.members(activity).map_or(0, <[_]>::len);
         if n < CREW {
@@ -318,7 +320,7 @@ impl Seating {
         }
         let body = |k: &str| self.rules.kinds.get(k).is_some_and(|d| d.owner == "family");
         let (to, place, turn) = (target.to, target.place, target.turn);
-        let r = stands_in(
+        let r = stands_in_but(
             tree,
             self.ground,
             part,
@@ -327,6 +329,7 @@ impl Seating {
             turn,
             HUMAN_RADIUS,
             &body,
+            walking,
         );
         if let Some(who) = r.or_else(|e| refuse("seating.unread", e))? {
             return refuse(

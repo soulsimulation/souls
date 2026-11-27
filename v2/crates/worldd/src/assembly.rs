@@ -725,6 +725,9 @@ impl Assembly {
             hold: bay && s.stands(pk.as_str()),
         };
         self.aim(tree, activity, ground)?;
+        // Those who will walk beside the part are not where they stand now when it is seated: left out here, counted
+        // when its track ends ([`Assembly::due`]).
+        let walking: Vec<Id> = walks.iter().map(|w| w.body).collect();
         self.seating.check(
             tree,
             acts,
@@ -733,6 +736,7 @@ impl Assembly {
             part,
             &target,
             reach,
+            &walking,
         )?;
         // The seating as it would be committed, on a copy: the world's own rules refuse it now, not at the track's end.
         let mut copy = tree.frozen();
@@ -880,6 +884,7 @@ impl Assembly {
                     s.part,
                     &s.target,
                     s.reach,
+                    &[],
                 )?;
                 self.seating
                     .put(tree, acts, mint, s.due, activity, s.part, &s.target)
