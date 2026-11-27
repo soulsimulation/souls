@@ -65,7 +65,7 @@ import type {ShoreContactV1} from '../../../../packages/engine-contract/src/shor
 import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
-import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, formPresses, pressWeight, type FormPress, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf } from './piano-score.ts';
 import { ACT_BLEND, ACT_HISTORY, OWN_FADE, blendFrames, postureKind, postureNow, posturePhaseEnds, type PostureChange, type PostureNow } from './posture-transition.ts';
 import {posePianoHand} from './piano-hands.ts';
@@ -195,6 +195,7 @@ type View = {
   /** Library clip layer (clip-library.ts): seconds since `activity` began (undefined: before the record), the activity
    *  and base before it (crossfade), the paired-gesture partner and where it is, metres walked, speaking now. */
   since?: number;
+  formPress?: readonly FormPress[];
   prevAct?: string;
   /** posture-transition.ts: the latest change of posture (activity before it, its base, the activity after) and its age. */
   postureChange?: PostureChange;
@@ -331,6 +332,8 @@ export type SampledHuman = {
   /** Seconds since `activity` began in this take, and the activity / base before it (library clip crossfades and
    *  one-shots); absent when the activity began before the take. */
   activityAge?: number;
+  /** Existing v2 press record, including its native hand and phase clock. */
+  formPress?: readonly FormPress[];
   /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
    *  the activity it went into and its age (s); absent when there was none in the last second or so. */
   postureChange?: PostureChange;
@@ -926,7 +929,7 @@ export class HumanViews {
       v.activity = act;
       if(v.handActuator&&!f.handActuator)v.lastHandActuator=v.handActuator;else if(f.handActuator)v.lastHandActuator=undefined;
       v.handActuator=f.handActuator;v.handActuatorTime=f.handActuatorTime;v.watering=f.watering;v.wateringTime=f.wateringTime;v.letGo=f.letGo;v.letGoTime=f.letGoTime;v.cup=f.cup;v.cupTime=f.cupTime;v.transfer=f.transfer;v.transferTime=f.transferTime;
-      v.itemPose=f.itemPose;
+      v.itemPose=f.itemPose; v.formPress=formPresses(f.formPress);
       v.sleepPose = f.sleepPose;
       v.shore = f.shore;
       v.shoreTime = f.shoreTime;
@@ -1057,6 +1060,7 @@ export class HumanViews {
     idle.time = b.idleT;
     // Body activity layer (activity-poses.ts): free hands only (engine hand points / grips win), never on a frame or prone.
     const tSec = lerp(a.expressionT, b.expressionT, alpha);
+    const recordedPress = !!v.formPress?.some(p=>p.current!==false);
     const engineHands = !!(b.hands.left || b.hands.right || a.hands.left || a.hands.right);
     const freeBody = !v.grip && !v.on && !fp && proneW === 0 && !v.sleepPose;
     // Shared Wave eases from its recorded onset and lowers from the attained
@@ -1081,7 +1085,7 @@ export class HumanViews {
     const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
     if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
     const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
-    const act0: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep && lib.rise === undefined
+    const act0: ActivityFrame | null = !(recordedPress && v.activity === 'operate') && freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep && lib.rise === undefined
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
@@ -1090,7 +1094,7 @@ export class HumanViews {
     // posture-transition.ts: over a change of posture a face-down plank tilts up from (down to) the feet; after getting up
     // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
     const pn = lib.posture, own = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !lib.sleep && lib.rise === undefined && !letGo && !fluteRelease && !gestureBack && !pianoRelease && !waveActive;
-    const blendFrom = own && !pn && v.since !== undefined && v.since < ACT_BLEND && v.prevAct !== undefined && v.prevAct !== v.activity && !OWN_FADE.has(v.prevAct) && !OWN_FADE.has(v.activity)
+    const blendFrom = own && !pn && v.since !== undefined && v.since < ACT_BLEND && v.prevAct !== undefined && v.prevAct !== v.activity && !OWN_FADE.has(v.prevAct) && !OWN_FADE.has(v.activity) && !(recordedPress && (v.activity === 'operate' || v.prevAct === 'operate'))
       && postureKind(v.prevAct, v.prevBase) === postureKind(v.activity, v.base) ? v.prevAct : null;
     let act: ActivityFrame | null = !own ? act0
       : pn?.tilt ? pn.frame ?? activityFrame(pn.tilt.act, v.base, tSec, pairPhase, { actorId: h.name })
@@ -1149,7 +1153,7 @@ export class HumanViews {
     // Entry 7 (frisbee clear-v1): the arms lower out of the game on its own recorded clock; idle variety fades in under them
     const gameBlend = v.game?.flightPolicy === 'clear-v1' ? gameArmBlend(v.game, v.gameTick ?? 0, v.gameDt ?? .05) : 1;
     const gameShare = v.activity === 'idle' || v.game?.flightPolicy !== 'clear-v1' ? 1 : 1 - gameBlend;
-    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur && !lib.posture;
+    const idleFree = (recordedPress || waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur && !lib.posture;
     // Entry 43 (entry 41's M04 finding): a let-go before a reach fades the gesture out on its own clock; the reach after
     // it then fades none of its own (its gesture is already gone), and the act's own return of the idle (after the arm is
     // down) still applies. A reach with no let-go keeps the fade over the reach. A put of a handle-held item starts
@@ -1279,9 +1283,9 @@ export class HumanViews {
     const carryW = carried ? smooth(Math.min(1, (tSec - v.carrySince!) / CARRY_EASE)) : 0;
     const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
-    const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && ['idle', 'walk', 'run', 'jog'].includes(v.activity);
+    const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && (['idle', 'walk', 'run', 'jog'].includes(v.activity) || recordedPress && v.activity === 'operate');
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
-    if (!(footFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame)) return;
+    if (!(v.formPress || footFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame)) return;
     for (const s of v.saved) { s.p.copy(s.o.position); s.q.copy(s.o.quaternion); }
     v.layered = true;
     _fwd.set(Math.cos(yaw), 0, Math.sin(yaw)); // engine yaw 0 faces +x; holder.rotation.y = -yaw
@@ -1577,6 +1581,23 @@ export class HumanViews {
       });
       reachTo(v,targets,false);closeHands(v,targets.map(()=>0));
     } else dangle(v, pz.bend, []);
+    // The recorded press owns only its selected free hand, over the actual current base pose.
+    // Its native recovery is inside the move; cancellation lowers from the attained weight.
+    // Explicit hands, held props, grips and paired contacts always win.
+    if (v.formPress && freeBody && !hasHands && !gripping && !v.itemPose && !v.handActuator && !v.propWanted && !wantProp && !v.handHold && !v.rps && !v.partner) for (const press of v.formPress) {
+      const k = pressWeight(press,tSec), i = v.arms.findIndex((_,i) => armSide(v,i) === press.hand);
+      if (k > 0 && i >= 0) {
+        const arm = v.arms[i], from = palm(arm,V()), shoulder = arm.upper.getWorldPosition(V());
+        const left = armSide(v,i) === 'left';
+        const offset = V().copy(_fwd).multiplyScalar(.6).addScaledVector(_right,(left?-1:1)*-.18).addScaledVector(UP,-.3);
+        offset.clampLength(0,armLen(arm)*.98);
+        const target = shoulder.clone().add(offset);
+        const pole = arm.lower.getWorldPosition(V()).sub(shoulder.clone().add(from).multiplyScalar(.5));
+        pole.lerp(V().copy(_right).multiplyScalar(left?-.6:.6).addScaledVector(UP,-.5).addScaledVector(_fwd,-.2),k);
+        armTo(arm,from.lerp(target,k),k,.98,h,pole);
+        h.updateMatrixWorld(true); targets[i] = target; source = 'expression';
+      }
+    }
     // entry 35: hand games over whatever the arms do now (holding hands, an offered hand, a rock-paper-scissors count)
     const hgDiag = handGame ? poseHandGames(v, v.arms, (i) => armSide(v, i), h, _fwd, _right, h.position.y, v.spine?.head) : null;
     if (warmW > 0 && v.fire && !gripping && !hasHands) warmHands(v, warmW, h.position);

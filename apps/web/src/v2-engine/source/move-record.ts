@@ -11,6 +11,20 @@ export function moveRec(m: Map<number, unknown>, run?: unknown): MoveRec {
   if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
   const rec: MoveRec = { ...(run === undefined ? {} : { run: typeof run === 'number' || typeof run === 'bigint' ? String(run) : key(run as IdValue) }),
     body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
+  if (m.has(4)) {
+    const limbs = m.get(4);
+    if (!Array.isArray(limbs)) throw new Error('not a move record');
+    rec.limbs = limbs.map(v => {
+      const name = text(v);
+      if (typeof name !== 'string' || !name.length) throw new Error('not a move record');
+      return name;
+    });
+  }
+  if (m.has(6)) {
+    const contact = text(m.get(6));
+    if (typeof contact !== 'string' || !contact.length) throw new Error('not a move record');
+    rec.contact = contact;
+  }
   if (m.has(9)) {
     const e = m.get(9);
     if (!(e instanceof Map)) throw new Error('not a move end');

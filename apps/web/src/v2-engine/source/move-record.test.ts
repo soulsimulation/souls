@@ -56,3 +56,25 @@ test('absent ends stay absent; malformed release records cannot silently become 
   assert.equal(numericRun.run, '4');
   assert.deepEqual(numericRun.ended, { at: Number(released), how: 'released' });
 });
+
+
+test('press hand, named target and phase times survive the shared decoder with authoritative release', () => {
+  for (const hand of ['left', 'right']) {
+    const phaseEnds = [start + 250000n, start + 550000n];
+    const cut = start + 100000n;
+    const m = record(0, new Map<number, unknown>([[1, cut], [2, text('cancelled')]]));
+    m.set(2, text('souls:press')); m.set(4, [text(`souls:hand-${hand}`)]);
+    m.set(6, text('pile')); m.set(8, phaseEnds);
+    const decoded = throughCBOR(m);
+    assert.deepEqual(decoded.limbs, [`souls:hand-${hand}`]);
+    assert.equal(decoded.contact, 'pile', 'a name is retained without guessing world coordinates');
+    assert.equal(decoded.target, key(2));
+    assert.equal(decoded.start, Number(start));
+    assert.deepEqual(decoded.ends, phaseEnds.map(Number));
+    assert.deepEqual(decoded.ended, { at: Number(cut), how: 'cancelled' });
+    const g = gestureFrom(decoded)!;
+    assert.deepEqual(g.press, { hand, start: Number(start), contact: Number(phaseEnds[0]), end: Number(phaseEnds[1]) });
+    endGesture([g], decoded.start, decoded.ended!.at, decoded.run);
+    assert.equal(g.end, Number(cut), 'field9 still cuts the same run');
+  }
+});
