@@ -825,17 +825,30 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
     // The take moved nothing in one step: the crew's node was first set where the frame stood (the frame in its slot
     // exactly there), then went into its carriers' hands, at carrying height, a sample a tick, none more than 0.1 m from the last.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    let track: Vec<Vec3> = effects(&dir)
-        .into_iter()
-        .filter_map(|e| match e.body {
-            Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
-                Change::Motion(h) if h.node == carry => Some(h.pose.position),
+    // Read once the track has ended (at most 1.2 s of world time; a loaded machine's log lags it), within 10 s.
+    let samples = |dir: &Path| -> Vec<Vec3> {
+        effects(dir)
+            .into_iter()
+            .filter_map(|e| match e.body {
+                Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                    Change::Motion(h) if h.node == carry => Some(h.pose.position),
+                    _ => None,
+                }),
                 _ => None,
-            }),
-            _ => None,
-        })
-        .collect();
+            })
+            .collect()
+    };
+    let until = Instant::now() + Duration::from_secs(10);
+    let track = loop {
+        let t = samples(&dir);
+        let up = t
+            .last()
+            .is_some_and(|p| (p.y - sim::activity::carry::HEIGHT).abs() <= 5_000);
+        if up || Instant::now() > until {
+            break t;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     let first = track.first().copied().expect("the crew's node was placed");
     println!(
         "the take's track: {} samples from ({}, {}, {}) mm to {:?}",
