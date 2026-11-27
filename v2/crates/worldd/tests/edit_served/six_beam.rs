@@ -206,7 +206,7 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
     let got = six[0].act("part:take", c, part_of(beam)).await;
     println!("six take the beam: {got:?}");
     assert_eq!(got.kind, 1, "six take the beam");
-    let end = 1_780_000;
+    let end = 1_750_000;
     let slot = v3(m_hl.x, 0, m_hl.z);
     let west = v3(slot.x - 2_500_000, 0, slot.z);
     walk_all(
