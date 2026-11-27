@@ -96,7 +96,7 @@ test('the card is told whether the Soul\'s agent is connected (the gateway\'s {"
 test('#1330: the box socket down for OUTAGE_MS → unavailable, nothing of the agent; reconnect → normal; a send in between keeps its words', async () => {
   const { OUTAGE_MS, UNAVAILABLE_SEND } = await import('./owner-mailbox.ts');
   let t = 1_000_000, up = true;
-  const sock = { ...fakeSocket((f) => (f.startsWith('put ') ? { sent: { id: 'm9' } } : null)), onOpen: null as ((o: boolean) => void) | null };
+  const sock = Object.assign(fakeSocket((f) => (f.startsWith('put ') ? { sent: { id: 'm9' } } : null)), { onOpen: null as ((o: boolean) => void) | null });
   const sendText = sock.sendText;
   sock.sendText = (x: string) => (up ? sendText(x) : false);
   const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT), () => t);
@@ -129,7 +129,7 @@ test('#1330: the box socket down for OUTAGE_MS → unavailable, nothing of the a
 
 test('#1330: a first connection that fails counts as down (a page opened during an outage)', async () => {
   let t = 5_000;
-  const sock = { ...fakeSocket(() => null), onOpen: null as ((o: boolean) => void) | null };
+  const sock = Object.assign(fakeSocket(() => null), { onOpen: null as ((o: boolean) => void) | null });
   const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT), () => t);
   await mb.read();
   assert.equal((await mb.read()).unavailable, undefined, 'still making its first connection');

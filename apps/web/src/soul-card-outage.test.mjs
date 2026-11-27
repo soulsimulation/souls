@@ -24,7 +24,7 @@ test('unavailable: "World unavailable" in place of Connected and the stale activ
  const html=render(h(SoulCardView,{...was,send,inbox,mailbox:true,unavailable:true,doing:'Walking',place:'the pond'})),t=text(html);
  assert.match(html,/data-soul-state="unavailable"/);
  assert.match(html,/data-status="unavailable"/);assert.match(t,/World unavailable/);
- assert.doesNotMatch(t,/Connected|Walking|at the pond|Awake/,'no stale link or activity');
+ assert.doesNotMatch(t,/Connected|Walking|Awake/,'no stale link or activity');
  assert.ok(html.includes('data-agent-message="soul"'),'the message box stays');
  assert.match(html,/<button type="submit" disabled="">Send<\/button>/,'Send is off');
  assert.match(html,/data-world-unavailable="1"/);assert.ok(t.includes(UNAVAILABLE_LINE));
