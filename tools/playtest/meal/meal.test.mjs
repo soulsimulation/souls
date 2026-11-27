@@ -277,5 +277,30 @@ test('tracked meal boot template reuses existing entry pictures and canonical co
   defs.forEach((o, i) => assert.deepEqual({ ...o.def, name: original[i].def.name }, original[i].def));
   for (const name of ['core/sink@1', 'core/table@1', 'core/chair@1']) assert(ops.some(o => o.op === 'place' && o.def === name));
   assert.deepEqual(ops.find(o => o.name === 'meal-bowl').in, { parent: '$pot', slot: 'shelf' });
-  assert.deepEqual(ops.filter(o => o.op === 'place').map(o => o.p), [[-3, 0], [0, 0, 0], [3, 0], [0, 3], [0, 4.1]]);
+  assert.deepEqual(ops.filter(o => o.op === 'place').map(o => o.p), [[-3, 0], [0, 0, 0], [3, 0], [0, 3], [0, 4.45]]);
+});
+
+test('boot chair spacing clears the retained native under-slot cuts; registered stand and routes remain unproved', () => {
+  // Retained public genesis06133084 and chair entry5c105880: actual imported front539mm, not source509mm.
+  // Historical native1ee0e45f: ground/scene.rs under_slots fills these elevated slots' leg spans;
+  // ground/mod.rs prepare expands them by standard radius280 + MARGIN60 +1mm. This is offline geometry only.
+  const furniture = JSON.parse(readFileSync(resolve('packages/world-compiler/src/core-kit/furniture.json')));
+  const [table, chair] = ['core-table', 'core-chair'].map(name => furniture.find(d => d.name === name));
+  const mm = metres => Math.round(metres * 1000);
+  const cylinderLegs = def => def.make.args.shapes.filter(s => s.kind === 'cyl' && s.h >= .3)
+    .map(s => [mm(s.at[0]), mm(s.at[2]), mm(s.r), mm(s.at[1] - s.h / 2)]);
+  assert.deepEqual(cylinderLegs(table), [[-520, -320, 30, 0], [520, -320, 30, 0], [-520, 320, 30, 0], [520, 320, 30, 0]]);
+  assert.deepEqual(cylinderLegs(chair), [[-160, -150, 22, 0], [160, -150, 22, 0], [-160, 150, 22, 0], [160, 150, 22, 0], [-200, -190, 20, 465], [200, -190, 20, 465]]);
+  assert.equal(mm(table.slots[0].p[1]), 750); assert.equal(mm(chair.slots[0].p[1]), 470);
+  const frontLegEdge = def => Math.max(...cylinderLegs(def).map(([, z, r]) => z + r));
+  const expanded = 280 + 60 + 1;
+  const ops = mealTemplate(entries).batches[0].ops;
+  const tableAt = ops.find(o => o.name === 'meal-table'), chairAt = ops.find(o => o.name === 'diner-chair');
+  assert.equal(chairAt.r, Math.PI);
+  const tableCut = mm(tableAt.p[1]) + frontLegEdge(table) + expanded;
+  const oldChairCut = 4100 - frontLegEdge(chair) - expanded;
+  assert.equal(tableCut, 3691); assert.equal(tableCut - oldChairCut, 104, 'the previous actual cuts overlapped');
+  const declaredFront = mm(chairAt.p[1]) - 539, chairCut = mm(chairAt.p[1]) - frontLegEdge(chair) - expanded;
+  assert.equal(declaredFront, 3911); assert.equal(chairCut, 3937);
+  assert(declaredFront > tableCut && declaredFront < chairCut, 'the declared front has clear ground between the actual cuts');
 });

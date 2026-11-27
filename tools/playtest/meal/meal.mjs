@@ -49,7 +49,7 @@ export function sceneOf(entries) {
       { op: 'place', def: bowl.ref, name: 'meal-bowl', in: { parent: '$pot', slot: 'shelf' }, p: [0, 0, 0] },
       { op: 'place', def: sink.ref, name: 'wash-sink', p: [3, 0] },
       { op: 'place', def: table.ref, name: 'meal-table', p: [0, 3] },
-      { op: 'place', def: chair.ref, name: 'diner-chair', p: [0, 4.1], r: Math.PI },
+      { op: 'place', def: chair.ref, name: 'diner-chair', p: [0, 4.45], r: Math.PI },
     ] }] },
     map: { format: 'souls-world-map/1', rows: definitions.map(({ entry, ref }) => ({ def: ref, entry: entry.kind, kind: entry.kind })) },
   };
