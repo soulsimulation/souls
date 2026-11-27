@@ -114,7 +114,9 @@ test('dedicated support controls remain random-access and preserve recorded inpu
     draw(controls[0]);
     const seated=views.bones()[id];
     assert.equal(seated.hipY,.54,'the existing .45 m seat owns the pelvis offset');
-    assert.deepEqual(seated.feet,[[1.4612,.1137,-1.0675],[1.3624,.1141,-.681]],'seat foot placement stays byte-for-byte at the clean-source readout');
+    assert.deepEqual(seated.feet.map(p=>[p[0],p[2]]),[[1.4612,-1.0675],[1.3624,-.681]],'seat support retains the authored horizontal foot placement');
+    const support=skin(views,id);
+    for(const side of ['L','R'])assert(support['foot'+side].min>=.001&&support['foot'+side].min<=.007,'the intended seated repair lowers the complete drawn shoe to reachable support');
     draw(controls[8]);
     const native=views.bones()[id].arms.find(a=>a.side==='left')!;
     assert.equal(native.source,'hands');assert.equal(native.contact,1);assert.equal(native.err,0);
