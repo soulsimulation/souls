@@ -20,6 +20,14 @@ export function counterDone(answer, label) {
   assert(answer.ok === true && answer.phase === 'done' && answer.receipt?.answers?.at(-1)?.answer === 'receipt', `${label}: ${answer.code ?? answer.phase ?? 'no terminal receipt'}`);
   return answer;
 }
+export function counterRefused(answer, reason) {
+  assert(Number.isSafeInteger(answer.sequence) && answer.sequence > 0, 'refusal must be an ordinary sent native sequence');
+  assert.equal(answer.phase, 'refused', 'refusal must reach its terminal phase');
+  assert.equal(answer.receipt?.sequence, answer.sequence, 'refusal must retain the exact native sequence');
+  const last = answer.receipt?.answers?.at(-1);
+  assert(last?.answer === 'refused' && last.reason === reason, `expected native refusal ${reason}`);
+  return answer;
+}
 function activityId(look) {
   assert.equal(look.ok, true, 'activity look must succeed');
   const lines = (look.in ?? []).filter(line => line.includes('counter-match'));
@@ -59,8 +67,9 @@ export async function discoverCounterMatch({ seats, name = 'counter-match', comm
 }
 
 /** Turn/refusal/consent diagnostic through ordinary interfaces; successful receipts are followed by state reads. */
-export async function rehearseCounterMatch({ seats, name, record = () => {}, sleep = pause }) {
+export async function rehearseCounterMatch({ seats, name, record = () => {}, sleep = pause, observe = async () => {}, midRoundDeparture = false }) {
   assert(seats.length >= 2 && seats.length <= 4, 'this diagnostic plays the intended 1 versus 1–3 layout');
+  assert(!midRoundDeparture || seats.length >= 3, 'mid-round departure needs a remaining teammate');
   assert(new Set(seats.map(s => s.body)).size === seats.length && new Set(seats.map(s => s.label)).size === seats.length && seats.every(s => s.body && s.label), 'each participant must control a distinct known body');
   const command = async (seat, ...words) => { const answer = await seat.cli(...words); record({ person: seat.label, words, answer }); return answer; };
   const discovery = await discoverCounterMatch({ seats, name, command }), board = discovery[0].board.id;
@@ -69,6 +78,7 @@ export async function rehearseCounterMatch({ seats, name, record = () => {}, sle
     const answer = await command(seat, 'inspect', board); assert.equal(answer.id, board, 'state readback must retain table identity');
     const state = counterState(answer);
     for (const [key, value] of Object.entries(expected)) assert.equal(state[key], value, `counter ${key} readback`);
+    await observe('state', { seat, board, state, answer });
     return state;
   };
   const use = async (seat, form, args) => counterDone(await command(seat, 'act', ...counterOffer(discovery[seats.indexOf(seat)].board, form, args), '--wait'), form);
@@ -103,29 +113,35 @@ export async function rehearseCounterMatch({ seats, name, record = () => {}, sle
   await accept(second[0]);
   const initialMembers = await membership(id, [first, second[0]]);
   const secondArgs = seat => ({ stand: discovery[seats.indexOf(seat)].stands[second.indexOf(seat)] });
-  const wrongTurn = await command(second[0], 'can', ...counterOffer(discovery[1].board, 'take_1_second', secondArgs(second[0])));
-  assert(wrongTurn.can === 'no' && wrongTurn.current === true && wrongTurn.reason === 'field_differs' && wrongTurn.says === 'first_to_play', 'wrong turn must name the first side before any take');
+  const wrongTurnAdvisory = await command(second[0], 'can', ...counterOffer(discovery[1].board, 'take_1_second', secondArgs(second[0])));
+  const wrongTurn = counterRefused(await command(second[0], 'act', ...counterOffer(discovery[1].board, 'take_1_second', secondArgs(second[0])), '--wait'), 'field_differs');
+  await read(first, { remaining: 7, turn: 'first', winner: null });
   await use(first, 'take_1_first'); await read(first, { remaining: 6, turn: 'second' });
   for (const seat of second.slice(1)) await accept(seat);
   const allMembers = await membership(id, seats);
   const recovered = await command(second[0], 'can', ...counterOffer(discovery[1].board, 'take_2_second', secondArgs(second[0])));
-  assert(recovered.can === 'yes' || recovered.can === 'unknown', 'a definite refusal still blocks the recovered turn');
   await use(second[0], 'take_2_second', secondArgs(second[0])); await read(second[0], { remaining: 4, turn: 'first' });
   await use(first, 'take_1_first'); await read(first, { remaining: 3, turn: 'second' });
-  await use(second.at(-1), 'take_1_second', secondArgs(second.at(-1))); await read(second.at(-1), { remaining: 2, turn: 'first' });
-  await use(first, 'take_2_first'); const finished = await read(first, { remaining: 0, turn: 'second', winner: 'first' });
-  await use(first, 'restart'); await read(first, { remaining: 7, turn: 'first', winner: null });
   const departures = [];
-  for (const seat of [...second].reverse()) {
+  const depart = async (seat, expected) => {
     counterDone(await command(seat, 'together', 'leave', id), 'independent leave');
     const look = await command(seat, 'look'); assert(look.ok === true && !(look.in ?? []).some(line => line.includes(word)), 'departed player must no longer be a member');
     departures.push(seat.label); await membership(id, seats.filter(s => !departures.includes(s.label)));
-    await read(first, { remaining: 7, turn: 'first' });
-  }
-  const noOpponent = await command(first, 'can', ...counterOffer(discovery[0].board, 'take_1_first'));
-  assert(noOpponent.can === 'no' && noOpponent.current === true && noOpponent.says === 'other_side_missing', 'taking alone must explain the missing opponent');
+    await read(first, expected);
+    await observe('departure', { seat, board, midRound: expected.remaining === 3 });
+  };
+  if (midRoundDeparture) await depart(second.at(-1), { remaining: 3, turn: 'second' });
+  const next = midRoundDeparture ? second[0] : second.at(-1);
+  await use(next, 'take_1_second', secondArgs(next)); await read(second.at(-1), { remaining: 2, turn: 'first' });
+  await use(first, 'take_2_first'); const finished = await read(first, { remaining: 0, turn: 'second', winner: 'first' });
+  await use(first, 'restart'); await read(first, { remaining: 7, turn: 'first', winner: null });
+  for (const seat of [...second].reverse().filter(s => !departures.includes(s.label))) await depart(seat, { remaining: 7, turn: 'first' });
+  const noOpponentAdvisory = await command(first, 'can', ...counterOffer(discovery[0].board, 'take_1_first'));
+  const noOpponent = counterRefused(await command(first, 'act', ...counterOffer(discovery[0].board, 'take_1_first'), '--wait'), 'not_linked');
+  await read(first, { remaining: 7, turn: 'first' });
   counterDone(await command(first, 'together', 'leave', id), 'first leaves');
   const final = await command(first, 'look'); assert(final.ok === true && !(final.in ?? []).some(line => line.includes(word)), 'first must leave too');
+  await observe('clean', { seats, board });
   return { complete: true, diagnosticOnly: true, independentCollaborationProved: false, approaches, handContactProved: false, discovery, initialMembers, allMembers,
-    refusalRecovery: { wrongTurn, recovered, completedSecondTake: true }, finished, winnerBasis: 'remaining=0: opposite the recorded next turn; last observed taker was first', departures, noOpponent };
+    refusalRecovery: { wrongTurnAdvisory, wrongTurn, recovered, completedSecondTake: true }, finished, winnerBasis: 'remaining=0: opposite the recorded next turn; last observed taker was first', departures, midRoundDeparture, noOpponentAdvisory, noOpponent };
 }

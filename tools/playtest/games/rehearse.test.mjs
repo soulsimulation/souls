@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { counterState, counterDone, rehearseCounterMatch } from './rehearse.mjs';
+import { counterState, counterDone, counterRefused, rehearseCounterMatch } from './rehearse.mjs';
 const done = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
 // Independent public replies: never import client builders, native rules, entry internals or private fixture ids.
-function publicGame({ players = 3, busy = false, declined = false, staleTurn = false, wrongWinner = false, stuckLeave = false, approachFails = false } = {}) {
+function publicGame({ players = 3, busy = false, declined = false, staleTurn = false, wrongWinner = false, stuckLeave = false, approachFails = false, refusalReason = null, refusalWrites = false, advisoryUnknown = true } = {}) {
   const calls = [], members = new Map(), board = 'observed-table', activity = 'observed-invitation';
-  let offered = false, remaining = 7, turn = 'first';
+  let offered = false, remaining = 7, turn = 'first', sequence = 0;
+  const refused = reason => { const n=++sequence; return {ok:true,sequence:n,phase:'refused',receipt:{sequence:n,answers:[{answer:'refused',reason:refusalReason??reason}]}}; };
   const card = 'Offerer first vs 1–3 second; second_stand/second_back/second_far; last wins.';
   const acts = { take_1_first: 'first-one', take_2_first: 'first-two', take_1_second: 'second-one', take_2_second: 'second-two', restart: 'new-round' };
   const inspectBoard = () => ({ ok: true, id: board, card, state: { remaining, turn }, offers: [{ name: 'walk', act: `approach:${board}` }, ...Object.entries(acts).map(([name, alias]) => ({ name, act: `${alias}:${board}`, ...(name.endsWith('second') ? { params: { stand: { type: 'part' } } } : {}) }))] });
@@ -29,6 +30,7 @@ function publicGame({ players = 3, busy = false, declined = false, staleTurn = f
     }
     if (op === 'together' && sub === 'leave') { assert.equal(id, activity); if (!(stuckLeave && i === players - 1)) members.delete(i); return done(); }
     if (op === 'can') {
+      if (advisoryUnknown) return {ok:true,can:'unknown',why:'not-seen:not_linked',current:true};
       if (i === 0 && ![...members.values()].includes('second')) return { ok: true, can: 'no', current: true, reason: 'not_linked', says: 'other_side_missing' };
       if (i > 0 && (turn === 'first' || staleTurn)) return { ok: true, can: 'no', current: true, reason: 'field_differs', says: 'first_to_play' };
       return { ok: true, can: 'yes', current: true };
@@ -36,6 +38,8 @@ function publicGame({ players = 3, busy = false, declined = false, staleTurn = f
     if (op === 'act') {
       if (sub === `approach:${board}`) return approachFails ? { ok: false, phase: 'refused', code: 'walk.blocked' } : done();
       const form = Object.entries(acts).find(([, alias]) => sub === `${alias}:${board}`)?.[0]; assert(form, 'use public offer aliases');
+      if (form !== 'restart' && ![...members.values()].includes(i===0?'second':'first')) return refused('not_linked');
+      if (form !== 'restart' && (turn !== (i===0?'first':'second') || staleTurn && i>0)) { if(refusalWrites) remaining--; return refused('field_differs'); }
       if (form === 'restart') { remaining = 7; turn = 'first'; }
       else {
         if (i > 0) assert(words.includes(`stand=${['second_stand', 'second_back', 'second_far'][i - 1]}`), 'each second-side player keeps its discovered approach');
@@ -61,7 +65,7 @@ test('ordinary discovery, exact invitation, late teammate, refusal recovery, win
   const fixture = publicGame(), report = await run(fixture);
   assert.equal(report.complete, true); assert.equal(report.finished.winner, 'first');
   assert.equal(report.initialMembers.members.length, 2); assert.equal(report.allMembers.members.length, 3);
-  assert.equal(report.refusalRecovery.wrongTurn.says, 'first_to_play'); assert.equal(report.refusalRecovery.completedSecondTake, true);
+  assert.equal(report.refusalRecovery.wrongTurn.receipt.answers.at(-1).reason, 'field_differs'); assert.equal(report.refusalRecovery.completedSecondTake, true);
   assert.deepEqual(report.departures, ['player-2', 'player-1']); assert.equal(fixture.members.size, 0);
   assert.equal(report.independentCollaborationProved, false);
   assert.equal(report.handContactProved, false);
@@ -99,8 +103,8 @@ test('declined consent stops before any counter action', async () => {
 
 test('a continuing definite wrong-turn refusal prevents claiming recovery', async () => {
   const fixture = publicGame({ staleTurn: true });
-  await assert.rejects(run(fixture), /definite refusal/);
-  assert.equal(fixture.calls.filter(c => c.words[0] === 'act' && c.words[1] !== 'approach:observed-table').length, 1);
+  await assert.rejects(run(fixture), /take_2_second: refused/);
+  assert.equal(fixture.calls.filter(c => c.words[0] === 'act' && c.words[1] !== 'approach:observed-table').length, 3);
 });
 
 test('an inconsistent final next-turn cannot name the last taker as winner', async () => {
@@ -116,4 +120,22 @@ test('a refused ordinary approach stops before offering or taking counters', asy
   await assert.rejects(run(fixture), /walk.blocked/);
   assert(!fixture.calls.some(c => c.words[0] === 'together' && c.words[1] === 'offer'));
   assert.equal(fixture.calls.filter(c => c.words[0] === 'act').length, 1);
+});
+
+
+test('native refusals require exact sequence/terminal/reason rather than a local can answer',()=>{
+  assert.throws(()=>counterRefused({can:'no',reason:'field_differs'},'field_differs'),/sent native sequence/);
+  assert.throws(()=>counterRefused({sequence:1,phase:'refused',receipt:{sequence:2,answers:[{answer:'refused',reason:'field_differs'}]}},'field_differs'),/exact native sequence/);
+});
+test('unrelated native refusal or a refusal that changes the board cannot count as expected turn refusal',async()=>{
+  await assert.rejects(run(publicGame({refusalReason:'out_of_reach'})),/expected native refusal field_differs/);
+  await assert.rejects(run(publicGame({refusalWrites:true})),/remaining readback/);
+});
+test('optional mid-round departure retains the remaining opponent and lets that opponent finish',async()=>{
+  const fixture=publicGame(),stages=[];
+  const result=await rehearseCounterMatch({seats:fixture.seats,sleep:async()=>{},midRoundDeparture:true,observe:async(stage,detail)=>stages.push({stage,...detail})});
+  assert.equal(result.midRoundDeparture,true);assert.deepEqual(result.departures,['player-2','player-1']);
+  assert(stages.some(s=>s.stage==='departure'&&s.midRound));
+  assert(stages.filter(s=>s.stage==='state').some(s=>s.state.remaining===3&&s.state.turn==='second'));
+  assert.equal(stages.at(-1).stage,'clean');assert.equal(result.finished.winner,'first');
 });
