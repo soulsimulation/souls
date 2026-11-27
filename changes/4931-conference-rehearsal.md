@@ -8,3 +8,5 @@ Creator pairing reads the public principal from the owned fixture's world direct
 Finite creator commands use their owned home as working directory so long socket paths remain within Node's read allowance, without permission to spawn another daemon.
 Question rehearsal keeps advisory client verdicts distinct from native refusals, verifies the original request survives, and proves author recovery with a new post.
 Conference proof samples visible body geometry against the lectern's drawn surfaces, retaining penetration witnesses separately from uncertain surface contact.
+
+Turn only the rehearsal lectern placement toward the audience; geometric checks bind the canonical speaker stand and listener seats, while actual native facing and turn continuity still require page observation.
