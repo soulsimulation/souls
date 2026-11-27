@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
-import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
+import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
@@ -123,7 +123,7 @@ export function conferenceMeetingStage(frames, stages, event) {
 export function conferenceMeetingJourney(frames, stages, seats) {
   assert.equal(seats.length, 5, 'conference meeting requires five participants');
   const counts = { 'attend-done': 8, 'lectern-ready': 2, 'lecture-ready': 2, 'story-complete': 2,
-    'seated-wave-done': 1, 'rise-done': 8, point: 2, settled: 2,
+    'seated-wave-done': 1, 'rise-done': 8, point: 1, settled: 1,
     'question-posted': 1, 'question-refused': 1, 'question-recovered': 1, 'introduction-done': 1, 'conference-clean': 1 };
   for (const [stage, count] of Object.entries(counts)) assert.equal(stages.filter(s => s.stage === stage).length, count,
     `conference ${stage} stage coverage incomplete`);
@@ -144,6 +144,40 @@ export function conferenceMeetingJourney(frames, stages, seats) {
   assert(stages.indexOf(stages.find(s => s.stage === 'question-recovered')) > stages.indexOf(refused), 'conference recovery precedes refusal');
   return { people: seats.length, entryTransitions: 8, rises: 8, question: 'posted-refused-recovered', presentations: 2,
     firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
+}
+
+/** Ordinary creator proof: the edit's returned name is the only identity used for readback. */
+export async function proveConferenceCreator({ creator, record = () => {}, signal }) {
+  const cli = async (...words) => {
+    signal?.throwIfAborted(); const answer = await creator.cli(...words);
+    record({ person: creator.label, words, answer });
+    assert.equal(answer.ok, true, `conference creator ${words[0]}: ${answer.code ?? 'refused'}`);
+    return answer;
+  };
+  let described, kinds, grounds;
+  for (const until = Date.now() + 10000;;) {
+    described = await cli('describe');
+    kinds = Object.keys(described.kinds ?? {}).filter(kind => kind.split('@')[0] === 'eden:conference_question');
+    grounds = (described.nodes ?? []).filter(node => /^(?:[a-z][a-z0-9_-]*:)?ground$/.test(node.kind.split('@')[0]));
+    if (kinds.length && grounds.length) break;
+    assert(Date.now() < until, 'conference creator copy never lists the boot family kind and ground');
+    await new Promise(ok => setTimeout(ok, 100));
+  }
+  assert.equal(kinds.length, 1, 'conference creator family revision must be unambiguous');
+  assert.equal(grounds.length, 1, 'conference creator ground must be unambiguous');
+  const kind = kinds[0], ground = grounds[0].id;
+  // Declared once: flat, unused ground outside the demonstration area. Never retry a refused placement elsewhere.
+  const place = await cli('place', kind, '--in', String(ground), '--at', '12,0,12');
+  assert(Number.isSafeInteger(place.sequence) && place.sequence > 0, 'conference creator terminal edit sequence missing');
+  assert.deepEqual(Object.keys(place.names ?? {}), ['1'], 'conference creator place must return exactly its named thing');
+  const id = place.names['1']; assert(typeof id === 'string' && id, 'conference creator returned no placed identity');
+  const readback = await cli('describe', id);
+  assert.equal(readback.id, id, 'conference creator readback changed the returned identity');
+  assert.equal(readback.kind, kind, 'conference creator readback changed the selected kind revision');
+  assert.equal(String(readback.in?.[0]?.id), String(ground), 'conference creator readback is in another parent');
+  assert.deepEqual(readback.at, [12, 0, 12], 'conference creator readback differs from the declared placement');
+  return { kind, id, parent: ground, at: readback.at, sequence: place.sequence,
+    qualification: 'ordinary describe/place/readback receipt; boot furniture supplies the clip, post-boot drawing is not claimed' };
 }
 
 export async function prepare({ base, paths, recipe, signal }) {
@@ -168,6 +202,9 @@ export async function prepare({ base, paths, recipe, signal }) {
   ]);
   state.fixtures = conferenceFixtures({ lecterns, questions, benches });
   state.discovery = await discoverConference({ seat: state.seats[0], ...state.fixtures, record: state.record });
+  state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
+  state.creatorProof = await proveConferenceCreator({ creator: state.creator, record: state.record, signal });
+  save(paths, 'command-conference-creator.json', state.creatorProof);
   save(paths, 'command-conference-discovery.json', { fixtures: state.fixtures, discovery: state.discovery, rows: state.rows,
     servedClient: JSON.parse(readFileSync(join(paths.dir, 'conference-served-client.json'), 'utf8')) });
   return { people: state.seats.length, fixtures: state.fixtures };
@@ -350,12 +387,12 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       }
     };
     state.result = await performConference({ seats: state.seats, ...state.fixtures, record: state.record,
-      storyRepeats: 1, interruptStory: true, observe });
+      storyRepeats: 1, interruptStory: true, interruptFirstOnly: true, observe });
     state.depictedJourney = conferenceMeetingJourney(state.frameReads, state.stages, state.seats);
     const draw = await page.evaluate(() => ({ samples: window.__conferenceDrawObserver?.samples.length, failures: window.__conferenceDrawObserver?.failures }));
     assert(draw.samples >= 2 && draw.failures?.length === 0, 'conference final-draw measurement missing or failed');
     signal.throwIfAborted();
-    check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 2 && state.result.handover,
+    check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 1 && state.result.handover,
       'Ordinary receipts and advancing depicted entry, seated gesture/return, rise, questions/recovery, handover and cleanup; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }

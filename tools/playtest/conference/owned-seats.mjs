@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { accessSync, constants, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { lastJson, pairArgs, seatEnv } from '../arena/new-engine/seat.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -111,11 +112,8 @@ export async function startConferenceResident({ recipe, clientRoot, seat, signal
   return child;
 }
 
-export async function pairConferenceSeat({ recipe, paths, bundle, label, name, signal }) {
-  requireConferenceRecipe(recipe);
-  assert(/^[a-z][a-z0-9-]{0,31}$/.test(label), 'conference-proof synthetic seat label');
-  const folder = join(paths.data, 'seats', label), home = join(folder, '.souls'); mkdirSync(folder, { recursive: true });
-  const env = seatEnv(home, recipe.pkg), seat = { label, folder, home, env, soul: null, body: null };
+async function conferenceServedSource({ recipe, paths, bundle, seat, signal }) {
+  const { folder, home, env, label } = seat;
   let ordinal = 0;
   const command = (args, options = {}) => ownedConferenceCommand(recipe, args, {
     cwd: folder, env, signal, log: join(paths.dir, `conference-command-${label}-${++ordinal}.json`), ...options,
@@ -131,6 +129,15 @@ export async function pairConferenceSeat({ recipe, paths, bundle, label, name, s
     assert.equal(hash(readFileSync(join(clientRoot, source))), hash(readFileSync(join(recipe.checkout, source))),
       `conference-proof served source mismatch: ${source}`);
   }
+  return { command, clientRoot };
+}
+
+export async function pairConferenceSeat({ recipe, paths, bundle, label, name, signal }) {
+  requireConferenceRecipe(recipe);
+  assert(/^[a-z][a-z0-9-]{0,31}$/.test(label), 'conference-proof synthetic seat label');
+  const folder = join(paths.data, 'seats', label), home = join(folder, '.souls'); mkdirSync(folder, { recursive: true });
+  const env = seatEnv(home, recipe.pkg), seat = { label, folder, home, env, soul: null, body: null };
+  const { command, clientRoot } = await conferenceServedSource({ recipe, paths, bundle, seat, signal });
   let resolveApproval;
   const approval = new Promise(ok => { resolveApproval = ok; });
   const pairing = command([join(clientRoot, 'v2/client/src/pair/pair.mjs'), ...pairArgs(recipe.world, label), '--name', name], {
@@ -166,5 +173,68 @@ export async function pairConferenceSeat({ recipe, paths, bundle, label, name, s
       signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
     });
   }
+  return seat;
+}
+
+
+/** Only this registered resident may start. Finite creator CLIs cannot auto-start another daemon. */
+export function conferenceCreatorArgs({ clientRoot, home, soul }, words) {
+  assert(typeof soul === 'string' && /^c_[A-Za-z0-9_-]+$/.test(soul), 'conference creator grant required');
+  return ['--permission', `--allow-fs-read=${clientRoot}`, `--allow-fs-read=${resolve(home, '..')}`, `--allow-fs-write=${home}`,
+    join(clientRoot, 'v2/client/src/creator/souls-god.mjs'), ...words, '--creator', soul];
+}
+
+/** Probe the actual Node executable on the real unchanged auto-start path before starting a creator resident. */
+export async function verifyConferenceCreatorPermission({ recipe, paths, clientRoot, signal }) {
+  const home = join(paths.data, 'creator-child-probe'); mkdirSync(home, { recursive: true });
+  const module = pathToFileURL(join(clientRoot, 'v2/client/src/daemon/client.mjs')).href;
+  const script = `import { call } from ${JSON.stringify(module)};
+    try { await call(${JSON.stringify(home)}, 'c_public', {op:'describe'}, {within:500}); process.exitCode=2; }
+    catch(error) { console.log(JSON.stringify({node:process.version,code:error.code,permission:error.permission,canSpawn:process.permission.has('child')})); }`;
+  const result = await ownedConferenceCommand(recipe, ['--permission', `--allow-fs-read=${clientRoot}`,
+    `--allow-fs-read=${home}`, `--allow-fs-write=${home}`, '--input-type=module', '-e', script], {
+    cwd: home, env: { PATH: process.env.PATH, BRAIN_MODE: 'fake' }, signal,
+    log: join(paths.dir, 'command-conference-creator-node.json'),
+  });
+  assert(result.node === process.version && result.code === 'ERR_ACCESS_DENIED' && result.permission === 'ChildProcess' && result.canSpawn === false,
+    'conference creator Node must fail closed before daemon auto-spawn');
+  return result;
+}
+
+export async function pairConferenceCreator({ recipe, paths, bundle, signal }) {
+  requireConferenceRecipe(recipe);
+  const label = 'conference-creator', folder = join(paths.data, 'seats', label), home = join(folder, '.souls');
+  mkdirSync(folder, { recursive: true });
+  const seat = { label, folder, home, env: seatEnv(home, recipe.pkg), soul: null };
+  const { command, clientRoot } = await conferenceServedSource({ recipe, paths, bundle, seat, signal });
+  const creatorModule = 'v2/client/src/creator/souls-god.mjs';
+  assert.equal(hash(readFileSync(join(clientRoot, creatorModule))), hash(readFileSync(join(recipe.checkout, creatorModule))),
+    'conference-proof served creator source mismatch');
+  await verifyConferenceCreatorPermission({ recipe, paths, clientRoot, signal });
+  // This is run.sh's public seeded creator principal, never a token or a stored credential.
+  const principal = readFileSync(join(recipe.world.dir, 'creator'), 'utf8').trim();
+  assert(/^[0-9a-f]{32}-[0-9]+$/.test(principal), 'conference-proof public boot creator principal missing');
+  let resolveApproval;
+  const approval = new Promise(ok => { resolveApproval = ok; });
+  const pairing = command([join(clientRoot, 'v2/client/src/pair/pair.mjs'), ...pairArgs(recipe.world, label), '--creator', `creator-${principal}`], {
+    timeoutMs: 20000, onLine: line => { const answer = lastJson(line); if (answer?.step === 'approve') resolveApproval(answer); },
+  });
+  const settled = pairing.then(answer => ({ answer }), error => ({ error }));
+  const asked = await Promise.race([approval, settled.then(() => { throw Error('conference-proof.creator-pair-ended-before-approval'); })]);
+  const response = await fetch(new URL('/v1/pair/approve', recipe.world.directory), {
+    method: 'POST', headers: { 'content-type': 'application/json' }, signal,
+    body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'Ada' }),
+  });
+  assert.equal(response.status, 200, 'conference-proof synthetic creator approval');
+  const result = await settled;
+  if (result.error) throw result.error;
+  assert(result.answer?.ok === true && result.answer.soul === `c_${principal}`, 'conference-proof pairing must return the public creator grant');
+  seat.soul = result.answer.soul;
+  const resident = await startConferenceResident({ recipe, clientRoot, seat, signal, log: join(paths.dir, 'conference-client-creator.log') });
+  seat.cli = async (...words) => {
+    signal.throwIfAborted();
+    assert(resident.exitCode === null && resident.signalCode === null, 'conference-proof creator resident must remain alive');
+    return command(conferenceCreatorArgs({ clientRoot, home, soul: seat.soul }, words));
+  };
   return seat;
 }

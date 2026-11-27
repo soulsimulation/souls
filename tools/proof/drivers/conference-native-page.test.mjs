@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney } from './conference-native-page.mjs';
+import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
 
 test('tracked conference fixture preserves the existing authored layout exactly', () => {
@@ -147,7 +147,7 @@ test('rise and question gates require actual depicted standing and the next ordi
 test('meeting gate rejects a short journey and incomplete assembly observations', () => {
   assert.throws(() => conferenceMeetingJourney([], [], Array(5).fill({})), /stage coverage incomplete/);
   const counts = { 'attend-done': 8, 'lectern-ready': 2, 'lecture-ready': 2, 'story-complete': 2,
-    'seated-wave-done': 1, 'rise-done': 8, point: 2, settled: 2, 'question-posted': 1,
+    'seated-wave-done': 1, 'rise-done': 8, point: 1, settled: 1, 'question-posted': 1,
     'question-refused': 1, 'question-recovered': 1, 'introduction-done': 1, 'conference-clean': 1 };
   const stages = Object.entries(counts).flatMap(([stage, count]) => Array.from({ length: count }, () => ({ stage })));
   assert.throws(() => conferenceMeetingJourney([meetingFrame(1), meetingFrame(2)], stages, Array(5).fill({})), /assemblies must be captured/);
@@ -160,3 +160,28 @@ test('group cleanup rejects a departed actor still seated or a group never seen 
   assert.throws(() => conferenceMeetingStage([...frames.slice(0, -1), meetingFrame(4, 'sit', true)], stages, stages[1]), /standing rest/);
   assert.throws(() => conferenceMeetingStage(frames.map(f => meetingFrame(f.tick)), stages, stages[1]), /applause not depicted/);
 });
+
+
+function creatorReplies({ names = { 1: 'returned-id' }, readID = 'returned-id', readKind = 'eden:conference_question@pin', placeOK = true } = {}) {
+  const calls = [];
+  return { calls, label: 'Creator', cli: async (...words) => {
+    calls.push(words);
+    if (words[0] === 'place') return placeOK ? { ok: true, sequence: 23, names } : { ok: false, code: 'edit.overlap' };
+    if (words.length > 1) return { ok: true, id: readID, kind: readKind, in: [{ id: 'actual-ground' }], at: [12, 0, 12] };
+    return { ok: true, kinds: { 'eden:conference_question@pin': {} }, nodes: [{ id: 'actual-ground', kind: 'eden:ground' }] };
+  } };
+}
+
+test('creator proof uses the actual discovered kind/ground and returned place identity for readback', async () => {
+  const creator = creatorReplies(), result = await proveConferenceCreator({ creator });
+  assert.equal(result.id, 'returned-id'); assert.equal(result.sequence, 23);
+  assert.deepEqual(creator.calls, [['describe'], ['place', 'eden:conference_question@pin', '--in', 'actual-ground', '--at', '12,0,12'], ['describe', 'returned-id']]);
+});
+
+for (const [options, reason] of [[{ names: {} }, /named thing/], [{ readID: 'unrelated-id' }, /returned identity/],
+  [{ readKind: 'eden:bench' }, /selected kind/], [{ placeOK: false }, /edit.overlap/]]) {
+  test(`creator proof rejects ${reason.source} without another placement`, async () => {
+    const creator = creatorReplies(options); await assert.rejects(proveConferenceCreator({ creator }), reason);
+    assert.equal(creator.calls.filter(words => words[0] === 'place').length, 1);
+  });
+}

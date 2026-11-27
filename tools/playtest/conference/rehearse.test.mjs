@@ -122,3 +122,13 @@ test('cleanup cannot pass when an ordinary look still reports the activity', asy
   await assert.rejects(performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'] }), /activities must end/);
   assert(!cast.events.some(e => e.endsWith(':conference-clean')));
 });
+
+
+test('the concise proof can deliberately interrupt only the first speaker while preserving full default behavior', async () => {
+  const cast = meetingCast();
+  const result = await performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'],
+    interruptStory: true, interruptFirstOnly: true });
+  assert.equal(result.interruptedStories, 1); assert.equal(result.presentations, 2);
+  assert.equal(cast.events.filter(e => e.endsWith(':tell-story')).length, 1);
+  assert.equal(cast.calls.filter(c => c.words[0] === 'act' && c.words[1] === 'tell_story' && !c.words.includes('--wait')).length, 1);
+});

@@ -149,13 +149,13 @@ export async function explainConference({ speaker, lecture, question, record = (
   return { interrupted: Boolean(interrupted), storyActions: storyRepeats };
 }
 
-export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false, observe = async () => {} }) {
+export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false, interruptFirstOnly = false, observe = async () => {} }) {
   assert.equal(seats.length, 5, 'one speaker and four listeners');
   const [presenter, next] = seats;
   let interruptedStories = 0;
   const { command, act, body, parent, offer, leave } = conferenceCommands(record);
   const assemble = (speaker, listeners) => assembleConference({ seats: [speaker, ...listeners], lecture, benches, record, observe });
-  const explain = async speaker => { const result = await explainConference({ speaker, lecture, question, record, storyRepeats, interruptStory, observe }); interruptedStories += Number(result.interrupted); };
+  const explain = async speaker => { const result = await explainConference({ speaker, lecture, question, record, storyRepeats, interruptStory: interruptStory && (!interruptFirstOnly || speaker === presenter), observe }); interruptedStories += Number(result.interrupted); };
   async function closeLecture(speaker, listeners) {
     // Successful permission-checked step_down also proves the speaker link survived the gestures.
     await observe('departure-start', { seat: speaker, listeners });
