@@ -1301,8 +1301,10 @@ impl Controller {
         let mut put = Vec::with_capacity(self.bodies.len());
         out.samples
             .reserve(gave.iter().map(|g| g.samples.len()).sum::<usize>());
-        self.log
-            .reserve(gave.iter().map(|g| g.log.len()).sum::<usize>());
+        if !self.unlogged {
+            self.log
+                .reserve(gave.iter().map(|g| g.log.len()).sum::<usize>());
+        }
         for g in gave {
             out.said.extend(g.said);
             if !self.unlogged {

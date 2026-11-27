@@ -49,7 +49,9 @@
 //! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. Readers
 //! that start before the checkpoint (the public stream from its own cursor, the shipper and the archive from the cut)
 //! read the log from the disk a batch at a time, so no start holds the whole log and its time does not grow with the
-//! world's age. With no checkpoint the log is read and replayed from record 0; a compacted log with none that verifies
+//! world's age. With a store, the shipper is still handed every record from the cut before the world listens, held
+//! until its claim answers: what the compactor keeps (the oldest checkpoint, the slowest reader, 64 MiB). With no
+//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies
 //! is refused (`log-compacted-past-checkpoint`). It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
@@ -3738,17 +3740,27 @@ fn serve(args: &[String]) -> R<()> {
         end: found.first + found.records.len() as u64,
         at: place.filter(|a| a.record == found.first && a.offset == found.start as u64),
     };
+    // A start from the checkpoint's place does not read the log's cut: that it continues the chain is checked here,
+    // one batch from it, so a bad cut is still refused at the start (`log-read`), not later by a reader that needs it.
+    if let Some(cut) = sim::log::compact::read_cut(&log_path).map_err(refusal)?
+        && cut.at.record < found.first
+    {
+        LogReader {
+            path: log_path.clone(),
+            at: Some(cut.at),
+        }
+        .batch(cut.at.record, cut.at.record + 1)
+        .map_err(refusal)?;
+    }
     stamp("log read from the checkpoint");
     // K16: a world is served under its own header, the one its log names, never one rebuilt from this build's code.
     // A fork's is its `header`, checked above against this build's kinds.
     if stored_header.is_none() {
-        // Read from a checkpoint with no part after it, a world that keeps no header file learns the one its log
-        // names from the log before it, read from the disk a batch at a time (rare: a world from before headers).
+        // Read from a checkpoint with no part after it (an idle world), the header is checked against the newest
+        // part in the log before it, read from the disk a batch at a time: the log kept from its cut, which the
+        // compactor bounds, as a start from the cut read it.
         let mut earlier = Vec::new();
-        if found.records.iter().all(|b| recorder::is_input(b))
-            && found.first > disk.first
-            && !dir.join("header").exists()
-        {
+        if found.records.iter().all(|b| recorder::is_input(b)) && found.first > disk.first {
             disk.each_from(disk.first, &mut |_, bytes| {
                 if !recorder::is_input(bytes) {
                     earlier = vec![bytes.to_vec()];
