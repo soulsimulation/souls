@@ -192,6 +192,7 @@ jobs:
           sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel" --target wasm32-unknown-unknown > /dev/null
           export PATH="$CARGO_HOME/bin:$PATH"
           cargo build --release --locked -p worldd -p gatewayd -p directoryd -p testworld
+          cargo build --release --locked -p assets --bin assets-check
           bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
