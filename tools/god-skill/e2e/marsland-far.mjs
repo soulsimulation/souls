@@ -107,7 +107,7 @@ async function withPage(fn, dpr = 1) {
   if (!release) { log('  (chrome lease busy; browser checks skipped)'); return null; }
   let browser = null;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: dpr });
     await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); });
     return await fn(await ctx.newPage());

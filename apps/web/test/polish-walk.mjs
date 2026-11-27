@@ -16,7 +16,7 @@ const report={started:new Date().toISOString(),checks:[],views:[],requests:{}};
 const release=await chromeLease('polish');let browser;
 const check=(name,fn)=>async(...args)=>{const result=await fn(...args);report.checks.push({name,result});console.log('PASS '+name);return result;};
 try{
- browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+ browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
  for(const [phase,origin] of [['before',baseline],['after',candidate]]){
   const context=await browser.newContext({viewport:{width:1280,height:844},deviceScaleFactor:1});
   await context.addInitScript(()=>localStorage.setItem('sim.dev','polish'));

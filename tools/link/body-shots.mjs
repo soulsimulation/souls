@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// LINK BODY (2026-10-24) local proof in real Chrome: one fresh hello-hamlet world with the body clocks shortened (dev only,
+// LINK BODY (2026-10-24) local proof in Chromium: one fresh hello-hamlet world with the body clocks shortened (dev only,
 // SIM_BODY_KNOBS), four Souls through the unchanged Soul CLI over real HTTP:
 //   Ana keeps a listen open (awake) · Ben never listens (zombie, shuffling) · Cy never listens (asleep, lying down)
 //   · Di swims into the pond and then stops listening (asleep, floating at the surface).
@@ -70,7 +70,7 @@ if (chromium && !args['no-viewer']) {
   const release = await chromeLease('link-body-shots').catch(() => null);
   if (!release) log('(Chrome lease busy: viewer steps skipped)');
   else {
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: 1 });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); localStorage.setItem('skipgc', 't'); });

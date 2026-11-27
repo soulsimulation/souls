@@ -3,7 +3,7 @@
 // world works there — the broadcast camera (arrival, landmarks, the conversation two-shot), follow while the god builds,
 // Souls steered by their agents, weather and time (the god's env setter: a storm at dusk, pause, night with lit lamps),
 // Souls conversing, and a Soul lifted up when idle. One fresh world, the harness plays the god (eden-god CLI + HTTP) and
-// the Souls (the unchanged Soul CLI); the viewer is real Chrome (GPU, Chrome lease) at dpr 1 and 2 with real clicks.
+// the Souls (the unchanged Soul CLI); the viewer is Chromium (GPU, Chrome lease) at dpr 1 and 2 with real clicks.
 //
 //   node tools/god-skill/e2e/r4-live.mjs [--port 5494] [--keep] [--dpr 1,2]
 //
@@ -75,7 +75,7 @@ const worldEnv = async () => (await api('/v1/world/env')).data;
 const mins = (clock) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
 const near = (a, b, m) => Math.abs(((mins(a) - mins(b)) % 1440 + 1440 + 720) % 1440 - 720) <= m;
 
-// ---------- the viewer: real Chrome (one lease for the whole visit), real input
+// ---------- the viewer: Chromium (one lease for the whole visit), real input
 let chromium = null;
 try { chromium = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test').chromium; } catch { log('  (no @playwright/test: viewer steps skipped)'); }
 async function snap(page, name) { const file = resolve(out, `${name}.png`); await page.screenshot({ path: file }); report.shots.push(file); log(`  📷 ${name}.png`); }
@@ -120,7 +120,7 @@ try {
   if (chromium) for (const dpr of dprs) {
     const release = await chromeLease('r4-live-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

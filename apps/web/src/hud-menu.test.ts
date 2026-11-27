@@ -29,6 +29,12 @@ test('rows follow the issue order: time, search, souls, god, music, camera, extr
   assert.equal(rows.at(-1)!.section, 'account');
 });
 
+test('a row is called what the desktop control is called (27 Nov: the phone said Search and Music)', () => {
+  const label = (key: string) => MENU_TARGETS.find((t) => t.key === key)!.label;
+  assert.equal(label('search'), 'Explore');   // the desktop button: "Explore <world>"
+  assert.equal(label('music'), 'Audio');      // the desktop button: "Audio"
+});
+
 test('a row clicks the control it stands for; absent and hidden controls get no row', () => {
   const music = el('', { 'aria-label': 'Audio' }), hiddenSearch = el('', {}, true);
   const rows = collectMenuRows(page({ [sel('music')]: [music], [sel('search')]: [hiddenSearch], [sel('sign-in')]: [el('Sign in')] }));
