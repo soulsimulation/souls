@@ -579,7 +579,7 @@ fn a4_make_way_steps_aside_only_a_still_body_with_no_order_to_stay() {
 }
 
 /// E16 (#2787): the shoulder turn never squeezes a walker through a carried load. A crew of two, staying by their own
-/// orders, holds a board across the 0.9 m corridor upstairs between the walker and its goal. At 9 s the walker turns
+/// orders, holds a board across the 0.9 m corridor upstairs between the walker and its goal (one of them in reach). At 9 s the walker turns
 /// its shoulder and the crew, standing still near it, is named to it; the board keeps its whole space all the same.
 /// The walker never passes it, never comes within two radii and slack of it, and its order ends `goal-unreachable`
 /// at 15 s, naming a next step.
@@ -590,8 +590,8 @@ fn e16_a_walker_never_squeezes_through_a_carried_board() {
     let (mut s, n) = Scene::new("a board held across the 0.9 m corridor");
     let f1 = n["building/floor-1"];
     s.walker(1, f1, v(-1_000_000, 0), f1, v(3_400_000, 0));
-    for (k, z) in [(3, -200_000), (4, 200_000)] {
-        s.still(k, f1, v(1_400_000, z));
+    for (k, x) in [(3, 1_400_000), (4, 2_000_000)] {
+        s.still(k, f1, v(x, 0));
         s.c.stay(id(k));
     }
     let y = body_of(&s, id(1)).pose.position.y + 500_000;
