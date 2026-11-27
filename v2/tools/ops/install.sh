@@ -456,13 +456,13 @@ origin_files() {
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/"
 }
 
-# The placement and archive scripts, as the install and each release (release.sh placement) put them in $LIB/ops.
+# The placement and archive scripts (and give-world.mjs, an operator's, docs/operations.md), as the install and each release (release.sh placement) put them in $LIB/ops.
 ops_files() {
   local out=${1:?ops <out>}
   rm -rf "$out"
   mkdir -p "$out/proxy"
   # is-main.mjs is tools/lib's, kept beside the scripts: their import of it resolves where they are installed ($LIB/ops).
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$HERE/is-main.mjs" "$out/"
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$HERE/is-main.mjs" "$HERE/give-world.mjs" "$out/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/proxy/"
 }
 

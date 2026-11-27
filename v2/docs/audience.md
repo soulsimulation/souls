@@ -84,8 +84,10 @@ removal end to end (W7) and who may act (F6) are not here.
    to removal: no byte and no hash of it changes. Every view built with the list marks the reference `{21: id, 22:
    1}`. Copies outside the store (a reader's, a cache's) outlive the delete until purged. W7 (#2826,
    `worldd remove-words`, `v2/crates/worldd/src/removal.rs`) removes one person's words by author and time on a
-   stopped world: the stream's text files are written again without them (a cache keeps one a minute at most), a
-   start writes recovered text files without them, and a fork's history views are re-derived with the list at its
+   stopped world, or on a running one, which takes the ask on a thread of its own and never stops its clock. Who
+   may ask (the person for their own Souls, the world's creator, a site owner) is the directory's to say
+   (`directoryd::pairing::removal`). The stream's text files are written again without them (a cache keeps one a
+   minute at most), a start writes recovered text files without them, and a fork's history views are re-derived with the list at its
    start. A body's current name and description are kept: the directory holds them and a start sets them again.
    The list is a lineage family's (a world and its forks); views name it by hash.
 10. **A fork is a view of a checkpoint through one principal's audiences:** everyone's, its own and those it is a

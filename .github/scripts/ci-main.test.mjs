@@ -23,7 +23,7 @@ test('ci.yml: nothing stands in for main\'s full run; pushes run newest only, th
   assert.doesNotMatch(workflow, /ci-main\.mjs --repo/, 'the push asks no one whether it may skip');
   assert.doesNotMatch(workflow, /steps\.queued|outputs\.covered/);
   const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
-  assert.match(ok, /needs: \[scope, repo, qualify, smoke, group-check\]/);
+  assert.match(ok, /needs: \[scope, repo, codex-files, qualify, smoke, group-check\]/);
   // push runs share one group and the newest cancels the older: only the newest main commit is tested. The daily full
   // run has its own group, which nothing cancels (cancel-in-progress is false for schedule).
   assert.match(workflow, /\n  schedule:\n    - cron: '23 6 \* \* \*'\n/);

@@ -111,7 +111,7 @@ if (mode === 'serve') {
   const report = { at: new Date().toISOString(), cdnUrl, originUrl, bytes: ready.campusBytes, runs: [] };
   let browser;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     for (const dpr of [1, 2]) for (const scenario of ['cdn', 'unreachable', 'corrupt']) {
       assert.equal(await (await fetch(`${CONTROL}/${scenario === 'cdn' ? 'up' : scenario === 'corrupt' ? 'corrupt' : 'down'}`)).text(), scenario === 'cdn' ? 'up' : scenario === 'corrupt' ? 'corrupt' : 'down');
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });

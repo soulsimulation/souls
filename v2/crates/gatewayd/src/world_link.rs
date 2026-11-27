@@ -48,8 +48,10 @@
 //! agent's intents are in the world's line at a time, from when they are sent until the world first answers them
 //! (progress, a receipt or a refusal); the agent's next ones wait in its own queue, in order, and go as those are
 //! answered. A flooding agent waits behind its own intents; one that sends now and then finds its place free. Nothing
-//! is refused or dropped for speed: a waiting intent keeps its deadline (C8) like any other. Sync requests are not
-//! intents and go at once.
+//! is refused or dropped for speed: a waiting intent keeps its deadline (C8) like any other. Sync requests take turns
+//! the same way, apart (O8, #2805): the world answers them on one thread, first come, first served, so at most
+//! [`SYNC_TURN`] of an agent's are in that line at a time and the rest wait here, in order, bounded in bytes by
+//! [`SYNCS_MOST`]; one past that is refused [`SLOW_DOWN`] at once and never sent.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -160,8 +162,26 @@ pub const TURN: usize = 4;
 pub const KEPT_MOST: usize = 256 << 10;
 /// What one kept intent's place in the gateway's maps is charged, bytes, besides its own.
 pub const KEPT_EACH: usize = 256;
-/// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`]: send it again once one of
-/// them is answered.
+/// The most one agent's sync requests (R5b) waiting for the world's answer may hold at once, bytes (O8, #2805): each
+/// request's own and [`KEPT_EACH`], until the world answers it or goes away. A client's daemon asks one at a time, and
+/// a public name or two beside it; 64 KiB is about 200 of the smallest requests, or 15 of the largest. A client that
+/// asks faster than the world's sync thread answers is refused [`SLOW_DOWN`] at once, under its own number, and the
+/// request never reaches the world: unbounded, a flood of them held the gateway's queue to the world and its memory,
+/// and every honest agent's acts waited behind it (honest p95 10 times the no-attack arm's). Apart from
+/// [`KEPT_MOST`]: one concern, its own bound and gauge ([`Link::syncs_slowed`]).
+pub const SYNCS_MOST: usize = 64 << 10;
+/// How many of one agent's sync requests may be in the world's sync line at a time, sent and not yet answered (O8):
+/// the rest wait here, in order, so a flood of them stands behind its own and an honest client's request waits behind
+/// at most this many of each other agent's. A client's daemon has one out, and a public names request beside it.
+pub const SYNC_TURN: usize = 2;
+/// How long a sync request is kept for the world's answer, µs, sent or waiting its turn: past it, it is answered
+/// [`SYNC_TIMED_OUT`] and its place goes to its agent's next, so one the world never answers never holds the agent's
+/// later ones. A client's daemon gives a request up after the same 10 s (`SYNC_WITHIN`, `v2/client/src/daemon`).
+pub const SYNC_DEADLINE: u64 = 10_000_000;
+/// The gateway's answer to a sync request kept past [`SYNC_DEADLINE`].
+pub const SYNC_TIMED_OUT: &str = "sync.timed-out";
+/// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`], or to a sync request whose
+/// agent's waiting requests are at [`SYNCS_MOST`]: send it again once one of them is answered.
 pub const SLOW_DOWN: &str = "agent.slow-down";
 
 /// The key of the frame sent first on each connection to the world, `{31: []}`: this is the world's gateway, so the
@@ -219,8 +239,9 @@ pub enum Sent {
     Sent,
     /// The world is away: answer it with [`RESTARTING`].
     Restarting,
-    /// Its agent's kept intents are at [`KEPT_MOST`]: answer it with [`SLOW_DOWN`]. Not kept. With the intents so
-    /// refused since the gateway started (the gauge).
+    /// Its agent's kept intents are at [`KEPT_MOST`] (a sync request's: its waiting requests at [`SYNCS_MOST`]):
+    /// answer it with [`SLOW_DOWN`]. Not kept. With the intents (or sync requests) so refused since the gateway
+    /// started (the gauge).
     Full(u64),
 }
 
@@ -257,9 +278,8 @@ struct State {
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
-    /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes, the asking socket's
-    /// session and the client's number.
-    syncs: BTreeMap<u64, (Vec<u8>, u64, Value)>,
+    /// Sync requests sent and not yet answered, by the gateway's number.
+    syncs: BTreeMap<u64, Asked>,
     /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
     wake: Option<Wake>,
     asked: bool,
@@ -273,6 +293,24 @@ struct State {
     /// O8: each agent's kept intents' charge, bytes ([`KEPT_MOST`]), and the intents refused [`SLOW_DOWN`] (its gauge).
     charged: BTreeMap<Vec<u8>, usize>,
     slowed: u64,
+    /// O8: each agent's sync requests' charge, bytes ([`SYNCS_MOST`]), and the requests refused [`SLOW_DOWN`].
+    sync_charged: BTreeMap<Vec<u8>, usize>,
+    sync_slowed: u64,
+    /// O8: each agent's sync requests in the world's sync line now ([`SYNC_TURN`]), and those waiting their turn.
+    sync_flying: BTreeMap<Vec<u8>, usize>,
+    sync_waiting: BTreeMap<Vec<u8>, VecDeque<u64>>,
+}
+
+/// A sync request kept until the world answers it (O8): its actor's bytes, its asking socket's session, the client's
+/// number, its charge against [`SYNCS_MOST`], when it is given up ([`SYNC_TIMED_OUT`]) on the steady clock, and its
+/// bytes while it waits its turn here (none once in the world's line).
+struct Asked {
+    key: Vec<u8>,
+    session: u64,
+    n: Value,
+    charge: usize,
+    due: u64,
+    waiting: Option<Vec<u8>>,
 }
 
 /// What an answer from the world is to the gateway.
@@ -295,6 +333,59 @@ impl State {
                 self.charged.remove(key);
             }
         }
+    }
+
+    /// A sync request of `key`'s, charged `charge`, was answered or given up.
+    fn sync_release(&mut self, key: &[u8], charge: usize) {
+        if let Some(c) = self.sync_charged.get_mut(key) {
+            *c = c.saturating_sub(charge);
+            if *c == 0 {
+                self.sync_charged.remove(key);
+            }
+        }
+    }
+
+    /// One of `key`'s sync requests left the world's sync line: its next waiting one goes in its place.
+    fn sync_landed(&mut self, key: &[u8]) {
+        let mut next = None;
+        while let Some(ours) = self.sync_waiting.get_mut(key).and_then(VecDeque::pop_front) {
+            if let Some(bytes) = self.syncs.get_mut(&ours).and_then(|a| a.waiting.take()) {
+                next = Some(bytes);
+                break;
+            }
+        }
+        match (next, self.out.clone()) {
+            (Some(bytes), Some(out)) => {
+                let _ = out.send(bytes);
+            }
+            _ => {
+                if let Some(line) = self.sync_flying.get_mut(key) {
+                    *line = line.saturating_sub(1);
+                    if *line == 0 {
+                        self.sync_flying.remove(key);
+                    }
+                }
+            }
+        }
+        if self.sync_waiting.get(key).is_some_and(VecDeque::is_empty) {
+            self.sync_waiting.remove(key);
+        }
+    }
+
+    /// Takes sync request `ours` out: its charge is released, and its place in the world's line, if it had one, goes
+    /// to its agent's next. A late answer from the world to it is dropped ([`Link::sync_answered`]).
+    fn sync_drop(&mut self, ours: u64) -> Option<Asked> {
+        let a = self.syncs.remove(&ours)?;
+        self.sync_release(&a.key, a.charge);
+        if a.waiting.is_none() {
+            self.sync_landed(&a.key);
+        } else if let Some(q) = self.sync_waiting.get_mut(&a.key) {
+            q.retain(|w| *w != ours);
+            if q.is_empty() {
+                self.sync_waiting.remove(&a.key);
+            }
+        }
+        Some(a)
     }
 
     fn remember(&mut self, key: Vec<u8>, sequence: u64) {
@@ -448,7 +539,8 @@ impl Link {
     }
 
     /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out, from the
-    /// socket signed in as `session`, which alone is given its answer.
+    /// socket signed in as `session`, which alone is given its answer. It is charged against its agent's
+    /// [`SYNCS_MOST`] until answered, and refused ([`Sent::Full`]) when that would go over.
     pub fn ask(&self, key: Vec<u8>, session: u64, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
@@ -469,8 +561,39 @@ impl Link {
         let Ok(bytes) = encode(&Value::Map(ask)) else {
             return Sent::Restarting;
         };
-        s.syncs.insert(ours, (key, session, n));
-        let _ = out.send(bytes);
+        let charge = bytes.len() + KEPT_EACH;
+        let held = s.sync_charged.get(&key).copied().unwrap_or(0);
+        if held + charge > SYNCS_MOST {
+            s.sync_slowed += 1;
+            return Sent::Full(s.sync_slowed);
+        }
+        s.sync_charged.insert(key.clone(), held + charge);
+        let line = s.sync_flying.entry(key.clone()).or_insert(0);
+        let waiting = if *line >= SYNC_TURN {
+            Some(bytes)
+        } else {
+            *line += 1;
+            let _ = out.send(bytes);
+            None
+        };
+        if waiting.is_some() {
+            s.sync_waiting
+                .entry(key.clone())
+                .or_default()
+                .push_back(ours);
+        }
+        let due = times::stamp().saturating_add(SYNC_DEADLINE);
+        s.syncs.insert(
+            ours,
+            Asked {
+                key,
+                session,
+                n,
+                charge,
+                due,
+                waiting,
+            },
+        );
         Sent::Sent
     }
 
@@ -486,6 +609,59 @@ impl Link {
             .unwrap_or_else(|e| e.into_inner())
             .out
             .is_some()
+    }
+
+    /// Sync requests sent and not yet answered.
+    pub fn syncs_waiting(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .syncs
+            .len()
+    }
+
+    /// Sync requests refused [`SLOW_DOWN`] since the gateway started (the gauge of [`SYNCS_MOST`]).
+    pub fn syncs_slowed(&self) -> u64 {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .sync_slowed
+    }
+
+    /// The socket signed in as `session` for `key` ended (O8): its sync requests still waiting their turn here are
+    /// given up and never sent. Those already in the world's line keep their places until the world answers them (the
+    /// answer then goes nowhere) or [`SYNC_DEADLINE`] passes, so signing in again never buys an agent more places in
+    /// that line.
+    pub fn sync_ended(&self, key: &[u8], session: u64) {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let ended: Vec<u64> = s
+            .syncs
+            .iter()
+            .filter(|(_, a)| a.key == key && a.session == session && a.waiting.is_some())
+            .map(|(ours, _)| *ours)
+            .collect();
+        for ours in ended {
+            s.sync_drop(ours);
+        }
+    }
+
+    /// Takes every sync request past [`SYNC_DEADLINE`] at `now` (the steady clock), sent or waiting its turn: its
+    /// actor's bytes, session and the client's number, to answer [`SYNC_TIMED_OUT`]. Its place goes to the agent's next.
+    pub fn syncs_overdue(&self, now: u64) -> Vec<(Vec<u8>, u64, Value)> {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        // `due` grows with the gateway's number (one clock, one lock), so the late ones come first. Those waiting their
+        // turn are taken first, so a place freed is never given to one of them.
+        let mut late: Vec<(bool, u64)> = s
+            .syncs
+            .iter()
+            .take_while(|(_, a)| now >= a.due)
+            .map(|(ours, a)| (a.waiting.is_none(), *ours))
+            .collect();
+        late.sort_unstable();
+        late.into_iter()
+            .filter_map(|(_, ours)| s.sync_drop(ours))
+            .map(|a| (a.key, a.session, a.n))
+            .collect()
     }
 
     /// Intents sent and not yet answered.
@@ -583,17 +759,19 @@ impl Link {
             return None;
         };
         let ours = *ours;
-        let kept = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .syncs
-            .remove(&ours);
-        Some(kept.and_then(|(key, session, n)| {
-            m.insert(wire::ASK, n);
-            m.remove(&wire::ACTOR);
-            Some((key, session, encode(&Value::Map(m)).ok()?))
-        }))
+        let kept = {
+            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            s.sync_drop(ours)
+        };
+        Some(kept.and_then(
+            |Asked {
+                 key, session, n, ..
+             }| {
+                m.insert(wire::ASK, n);
+                m.remove(&wire::ACTOR);
+                Some((key, session, encode(&Value::Map(m)).ok()?))
+            },
+        ))
     }
 
     /// Connected: the writer's queue, with every unanswered intent in it or waiting its agent's turn (S2), in
@@ -630,7 +808,13 @@ impl Link {
         {
             wake();
         }
-        std::mem::take(&mut s.syncs).into_values().collect()
+        s.sync_charged.clear();
+        s.sync_flying.clear();
+        s.sync_waiting.clear();
+        std::mem::take(&mut s.syncs)
+            .into_values()
+            .map(|a| (a.key, a.session, a.n))
+            .collect()
     }
 }
 
@@ -775,6 +959,9 @@ pub async fn deadlines(gw: Arc<Gateway>) {
         for (key, actor, sequence, reason) in gw.link.overdue(times::stamp()) {
             let frame = crate::socket::refused(actor, sequence, reason, gw.link.now());
             gw.tell(&key, sequence, frame);
+        }
+        for (key, session, n) in gw.link.syncs_overdue(times::stamp()) {
+            gw.reply(&key, session, sync_refused(n, SYNC_TIMED_OUT));
         }
     }
 }
@@ -944,5 +1131,134 @@ mod kept_tests {
         // The deadline sweep frees every place it answers.
         assert!(link.overdue(u64::MAX / 2).len() as u64 >= fits + 2);
         assert!(link.state.lock().unwrap().charged.is_empty());
+    }
+
+    /// O8 (#2805): one agent's sync requests waiting for the world are bounded by SYNCS_MOST, refused past it and never
+    /// sent, freed by the world's answer and when the world goes away; another agent's are not held by it.
+    #[test]
+    fn o8_an_agents_sync_requests_are_bounded_and_freed() {
+        let link = Link::default();
+        let mut queue = link.connected();
+        let ((key, _), (other, _)) = (soul(1), soul(2));
+        let ask = |key: &Vec<u8>, n: u64| {
+            let a = BTreeMap::from([(wire::IDS, Value::Array(Vec::new()))]);
+            link.ask(key.clone(), 1, Value::Uint(n), a)
+        };
+        let mut n = 0;
+        while ask(&key, n) == Sent::Sent {
+            n += 1;
+            assert!(n < 10_000, "never refused");
+        }
+        let fits = n;
+        assert!(fits >= 100, "far above a daemon's one at a time: {fits}");
+        assert_eq!(ask(&key, n + 1), Sent::Full(2));
+        assert_eq!(link.syncs_slowed(), 2);
+        assert_eq!(
+            link.syncs_waiting() as u64,
+            fits,
+            "a refused request is not kept"
+        );
+        let mut sent = Vec::new();
+        while let Ok(b) = queue.try_recv() {
+            sent.push(b);
+        }
+        assert_eq!(
+            sent.len(),
+            SYNC_TURN,
+            "its turn in the world's line; the rest wait here"
+        );
+        // Another agent asks freely.
+        assert_eq!(ask(&other, 0), Sent::Sent);
+        // The world's answer to one frees its place: the next is taken.
+        let ours = match decode(&sent[0]).unwrap().value {
+            Value::Map(m) => m.get(&wire::ASK).cloned().unwrap(),
+            _ => unreachable!(),
+        };
+        let answer = encode(&Value::Map(
+            [(wire::ASK, ours), (1, Value::Array(Vec::new()))].into(),
+        ))
+        .unwrap();
+        assert!(matches!(link.sync_answered(&answer), Some(Some(_))));
+        let mut next = Vec::new();
+        while let Ok(b) = queue.try_recv() {
+            next.push(b);
+        }
+        assert_eq!(
+            next.len(),
+            2,
+            "the other agent's, and the flooder's next in its turn"
+        );
+        assert_eq!(ask(&key, n + 2), Sent::Sent);
+        // The world going away gives up every request and frees every place.
+        assert_eq!(link.disconnected().len() as u64, fits + 1);
+        assert!(link.state.lock().unwrap().sync_charged.is_empty());
+        let _queue = link.connected();
+        assert_eq!(ask(&key, n + 3), Sent::Sent);
+    }
+
+    /// O8 (#5195 triage): a sync request the world never answers, or whose socket ended, never holds the agent's later
+    /// ones: past SYNC_DEADLINE it is answered `sync.timed-out` and its place freed; a socket's end frees its own.
+    #[test]
+    fn o8_a_sync_never_answered_or_whose_socket_ended_frees_its_place() {
+        let link = Link::default();
+        let mut queue = link.connected();
+        let (key, _) = soul(1);
+        let ask = |session: u64, n: u64| {
+            let a = BTreeMap::from([(wire::IDS, Value::Array(Vec::new()))]);
+            link.ask(key.clone(), session, Value::Uint(n), a)
+        };
+        let drain = |q: &mut mpsc::UnboundedReceiver<Vec<u8>>| {
+            let mut n = 0;
+            while q.try_recv().is_ok() {
+                n += 1;
+            }
+            n
+        };
+        // The world never answers: two in its line, a third waits here.
+        for n in 1..=3 {
+            assert_eq!(ask(1, n), Sent::Sent);
+        }
+        assert_eq!(drain(&mut queue), SYNC_TURN);
+        assert!(link.syncs_overdue(times::stamp()).is_empty(), "not yet due");
+        let late = link.syncs_overdue(times::stamp() + SYNC_DEADLINE + 1);
+        assert_eq!(late.len(), 3, "each answered sync.timed-out");
+        assert_eq!(
+            drain(&mut queue),
+            0,
+            "the waiting one is given up, not sent"
+        );
+        {
+            let s = link.state.lock().unwrap();
+            assert!(s.syncs.is_empty() && s.sync_charged.is_empty());
+            assert!(s.sync_flying.is_empty() && s.sync_waiting.is_empty());
+        }
+        // The agent syncs again at once.
+        assert_eq!(ask(1, 4), Sent::Sent);
+        assert_eq!(drain(&mut queue), 1);
+        // A socket replaced with its syncs out: the one waiting here is given up, never sent; the two in the world's
+        // line keep their places, so signing in again buys no more of them.
+        assert_eq!(ask(1, 5), Sent::Sent);
+        assert_eq!(ask(1, 6), Sent::Sent);
+        assert_eq!(drain(&mut queue), 1, "its turn is full");
+        link.sync_ended(&key, 1);
+        assert_eq!(
+            drain(&mut queue),
+            0,
+            "an ended socket's waiting one is not sent"
+        );
+        assert_eq!(link.syncs_waiting(), 2);
+        assert_eq!(ask(2, 1), Sent::Sent);
+        assert_eq!(drain(&mut queue), 0, "the new socket's waits its turn");
+        // The world's answer to one of the ended socket's (the gateway's numbers 3 and 4) frees a place: the new
+        // socket's goes.
+        let answer = encode(&Value::Map([(wire::ASK, Value::Uint(3))].into())).unwrap();
+        assert!(matches!(link.sync_answered(&answer), Some(Some(_))));
+        assert_eq!(drain(&mut queue), 1);
+        // One the world never answers is given up at its deadline, freeing its place too.
+        assert_eq!(ask(2, 2), Sent::Sent);
+        assert_eq!(drain(&mut queue), 0);
+        let late = link.syncs_overdue(times::stamp() + SYNC_DEADLINE + 1);
+        assert_eq!(late.len(), 3);
+        assert_eq!(link.syncs_waiting(), 0);
     }
 }

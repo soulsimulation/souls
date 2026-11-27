@@ -5,7 +5,8 @@
 import {clockAt,type AgentHere} from './agent-presence.ts';
 
 export type LinkState='pairing'|'connected'|'disconnected';
-export type LinkReason='listening'|'pending-approval'|'approved-waiting'|'stopped-listening'|'replaced'|'revoked'|'never';
+/** `asleep` (first-day 27 Nov): connected, but its client says nobody is reading its messages now. */
+export type LinkReason='listening'|'asleep'|'pending-approval'|'approved-waiting'|'stopped-listening'|'replaced'|'revoked'|'never';
 export type Link={state:LinkState;reason:LinkReason;since:number|null;holder:{label:string|null;since:number|null}|null;approvalId?:string};
 export type BodyState='awake'|'idle'|'zombie'|'asleep';
 export type BodyDoing='standing'|'sitting'|'dozing'|'drifting'|'floating';
@@ -13,7 +14,7 @@ export type Body={state:BodyState;doing:BodyDoing|null;since:number};
 export type Now={text:string;at:number};
 
 const STATES:readonly LinkState[]=['pairing','connected','disconnected'];
-const REASONS:readonly LinkReason[]=['listening','pending-approval','approved-waiting','stopped-listening','replaced','revoked','never'];
+const REASONS:readonly LinkReason[]=['listening','asleep','pending-approval','approved-waiting','stopped-listening','replaced','revoked','never'];
 const BODIES:readonly BodyState[]=['awake','idle','zombie','asleep'];
 const DOINGS:readonly BodyDoing[]=['standing','sitting','dozing','drifting','floating'];
 const obj=(v:unknown):Record<string,unknown>|null=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:null;
@@ -89,7 +90,8 @@ export function reconnectSentence(name:string,link:Link,now=Date.now()):{why:str
   :'The agent stopped listening.';
  return {why,ask:`Reconnect to ${name} by prompting your agent:`};
 }
-/** The link details' second line under "Held by your agent": "eden-agent 1.9.16 · paired 14:02 · listening now".
+/** The link details' second line under "Held by your agent": "eden-agent 1.9.16 · paired 14:02 · listening now"; a
+ * client connected with nobody reading its messages says so ("not listening now: messages wait for it"), never "listening".
  * Owner terms, never a bare internal label: an eden-agent label is the client's name; any other grant label is quoted
  * as where the agent connected from ("from “travel”"). */
 export const holderClient=(label:string)=>/^eden-agent(\s|$)/.test(label)?label:`from “${label}”`;
@@ -97,7 +99,7 @@ export function holderLine(link:Link,here:AgentHere|null,now=Date.now()){
  const parts:string[]=[];
  if(link.holder?.label)parts.push(holderClient(link.holder.label));
  const paired=link.holder?.since??null;if(paired)parts.push(`paired ${clockAt(paired,now)}`);
- parts.push(here?.state==='working'?'working through your messages':'listening now');
+ parts.push(link.reason==='asleep'?'not listening now: messages wait for it':here?.state==='working'?'working through your messages':'listening now');
  return parts.join(' · ');
 }
 /** Approved-waiting offers the prompt again only after a minute. */

@@ -353,6 +353,8 @@ test('ci-ok: a ready pull_request with only light legs green passes; a failed le
   assert.equal(verdict(needs), 'pass');
   assert.equal(verdict({ ...needs, QUALIFY: 'failure' }), 'fail', 'a light leg that failed');
   assert.equal(verdict({ ...needs, SMOKE: 'failure' }), 'fail');
+  assert.equal(verdict({ ...needs, CODEX_FILES: 'failure' }), 'fail', 'a PR that changes Codex files (#5068)');
+  assert.equal(verdict({ ...needs, CODEX_FILES: 'success' }), 'pass');
   const none = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
   assert.equal(verdict({ ...needs, ANY: none.any, QUALIFY: 'skipped', SMOKE_SELECTED: none.smoke, SMOKE: 'skipped' }), 'pass', 'nothing of its own to run');
   assert.match(ok, /if: needs\.scope\.outputs\.deferred == 'true'[\s\S]*?exit 1/, 'outside the window a deferred run still fails');
@@ -633,6 +635,6 @@ test('a merge group compiles what it changed: v2 with cargo check, the web app w
   assert.match(job, /self-hosted/);
   assert.doesNotMatch(job, /cargo test|node --test|pnpm test/, 'compile only');
   const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
-  assert.match(ok, /needs: \[scope, repo, qualify, smoke, group-check\]/, 'ci-ok waits for it');
+  assert.match(ok, /needs: \[scope, repo, codex-files, qualify, smoke, group-check\]/, 'ci-ok waits for it');
   assert.match(ok, /merge_group \]; then [^\n]*test "\$GROUP" = success/, 'a merge group passes only when the group compiles');
 });

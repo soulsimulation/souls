@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release 0.6 soundscape proof in real Chrome (shared Chrome lease, Metal GPU): a fresh dev world built from the
+// Release 0.6 soundscape proof in Chromium (shared Chrome lease, Metal GPU): a fresh dev world built from the
 // eden-district template plus a wood, a windy knoll with flags and a flower bed; the camera visits each place by day and
 // the pond and wood by night, and records which sources play there (`__edenSound.state()`), the output level, and that
 // mute silences it. Fake minds, no paid generation, no production data. Only stops the server it started.
@@ -68,7 +68,7 @@ try {
   const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../god-skill/lib/chrome-lease.mjs');
   const release = await chromeLease('r31v-sound');
   try {
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       for (const dpr of dprs) {
         const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr })).newPage();

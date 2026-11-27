@@ -84,7 +84,7 @@ let browser = null, page = null, release = null;
 async function openPage() {
   if (!chromium) return null;
   release = await chromeLease('L10-humanoid-world');
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   page.on('pageerror', (e) => report.pageErrors = [...(report.pageErrors ?? []), e.message]);
   await page.goto(`${base}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 120_000 });

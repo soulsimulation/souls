@@ -1,0 +1,29 @@
+{
+ "schema": "souls-named-batch/1",
+ "world": "eden-2026",
+ "from": "worlds/patches/eden-2026-lighthouse-door-20261126/batch.json",
+ "note": "First-day round 2 (0.139): no walk reached the harbour lighthouse (refused spot-none-free with nobody about). It stands across the end of its breakwater, 5.4 m wide over a 5.2 m deck, with its one door on the far side, over the sea. Turned a half turn in place, its door opens onto the breakwater; its door thing moves with it. World x and z in metres, r in radians about the thing's own origin. worlds/templates/eden-2026.json carries the same change. Live (27 Nov): live Eden's lighthouse is core/lighthouse@1, whose door is its entrance room's doorway (field 22, 2.79 m out on +z), not a door thing: the turn takes the doorway round with it to the breakwater side, so the door thing's move has nothing to move.",
+ "counts": {
+  "turn": 1
+ },
+ "ops": [
+  {
+   "op": "turn",
+   "node": "region-harbour-lighthouse",
+   "def": "core/lighthouse@1",
+   "at_ground": [
+    96,
+    188
+   ],
+   "from_r": 0,
+   "r": 3.1416
+  }
+ ],
+ "left_out": [
+  {
+   "node": "region-harbour-lighthouse-door-1",
+   "def": "core/door@2",
+   "why": "nothing here is named region-harbour-lighthouse-door-1"
+  }
+ ]
+}

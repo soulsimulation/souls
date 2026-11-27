@@ -11,6 +11,22 @@
 //! - `malformed`: one signed-in socket sends frames the gateway cannot take as intents as fast as it can: random bytes,
 //!   a cut intent, and an intent for another Soul's actor, in turn; it reads its answers.
 //! - `reconnect`: four loops on the hostile's one token: connect, sign in, read the outcome, drop the socket.
+//! - `sync`: one signed-in socket sends R5b's sync requests (`{20: n, 21: []}`) as fast as the socket takes them, and
+//!   reads its answers.
+//! - `replace`: as `flood`, each intent replacing the one before it.
+//! - `slow`: a reader that never reads: it subscribes to everything in full and sends ten toggles a second, reading
+//!   nothing, until it is let go; then again.
+//! - `subscribe`: a subscription for everything (the world's root) in full, read as it comes, asked again each second.
+//! - `silent`: 10,000 sockets that never sign in, half never sending their HTTP request, half upgraded and never
+//!   sending their first frame; each closed is opened again.
+//! - `guess`: four loops signing in with fresh well-formed tokens the world never issued.
+//! - `shared`: one token on 500 sockets, each signing in again once it is taken from it.
+//! - `all`: every attack above at once, each in its own process on a token of its own.
+//!
+//! With `--sync`, each honest act also sends a sync request for the agent's granted scope, and its wait is measured.
+//! The honest agents act every `--every` ms (default 1000; 12000 at 1,000 agents is the tranche's 5,000 acts a minute).
+//! The world and the gateway's processor seconds are over the attack window. Run under `ulimit -n 65536`, the agents'
+//! relay unit's own limit (`v2/tools/ops/units/souls-agents.service`), for `silent`.
 //!
 //! For each run it prints: the world's tick p99 and longest and ticks over budget (`health.json`, the whole run), the
 //! honest agents' act wait (send to final answer, at the client) p50, p95 and p99, honest acts not answered, honest
@@ -18,7 +34,7 @@
 //! drop, counted).
 //!
 //! Build first: `cargo build --release -p gatewayd -p worldd -p bench`. Then `target/release/hostile --dir <empty
-//! folder> [--honest 50] [--seconds 20] [--repeats 2] [--arms none,flood,oversized,malformed,reconnect]`.
+//! folder> [--honest 50] [--seconds 20] [--repeats 2] [--every 1000] [--arms none,flood,...]`.
 // A bench times a run by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 // The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; this bench's maps are tallies.
@@ -43,7 +59,35 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use worldd::checkers::toggles;
 
 const LINEAGE: [u8; 16] = [0x45; 16];
-const ARMS: [&str; 5] = ["none", "flood", "oversized", "malformed", "reconnect"];
+const ARMS: [&str; 13] = [
+    "none",
+    "flood",
+    "oversized",
+    "malformed",
+    "reconnect",
+    "sync",
+    "replace",
+    "slow",
+    "subscribe",
+    "silent",
+    "guess",
+    "shared",
+    "all",
+];
+/// The attacks `all` makes at once, each in a process of its own on a token of its own.
+const ALL: [&str; 11] = [
+    "flood",
+    "oversized",
+    "malformed",
+    "reconnect",
+    "sync",
+    "replace",
+    "slow",
+    "subscribe",
+    "silent",
+    "guess",
+    "shared",
+];
 /// An honest act's expiry, from its send.
 const EXPIRY_US: i64 = 30_000_000;
 
@@ -69,11 +113,31 @@ fn rss_kib(pid: u32) -> u64 {
         .unwrap_or(0)
 }
 
+/// A process's processor time so far, user and system, seconds (Linux's `/proc`; 0 elsewhere).
+fn cpu_s(pid: u32) -> f64 {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return 0.0;
+    };
+    // The fields after the command's closing parenthesis: utime and stime are the 12th and 13th, in clock ticks.
+    let rest = stat.rsplit_once(')').map_or("", |(_, r)| r);
+    let f: Vec<u64> = rest
+        .split_whitespace()
+        .skip(11)
+        .take(2)
+        .filter_map(|x| x.parse().ok())
+        .collect();
+    f.iter().sum::<u64>() as f64 / 100.0
+}
+
 fn us_now() -> i64 {
     worldd::answers::now()
 }
 
 fn toggle(body: Id, lamp: Id, sequence: u64) -> Vec<u8> {
+    toggle_replacing(body, lamp, sequence, None)
+}
+
+fn toggle_replacing(body: Id, lamp: Id, sequence: u64, replaces: Option<u64>) -> Vec<u8> {
     let n = |s: &str| Name::new(s).expect("a name");
     let i = Intent {
         actor: Actor::Soul(body),
@@ -96,7 +160,7 @@ fn toggle(body: Id, lamp: Id, sequence: u64) -> Vec<u8> {
             parameters: BTreeMap::new(),
             resources: Vec::new(),
         }],
-        replaces: None,
+        replaces,
         body: None,
         reflex: false,
     };
@@ -126,6 +190,12 @@ fn told(bytes: &[u8]) -> (Option<(u64, bool)>, String) {
     let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
         return (None, "undecodable".into());
     };
+    if m.contains_key(&20) {
+        return match m.get(&24) {
+            Some(Value::Text(n)) => (None, format!("sync {}", n.as_str())),
+            _ => (None, "sync answer".into()),
+        };
+    }
     if let Some(Value::Text(n)) = m.get(&4) {
         return (None, n.as_str().to_owned());
     }
@@ -173,15 +243,33 @@ struct Honest {
     closed: AtomicU64,
     ready: AtomicU64,
     reasons: Mutex<BTreeMap<String, u64>>,
+    /// With `--sync`: each act's sync request's wait, send to answer, those not answered and those refused.
+    sync_waits_us: Mutex<Vec<u64>>,
+    sync_unanswered: AtomicU64,
+    sync_refused: AtomicU64,
 }
 
-/// One honest agent: first frame, sign-in, then its own lamp toggled once a second from `offset` until `stop`, then a
+/// A sync answer's number, and whether it is a refusal.
+fn sync_answer(bytes: &[u8]) -> Option<(u64, bool)> {
+    let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
+        return None;
+    };
+    match m.get(&20) {
+        Some(Value::Uint(n)) => Some((*n, m.contains_key(&24))),
+        _ => None,
+    }
+}
+
+/// One honest agent: first frame, sign-in, then its own lamp toggled every `every` from `offset` until `stop`, then a
 /// wait for its answers.
+#[allow(clippy::too_many_arguments)] // one agent's place in the run
 async fn honest(
     url: String,
     token: String,
     pair: (Id, Id),
     offset: Duration,
+    every: Duration,
+    sync: bool,
     go: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     h: Arc<Honest>,
@@ -204,15 +292,18 @@ async fn honest(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let mut sent: BTreeMap<u64, Instant> = BTreeMap::new();
+    let mut syncs: BTreeMap<u64, Instant> = BTreeMap::new();
+    let mut sync_waits = Vec::new();
     let mut waits = Vec::new();
     let mut seq = 0u64;
-    let mut tick =
-        tokio::time::interval_at(tokio::time::Instant::now() + offset, Duration::from_secs(1));
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + offset, every);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut drain: Option<Instant> = None;
     let mut closed = false;
     loop {
-        if drain.is_some_and(|d| Instant::now() >= d) || (drain.is_some() && sent.is_empty()) {
+        if drain.is_some_and(|d| Instant::now() >= d)
+            || (drain.is_some() && sent.is_empty() && syncs.is_empty())
+        {
             break;
         }
         tokio::select! {
@@ -227,9 +318,25 @@ async fn honest(
                     closed = true;
                     break;
                 }
+                if sync {
+                    syncs.insert(seq, Instant::now());
+                    if tx.send(Message::Binary(sync_ask(seq).into())).await.is_err() {
+                        closed = true;
+                        break;
+                    }
+                }
             }
             m = rx.next() => match m {
                 Some(Ok(Message::Binary(b))) => {
+                    if let Some((n, refused)) = sync_answer(&b) {
+                        if let Some(at) = syncs.remove(&n) {
+                            sync_waits.push(at.elapsed().as_micros() as u64);
+                            if refused {
+                                h.sync_refused.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        continue;
+                    }
                     let (s, name) = told(&b);
                     if let Some((s, true)) = s && let Some(at) = sent.remove(&s) {
                         waits.push(at.elapsed().as_micros() as u64);
@@ -249,6 +356,12 @@ async fn honest(
         h.closed.fetch_add(1, Ordering::Relaxed);
     }
     h.unanswered.fetch_add(sent.len() as u64, Ordering::Relaxed);
+    h.sync_unanswered
+        .fetch_add(syncs.len() as u64, Ordering::Relaxed);
+    h.sync_waits_us
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend(sync_waits);
     h.waits_us
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -294,21 +407,55 @@ async fn signed_in(url: &str, token: &str) -> Option<(Socket, String)> {
     }
 }
 
+/// Sockets the `silent` attack holds.
+const SILENT: usize = 10_000;
+/// Sockets the `shared` attack holds on one token.
+const SHARED: usize = 500;
+
+/// A sync request (R5b), `{20: n, 21: []}`: the hashes of the scope the world grants the asker.
+fn sync_ask(n: u64) -> Vec<u8> {
+    encode(&Value::Map(
+        [(20, Value::Uint(n)), (21, Value::Array(Vec::new()))].into(),
+    ))
+    .expect("a sync request")
+}
+
+/// A subscription for everything (#3292): the lamps world's root node held, at level 1 (full), with a budget far above
+/// the world's. The root is the first id the world's minter makes (`worldd::checkers::toggles::World::build`).
+fn everything(_pairs: &[(Id, Id)]) -> Vec<u8> {
+    let root = replica::ids::Minter::new(Scope([0x2b; 16]))
+        .mint()
+        .unwrap_or_else(|_| fail("the root's id"));
+    let request = Value::Map(
+        [
+            (
+                1,
+                Value::Array(vec![Value::Map([(1, root.to_value())].into())]),
+            ),
+            (2, Value::Uint(1)),
+            (3, Value::Uint(u32::MAX as u64)),
+        ]
+        .into(),
+    );
+    encode(&Value::Map([(30, request)].into())).expect("a subscribe request")
+}
+
 /// The attack, in this process: for `seconds`, then its tally on one line to `out`.
 async fn attack(
     arm: &str,
     url: String,
     token: String,
     pairs: Vec<(Id, Id)>,
+    me: usize,
     seconds: u64,
     out: PathBuf,
 ) {
     let t: Tally = Arc::default();
     let end = Instant::now() + Duration::from_secs(seconds);
-    let me = *pairs.last().unwrap_or_else(|| fail("no pairs"));
+    let me = *pairs.get(me).unwrap_or_else(|| fail("no such pair"));
     let mut sent = 0u64;
     match arm {
-        "flood" | "malformed" => {
+        "flood" | "malformed" | "sync" | "replace" => {
             let Some((ws, outcome)) = signed_in(&url, &token).await else {
                 fail("the hostile could not sign in")
             };
@@ -322,6 +469,12 @@ async fn attack(
                 sent += 1;
                 let frame = if arm == "flood" {
                     toggle(me.0, me.1, sent)
+                } else if arm == "sync" {
+                    // R5b's sync request for the scope the world grants it: answered on the world's sync thread.
+                    sync_ask(sent)
+                } else if arm == "replace" {
+                    // Each intent replaces the one before it.
+                    toggle_replacing(me.0, me.1, sent, (sent > 1).then(|| sent - 1))
                 } else {
                     match sent % 3 {
                         0 => {
@@ -390,6 +543,180 @@ async fn attack(
                 sent += l.await.unwrap_or(0);
             }
         }
+        "slow" => {
+            // A reader that never reads: it subscribes to everything in full and sends its own lamp's toggle ten times a
+            // second, and reads nothing, until the gateway lets it go; then again.
+            while Instant::now() < end {
+                let Some((ws, outcome)) = signed_in(&url, &token).await else {
+                    count(&t, "connect failed");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                };
+                count(&t, format!("sign-in {outcome}"));
+                let (mut tx, rx) = ws.split();
+                let _ = tx.send(Message::Binary(everything(&pairs).into())).await;
+                let started = Instant::now();
+                loop {
+                    sent += 1;
+                    let send = tx.send(Message::Binary(toggle(me.0, me.1, sent).into()));
+                    match tokio::time::timeout(Duration::from_secs(2), send).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => {
+                            count(&t, "let go (send failed)");
+                            break;
+                        }
+                        Err(_) => {
+                            count(&t, "its own sends blocked");
+                            break;
+                        }
+                    }
+                    if Instant::now() >= end {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                count(
+                    &t,
+                    format!("held {} s", started.elapsed().as_secs().min(99) / 10 * 10),
+                );
+                // Now read what is left, to see how it was let go.
+                let _ = tokio::time::timeout(Duration::from_secs(5), read_all(rx, t.clone())).await;
+            }
+        }
+        "subscribe" => {
+            // A subscription for everything in full, read as fast as it comes; asked again each second.
+            let Some((ws, outcome)) = signed_in(&url, &token).await else {
+                fail("the hostile could not sign in")
+            };
+            count(&t, format!("sign-in {outcome}"));
+            let (mut tx, rx) = ws.split();
+            let reader = tokio::spawn(read_all(rx, t.clone()));
+            while Instant::now() < end {
+                sent += 1;
+                if tx
+                    .send(Message::Binary(everything(&pairs).into()))
+                    .await
+                    .is_err()
+                {
+                    count(&t, "send failed");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            let _ = tx.send(Message::Close(None)).await;
+            let _ = tokio::time::timeout(Duration::from_secs(10), reader).await;
+        }
+        "silent" => {
+            // 10,000 sockets that never sign in: half never send their HTTP request, half are upgraded and never send
+            // their first frame. Each that is closed is opened again at once.
+            let addr = url
+                .trim_start_matches("ws://")
+                .split('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            let mut loops = Vec::new();
+            for i in 0..SILENT {
+                let (url, addr, t) = (url.clone(), addr.clone(), t.clone());
+                loops.push(tokio::spawn(async move {
+                    let mut n = 0u64;
+                    while Instant::now() < end {
+                        n += 1;
+                        let left = end.saturating_duration_since(Instant::now());
+                        if i % 2 == 0 {
+                            match tokio::net::TcpStream::connect(&addr).await {
+                                Ok(mut s) => {
+                                    let mut b = [0u8; 256];
+                                    use tokio::io::AsyncReadExt;
+                                    match tokio::time::timeout(left, s.read(&mut b)).await {
+                                        Ok(Ok(0)) | Ok(Err(_)) => count(&t, "tcp closed"),
+                                        Ok(Ok(_)) => count(&t, "tcp answered"),
+                                        Err(_) => count(&t, "tcp held to the end"),
+                                    }
+                                }
+                                Err(_) => {
+                                    count(&t, "tcp connect failed");
+                                    tokio::time::sleep(Duration::from_millis(200)).await;
+                                }
+                            }
+                        } else {
+                            match tokio_tungstenite::connect_async(&url).await {
+                                Ok((ws, _)) => {
+                                    let (_, rx) = ws.split();
+                                    let _ =
+                                        tokio::time::timeout(left, read_all(rx, t.clone())).await;
+                                    if Instant::now() >= end {
+                                        count(&t, "ws held to the end");
+                                    }
+                                }
+                                Err(_) => {
+                                    count(&t, "ws connect failed");
+                                    tokio::time::sleep(Duration::from_millis(200)).await;
+                                }
+                            }
+                        }
+                    }
+                    n
+                }));
+            }
+            for l in loops {
+                sent += l.await.unwrap_or(0);
+            }
+        }
+        "guess" => {
+            // Token guessing: four loops, each a fresh well-formed token the world never issued.
+            let mut loops = Vec::new();
+            for _ in 0..4 {
+                let (url, t) = (url.clone(), t.clone());
+                loops.push(tokio::spawn(async move {
+                    let mut n = 0u64;
+                    while Instant::now() < end {
+                        n += 1;
+                        let guess =
+                            Token::issue(Grant::Actor(Actor::Soul(me.0))).expect("random bytes");
+                        match signed_in(&url, guess.reveal()).await {
+                            Some((_, outcome)) => count(&t, format!("sign-in {outcome}")),
+                            None => count(&t, "connect failed or closed"),
+                        }
+                    }
+                    n
+                }));
+            }
+            for l in loops {
+                sent += l.await.unwrap_or(0);
+            }
+        }
+        "shared" => {
+            // One token on 500 sockets: each signs in, holds its socket until it is taken from it, and signs in again.
+            let mut loops = Vec::new();
+            for _ in 0..SHARED {
+                let (url, token, t) = (url.clone(), token.clone(), t.clone());
+                loops.push(tokio::spawn(async move {
+                    let mut n = 0u64;
+                    while Instant::now() < end {
+                        n += 1;
+                        match signed_in(&url, &token).await {
+                            Some((ws, outcome)) => {
+                                if outcome != "stream.started" && outcome != "stream.resumed" {
+                                    count(&t, format!("sign-in {outcome}"));
+                                }
+                                let (_, rx) = ws.split();
+                                let left = end.saturating_duration_since(Instant::now());
+                                let _ = tokio::time::timeout(left, read_all(rx, t.clone())).await;
+                            }
+                            None => {
+                                count(&t, "connect failed or closed");
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
+                        }
+                    }
+                    n
+                }));
+            }
+            for l in loops {
+                sent += l.await.unwrap_or(0);
+            }
+        }
         _ => fail(format!("no attack {arm}")),
     }
     let tally = t.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -403,6 +730,8 @@ struct Args {
     honest: usize,
     seconds: u64,
     repeats: usize,
+    every_ms: u64,
+    sync: bool,
     arms: Vec<String>,
 }
 
@@ -414,6 +743,8 @@ fn args(a: &[String]) -> Option<Args> {
         honest: num("--honest", 50)? as usize,
         seconds: num("--seconds", 20)?,
         repeats: num("--repeats", 2)? as usize,
+        every_ms: num("--every", 1000)?,
+        sync: a.iter().any(|x| x == "--sync"),
         arms: get("--arms").map_or_else(
             || ARMS.iter().map(|s| (*s).to_owned()).collect(),
             |s| s.split(',').map(str::to_owned).collect(),
@@ -459,7 +790,7 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let dir = a.dir.join(format!("{arm}-{rep}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(format!("the run folder: {e}")));
-    let n = a.honest + 1;
+    let n = a.honest + ALL.len();
     let pairs = toggles::World::build(1, n, 0).pairs;
     let sock = dir.join("w.sock");
     let mut w = Command::new(bin().join("worldd"))
@@ -496,6 +827,8 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
         .arg(&sock)
         .arg("--tokens")
         .arg(dir.join("tokens"))
+        .arg("--views")
+        .arg(sock.with_extension("views"))
         .args(["--build", "1220"])
         .stdout(Stdio::piped())
         .stderr(std::fs::File::create(dir.join("gatewayd.log")).unwrap_or_else(|e| fail(e)))
@@ -519,12 +852,14 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let mut agents = Vec::new();
     for i in 0..a.honest {
         // Offset by index, so the acts spread over each second.
-        let offset = Duration::from_millis((i as u64 * 1000) / a.honest as u64);
+        let offset = Duration::from_millis((i as u64 * a.every_ms) / a.honest as u64);
         agents.push(tokio::spawn(honest(
             url.clone(),
             tokens[i].clone(),
             pairs[i],
             offset,
+            Duration::from_millis(a.every_ms),
+            a.sync,
             go.clone(),
             stop.clone(),
             h.clone(),
@@ -537,33 +872,50 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let rss_idle = rss_kib(gpid);
 
     // The attack, in a process of its own, so its sends never take this one's threads.
-    let out = dir.join("hostile.txt");
-    let mut hostile = (arm != "none").then(|| {
-        Command::new(std::env::current_exe().unwrap_or_else(|_| fail("this binary")))
-            .args([
-                "attack",
-                arm,
-                &url,
-                &tokens[a.honest],
-                &n.to_string(),
-                &a.seconds.to_string(),
-            ])
-            .arg(&out)
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap_or_else(|e| fail(format!("the hostile: {e}")))
-    });
+    let attacks: Vec<&str> = match arm {
+        "none" => Vec::new(),
+        "all" => ALL.to_vec(),
+        one => vec![one],
+    };
+    let mut hostile: Vec<(String, PathBuf, Child)> = attacks
+        .iter()
+        .enumerate()
+        .map(|(k, attack)| {
+            let me = a.honest + k;
+            let out = dir.join(format!("hostile-{attack}.txt"));
+            let child =
+                Command::new(std::env::current_exe().unwrap_or_else(|_| fail("this binary")))
+                    .args([
+                        "attack",
+                        attack,
+                        &url,
+                        &tokens[me],
+                        &n.to_string(),
+                        &a.seconds.to_string(),
+                    ])
+                    .arg(&out)
+                    .arg(me.to_string())
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .unwrap_or_else(|e| fail(format!("the hostile: {e}")));
+            ((*attack).to_owned(), out, child)
+        })
+        .collect();
+    let wpid = w.id();
+    let cpu0 = (cpu_s(gpid), cpu_s(wpid));
     go.store(true, Ordering::Relaxed);
     let rss_max = Arc::new(AtomicU64::new(rss_idle));
+    let wrss_max = Arc::new(AtomicU64::new(rss_kib(wpid)));
     let sampling = Arc::new(AtomicBool::new(true));
     let sampler = {
-        let (rss_max, sampling) = (rss_max.clone(), sampling.clone());
+        let (rss_max, wrss_max, sampling) = (rss_max.clone(), wrss_max.clone(), sampling.clone());
         tokio::spawn(async move {
             while sampling.load(Ordering::Relaxed) {
-                let r = tokio::task::spawn_blocking(move || rss_kib(gpid))
+                let (r, wr) = tokio::task::spawn_blocking(move || (rss_kib(gpid), rss_kib(wpid)))
                     .await
-                    .unwrap_or(0);
+                    .unwrap_or((0, 0));
                 rss_max.fetch_max(r, Ordering::Relaxed);
+                wrss_max.fetch_max(wr, Ordering::Relaxed);
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         })
@@ -573,7 +925,8 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     for ag in agents {
         let _ = ag.await;
     }
-    if let Some(c) = hostile.as_mut() {
+    let cpu1 = (cpu_s(gpid), cpu_s(wpid));
+    for (_, _, c) in hostile.iter_mut() {
         let _ = tokio::task::block_in_place(|| c.wait());
     }
     sampling.store(false, Ordering::Relaxed);
@@ -587,9 +940,24 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let mut waits = std::mem::take(&mut *h.waits_us.lock().unwrap_or_else(|e| e.into_inner()));
     waits.sort_unstable();
     let reasons = h.reasons.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let hostile_told = std::fs::read_to_string(&out).unwrap_or_else(|_| "—".into());
+    let mut sync_waits =
+        std::mem::take(&mut *h.sync_waits_us.lock().unwrap_or_else(|e| e.into_inner()));
+    sync_waits.sort_unstable();
+    let hostile_told = if hostile.is_empty() {
+        "—".to_owned()
+    } else {
+        hostile
+            .iter()
+            .map(|(attack, out, _)| {
+                let told =
+                    std::fs::read_to_string(out).unwrap_or_else(|_| "nothing written".into());
+                format!("{attack}: {}", told.trim())
+            })
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
     format!(
-        "| {arm} | {rep} | {tick_n} | {:.1} | {:.1} | {over} | {} | {:.1} | {:.1} | {:.1} | {} | {} {:?} | {} | {} | {} | {} |",
+        "| {arm} | {rep} | {tick_n} | {:.1} | {:.1} | {over} | {} | {:.1} | {:.1} | {:.1} | {} | {} {:?} | {} | {} | {} | {:.1} | {} | {:.1} | {} | {:.1} / {:.1} / {} / {} | {} |",
         tick_p99 as f64 / 1000.0,
         tick_max as f64 / 1000.0,
         waits.len(),
@@ -602,6 +970,14 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
         h.closed.load(Ordering::Relaxed),
         rss_idle / 1024,
         rss_max.load(Ordering::Relaxed) / 1024,
+        cpu1.0 - cpu0.0,
+        wrss_max.load(Ordering::Relaxed) / 1024,
+        cpu1.1 - cpu0.1,
+        sync_waits.len(),
+        pct(&sync_waits, 0.5),
+        pct(&sync_waits, 0.95),
+        h.sync_unanswered.load(Ordering::Relaxed),
+        h.sync_refused.load(Ordering::Relaxed),
         hostile_told.trim(),
     )
 }
@@ -618,14 +994,19 @@ async fn main() {
             argv.get(6).and_then(|s| s.parse::<u64>().ok()),
             argv.get(7),
         ) else {
-            fail("usage: hostile attack <arm> <url> <token> <bodies> <seconds> <out>")
+            fail("usage: hostile attack <arm> <url> <token> <bodies> <seconds> <out> <me>")
         };
+        let me = argv
+            .get(8)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(n - 1);
         let pairs = toggles::World::build(1, n, 0).pairs;
         attack(
             arm,
             url.clone(),
             token.clone(),
             pairs,
+            me,
             seconds,
             PathBuf::from(out),
         )
@@ -638,13 +1019,15 @@ async fn main() {
         )
     };
     println!(
-        "hostile bench: {} honest agents, each its own lamp once a second, {} s a run, 50 ms ticks",
-        a.honest, a.seconds
+        "hostile bench: {} honest agents, each its own lamp every {} ms, {} s a run, 50 ms ticks",
+        a.honest, a.every_ms, a.seconds
     );
     println!(
-        "| arm | repeat | ticks | tick p99 ms | tick longest ms | over budget | honest acts | wait p50 ms | p95 ms | p99 ms | unanswered | refused | honest closed | gatewayd MiB idle | MiB max | hostile |"
+        "| arm | repeat | ticks | tick p99 ms | tick longest ms | over budget | honest acts | wait p50 ms | p95 ms | p99 ms | unanswered | refused | honest closed | gatewayd MiB idle | MiB max | CPU s | worldd MiB max | CPU s | honest syncs | sync p50 / p95 ms / unanswered / refused | hostile |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!(
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    );
     for arm in &a.arms {
         for rep in 1..=a.repeats {
             println!("{}", run(&a, arm, rep).await);

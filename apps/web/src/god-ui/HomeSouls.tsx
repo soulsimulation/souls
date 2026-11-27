@@ -18,6 +18,16 @@ const readHeld = () => { try { return Math.min(24, Math.max(0, Number(localStora
 const writeHeld = (n: number) => { try { if (n) localStorage.setItem(HELD, String(n)); else localStorage.removeItem(HELD); } catch { /* private mode: the section appears when it loads */ } };
 const Hold = ({ n }: { n: number }) => <div className="lh-cards hs-cards">{Array.from({ length: n }, (_, i) => <span key={i} className="lh-card hs-card hs-hold" aria-hidden="true" />)}</div>;
 
+/** The account's Souls (my-souls/1), or null without a token: signed in but its token not given yet (Clerk still
+ *  settling) asks nothing, where it used to ask unsigned and log a 401 on the home page (first day, 27 Nov); the effect
+ *  asks again when the session changes. */
+export async function readMySouls(headers: Record<string, string>, get: typeof fetch = fetch): Promise<HomeSoul[] | null> {
+  if (!headers.authorization) return null;
+  const r = await get(`${BASE}/__sim/my-souls.json`, { headers });
+  const d = r.ok ? await r.json() : null;
+  return Array.isArray(d?.souls) ? d.souls as HomeSoul[] : [];
+}
+
 export function HomeSouls() {
   const session = useSession();
   const [souls, setSouls] = useState<HomeSoul[] | null>(null);
@@ -28,9 +38,8 @@ export function HomeSouls() {
     void loadCards();
     void (async () => {
       try {
-        const r = await fetch(`${BASE}/__sim/my-souls.json`, { headers: await userAuthHeaders() });
-        const d = r.ok ? await r.json() : null, list = Array.isArray(d?.souls) ? d.souls as HomeSoul[] : [];
-        if (live) { setSouls(list); writeHeld(list.length); }
+        const list = await readMySouls(await userAuthHeaders());
+        if (live && list) { setSouls(list); writeHeld(list.length); }
       } catch { if (live) setSouls([]); }
     })();
     return () => { live = false; };

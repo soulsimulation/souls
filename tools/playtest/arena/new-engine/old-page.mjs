@@ -266,7 +266,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
     const client = join(dir, 'client');
     await command('build-client', process.execPath, [join(checkout, 'v2/client/served/build.mjs'), '--out', client, '--version', '0.0.0', '--pkg', pkg], { cwd: checkout, stdio: 'ignore' });
     const sw = JSON.parse(await command('switch-native-page', process.execPath, [join(checkout, 'tools/world-launcher/v2-switch.mjs'), '--binding', binding, '--slug', slug, '--stream', routes.worlds[slug].stream,
-      '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--port', String(launcher), ...(bodies ? ['--bodies', resolve(bodies)] : [])], { cwd: checkout, encoding: 'utf8' }));
+      '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--no-unit', '--port', String(launcher), ...(bodies ? ['--bodies', resolve(bodies)] : [])], { cwd: checkout, encoding: 'utf8' }));
     if (!sw.page?.v2Stream) throw new Error(`the switch did not take: ${JSON.stringify(sw).slice(0, 300)}`);
     const page = `${base}/w/${slug}/`;
     // the page's inline config names the stream once the launcher has the binding (within a second)
@@ -290,7 +290,7 @@ async function withCreate({ world, genesis, dir, marsWeb, pkg, launcher, frontPo
   execFileSync(process.execPath, [CLIENT_BUILD, '--out', client, '--version', '0.0.0', '--pkg', pkg], { cwd: REPO_ROOT, stdio: 'ignore' });
   const routes = JSON.parse(readFileSync(routesFile, 'utf8'));
   execFileSync(process.execPath, [SWITCH, '--binding', binding, '--slug', WORLD, '--stream', routes.worlds[WORLD].stream, '--routes', routesFile, '--client', client,
-    '--static', join(dir, 'static')], { cwd: REPO_ROOT, stdio: 'ignore' });
+    '--static', join(dir, 'static'), '--no-unit'], { cwd: REPO_ROOT, stdio: 'ignore' });
   procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth',
     '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb, ...(genesis.templatesDir ? ['--templates-dir', genesis.templatesDir] : [])], /\[launcher\] http/,
     { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding, SOULS_V2_DIRECTORY: made.url } }));

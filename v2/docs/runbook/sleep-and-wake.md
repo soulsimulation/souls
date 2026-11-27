@@ -13,7 +13,8 @@ each due change at its due time.
 no body moving for an intent or for the wind-down) and its **next due time**, the earliest over its due lists (the
 sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends, the
 forms' timers: a bell's fade, a planter's next stage). A form's timer pending when the world sleeps or restarts goes
-back on its list from the timers the tree holds, at the first tick (#3991). Still for 60 s on end, with nothing due
+back on its list from the timers the tree holds, at the first tick (#3991), and fires in a world with no bodies too;
+its form's needs are decided when it fires, and one refused is written on its thing as `souls:timer-refused`. Still for 60 s on end, with nothing due
 within 60 s (`supervisor::sleep::may_sleep`), it sleeps. Agents' sockets live in the gateway and keep no world awake.
 The order is fixed:
 

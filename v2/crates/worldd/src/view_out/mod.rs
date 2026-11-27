@@ -309,13 +309,55 @@ pub fn capture_checkpoint(path: &Path, expected: &sim::checkpoint::Root) -> R<Ve
 pub fn write_whole(path: &Path, bytes: &[u8]) -> R<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    let mut f = fs::File::create(&tmp).map_err(io)?;
+    whole_via(path, &PathBuf::from(tmp), bytes)
+}
+
+/// As [`write_whole`], for a text file (rule 10), under a temporary name of this write alone (W7, #2826): a removal's
+/// purge and a writer may write one text file at once, each whole, the last rename standing, never one's bytes in
+/// the other's file. A write killed midway leaves its own `.tmp` behind, which the origin never serves.
+pub fn write_text(path: &Path, bytes: &[u8]) -> R<()> {
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    whole_via(path, &PathBuf::from(tmp), bytes)
+}
+
+fn whole_via(path: &Path, tmp: &Path, bytes: &[u8]) -> R<()> {
+    let mut f = fs::File::create(tmp).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
     // Synced before the rename (B1-7): after a power cut the name holds the old bytes or the new, never a short file.
     f.sync_all().map_err(io)?;
     drop(f);
-    fs::rename(&tmp, path).map_err(io)
+    fs::rename(tmp, path).map_err(io)
+}
+
+/// After a text file was written from `bytes` without the rows `list` names (rule 10, W7 #2826): while the store's
+/// list has changed since, the file again with the list now. A removal after the last read finds the file there and
+/// purges it itself (`worldd::removal`), so no removal lands between and is missed.
+fn settle(store: &Store, path: &Path, bytes: &[u8], mut list: Redactions) -> R<()> {
+    loop {
+        let now = store.redactions();
+        if now == list {
+            return Ok(());
+        }
+        derive(path, purge_text(bytes, &now)?.as_deref().unwrap_or(bytes))?;
+        list = now;
+    }
+}
+
+/// Writes a text file derived from the store (rule 10): whole, unless the disk holds these bytes already.
+fn derive(path: &Path, bytes: &[u8]) -> R<()> {
+    if fs::read(path).is_ok_and(|on_disk| on_disk == bytes) {
+        return Ok(());
+    }
+    if let Some(p) = path.parent() {
+        fs::create_dir_all(p).map_err(io)?;
+    }
+    write_text(path, bytes)
 }
 
 /// A text file (rule 10) without the rows of the references `redactions` names (W7, #2826), or `None` when it holds
@@ -1451,7 +1493,32 @@ pub struct PublicStart<'a> {
     /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
     pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
-    pub history: Option<&'a sim::log::Recovered>,
+    pub history: Option<&'a dyn History>,
+}
+
+/// The world's log records from its first kept one on, as a reader recovering from them needs them (#2803): held in
+/// memory ([`sim::log::Recovered`], a test's), or read from the disk a batch at a time (`worldd serve`'s), so a
+/// restart never holds the whole log.
+pub trait History {
+    /// The first record held.
+    fn first(&self) -> u64;
+    /// Hands each record from `from` on to `each`, in order, while it returns `Ok(true)`.
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()>;
+}
+
+impl History for sim::log::Recovered {
+    fn first(&self) -> u64 {
+        self.first
+    }
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()> {
+        let from = from.max(self.first);
+        for (n, raw) in (from..).zip(self.after(from)) {
+            if !each(n, raw)? {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 impl PublicStart<'_> {
     /// Only the public legacy transition may choose an older retained source. The engine's newest restore stays
@@ -1892,18 +1959,18 @@ impl<S: ObjectStore> PublicWriter<S> {
                     )
                 })?;
                 if w.migration_state.is_none() {
-                    w.bridge_to(history.first)?;
+                    w.bridge_to(history.first())?;
                 }
-                for (offset, raw) in history.records.iter().enumerate() {
-                    let n = history.first + offset as u64;
+                history.each_from(w.cursor, &mut |n, raw| {
                     if n < w.cursor {
-                        continue;
+                        return Ok(true);
                     }
                     if w.migration_state.is_some() {
-                        break;
+                        return Ok(false);
                     }
                     w.apply_record(n, raw)?;
-                }
+                    Ok(true)
+                })?;
                 let prefix = w.migration_state.take().ok_or_else(|| {
                     fault(
                         "stream-legacy-source-missing",
@@ -3000,15 +3067,14 @@ impl<S: ObjectStore> PublicWriter<S> {
         let Some(store) = &self.text else {
             return immutable(path, recovered);
         };
-        let purged = purge_text(recovered, &store.redactions())?;
-        let bytes = purged.as_deref().unwrap_or(recovered);
-        if fs::read(path).is_ok_and(|on_disk| on_disk == bytes) {
-            return Ok(());
-        }
-        if let Some(p) = path.parent() {
-            fs::create_dir_all(p).map_err(io)?;
-        }
-        write_whole(path, bytes)
+        let list = store.redactions();
+        derive(
+            path,
+            purge_text(recovered, &list)?
+                .as_deref()
+                .unwrap_or(recovered),
+        )?;
+        settle(store, path, recovered, list)
     }
     /// A node is a row of the public projection when it is live in `t` and public (#3667).
     fn visible(&self, t: &replica::tree::Tree, id: Id) -> bool {
@@ -3937,8 +4003,18 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.generation_dir().join(number.to_string()),
             self.generation_dir().join(format!("{number}.text")),
         );
+        // A removal while the part was cut (W7, #2826): the local file is written without its rows, derived from the
+        // store as rule 10 says; the recovery object keeps the bytes as cut, never served.
+        let list = self.text.as_ref().map(|store| store.redactions());
+        let derived = match &list {
+            Some(list) => purge_text(&text, list)?,
+            None => None,
+        };
         let (part_written, text_written) = std::thread::scope(|s| {
-            let text = beside(s, || immutable(&text_file, &text));
+            let text = beside(s, || match &derived {
+                Some(purged) => derive(&text_file, purged),
+                None => immutable(&text_file, &text),
+            });
             (
                 immutable(&part_file, &bytes),
                 text.join("the text file's writer panicked"),
@@ -3946,6 +4022,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         });
         part_written?;
         text_written?;
+        if let (Some(store), Some(list)) = (&self.text, list) {
+            settle(store, &text_file, &text, list)?;
+        }
         lap.mark(8);
         self.last_to = Some(sp.to);
         if let Some(began) = began {

@@ -20,7 +20,8 @@ With the client a world serves (`<world url>/eden.mjs`), the command is `node ed
    (`kinds`: each kind and the kinds it `admits`). Read it before you build, and again whenever you are unsure.
 
 If the home has no creator yet, pair first: `node souls-god.mjs pair <world url> --creator <creator grant>`. It prints
-a link and a short code; the world's owner opens the link signed in and approves. Then run `status`.
+a link and a short code; the world's owner opens the link signed in and approves. Then run `status`: while the
+pairing is still collecting its approval it waits (up to 20 s), and if the owner has not approved yet it says so.
 
 On a large world, save `node souls-god.mjs describe > world.json` in your scratch folder. Inspect selected JSON with
 `jq '.kinds | keys' world.json` and `jq '.nodes[] | select(.kind == "eden:ground")' world.json`; filter other kinds or
@@ -182,6 +183,8 @@ the root, which `describe` shows), and from then on you place it like any other 
   of at most 256 operations, and the world checks each. It prints one line per op (`ready`, `applied`, `already`,
   `refused` with the code, `unresolved`, `ambiguous`, `moved-since`, ...), then the counts. Run `--dry-run` first;
   a second run finds every op `already` and sends nothing. A thing moved off a roof to the ground gets a new id.
+  If your copy's open ground came without its terrain tiles, a move to the ground is `bad-op`: give the tiles with
+  `--terrain <file>` (`{"tileSize", "tiles"}`, the rows of the ground's field 25), read only for such a copy.
 
 ## Furnishing
 
@@ -203,7 +206,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 - `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
   `--bounds x0,z0,x1,z1` (metres) to cover a box.
 - The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
-  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  carries only the new tiles, so one grow adds at most about 390 of Eden 2026's 64 m tiles; a larger one is refused
   `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
   land edit, so a ground past about 16 MB is refused `edit.too-large`.
 

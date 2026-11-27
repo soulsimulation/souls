@@ -875,7 +875,7 @@
   },
   {
    "def": "mars-rack-beam@1",
-   "placed": 2,
+   "placed": 4,
    "template": "worlds/templates/mars-camp.json (its rack yard), not mars-two",
    "kind": "mars:rack_beam",
    "forms": "own"

@@ -43,3 +43,13 @@ test('preview override parsing', () => {
   const m=parseFadeOverride('?fade=Alice:42,Bob:beam, Carol:reclaim');
   assert.equal(m.get('alice'),'42');assert.equal(m.get('bob'),'beam');assert.equal(m.get('carol'),'reclaim');
 });
+
+test('new engine: a body the take marks leaving beams up once, keyed by its entity, and is let go after the beam', async () => {
+  const { leavingBeams } = await import('../src/WorldFading.ts');
+  const beams=new Map();
+  assert.equal(leavingBeams({e1:{state:{}},e2:{state:{activity:'idle'}}},beams,0),false,'no mark, no beam');
+  assert.equal(leavingBeams({e1:{state:{leaving:true}}},beams,1000),true);assert.equal(beams.get('e1').beamedAt,1000);
+  assert.equal(leavingBeams({e1:{state:{leaving:true}}},beams,1500),false,'started once');assert.equal(beams.get('e1').beamedAt,1000);
+  assert.equal(leavingBeams({},beams,1000+FADING.beamSeconds*1000-1),false,'kept while it beams, the body gone');
+  assert.equal(leavingBeams({},beams,1000+FADING.beamSeconds*1000+1),true);assert.equal(beams.size,0);
+});

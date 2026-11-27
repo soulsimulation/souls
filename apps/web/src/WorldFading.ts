@@ -139,6 +139,15 @@ export class WorldFadingLayer{
 export function beamedOut(states:ReadonlyMap<string,FadingState>,nowMs:number):Set<string>{
  const out=new Set<string>();for(const [id,s] of states)if(s.beamedAt!==undefined&&nowMs>=s.beamedAt)out.add(id);return out;
 }
+/** New engine (#5068 item 7): a body the take marks `leaving` (the engine's `life:leave` retired it; the take still draws it
+ *  to the end of its last chunk) beams up from where it was last drawn, keyed by its entity id, from the first frame that
+ *  shows the mark. `beams` keeps each for the beam's length; true when it changed. No mark, no beam. */
+export function leavingBeams(entities:Readonly<Record<string,{state?:Readonly<Record<string,unknown>>}|undefined>>,beams:Map<string,FadingState>,nowMs:number):boolean{
+ let changed=false;
+ for(const id in entities)if(entities[id]?.state?.leaving===true&&!beams.has(id)){beams.set(id,{idleMinutes:FADING.beamAt,beamedAt:nowMs});changed=true;}
+ for(const [id,s] of beams)if(nowMs-(s.beamedAt??nowMs)>FADING.beamSeconds*1000){beams.delete(id);changed=true;}
+ return changed;
+}
 /** Dev/preview override: `?fade=Alice:42,Bob:58,Carol:beam,Dan:reclaim` (names resolved by caller). */
 export function parseFadeOverride(search:string):Map<string,string>{
  const raw=new URLSearchParams(search).get('fade');const out=new Map<string,string>();if(!raw)return out;

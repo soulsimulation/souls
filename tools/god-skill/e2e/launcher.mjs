@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The God modal end to end, as an owner and their coding agent use it (B8, round 9). It replaces the V6-launcher meetup
 // flow, which Z3 retired when G5 made God Mode one view with no tabs. A world made by this checkout's launcher under /worlds,
-// owned by dev:gene, is walked in real Chrome:
+// owned by dev:gene, is walked in Chromium:
 //   A not connected: God Mode opens by itself; the Connect block names this world's SKILL.md; Copy puts the line on the clipboard
 //   B pairing: the agent (eden-god.mjs from this checkout, in a fresh folder) registers and pairs; Approve in God Mode pairs it
 //   C connected: `listen --follow` turns the pill green and the Connect block goes
@@ -79,8 +79,8 @@ const snapshot = async () => (await fetch(`${base}/v1/world/snapshot`)).json();
 const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../lib/chrome-lease.mjs');
 const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
 const releaseLease = await chromeLease('god-modal-e2e');
-// Real GPU (Metal) headless Chrome; swiftshader starves on this shared machine.
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+// Real GPU (Metal) headless Chromium; swiftshader starves on this shared machine.
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 let listen = null;
 try {
   const ctx = await browser.newContext({ viewport: { width: 1352, height: 820 }, deviceScaleFactor: dpr });

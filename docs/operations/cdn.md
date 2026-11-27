@@ -144,7 +144,7 @@ is skipped. `manifest` merges only receipt-verified paths into the manifest's `w
   Chrome's `Accept-Encoding` (must stay br), identity and gzip (must arrive decoded). `--allow-warm` labels a recheck
   of an already warm object.
 - `node tools/cdn/cdn-walk.mjs <outDir> <url>... [--manifest <file>] [--wait <ms>] [--devices desktop1,phone2]`: the
-  release's runtime check. Real Chrome, desktop and phone, asset worker on. It fails when the origin answers an asset
+  release's runtime check. Playwright Chromium, desktop and phone, asset worker on. It fails when the origin answers an asset
   the manifest maps, a CDN request is not 200, a `br` object arrives without `Content-Encoding: br`, the worker
   delivered GLBs but none from the CDN, a god upload came from the origin without a Worker request first, or a
   same-origin immutable response lacks a long-lived cache policy (`origin-cache.mjs`).
@@ -270,6 +270,21 @@ first; until then the binding field is ignored.
    `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs eden on`. Open
    `https://soul.game/w/eden/` in a browser: in DevTools, Network, filtered on `stream.soul.game`, the pointer and the
    parts answer `200` with `cf-cache-status: HIT` once warm, and the world moves.
+
+**Measured through the real CDN (#4985, 27 Nov 2026).** Remote readers (the page's stream worker without the
+drawing, asking `br, gzip` as a browser does) on Modal machines of 250 readers each, which Cloudflare's anycast spread
+over 6 to 10 edge locations on three continents, read Eden through `stream.soul.game` at 1,000, 2,500 and 5,000, each
+even (arrivals over 30 s, then held) and uneven (one join wave within 5 s, a churn wave of a quarter at the middle,
+2 % slow readers), two repeats. Up to 5,000 even and 2,500 uneven, the edges answered up to 20,000 requests a second
+at a 99.97 to 99.99 % hit ratio, first picture p95 under 3 s, and the origin host saw what it sees with no viewers:
+about 6 requests a second, under 0.01 of a core for the origin, the host near 7 % busy, Eden at 20 ticks a second with
+no tick over budget. To join, a reader downloads about 1.27 MB (the baseline 1.12 MB as br) against 9.2 MB without
+compression. **What breaks first is Cloudflare's security, not the host:** 5,000 readers joining within 5 s get
+"Sorry, you have been blocked" (403) on every read within 10 s and for the rest of the arm, from 20 machines and from
+100; the host and Eden saw nothing. Which rule fires is in the dashboard's Security Events for `stream.soul.game`.
+The rerun: `REMOTE_PKG=<the world's replica package> modal run tools/bench/capacity/viewers/v2-remote-modal.py
+--base https://stream.soul.game --stream <v2Stream> --viewers 5000 --arm uneven --per-share 250 --slow 100 --out
+<file>`, then `node tools/bench/capacity/viewers/v2-remote-report.mjs <file>`. The per-arm table is on #4985.
 
 **Rollback:** `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs eden off` (pages loaded
 after it read `soul.game/s/` again; an open page reads the CDN until it reloads). If the CDN itself is wrong, also set

@@ -11,7 +11,7 @@ try {
   await addSoul(ctx); const snap = await ctx.api('/v1/world/snapshot', { as: 'public' });
   const r = await follow(ctx, 'walk:mimos/floor'); console.log('walk', r.ok, r.room?.room);
   const s = await follow(ctx, `sit:${snap.entities.find((e) => e.name === 'honey-sofa-13').id}`, { seated: true, params: { seconds: 900 } }); console.log('sit', s.ok);
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const views = { 'campus-top': { eye: [10, 95, 10], at: [10, 0, -35], hide: 0 }, 'mimos-inside': { eye: [3, 7, -24], at: [3, 0, -31], hide: 1 } };
   for (const dpr of [1, 2]) for (const [n, v] of Object.entries(views)) {
     const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr }); await c.addInitScript(() => localStorage.setItem('sim.dev', 'admin'));

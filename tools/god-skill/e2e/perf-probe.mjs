@@ -73,7 +73,7 @@ const summarize = (frames, render, gpu, longtasks, ms) => {
 };
 
 const release = await chromeLease('perf-probe');
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--enable-precise-memory-info'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--enable-precise-memory-info'] });
 const results = [];
 try {
   for (const [W, H] of sizes) for (const dpr of dprs) {

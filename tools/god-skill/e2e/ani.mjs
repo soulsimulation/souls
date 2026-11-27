@@ -77,7 +77,7 @@ try {
 
   const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
   release = await chromeLease('t4-ani-e2e');
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const eye = `${(sx - 8).toFixed(1)},4.5,${(sz - 8).toFixed(1)}`, at = `${sx.toFixed(1)},0.6,${sz.toFixed(1)}`;
   const open = async (label, extra, viewport, dpr) => {
     const page = await (await browser.newContext({ viewport, deviceScaleFactor: dpr })).newPage(); page.setDefaultTimeout(600000);

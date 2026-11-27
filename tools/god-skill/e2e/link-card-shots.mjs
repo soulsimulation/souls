@@ -154,7 +154,7 @@ try {
   const base = `${origin}${BASE}/w/${slug}`;
   for (let i = 0; i < 120; i++) { const s = await call(`${base}/v1/god/status`, { sub: 'user_gene' }).catch(() => null); if (s?.status === 200) break; await sleep(1000); }
   release = await chromeLease('link-card-shots');
-  browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
   let sid = null;
   for (const [view, opts] of views) {
     const ctx = await context(browser, 'user_gene', { ...opts });

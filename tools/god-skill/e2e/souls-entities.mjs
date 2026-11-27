@@ -92,7 +92,7 @@ async function shot(name, { eye, at, wait: ms = 5000, hideRoofs = true } = {}) {
   if (!chromium) return;
   try {
     // one Chrome at a time across lanes (MERGES.md), on the real GPU (no swiftshader); ?shot=1 = clean canvas
-    if (!browser) { await lease(); browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] }); const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); }); page = await ctx.newPage(); }
+    if (!browser) { await lease(); browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] }); const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); }); page = await ctx.newPage(); }
     const q = new URLSearchParams({ dev: '1', shot: '1', ...(hideRoofs ? { hideRoofs: '1' } : {}) }); if (eye) q.set('eye', eye.join(',')); if (at) q.set('at', at.join(','));
     const t0 = t();
     await page.goto(`${base}?${q}`, { waitUntil: 'domcontentloaded', timeout: 120000 });

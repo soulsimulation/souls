@@ -39,7 +39,8 @@
 //!
 //! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
 //!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
-//!   timer ([`Acts::fired`]). Those the tree holds at a start (a restart, a sleeping world woken) go back on the list
+//!   timer ([`Acts::fired`]); its needs are decided then, on the world's state at its due time, and a refusal is
+//!   written by name as a [`TIMER_REFUSED`] entry on the thing (#3991). Those the tree holds at a start (a restart, a sleeping world woken) go back on the list
 //!   at the first tick (#3991). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
@@ -65,7 +66,7 @@ use sim::ground::Versions;
 use sim::planner::{FormAnswer, FormKey, FormKind, FormQuery, FormQuestion, FormResult};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
@@ -216,6 +217,38 @@ fn selects_body_slot(f: &Json, key: &str) -> bool {
                 && e.get("what").and_then(Json::str) == Some("actor")
                 && arg(e.get("into"))
         }))
+}
+
+/// The event of the entry a form's timer the world refused writes (#3991): on the timer's thing, at its due time,
+/// changing nothing. Its fields: 1 the timer, 2 the refusal's name (a need's reason, `thing-missing`, a binder's),
+/// 3 the form, 4 the refusal's detail.
+pub const TIMER_REFUSED: &str = "souls:timer-refused";
+
+fn timer_refused(t: &Timer, node: Id, form: &str, e: &Refusal) -> Effect {
+    let text = |s: &str| replica::encode::Value::Bytes(s.as_bytes().to_vec());
+    Effect {
+        envelope: replica::effects::Envelope {
+            sequence: 0,
+            at: t.due,
+            cause: replica::effects::Cause::World,
+            actor: Actor::World,
+            audience: replica::world_model::Audience::Everyone,
+            node,
+        },
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![replica::effects::Event {
+            name: Name::new(TIMER_REFUSED).unwrap_or_else(|| unreachable!("a name")),
+            fields: BTreeMap::from([
+                (1, t.id.to_value()),
+                (2, text(e.name)),
+                (3, text(form)),
+                (4, text(&e.detail)),
+            ]),
+            changes: Vec::new(),
+            rest: replica::effects::Rest::new(),
+        }]),
+        rest: replica::effects::Rest::new(),
+    }
 }
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -1545,7 +1578,12 @@ pub struct Acts {
     toward: BTreeMap<Id, Id>,
     /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
     timers: BTreeMap<Id, (Id, Name)>,
-    /// Each form a timer started since the last call, by the timer's id: its run, or its refusal by name (C24).
+    /// Each timer's run still going, by the timer's id: the timer and its form, so entries of the run the world
+    /// refuses to write are named on its thing ([`Acts::timer_unwritten`]).
+    timer_runs: BTreeMap<Id, (Timer, String)>,
+    /// Each form a timer started in the last tick, by the timer's id: its run, or its refusal by name (C24). Emptied at
+    /// each tick's start (#3991), so it holds one tick's timers however long the world runs; a refusal is also written
+    /// to the log as a [`TIMER_REFUSED`] entry on the timer's thing, where Souls and the page read it.
     pub fired: Vec<(Id, R<Asked>)>,
     /// The form's walks watched for progress (C21).
     watch: Watch,
@@ -1564,6 +1602,8 @@ pub struct Acts {
     /// While a batch of starts holds the bodies ([`Acts::hold_sight`]): the snapshot every [`Sight`] of it reads, built
     /// at its first use.
     held: Option<Option<Held>>,
+    /// While a batch of starts holds the bodies: the places `here` selectors read ([`Here`]), built at the first one.
+    here: Option<Arc<OnceLock<Here>>>,
     /// Each body seated by a form on a seat of another thing, with the links that form made from it (E14b): held
     /// with the seat, so a body that leaves the seat by any way but a form ([`Acts::untie`]) leaves them too.
     ties: BTreeMap<Id, Tie>,
@@ -1674,6 +1714,49 @@ pub const NONE_SELECTED: &str = "thing.none-selected";
 /// How far from the anchor a thing `here` may be, mm: today's reach for a thing a form uses nearby (a tap for a
 /// kettle, `TAP_REACH` in today's tea).
 pub const HERE_REACH_MM: i64 = 20_000;
+
+/// Every node with a place in the zone's frame, by square cell of [`HERE_REACH_MM`] across x and z, with that place:
+/// the set a `here` selector reads ([`ranked_things`]). A thing within the reach of an anchor lies in the anchor's
+/// cell or one of its eight neighbours, so a selector reads those nine cells, not every node of the tree (an even load
+/// at 1,000 Souls spent up to 0.7 s of a tick reading every node's place, once per form start, #5202's follow-up).
+/// Built from the tree as it stands at the first `here` selector of a batch of starts and kept for the batch
+/// ([`Acts::hold_sight`]): a start reads the tree and never changes it, and between the batch's starts the world
+/// writes only entries that change no node. Cells are a [`BTreeMap`], read by key only; the ranked list is sorted by a
+/// total order, so the order a cell keeps its nodes in reaches nothing.
+pub(crate) struct Here {
+    cells: BTreeMap<(i64, i64), Vec<(replica::tree::Handle, Vec3)>>,
+}
+
+impl Here {
+    /// The places of every node of `tree` that has one, by cell.
+    pub(crate) fn of(tree: &Tree) -> Self {
+        let mut cells: BTreeMap<(i64, i64), Vec<_>> = BTreeMap::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]));
+            if let Some(p) = tree.node(h).and_then(|n| world_at(tree, n.id())) {
+                cells.entry(Self::cell(p)).or_default().push((h, p));
+            }
+        }
+        Self { cells }
+    }
+
+    fn cell(p: Vec3) -> (i64, i64) {
+        let side = HERE_REACH_MM * 1_000;
+        (p.x.div_euclid(side), p.z.div_euclid(side))
+    }
+
+    /// Every node in the cell of `at` and its eight neighbours, with its place: a superset of those within
+    /// [`HERE_REACH_MM`] of `at` across x and z.
+    fn near(&self, at: Vec3) -> impl Iterator<Item = &(replica::tree::Handle, Vec3)> {
+        let (x, z) = Self::cell(at);
+        (-1..=1)
+            .flat_map(move |i| (-1..=1).map(move |j| Some((x.checked_add(i)?, z.checked_add(j)?))))
+            .flatten()
+            .filter_map(|c| self.cells.get(&c))
+            .flatten()
+    }
+}
 
 /// How near a body stands to a thing to be within a form's reach of it, mm, beyond the thing's own half size.
 const NEAR_MM: i64 = 1_500;
@@ -1788,6 +1871,7 @@ fn reach_between(entry: &Json, b: Vec3, n: Vec3) -> bool {
 pub(crate) fn select_thing(
     tree: &Tree,
     kinds: &Json,
+    near: &OnceLock<Here>,
     select: &Json,
     node: Id,
     body: Id,
@@ -1796,7 +1880,7 @@ pub(crate) fn select_thing(
     if select.get("of").and_then(Json::str) != Some("things") {
         return Err(());
     }
-    let (ranked, rank) = ranked_things(tree, kinds, select, node, body, body_at)?;
+    let (ranked, rank) = ranked_things(tree, kinds, near, select, node, body, body_at)?;
     Ok(match rank {
         Some(r) => ranked.get(r - 1).map(|(_, id)| *id),
         None => ranked.last().map(|(_, id)| *id),
@@ -1808,10 +1892,12 @@ type Ranked = Vec<(Option<i128>, Id)>;
 
 /// [`select_thing`]'s set in its order, each with its squared distance from the anchor (none for a thing with no
 /// place), and the selector's rank (`None` for `last`). Reads `in`, `anchor`, `order`, `rank` and `kind`, whatever
-/// `of` says: a seat of another thing (E14b) is chosen from the same set in the same order.
+/// `of` says: a seat of another thing (E14b) is chosen from the same set in the same order. A `here` set is read from
+/// `near` ([`Here`]), built from `tree` at its first use.
 fn ranked_things(
     tree: &Tree,
     kinds: &Json,
+    near: &OnceLock<Here>,
     select: &Json,
     node: Id,
     body: Id,
@@ -1852,14 +1938,20 @@ fn ranked_things(
         d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
     };
     let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
+    let xz = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.z, p.z)
+    };
+    // Here: only the nodes with a place within the reach of the anchor, from the cells around it; none with no anchor.
+    // The reach test below drops every other node, so the set is the same as from every node of the tree.
     let handles: Vec<replica::tree::Handle> = if here {
-        let mut all = Vec::new();
-        let mut stack = vec![tree.root()];
-        while let Some(h) = stack.pop() {
-            stack.extend(tree.children(h).unwrap_or(&[]));
-            all.push(h);
-        }
-        all
+        anchor.map_or_else(Vec::new, |a| {
+            near.get_or_init(|| Here::of(tree))
+                .near(a)
+                .filter(|(_, p)| xz(a, *p) <= reach)
+                .map(|(h, _)| *h)
+                .collect()
+        })
     } else {
         sets.iter()
             .filter_map(|s| tree.children(tree.handle(*s)?))
@@ -1892,28 +1984,28 @@ fn ranked_things(
         }
         true
     };
-    let xz = |a: Vec3, p: Vec3| {
-        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        d(a.x, p.x) + d(a.z, p.z)
-    };
     let of_kind = |n: &replica::tree::NodeRef<'_>| {
         kind.is_none_or(|k| plain(n.kind()) == k || entry_of(n).split('@').next() == Some(k))
     };
+    // Every test is pure, so their order changes only the work. The reach is asked before the frame and container
+    // walks (an even load at 1,000 Souls held the clock for seconds walking every node's frame, many form starts a
+    // tick, #5202).
     let mut ranked: Vec<(Option<i128>, Id)> = handles
         .into_iter()
         .filter_map(|h| tree.node(h))
         .filter(|n| n.id() != node && n.id() != body)
         .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
         .filter(|n| of_kind(n))
-        .filter(|n| !is_body(n.id()))
-        .filter(|n| !here || (same_place(n.id()) && !closed_above(n.id())))
         .filter_map(|n| {
             let p = world_at(tree, n.id());
             if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
                 return None;
             }
-            Some((anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
+            Some((n, p))
         })
+        .filter(|(n, _)| !is_body(n.id()))
+        .filter(|(n, _)| !here || (same_place(n.id()) && !closed_above(n.id())))
+        .map(|(n, p)| (anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
         .collect();
     ranked.sort_by(|(da, a), (db, b)| {
         let by = match (da, db) {
@@ -1982,9 +2074,11 @@ type Open = (Option<i128>, Id, u64, Option<i128>);
 /// nearer the body; equally near both, the choice is not the world's: refused `arg-ambiguous`, naming the argument.
 /// None free is refused by name, as on the act's own thing. `None` for a select of the node's own slots (`in`:
 /// `this`, or none), which [`Acts::start`]'s own pick takes.
+#[allow(clippy::too_many_arguments)]
 fn other_seat(
     tree: &Tree,
     kinds: &Json,
+    near: &OnceLock<Here>,
     b: &Bodies,
     select: &Json,
     node: Id,
@@ -2002,7 +2096,7 @@ fn other_seat(
     let body_at = c
         .body(body)
         .and_then(|m| carried(tree, Some(m.pose.frame.node), m.pose.position));
-    let Ok((ranked, rank)) = ranked_things(tree, kinds, select, node, body, body_at) else {
+    let Ok((ranked, rank)) = ranked_things(tree, kinds, near, select, node, body, body_at) else {
         return Some(Err(refusal("arg-malformed", key)));
     };
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
@@ -2184,6 +2278,7 @@ impl Acts {
             toward: BTreeMap::new(),
             timers: BTreeMap::new(),
             fired: Vec::new(),
+            timer_runs: BTreeMap::new(),
             watch: Watch::new(),
             made_way: BTreeSet::new(),
             beside: BTreeMap::new(),
@@ -2192,6 +2287,7 @@ impl Acts {
             hatches: BTreeMap::new(),
             zone: header,
             held: None,
+            here: None,
             ties: BTreeMap::new(),
             tied: false,
             timed: false,
@@ -2539,13 +2635,16 @@ impl Acts {
     /// starts, between which no body moves (a start claims legs and sets timers; the controller steps them in a later
     /// tick). Each start otherwise rebuilt it whole: every body, every build, at about 0.4 ms each at 750 bodies.
     /// The snapshot is built at the first start that needs it, so a tick with no starts builds none.
+    /// The places `here` selectors read are held with it ([`Here`]), built at the batch's first such selector.
     pub fn hold_sight(&mut self) {
         self.held = Some(None);
+        self.here = Some(Arc::default());
     }
 
-    /// Lets each [`Sight`] read the bodies afresh again.
+    /// Lets each [`Sight`] read the bodies afresh again, and each `here` selector the tree's places.
     pub fn release_sight(&mut self) {
         self.held = None;
+        self.here = None;
     }
 
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or
@@ -2564,6 +2663,8 @@ impl Acts {
     ) -> R<Asked> {
         let mut bodies = bodies;
         let mut first = None;
+        // Outside a held batch, the places are read afresh for this start, at its first `here` selector.
+        let near = self.here.clone().unwrap_or_default();
         for (node, form) in candidates {
             let found = tree
                 .handle(*node)
@@ -2630,7 +2731,7 @@ impl Acts {
                     }
                     if !all.contains_key(key)
                         && let Some(chosen) = take.get("select").and_then(|select| {
-                            other_seat(tree, &self.kinds, b, select, *node, body, key)
+                            other_seat(tree, &self.kinds, &near, b, select, *node, body, key)
                         })
                     {
                         match chosen {
@@ -2717,7 +2818,7 @@ impl Acts {
                     let Some(select) = take.get("select") else {
                         continue;
                     };
-                    match select_thing(tree, &self.kinds, select, *node, body, body_at) {
+                    match select_thing(tree, &self.kinds, &near, select, *node, body, body_at) {
                         Ok(Some(t)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Node(t));
                             picked = true;
@@ -2957,6 +3058,7 @@ impl Acts {
     /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
     /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
+        self.fired.clear();
         if !self.timed {
             self.timed = true;
             self.timers_from_state(tree);
@@ -3103,11 +3205,19 @@ impl Acts {
     }
 
     /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as
-    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`].
+    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`]. Its needs are decided at
+    /// its due time on the world's state then, as an act's are at commit (#3991): a bell already hushed is not faded
+    /// again. A refusal is written as a [`TIMER_REFUSED`] entry on the thing, so why the thing never changed is seen.
     fn timer_fired(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, t: &Timer, tick: u64) {
         let Some((node, form)) = self.timers.remove(&t.id) else {
             return;
         };
+        // A timer the tree no longer holds went with its thing (a removal drops its timers) or was never written: it
+        // has nothing to clear and no thing to write on, and an entry on a node gone would sink the tick's other world
+        // entries with it.
+        if !tree.timers().contains_key(&t.id) || tree.handle(node).is_none() {
+            return;
+        }
         self.forms.out.push(Effect {
             envelope: replica::effects::Envelope {
                 sequence: 0,
@@ -3140,15 +3250,34 @@ impl Acts {
                         &replica::encode::encode(&t.id.to_value()).unwrap_or_default(),
                     ),
                 };
-                self.with(tree, bodies, tick, |forms, w| {
-                    let steps = skills::form_runner::bind(&entry, name)?;
-                    let effects = skills::form_runner::bind_effects(&entry, name)?;
-                    forms.start(w, node, node, intent, steps, effects, limits(), t.due)
-                })
+                let none = skills::form_runner::Args::new();
+                match crate::needs::check(
+                    tree,
+                    bodies.as_deref(),
+                    &self.kinds,
+                    node,
+                    node,
+                    &entry,
+                    name,
+                    &none,
+                    t.due,
+                ) {
+                    Err(e) => Err(e),
+                    Ok(()) => self.with(tree, bodies, tick, |forms, w| {
+                        let steps = skills::form_runner::bind(&entry, name)?;
+                        let effects = skills::form_runner::bind_effects(&entry, name)?;
+                        forms.start(w, node, node, intent, steps, effects, limits(), t.due)
+                    }),
+                }
             }
         };
-        if let Ok(Asked::Started(run) | Asked::Running(run)) = &asked {
-            self.runs.insert(*run, t.id);
+        match &asked {
+            Ok(Asked::Started(run) | Asked::Running(run)) => {
+                self.runs.insert(*run, t.id);
+                self.timer_runs.insert(t.id, (t.clone(), name.to_owned()));
+            }
+            Ok(_) => {}
+            Err(e) => self.forms.out.push(timer_refused(t, node, name, e)),
         }
         self.fired.push((t.id, asked));
     }
@@ -3214,9 +3343,20 @@ impl Acts {
             .filter_map(|e| {
                 let why = self.blocked.remove(&e.body);
                 let why = why.filter(|_| e.how.as_str() == BLOCKED).or(e.why);
-                Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
+                let id = self.runs.remove(&e.run)?;
+                self.timer_runs.remove(&id);
+                Some((id, e.how.as_str().to_owned(), why))
             })
             .collect()
+    }
+
+    /// A timer's run whose entries the world refused to write at `at` (#3991): the [`TIMER_REFUSED`] entry naming why,
+    /// on its thing, when `id` is a timer's run still going; none for any other.
+    pub fn timer_unwritten(&self, id: Id, e: &Refusal, at: Micros) -> Option<Effect> {
+        let (t, form) = self.timer_runs.get(&id)?;
+        let mut entry = timer_refused(t, t.node, form, e);
+        entry.envelope.at = at;
+        Some(entry)
     }
 }
 
