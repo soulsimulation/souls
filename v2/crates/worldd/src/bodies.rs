@@ -744,7 +744,7 @@ impl Bodies {
     ) -> Option<(Id, i128)> {
         let c = &self.runner.controller;
         let pose = c.body(body)?.pose;
-        let from = (pose.frame.node, pose.position);
+        let from = (pose.frame.node, pose.position, room == self.town.ground);
         let mut best: Option<(i128, Id)> = None;
         // A thing filed under two kinds (its plain kind and its entry's) is met twice with any kind: the same key.
         let things: Box<dyn Iterator<Item = Id> + '_> = match kind {
@@ -776,14 +776,22 @@ impl Bodies {
         best.map(|(gap, t)| (t, gap))
     }
 
-    /// The thing of `kind` with a seat in `room`, taken or free, whose seat stands nearest `body` (ties by thing), with
-    /// that distance squared, µm² ([`Bodies::seat_gap`]): where a sit by kind that found none free is told they are.
-    pub fn nearest_of_kind(&self, room: Id, kind: &str, body: Id) -> Option<(Id, i128)> {
+    /// The thing of `kind` with a seat in `room` that `may` (the asker may use it), taken or free, whose seat stands
+    /// nearest `body` (ties by thing), with that distance squared, µm² ([`Bodies::seat_gap`]): where a sit by kind
+    /// that found none free is told they are.
+    pub fn nearest_of_kind(
+        &self,
+        room: Id,
+        kind: &str,
+        body: Id,
+        may: &dyn Fn(Id) -> bool,
+    ) -> Option<(Id, i128)> {
         let pose = self.runner.controller.body(body)?.pose;
-        let from = (pose.frame.node, pose.position);
+        let from = (pose.frame.node, pose.position, room == self.town.ground);
         self.rooms
             .get(&(room, kind.to_owned()))?
             .iter()
+            .filter(|t| may(**t))
             .flat_map(|t| {
                 self.slots
                     .places_of(*t)
@@ -793,14 +801,14 @@ impl Bodies {
             .map(|(gap, t)| (t, gap))
     }
 
-    /// The square of the distance on the ground plane, µm², from `from` (a body's frame node and its position there)
-    /// to seat `p`'s standing point. A seat on another floor than the body's frame (a hall's floor, from the open
-    /// ground) is moved into that frame by the poses between (`xform_to`); where that frame is not above the seat's
-    /// floor (a seated body's frame is its seat's thing), its point is read in its own floor's frame, as C19's pick
-    /// reads it.
-    fn seat_gap(&self, from: (Id, Vec3), p: &sim::slots::PlaceAt) -> Option<i128> {
+    /// The square of the distance on the ground plane, µm², from `from` (a body's frame node, its position there, and
+    /// whether the sit by kind is asked on the open ground) to seat `p`'s standing point. On the open ground, a seat on
+    /// another floor than the body's frame (a hall's floor) is moved into that frame by the poses between
+    /// (`xform_to`). Elsewhere (indoors), and where that frame is not above the seat's floor (a seated body's frame is
+    /// its seat's thing), its point is read in its own floor's frame, as C19's pick reads it.
+    fn seat_gap(&self, from: (Id, Vec3, bool), p: &sim::slots::PlaceAt) -> Option<i128> {
         let mut at = p.stand().ok()?;
-        if p.floor != from.0 {
+        if from.2 && p.floor != from.0 {
             let t = &self.town.tree;
             let moved = t
                 .handle(p.floor)

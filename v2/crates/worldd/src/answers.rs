@@ -1366,8 +1366,6 @@ struct Clock {
     /// Each sit by kind bound on the open ground to a seat in a place there: the words its end writes (field 8), which
     /// name that place and how far it was ([`Clock::seat_by_kind`]).
     sat_in: BTreeMap<Id, String>,
-    /// Imported public names by reference ([`Config::public_names`]), for a place's title in a sit by kind's words.
-    public_names: Arc<crate::views::names::PublicNames>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -1776,6 +1774,27 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name; 8, a done act's
 /// words when its move was made from afar (#5063).
+/// The place on `top` (the open ground) that holds `thing`, for a sit by kind's words (#5152 follow-up): the innermost
+/// node above it and below `top` that `look` shows as a place (a room or a place; a floor or a building is not one),
+/// named by its id so the log holds no words and each reader's copy names it by its title, as `look` does. `None` for
+/// a thing in no such place on `top` (a seat right on the open ground), or not in `tree`.
+fn place_of(tree: &replica::tree::Tree, thing: Id, top: Id) -> Option<Id> {
+    let node = |id: Id| tree.node(tree.handle(id)?);
+    let mut at = node(thing)?.parent()?;
+    for _ in 0..64 {
+        if at == top {
+            return None;
+        }
+        let n = node(at)?;
+        let kind = replica::world_model::plain(n.kind().as_str());
+        if kind.ends_with(":room") || kind.ends_with(":place") {
+            return Some(at);
+        }
+        at = n.parent()?;
+    }
+    None
+}
+
 pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -4652,9 +4671,10 @@ impl Clock {
     /// waiting never clears.
     ///
     /// From the open ground (the selector's node is the town's ground) a seat in a place on it (a hall, a room of a
-    /// building) is named by that place, as `look` names places ([`Clock::place_named`]), and how far it is: the bound
-    /// seat's, in the words its act's end writes (the second of the pair); none free, the nearest seat of the kind's,
-    /// in the refusal. Elsewhere, and for a seat right on the open ground, the words are as before.
+    /// building) is named by that place's id ([`Clock::place_named`]), which the client reads as its title as `look`
+    /// names places, and how far it is: the bound seat's, in the words its act's end writes (the second of the pair);
+    /// none free, the nearest seat of the kind the Soul may use, in the refusal. Elsewhere, and for a seat right on
+    /// the open ground, the words are as before.
     fn seat_by_kind(
         &self,
         selector: &Selector,
@@ -4681,16 +4701,16 @@ impl Clock {
             parameters: BTreeMap::new(),
             ..asked.clone()
         });
+        let mine = |t: Id| replica::who_may::private_to(tree, t, soul).is_none();
         let fits = |t: Id| {
             probe.borrow_mut().target = Some(Target::Node(t));
-            replica::who_may::private_to(tree, t, soul).is_none()
-                && self.forms.fixture_sit(tree, &probe.borrow())
+            mine(t) && self.forms.fixture_sit(tree, &probe.borrow())
         };
         let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
         // From the open ground: the place on it holding seat `t`, `gap` µm² away, and how far, in metres to 0.1 m.
         let outdoors = *node == b.town.ground;
         let place = |t: Id, gap: i128| {
-            let named = self.place_named(&b.town.tree, t, *node)?;
+            let named = replica::world_model::show(place_of(tree, t, *node)?);
             let dm = (u128::try_from(gap).unwrap_or(0).isqrt() + 50_000) / 100_000;
             Some(format!("in {named}, {}.{} m away", dm / 10, dm % 10))
         };
@@ -4726,76 +4746,23 @@ impl Clock {
                 ),
             );
         }
-        // From the open ground, the place holding the nearest seat of the kind (each one there held or out of reach).
-        let room = match outdoors
-            .then(|| b.nearest_of_kind(*node, kind, body))
+        // From the open ground, the place holding the nearest seat of the kind the Soul may use (each one held).
+        let near = outdoors
+            .then(|| b.nearest_of_kind(*node, kind, body, &|t| mine(t)))
             .flatten()
             .and_then(|(t, gap)| place(t, gap))
-        {
-            Some(p) => format!("{room}: the nearest is {p}"),
-            None => room,
-        };
+            .map_or(String::new(), |p| format!(" (the nearest {kind} is {p})"));
         refused(
             sim::commit::bind::NONE_FREE,
             match other {
-                Some(o) => format!("no {kind} free in {room}; {o}, or wait for one to be left"),
-                None => format!("every place to sit in {room} is held: wait for one to be left"),
+                Some(o) => {
+                    format!("no {kind} free in {room}{near}; {o}, or wait for one to be left")
+                }
+                None => {
+                    format!("every place to sit in {room} is held{near}: wait for one to be left")
+                }
             },
         )
-    }
-
-    /// The place holding `thing` below `top` (the open ground), as `look` names places (#3699): each node above the
-    /// thing and below `top` that has a title (field 4: an imported public name, or a creator's public words), the
-    /// innermost first, joined by " in " (a room, then its building); with none titled, the node just below `top` by
-    /// its kind and counter (`room 12`), as `look` names a place with no title. A node seen by an audience only is
-    /// never named. `None` for a thing right on `top`, or not in the tree.
-    fn place_named(&self, tree: &replica::tree::Tree, thing: Id, top: Id) -> Option<String> {
-        let node = |id: Id| tree.node(tree.handle(id)?);
-        let title = |n: &replica::tree::NodeRef<'_>| -> Option<String> {
-            if n.audience() != Audience::Everyone {
-                return None;
-            }
-            match n.fields().get(&import_eden::F_NAME)? {
-                Value::Bytes(b) => {
-                    let key = <[u8; 32]>::try_from(b.as_slice()).ok()?;
-                    self.public_names
-                        .get(&key)
-                        .filter(|t| replica::ids::sha256(t.as_bytes()) == key)
-                        .cloned()
-                }
-                v => replica::audience::reference(v)
-                    .and_then(|r| self.text.read(r, &[]).ok())
-                    .and_then(|w| String::from_utf8(w).ok()),
-            }
-        };
-        let mut titled = Vec::new();
-        let mut below_top = None;
-        let mut at = node(thing)?.parent()?;
-        for _ in 0..64 {
-            if at == top {
-                break;
-            }
-            let n = node(at)?;
-            if let Some(t) = title(&n) {
-                titled.push(t);
-            }
-            let up = n.parent()?;
-            below_top = Some((at, n));
-            at = up;
-        }
-        if !titled.is_empty() {
-            return Some(titled.join(" in "));
-        }
-        let (id, n) = below_top?;
-        if n.audience() != Audience::Everyone {
-            return None;
-        }
-        let kind = replica::world_model::plain(n.kind().as_str());
-        Some(format!(
-            "{} {}",
-            kind.rsplit(':').next().unwrap_or(kind),
-            id.counter()
-        ))
     }
 
     /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
@@ -6960,7 +6927,6 @@ pub fn start<S: Storage + 'static>(
         forming: Vec::new(),
         by_kind: BTreeMap::new(),
         sat_in: BTreeMap::new(),
-        public_names: Arc::clone(&cfg.public_names),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {

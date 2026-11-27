@@ -27,7 +27,7 @@ use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::{Value as Json, parse};
 use replica::selector::{Rule, Selector};
 use replica::tree::Rules as TreeRules;
-use replica::world_model::{Audience, Kind};
+use replica::world_model::{Audience, Kind, show};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::walk::town::Town;
@@ -456,10 +456,6 @@ fn hall(tag: &str, titled: bool) -> (answers::World, Mem, Replica, std::path::Pa
     let rules = tree_rules();
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(move |_| hall_bodies(titled)));
-    cfg.public_names = std::sync::Arc::new(BTreeMap::from([(
-        replica::ids::sha256(BANDSTAND.as_bytes()),
-        BANDSTAND.to_owned(),
-    )]));
     cfg.engine = Some((rules, Vec::new()));
     let kinds = Json::Obj(vec![
         (
@@ -674,8 +670,8 @@ fn ended_words(log: &[u8]) -> Vec<String> {
     out
 }
 
-/// #5152 follow-up: from the open ground, a sit by kind names the place on it that holds the seats, by its title, and
-/// how far: the twelve seated, in their act's end; the thirteenth, refused `place.none-free`, in its refusal.
+/// #5152 follow-up: from the open ground, a sit by kind names the place on it that holds the seats, by its id (each
+/// reader's copy names it by its title), and how far: the twelve seated, in their act's end; the thirteenth, refused `place.none-free`, in its refusal.
 #[test]
 fn i5152_from_the_open_ground_a_sit_by_kind_names_the_place_of_the_seats() {
     let (world, store, _, path, mut clients) = served("bandstand", true);
@@ -704,7 +700,7 @@ fn i5152_from_the_open_ground_a_sit_by_kind_names_the_place_of_the_seats() {
     );
     for w in sat {
         assert!(
-            w.contains(&format!("in {BANDSTAND}, ")) && w.ends_with(" m away"),
+            w.contains(&format!("in {}, ", show(bandstand()))) && w.ends_with(" m away"),
             "the place and how far: {w}"
         );
     }
@@ -713,7 +709,10 @@ fn i5152_from_the_open_ground_a_sit_by_kind_names_the_place_of_the_seats() {
     };
     assert_eq!(reason, "place.none-free");
     assert!(
-        detail.contains(&format!("the nearest is in {BANDSTAND}, ")) && detail.contains(" m away"),
+        detail.contains(&format!(
+            "(the nearest {CHAIR} is in {}, ",
+            show(bandstand())
+        )) && detail.contains(" m away)"),
         "the refusal names the place: {detail}"
     );
 }
@@ -777,7 +776,9 @@ fn i5152_a_seat_on_another_floor_is_measured_from_the_open_ground() {
         bandstand(),
     ))
     .unwrap();
-    let (t, gap) = b.nearest_of_kind(ground, CHAIR, w1()).expect("the chair");
+    let (t, gap) = b
+        .nearest_of_kind(ground, CHAIR, w1(), &|_| true)
+        .expect("the chair");
     assert_eq!(t, chair);
     // 10 m east and 1.5 m north of the body: its stand point, moved into the ground's frame.
     let want = 10_000_000_i128.pow(2) + 1_500_000_i128.pow(2);

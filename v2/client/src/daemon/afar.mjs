@@ -23,8 +23,9 @@ export function afarFor(ended, after, before) {
 }
 
 /** #5152 follow-up: the words of a sit by kind of `mine` bound from the open ground, from an act-end event: the seat
- *  taken, the place on the ground that holds it by its title, and how far it was (worldd's `Clock::seat_by_kind`, e.g.
- *  `eden:chair cd:120 in the hall, 14.2 m away`); null for any other event. `receipt` gives them as `sat_in`. */
+ *  taken, the place on the ground that holds it, and how far it was, both by id (worldd's `Clock::seat_by_kind`, e.g.
+ *  `eden:chair cd:120 in cd:150, 14.2 m away`); null for any other event. `receipt` gives them as `sat_in`, each id
+ *  named as the copy names it (`readableDetail`: a place by its title, as `look` does). */
 export function satInOf(ev, mine) {
   if (ev?.name !== ACT_ENDED_ENTRY || !mine.includes(ev.fields?.[1]) || ev.fields?.[8] == null) return null;
   const words = textOf(ev.fields[8]);
