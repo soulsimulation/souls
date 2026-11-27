@@ -656,7 +656,7 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
 }
 
 /// #5067 (reachable carriers, acceptance 2 and 3b; the retained frame case): a crew of two takes the loose 2.4 m rack
-/// frame standing, from its places along its own z (REACH beyond its outermost grips, as `carry:lift` measures them).
+/// frame standing, from beside its edges.
 /// Its back walks 2.5 m off: the carry breaks off (`souls:carriers-apart`) and the frame is set down. Each carrier then
 /// walks to its end where the client's approach aims it (`v2/client/src/carry/carry.mjs` `gripSpot`: along the frame's
 /// long axis if it lies, else its own z, at its places), and the same crew lifts it again: admitted, not refused
@@ -706,7 +706,9 @@ async fn grips_a_frame_set_down_by_carriers_apart_is_lifted_again_from_its_appro
             .collect()
     };
     let at = upright_at();
-    let places = places_north(at, &l, 2);
+    // Taken standing from beside its edges (its own x, REACH beyond its half width), where each reaches the edge it holds.
+    let edge = l.half_width + sim::activity::carry::REACH;
+    let places = vec![spot(at, edge, false), spot(at, -edge, false)];
     let carry = crew_at(&mut souls, &dir, ground, &bodies, &[0, 1], &places).await;
     souls[0]
         .act("part:take", carry, BTreeMap::from([(1, frame.to_value())]))
@@ -718,11 +720,7 @@ async fn grips_a_frame_set_down_by_carriers_apart_is_lifted_again_from_its_appro
         .send(
             "eden:walk",
             ground,
-            point(Vec3::new(
-                back.x,
-                0,
-                back.z + (back.z - at.z).signum() * 2_500_000,
-            )),
+            point(Vec3::new(back.x - 2_500_000, 0, back.z)),
         )
         .await;
     let _ = souls[1].answer().await;
