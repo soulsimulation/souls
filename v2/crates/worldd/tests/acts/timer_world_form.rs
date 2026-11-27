@@ -324,3 +324,57 @@ fn i3991_a_timer_whose_thing_was_removed_writes_nothing() {
     );
     run.stop();
 }
+
+/// The due times of every timer the log sets, in order.
+fn timer_dues(run: &Run) -> Vec<i64> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut dues = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            if let Body::Timers(ts) = &e.body {
+                for t in ts {
+                    if let replica::effects::TimerRec::Set { due, .. } = t {
+                        dues.push(*due);
+                    }
+                }
+            }
+        }
+    }
+    dues
+}
+
+/// #3991 (2), the replacement half: the bell is rung, and rung again a second later while its first fade is pending.
+/// The second ring's timer replaces the first (a form's timer clears the pending timers of the same name on its thing,
+/// C24): the fade runs once, at the later deadline, and the bell rings until then.
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn i3991_a_timer_set_again_while_pending_fires_once_at_the_later_deadline() {
+    let (run, mut a, _) = serve("i3991-again");
+    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    std::thread::sleep(Duration::from_secs(1));
+    let again = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(!again.expect("the second ring lands").is_empty(), "one receipt");
+    let dues = timer_dues(&run);
+    assert_eq!(dues.len(), 2, "each ring set a timer: {dues:?}");
+    let (first, later) = (dues[0], dues[1]);
+    assert!(later > first, "the second deadline is the later one");
+    let t0 = std::time::Instant::now();
+    while rack_events(&run, "faded").is_empty() && t0.elapsed() < Duration::from_secs(8) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // A moment more, for a second fire that should not come.
+    std::thread::sleep(Duration::from_millis(500));
+    let faded = rack_events(&run, "faded");
+    let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
+    println!("#3991 set again: dues {dues:?}, faded {faded:?}, refused {refused:?}");
+    assert_eq!(faded.len(), 1, "the fade ran once");
+    assert_eq!(faded[0].0, later, "at the later deadline");
+    assert!(refused.is_empty(), "the replaced timer never fired, so nothing was refused");
+    assert_eq!(ringing(&run), 0, "the fade cleared the flag");
+    run.stop();
+}
