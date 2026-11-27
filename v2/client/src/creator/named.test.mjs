@@ -75,11 +75,16 @@ test('each op becomes the creator\'s operations, in the parent\'s frame, support
   assert.deepEqual(planter.ops[1].atUm, [125990000, 0, 5820000]);
   assert.deepEqual(planter.ops[1].fields[4], named('home-6-roof-planter'));
   assert.deepEqual(planter.ops[1].fields[12], [[0, 0, 300, 300, 0, 0, 500, 0, 0]]);
-  // the deck's params, and its floor's walked surface at the old height with it
+  // the deck's params; its floor, now a step high, is ground cover: it goes, and the podium on it stands on the open
+  // ground, placed where the file's later move puts it (a point in the world's frame)
   assert.equal(Buffer.from(deck.ops[0].value.hex, 'hex').toString(), '{"height":0.2,"rails":false}');
-  assert.deepEqual(deck.ops[1], { op: 'set', node: id(15), field: 14, value: [[200, ring]] });
-  // a point in the world's frame, its parent (the deck's floor) at the world's origin
-  assert.deepEqual(podium.ops[0].atUm, [9000000, 200000, -2000000]);
+  assert.deepEqual(deck.ops.slice(1).map((o) => [o.op, o.in ?? o.node]), [['place', id(1)], ['remove', id(15)]]);
+  assert.deepEqual(deck.ops[1].atUm, [9000000, 200000, -2000000]);
+  assert.deepEqual(deck.ops[1].fields[4], named('podium'));
+  assert.deepEqual([podium.status, podium.ops, podium.with], ['ready', [], 4]);
+  // raised (or lowered above a step), the floor stays and its walked surface goes with the height
+  const higher = planOf({ ops: [{ op: 'set-param', node: 'deck', param: 'height', from: 0.24, to: 0.3 }] }, world(), flat)[0];
+  assert.deepEqual(higher.ops[1], { op: 'set', node: id(15), field: 14, value: [[300, ring]] });
 });
 
 test('a thing already where the op puts it sends nothing; one moved since is reported and skipped', () => {
@@ -111,10 +116,10 @@ test('edits carry at most 256 operations each, in file order, each place named w
 test('an edit the world refuses is sent again an op at a time, so each op has its own outcome', async () => {
   const plan = planOf(BATCH, world(), flat), sent = [];
   const ask = async (req) => { sent.push(req.ops.length); return req.ops.some((o) => o.node === id(10)) ? { ok: false, code: 'edit.would-bury' } : { ok: true }; };
-  assert.equal(await sendPlan(plan, ask), 7);
+  assert.equal(await sendPlan(plan, ask), 6);
   assert.deepEqual(plan.map((e) => e.status), ['applied', 'applied', 'refused', 'applied', 'applied', 'applied']);
   assert.equal(plan[2].code, 'edit.would-bury');
-  assert.equal(sent[0], 8); // one edit first: 1 + 1 + 1 + 2 + 2 + 1 operations
+  assert.equal(sent[0], 8); // one edit first: 1 + 1 + 1 + 2 + 3 operations; the podium goes with the deck's
 });
 
 test('the open ground\'s height is read from the export\'s tiles, as the engine reads it', async () => {

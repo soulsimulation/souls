@@ -19,8 +19,10 @@
 //                  it; one on a building's floor (a roof) is removed and placed again on the open ground with its
 //                  fields (a new parent is not a move: replica `edit::Op::Move`), so it takes a new id
 //   set-param      {node, param, from, to}                     one of its def's params (field 19, JSON); `height`
-//                  also moves the walked surfaces of its floors that stood at `from` (field 14), so a deck walks at
-//                  its new height
+//                  also moves the walked surfaces of its floors that stood at `from` (field 14); a floor with no room
+//                  brought to a step or less is ground cover, as import-eden makes it: it goes, and what stood on it
+//                  is placed again on the open ground, lowered with it (a later move of such a thing in the file
+//                  places it there instead)
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -141,6 +143,14 @@ export function planOp(ix, op, lift) {
   const said = (status, ops, detail) => ({ status, id, ops: status === 'ready' ? ops : [], ...(detail ? { detail } : {}) });
   if (op.op === 'move') {
     if (!Array.isArray(op.from) || !Array.isArray(op.at)) return said('bad-op', [], 'a move gives from and at, [x, y, z] m');
+    const by = ix.replaced.get(id);
+    if (by && op.room === undefined) {
+      // Placed again on the open ground by an earlier op of this file: it is placed where this op puts it.
+      if (!near(mine.at, um(op.from))) return said('moved-since', [], `at ${metresOf(mine.at)}`);
+      by.place.atUm = um(op.at);
+      if (op.r !== undefined) by.place.orientation = quatOfYaw(op.r);
+      return { status: 'ready', id, ops: [], with: by.i, detail: `placed with op ${by.i}, on the open ground` };
+    }
     if (op.room !== undefined) {
       const origin = text(parent?.fields?.[F.ORIGIN]) ?? '';
       if (!origin.endsWith(`/${op.room}`)) return said('room-differs', [], `${op.node} stands in ${origin || parent?.id}, not room ${op.room}`);
@@ -171,11 +181,8 @@ export function planOp(ix, op, lift) {
     // On a building's floor (a roof): placed again on the open ground, with its fields, and removed from the roof.
     if (op.from_roof && !near([local[0], local[2]], [um(op.from_roof)[0], um(op.from_roof)[2]])) return said('moved-since', [], `at ${metresOf(local)} on its floor`);
     if ((ix.kids.get(id) ?? []).length) return said('holds-things', [], `${op.node} holds things; move them first`);
-    const fields = {}, dropped = [];
-    for (const [k, v] of Object.entries(n.fields ?? {})) { const b = batchValue(v, new Map(), ix.words ?? {}); if (b === null) dropped.push(Number(k)); else fields[k] = b; }
-    const deep = Object.keys(fields).filter((k) => depthOf(fields[k]) > PLACE_DEPTH).map((k) => { const value = fields[k]; delete fields[k]; return { op: 'set', node: 1, field: Number(k), value }; });
-    const place = { op: 'place', name: 1, kind: n.kind, in: ix.ground.id, atUm: [x, h, z], orientation: quatOfYaw(yaw), support: { which: 1, node: ix.ground.id, height: 0 }, fields };
-    return said('ready', [{ op: 'remove', node: id }, place, ...deep], dropped.length ? `fields not carried: ${dropped.join(', ')}` : 'placed again on the open ground: a new id');
+    const { ops, dropped } = onGround(ix, n, [x, h, z], quatOfYaw(yaw), 1);
+    return said('ready', [{ op: 'remove', node: id }, ...ops], dropped.length ? `fields not carried: ${dropped.join(', ')}` : 'placed again on the open ground: a new id');
   }
   if (op.op === 'set-param') {
     let params;
@@ -188,8 +195,18 @@ export function planOp(ix, op, lift) {
     if (op.param === 'height' && typeof op.from === 'number' && typeof op.to === 'number') {
       const [was, now] = [Math.round(op.from * 1000), Math.round(op.to * 1000)];
       for (const f of ix.kids.get(id) ?? []) {
-        const rows = f.fields?.[F.SURFACES];
-        if (Array.isArray(rows) && rows.some((row) => num(row[0]) === was)) ops.push({ op: 'set', node: f.id, field: F.SURFACES, value: rows.map((row) => (num(row[0]) === was ? [now, row[1]] : row)) });
+        const rows = f.fields?.[F.SURFACES], on = ix.kids.get(f.id) ?? [];
+        if (!Array.isArray(rows) || !rows.some((row) => num(row[0]) === was)) continue;
+        // A floor with no room, a step high or less, is ground cover, walked as the open ground (import-eden
+        // `on_floor`): it goes, and what stood on it stands on the open ground, lowered with it (a new id each).
+        if (now <= STEP_MM && ix.ground && on.every((c) => c.fields?.[F.DEF] !== undefined && !(ix.kids.get(c.id) ?? []).length)) {
+          for (const c of on) {
+            const w = worldPose(ix, c.id), again = onGround(ix, c, [w.at[0], w.at[1] - (was - now) * 1000, w.at[2]], unit(w.q).map((v) => v * Q), 1 + ops.filter((o) => o.op === 'place').length);
+            ops.push(...again.ops);
+            ix.replaced.set(c.id, { place: again.ops[0], i: ix.current });
+          }
+          ops.push({ op: 'remove', node: f.id });
+        } else ops.push({ op: 'set', node: f.id, field: F.SURFACES, value: rows.map((row) => (num(row[0]) === was ? [now, row[1]] : row)) });
       }
     }
     return said('ready', ops);
@@ -197,17 +214,30 @@ export function planOp(ix, op, lift) {
   return { status: 'bad-op', detail: `no op ${op.op}`, ops: [] };
 }
 
-/** The file's ops planned on the copy, in order: `[{ i, op, node, status, id?, ops, detail? }]`. */
+/** A step, mm: a floor no higher is ground cover (`sim::ground::STEP`, import-eden `BODY_SPAN.0`). */
+export const STEP_MM = 220;
+
+/** `n` placed again on the open ground at `atUm` (the ground's frame is the world's), turned `q`, with its fields: the
+ *  place named `name`, then the sets of fields too deep for a place; and the fields not carried. */
+function onGround(ix, n, atUm, q, name) {
+  const fields = {}, dropped = [];
+  for (const [k, v] of Object.entries(n.fields ?? {})) { const b = batchValue(v, new Map(), ix.words ?? {}); if (b === null) dropped.push(Number(k)); else fields[k] = b; }
+  const deep = Object.keys(fields).filter((k) => depthOf(fields[k]) > PLACE_DEPTH).map((k) => { const value = fields[k]; delete fields[k]; return { op: 'set', node: name, field: Number(k), value }; });
+  return { ops: [{ op: 'place', name, kind: n.kind, in: ix.ground.id, atUm: atUm.map(Math.round), orientation: signed(q.map(Math.round)), support: { which: 1, node: ix.ground.id, height: 0 }, fields }, ...deep], dropped };
+}
+
+/** The file's ops planned on the copy, in order: `[{ i, op, node, status, id?, ops, with?, detail? }]`; an op whose
+ *  thing an earlier op places again goes `with` that op. */
 export function planOf(batch, world, lift) {
-  const ix = { ...indexOf(world), words: world.words ?? {} };
-  return batch.ops.map((op, i) => ({ i, op: op.op, node: op.node, ...planOp(ix, op, lift) }));
+  const ix = { ...indexOf(world), words: world.words ?? {}, replaced: new Map(), current: 0 };
+  return batch.ops.map((op, i) => { ix.current = i; return { i, op: op.op, node: op.node, ...planOp(ix, op, lift) }; });
 }
 
 /** The ready entries in edits of at most `most` operations, file order; each place's name is its own in its edit. */
 export function editsOf(plan, most = OPS_MOST) {
   const edits = [];
   let cur = null;
-  for (const e of plan.filter((x) => x.status === 'ready')) {
+  for (const e of plan.filter((x) => x.status === 'ready' && x.with === undefined)) {
     if (!cur || cur.ops.length + e.ops.length > most) edits.push((cur = { entries: [], ops: [] }));
     const base = cur.ops.filter((o) => o.op === 'place').length;
     cur.ops.push(...e.ops.map((o) => (o.op === 'place' ? { ...o, name: o.name + base } : o.op === 'set' && typeof o.node === 'number' ? { ...o, node: o.node + base } : o)));
@@ -232,6 +262,7 @@ export async function sendPlan(plan, ask) {
       Object.assign(e, one.ok ? { status: 'applied' } : one.code === 'edit.unanswered' ? { status: 'unanswered', detail: 'the world did not answer in time: run --dry-run to see whether it landed' } : { status: 'refused', code: one.code, ...(one.detail ? { detail: one.detail } : {}) });
     }
   }
+  for (const e of plan) if (e.with !== undefined && e.status === 'ready') { const by = plan.find((x) => x.i === e.with); e.status = by.status; if (by.code) e.code = by.code; }
   return edits;
 }
 
