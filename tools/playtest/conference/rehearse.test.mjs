@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { completed, discoverConference, performConference, rehearsalTemplate } from './rehearse.mjs';
 
 const receipt = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
@@ -169,4 +170,43 @@ test('the concise proof can deliberately interrupt only the first speaker while 
   assert.equal(result.interruptedStories, 1); assert.equal(result.presentations, 2);
   assert.equal(cast.events.filter(e => e.endsWith(':tell-story')).length, 1);
   assert.equal(cast.calls.filter(c => c.words[0] === 'act' && c.words[1] === 'tell_story' && !c.words.includes('--wait')).length, 1);
+});
+
+
+test('authored speaker faces the actual audience and listeners face the stage in both helper and tracked scene', () => {
+  const read = file => JSON.parse(readFileSync(new URL(file, import.meta.url)));
+  const canonical = read('../../../content/kinds/hall/lecture.json');
+  const bench = read('../../../content/kinds/seating/bench.json');
+  const scene = rehearsalTemplate(read('../../../worlds/templates/eden-2026.json'));
+  const tracked = read('../../../worlds/templates/conference-rehearsal.json');
+  assert.deepEqual(tracked, scene, 'boot template and ordinary helper must have identical placement/definitions');
+  const rotate = (p, yaw) => [Math.cos(yaw)*p[0]+Math.sin(yaw)*p[2],p[1],-Math.sin(yaw)*p[0]+Math.cos(yaw)*p[2]];
+  const world = (place, local) => rotate(local,place.r??0).map((n,i)=>n+place.p[i]);
+  const dotToward = (forward, from, to) => {
+    const d=[to[0]-from[0],0,to[2]-from[2]], length=Math.hypot(...d);
+    assert(length>0,'facing target must be spatially distinct');
+    return forward.reduce((sum,n,i)=>sum+n*d[i]/length,0)/Math.hypot(...forward);
+  };
+  const facing = template => {
+    const placed=template.batches.flatMap(b=>b.ops).filter(o=>o.op==='place');
+    const lectern=placed.find(o=>o.name==='presentation-lectern');
+    const slot=canonical.slots.lectern, stand=canonical.points[slot.stand];
+    assert.deepEqual(slot.at_mm,stand.at_mm,'speaker arrives at the canonical standing slot');
+    // Native form arrival has no explicit face here: from the reached point it faces the thing origin.
+    assert.equal(stand.yaw_mdeg,undefined);
+    const local=slot.at_mm.map(n=>n/1000),speaker=world(lectern,local);
+    const forward=rotate([-local[0],0,-local[2]],lectern.r??0);
+    const listeners=placed.filter(o=>o.name.startsWith('audience-')).flatMap(place=>Object.values(bench.slots).map(seat=>({
+      position:world(place,seat.at_mm.map(n=>n/1000)),
+      // The production seated-heading convention faces local +Z turned by seat yaw then parent yaw.
+      forward:rotate(rotate([0,0,1],(seat.yaw_mdeg??0)*Math.PI/180000),place.r??0),
+    })));
+    assert.equal(listeners.length,4);
+    const centroid=[0,1,2].map(i=>listeners.reduce((sum,p)=>sum+p.position[i],0)/listeners.length);
+    return {speaker:dotToward(forward,speaker,centroid),listeners:listeners.map(p=>dotToward(p.forward,p.position,speaker))};
+  };
+  const current=facing(scene);assert(current.speaker>.99,'speaker must address the actual audience centroid');
+  assert(current.listeners.every(dot=>dot>.9),'each listener must face the speaker on stage');
+  const old=structuredClone(scene);old.batches.flatMap(b=>b.ops).find(o=>o.name==='presentation-lectern').r=0;
+  assert(facing(old).speaker<-.99,'the prior backwards-facing arrangement must fail the geometric condition');
 });
