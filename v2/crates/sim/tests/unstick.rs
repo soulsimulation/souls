@@ -579,7 +579,8 @@ fn a4_make_way_steps_aside_only_a_still_body_with_no_order_to_stay() {
 }
 
 /// E16 (#2787): the shoulder turn never squeezes a walker through a carried load. A crew of two, staying by their own
-/// orders, holds a board across the 0.9 m corridor upstairs between the walker and its goal (one of them in reach). At 9 s the walker turns
+/// orders, holds a board across the 0.9 m corridor upstairs between the walker and its goal (one of them in reach;
+/// the goal is further than CROWDED past it, so the walk is not ended as near as the crowd allows). At 9 s the walker turns
 /// its shoulder and the crew, standing still near it, is named to it; the board keeps its whole space all the same.
 /// The walker never passes it, never comes within two radii and slack of it, and its order ends `goal-unreachable`
 /// at 15 s, naming a next step.
@@ -589,8 +590,8 @@ fn e16_a_walker_never_squeezes_through_a_carried_board() {
     use replica::host::F_SHOULDER;
     let (mut s, n) = Scene::new("a board held across the 0.9 m corridor");
     let f1 = n["building/floor-1"];
-    s.walker(1, f1, v(-1_000_000, 0), f1, v(3_400_000, 0));
-    for (k, x) in [(3, 1_400_000), (4, 2_000_000)] {
+    s.walker(1, f1, v(-1_500_000, 0), f1, v(3_400_000, 0));
+    for (k, x) in [(3, 400_000), (4, 1_000_000)] {
         s.still(k, f1, v(x, 0));
         s.c.stay(id(k));
     }
@@ -598,7 +599,7 @@ fn e16_a_walker_never_squeezes_through_a_carried_board() {
     let board = sim::host::Carried::new(
         id(900),
         f1,
-        ([1_000_000, 600_000], [1_000_000, -600_000]),
+        ([0, 600_000], [0, -600_000]),
         100_000,
         y,
         Vec3::ZERO,
@@ -650,7 +651,7 @@ fn e16_a_walker_never_squeezes_through_a_carried_board() {
     assert_eq!(name, "goal-unreachable");
     assert!(at >= 15_000_000, "at 15 s: {at}");
     assert!(detail.contains("next: "), "names a next step: {detail}");
-    assert!(furthest < 1_000_000, "never past the board: {furthest} um");
+    assert!(furthest < 0, "never past the board: {furthest} um");
     let room = 2 * skills::route::ROOM + skills::route::SLACK;
     assert!(
         closest >= room - 5_000,
