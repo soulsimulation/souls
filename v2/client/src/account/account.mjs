@@ -4,7 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, 
 import { join, resolve } from 'node:path';
 import { request } from '../daemon/client.mjs';
 import { CREDENTIALS, Refused, runtimeOf } from '../home/home.mjs';
-import { pairAddress } from '../pair/address.mjs';
+import { pairAddress, worldNameOf } from '../pair/address.mjs';
 import { localId } from '../pair/pair.mjs';
 import { writeGuide } from '../home/guide.mjs';
 
@@ -146,7 +146,8 @@ export async function accountPair(home, named, url, { as, move = false, fresh = 
   if (!/^soul-[0-9a-f]{32}-\d+$/.test(b.grant) || typeof b.token !== 'string' || !b.token.startsWith(`${b.grant}.`)) fail('pair-answer', 'invalid Soul credential answer');
   const soul = localId(b.grant), creds = read(home, CREDENTIALS), config = read(home, 'config.json');
   creds.souls = { ...creds.souls, [soul]: { ...creds.souls?.[soul], [address.world]: { token: b.token } } }; put(home, CREDENTIALS, creds);
-  config.worlds = { ...config.worlds, [address.world]: { ...config.worlds?.[address.world], url: address.url, gateway: address.gateway } };
+  const worldName = await worldNameOf(address.directory, address.world, { get });
+  config.worlds = { ...config.worlds, [address.world]: { ...config.worlds?.[address.world], url: address.url, gateway: address.gateway, ...(worldName ? { name: worldName } : {}) } };
   config.souls = { ...config.souls, [soul]: { ...config.souls?.[soul], id: soul, account: a.alias, world: address.world, ...(row?.name ? { name: row.name } : {}) } }; put(home, 'config.json', config);
   privateState = read(home, CREDENTIALS); if (privateState.pendingAccountPair?.idempotencyKey === pending.idempotencyKey) delete privateState.pendingAccountPair; put(home, CREDENTIALS, privateState);
   let guide; try { guide = writeGuide(home); } catch { guide = { failed: 'guide unavailable; credentials are paired' }; }

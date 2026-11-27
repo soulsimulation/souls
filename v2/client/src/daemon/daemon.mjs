@@ -1888,7 +1888,7 @@ async function answer(req, conn = null) {
       const clock = clockOf(copy);
       return {
         clock, worldUs: worldNow(clock),
-        ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
+        ok: true, soul, pid: process.pid, world: seat.world, worldName: seat.worldName ?? null, connected: signedIn, cursor: state.cursor,
         ...(replacedAt !== null ? { replaced: { at: new Date(replacedAt).toISOString(), say: `Another client of this Soul connected (the last to connect wins). This one signs in again at its next command, or by itself once the other has gone (it checks every ${Math.round(REPLACED_RETRY_MS / 60_000) || 1} min).` } } : {}),
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),

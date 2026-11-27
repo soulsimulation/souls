@@ -15,12 +15,22 @@ function readConfig(root) {
   try { return JSON.parse(readFileSync(join(root, 'config.json'), 'utf8')); } catch { return {}; }
 }
 
+/**
+ * How the guide names a world: its public name as pairing recorded it, else its address (`<origin>/w/<key>`), never the
+ * bare key (first day, 27 Nov: "in eden" beside a page titled "Eden 2026" read as two worlds).
+ */
+export function worldLabel(key, world) {
+  if (typeof world?.name === 'string' && world.name.trim()) return world.name.trim().slice(0, 60);
+  try { const u = new URL(world?.url); return /\/w\/[^/]+/.test(u.pathname) ? `${u.origin}${u.pathname.replace(/\/$/, '')}` : `${u.origin}/w/${key}`; } catch { return `the world at \`/w/${key}\``; }
+}
+
 /** Who lives here: each Soul with a token, its name when the home has one, its world, and one command to look. */
 export function soulsHere(root) {
-  const names = readConfig(root).souls ?? {};
+  const config = readConfig(root), names = config.souls ?? {};
   return soulsWithTokens(root).map((id) => {
     const name = typeof names[id]?.name === 'string' && names[id].name.trim() ? names[id].name.trim().slice(0, 60) : null;
-    return { id, name, world: worldsOf(root, id)[0] };
+    const key = worldsOf(root, id)[0];
+    return { id, name, world: worldLabel(key, config.worlds?.[key]) };
   });
 }
 
