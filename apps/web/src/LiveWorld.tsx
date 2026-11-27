@@ -273,6 +273,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   const context = useRef({ placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds });
   context.current = { placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds };
   const past = useRef<Past | null>(null);
+  const observationSeekGeneration = useRef(0);
   const shown = useRef<Shown>({ tick: 0, datetime: null, take: null, entities: {} });
   const drawnTick = useRef<number | null>(null);
   const stateSignature = useRef('');
@@ -501,8 +502,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // #5022: `shoot` and a creator's `look` (v2/client shoot.mjs) wait for `v2.capture` on a ?shot=1 page, then aim it at a name (v2-engine/capture.ts)
     const observationEnabled=new URLSearchParams(location.search).has('camera-observe');
     const cameraObserver=observationEnabled?new DisplayedCameraObserver():null;
-    let observationPast:Past|null=null,observationEpoch=0;
-    const observationReadout:{frame:unknown;movement:unknown;costMs:number[];alignment:unknown}={frame:null,movement:null,costMs:[],alignment:null};
+    let observationPast:Past|null=null,observationEpoch=0,observationSeek=-1;
+    const observationReadout:{frame:unknown;movement:unknown;costMs:number[];alignment:unknown;drawn:unknown}={frame:null,movement:null,costMs:[],alignment:null,drawn:null};
     if(cameraObserver)(window as unknown as {__cameraObservation?:unknown}).__cameraObservation=observationReadout;
     const shotCapture=shotMode&&newWorld?installCapture(window as unknown as {v2?:unknown},{ready:()=>!!(window as unknown as {__shotReady?:boolean}).__shotReady,t:()=>{const dt=shown.current.take?.dt;return dt?Math.round(shown.current.tick*dt*1e6):null;},nodes:buildNodes,
       body:n=>{const s=context.current.sim.conn.replica.souls.get(soulIdOf(n.soul??n.id)),base=entityOf(n.id),es=shown.current.entities,e=es[s?.entityId??base]??es[base+'_a']??es[base+'_b']??es[base+'_c'];return e?{name:s?.name??null,p:e.p,yaw:e.yaw}:null;},  // a resident figure with no Soul: its look's entity (bridge.ts bodies)
@@ -1253,13 +1254,14 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(look.enabled&&entityLayer.active&&!expansion){if(look.follow)light.follow(controls.target,camera.position);renderer.toneMappingExposure=lookExposure(light.daylight,look.nightExposure);}
       if(adaptive&&entityLayer.active&&!eyes)adaptive.frame(now);const draw=()=>{diagnostics.beginRender(renderer);sunCache?.prepare(renderer.shadowMap.autoUpdate||renderer.shadowMap.needsUpdate);if(!eyes)entityLayer.cull(camera,renderer.domElement.clientHeight,renderer.shadowMap.autoUpdate||renderer.shadowMap.needsUpdate,sunCache?.cullCamera??light.sun.shadow.camera);if(distanceDetail&&!eyes)distanceDetail.apply(scene,camera,renderer.domElement.clientHeight);if(meshLod&&!eyes)meshLod.apply(scene,camera,renderer.domElement.clientHeight);if(farStandIns&&!eyes)farStandIns.apply(scene,camera,renderer.domElement.clientHeight);try{if(!eyes?.render()){if(post&&entityLayer.active)post.render(renderer,scene,camera);else renderer.render(scene,camera);}
       if(cameraObserver&&!holdDraw){
-        const started=performance.now();if(observationPast!==past.current){observationPast=past.current;observationEpoch++;}
+        const started=performance.now();if(observationPast!==past.current||observationSeek!==observationSeekGeneration.current){observationPast=past.current;observationSeek=observationSeekGeneration.current;observationEpoch++;}
         const subjects:DrawnSubject[]=Object.entries(at.entities).filter(([id])=>records[id]?.kind==='human').map(([id,e])=>{
           const human=people?.bodyObject(id)??null,root=drawnRepresentation(human,floaters.object(id),standIns.getObjectByName(id));
           const body=recordedBody(records[id]?.body,e.state),radius=body?.family==='floater'&&typeof body.radius==='number'&&Number.isFinite(body.radius)?body.radius:null;
           const on=typeof e.state.on==='string'?e.state.on:null,carrier=on&&records[on]?.carrier?{subject:on,relation:'aboard' as const,confidence:1}:null;
           return {id,root,forwardLocal:human&&root===human?[1,0,0] as const:null,bounds:radius&&radius>0?{min:[-radius,-radius,-radius],max:[radius,radius,radius]}:null,activity:drawnTakeActivity(e.activity,e.state,shown.current.take),carrier};});
         const version={world:String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),epoch:JSON.stringify([s.conn.welcome?.epoch??null,observationEpoch,past.current?'history':'live']),revision:String(sceneKey??'draw')};
+        observationReadout.drawn={tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt)};
         observationReadout.frame=cameraObserver.capture({version,tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),subjects});
         observationReadout.movement=[...cameraObserver.movement];
         observationReadout.alignment=subjects.map(x=>({id:x.id,matrixPosition:x.root?[x.root.matrixWorld.elements[12],x.root.matrixWorld.elements[13],x.root.matrixWorld.elements[14]]:null}));
@@ -1484,7 +1486,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
     // A newer buffered seek also supersedes an older network request.
     seeking.current?.abort(); seeking.current = null;
     const cur = past.current;
-    if (cur && cur.chunks[0].fromTick <= tick && tick <= cur.chunks.at(-1)!.toTick) { cur.tick = tick; setLoading(false); setDraft(null); setNote(null); refreshPlayback(n=>n+1); return; }
+    if (cur && cur.chunks[0].fromTick <= tick && tick <= cur.chunks.at(-1)!.toTick) { cur.tick = tick; observationSeekGeneration.current++; /* Explicit seek resets observation continuity; playback and extension ownership retain cur. */ setLoading(false); setDraft(null); setNote(null); refreshPlayback(n=>n+1); return; }
     const ctl = new AbortController();
     seeking.current = ctl;
     setLoading(true); setNote(null);

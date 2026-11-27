@@ -15,10 +15,13 @@ export function beforeNavigation({page}) {
  return ()=>page.off('response',response);
 }
 export function depictedBodyIds(body) {const base=entityOf(body);return [base,entityWithLook(base,defaultLookOf(body))];}
+export function recordAlignment(value,phase,body,file,check) {
+ writeFileSync(file,JSON.stringify(value,null,2),{flag:'wx'});check(`${phase}-draw-matrix-alignment`,alignmentValid(value,body));
+}
 export function alignmentValid(readout,body) {
  if(readout?.frame?.status!=='observed')return false;
  const s=readout.frame.value.subjects.find(s=>s.id===body&&s.state==='present'),a=readout.alignment?.find(a=>a.id===body);
- return !!s&&!!a?.matrixPosition&&s.transform.positionM.every((v,i)=>Math.abs(v-a.matrixPosition[i])<1e-9)&&Number.isFinite(readout.frame.value.depicted.tick);
+ return !!s&&!!a?.matrixPosition&&s.transform.positionM.every((v,i)=>Math.abs(v-a.matrixPosition[i])<1e-9)&&Number.isFinite(readout.frame.value.depicted.tick)&&readout.frame.value.depicted.tick===readout.drawn?.tick&&readout.frame.value.depicted.seconds===readout.drawn?.seconds;
 }
 export default async function({page,paths,check,fixture,signal}) {
  const html=await documents.get(page)?.[0];check('actual-native-document',typeof html==='string'&&!!suppliedNativeStream(html));writeFileSync(join(paths.dir,'native-document.html'),html,{flag:'wx'});
@@ -27,7 +30,7 @@ export default async function({page,paths,check,fixture,signal}) {
  catch(error){writeFileSync(join(paths.dir,'failed-observation.json'),JSON.stringify(await page.evaluate(()=>({url:location.href,readout:window.__cameraObservation})),null,2),{flag:'wx'});throw error;}
  const depicted=await page.evaluate(ids=>window.__cameraObservation.frame.value.subjects.find(s=>ids.includes(s.id)&&s.state==='present').id,candidates);
  const read=()=>page.evaluate(()=>window.__cameraObservation),samples=[];
- const sample=async phase=>{const value=await read();check(`${phase}-draw-matrix-alignment`,alignmentValid(value,depicted));samples.push({phase,...value});return value;};
+ const sample=async phase=>{const value=await read();recordAlignment(value,phase,depicted,join(paths.dir,`phase-${phase}.json`),check);samples.push({phase,...value});return value;};
  let input=0;const snapshot=async name=>writeFileSync(join(paths.dir,`accessibility-before-${++input}-${name}.yml`),await page.locator('body').ariaSnapshot(),{flag:'wx'});
  await snapshot('explore');await page.getByRole('button',{name:/^Explore /}).click();await snapshot('select-subject');await page.getByRole('dialog',{name:/^Explore /}).getByRole('button',{name:/Camera Subject/}).click();
  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-mode')==='follow',null,{timeout:20000});
