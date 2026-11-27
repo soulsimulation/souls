@@ -4,10 +4,73 @@
 // samples are played through a bridge of their own (bridge.ts, the live stream's), so a past chunk is made exactly as
 // a live one. Nothing here draws.
 import { decode } from 'cborg';
-import { V2Bridge } from './bridge.ts';
-import { TICK_US, TICKS, type Frame, type RecordedChunk } from './takes.ts';
-import type { HistoryMsg, Seeked } from './history-worker.ts';
+import { BEHIND_US, V2Bridge } from './bridge.ts';
+import { TICK_US, TICKS, positionAt, type Frame, type RecordedChunk } from './takes.ts';
+import type { HistoryMsg, HistoryNode, Seeked } from './history-worker.ts';
 import { DAY_US, dayIndexKey, yearCountsKey } from './history-keys.ts';
+
+export const historyTick = (us: number): number => {
+  if (!Number.isSafeInteger(us)) throw new Error('history timeline time is not an exact integer');
+  return Math.ceil(us / TICK_US);
+};
+
+type Changes = [number, string, string, unknown][];
+type Piece = { tracks: Record<string, number[][]>; changes: Changes; events: { t: number }[];
+  finalState: { tick: number; entities: Record<string, unknown>; [key: string]: unknown }; [key: string]: unknown };
+/** Existing bridge one-tick takes become normal one-second takes. Sampling/gesture/seat/facing
+ * stays in the bridge; this combines recorded tracks and discrete changes without moving anything. */
+export class HistoryTakes {
+  readonly chunks = new Map<number, RecordedChunk>();
+  private last = -Infinity;
+  private partial: { from: number; count: number; take: Piece; values: Map<string, string | undefined>; visible: Set<string> } | null = null;
+  private readonly from: number;
+  private readonly to: number;
+  private readonly limit: number;
+  constructor(from: number, to: number, limit: number) { this.from = from; this.to = to; this.limit = limit; }
+  add(piece: RecordedChunk): void {
+    if (piece.fromTick <= this.last) return;
+    this.last = piece.fromTick;
+    const from = Math.floor(piece.fromTick / TICKS) * TICKS, offset = piece.fromTick - from;
+    if (from < this.from || from + TICKS > this.to || this.chunks.size >= this.limit) return;
+    const raw = piece.take as unknown as Piece;
+    if (!this.partial || this.partial.from !== from) {
+      if (offset !== 0) return; // as before, only complete aligned chunks are returned
+      this.partial = { from, count: 0, take: { ...raw, id: `v2-${from}`, startTick: from, ticks: TICKS, keyframeEvery: TICKS,
+        baselineStateHash: `v2-state-${from}`, finalStateHash: `v2-state-${from + TICKS}`, tracks: {}, changes: [], events: [],
+        finalState: { ...raw.finalState, tick: from + TICKS, entities: {} } }, values: new Map(), visible: new Set() };
+    }
+    const p = this.partial;
+    if (offset !== p.count) throw new Error('history take fragments are not contiguous');
+    const change = (tick: number, entity: string, field: string, value: unknown) => {
+      const key = `${entity}\0${field}`, encoded = JSON.stringify(value);
+      if (!p.values.has(key) || p.values.get(key) !== encoded) { p.take.changes.push([tick, entity, field, value]); p.values.set(key, encoded); }
+    };
+    const visible = new Set(Object.keys(raw.tracks));
+    for (const id of p.visible) if (!visible.has(id)) change(offset, id, 'present', false);
+    for (const [id, samples] of Object.entries(raw.tracks)) {
+      const track = p.take.tracks[id] ??= [];
+      for (const s of samples) {
+        const next = [offset + s[0], ...s.slice(1)];
+        const last = track.at(-1);
+        // Two integer keyframes at a discontinuity retain the old endpoint then the new start.
+        // Existing replay holds the old value before the tick and selects the new one at it.
+        if (!last || last[0] !== next[0] || last.some((v, i) => v !== next[i])) track.push(next);
+      }
+    }
+    for (const [tick, id, field, value] of raw.changes) change(offset + tick, id, field, value);
+    p.take.events.push(...raw.events.map((e) => ({ ...e, t: offset + e.t })));
+    Object.assign(p.take.finalState.entities, raw.finalState.entities);
+    p.visible = visible;
+    if (++p.count === TICKS) {
+      for (const [id, track] of Object.entries(p.take.tracks)) {
+        const same = (a: number[], b: number[]) => a.slice(1).every((v, i) => v === b[i + 1]);
+        p.take.tracks[id] = track.filter((s, i) => i === 0 || i === track.length - 1 || !same(track[i - 1], s) || !same(s, track[i + 1]));
+      }
+      p.take.changes.sort((a, b) => a[0] - b[0]);
+      this.chunks.set(from, { fromTick: from, toTick: from + TICKS, take: p.take }); this.partial = null;
+    }
+  }
+}
 
 /** The world's history export, from the page's config: the route's `v2History`, else beside the stream's `views/`. */
 export function historyBase(stream: string, config: unknown): string | null {
@@ -17,8 +80,8 @@ export function historyBase(stream: string, config: unknown): string | null {
   return i > 0 ? `${stream.slice(0, i)}/history/` : null;
 }
 
-/** How far the bridge is moved on at a time, so it makes every chunk on the way (it keeps its newest twelve). */
-const STEP_US = 6 * TICKS * TICK_US;
+/** Quiet look-ahead after a requested window; one-tick publication below keeps discrete changes causal. */
+const STEP_US = TICKS * TICK_US;
 /** How long before a moment the page's window of it starts (WorldGeometry.ts rewindWindow). */
 const LEAD_US = 10_000_000;
 
@@ -80,25 +143,110 @@ export class V2History {
    *  taken to be no later than now. It is the world's own clock, which for a world made through New world began at 0. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal, nowTick?: number | null): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
-    const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
+    const bridge = new V2Bridge(this.frame, this.hour, 1), composed = new HistoryTakes(from, to, limit), got = composed.chunks, endUs = to * TICK_US;
     const now = (nowTick ?? to) * TICK_US;
     let at = await this.start(from * TICK_US, endUs), first = true, next: number | null = null;
-    const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
+    let takenThrough = -Infinity;
+    const take = () => {
+      const pieces = bridge.view.takes.chunks; let i = pieces.length;
+      while (i > 0 && pieces[i - 1].fromTick > takenThrough) i--;
+      for (; i < pieces.length; i++) { composed.add(pieces[i]); takenThrough = pieces[i].fromTick; }
+    };
+    // Yield between ordered publications; cancellation never publishes a later batch.
+    let workStart = performance.now();
+    const cooperate = async () => {
+      if (signal?.aborted) throw new Error('aborted');
+      if (performance.now() - workStart >= 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0)); workStart = performance.now();
+        if (signal?.aborted) throw new Error('aborted');
+      }
+    };
+    const known = new Map<string, HistoryNode>(), children = new Map<string, Set<string>>();
+    const remember = (n: HistoryNode) => {
+      const old = known.get(n.id); if (old?.parent) children.get(old.parent)?.delete(n.id);
+      known.set(n.id, n);
+      if (n.parent) { let set = children.get(n.parent); if (!set) children.set(n.parent, set = new Set()); set.add(n.id); }
+    };
+    let cursor = -Infinity;
+    const advance = async (us: number) => {
+      if (!Number.isFinite(cursor)) cursor = us;
+      while (cursor < us && got.size < limit) {
+        cursor = Math.min(us, cursor + TICK_US);
+        bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: cursor + BEHIND_US } }); take(); await cooperate();
+      }
+    };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
     while (at < endUs + STEP_US && got.size < limit) {
       if (signal?.aborted) throw new Error('aborted');
       // K3: a window that begins before the world's first moment (a link to its first minute) is read from that moment
       const s = await this.seek(at, now).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f, now); });
+      workStart = performance.now(); await cooperate();
       // the bundle's time, and the quiet after it until the next bundle: a world with no records writes no bundle, so
       // past the newest one (no next yet) the world is as that bundle left it, and a minute ago is played from there
       const until = Math.min(s.next ?? Infinity, endUs + 2 * STEP_US);
-      // the bundle's state and its motion, then its time step by step
-      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples, ...(s.courses ? { courses: s.courses } : {}) } });
-      first = false;
-      for (let t = s.start + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
-        bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: Math.min(t, until) } });
-        take();
+      if (!Array.isArray(s.transitions)) throw new Error('history timeline missing');
+      let previous = s.at;
+      for (const row of s.transitions) {
+        historyTick(row.at);
+        if (row.at <= s.at || row.at < previous || row.at > s.start + s.length || !Array.isArray(row.nodes) || !Array.isArray(row.removed)) throw new Error('history timeline malformed');
+        previous = row.at;
       }
+      const initialAt = historyTick(s.at) * TICK_US;
+      if (!first) await advance(initialAt);
+      const live = new Set(s.nodes.map((n) => n.id)), removed = [...known.keys()].filter((id) => !live.has(id));
+      known.clear(); children.clear(); for (const n of s.nodes) remember(n);
+      bridge.receive({ t: 'part', p: { number: 0, from: initialAt, to: initialAt, nodes: s.nodes.map((n) => ({ ...n, at: initialAt })), removed, samples: [], ...(s.courses ? { courses: s.courses } : {}) } });
+      cursor = Math.max(cursor, initialAt); first = false;
+      // Exact native times remain on s. Only the display materialization receives ceil-tick copies.
+      // Motion samples are already authorized recorded paths. Read ahead within a stable frame
+      // segment as the old converter did, so sparse samples still interpolate instead of becoming stairs.
+      const state = new Map(s.nodes.map((n) => [n.id, n]));
+      const boundaries: number[] = [];
+      for (const row of s.transitions) {
+        if (row.removed.length || row.nodes.some((n) => {
+          const old = state.get(n.id);
+          return !old || n.parent !== old.parent || n.slot !== old.slot || n.at !== row.at || !/:(body|humanoid)@/.test(n.kind);
+        })) boundaries.push(row.at);
+        for (const id of row.removed) state.delete(id); for (const n of row.nodes) state.set(n.id, n);
+      }
+      const samples = [...s.samples].sort((a, b) => a[3] - b[3]); let sampleIndex = 0, boundaryIndex = 0;
+      const motion = (before: number) => {
+        const part: typeof s.samples = [];
+        while (sampleIndex < samples.length && samples[sampleIndex][3] < before) {
+          const sample = samples[sampleIndex++];
+          if (known.has(sample[0]) && known.has(sample[1])) part.push([sample[0], sample[1], sample[2], historyTick(sample[3]) * TICK_US, sample[4], sample[5], sample[6]]);
+        }
+        if (part.length) bridge.receive({ t: 'part', p: { number: 0, from: cursor, to: cursor, nodes: [], removed: [], samples: part } });
+      };
+      motion(boundaries[0] ?? until);
+      for (let i = 0; i < s.transitions.length && got.size < limit; i++) {
+        const row = s.transitions[i]; if (row.at >= until) break;
+        const displayAt = historyTick(row.at) * TICK_US; await advance(displayAt);
+        const affected = new Set<string>(), pending = row.nodes.map((n) => n.id);
+        for (let j = 0; j < pending.length; j++) for (const id of children.get(pending[j]) ?? []) {
+          if (!affected.has(id)) { affected.add(id); pending.push(id); }
+        }
+        for (const id of row.removed) { const old = known.get(id); if (old?.parent) children.get(old.parent)?.delete(id); known.delete(id); }
+        for (const n of row.nodes) remember(n);
+        const direct = new Set(row.nodes.map((n) => n.id)), refresh: typeof s.samples = [];
+        for (const id of affected) {
+          const n = known.get(id);
+          if (!n?.parent || direct.has(id) || !/:(body|humanoid)@/.test(n.kind)) continue;
+          // Reuse the bridge's public frame/slot composition with the recorded local path.
+          const path = samples.filter((v) => v[0] === id && v[1] === n.parent && v[2] === n.slot && v[3] >= (n.at ?? s.at))
+            .map((v) => ({ at: v[3], p: [v[4], v[5], v[6]] as [number, number, number] }));
+          path.unshift({ at: n.at ?? s.at, p: n.pos });
+          const p = positionAt(path, row.at) ?? n.pos;
+          refresh.push([id, n.parent, n.slot, displayAt, ...p]);
+        }
+        bridge.receive({ t: 'part', p: { number: 0, from: displayAt, to: displayAt, nodes: row.nodes.map((n) => ({ ...n, at: displayAt })), removed: row.removed, samples: refresh, ...(row.courses ? { courses: row.courses } : {}) } });
+        if (s.transitions[i + 1]?.at !== row.at && boundaries[boundaryIndex] === row.at) {
+          while (boundaries[boundaryIndex] === row.at) boundaryIndex++;
+          motion(boundaries[boundaryIndex] ?? until);
+        }
+        await cooperate();
+      }
+      await advance(until);
       next = s.next;
       if (s.next === null || s.next <= at) break;
       at = s.next;

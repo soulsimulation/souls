@@ -1257,9 +1257,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const started=performance.now();if(observationPast!==past.current||observationSeek!==observationSeekGeneration.current){observationPast=past.current;observationSeek=observationSeekGeneration.current;observationEpoch++;}
         const subjects:DrawnSubject[]=Object.entries(at.entities).filter(([id])=>records[id]?.kind==='human').map(([id,e])=>{
           const human=people?.bodyObject(id)??null,root=drawnRepresentation(human,floaters.object(id),standIns.getObjectByName(id));
-          const body=recordedBody(records[id]?.body,e.state),radius=body?.family==='floater'&&typeof body.radius==='number'&&Number.isFinite(body.radius)?body.radius:null;
           const on=typeof e.state.on==='string'?e.state.on:null,carrier=on&&records[on]?.carrier?{subject:on,relation:'aboard' as const,confidence:1}:null;
-          return {id,root,forwardLocal:human&&root===human?[1,0,0] as const:null,bounds:radius&&radius>0?{min:[-radius,-radius,-radius],max:[radius,radius,radius]}:null,activity:drawnTakeActivity(e.activity,e.state,shown.current.take),carrier};});
+          return {id,root,forwardLocal:human&&root===human?[1,0,0] as const:null,bounds:null,activity:drawnTakeActivity(e.activity,e.state,shown.current.take),carrier};});
         const version={world:String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),epoch:JSON.stringify([s.conn.welcome?.epoch??null,observationEpoch,past.current?'history':'live']),revision:String(sceneKey??'draw')};
         observationReadout.drawn={tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt)};
         observationReadout.frame=cameraObserver.capture({version,tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),subjects});

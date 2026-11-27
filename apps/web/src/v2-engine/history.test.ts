@@ -24,7 +24,7 @@ function fakeWorker() {
     const start = T0 + Math.floor((m.at - T0) / BUNDLE) * BUNDLE, x = (t: number) => (t - T0); // µs walked = µm
     const samples: Seeked['samples'] = [];
     for (let t = start; t < start + BUNDLE; t += 1_000_000) samples.push(['b.7', 'w.0', null, t, x(t), 0, 0]);
-    const s: Seeked = { seq: m.seq, at: m.at, start, length: BUNDLE, next: start + BUNDLE < T0 + 3 * BUNDLE ? start + BUNDLE : null, nodes: [place, body(x(m.at))], samples };
+    const s: Seeked = { seq: m.seq, at: m.at, start, length: BUNDLE, next: start + BUNDLE < T0 + 3 * BUNDLE ? start + BUNDLE : null, nodes: [place, body(x(m.at))], samples, transitions: [] };
     queueMicrotask(() => w.onmessage?.({ data: { t: 'seeked', s } } as MessageEvent));
   }, terminate() {} };
   return { w, asked };
@@ -50,7 +50,7 @@ test('a window past the newest bundle (a quiet minute writes none) is played fro
   const w = { onmessage: null as null | ((e: MessageEvent) => void), postMessage(m: { seq: number; at: number }) {
     const samples: Seeked['samples'] = [];
     for (let t = T0; t < T0 + BUNDLE; t += 1_000_000) samples.push(['b.7', 'w.0', null, t, Math.min(t - T0, 20_000_000), 0, 0]);
-    const s: Seeked = { seq: m.seq, at: m.at, start: T0, length: BUNDLE, next: null, nodes: [place, body(20_000_000)], samples };
+    const s: Seeked = { seq: m.seq, at: m.at, start: T0, length: BUNDLE, next: null, nodes: [place, body(20_000_000)], samples, transitions: [] };
     queueMicrotask(() => w.onmessage?.({ data: { t: 'seeked', s } } as MessageEvent));
   }, terminate() {} };
   const h = new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' });
@@ -114,7 +114,7 @@ test('a young world: every seek names the world\'s first moment as its floor, so
   const posted: { at: number; floor?: number }[] = [];
   const w = { onmessage: null as null | ((e: MessageEvent) => void), postMessage(m: { seq: number; at: number; floor?: number }) {
     posted.push(m);
-    const s: Seeked = { seq: m.seq, at: m.at, start: first, length: BUNDLE, next: null, nodes: [place, body(0)], samples: [] };
+    const s: Seeked = { seq: m.seq, at: m.at, start: first, length: BUNDLE, next: null, nodes: [place, body(0)], samples: [], transitions: [] };
     queueMicrotask(() => w.onmessage?.({ data: { t: 'seeked', s } } as MessageEvent));
   }, terminate() {} };
   try {
@@ -294,4 +294,72 @@ test('#3358: a read ahead asks the worker for the window\'s first bundle, from t
   } finally {
     globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
   }
+});
+
+test('within-bundle birth/update/removal are causal integer display ticks from exact native times', async () => {
+ (globalThis as {location?:unknown}).location??={href:'https://example.invalid/'};
+ const born=T0+3_250_001,updated=T0+5_125_001,removed=T0+7_750_001;
+ const atBody=(x:number,at:number)=>({...body(x),at});
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){
+  const s={seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place],samples:[],transitions:[
+   {at:born,nodes:[atBody(10_000_000,born)],removed:[]},
+   {at:updated,nodes:[atBody(20_000_000,updated)],removed:[]},
+   {at:removed,nodes:[],removed:['b.7']},
+  ]};queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s}} as MessageEvent));},terminate(){}};
+ const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});
+ const chunks=await h.chunks(T0/TICK_US,(T0+10_000_000)/TICK_US,20);
+ const entity=(us:number)=>{const c=chunks.find(c=>c.fromTick*TICK_US<=us&&us<c.toTick*TICK_US)!;return sampleTake(c.take as unknown as Take,(us-c.fromTick*TICK_US)/1e6).entities[E];};
+ const ceil=(us:number)=>Math.ceil(us/TICK_US)*TICK_US;
+ for(const us of [born,updated,removed]) assert.ok(ceil(us)>=us&&ceil(us)-us<TICK_US,'declared quantization bound');
+ assert.equal(entity(born-1),undefined,'absent before native birth');assert.equal(entity(ceil(born)-1000),undefined,'not revealed before causal display tick');
+ assert.ok(entity(ceil(born)),'present at causal birth tick');assert.ok(Math.abs(entity(ceil(born))!.p[0]-10)<.001,'birth pose');
+ assert.ok(Math.abs(entity(updated-1)!.p[0]-10)<.001,'no future pose before recorded update');
+ assert.ok(Math.abs(entity(ceil(updated))!.p[0]-20)<.001,'recorded pose at causal update tick');
+ assert.ok(entity(removed-1),'present before native removal');assert.ok(entity(ceil(removed)-1000),'present until causal removal tick');assert.equal(entity(ceil(removed)),undefined,'removed inside same take chunk');
+});
+
+test('sparse recorded motion remains interpolated and integer take wire is accepted',async()=>{
+ const { recordedTakeChunkSchema }=await import('../../../../packages/protocol/src/presentation.ts');
+ const {w}=fakeWorker();const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});const from=(T0+30_000_000)/TICK_US;const chunks=await h.chunks(from,from+4*TICKS,4);const c=chunks[0];recordedTakeChunkSchema.parse(c);assert.ok(Math.abs(sampleTake(c.take as unknown as Take,.425).entities[E].p[0]-30.425)<.001,'native sparse motion keeps interpolation');
+});
+
+test('timeline absence or bad order is visible rather than falling back to fixed nodes',async()=>{
+ for(const transitions of [undefined,[{at:T0+2,nodes:[],removed:[]},{at:T0+1,nodes:[],removed:[]}]]){const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s:{seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place],samples:[],transitions}}} as MessageEvent));},terminate(){}};const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});await assert.rejects(()=>h.chunks(T0/TICK_US,T0/TICK_US+10*TICKS,10),/history timeline/);}
+});
+
+test('same display tick keeps native order and later bundle absence removes the old body',async()=>{
+ const born=T0+3_250_001,removed=T0+3_260_001,reborn=T0+3_270_001;let count=0;
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){const second=m.at>=T0+10_000_000;const s={seq:m.seq,at:m.at,start:second?T0+10_000_000:T0,length:second?BUNDLE:10_000_000,next:second?null:T0+10_000_000,nodes:second?[place]:[place],samples:[],transitions:second?[]:[{at:born,nodes:[body(10_000_000)],removed:[]},{at:removed,nodes:[],removed:['b.7']},{at:reborn,nodes:[body(20_000_000)],removed:[]}]};count++;queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s}} as MessageEvent));},terminate(){}};
+ const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});const chunks=await h.chunks(T0/TICK_US,(T0+12_000_000)/TICK_US,20);const before=chunks.find(c=>c.fromTick*TICK_US===T0+3_000_000)!;assert.equal(sampleTake(before.take as unknown as Take,.299).entities[E],undefined);assert.equal(sampleTake(before.take as unknown as Take,.3).entities[E].p[0],20,'last native transition wins at shared ceil tick');const later=chunks.find(c=>c.fromTick*TICK_US===T0+10_000_000)!;assert.equal(sampleTake(later.take as unknown as Take,0).entities[E],undefined);assert.ok(count>=2);
+});
+
+test('new body uses its recorded nested public frame and never leaks before its birth tick',async()=>{
+ const carrier={...place,id:'carrier',parent:'w.0',pos:[10_000_000,2_000_000,0] as [number,number,number]};const born=T0+2_025_001;
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s:{seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place,carrier],samples:[],transitions:[{at:born,nodes:[{...body(2_000_000),parent:'carrier',at:null}],removed:[]}]}}} as MessageEvent));},terminate(){}};
+ const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});const chunks=await h.chunks(T0/TICK_US,(T0+5_000_000)/TICK_US,10);const c=chunks.find(c=>c.fromTick*TICK_US===T0+2_000_000)!;assert.equal(sampleTake(c.take as unknown as Take,.049).entities[E],undefined);assert.deepEqual(sampleTake(c.take as unknown as Take,.05).entities[E].p,[12,2,0]);
+});
+
+test('validated timeline wire adapter preserves exact order and rejects missing/malformed batches',async()=>{
+ const {readTimeline}=await import('./history-timeline.ts');const node=new Map([[1,'node']]);const rec=()=>body(0);const id=(v:never)=>String(v);
+ const wire=new Map<number,unknown>([[1,T0],[2,[]],[3,[new Map<number,unknown>([[1,T0+1],[2,[node]],[3,[]]]),new Map<number,unknown>([[1,T0+2],[2,[]],[3,['node']]])]],[6,T0+3]]);
+ const out=readTimeline(wire,rec,id,T0,T0+3);assert.deepEqual(out.transitions.map(r=>r.at),[T0+1,T0+2]);assert.equal(out.transitions[1].removed[0],'node');
+ for(const bad of [undefined,new Map(),new Map([...wire,[3,undefined]])])assert.throws(()=>readTimeline(bad,rec,id,T0,T0+3),/history timeline/);
+});
+
+test('parent-only recorded movement refreshes a carried child only at the causal tick',async()=>{
+ (globalThis as {location?:unknown}).location??={href:'https://example.invalid/'};
+ const carrier={...place,id:'carrier',parent:'w.0',pos:[10_000_000,2_000_000,0] as [number,number,number]};const moved=T0+3_125_001;
+ const rider={...body(2_000_000),parent:'carrier',at:null};
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s:{seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place,carrier,rider],samples:[],transitions:[{at:moved,nodes:[{...carrier,pos:[20_000_000,2_000_000,0]}],removed:[]}]}}} as MessageEvent));},terminate(){}};
+ const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});const chunks=await h.chunks(T0/TICK_US,(T0+5_000_000)/TICK_US,10);const c=chunks.find(c=>c.fromTick*TICK_US===T0+3_000_000)!;assert.deepEqual(sampleTake(c.take as unknown as Take,.125).entities[E].p,[12,2,0],'no future parent movement');assert.deepEqual(sampleTake(c.take as unknown as Take,.15).entities[E].p,[22,2,0],'recorded nested world pose');
+});
+
+test('cooperative conversion observes cancellation before another publication',async()=>{
+ (globalThis as {location?:unknown}).location??={href:'https://example.invalid/'};
+ const controller=new AbortController();
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){
+  queueMicrotask(()=>{w.onmessage?.({data:{t:'seeked',s:{seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place,body(0)],samples:[],transitions:[]}}} as MessageEvent);setTimeout(()=>controller.abort(),0);});
+ },terminate(){}};
+ const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});
+ await assert.rejects(()=>h.chunks(T0/TICK_US,T0/TICK_US+60*TICKS,60,controller.signal),/aborted/);
 });

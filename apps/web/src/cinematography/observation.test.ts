@@ -73,3 +73,10 @@ test('wide hierarchies decline detail before enqueueing children or allocating b
 test('morph target geometry explicitly declines unsupported detailed envelopes',()=>{
  const body=root(),mesh=new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());body.add(mesh);body.updateMatrixWorld(true);mesh.geometry.morphAttributes.position=[mesh.geometry.attributes.position.clone()];assert.equal(new DrawGeometry().inspect(body,new Vector3(),new Quaternion(),false,{remaining:1000}).bounds,null);
 });
+
+test('rotated non-sphere has unknown cold bounds until actual drawn geometry is complete',()=>{
+ const holder=root(),mesh=new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());mesh.rotation.z=Math.PI/4;holder.add(mesh);holder.updateMatrixWorld(true);
+ const observer=new DisplayedCameraObserver();
+ const cold=observer.capture({version,tick:1,seconds:1,geometryWork:0,subjects:[{id:'floater',root:holder}]});if(cold.status!=='observed'||cold.value.subjects[0].state!=='present')throw Error('fixture');assert.equal(cold.value.subjects[0].bounds,null,'radius alone cannot bound tilted model');
+ const warm=observer.capture({version,tick:2,seconds:2,geometryWork:2048,subjects:[{id:'floater',root:holder}]});if(warm.status!=='observed'||warm.value.subjects[0].state!=='present')throw Error('fixture');assert.ok(warm.value.subjects[0].bounds!.max[0]>1.4,'actual rotated model exceeds unit-radius axes');
+});
