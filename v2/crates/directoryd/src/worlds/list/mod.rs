@@ -10,7 +10,9 @@
 //! 3. **A request key.** Each create carries the page's key for that one click. Creates are made one at a time, and
 //!    the answer is kept by key, so the same key twice makes one world and answers the second with the first's world.
 //! 4. **Per-account limits** ([`Limits`], today's): five worlds an account; an account in its first day two, and one
-//!    an hour. A refusal names the limit and when to retry. They stop abuse and count toward no bar.
+//!    an hour. A refusal names the limit and when to retry. They stop abuse and count toward no bar. They count only
+//!    worlds made through New world: an imported world (its row's template [`IMPORTED`], [`register`]) counts toward
+//!    no account's limits. A site owner ([`SITE_OWNERS_ENV`]) has none.
 //! 5. **The label is free text, not identity.** A label already on another account's world is refused.
 //! 6. **A world's settings** (W9, #2827), today's two owner switches, by its creator alone: `unlisted` takes the row
 //!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
@@ -51,6 +53,11 @@ use crate::worlds::create::{Create, NameRecord, Source, create};
 
 /// The list's one object.
 pub const KEY: &str = "world-list";
+/// The template an imported world's row names ([`register`]): made by no create, so it counts toward no limit.
+pub const IMPORTED: &str = "imported";
+/// The site's owners, canonical account ids, comma separated (the variable the ops page and the launcher read): no
+/// limit of rule 4 applies to them.
+pub const SITE_OWNERS_ENV: &str = "SIM_SITE_OWNERS";
 /// The folder the list is kept in when no bucket is set ([`from_env`]), and its default.
 pub const WORLD_STORE_ENV: &str = "DIRECTORYD_WORLD_STORE";
 pub const WORLD_STORE_DEFAULT: &str = "directory";
@@ -234,6 +241,8 @@ pub struct Worlds<S: Store> {
     cache: Mutex<Option<(String, Vec<Json>)>>,
     pub templates: BTreeMap<String, Template>,
     pub limits: Limits,
+    /// Rule 4: accounts no limit applies to ([`SITE_OWNERS_ENV`]).
+    pub site_owners: std::collections::BTreeSet<String>,
     starter: Starter,
     /// Rule 9: the folder of this machine's world folders, and the counts read from it: when (seconds) and by folder.
     pub souls_root: Option<PathBuf>,
@@ -276,6 +285,7 @@ impl<S: Store> Worlds<S> {
             cache: Mutex::new(None),
             templates,
             limits: Limits::default(),
+            site_owners: Default::default(),
             starter,
             souls_root: None,
             souls_read: Mutex::new((0, BTreeMap::new())),
@@ -382,7 +392,21 @@ impl<S: Store> Worlds<S> {
         now: u64,
     ) -> Result<Json, Refusal> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        self.make(&mut inner, ask, creator, account_made, now)
+        self.make(&mut inner, ask, creator, account_made, now, true)
+    }
+
+    /// [`Worlds::create`] for the signed-in `account`: a site owner ([`Worlds::site_owners`]) has no limits.
+    pub fn create_for(
+        &self,
+        ask: &Ask,
+        creator: Id,
+        account: &str,
+        account_made: u64,
+        now: u64,
+    ) -> Result<Json, Refusal> {
+        let limited = !self.site_owners.contains(account);
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.make(&mut inner, ask, creator, account_made, now, limited)
     }
 
     fn make(
@@ -392,6 +416,7 @@ impl<S: Store> Worlds<S> {
         creator: Id,
         account_made: u64,
         now: u64,
+        limited: bool,
     ) -> Result<Json, Refusal> {
         if ask.key.is_empty() || ask.key.len() > 64 {
             return refuse(
@@ -432,9 +457,10 @@ impl<S: Store> Worlds<S> {
                 let made: Vec<u64> = rows
                     .iter()
                     .filter(|r| row_creator(r) == Some(&who))
+                    .filter(|r| r.get("template").and_then(Json::as_str) != Some(IMPORTED))
                     .filter_map(|r| r.get("made").and_then(Json::as_u64))
                     .collect();
-                if let Err(o) = self.limits.check(account_made, &made, now) {
+                if limited && let Err(o) = self.limits.check(account_made, &made, now) {
                     return Err(Refusal {
                         name: o.name,
                         detail: json!({"limit": o.limit, "retry_after": o.retry_after}).to_string(),
@@ -764,6 +790,15 @@ pub fn worldd_starter(worldd: PathBuf, worlds: PathBuf) -> Starter {
     })
 }
 
+/// The site owners [`SITE_OWNERS_ENV`] names: its comma-separated account ids, trimmed, empty ones dropped.
+pub fn site_owners(text: &str) -> std::collections::BTreeSet<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The list and create the environment names, or `None` when `DIRECTORYD_TEMPLATES` is not set:
 /// `DIRECTORYD_TEMPLATES` (a folder of published templates, one folder each), `DIRECTORYD_WORLDS` (where new worlds'
 /// folders go), `DIRECTORYD_WORLDD` (the world program). The directory's store is the one W8's environment names, or
@@ -800,6 +835,7 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
             placement::starter(var("DIRECTORYD_PLACEMENT", "placement")),
         );
         worlds.souls_root = std::env::var_os(SOULS_ROOT_ENV).map(PathBuf::from);
+        worlds.site_owners = site_owners(&std::env::var(SITE_OWNERS_ENV).unwrap_or_default());
         Ok(worlds)
     };
     Some(run())
