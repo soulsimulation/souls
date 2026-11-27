@@ -42,6 +42,37 @@ export function completed(answer, label) {
   return answer;
 }
 
+/** Check what an ordinary agent can learn before running the fixed-sequence diagnostic below. */
+export async function discoverConference({ seat, lecture, question, record = () => {} }) {
+  const read = async (...words) => {
+    const answer = await seat.cli(...words);
+    record({ person: seat.label, words, answer });
+    assert.equal(answer.ok, true, `discovery ${words.join(' ')}`);
+    return answer;
+  };
+  await read('help');
+  await read('look');
+  const activities = (await read('together', 'kinds')).activities;
+  for (const word of ['hall-lecture', 'speaker-introduction', 'round-of-applause']) {
+    assert(activities?.some((a) => a.word === word && a.card), `${word} has an ordinary activity card`);
+  }
+  const lectern = await read('inspect', lecture), stand = await read('inspect', question);
+  assert(stand.card?.includes('withdraw'), 'the question card explains how the author frees the stand');
+  const form = (thing, name) => {
+    const offer = thing.offers?.find((o) => o.name === name);
+    assert(offer?.usage, `${name} exposes its ordinary command usage`);
+    return offer;
+  };
+  assert(form(lectern, 'take_the_lectern').params?.place?.of?.includes('lectern'), 'the lectern names its standing place');
+  assert.equal(form(lectern, 'attend').params?.seat?.type, 'slot', 'attending names the required seat argument');
+  for (const name of ['step_down', 'leave']) form(lectern, name);
+  assert.equal(form(stand, 'post_question').params?.words?.type, 'text', 'posting names the words argument');
+  for (const name of ['mark_answered', 'withdraw_question']) {
+    assert.deepEqual(form(stand, name).who, { link: 'asker' }, `${name} names its author-only permission`);
+  }
+  return { activities: 3, lectern: lectern.offers, question: stand.offers };
+}
+
 export async function performConference({ seats, lecture, benches, question, record = () => {} }) {
   assert.equal(seats.length, 5, 'one speaker and four listeners');
   const [presenter, next] = seats;
@@ -88,9 +119,15 @@ export async function performConference({ seats, lecture, benches, question, rec
   await body(next, 'wave');
   await body(next, 'rise');
   await act(next, 'post_question', question, 'words=How do the parts fit together?');
+  const occupied = await command(next, 'can', `post_question:${question}`, 'words=Another question');
+  assert.equal(occupied.can, 'no', 'an author cannot replace a pending question silently');
+  assert.equal(occupied.reason, 'already_linked', 'the refusal names the occupied question link');
+  assert.equal(occupied.says, 'question_pending', 'the refusal identifies the authored pending-question guidance');
   await body(presenter, 'tell_story');
   await act(next, 'mark_answered', question);
   await act(next, 'withdraw_question', question);
+  assert.equal((await command(next, 'can', `post_question:${question}`, 'words=Another question')).can, 'yes',
+    'withdrawing makes the question stand usable again');
   await closeLecture(presenter, seats.slice(1));
   await offer(presenter, 'speaker-introduction', [next]);
   // Observe its actual end, including the walk to its places, before attempting the next activity.
@@ -171,6 +208,7 @@ export async function rehearse({ directory, startFile = null, onReady = () => {}
     const question = (await find('question-stand', 'eden:conference_question'))[0]?.id;
     const benches = (await find('audience', 'eden:bench')).sort((a, b) => a.name.localeCompare(b.name)).map((node) => node.id);
     assert(lecture && question && benches.length === 2, 'existing conference fixtures are visible to the served client');
+    report.discovery = await discoverConference({ seat: seats[0], lecture, question, record });
     report.ready = true; save(); await onReady({ page: running.page, directory });
     if (startFile) { while (!existsSync(startFile)) await sleep(100); }
     report.demonstrationStart = Date.now(); save();

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { completed, performConference, rehearsalTemplate } from './rehearse.mjs';
+import { offersOf } from '../../../v2/client/src/check/offers.mjs';
+import { completed, discoverConference, performConference, rehearsalTemplate } from './rehearse.mjs';
 
 const receipt = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
@@ -16,6 +18,23 @@ test('the rehearsal reuses both existing definitions and refuses an incomplete f
   assert.equal(scene.batches[0].ops[0], definitions[0]);
   assert.equal(scene.batches[0].ops[1], definitions[1]);
   assert.throws(() => rehearsalTemplate({ batches: [{ ops: [definitions[0]] }] }), /existing furniture/);
+});
+
+test('discovery rejects a client that hides a required argument, before sending any action', async () => {
+  const entry = (name) => JSON.parse(readFileSync(new URL(`../../../content/kinds/${name}.json`, import.meta.url), 'utf8'));
+  const lecture = offersOf('lectern', entry('hall/lecture'));
+  const stand = entry('conference/conference_question'), question = offersOf('question', stand);
+  const calls = [];
+  const seat = { label: 'Reader', cli: async (...words) => {
+    calls.push(words);
+    if (words[0] === 'together') return { ok: true, activities: ['hall-lecture', 'speaker-introduction', 'round-of-applause'].map((word) => ({ word, card: word })) };
+    if (words[0] === 'inspect') return { ok: true, offers: words[1] === 'lectern' ? lecture : question, card: stand.text.card };
+    return { ok: true };
+  } };
+  await discoverConference({ seat, lecture: 'lectern', question: 'question' });
+  delete question.find((o) => o.name === 'post_question').params.words;
+  await assert.rejects(discoverConference({ seat, lecture: 'lectern', question: 'question' }), /words argument/);
+  assert(calls.every(([word]) => ['help', 'look', 'together', 'inspect'].includes(word)), 'discovery sends reads only');
 });
 
 test('a gesture that loses the lectern fails the composition before question or handover', async () => {
