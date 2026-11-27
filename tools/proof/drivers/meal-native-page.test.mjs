@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { mealWorldPage, mealNodeIdentity, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
+import { mealWorldPage, mealNodeIdentity, mealArchiveJSON, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
 
 class PublicWorker extends EventTarget {
   message(data) { this.dispatchEvent(new MessageEvent('message', { data })); }
@@ -132,3 +132,65 @@ test('public world discovery rejects an unrelated or duplicate fixture and never
     await assert.rejects(mealWorldPage({ base: 'https://example.invalid/' }), /owned origin/);
   } finally { globalThis.fetch = original; }
 });
+
+
+// Decode the documented private archive tags; this is not the Worker/native protocol.
+const archiveValue = value => {
+  if (Array.isArray(value)) return value.map(archiveValue);
+  if (!value || typeof value !== 'object') return value;
+  if (value.$mealArchive === 'BigInt') return BigInt(value.decimal);
+  if (value.$mealArchive === 'Uint8Array') return Uint8Array.from(value.bytes);
+  if (value.$mealArchive === 'undefined') return undefined;
+  if (value.$mealArchive === 'object') return Object.fromEntries(value.entries.map(([key,v])=>[key,archiveValue(v)]));
+  return Object.fromEntries(Object.entries(value).map(([key,v])=>[key,archiveValue(v)]));
+};
+
+test('move/sample/run-end-only parts and all chair/ancestor/frame records are retained without changing selected latest', async()=>inPage(async page=>{
+  mealBrowserInstall({bowl:'bowl',bodies:['diner-body']});
+  const worker=new page.Worker(),observer=page.__mealPayloadObserver;
+  const chair=node('chair',{kind:'eden:chair',parent:'room',slots:[[1,0,450,0,0,1]],course:Uint8Array.of(1,2)});
+  const ancestor=node('room',{kind:'eden:room',parent:'world',pos:[1000,2000,3000],unknownFrameField:{unchanged:true}});
+  const initial={t:'snapshot',s:{nodes:[bowl(2),body(),chair,ancestor],removed:[]}};
+  const moves={t:'part',p:{number:1,from:100,to:200,nodes:[],removed:[],samples:[],moves:[{body:'diner-body',name:'eat',start:110,ends:[120,180],target:'bowl',run:'run1',limbs:['hand'],contact:'contact',ended:{at:180,how:'done'}}]}};
+  const samples={t:'part',p:{number:2,from:200,to:300,samples:[['diner-body','chair',1,250,1,2,3]],courses:{chair:[200,0,0,0,300,1,2,3]},leaves:{chair:350},unknownField:{value:8n}}};
+  const runEnds={t:'part',p:{number:3,from:300,to:400,nodes:[],removed:[],samples:[],runEnds:[{body:'diner-body',at:390,how:'done',run:'run1'}]}};
+  const delivered=[];worker.addEventListener('message',e=>delivered.push(e.data));
+  for(const message of [initial,moves,samples,runEnds])worker.message(message);
+  assert.deepEqual(delivered,[initial,moves,samples,runEnds]);assert.equal(observer.messages.length,4);
+  assert.deepEqual(observer.messages.map(row=>row.publicMessage),delivered);
+  assert.notEqual(observer.messages[0].publicMessage,initial);assert.notEqual(observer.messages[0].publicMessage.s.nodes[2].course,chair.course);
+  assert(observer.messages[0].publicMessage.s.nodes[2].course instanceof Uint8Array);
+  assert.deepEqual(observer.messages[2].publicMessage.p.samples,samples.p.samples);
+  assert.deepEqual(observer.messages[3].publicMessage.p.runEnds,runEnds.p.runEnds);
+  assert.equal(observer.workers[0].latest.size,2,'chair ancestors are archived without changing selected-node checkpoint semantics');
+  assert.deepEqual(observer.workers[0].latest.get('diner-body').pos,body().pos,'raw samples never synthesize a new node position');
+  assert.equal(observer.workers[0].worldAt,400);assert.equal(observer.failures.length,0);
+  const archived=archiveValue(JSON.parse(mealArchiveJSON(mealBrowserStop())));
+  assert.deepEqual(archived.messages.map(row=>row.publicMessage),delivered);
+  assert.equal(samples.p.unknownField.value,8n);assert.deepEqual(chair.course,Uint8Array.of(1,2));
+  worker.message(moves);assert.equal(observer.messages.length,4,'cleanup stops archival observation only');assert.equal(delivered.at(-1),moves);
+}));
+
+test('private archive tags preserve BigInt/Uint8Array/undefined and cannot impersonate a literal public object',()=>{
+  const original={integer:18446744073709551615n,bytes:Uint8Array.of(0,255),present:undefined,literal:{$mealArchive:'BigInt',decimal:'not-a-number'}};
+  const decoded=archiveValue(JSON.parse(mealArchiveJSON(original)));
+  assert.deepEqual(decoded,original);assert(Object.hasOwn(decoded,'present'));assert(decoded.bytes instanceof Uint8Array);
+});
+
+for(const [name,options,message,reason] of [
+  ['bytes',{maxBytes:100},{t:'part',p:{nodes:[],samples:[],unknown:'x'.repeat(200)}},/byte limit/],
+  ['nodes',{maxNodes:1},{t:'snapshot',s:{nodes:[bowl(2),body()]}},/node limit/],
+  ['records',{maxRecords:3},{t:'part',p:{nodes:[],samples:[],moves:[]}},/record limit/],
+  ['unsupported binary',{}, {t:'part',p:{nodes:[],samples:[],unknown:new Uint16Array([1,2])}},/unsupported public binary/],
+]) test(`full public observation fails visibly before partial retention on ${name}`,async()=>inPage(async page=>{
+  mealBrowserInstall({bowl:'bowl',bodies:['diner-body'],...options});const worker=new page.Worker();let delivered;
+  worker.addEventListener('message',e=>delivered=e.data);worker.message(message);
+  const result=mealBrowserStop();assert.equal(delivered,message);assert.equal(result.messages.length,0);assert.match(result.failures[0],reason);
+  assert.deepEqual(result.retained,{publicMessageByteUpperBound:0,nodes:0,records:0});
+}));
+
+test('the eight-worker cap remains visible without preventing ordinary worker creation',async()=>inPage(async page=>{
+  mealBrowserInstall({bowl:'bowl',bodies:[]});const workers=Array.from({length:9},()=>new page.Worker());
+  assert(workers.every(w=>w instanceof PublicWorker));assert.equal(page.__mealPayloadObserver.workers.length,8);
+  assert.match(mealBrowserStop().failures[0],/worker observation limit/);
+}));

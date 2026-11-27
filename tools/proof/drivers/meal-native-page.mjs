@@ -8,7 +8,16 @@ import { meal, foundId } from '../../playtest/meal/meal.mjs';
 import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
-const save = (paths, name, value) => writeFileSync(join(paths.dir, name), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+// Private archive encoding only; delivered Worker objects and selected checkpoint spelling stay unchanged.
+// $mealArchive tags retain BigInt decimal values, Uint8Array bytes and explicit undefined.
+// Literal objects carrying that tag key are escaped as entries, so they cannot impersonate a typed value.
+export function mealArchiveJSON(value) {
+  return JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? { $mealArchive: 'BigInt', decimal: String(v) }
+    : v instanceof Uint8Array ? { $mealArchive: 'Uint8Array', bytes: Array.from(v) }
+    : v === undefined ? { $mealArchive: 'undefined' }
+    : v && typeof v === 'object' && Object.hasOwn(v, '$mealArchive') ? { $mealArchive: 'object', entries: Object.entries(v) } : v, 2);
+}
+const save = (paths, name, value) => writeFileSync(join(paths.dir, name), mealArchiveJSON(value), { flag: 'wx', mode: 0o600 });
 
 /** CLI and public stream spelling of the same native ID; never manufacture an alias for an unknown format. */
 export function mealNodeIdentity(original) {
@@ -43,10 +52,49 @@ export async function prepare({ base, paths, recipe, signal }) {
 }
 
 /** Serialized into the page: passively listen to public messages; never intercept or rewrite their data. */
-export function mealBrowserInstall({ bowl, bodies, identities, limit = 361 }) {
+export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxBytes = 33554432, maxNodes = 20000, maxRecords = 1000000 }) {
   if (window.__mealPayloadObserver) throw Error('meal observer already installed');
   const original = window.Worker, known = new Set([bowl, ...bodies]);
-  const observer = { original, listeners: [], workers: [], messages: [], failures: [], identities, limit, stopped: false };
+  const bounds = { messages: 361, workers: 8, bytes: 33554432, nodes: 20000, records: 1000000, depth: 64 };
+  for (const [value, cap] of [[limit,bounds.messages],[maxBytes,bounds.bytes],[maxNodes,bounds.nodes],[maxRecords,bounds.records]]) {
+    if (!Number.isSafeInteger(value) || value <= 0 || value > cap) throw Error('meal invalid public observation budget');
+  }
+  const observer = { original, listeners: [], workers: [], messages: [], failures: [], identities, limit, stopped: false,
+    limits: { messages: limit, workers: 8, publicMessageByteUpperBound: maxBytes, nodes: maxNodes, records: maxRecords, depth: 64 },
+    retained: { publicMessageByteUpperBound: 0, nodes: 0, records: 0 } };
+  // Conservative compact-JSON cost upper bound checked BEFORE cloning. No reference to the delivered object is retained.
+  const measure = message => {
+    const cost = { publicMessageByteUpperBound: 0, nodes: (message.t === 'snapshot' ? message.s?.nodes : message.p?.nodes)?.length ?? 0, records: 0 };
+    const ancestors = new Set();
+    const charge = (bytes, records = 0) => {
+      cost.publicMessageByteUpperBound += bytes; cost.records += records;
+      if (observer.retained.publicMessageByteUpperBound + cost.publicMessageByteUpperBound > maxBytes) throw Error('meal public archive byte limit exceeded');
+      if (observer.retained.records + cost.records > maxRecords) throw Error('meal public record limit exceeded');
+    };
+    if (observer.retained.nodes + cost.nodes > maxNodes) throw Error('meal public node limit exceeded');
+    const visit = (v, depth) => {
+      if (depth > bounds.depth) throw Error('meal public record depth limit exceeded');
+      charge(4,1);
+      if (v === null || typeof v === 'boolean') { charge(5); return; }
+      if (typeof v === 'string') { charge(v.length*6+2); return; }
+      if (typeof v === 'number') { if (!Number.isFinite(v)) throw Error('meal unsupported public nonfinite number'); charge(32); return; }
+      if (typeof v === 'bigint') { charge(String(v).length+100); return; }
+      if (v === undefined) { charge(100); return; }
+      if (v instanceof Uint8Array) { charge(v.length*4+100,v.length); return; }
+      if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) throw Error('meal unsupported public binary type');
+      if (typeof v !== 'object' || (!Array.isArray(v) && Object.getPrototypeOf(v) !== Object.prototype && Object.getPrototypeOf(v) !== null)) throw Error('meal unsupported public value type');
+      if (ancestors.has(v)) throw Error('meal unsupported public cyclic record');
+      if (Array.isArray(v) && observer.retained.records + cost.records + v.length > maxRecords) throw Error('meal public record limit exceeded');
+      ancestors.add(v); let arrayKeys = 0;
+      for (const key in v) if (Object.hasOwn(v,key)) {
+        if (Array.isArray(v) && (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= v.length)) throw Error('meal unsupported public array property');
+        arrayKeys++; charge(key.length*6+4); visit(v[key],depth+1);
+      }
+      if (Array.isArray(v) && arrayKeys !== v.length) throw Error('meal unsupported public sparse array');
+      ancestors.delete(v);
+    };
+    visit(message,0); return cost;
+  };
   const copy = value => JSON.parse(JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? { big: String(v) }
     : v instanceof Map ? Object.fromEntries(v) : v instanceof Uint8Array ? Array.from(v) : v));
   class ObservedWorker extends original {
@@ -63,17 +111,19 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361 }) {
         if (observer.stopped) return;
         try {
           const message = event.data, payload = message?.t === 'snapshot' ? message.s : message?.t === 'part' ? message.p : null;
-          if (!payload || !Array.isArray(payload.nodes)) return;
+          if (!payload) return; // Other public message types are explicitly outside this snapshot/part archive.
+          if (payload.nodes !== undefined && !Array.isArray(payload.nodes)) throw Error('meal malformed public node list');
+          if (observer.messages.length >= limit) throw Error('meal public payload storage limit exceeded');
+          const cost = measure(message), publicMessage = structuredClone(message);
           if (message.t === 'snapshot') worker.latest.clear();
           const removed = (payload.removed ?? []).filter(id => known.has(id));
           for (const id of removed) worker.latest.delete(id);
-          const nodes = payload.nodes.filter(n => known.has(n.id)).map(n => copy(Object.fromEntries(
+          const nodes = (payload.nodes ?? []).filter(n => known.has(n.id)).map(n => copy(Object.fromEntries(
             ['id', 'kind', 'parent', 'slot', 'pos', 'rot', 'at', 'body', 'slots', 'fields'].filter(k => n[k] !== undefined).map(k => [k, n[k]]))));
           for (const node of nodes) worker.latest.set(node.id, node);
           worker.worldAt = Number.isSafeInteger(payload.to) ? payload.to : null;
-          if (!nodes.length && !removed.length) return;
-          if (observer.messages.length >= limit) throw Error('meal public payload storage limit exceeded');
-          observer.messages.push({ worker: worker.number, receivedAt: performance.now(), worldAt: worker.worldAt, type: message.t, nodes, removed });
+          for (const key of Object.keys(cost)) observer.retained[key] += cost[key];
+          observer.messages.push({ worker: worker.number, receivedAt: performance.now(), worldAt: worker.worldAt, type: message.t, nodes, removed, publicMessage });
         } catch (error) { if (observer.failures.length < 10) observer.failures.push(String(error)); }
       };
       this.addEventListener('message', listener); observer.listeners.push([this, listener]);
@@ -121,8 +171,8 @@ export function mealBrowserStop() {
     for (const [worker, listener] of observer.listeners) worker.removeEventListener('message', listener);
     if (window.Worker !== observer.wrapped) throw Error('meal observer ownership changed');
     window.Worker = observer.original;
-    return observer.result = { messages: observer.messages, failures: observer.failures, identities: observer.identities, limit: observer.limit,
-      qualification: 'Passive public messages, not an attachment or final-draw contact measurement.' };
+    return observer.result = { messages: observer.messages, failures: observer.failures, identities: observer.identities, limit: observer.limit, limits: observer.limits, retained: observer.retained,
+      qualification: 'Full passive structured-cloned snapshot/part messages with original emitted names/types, including moves, runEnds, samples, courses, leaves, chair/ancestor nodes and unknown fields; other message types (pointer/error/format/catching) are not archived. Private JSON tags preserve BigInt/Uint8Array/undefined and escape literal tag objects; tags are not native protocol fields. Selected nodes/latest retain legacy checkpoint semantics. Byte budget bounds public message trees by conservative compact-JSON cost; legacy selected views, envelope metadata and JSON indentation add overhead, so this is not pretty-printed file size. No contact/final-draw or missing-native-capability claim.' };
   } catch (error) { observer.error = error; throw error; }
 }
 
