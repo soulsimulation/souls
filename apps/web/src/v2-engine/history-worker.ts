@@ -30,8 +30,8 @@ const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 const text = new TextDecoder();
 
-async function get(url: URL, signal?: AbortSignal): Promise<Uint8Array | null> {
-  const res = await fetch(url, { signal });
+async function get(url: URL): Promise<Uint8Array | null> {
+  const res = await fetch(url);
   return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
 }
 
@@ -81,37 +81,37 @@ function dayIndex(base: URL, day: number, today: number): Promise<DayIndex | nul
   return p;
 }
 /** #3358: the stored bytes of the bundles read last (a bundle's key names it for good), so a bundle read ahead, or
- *  read by the seek before, is not fetched again. A failed or stopped read is not kept. */
+ *  read by the seek before, is not fetched again. A failed read is not kept. */
 const bundles = new Map<string, Promise<Uint8Array>>();
-function bundle(base: URL, key: string, signal?: AbortSignal): Promise<Uint8Array> {
+function bundle(base: URL, key: string): Promise<Uint8Array> {
   let b = bundles.get(key);
   if (!b) {
-    bundles.set(key, (b = get(new URL(key, base), signal).then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
+    bundles.set(key, (b = get(new URL(key, base)).then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
     b.catch(() => bundles.delete(key));
     while (bundles.size > 4) bundles.delete(bundles.keys().next().value!);
   }
   return b;
 }
 /** #3358: read aheads (history.ts prepare) fetch what a seek they foresee will read and keep the bundle, applying
- *  nothing, one at a time in the order asked (the first is the likelier). A seek drops those not begun (`round`) and
- *  stops the one under way when its bundle does not hold the seek's moment, so a guess never slows the seek chosen. */
+ *  nothing, one at a time in the order asked (the first is the likelier). A seek whose moment the read ahead under way
+ *  holds (the first guess was right) drops those not begun (`round`). One under way is never stopped: measured on
+ *  soul.game, the bytes already sent drain first whatever is asked after them, so a seek of another guess waits about
+ *  as long either way, and the next read ahead starts the moment they have. */
 let reading: Promise<unknown> = Promise.resolve(), round = 0;
-let under: { from: number; to: number; stop: AbortController } | null = null;
+let under: { from: number; to: number } | null = null;
 function readAhead(base: URL, at: number, now: number, floor?: number) {
   const r = round, today = Math.floor(now / DAY_US);
   reading = reading.then(async () => {
     const f = r === round ? await walk(at, now, floor, (day) => dayIndex(base, day, today)) : null;
     const to = f && r === round ? await f.later() : null;
     if (!f || r !== round) return;
-    const stop = new AbortController();
-    under = { from: at, to: to ?? Infinity, stop };
-    await bundle(base, f.key, stop.signal).finally(() => { under = null; });
+    under = { from: at, to: to ?? Infinity };
+    await bundle(base, f.key).finally(() => { under = null; });
   }).catch(() => null);
 }
 
 async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
-  round++;
-  if (under && !(under.from <= at && at < under.to)) under.stop.abort();
+  if (under && under.from <= at && at < under.to) round++;
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
   // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
   const today = Math.floor(now / DAY_US), found = await walk(at, now, floor, (day) => dayIndex(base, day, today));
