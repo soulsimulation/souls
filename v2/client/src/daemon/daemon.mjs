@@ -306,10 +306,13 @@ const closes = []; // closes not yet sent, for the next sign-in
 // First-day 27 Nov: the owner's card says "listening" only while a reader (`listen`, `wait`) is open here, and
 // "Thinking…" only once the model's turn has a message, not when this daemon was given it. Told to the gateway as
 // `{"listening": true|false}` and `{"read": {"id"}}`; it tells the owner's page.
-const LISTEN_GAP_MS = 5000; // `listen --follow` asks again at once: a gap shorter than this is still listening
-let listeners = 0, listeningSaid = false, listenOff = null;
+// An agent that loops on `wait` works through what it was handed between readers: it still listens until this long
+// after both its last reader closed and its last command (a model's turn can take a minute).
+const LISTEN_GAP_MS = 60_000;
+let listeners = 0, listeningSaid = false, listenOff = null, readerClosedAt = 0;
 const handedMail = new Set(); // ids a reader handed out: read once the model's turn sends a command
-const readMail = new Set(); // ids told read
+const readMail = new Set(); // ids the model's turn has (read)
+const toldRead = new Set(); // of those, the ids told on this sign-in
 function sayListening() {
   const on = listeners > 0;
   if (on === listeningSaid || !ws || !signedIn) return;
@@ -317,19 +320,33 @@ function sayListening() {
   ws.send(JSON.stringify({ listening: on }));
 }
 function readerOpened() { listeners++; clearTimeout(listenOff); listenOff = null; sayListening(); }
+function listenGap() {
+  clearTimeout(listenOff);
+  const left = Math.max(readerClosedAt, lastCommand) + LISTEN_GAP_MS - Date.now();
+  if (listeners > 0 || left <= 0) { listenOff = null; sayListening(); return; }
+  listenOff = setTimeout(listenGap, left);
+  listenOff.unref?.();
+}
 function readerClosed() {
   listeners = Math.max(listeners - 1, 0);
-  clearTimeout(listenOff);
-  listenOff = setTimeout(() => { listenOff = null; sayListening(); }, LISTEN_GAP_MS);
-  listenOff.unref?.();
+  readerClosedAt = Date.now();
+  listenGap();
+}
+/** Reads are told to the gateway as soon as the socket is signed in; one made while it is not waits for the next. */
+function tellRead() {
+  if (!ws || !signedIn) return;
+  for (const id of readMail) {
+    if (toldRead.has(id)) continue;
+    toldRead.add(id);
+    ws.send(JSON.stringify({ read: { id } }));
+  }
 }
 function markRead(ids) {
   for (const id of ids) {
     handedMail.delete(id);
-    if (!mail.has(id) || readMail.has(id) || !ws || !signedIn) continue;
-    readMail.add(id);
-    ws.send(JSON.stringify({ read: { id } }));
+    if (mail.has(id)) readMail.add(id);
   }
+  tellRead();
 }
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
@@ -528,9 +545,10 @@ async function sendBulk(bytes, sequence) {
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
-  if (!signedIn) { signedInAt = Date.now(); listeningSaid = false; } // a new sign-in starts with nobody reading
+  if (!signedIn) { signedInAt = Date.now(); listeningSaid = false; toldRead.clear(); } // a new sign-in knows nothing yet
   signedIn = true;
   sayListening();
+  tellRead();
   // #4977: a `wait` under way is told the connection is back, and how long it was gone.
   if (lostAt !== null) {
     const gap = Date.now() - lostAt;
@@ -605,7 +623,12 @@ function onText(text, sock) {
     return;
   }
   const m = f.mail;
-  if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
+  if (!m || typeof m.id !== 'string') return;
+  if (mail.has(m.id)) {
+    // given again (a new sign-in): the gateway forgot it was read, so it is told again
+    if (readMail.has(m.id)) { toldRead.delete(m.id); tellRead(); }
+    return;
+  }
   mail.set(m.id, m);
   log(`message ${m.id}`); // never its words
   note({ kind: 'mail', id: m.id, text: String(m.text), at: m.at });
@@ -676,6 +699,7 @@ function closeMail(id, state, outcome) {
   mail.delete(id);
   handedMail.delete(id);
   readMail.delete(id);
+  toldRead.delete(id);
   replyOf.delete(id);
   closedMail.set(id, state);
   if (closedMail.size > 200) closedMail.delete(closedMail.keys().next().value);

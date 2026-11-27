@@ -201,9 +201,6 @@ struct Held {
     who: Option<Arc<Who>>,
     /// The ids of the owner's messages given to the grant's sockets (each socket's own are in [`Live::mailed`]).
     mailed: BTreeSet<String>,
-    /// Whether the grant's agent said a reader of its messages is open now (`{"listening": …}`, first-day 27 Nov): its
-    /// client being connected does not say that anyone reads what the client is given.
-    listening: bool,
     /// W10: the grant's intents sent while a message given to it is open, by sequence, and their verbs. Only acts
     /// begun after the pickup are told to the owner, so an older act never reads as the answer.
     doing: BTreeMap<u64, String>,
@@ -243,6 +240,10 @@ struct Live {
     mail: mpsc::Sender<String>,
     mailed: BTreeSet<String>,
     behind: Arc<tokio::sync::Notify>,
+    /// Whether this socket's client said a reader of its messages is open now (`{"listening": …}`, first-day 27 Nov):
+    /// a client being connected does not say that anyone reads what it is given. Per socket, so one of a creator's
+    /// sockets closing its reader does not hide another's.
+    listening: bool,
 }
 
 /// Which intent a frame of a grant's stream answers, and whether the answer ends it (a progress answer does not, C20).
@@ -260,6 +261,13 @@ pub fn shared(grant: Grant) -> bool {
 }
 
 impl Held {
+    /// Whether any live socket of the grant said a reader of its messages is open.
+    fn listening(&self) -> bool {
+        self.sessions
+            .values()
+            .any(|l| l.listening && !l.frames.is_closed())
+    }
+
     /// The sessions a frame answering `a` goes to. On a shared grant, for an intent a socket of it sent: that socket,
     /// and any signed in since it was sent ([`Out`]); never the others, which signed in before and are other clients.
     /// Otherwise (a Soul's grant, an answer the world handed over from before a restart, a bulk edit's): every socket
@@ -391,7 +399,6 @@ impl Gateway {
         if !shared(grant) {
             held.sessions.clear();
             held.mailed.clear();
-            held.listening = false;
         }
         held.sessions.insert(
             session,
@@ -400,10 +407,11 @@ impl Gateway {
                 mail: mail_tx,
                 mailed: BTreeSet::new(),
                 behind: behind.clone(),
+                listening: false,
             },
         );
         held.who = Some(who);
-        self.tell_watchers(&grant.key(), mailbox::agent(grant, true, held.listening));
+        self.tell_watchers(&grant.key(), mailbox::agent(grant, true, held.listening()));
         let newest = if shared(grant) { 0 } else { held.newest };
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
@@ -440,10 +448,12 @@ impl Gateway {
     pub fn detach(&self, grant: Grant, session: u64) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(held) = hub.grants.get_mut(&grant.key()) {
+            let was = held.listening();
             held.sessions.remove(&session);
             if held.sessions.is_empty() {
-                held.listening = false;
                 self.tell_watchers(&grant.key(), mailbox::agent(grant, false, false));
+            } else if was && !held.listening() {
+                self.tell_watchers(&grant.key(), mailbox::agent(grant, true, false));
             }
         }
     }
@@ -571,8 +581,10 @@ impl Gateway {
     /// The queue starts with whether each grant's agent is connected now (`mailbox::agent`); each change follows.
     pub fn watch(&self, grants: &[Grant]) -> (u64, mpsc::Sender<String>, mpsc::Receiver<String>) {
         let (tx, rx) = mpsc::channel(OUTBOUND);
+        // the state is read and the socket registered under the hub's lock, so no change falls between them
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         for g in grants.iter().take(OUTBOUND / 2) {
-            let _ = tx.try_send(self.presence(*g));
+            let _ = tx.try_send(self.presence(&hub, *g));
         }
         let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
         let n = w.keys().next_back().map_or(1, |n| n + 1);
@@ -583,9 +595,10 @@ impl Gateway {
     /// W10: what a watching view socket may see changed (its token was renewed for other grants); a grant new to it
     /// is told whether its agent is connected.
     pub fn rewatch(&self, n: u64, grants: &[Grant]) {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         let now: Vec<(Vec<u8>, String)> = grants
             .iter()
-            .map(|g| (g.key(), self.presence(*g)))
+            .map(|g| (g.key(), self.presence(&hub, *g)))
             .collect();
         let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((keys, tx)) = w.get_mut(&n) {
@@ -598,24 +611,34 @@ impl Gateway {
         }
     }
 
-    /// The owner's box's presence frame for `grant` as it is now: whether its agent is connected, and listening.
-    fn presence(&self, grant: Grant) -> String {
-        let connected = self.connected(grant) == Some(true);
-        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
-        let listening = hub.grants.get(&grant.key()).is_some_and(|h| h.listening);
-        mailbox::agent(grant, connected, connected && listening)
+    /// The owner's box's presence frame for `grant` as it is now (read under the hub's lock): whether its agent is
+    /// connected (as [`Gateway::connected`]), and listening.
+    fn presence(&self, hub: &Hub, grant: Grant) -> String {
+        let held = hub.grants.get(&grant.key());
+        let connected = !*self.closing.borrow()
+            && held.is_some_and(|h| h.sessions.values().any(|l| !l.frames.is_closed()));
+        mailbox::agent(
+            grant,
+            connected,
+            connected && held.is_some_and(Held::listening),
+        )
     }
 
-    /// The socket signed in for `grant` as `session` says whether a reader of its messages is open now; a change is
-    /// told to the view sockets that watch the grant. Nothing from a socket no longer signed in.
+    /// The socket signed in for `grant` as `session` says whether a reader of its messages is open now; the grant
+    /// listens while any of its live sockets does, and a change of that is told to the view sockets that watch the
+    /// grant. Nothing from a socket no longer signed in.
     pub fn set_listening(&self, grant: Grant, session: u64, on: bool) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(held) = hub.grants.get_mut(&grant.key())
-            && held.sessions.contains_key(&session)
-            && held.listening != on
-        {
-            held.listening = on;
-            self.tell_watchers(&grant.key(), mailbox::agent(grant, true, on));
+        if let Some(held) = hub.grants.get_mut(&grant.key()) {
+            let was = held.listening();
+            let Some(live) = held.sessions.get_mut(&session) else {
+                return;
+            };
+            live.listening = on;
+            let now = held.listening();
+            if now != was {
+                self.tell_watchers(&grant.key(), mailbox::agent(grant, true, now));
+            }
         }
     }
 
@@ -1185,5 +1208,35 @@ mod tests {
             "a reader is not carried over a new sign-in"
         );
         drop(back);
+    }
+
+    /// A creator's sockets each say whether a reader is open: the box hears listening while any of them listens.
+    #[test]
+    fn a_creators_box_listens_while_any_of_its_sockets_reads() {
+        let gw = gateway();
+        let creator = grant("creator");
+        let (_, _, mut watching) = gw.watch(&[creator]);
+        watching.try_recv().unwrap();
+        let page = sign_in(&gw, creator);
+        let agent = sign_in(&gw, creator);
+        watching.try_recv().unwrap();
+        watching.try_recv().unwrap();
+        gw.set_listening(creator, page.session, true);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(creator, true, true)
+        );
+        gw.set_listening(creator, agent.session, true);
+        gw.set_listening(creator, page.session, false);
+        assert!(watching.try_recv().is_err(), "the other socket still reads");
+        gw.set_listening(creator, page.session, true);
+        gw.detach(creator, agent.session);
+        assert!(watching.try_recv().is_err(), "one reader left");
+        gw.detach(creator, page.session);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(creator, false, false)
+        );
+        drop((page, agent));
     }
 }

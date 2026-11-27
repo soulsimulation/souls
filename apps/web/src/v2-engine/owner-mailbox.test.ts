@@ -213,3 +213,19 @@ test('first-day 27 Nov: read before the put\'s answer still makes it Thinking…
   box.text(JSON.stringify({ sent: { id: 'm8' } }));
   assert.equal(box.messages[0].state, 'thinking');
 });
+
+test('first-day 27 Nov: a read message carries when it was read, also when read before the put\'s answer', () => {
+  const box = new OwnerBox();
+  box.put(GRANT, 'wave');
+  const before = Date.now();
+  box.text(JSON.stringify({ mail: { id: 'm9', state: 'read' } }));
+  box.text(JSON.stringify({ sent: { id: 'm9' } }));
+  assert.ok((box.messages[0].readAt ?? 0) >= before);
+  box.put(GRANT, 'sit');
+  box.text(JSON.stringify({ sent: { id: 'm10' } }));
+  assert.equal(box.messages[1].readAt, undefined);
+  box.text(JSON.stringify({ mail: { id: 'm10', state: 'read' } }));
+  assert.ok((box.messages[1].readAt ?? 0) >= before);
+  const inbox = inboxOf(box.messages, new Map(), true, true);
+  assert.equal(inbox.latest?.readAt, box.messages[1].readAt);
+});
