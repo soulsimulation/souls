@@ -372,9 +372,30 @@ fn i3991_a_timer_set_again_while_pending_fires_once_at_the_later_deadline() {
     let faded = rack_events(&run, "faded");
     let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
     println!("#3991 set again: dues {dues:?}, faded {faded:?}, refused {refused:?}");
+    println!("#3991 set again: timer records {:?}", timer_records(&run));
+    println!("#3991 set again: ringing {}, the tree's timers {:?}, next due {:?}", ringing(&run), run.replay().tree().timers(), run.world.quiet.read());
     assert_eq!(faded.len(), 1, "the fade ran once");
     assert_eq!(faded[0].0, later, "at the later deadline");
     assert!(refused.is_empty(), "the replaced timer never fired, so nothing was refused");
     assert_eq!(ringing(&run), 0, "the fade cleared the flag");
     run.stop();
+}
+
+/// The log's timer records, in order: `(world time, node, record)` (to read what a replacement wrote).
+fn timer_records(run: &Run) -> Vec<(i64, Id, replica::effects::TimerRec)> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut out = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            if let Body::Timers(ts) = &e.body {
+                for t in ts {
+                    out.push((e.envelope.at, e.envelope.node, t.clone()));
+                }
+            }
+        }
+    }
+    out
 }
