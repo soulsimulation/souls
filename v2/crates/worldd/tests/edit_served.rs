@@ -8602,9 +8602,16 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         let went = where_is(&w, beam).2.x - (before[0].x + before[1].x) / 2;
         for (k, b) in crew_bodies.iter().enumerate() {
             let dx = body_at(&w, *b).x - before[k].x;
-            println!("crew of {n}: carrier {k} went {} mm east; the beam {} mm", dx / 1000, went / 1000);
+            println!(
+                "crew of {n}: carrier {k} went {} mm east; the beam {} mm",
+                dx / 1000,
+                went / 1000
+            );
             let want = if k < 2 { 0 } else { went };
-            assert!((dx - want).abs() <= 30_000, "carrier {k} went {dx} µm; the beam {went} µm");
+            assert!(
+                (dx - want).abs() <= 30_000,
+                "carrier {k} went {dx} µm; the beam {went} µm"
+            );
         }
         // A hold for each carrier, let go of as the beam is seated.
         let (phase, holding) = grips_said(&w, c, |p, _| p == "souls:released");
