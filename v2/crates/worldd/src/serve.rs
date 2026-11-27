@@ -44,11 +44,13 @@
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
 //!
-//! **A start** reads the log through once from its cut (its records feed the stream from its own cursor), restores
-//! the newest checkpoint and builds the towns and the views' hub from it and the records after it (#3837), then hands
-//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. With no
-//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies is refused
-//! (`log-compacted-past-checkpoint`). It prints `worldd:
+//! **A start** restores the newest checkpoint, reads the log from that checkpoint's place only (#2803), builds the
+//! towns and the views' hub from the checkpoint and the records after it (#3837), gives those records back, then hands
+//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. Readers
+//! that start before the checkpoint (the public stream from its own cursor, the shipper and the archive from the cut)
+//! read the log from the disk a batch at a time, so no start holds the whole log and its time does not grow with the
+//! world's age. With no checkpoint the log is read and replayed from record 0; a compacted log with none that verifies
+//! is refused (`log-compacted-past-checkpoint`). It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.

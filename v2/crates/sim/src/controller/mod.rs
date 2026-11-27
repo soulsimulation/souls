@@ -452,6 +452,8 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// The input log is not kept ([`Controller::forget_log`]).
+    unlogged: bool,
     /// Where each body not being carried across a link stands, kept as the bodies move: "who is near" (N16). A body
     /// the world carries by its own rule (N10's walk-out) stays on its node, and in the index.
     near: Index,
@@ -617,6 +619,14 @@ impl Slot {
 impl Controller {
     pub fn new() -> Controller {
         Controller::default()
+    }
+
+    /// Keeps no input log from now on (#2803): [`Controller::log`] stays empty. A served world keeps its inputs in its
+    /// own log (K12) and never reads this one, which would otherwise grow with every changed input for the world's
+    /// life; the tests and tools that read it keep it.
+    pub fn forget_log(&mut self) {
+        self.unlogged = true;
+        self.log = Vec::new();
     }
 
     /// No bodies yet, kept in `near` (N16: `Index::fixed()` turns splitting off).
@@ -1212,6 +1222,9 @@ impl Controller {
                 s.log(id, at, &mut self.log);
             }
         }
+        if self.unlogged {
+            self.log.clear();
+        }
         // A carry about to land waits at its track's end while another body stands where it would land, for at most
         // LANDING_WAIT ticks (#4215): never one body set down on another while it can be helped, never held for good.
         let mut hold: BTreeSet<Id> = BTreeSet::new();
@@ -1292,7 +1305,9 @@ impl Controller {
             .reserve(gave.iter().map(|g| g.log.len()).sum::<usize>());
         for g in gave {
             out.said.extend(g.said);
-            self.log.extend(g.log);
+            if !self.unlogged {
+                self.log.extend(g.log);
+            }
             out.samples.extend(g.samples);
             out.refused.extend(g.refused);
             put.extend(g.put);
