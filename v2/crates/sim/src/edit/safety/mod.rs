@@ -333,7 +333,7 @@ pub fn guard_kept(
     #[allow(clippy::disallowed_methods)]
     let t_guard = t0.elapsed();
     eprintln!(
-        "TMP5216 guard_kept: frozen {:?} rebuild {:?} map {:?} sides {:?} guard {:?}; whole {} why {:?} squares {} buildings {} whole_classes {:?} classes {}",
+        "TMP5216 guard_kept: frozen {:?} rebuild {:?} map {:?} sides {:?} guard {:?}; whole {} why {:?} squares {} buildings {} whole_classes {:?}",
         t_frozen,
         t_rebuild - t_frozen,
         t_map - t_rebuild,
@@ -347,7 +347,6 @@ pub fn guard_kept(
             Fresh::Whole(_) => 0,
         },
         r.whole_classes(),
-        known.basis.classes.len(),
     );
     Ok((out, r))
 }
