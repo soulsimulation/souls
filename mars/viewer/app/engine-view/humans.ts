@@ -125,6 +125,7 @@ type View = {
   clipContext?: object;
   clipOrigin?: ClipOrigin;
   seatSample?: SampledHuman;
+  seatPlan?: ReturnType<typeof seatTransition>;
   seatOrigins?: Map<string, DrawnOrigin>;
   ownerArmBase?: NonNullable<DrawnOrigin['arms']>;
   clipReference?: {o:THREE.Object3D;p:THREE.Vector3;q:THREE.Quaternion;s:THREE.Vector3}[];
@@ -1000,6 +1001,7 @@ export class HumanViews {
       v.since = seatMove?.activity ? seatMove.since : f.activityAge;
       v.clipOrigin = f.clipOrigin;
       v.seatSample = seatPlan || SEATED.has(base) || f.clipOrigin && SEATED.has(baseOf(f.clipOrigin.sample.activity ?? 'idle', f.clipOrigin.sample.baseActivity)) ? f : undefined;
+      v.seatPlan = seatPlan;
       v.postureChange = f.postureChange;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
@@ -1082,8 +1084,7 @@ export class HumanViews {
     const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
     const clipHistoryReset=!!v.clipOrigin&&!v.speaking&&!v.instrument&&!v.propWanted&&!v.prop?.obj.visible&&!v.itemPose&&!v.handActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.lastHandActuator&&!v.handHold&&!v.rps&&!v.grip&&!v.on&&!v.formPress?.length&&v.cur.walkW<.01&&v.cur.sitW===0&&postureKind(v.activity,v.base)==='stand'&&postureKind(v.clipOrigin.sample.activity??'idle',v.clipOrigin.sample.baseActivity)==='stand';
     const plainIdle=v.activity==='idle'&&!v.postureChange&&!clipHistoryReset;
-    const seatResetPlan=v.seatSample?seatTransition(v.seatSample.postureChange,v.seatSample.activity??'idle',v.seatSample.baseActivity):null;
-    const seatReset=!!v.seatSample&&!v.itemPose&&!v.handActuator&&(SEATED.has(v.base)||!!seatResetPlan&&v.seatSample.postureChange!.age<seatResetPlan.end+ACT_BLEND);
+    const seatReset=!!v.seatSample&&!v.itemPose&&!v.handActuator&&(SEATED.has(v.base)||!!v.seatPlan&&v.seatSample.postureChange!.age<v.seatPlan.end+ACT_BLEND);
     if((!nativeHandOwner || seatReset) && !plainIdle){
       v.rig.mixer.stopAllAction();
       for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
@@ -1335,7 +1336,7 @@ export class HumanViews {
     const held = !!propKind && propKind === v.propWanted;
     const carried = held && !act?.hands && !clipBody && sitW === 0 && !fp && !gait;
     if (!carried) v.carrySince = undefined; else if (v.carrySince === undefined || v.carrySince > tSec) v.carrySince = tSec;
-    const seatExit = v.seatSample ? seatTransition(v.seatSample.postureChange, v.seatSample.activity ?? 'idle', v.seatSample.baseActivity) : null;
+    const seatExit = v.seatPlan;
     const carryAge = seatExit?.activity === 'stand-up' ? v.seatSample!.postureChange!.age - seatExit.end : tSec - v.carrySince!;
     const carryW = carried ? smooth(Math.min(1, carryAge / CARRY_EASE)) : 0;
     const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
@@ -1839,7 +1840,7 @@ export class HumanViews {
 
   /** Seat phase endpoints and activity interruptions share immutable recorded origins. */
   private blendSeat(v: View, time: number, sourcePose: boolean): number {
-    const sample = v.seatSample!, pc = sample.postureChange, plan = seatTransition(pc, sample.activity ?? 'idle', sample.baseActivity);
+    const sample = v.seatSample!, pc = sample.postureChange, plan = v.seatPlan;
     const endpoint = plan && pc && pc.age >= plan.end && pc.age - plan.end < ACT_BLEND ? plan.end : undefined;
     const initial = pc && pc.age < ACT_BLEND && plan ? 0 : undefined;
     const phase = endpoint ?? initial;

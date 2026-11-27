@@ -228,6 +228,21 @@ test('retained adjacent native take chunks give fresh seat exits the same exact 
  }}finally{(full as unknown as {humans:Views}).humans.clear();setHumanGround(null);}
 });
 
+test('a plain sample clears a preceding seated exit plan and remains repeatable on seek', async () => {
+  const source = await template('woman'), views = new HumanViews(); views.setTemplates([source]);
+  const standing: SampledHuman = {...base, activity: 'nod', baseActivity: 'idle', activityAge: .5, seatHeight: undefined};
+  try {
+    const drawStanding = () => { views.setFrame([standing], 80); views.render(1); return skin(views, base.id); };
+    const expected = drawStanding();
+    for (const age of [.1, .7]) {
+      views.setFrame([{...base, activity: 'idle', baseActivity: 'idle', activityAge: age, postureChange: {from: 'sit', to: 'idle', age}, seatHeight: undefined, seatOrigin: {height: .465}}], 79 + age);
+      views.render(1);
+      assert(separation(expected, drawStanding()) < 1e-5, 'departing posture cannot survive a plain sample or a backwards seek');
+      assert.deepEqual(views.bodyObject(base.id)!.position.toArray(), base.p);
+    }
+  } finally { views.clear(); }
+});
+
 test('actual held props and direct native hands retain seated continuity and authoritative contact',async t=>{
  setHumanGround(()=>0);const source=await template('woman');
  const native={left:[1300,1150,-1200],right:[1300,1150,-800]};
