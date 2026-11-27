@@ -55,23 +55,38 @@ export function completeResponses(responses) {
  for(const [url,v]of out){if(Buffer.isBuffer(v))continue;v.parts.sort((a,b)=>a[0]-b[0]);let end=0;const parts=[];for(const [start,last,bytes]of v.parts){if(start!==end||bytes.length!==last-start+1)break;parts.push(bytes);end=last+1;}if(end===v.total)out.set(url,Buffer.concat(parts));else out.delete(url);}
  return out;
 }
+const bundleResponse=url=>{const p=new URL(url).pathname;return p.includes('/bundles/')&&!p.endsWith('/index');};
+/** A failed/partial revision has unknown eligibility; it cannot vanish from agreement proof. */
+export function completeRecordedResponses(responses) {
+ const complete=completeResponses(responses);
+ for(const r of responses){if(!bundleResponse(r.url))continue;
+  if(r.error||!r.bytes||r.status<200||r.status>=300||!complete.has(r.url)||(r.status===206&&!/^bytes \d+-\d+\/\d+$/.test(r.headers['content-range']??'')))throw Error('recorded-bundle-incomplete-or-failed');
+ }
+ return complete;
+}
+/** Integrity/decoder refusal propagates: an undecodable revision is never silently skipped. */
+export function decodeRecordedBundle(url,bytes,read) {
+ const raw=inflateRawSync(bytes),digest=createHash('sha256').update(raw).digest();
+ if(!new URL(url).pathname.endsWith('-'+digest.toString('hex')))throw Error('recorded-bundle-content-address-mismatch');
+ return read(raw,digest);
+}
 export function agreeRecordedPoses(candidates,initial,toleranceM=0.001) {
  if(!candidates.length||!Array.isArray(initial)||initial.length!==3||!initial.every(Number.isFinite))return false;
  return candidates.every(c=>Array.isArray(c.positionM)&&c.positionM.length===3&&c.positionM.every((v,i)=>Number.isFinite(v)&&Math.abs(v-initial[i])<=toleranceM));
 }
 export async function publicTarget(state,target,body,initial) {
- await state.flush();if(state.stopped||state.closed)throw Error('history-response-collection-closed');const responses=completeResponses(state.responses),header=[...responses].find(([url])=>new URL(url).pathname.endsWith('/header'))?.[1];
+ await state.flush();if(state.stopped||state.closed)throw Error('history-response-collection-closed');const responses=completeRecordedResponses(state.responses),header=[...responses].find(([url])=>new URL(url).pathname.endsWith('/header'))?.[1];
  if(!header)throw Error('recorded-public-header-not-retained');
  const {decode}=await import(new URL('../../../apps/web/node_modules/cborg/cborg.js',import.meta.url));
  const replica=await import(new URL('../../../v2/target/wasm-load/pkg/replica.js',import.meta.url));replica.initSync({module:readFileSync(new URL('../../../v2/target/wasm-load/pkg/replica_bg.wasm',import.meta.url))});
  const key=id=>id?Buffer.from(id[0]).toString('hex')+'.'+id[1]:null,candidates=[];
  for(const [url,bytes]of responses){if(!new URL(url).pathname.includes('/bundles/')||new URL(url).pathname.endsWith('/index'))continue;
-  const raw=inflateRawSync(bytes),digest=createHash('sha256').update(raw).digest();if(!new URL(url).pathname.endsWith('-'+digest.toString('hex')))throw Error('recorded-bundle-content-address-mismatch');let result;try{result=decode(replica.historyAt(header,raw,digest,BigInt(Math.round(target*50000)),false),{useMaps:true});}catch{continue;}
+  let rawSha256;const result=decodeRecordedBundle(url,bytes,(raw,digest)=>{rawSha256=digest.toString('hex');return decode(replica.historyAt(header,raw,digest,BigInt(Math.round(target*50000)),false),{useMaps:true});});
   const at=target*50000;if(at<Number(result.get(4))||at>Number(result.get(4))+Number(result.get(5)))continue;
   const nodes=new Map(result.get(2).map(n=>[key(n.get(1)),n])),node=nodes.get(body);if(!node)throw Error('recorded-target-body-absent-in-eligible-revision');
   // The owned fixture's root body has a world parent. Decline nested oracle rather than invent a transform.
   let parentId=key(node.get(3));const seen=new Set();while(parentId){if(seen.has(parentId))throw Error('recorded-target-parent-cycle');seen.add(parentId);const parent=nodes.get(parentId);if(!parent)throw Error('recorded-target-parent-missing');const pose=parent.get(7);if(pose&&((pose.get(2)??[]).some(v=>Number(v)!==0)||(pose.get(3)??[1073741824,0,0,0]).some((v,i)=>Number(v)!==(i===0?1073741824:0))))throw Error('recorded-target-nonidentity-parent');parentId=key(parent.get(3));}
-  candidates.push({bundleUrl:url,bundleSha256:hash(bytes),rawSha256:hash(raw),positionM:node.get(7).get(2).map(v=>Number(v)/1e6)});
+  candidates.push({bundleUrl:url,bundleSha256:hash(bytes),rawSha256,positionM:node.get(7).get(2).map(v=>Number(v)/1e6)});
  }
  if(!agreeRecordedPoses(candidates,initial))throw Error('recorded-target-revisions-ambiguous-or-not-prewalk');
  return {targetTick:target,candidates,positionM:initial,toleranceM:0.001,basis:'All eligible actual captured public revisions agree with the older stationary pre-walk frame within1mm; native historyAt at integer20Hz target. Specifically consumed revision is not identified. Strict draw alignment remains1e-9.'};
@@ -117,7 +132,7 @@ export default async function({page,paths,check,fixture,signal}) {
  const paused=await sample('history-paused');await page.screenshot({path:join(paths.dir,'history-paused.png')});
  await page.waitForTimeout(150);const again=await sample('history-paused-stable');await page.screenshot({path:join(paths.dir,'history-paused-stable.png')});
  check('history-paused-stable',stablePaused(paused,again,depicted)&&pausedReady(await ui(),recordedTick));
- const subject=paused.frame.value.subjects.find(s=>s.id===depicted),initial=before.frame.value.subjects.find(s=>s.id===depicted);check('history-known-recorded-pose',subject.transform.positionM.every((v,i)=>Math.abs(v-oracle.positionM[i])<=oracle.toleranceM)&&initial.transform.positionM.every((v,i)=>Math.abs(v-oracle.positionM[i])<=oracle.toleranceM));
+ const subject=paused.frame.value.subjects.find(s=>s.id===depicted),initial=before.frame.value.subjects.find(s=>s.id===depicted);check('history-known-recorded-pose',agreeRecordedPoses(oracle.candidates,subject.transform.positionM,oracle.toleranceM)&&agreeRecordedPoses(oracle.candidates,initial.transform.positionM,oracle.toleranceM));
  await snapshot('return-live');await page.getByRole('button',{name:'Return to live',exact:true}).click();
  await page.waitForFunction(()=>window.__cameraObservation?.frame?.value?.version.epoch.includes('live'),null,{timeout:20000});await sample('returned-live');
  await snapshot('escape');await page.keyboard.press('Escape');await page.waitForTimeout(1200);

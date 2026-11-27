@@ -53,3 +53,26 @@ test('pending oracle cannot resume after cleanup closes collection',async()=>{
  const c=collectResponses(page,dir,'https://example.test',{cleanupMs:10});page.emit('response',response(page,()=>new Promise(resolve=>finish=resolve)));
  const query=assert.rejects(publicTarget(c,1,'body',[0,0,0]),/collection-closed/);await assert.rejects(c.stop(),/cleanup-timeout/);const frozen=readFileSync(dir+'/phase-manifest.json','utf8');finish(Buffer.from('late'));await query;assert.equal(readFileSync(dir+'/phase-manifest.json','utf8'),frozen);assert.equal(existsSync(dir+'/public-response-0.bin'),false);rmSync(dir,{recursive:true,force:true});
 });
+
+import {completeRecordedResponses,decodeRecordedBundle} from './camera-observation.mjs';
+import {createHash} from 'node:crypto';import {deflateRawSync} from 'node:zlib';
+test('complete old revision cannot hide failed or incomplete potentially eligible revision',()=>{
+ const url='https://example.test/history/bundles/old',old={url,status:200,headers:{},bytes:Buffer.from('complete')};
+ const fresh={url:'https://example.test/history/bundles/new',status:206,headers:{'content-range':'bytes 0-2/6'},bytes:Buffer.from('abc')};
+ assert.throws(()=>completeRecordedResponses([old,fresh]),/incomplete-or-failed/);
+ assert.throws(()=>completeRecordedResponses([old,{...fresh,status:503,bytes:undefined,error:'failed'}]),/incomplete-or-failed/);
+ assert.throws(()=>completeRecordedResponses([old,{...fresh,headers:{}}]),/incomplete-or-failed/);
+ assert.equal(completeRecordedResponses([old]).get(url).toString(),'complete');
+});
+test('undecodable actual bundle revision propagates refusal instead of leaving only old candidate',()=>{
+ const raw=Buffer.from('validated-shape-counterexample'),sha=createHash('sha256').update(raw).digest('hex'),url='https://example.test/history/bundles/0-'+sha;
+ assert.throws(()=>decodeRecordedBundle(url,deflateRawSync(raw),()=>{throw Error('native-history-integrity-refusal');}),/native-history-integrity-refusal/);
+ assert.throws(()=>decodeRecordedBundle(url,Buffer.from('not-deflate'),()=>assert.fail('cannot decode corrupt bytes')));
+ assert.equal(decodeRecordedBundle(url,deflateRawSync(raw),bytes=>bytes.toString()),raw.toString());
+});
+test('direct native/display comparison rejects opposite sides of prewalk within1mm each',()=>{
+ const native=[{positionM:[1.0009,0,0]}],initial=[1,0,0],paused=[.9991,0,0];
+ assert.equal(agreeRecordedPoses(native,initial),true);assert.equal(agreeRecordedPoses([{positionM:paused}],initial),true);
+ assert.equal(agreeRecordedPoses(native,paused),false);
+ assert.equal(agreeRecordedPoses([{positionM:[1,0,0]},{positionM:[1.0001,0,0]}],[1.0005,0,0]),true);
+});
