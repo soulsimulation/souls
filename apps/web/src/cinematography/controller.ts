@@ -5,9 +5,9 @@ import type {CameraVersion} from '../../../../packages/camera/src/observation.ts
 import {DisplayedCameraObserver} from './observation.ts';
 import type {DrawnSubject,ObservationResult} from './observation.ts';
 import type {SceneInfo} from '../WorldGeometry.ts';
-import {FollowCamera,FollowGeometry,publishedFollowGround} from './follow-camera.ts';
+import {FollowCamera,FollowGeometry,publishedFollowGround,type FollowViewport} from './follow-camera.ts';
 export const FOLLOW_DIAGNOSTIC_CAP=8192;
-export type FollowInput={key:string;tick:number;seconds:number;at:number;mode:string;id:string|null;camera:PerspectiveCamera;aim:Vector3};
+export type FollowInput={key:string;tick:number;seconds:number;at:number;mode:string;id:string|null;camera:PerspectiveCamera;aim:Vector3;viewport?:FollowViewport};
 export class FollowController{
  readonly enabled:boolean;
  private observer=new DisplayedCameraObserver();private policy=new FollowCamera();private geometry=new FollowGeometry();
@@ -30,7 +30,7 @@ export class FollowController{
    if(!p||![input.at,input.seconds,input.tick,p.at,p.seconds,p.tick].every(Number.isFinite)||p.key!==input.key||p.result.status!=='observed'||age<0||age>250||gap<0||gap>.25||p.tick>input.tick){this.policy.reset(input.camera.position,input.aim);this.reason='depicted-input-stale';return;}
    const subject=p.result.value.subjects.find(s=>s.id===input.id);if(!subject||subject.state!=='present'){this.policy.reset(input.camera.position,input.aim);this.reason='subject-unavailable';return;}
    const preparing=performance.now();const {roots,revision}=source();this.geometry.prepare(roots,revision);this.preparationMs=performance.now()-preparing;
-   const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;
+   const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground,input.viewport);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;
    input.camera.position.copy(pose.eye);input.aim.copy(pose.aim);input.camera.lookAt(pose.aim);
   }finally{this.controlMs=performance.now()-start;}
  }
@@ -41,7 +41,7 @@ export class FollowController{
   else{this.prior=null;if(this.activeKey)this.reset();this.controlMs=0;}
   if(!this.diagnostics)return;
   const rowStart=performance.now();const s=this.prior?.result.status==='observed'?this.prior.result.value.subjects.find(s=>s.state==='present'):null;
-  const row={sequence:++this.sequence,at:input.at,tick:input.tick,seconds:input.seconds,key:input.key,mode:input.mode,enabled:this.enabled,reason:this.enabled?this.reason:'legacy',controlMs:this.enabled?this.controlMs:legacyMs,observationMs,setupMs,totalMs:(this.enabled?this.controlMs:legacyMs)+observationMs,diagnosticMs:0,preparationMs:this.enabled?this.preparationMs:0,candidates:this.candidates,groundSource:this.groundSource,motion:this.motion,geometry:this.enabled?{...this.geometry.stats}:null,eye:input.camera.position.toArray(),aim:input.aim.toArray(),cameraWorld:input.camera.matrixWorld.toArray(),projection:input.camera.projectionMatrix.toArray(),subject:s??null};
+  const row={sequence:++this.sequence,at:input.at,tick:input.tick,seconds:input.seconds,key:input.key,mode:input.mode,enabled:this.enabled,reason:this.enabled?this.reason:'legacy',controlMs:this.enabled?this.controlMs:legacyMs,observationMs,setupMs,totalMs:(this.enabled?this.controlMs:legacyMs)+observationMs,diagnosticMs:0,preparationMs:this.enabled?this.preparationMs:0,candidates:this.candidates,groundSource:this.groundSource,motion:this.motion,geometry:this.enabled?{...this.geometry.stats}:null,viewport:input.viewport?{...input.viewport,insets:{...input.viewport.insets}}:null,eye:input.camera.position.toArray(),aim:input.aim.toArray(),cameraWorld:input.camera.matrixWorld.toArray(),projection:input.camera.projectionMatrix.toArray(),subject:s??null};
   if(this.rows.length<FOLLOW_DIAGNOSTIC_CAP)this.rows.push(row);else this.dropped++;row.diagnosticMs=performance.now()-rowStart;row.totalMs+=setupMs+row.diagnosticMs;
  }
  read(){return{schema:'follow-experiment/1',enabled:this.enabled,diagnostics:this.diagnostics,total:this.sequence,dropped:this.dropped,capacity:FOLLOW_DIAGNOSTIC_CAP,rows:this.rows.slice(),scope:'Raw completed-draw rows; controller, caller setup, subject observation and raw row construction synchronous spans. Geometry preparation included; exports measured separately by reader. Page frame spacing is not presented FPS; deferred GC/resident memory unknown.'};}
