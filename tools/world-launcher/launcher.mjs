@@ -50,6 +50,7 @@
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
 //   POST /__sim/worlds/<slug>/unlisted the world's owner (signed in, or their own agent's god token): {unlisted: true|false}
+//                                (a world with no old twin: its creator, signed in, set in the directory: routeOnlyUnlisted)
 //   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token) or a signed-in site owner: a 16:9 JPEG as
 //                                the body (thumbnail.mjs), or DELETE to fall back to the template's default; never wakes the world
 //   GET  /__sim/thumbs/<slug>/<sha>.jpg, /__sim/thumbs/_template/<sha>.jpg  the world list's pictures, immutable (#887)
@@ -767,15 +768,55 @@ export async function openLauncher(cfg = {}) {
       json(res, 200, { accountId: body.account, issuer: claims.iss, subject: claims.sub }, { 'cache-control': 'no-store' });
     } catch { json(res, 503, { ok: false, code: 'directory.unreachable', message: 'Signing in is not possible just now; try again.' }, { 'retry-after': '5', 'cache-control': 'no-store' }); }
   }
+  /** A world with no old twin (a created world, D2): its owner lists or unlists it with the request an old world's owner
+   *  makes (`POST /__sim/worlds/<slug>/unlisted`, {unlisted}), answered before the fence (which refuses a routed world's
+   *  writes) by the directory, which owns its row (`POST /v1/worlds/settings`), asked with their own sign-in as
+   *  createOnNewEngine asks it (a local dev sign-in as its test person). Only its creator may: the directory says who
+   *  that is. The list here shows the change at once. Live, 26 Nov: this was 409 world.new-engine and it stayed listed. */
+  async function routeOnlyUnlisted(req, res, w) {
+    const answer = (status, body) => json(res, status, body, { 'cache-control': 'no-store' });
+    if (req.method !== 'POST') { answer(405, { ok: false, code: 'method', message: 'POST {unlisted: true|false}' }); return; }
+    const tok = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
+    if (!tok || (!auth && !/^dev:[^\s:]{1,36}$/.test(tok))) { answer(401, { ok: false, code: 'signin-required', message: 'Sign in as the world\'s creator first.' }); return; }
+    const chunks = []; let n = 0;
+    for await (const c of req) { n += c.length; if (n > 16_384) { answer(413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
+    let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { answer(400, { ok: false, code: 'bad-json' }); return; }
+    if (typeof body?.unlisted !== 'boolean') { answer(400, { ok: false, code: 'invalid', message: 'unlisted: true or false' }); return; }
+    let r, d;
+    try {
+      r = await fetch(`${directoryUrl}/v1/worlds/settings`, { method: 'POST', signal: AbortSignal.timeout(3000),
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${auth ? tok : `test:${tok.slice(4)}`}` }, body: JSON.stringify({ world: w.slug, unlisted: body.unlisted }) });
+      d = await r.json().catch(() => ({}));
+    } catch { answer(503, { ok: false, code: 'directory.unreachable', message: 'The world list cannot be changed just now; try again.' }); return; }
+    if (r.status !== 200 || typeof d?.world?.name !== 'string') {
+      const [status, code, message] = r.status === 403 ? [403, 'forbidden', "only this world's creator may list or unlist it"] : r.status === 401 ? [401, 'signin-required', 'Sign in as the world\'s creator first.']
+        : r.status === 404 ? [404, 'not-found', 'the directory has no world by that name'] : [503, 'directory.unavailable', 'The world list cannot be changed just now; try again.'];
+      answer(status, { ok: false, code, refused: d?.refused ?? null, message }); return;
+    }
+    // the list's copy: the answer's row, then a fresh ask that starts after the write (one already asked may predate it)
+    await directory.asking;
+    directory.rows.set(w.slug, { ...d.world, unlisted: body.unlisted });
+    directory.at = 0; await directoryWorlds();
+    log(`${w.slug} is ${body.unlisted ? 'unlisted' : 'listed'} (its creator, in the directory)`);
+    answer(200, { ok: true, slug: w.slug, unlisted: body.unlisted });
+  }
   // D2 (0.134): a world with no old twin, one the routes file routes to the new engine and no binding binds (cutover.mjs
   // withRouteOnly). It has no registry row and no old process: the launcher serves its page (routeOnlyPage) and lists it.
   // Its name, template and unlisted flag come from the directory's world list (`GET /v1/worlds`, asked at most every
-  // 10 s); while the directory has not answered, its slug names it.
-  const directory = { at: 0, rows: new Map(), asking: null };
+  // 10 s); while the directory has not answered, its slug names it. The list asked without a sign-in leaves an unlisted
+  // world out (directoryd list_for): once the directory has answered, a world it leaves out is not listed here either,
+  // under the name it last gave (26 Nov: such a world was listed again, under its slug).
+  const directory = { at: 0, rows: new Map(), asking: null, answered: false };
   function directoryWorlds() {
     if (Date.now() - directory.at > 10_000 && !directory.asking) {
       directory.asking = fetch(`${directoryUrl}/v1/worlds`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null))
-        .then((j) => { if (Array.isArray(j?.worlds)) directory.rows = new Map(j.worlds.filter((x) => typeof x?.name === 'string').map((x) => [x.name, x])); }, () => {})
+        .then((j) => {
+          if (!Array.isArray(j?.worlds)) return;
+          const was = directory.rows;
+          directory.rows = new Map(j.worlds.filter((x) => typeof x?.name === 'string').map((x) => [x.name, x]));
+          for (const [name, row] of was) if (!directory.rows.has(name)) directory.rows.set(name, { ...row, unlisted: true });
+          directory.answered = true;
+        }, () => {})
         .finally(() => { directory.at = Date.now(); directory.asking = null; });
     }
     return directory.asking ?? Promise.resolve();
@@ -786,7 +827,7 @@ export async function openLauncher(cfg = {}) {
     const row = directory.rows.get(slug), made = Number(row?.made);
     return { slug, worldId: routeOnlyId(slug), routeOnly: true, name: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : slug,
       template: typeof row?.template === 'string' ? row.template : null, createdAt: Number.isFinite(made) && made > 0 ? (made < 1e12 ? made * 1000 : made) : 0,
-      ...(typeof row?.unlisted === 'boolean' ? { unlisted: row.unlisted } : {}), god: typeof row?.creator === 'string' };   // unsaid: listing.mjs's rule
+      ...(typeof row?.unlisted === 'boolean' ? { unlisted: row.unlisted } : !row && directory.answered ? { unlisted: true } : {}), god: typeof row?.creator === 'string' };   // unsaid: listing.mjs's rule
   }
   const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
   /** Whether a world is served without an old process: a world with no old twin, or (D2b, 0.134) a moved world, one its
@@ -1738,6 +1779,8 @@ export async function openLauncher(cfg = {}) {
       const agentsRest = cutoverSlug ? path.replace(/^\/(?:w|__sim\/worlds)\/[^/]+/, '') : '';
       if (cutoverWorld && /^\/v1\/account\/agents(?:\/[^/]{1,128}\/revoke)?$/.test(agentsRest) && cutover.v2Stream(cutoverWorld)) { await movedAgents(req, res, agentsRest); return; }
       if (cutoverWorld && agentsRest === '/v1/account/session' && cutover.v2Stream(cutoverWorld)) { await movedSession(req, res); return; }
+      // 26 Nov: and before it, a created world's owner lists or unlists it, in the directory (routeOnlyUnlisted)
+      if (cutoverWorld?.routeOnly && path === `/__sim/worlds/${cutoverWorld.slug}/unlisted`) { await routeOnlyUnlisted(req, res, cutoverWorld); return; }
       // 26 Nov: and before it, a world with no old twin answers its agents as the front door routes a moved world's: the
       // bootstrap they pair from, and its gateway's paths at its own gatewayd (cutover.mjs `agent`)
       const agent = cutoverWorld?.routeOnly ? cutover.agent(cutoverWorld.slug, agentsRest) : null;

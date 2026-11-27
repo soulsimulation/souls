@@ -1253,6 +1253,86 @@ async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
     );
 }
 
+/// #5006 row 14 (N2's test world, in CI): a creator's edit and its undo, through a real gateway, reach the world's
+/// public event index as its archiver thread writes it into the history export the page reads (nothing asks the
+/// world): a `souls:placed` row and a `souls:undone` row, each by the creator, the undo's after the edit's.
+#[tokio::test(flavor = "multi_thread")]
+async fn row14_a_creators_edit_and_its_undo_reach_the_public_event_index() {
+    use replica::history::events::EventIndex;
+    let d = scratch("row14");
+    let w = seed(
+        &d,
+        &testworld::generate(1, 0).expect("the test world").text,
+        1,
+        (-40, 30),
+    );
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    assert_eq!(
+        s.line("creator: ", 60),
+        format!("creator: {}", principal_text(c))
+    );
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the creator's wall commits: {got:?}");
+    let (got, _) = send(
+        &mut ws,
+        asked_intent(&w, creator, 2, got.version, &Asked::Undo),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "and is undone: {got:?}");
+    // The open day's index is written at most every 5 s while parts come (`serve.rs` `VIEWS_EVERY`): read every
+    // object of it in the export until the creator's two rows are there.
+    let events = w.dir.join("history/history/everyone/events");
+    let creators = || -> Vec<(i64, String)> {
+        let mut files = Vec::new();
+        for day in std::fs::read_dir(&events).into_iter().flatten().flatten() {
+            let p = day.path();
+            if p.is_dir() {
+                files.extend(
+                    std::fs::read_dir(&p)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|h| h.path()),
+                );
+            } else {
+                files.push(p);
+            }
+        }
+        let mut rows: Vec<(i64, String)> = files
+            .iter()
+            .filter_map(|f| EventIndex::read(&std::fs::read(f).ok()?).ok())
+            .flat_map(|x| x.rows)
+            .filter(|r| r.actor == creator)
+            .map(|r| (r.at, r.kind.as_str().to_owned()))
+            .collect();
+        rows.sort();
+        rows
+    };
+    let end = Instant::now() + Duration::from_secs(60);
+    let rows = loop {
+        let rows = creators();
+        if rows.iter().any(|(_, k)| k == "souls:undone") || Instant::now() > end {
+            break rows;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    println!("row 14: the creator's rows in the public event index: {rows:?}");
+    let kinds: Vec<&str> = rows.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(kinds, ["souls:placed", "souls:undone"], "{rows:?}");
+    assert!(rows[0].0 < rows[1].0, "the undo after the edit: {rows:?}");
+}
+
 /// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands, once its
 /// first act has born it, is refused `edit.would-bury` by the record's creator, and the same wall beside it commits.
 #[tokio::test(flavor = "multi_thread")]

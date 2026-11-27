@@ -1277,6 +1277,8 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
     away_next: Option<u64>,
+    /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
+    words_next: Option<String>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1713,7 +1715,8 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
     Ok(args)
 }
 
-/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
+/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name; 8, a done act's
+/// words when its move was made from afar (#5063).
 pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -4003,6 +4006,9 @@ impl Clock {
         if let Some(mm) = self.away_next.take() {
             fields.insert(7, Value::Uint(mm));
         }
+        if let Some(w) = self.words_next.take() {
+            fields.insert(8, Value::Bytes(w.into_bytes()));
+        }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
                 u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
@@ -4807,6 +4813,8 @@ impl Clock {
             Some(w) if how == acts::BLOCKED => format!("{how}: {w}"),
             _ => how.clone(),
         };
+        // #5063: a done act whose move was made from afar says so on its end (field 8), which its receipt names.
+        self.words_next = why.clone().filter(|_| how == "done");
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -6613,6 +6621,7 @@ pub fn start<S: Storage + 'static>(
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
+        words_next: None,
         edits,
         editing,
         set_down: Vec::new(),

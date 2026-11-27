@@ -208,6 +208,10 @@ impl<R: Reach> Reach for SeatReach<'_, R> {
     fn tip(&self, body: Id, limb: &Name) -> Option<Name> {
         self.inner.tip(body, limb)
     }
+
+    fn seen(&self, body: Id, thing: Id) -> bool {
+        self.inner.seen(body, thing)
+    }
 }
 
 /// [`SeatReach`] for `body` and the seat `place` of `slots`, over `inner`.
@@ -324,7 +328,8 @@ pub struct Ended {
     pub at: Micros,
     pub how: Name,
     /// The words of the refusal it ended by, when the world refused its step's move (`look: 31200 mm to 05:12, reach
-    /// 20000 mm`), for its act's answer; never logged.
+    /// 20000 mm`), or, for a run done whose move was made from afar, that move's words (`look: from afar, ...`,
+    /// #5063), for its act's answer.
     pub why: Option<String>,
 }
 
@@ -338,6 +343,8 @@ struct FormRun {
     walk: Option<Driver>,
     /// The move in progress the runner asked for.
     mv: Option<Instance>,
+    /// The words of its last move made from afar (#5063, [`crate::moves::Moves::afar`]), for its end.
+    afar: Option<String>,
     /// The thing it reserves and the link's id, while the link stands.
     held: Option<(Id, Id)>,
     /// The seats it reserves in place of its whole thing ([`slots_taken`], #4575): each one's thing and slot. Empty
@@ -1664,6 +1671,7 @@ impl Forms {
                 runner: Runner::new(steps, node, limits),
                 walk: None,
                 mv: None,
+                afar: None,
                 held: link.map(|l| (node, l)),
                 slots_held: taken,
                 long,
@@ -2229,6 +2237,9 @@ impl Forms {
                 ) {
                     Ok(n) => {
                         fr.mv = Some(n);
+                        if let Some(words) = w.moves.afar(n) {
+                            fr.afar = Some(words.to_owned());
+                        }
                         // A repeated move (a dance for a minute) is a record for viewers at its first move and again
                         // every `REWRITE_US` (a viewer who comes in mid-dance draws it from the next), each planned to
                         // the latest its step can end (its start, its length and one more move); the other repeats
@@ -2418,7 +2429,8 @@ impl Forms {
             .refusal
             .take()
             .filter(|(r, n, _)| *r == run && *n == how)
-            .map(|(.., why)| why);
+            .map(|(.., why)| why)
+            .or_else(|| fr.afar.clone().filter(|_| how.as_str() == "done"));
         self.ended.push(Ended {
             run,
             body: fr.body,

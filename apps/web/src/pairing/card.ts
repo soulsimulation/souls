@@ -1,10 +1,15 @@
 // X2 (0.134): the pairing card's script, copied from v2/web/src/pairing/card.ts; the page is apps/web/pair.html.
 import { browserSession, localTestSignIn, sessionRequest, type BrowserSession } from './signin.ts';
+import { pairWords } from './words.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
 const code = params.get('code') ?? '', request = params.get('request');
 let session: BrowserSession | null = null, generation = 0;
+/** The card's words for the request shown: a Soul's until a creator's request is shown (#5006 row 4). */
+let words = pairWords('soul');
+/** Puts `words` on the card: its heading, its warning and the row that says what is asked. */
+const say = () => { $('heading').textContent = words.heading; $('warn').textContent = words.warn; $('soul-label').textContent = words.term; };
 let unsubscribe: (() => void) | undefined;
 /** The Name row (its term and its value), shown only for a request that asked for a name. */
 const nameShown = (shown: boolean) => { $('name-row-label').hidden = !shown; $('name').hidden = !shown; };
@@ -50,7 +55,8 @@ async function show() {
     $('code').textContent = body.code; $('device').textContent = body.device; $('label').textContent = body.label;
     // trial of 0.137: the name the agent asked for (`souls.mjs pair --name`), for a new Soul
     $('name').textContent = typeof body.name === 'string' ? body.name : ''; nameShown(typeof body.name === 'string');
-    $('soul').textContent = body.soul ?? (body.former ? `${body.former}, brought over from today's client` : 'a new Soul');
+    words = pairWords(body.scope); say();
+    $('soul').textContent = words.what ?? body.soul ?? (body.former ? `${body.former}, brought over from today's client` : 'a new Soul');
     $('age').textContent = age(body.age);
     $('connected').textContent = body.connected ? `${body.connected}${body.force ? ' (this request replaces it)' : ' (this request will be refused unless the agent forces it)'}` : '';
     connectedShown(!!body.connected);
@@ -66,7 +72,7 @@ $('approve').onclick = async () => {
   $<HTMLButtonElement>('approve').disabled = true;
   try {
     const { status, body } = await post(request ? `${accountPath}/approve` : '/v1/pair/approve', { code, confirm: true });
-    $('said').textContent = status === 200 ? request ? 'Approved. This computer can now connect to your account.' : 'Approved. The device now holds your Soul.'
+    $('said').textContent = status === 200 ? request ? 'Approved. This computer can now connect to your account.' : words.approved
       : `Refused: ${body.refused}${body.device ? ` (connected to ${body.device})` : ''}`;
   } catch (e) { $('said').textContent = (e as Error).message; }
 };

@@ -25,7 +25,7 @@ export class V2History {
   private seq = 0;
   private waiting = new Map<number, (s: Seeked | Error) => void>();
   private worker: Worker | null = null;
-  private readonly base: string;
+  readonly base: string;
   private readonly make: () => Worker;
   private readonly frame: Omit<Frame, 'datetime'>;
   /** V6 (0.133): `hour=HH:MM`, as the live bridge has it: the past is drawn in that light too, its clock unchanged. */
@@ -135,3 +135,5 @@ export const setPlaySpeed = (x: number) => { speed = [1, 2, 4, 8].includes(x) ? 
 let current: V2History | null = null;
 export const setV2History = (h: V2History | null) => { current?.stop(); current = h; };
 export const v2History = () => current;
+/** #5006 row 14: the world's history export, absolute (God Mode's edit log reads its event index), or null. */
+export const v2HistoryBase = () => (current ? new URL(current.base, location.href).href : null);

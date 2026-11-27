@@ -312,7 +312,7 @@ function remoteInlineConfig(): Plugin {
 function devProxy() {
   // One RegExp key (a key starting with ^ is one) matching whole path segments: /history/… goes to the server, a page
   // /history-x stays with Vite.
-  const roots = 'v1|__sim|skill\\.md|cards\\.md|mcp|healthz|modular|mars-assets|engine|models|history|2020|browser|data/manifest\\.json';
+  const roots = 'v1|__sim|skill\\.md|cards\\.md|mcp|healthz|modular|mars-assets|world-assets|engine|models|history|2020|browser|data/manifest\\.json';
   const remote = process.env.SIM_DEV_API?.replace(/\/+$/, '');
   if (remote) { const opts = { target: remote, changeOrigin: true, secure: true, ws: true }; return { '^/w/[^/]+/[^?]+': opts, [`^/(?:${roots})(?:[/?]|$)`]: opts, '^/ws(?:[/?]|$)': opts }; }
   const http = `http://127.0.0.1:${process.env.PORT ?? 4500}`;

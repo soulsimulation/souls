@@ -9,7 +9,7 @@ use replica::encode::to_hex;
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
-const OWNER: &str = "operator:test-souls";
+pub(super) const OWNER: &str = "operator:test-souls";
 pub(super) const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS operator_test_souls_v1(
     grant_text TEXT PRIMARY KEY, world TEXT NOT NULL);";
 
