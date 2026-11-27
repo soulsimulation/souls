@@ -8,7 +8,7 @@ use crate::edit::plan;
 use crate::log::{Log, Mem};
 use replica::edit::{Edit, Op, Ref, Spot, check, reverses};
 use replica::effects::{FIXTURE_HEADER, Header, fixture_bytes};
-use replica::hash::state_hash;
+use replica::hash::{node_hash, state_hash};
 use replica::ids::{Minter, Scope};
 use replica::pose::{Quat, Support, Vec3};
 use replica::world_model::Kind;
@@ -517,6 +517,129 @@ fn a4_a_batch_that_added_a_claim_list_is_undone_to_the_empty_list() {
         w.undo(&mut ok()).expect_err("no inverse on a thing").name,
         "undo.no-inverse"
     );
+}
+
+/// Two edits on the world's root, the newest a weather with Lightning (fields 65 and 69 added): undoing it leaves
+/// their unset values, and those are never a later change. So the older edit is undone too, and both are redone in
+/// order (#5177's review). Each step's root hash is the one before or after its batch, unset values counted as absent.
+#[test]
+fn a4_an_unset_value_an_undo_left_does_not_block_the_next_undo_or_the_redos() {
+    use replica::edit::claims::F_CLAIMS;
+    use replica::sky::{F_STRIKE, F_WEATHER_UNTIL};
+    let mut w = W::new(KEPT_MOST);
+    w.furnish(None);
+    let root = w.root;
+    let root_now = |w: &W| settled(w.live.tree(), root);
+    let blank = root_now(&w);
+    w.edit(vec![root_claim(root)], None);
+    let claimed = root_now(&w);
+    w.edit(lightning(root), None);
+    let stormy = root_now(&w);
+    w.undo(&mut ok()).expect("the weather is undone");
+    let tree = w.live.tree();
+    let fields = tree
+        .node(tree.handle(root).expect("root"))
+        .expect("root")
+        .fields()
+        .clone();
+    assert_eq!(
+        fields.get(&F_WEATHER_UNTIL),
+        Some(&Value::Uint(0)),
+        "an unset end"
+    );
+    assert_eq!(
+        fields.get(&F_STRIKE),
+        Some(&Value::Array(Vec::new())),
+        "an unset strike"
+    );
+    assert_eq!(root_now(&w), claimed);
+    w.undo(&mut ok())
+        .expect("and the claim behind it, though the weather's unset values are new");
+    assert_eq!(root_now(&w), blank);
+    let tree = w.live.tree();
+    let fields = tree
+        .node(tree.handle(root).expect("root"))
+        .expect("root")
+        .fields()
+        .clone();
+    assert_eq!(fields.get(&F_CLAIMS), Some(&Value::Array(Vec::new())));
+    w.redo().expect("the claim is redone");
+    assert_eq!(root_now(&w), claimed);
+    w.redo().expect("and the weather");
+    assert_eq!(root_now(&w), stormy);
+    assert_eq!(w.history.depth(), (3, 0));
+    println!(
+        "claim, weather with Lightning, undo, undo, redo, redo: each admitted, root hashes as before and after"
+    );
+}
+
+/// A real change since the batch is still a conflict by name, an unset value included: another writer's strike on
+/// the field the first undo left unset, its weather kind, or its clearing of the claim (a real value to unset).
+#[test]
+fn a4_another_writers_change_after_an_unset_is_still_a_conflict() {
+    use replica::edit::claims::F_CLAIMS;
+    use replica::sky::{F_STRIKE, F_WEATHER};
+    for (field, to) in [
+        (F_CLAIMS, Value::Array(Vec::new())),
+        (
+            F_STRIKE,
+            Value::Array(vec![Value::Uint(5), Value::Uint(5), Value::Uint(0)]),
+        ),
+        (F_WEATHER, Value::Uint(7)),
+    ] {
+        let mut w = W::new(KEPT_MOST);
+        w.furnish(None);
+        let root = w.root;
+        w.edit(vec![root_claim(root)], None);
+        w.edit(lightning(root), None);
+        w.undo(&mut ok()).expect("the weather is undone");
+        w.foreign(
+            root,
+            Change::Set {
+                node: root,
+                field,
+                to: to.clone(),
+                by: None,
+            },
+        );
+        let unchanged = |w: &W| (w.state(), w.disk(), w.live.version(), w.history.depth());
+        let was = unchanged(&w);
+        let r = w.undo(&mut ok()).expect_err("refused");
+        assert_eq!(r.name, "undo.conflict", "field {field}");
+        assert_eq!(unchanged(&w), was, "a conflicting undo changes nothing");
+    }
+}
+
+fn root_claim(root: Id) -> Op {
+    Op::Set {
+        node: Ref::Node(root),
+        field: replica::edit::claims::F_CLAIMS,
+        to: Value::Array(vec![Value::Array(vec![
+            Value::Text(Name::new("c:a").expect("a name")),
+            Value::Text(Name::new("part:a").expect("a name")),
+            Value::Nint(9_999),
+            Value::Nint(9_999),
+            Value::Uint(10_000),
+            Value::Uint(10_000),
+        ])]),
+    }
+}
+
+/// The panel's Lightning on the root: a creator's weather end and a strike, both fields new.
+fn lightning(root: Id) -> Vec<Op> {
+    use replica::sky::{F_STRIKE, F_WEATHER_UNTIL};
+    vec![
+        Op::Set {
+            node: Ref::Node(root),
+            field: F_WEATHER_UNTIL,
+            to: Value::Uint(40_000_000),
+        },
+        Op::Set {
+            node: Ref::Node(root),
+            field: F_STRIKE,
+            to: Value::Array(vec![Value::Uint(1), Value::Uint(2), Value::Uint(0)]),
+        },
+    ]
 }
 
 /// 0.134 R4: a recolour is undone to the colour before it, and the first one to no tint (the empty list); redo gives
