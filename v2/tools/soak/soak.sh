@@ -10,7 +10,7 @@
 # Env: HOURS (default 24), AGENTS (default 1000), SEED (default 1), WORLD_CPUS (default 36-46), DRIVER_CPUS (default
 # 47), BIN (the folder holding release worldd, gatewayd and driver; default <run folder>/bin), MALLOC_ARENA_MAX
 # (default 2, passed to the world and the gateway), MIN_FREE_GB (default 20: below it the run stops, saying so),
-# SLOT_LOCK (a farm slot folder this run holds while it runs, e.g. ~/souls-farm/locks/slot4).
+# SLOT_LOCK (a farm slot folder this run holds while it runs, e.g. the farm's locks/slot4).
 #
 # Stop it: `touch <run folder>/STOP` (the sampler and the driver stop within a minute) or `systemctl --user stop
 # <unit>`. Every process it starts ends with it, by pid. After the last hour it kills the world with SIGKILL and
