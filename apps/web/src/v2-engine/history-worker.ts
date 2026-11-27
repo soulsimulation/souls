@@ -1,6 +1,6 @@
 // R2 (0.133): the history worker the old page seeks a moved world's past with, copied from the v2 page's
 // (v2/web/src/history/worker.ts, V9 #2719), not imported. A seek is V4's two requests, the day's bundle index and the
-// bundle that holds the moment, inflated here and applied on R1's replica (WASM, `historyAt`), so the page's thread
+// bundle that holds the moment, inflated and validated by the replica's historyTimeline, so the page's thread
 // only turns the records into takes (history.ts). Only the WASM module, the header and the day indexes read are kept
 // between seeks. The node records are read as the stream worker reads them, the fields the bridge reads.
 import init, { historyTimeline } from 'replica';
@@ -15,7 +15,7 @@ import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-k
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = NodeRec;
 export type HistoryTransition = {at:number;nodes:HistoryNode[];removed:string[];samples:HistorySample[]};
-/** A body's motion sample `[body, frame, slot, at µs, x, y, z µm]` (source.ts SampleRec). */
+/** The unchanged motion prefix plus complete Q30 orientation (source.ts SampleRec). */
 export type HistorySample = [string, string, number | null, number, number, number, number, [number,number,number,number]?];
 /** What one seek gives the page: the moment's state, its bundle's samples, and where the next bundle starts. */
 export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[]; carryChanges?:CarryChange[]; timeline?:{from:number;transitions:HistoryTransition[]};
@@ -54,7 +54,7 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
     rot: ((pose?.get(3) as unknown[]) ?? [1 << 30, 0, 0, 0]).map(num) as HistoryNode['rot'],
     at: moved ? num(moved.get(1)) : null,
   };
-  rec.crewMembers=crewMembers(f.get(4));rec.carryGrips=carryGrips(f.get(6));
+  rec.crewMembers=crewMembers(f.get(4));rec.carryGrips=carryGrips(f.get(6));if(rec.crewMembers!==undefined||rec.carryGrips!==undefined)rec.carryField=!f.has(6)?'absent':rec.carryGrips?'valid':'invalid';
   rec.fields=fieldsOf(f);
   const origin=f.get(1),definition=f.get(2);
   if(typeof origin==='string'&&definition instanceof Uint8Array){rec.defines=origin;rec.entry=definition;}

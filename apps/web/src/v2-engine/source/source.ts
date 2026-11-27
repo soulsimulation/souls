@@ -75,6 +75,8 @@ export type NodeRec = {
   /** Public native activity membership and load-local two-hand records. */
   crewMembers?: CrewMember[];
   carryGrips?: CarryGrips;
+  /** Validated node field presence, distinct from an unknown or undecodable contact record. */
+  carryField?: 'absent'|'valid'|'invalid';
   /** A creator's kind (`souls:kind`, #3697): the full name it defines (field 1) and its canonical `souls-entry/1`
    *  record (field 2), for the page's kind catalogue (`kinds/catalogue.ts`). */
   defines?: string;

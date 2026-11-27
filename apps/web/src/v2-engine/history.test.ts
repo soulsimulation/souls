@@ -312,11 +312,11 @@ test('validated timeline preserves within-bundle birth, reparent/full rotation a
  const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){const s:Seeked={seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place,load],samples:[],timeline:{from:T0,transitions:[{at:born,nodes:[actor,frame],removed:[],samples:[]},{at:moved,nodes:[{...load,parent:'frame',pos:[0,0,1e6],rot:[0,0,0,Q]}],removed:[],samples:[]},{at:gone,nodes:[],removed:['b.7','load','frame'],samples:[]}]}};queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s}}as MessageEvent));},terminate(){}};
  const parts=new CarriedParts({apply:()=>{}},bundledEntries({load:{kind:'fixture:load',points:{g:{at_mm:[0,0,0]}},geometry:{bounds_mm:[1000,1000,3000]}}}));
  const h=new V2History('/history/',()=>w as unknown as Worker,{rulesVersion:'fixture'},undefined,parts),from=T0/TICK_US;
- const chunks=await h.chunks(from,from+20*TICKS,20);assert.equal(chunks.length,20);
+ const chunks=await h.chunks(from,from+100*TICKS,100);assert.equal(chunks.length,100);
  const sample=(age:number)=>sampleTake(chunks.find(c=>c.fromTick===from+age*TICKS)!.take as unknown as Take,0);
  assert.equal(sample(8).entities[E],undefined,'later body must not leak backward into the baseline');
  assert(sample(11).entities[E],'actual birth becomes visible');assert.equal(sample(17).entities[E],undefined,'actual removal stops depiction');
- const window=h.carry(T0+13e6)!;assert(window);assert.equal(window.parts.recorded.pose('frame',T0+9e6),null);
+ const window=h.carry(T0+13e6)!;assert(window);assert(window.bodies.has('b.7'),'early binding survives final bridge pruning over a long window');assert.equal(window.parts.recorded.pose('frame',T0+9e6),null);
  assert.deepEqual(window.parts.recorded.pose('load',T0+11e6)?.p,[1,0,0]);
  const transformed=window.parts.recorded.pose('load',T0+13e6)!;assert.deepEqual(transformed.p,[2,0,-1]);assert(Math.abs(transformed.q[1])===1);
  assert.equal(window.parts.recorded.pose('load',T0+16e6),null);h.stop();

@@ -188,7 +188,7 @@ export class CarriedParts {
     }
     for (const r of this.nodes.values()) { const n = held.get(r.id) ?? r; if (n.parent && this.recorded.hasSamples(n.parent)) carrying.add(n.parent); }
     for (const id of carrying) {
-      const n=this.nodes.get(id),here=this.recorded.local(id,at);if(!n||!here)continue;
+      const n=this.nodes.get(id),here=this.recorded.localPose(id,at);if(!n||!here)continue;
       out.push({...n,parent:here.parent,slot:here.slot,pos:here.p.map(x=>Math.round(x*1e6))as[number,number,number],rot:here.q.map(x=>Math.round(x*Q))as[number,number,number,number]});
     }
     return out;

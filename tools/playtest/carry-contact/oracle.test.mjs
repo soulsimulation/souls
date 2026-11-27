@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
-import {drawnLoad,drawnGrips,observeRender,gradeContact,retainResult,bodyGeometry} from './oracle.mjs';
+import {drawnLoad,drawnGrips,observeRender,gradeContact,gradeInactive,retainResult,bodyGeometry} from './oracle.mjs';
 const {Scene,Group,Mesh,BoxGeometry,MeshBasicMaterial,InstancedMesh,Matrix4,Vector3,Euler,Quaternion}=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('three');
 const matrix=(p=[0,0,0],r=[0,0,0],s=1)=>new Matrix4().compose(new Vector3(...p),new Quaternion().setFromEuler(new Euler(...r)),new Vector3(s,s,s));
 const entry={format:'souls-entry/1',points:{a:{role:'grip',at_mm:[0,100,500]},b:{role:'grip',at_mm:[0,100,-500]}}};
@@ -100,3 +100,13 @@ test('hands and load lagging together cannot pass the independent full-pose endp
 });
 
 test('an independently recorded release begins a new anatomical episode, while an unaffected membership change cannot reset it',()=>{const s=nativeSample(),old=structuredClone(s.nativeContacts),released={...structuredClone(old),phase:'souls:released',sinceUs:8000000};old.sinceUs=7000000;s.nativeHistory=[old,released,s.nativeContacts];s.bodies[0].order=[1,0];[s.bodies[0].palms.left,s.bodies[0].palms.right]=[s.bodies[0].palms.right,s.bodies[0].palms.left];assert.equal(gradeContact(s,{now:110,previousAssignments:{'n-crew|n-load|n-body|point:a|7000000':[0,1]}}).ok,true);s.nativeHistory=[old,{...s.nativeContacts,sinceUs:8500000},s.nativeContacts];assert.equal(gradeContact(s,{now:110,previousAssignments:{'n-crew|n-load|n-body|point:a|7000000':[0,1]}}).status,'failed-measurement');});
+
+test('only independently known absent/released phases are inactive; their load clock and release ownership still grade',()=>{
+ const s=nativeSample();s.nativeContacts=null;s.contactState={at:10000000,crew:'n-crew',field:'absent',members:[{body:'n-body'}],grips:null};
+ assert.equal(gradeInactive(s,{now:110}).status,'native-inactive-observation');
+ s.contactState.field='unknown';assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');
+ s.contactState={at:10000000,crew:'n-crew',field:'valid',members:[],grips:{phase:'souls:released',load:'n-load',sinceUs:9500000}};
+ assert.equal(gradeInactive(s,{now:110}).releaseComplete,true);s.bodies[0].nativeCarryOwned=true;assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');delete s.bodies[0].nativeCarryOwned;
+ s.expectedLoad.matrix=matrix([1,0,0]).toArray();s.expectedLoad.previousMatrix=matrix([1,0,0]).toArray();assert.equal(gradeInactive(s,{now:110}).status,'failed-load-clock');
+ delete s.expectedLoad;assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');
+});

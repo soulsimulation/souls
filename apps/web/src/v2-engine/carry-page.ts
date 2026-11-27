@@ -7,7 +7,7 @@ import type {CarryObservation} from './recorded-carry.ts';
 import type {CarryGrips} from './source/carry-record.ts';
 export type CarryHands={left:[number,number,number];right:[number,number,number]};
 export type NativeCarryBody={body:string;crew:string;load:string;grip:string;phase:string;sinceUs:number;untilUs?:number;hands:CarryHands;order:[number,number];weight:number};
-export type CarryPageFrame={at:number;loads:Record<string,NativePose>;bodies:Record<string,NativeCarryBody>;observations:CarryObservation[];phaseHistory:Record<string,CarryGrips[]>;evidence:Record<string,ReturnType<CarriedParts['recorded']['evidence']>>;errors:string[]};
+export type CarryPageFrame={at:number;loads:Record<string,NativePose>;bodies:Record<string,NativeCarryBody>;observations:CarryObservation[];contactStates:ReturnType<CarriedParts['recorded']['contactStates']>;phaseHistory:Record<string,CarryGrips[]>;evidence:Record<string,ReturnType<CarriedParts['recorded']['evidence']>>;errors:string[]};
 let current:CarriedParts|null=null;
 let bodies:ReadonlyMap<string,string>=new Map();
 export const setNativeBodyEntities=(map:ReadonlyMap<string,string>)=>{bodies=map;};
@@ -17,13 +17,13 @@ export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:C
  if(!source)return null;const records=source.recorded,loads:Record<string,NativePose>={},bodies:Record<string,NativeCarryBody>={},observations=records.observations(at),errors:string[]=[],evidence:CarryPageFrame['evidence']={},ambiguous=new Set<string>();
  if(records.error)errors.push('carry-record:'+records.error);
  // Static construction parts keep their recorded quaternion too; the actual furnished piece path stays untouched.
- for(const[id,n]of records.nodes){if(!source.isLoadKind(n.kind)&&!observations.some(o=>o.grips.load===id))continue;
+ for(const n of records.nodesAt(at)){const id=n.id;if(!source.isLoadKind(n.kind)&&!observations.some(o=>o.grips.load===id))continue;
   if(n.soul||/:(body|humanoid)(@|$)/.test(n.kind))continue;
-  const pose=records.pose(id,at);if(pose)loads[layerDraws(n)&&n.origin?n.origin:entityId(id)]=pose;
+  const pose=records.pose(id,at);if(pose){loads[layerDraws(n)&&n.origin?n.origin:entityId(id)]=pose;evidence[id]=records.evidence(id,at);}
  }
  const depicted=[...observations,...records.retiring(at).map(grips=>({grips,members:null,pose:records.pose(grips.load,at),at}))];
  for(const o of depicted){const g=o.grips;if(!o.pose){errors.push('load-frame:'+g.load);continue;}
-  const n=records.nodes.get(g.load);if(!n){errors.push('load-node:'+g.load);continue;}loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=o.pose;
+  const n=records.nodeAt(g.load,at);if(!n){errors.push('load-node:'+g.load);continue;}loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=o.pose;
   const released=g.phase==='souls:released';
   if(!released&&!o.members){errors.push('crew-members:'+g.crew);continue;}
   if(!released&&(o.members!.length!==g.holds.length||o.members!.some(m=>!g.holds.some(h=>h.body===m.body))))errors.push('crew-contacts:'+g.crew);
@@ -39,7 +39,7 @@ export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:C
    bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,...(g.untilUs!==undefined?{untilUs:g.untilUs}:{}),hands:{left:points[order[0]],right:points[order[1]]},order,weight};
   }
  }
- return{at,loads,bodies,observations,phaseHistory:Object.fromEntries(observations.map(o=>[o.grips.crew,records.phaseHistory(o.grips.crew,at)])),evidence,errors};
+ const contactStates=records.contactStates(at);return{at,loads,bodies,observations,contactStates,phaseHistory:Object.fromEntries(contactStates.map(o=>[o.crew,records.phaseHistory(o.crew,at)])),evidence,errors};
 }
 
 export function carryOwnerBetween(entity:string,fromSeconds:number,toSeconds:number,byBody:ReadonlyMap<string,string>,source:CarriedParts|null=current){if(!source)return false;for(const[body,id]of byBody)if(id===entity)return source.recorded.ownedBetween(body,Math.round(fromSeconds*1e6),Math.round(toSeconds*1e6));return false;}

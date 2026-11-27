@@ -17,6 +17,7 @@ export class RecordedCarry{
  error:string|null=null;
  readonly nodes=new Map<string,NodeRec>();
  private records=new Map<string,Timed<NodeRec|null>[]>();
+ private poseStarts=new WeakMap<NodeRec,number>();
  private samples=new Map<string,SampleRec[]>();
  private members=new Map<string,Timed<CrewMember[]>[]>();
  private grips=new Map<string,Timed<CarryGrips>[]>();
@@ -24,7 +25,7 @@ export class RecordedCarry{
  private floor=-Infinity;
  receive(m:{t:'part';p:PartRec}|{t:'snapshot';s:SnapshotRec}|{t:string}){
   if(m.t!=='part'&&m.t!=='snapshot')return;
-  if(m.t==='snapshot'){this.error=null;this.floor=-Infinity;this.orders=new WeakMap();this.nodes.clear();this.records.clear();this.samples.clear();this.members.clear();this.grips.clear();}
+  if(m.t==='snapshot'){this.error=null;this.floor=-Infinity;this.orders=new WeakMap();this.poseStarts=new WeakMap();this.nodes.clear();this.records.clear();this.samples.clear();this.members.clear();this.grips.clear();}
   const p='p'in m?m.p as PartRec:null,s='s'in m?m.s as SnapshotRec:p!;
   const time=p?.from??-Infinity;
   for(const id of s.removed){this.nodes.delete(id);const r=this.records.get(id)??[];put(r,time,null);this.records.set(id,r);}
@@ -32,7 +33,11 @@ export class RecordedCarry{
    // Snapshot/as-at state is never dated at a future bundle motion. Live changes with exact transfers below override it.
    const effective=old?(p?.to??time):p?time:n.at??time;
    const exactTransfer=p?.carryChanges?.some(c=>c.node===n.id&&c.pose);
-   if(!exactTransfer&&(!old||JSON.stringify([old.parent,old.slot,old.pos,old.rot])!==JSON.stringify([n.parent,n.slot,n.pos,n.rot])))put(r,effective,n);this.records.set(n.id,r);
+   const poseChanged=!old||JSON.stringify([old.parent,old.slot,old.pos,old.rot])!==JSON.stringify([n.parent,n.slot,n.pos,n.rot]);
+   if(!exactTransfer&&(!old||JSON.stringify(old)!==JSON.stringify(n))){
+    // Metadata has its own boundary (slot points, kind/origin), but cannot restart an existing motion track.
+    const prior=this.record(n.id,effective);this.poseStarts.set(n,poseChanged?effective:prior?this.poseStarts.get(prior)??r.at(-1)?.at??effective:effective);put(r,effective,n);
+   }this.records.set(n.id,r);
    if(n.crewMembers){const h=this.members.get(n.id)??[];put(h,effective,n.crewMembers);this.members.set(n.id,h);}
    if(n.carryGrips&&!p?.carryChanges?.some(c=>c.node===n.id&&c.grips)){const h=this.grips.get(n.id)??[];putGrips(h,n.carryGrips.sinceUs,n.carryGrips);this.grips.set(n.id,h);}
   }
@@ -45,15 +50,18 @@ export class RecordedCarry{
  private change(c:CarryChange){
   if(c.members){const h=this.members.get(c.node)??[];put(h,c.at,c.members);this.members.set(c.node,h);}
   if(c.grips){const h=this.grips.get(c.node)??[];putGrips(h,c.at,c.grips);this.grips.set(c.node,h);}
-  if(c.pose){const n=this.nodes.get(c.node),h=this.records.get(c.node)??[];if(n){put(h,c.at,{...n,...c.pose});this.records.set(c.node,h);}}
+  if(c.pose){const n=this.nodes.get(c.node),h=this.records.get(c.node)??[];if(n){const value={...n,...c.pose};this.poseStarts.set(value,c.at);put(h,c.at,value);this.records.set(c.node,h);}}
  }
  private record(id:string,time:number):NodeRec|null|undefined{return at(this.records.get(id),time);}
+ nodeAt(id:string,time:number){return this.record(id,time)??null;}
+ *nodesAt(time:number){for(const id of this.records.keys()){const node=this.record(id,time);if(node)yield node;}}
  hasSamples(id:string){return !!this.samples.get(id)?.length;}
- local(id:string,time:number){
+ localPose(id:string,time:number){
   if(time<this.floor)return null;const n=this.record(id,time);if(!n)return null;
   let p=n.pos,q=n.rot,parent=n.parent,slot=n.slot;
   const samples=this.samples.get(id);let before=-1;if(samples)for(let i=samples.length-1;i>=0;i--)if(samples[i][3]<=time){before=i;break;}
   let recordAt=-Infinity;const revisions=this.records.get(id);if(revisions)for(let i=revisions.length-1;i>=0;i--)if(revisions[i].at<=time){recordAt=revisions[i].at;break;}
+  recordAt=this.poseStarts.get(n)??recordAt;
   if(samples&&before>=0&&samples[before][3]>=recordAt){const a=samples[before],b=samples[before+1];if(!a[7])return null;
    parent=a[1];slot=a[2];p=[a[4],a[5],a[6]];q=a[7];
    if(b&&b[1]===parent&&b[2]===slot){if(!b[7])return null;const u=(time-a[3])/(b[3]-a[3]);p=p.map((x,i)=>x+([b[4],b[5],b[6]][i]-x)*u)as V3;q=slerp(q,b[7],u).map(x=>x*Q)as Q4;}
@@ -62,7 +70,7 @@ export class RecordedCarry{
  }
  /** A slot translates in its parent's axes; it does not add the slot metadata's display yaw. */
  pose(id:string,time:number,seen=new Set<string>()):NativePose|null{
-  if(seen.has(id)||seen.size>=32)return null;seen.add(id);const local=this.local(id,time);if(!local)return null;
+  if(seen.has(id)||seen.size>=32)return null;seen.add(id);const local=this.localPose(id,time);if(!local)return null;
   if(local.parent===null)return{p:local.p,q:local.q};
   const up=this.record(local.parent,time);if(!up)return null;
   if(local.slot!==null){const point=up.slots?.find(s=>s[0]===local.slot);if(!point)return null;for(let k=0;k<3;k++)local.p[k]+=point[k+1]/1000;}
@@ -74,13 +82,17 @@ export class RecordedCarry{
   for(let key:string|null=id;key!==null;){if(seen.has(key)||seen.size>=32)return null;seen.add(key);
    const list=this.records.get(key);let r:Timed<NodeRec|null>|undefined;if(list)for(let i=list.length-1;i>=0;i--)if(list[i].at<=time){r=list[i];break;}if(!r?.value)return null;
    const n:NodeRec=r.value,ss:SampleRec[]=this.samples.get(key)??[];let k=-1;for(let i=ss.length-1;i>=0;i--)if(ss[i][3]<=time){k=i;break;}
-   const bracket:SampleRec[]=k<0?[]:ss.slice(k,k+2),use:boolean=!!bracket.length&&bracket[0][3]>=r.at,parent:string|null=use?bracket[0][1]:n.parent,slot:number|null=use?bracket[0][2]:n.slot;
+   const bracket:SampleRec[]=k<0?[]:ss.slice(k,k+2),poseAt=this.poseStarts.get(n)??r.at,use:boolean=!!bracket.length&&bracket[0][3]>=poseAt,parent:string|null=use?bracket[0][1]:n.parent,slot:number|null=use?bracket[0][2]:n.slot;
    const up=parent===null?null:this.record(parent,time),slotPoint=slot===null?null:up?.slots?.find(s=>s[0]===slot)??null;
    if(slot!==null&&!slotPoint)return null;
-   frames.push({id:key,record:n,recordAt:Number.isFinite(r.at)?r.at:Number.MIN_SAFE_INTEGER,bracket,slotPoint});key=parent;
+   frames.push({id:key,record:n,recordAt:Number.isFinite(poseAt)?poseAt:Number.MIN_SAFE_INTEGER,bracket,slotPoint});key=parent;
   }return{source:'native-records',at:time,frames};
  }
  observations(time:number):CarryObservation[]{if(this.error)return[];const out:CarryObservation[]=[];for(const[id,h]of this.grips){const g=at(h,time);if(g&&(g.phase!=='souls:released'||time-g.sinceUs<300000))out.push({grips:g,members:at(this.members.get(id),time)??null,pose:this.pose(g.load,time),at:time});}return out;}
+ contactStates(time:number){
+  const ids=new Set([...this.grips.keys(),...this.members.keys()]);return[...ids].map(crew=>{const node=this.record(crew,time),grips=at(this.grips.get(crew),time)??null,members=at(this.members.get(crew),time)??null;
+   return{crew,at:time,field:node?.carryField??(grips?'valid' as const:'unknown' as const),grips,members};});
+ }
  phaseHistory(crew:string,time:number){return(this.grips.get(crew)??[]).filter(r=>r.at<=time).map(r=>r.value);}
  /** Owner barriers use public intervals, not the previous rendered frame or mutable adapter flags. */
  ownedBetween(body:string,from:number,to:number){for(const h of this.grips.values())for(let i=0;i<h.length;i++){const g=h[i].value;if(!g.holds.some(hold=>hold.body===body))continue;const end=g.phase==='souls:released'?g.sinceUs+300000:Math.min(h[i+1]?.at??Infinity,g.untilUs??Infinity)+300000;if(g.sinceUs<=to&&end>=from)return true;}return false;}

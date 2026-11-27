@@ -85,10 +85,10 @@ export class V2History {
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal, nowTick?: number | null): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
-    const parts=this.parts?.fork();
+    const parts=this.parts?.fork(),bodies=new Map<string,string>();
     const now = (nowTick ?? to) * TICK_US;
     let at = await this.start(from * TICK_US, endUs), first = true, next: number | null = null;
-    const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
+    const take = () => { for(const [node,entity]of bridge.nativeBodies)bodies.set(node,entity);for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
     while (at < endUs + STEP_US && got.size < limit) {
       if (signal?.aborted) throw new Error('aborted');
@@ -132,7 +132,7 @@ export class V2History {
       const from2 = Math.floor(next / TICK_US);
       return this.chunks(from2, from2 + (to - from), limit, signal, nowTick ?? to);
     }
-    if(parts&&got.size){const values=[...got.values()];this.carryWindows.push({from:Math.min(...values.map(c=>c.fromTick))*TICK_US,to:Math.max(...values.map(c=>c.toTick))*TICK_US,parts,bodies:bridge.nativeBodies});if(this.carryWindows.length>12)this.carryWindows.shift();}
+    if(parts&&got.size){const values=[...got.values()];this.carryWindows.push({from:Math.min(...values.map(c=>c.fromTick))*TICK_US,to:Math.max(...values.map(c=>c.toTick))*TICK_US,parts,bodies});if(this.carryWindows.length>12)this.carryWindows.shift();}
     return [...got.values()].sort((a, b) => a.fromTick - b.fromTick).slice(0, limit);
   }
 

@@ -125,7 +125,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const tint = f.get(145);
   const text = (t: unknown) => (typeof t === 'string' ? t : t instanceof Uint8Array ? new TextDecoder().decode(t) : null);
   if (Array.isArray(tint)) rec.tint = tint.flatMap((r) => (Array.isArray(r) && r.length === 2 && text(r[0]) !== null ? [[text(r[0])!, num(r[1])] as [string, number]] : []));
-  rec.crewMembers=crewMembers(f.get(4)); rec.carryGrips=carryGrips(f.get(6));
+  rec.crewMembers=crewMembers(f.get(4)); rec.carryGrips=carryGrips(f.get(6));if(rec.crewMembers!==undefined||rec.carryGrips!==undefined)rec.carryField=!f.has(6)?'absent':rec.carryGrips?'valid':'invalid';
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
   if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
