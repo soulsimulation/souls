@@ -1,5 +1,6 @@
 // Fixed three-Soul diagnostic on the unchanged owned native-page runner. No world/browser lifecycle here.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { rehearseCounterMatch } from '../../playtest/games/rehearse.mjs';
@@ -9,6 +10,29 @@ import { nativeCameraMode } from './camera-native-page.mjs';
 const states = new Map(), names = ['Aster', 'Birch', 'Clover'];
 const save = (paths, name, value) => writeFileSync(join(paths.dir, name), JSON.stringify(value, null, 2), {flag:'wx',mode:0o600});
 export const counterCaptureMs = 90000; // Existing owned runner enforces the same ceiling including navigation.
+
+/** The public export retains names and origins; stream-scene entities retain origins, not names. */
+export function counterBootBoard(facts) {
+  assert.equal(facts.format,'souls/import-eden/1','counter public export format missing');
+  const rows=facts.things?.filter(t=>t.name==='counter-match')??[];
+  assert.equal(rows.length,1,'counter boot board missing or ambiguous');
+  const row=rows[0];assert.match(row.id,/^e_[a-z0-9]{4,12}$/,'counter boot origin missing');
+  assert.equal(row.def,'core-counter_match@1');assert.equal(row.ref,row.def);
+  const kinds=facts.kinds?.filter(k=>k.ref===row.def)??[];
+  assert.equal(kinds.length,1,'counter boot definition missing or ambiguous');assert.equal(kinds[0].name,'core:counter_match');
+  assert.equal(row.parent,null);assert.deepEqual(row.pose,[3000,0,0,0]);assert.deepEqual(row.world,[3000,0,0,0]);assert.equal(row.scale_ppm,1000000);
+  return {origin:row.id,def:row.def,p:[3,0,0],r:0,definitionName:'core-counter_match',definitionVersion:1};
+}
+
+/** Self-contained for the served observer: never select by absent names or fall back to a creator's board. */
+export function counterSceneBoard(model,boot) {
+  const fail=why=>{throw Error(`counter drawn board: ${why}`);},entity=model.entities.get(boot.origin);
+  if(!entity||entity.id!==boot.origin)fail('boot origin missing');
+  const def=model.resolvedDef(entity.def);
+  if(entity.def!==boot.def||def?.ref!==boot.def||def?.name!==boot.definitionName||def?.version!==boot.definitionVersion)fail('boot definition differs');
+  if(entity.by!=='v2'||entity.in?.parent!=='world'||JSON.stringify(entity.p)!==JSON.stringify(boot.p)||entity.r!==boot.r)fail('boot pose differs');
+  return entity.id;
+}
 
 export function counterWorldPage(catalog, base) {
   const rows=catalog.worlds?.filter(w=>w.name==='Counter match rehearsal'&&w.template==='counter-match-rehearsal')??[];
@@ -97,6 +121,10 @@ export async function proveCounterCreator({creator,record=()=>{},signal}) {
 export async function prepare({base,paths,recipe,signal}) {
   requireConferenceRecipe(recipe);const state={rows:[],stages:[]};states.set(paths.dir,state);
   state.record=row=>state.rows.push({at:Date.now(),...row});
+  const bootBytes=readFileSync(join(paths.data,'world','genesis.facts.json'));
+  const bootFacts=JSON.parse(bootBytes);state.bootBoard=counterBootBoard(bootFacts);
+  save(paths,'command-counter-boot-origin.json',{...state.bootBoard,publicExportSHA256:createHash('sha256').update(bootBytes).digest('hex'),
+    exported:{format:bootFacts.format,kinds:bootFacts.kinds.filter(k=>k.ref===state.bootBoard.def),things:bootFacts.things.filter(t=>t.id===state.bootBoard.origin)}});
   const response=await fetch(new URL('/__sim/worlds.json',base),{signal});assert.equal(response.status,200);
   const worldPage=counterWorldPage(await response.json(),base),bundle=await downloadConferenceClient({base:worldPage,paths,signal});
   state.seats=await Promise.all(names.map((name,i)=>pairConferenceSeat({recipe,paths,bundle,label:`counter-${i}`,name,signal})));
@@ -128,7 +156,7 @@ export async function beforeNavigation({paths,page,base}) {
   const state=states.get(paths.dir);assert(state,'counter preparation missing');
   const oracleURL=new URL('/__proof/counter-oracle.mjs',base).href,geometryURL=new URL('/__proof/counter-geometry.mjs',base).href;
   await page.route(oracleURL,route=>route.fulfill({status:200,contentType:'text/javascript',body:readFileSync(new URL('../../playtest/carry-contact/oracle.mjs',import.meta.url),'utf8')}));
-  await page.route(geometryURL,route=>route.fulfill({status:200,contentType:'text/javascript',body:`export ${conferenceClearanceTools.toString()}\nexport ${counterDrawTools.toString()}`}));
+  await page.route(geometryURL,route=>route.fulfill({status:200,contentType:'text/javascript',body:`export ${conferenceClearanceTools.toString()}\nexport ${counterDrawTools.toString()}\nexport ${counterSceneBoard.toString()}`}));
   Object.assign(state,{oracleURL,geometryURL});const response=r=>{if(new URL(r.url()).origin===new URL(base).origin&&/\/people-kit-[^/]+\.js$/.test(new URL(r.url()).pathname))state.kitURL=r.url();};
   page.on('response',response);counterFinalization(page,paths,state);
   return async()=>{page.off('response',response);try{if(!page.isClosed())await state.finalize();}finally{try{state.persist();}finally{try{await page.unroute(oracleURL);}finally{try{await page.unroute(geometryURL);}finally{states.delete(paths.dir);}}}}};
@@ -137,20 +165,18 @@ export async function beforeNavigation({paths,page,base}) {
 export default async function({page,paths,check,expectHttp,signal}){
   const state=states.get(paths.dir);assert(state,'counter preparation missing');
   expectHttp('/safety.md',404,'The old-page fixture does not route this optional standalone client document.');
-  const url=new URL(page.url());url.search='post=0&hour=12:00&eye=8,4,7&at=3,.8,0';
+  const url=new URL(page.url());url.search='post=0&hour=12:00&eye=-6,4.5,2.2&at=1.5,.8,0';
   await page.goto(url.href,{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>document.querySelector('.viewer-history[data-viewer-ready="true"]')&&!document.querySelector('.viewer-arrival'),null,{timeout:30000});
   const snapshot=async label=>writeFileSync(join(paths.dir,`counter-accessibility-${label}.yml`),await page.locator('body').ariaSnapshot(),{flag:'wx'});
   await nativeCameraMode(page,'manual',snapshot);await snapshot('escape');await page.keyboard.press('Escape');
   await page.screenshot({path:join(paths.dir,'counter-setup.png')}); // Actual full-body/both-feet framing requires root's visual inspection.
   assert(state.kitURL,'counter production people kit missing');
-  await page.evaluate(async({oracleURL,geometryURL,kitURL,souls})=>{
-    const {observeRender,bodyGeometry,drawnLoad}=await import(oracleURL),{conferenceClearanceTools,counterDrawTools}=await import(geometryURL),{TakePeople}=await import(kitURL);
+  await page.evaluate(async({oracleURL,geometryURL,kitURL,souls,bootBoard})=>{
+    const {observeRender,bodyGeometry,drawnLoad}=await import(oracleURL),{conferenceClearanceTools,counterDrawTools,counterSceneBoard}=await import(geometryURL),{TakePeople}=await import(kitURL);
     const world=window.__soulsEntity,prototype=TakePeople.prototype,original=prototype.show;
     if(!world||!original||window.__counterDrawObserver)throw Error('counter final-draw interface unavailable');
-    const entities=[...world.layer.model.entities.values()].filter(e=>e.name==='counter-match');if(entities.length!==1)throw Error('counter drawn board identity ambiguous');
-    if(world.layer.model.resolvedDef(entities[0].def)?.name!=='core-counter_match')throw Error('counter drawn definition differs from boot template');
-    const board=entities[0].id,vector=()=>world.camera.position.clone(),geometry=conferenceClearanceTools({vector,drawnLoad,bodyGeometry}),readBoard=counterDrawTools({vector,drawnLoad});
+    const board=counterSceneBoard(world.layer.model,bootBoard),vector=()=>world.camera.position.clone(),geometry=conferenceClearanceTools({vector,drawnLoad,bodyGeometry}),readBoard=counterDrawTools({vector,drawnLoad});
     const samples=[],failures=[],sampleLimit=Math.ceil(90000/250)+1;let people,previous=-Infinity;
     function show(...args){const result=original.apply(this,args);people=this;return result;}prototype.show=show;
     const bounds=points=>{if(!points.length)throw Error('counter empty actual skin group');const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity],low=[],high=[];
@@ -169,12 +195,22 @@ export default async function({page,paths,check,expectHttp,signal}){
         stage:'after-world-render',units:'m',renderTarget:null,bodies,state:{...world.layer.model.entities.get(board)?.state},board:readBoard(world.layer,world.scene,board),measurementMs:performance.now()-at});
     },error=>{if(failures.length<30)failures.push(String(error));});
     window.__counterDrawObserver={samples,failures,sampleLimit,stopRender,prototype,show,original,qualification:'actual submitted bodyDraw and board-role measurements every250ms; inferred foot groups; no every-frame, skin/table/hand contact, unrestricted stand admission or independent-agent certification'};
-  },{oracleURL:state.oracleURL,geometryURL:state.geometryURL,kitURL:state.kitURL,souls:state.seats.map(s=>s.soul)});
-  state.observerInstalled=true;let expected;
+  },{oracleURL:state.oracleURL,geometryURL:state.geometryURL,kitURL:state.kitURL,souls:state.seats.map(s=>s.soul),bootBoard:state.bootBoard});
+  state.observerInstalled=true;let expected,stateReads=0;
   try{
     const observe=async(stage,details)=>{
       if(stage==='departure'){state.stages.push({stage,person:details.seat.label,midRound:details.midRound,at:Date.now()});return;}
-      if(stage==='state')expected=details.state;
+      if(stage==='state'){
+        expected=details.state;
+        if(++stateReads===2){ // After ordinary approaches; continuous real input, never a camera/actor state mutation.
+          const box=await page.locator('canvas').first().boundingBox();assert(box&&box.width>400&&box.height>400,'counter camera canvas missing');
+          await snapshot('formation-orbit-move');await page.mouse.move(box.x+box.width*.4,box.y+box.height*.4);
+          await snapshot('formation-orbit-down');await page.mouse.down();
+          await snapshot('formation-orbit-drag');await page.mouse.move(box.x+box.width*.4+200,box.y+box.height*.4,{steps:24});
+          await snapshot('formation-orbit-up');await page.mouse.up();
+          state.stages.push({stage:'camera-orbit',at:Date.now(),qualification:'ordinary pointer orbit in continuous capture; visibility and clearance require visual review'});
+        }
+      }
       const status=await page.evaluate(()=>window.__counterDrawObserver.samples.length),event={stage,expected,sampleIndex:Math.max(0,status-1),at:Date.now()};state.stages.push(event);
       for(const until=Date.now()+2500;;){signal.throwIfAborted();const draw=await page.evaluate(()=>({samples:window.__counterDrawObserver.samples,failures:window.__counterDrawObserver.failures,now:performance.now()}));
         assert.equal(draw.failures.length,0,'counter actual draw observation failed');assert(draw.samples.at(-1)&&draw.now-draw.samples.at(-1).at<500,'counter final draw stale');

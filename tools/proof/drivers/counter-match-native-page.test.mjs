@@ -3,11 +3,38 @@ import { test } from 'node:test';
 import { createRequire } from 'node:module';
 import { readFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator } from './counter-match-native-page.mjs';
+import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator, counterBootBoard, counterSceneBoard } from './counter-match-native-page.mjs';
 import { drawnLoad } from '../../playtest/carry-contact/oracle.mjs';
 import { defOf } from '../../entry/look.mjs';
 const THREE=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('three');
 const tools=()=>counterDrawTools({vector:()=>new THREE.Vector3(),drawnLoad});
+const bootFacts=()=>({format:'souls/import-eden/1',kinds:[{ref:'core-counter_match@1',name:'core:counter_match'}],things:[{
+  id:'e_fixture1',name:'counter-match',def:'core-counter_match@1',ref:'core-counter_match@1',parent:null,
+  pose:[3000,0,0,0],world:[3000,0,0,0],scale_ppm:1000000}]});
+function sceneFixture(){
+  const boot=counterBootBoard(bootFacts()),entity={id:boot.origin,def:'core-counter_match@1',in:{parent:'world'},p:[3,0,0],r:0,by:'v2'};
+  const creator={id:'e_vfixture2',def:entity.def,in:{parent:'world'},p:[12,0,12],r:0,by:'v2'};
+  const model={entities:new Map([[entity.id,entity],[creator.id,creator]]),resolvedDef:()=>({ref:'core-counter_match@1',name:'core-counter_match',version:1})};
+  return{boot,entity,creator,model};
+}
+test('public boot export maps to its exact unnamed scene origin, distinct from an unnamed creator board',()=>{
+  const f=sceneFixture();assert.equal(f.boot.origin,'e_fixture1');assert.equal(counterSceneBoard(f.model,f.boot),'e_fixture1');
+  assert([...f.model.entities.values()].every(e=>!('name'in e)),'stream-scene never supplies native names');
+  const evaluate=Function(`return (${counterSceneBoard.toString()})`)();assert.equal(evaluate(f.model,f.boot),'e_fixture1','serialized helper cannot depend on Node closures');
+});
+test('boot identity rejects missing/duplicate rows and wrong canonical definition or boot pose',()=>{
+  for(const mutate of [f=>f.things=[],f=>f.things.push({...f.things[0],id:'e_fixture2'}),f=>f.things[0].def='other@1',
+    f=>f.kinds=[],f=>f.kinds[0].name='other:counter_match',f=>f.things[0].pose=[3001,0,0,0],f=>f.things[0].world=[3001,0,0,0]]){
+    const f=bootFacts();mutate(f);assert.throws(()=>counterBootBoard(f),assert.AssertionError);
+  }
+});
+test('scene identity rejects missing origin, mismatched ID/definition and authoritative pose',()=>{
+  for(const mutate of [f=>f.model.entities.delete(f.boot.origin),f=>f.entity.id='e_other1',f=>f.entity.def='other@1',
+    f=>f.model.resolvedDef=()=>({ref:'core-counter_match@1',name:'other',version:1}),f=>f.entity.p=[3.001,0,0],f=>f.entity.r=.1,
+    f=>f.entity.in.parent='other',f=>f.entity.by='other']){
+    const f=sceneFixture();mutate(f);assert.throws(()=>counterSceneBoard(f.model,f.boot),/counter drawn board/);
+  }
+});
 function boardFixture(scale=1,color='#bb493e'){
   const scene=new THREE.Scene(),root=new THREE.Group();root.position.set(3,.2,-2);root.rotation.y=.7;scene.add(root);
   const fill=new THREE.Mesh(new THREE.BoxGeometry(.665,.036,.064),new THREE.MeshBasicMaterial({color:'#d9b64c'}));
