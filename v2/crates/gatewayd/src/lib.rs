@@ -201,6 +201,9 @@ struct Held {
     who: Option<Arc<Who>>,
     /// The ids of the owner's messages given to the grant's sockets (each socket's own are in [`Live::mailed`]).
     mailed: BTreeSet<String>,
+    /// Whether the view sockets were last told the grant's agent listens ([`Held::listening`]): a socket let go for a
+    /// full queue leaves without a word, so a change is found against what was said, not what was.
+    said_listening: bool,
     /// W10: the grant's intents sent while a message given to it is open, by sequence, and their verbs. Only acts
     /// begun after the pickup are told to the owner, so an older act never reads as the answer.
     doing: BTreeMap<u64, String>,
@@ -411,7 +414,11 @@ impl Gateway {
             },
         );
         held.who = Some(who);
-        self.tell_watchers(&grant.key(), mailbox::agent(grant, true, held.listening()));
+        held.said_listening = held.listening();
+        self.tell_watchers(
+            &grant.key(),
+            mailbox::agent(grant, true, held.said_listening),
+        );
         let newest = if shared(grant) { 0 } else { held.newest };
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
@@ -448,12 +455,16 @@ impl Gateway {
     pub fn detach(&self, grant: Grant, session: u64) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(held) = hub.grants.get_mut(&grant.key()) {
-            let was = held.listening();
             held.sessions.remove(&session);
             if held.sessions.is_empty() {
+                held.said_listening = false;
                 self.tell_watchers(&grant.key(), mailbox::agent(grant, false, false));
-            } else if was && !held.listening() {
-                self.tell_watchers(&grant.key(), mailbox::agent(grant, true, false));
+            } else if held.said_listening != held.listening() {
+                held.said_listening = !held.said_listening;
+                self.tell_watchers(
+                    &grant.key(),
+                    mailbox::agent(grant, true, held.said_listening),
+                );
             }
         }
     }
@@ -630,13 +641,13 @@ impl Gateway {
     pub fn set_listening(&self, grant: Grant, session: u64, on: bool) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(held) = hub.grants.get_mut(&grant.key()) {
-            let was = held.listening();
             let Some(live) = held.sessions.get_mut(&session) else {
                 return;
             };
             live.listening = on;
             let now = held.listening();
-            if now != was {
+            if now != held.said_listening {
+                held.said_listening = now;
                 self.tell_watchers(&grant.key(), mailbox::agent(grant, true, now));
             }
         }

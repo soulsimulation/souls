@@ -82,8 +82,9 @@ export function notReadingLine(inbox: AgentInbox | null, now: number): string | 
   const latest = inbox?.latest, link = readLink(inbox?.link);
   if (!inbox || !latest || latest.state !== 'sent' || !link) return null;
   const why = link.state !== 'connected' ? 'Your agent isn\'t connected.' : link.reason === 'asleep' ? 'Your agent is connected but not listening now (asleep).' : null;
-  if (!why) return null;
   const until = inbox.waitsMs && latest.sentAt !== undefined ? latest.sentAt + inbox.waitsMs : null;
+  // listening, and the directory let it lapse unread all the same
+  if (!why) return until !== null && until <= now ? `Your message waited until ${clockAt(until, now)} and was not read: send it again.` : null;
   if (until === null) return `${why} Your message waits until it is back.`;
   return until > now ? `${why} Your message waits for it until ${clockAt(until, now)}.` : `${why} Your message waited until ${clockAt(until, now)} and was not read: send it again when your agent is back.`;
 }
@@ -145,9 +146,11 @@ export function AgentMessageBoxView({kind, name, inbox, prompt = '', text, sendi
   const act = doing && doing.phase !== 'thinking' ? doing : null;
   const down = soul && inbox?.unavailable === true;
   const notReading = soul && !down ? notReadingLine(inbox, now) : null;
+  const notLink = readLink(inbox?.link);
+  const notReadingWhy = notLink?.state !== 'connected' ? 'disconnected' : notLink.reason === 'asleep' ? 'asleep' : 'expired';
   const state = latest ? noAnswer ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^Picked up/, noAnswer)
     : thinking ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^Picked up/, 'Thinking…')
-    : notReading ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^(Sent|Not picked up yet \([^)]*\))/, 'Waiting') : receiptState(latest, inbox?.queued ?? 0, now) : '';
+    : notReading ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^(Sent|Not picked up yet \([^)]*\))/, notReadingWhy === 'expired' ? 'Expired' : 'Waiting') : receiptState(latest, inbox?.queued ?? 0, now) : '';
   // D3c: until the result, the world's progress line (an act served an earlier step: "now: …; not resting yet")
   const answers = latest ? [latest.reply, latest.result ?? latest.progress].filter((x): x is string => !!x) : [];
   const receipt = latest ? [state, latest.text, ...answers].join(' · ') : '';
@@ -166,7 +169,7 @@ export function AgentMessageBoxView({kind, name, inbox, prompt = '', text, sendi
       <span className="agent-message-state">{state}</span><span aria-hidden="true"> · </span><span className="agent-message-text">{latest.text}</span>
       {answers.map((a, i) => <span key={i} className="agent-message-answer"><span aria-hidden="true"> · </span><span className="agent-message-reply">{a}</span></span>)}
     </p>}
-    {notReading && <p className="agent-message-hint" role="status" data-not-reading={readLink(inbox?.link)?.state === 'connected' ? 'asleep' : 'disconnected'}>{notReading}</p>}
+    {notReading && <p className="agent-message-hint" role="status" data-not-reading={notReadingWhy}>{notReading}</p>}
     {hint && <p className="agent-message-hint" data-check-messages="1">{hint}</p>}
     {act && <p className="agent-message-act" data-act-phase={act.phase} title={doingLine(act)}><i aria-hidden="true"/><span>{doingLine(act)}</span></p>}
     {error && <p className="agent-message-error" role="alert">{error}</p>}

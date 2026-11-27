@@ -230,3 +230,12 @@ test('first-day 27 Nov: Thinking… lasts only while connected and a few minutes
   assert.match(stale, />Read 14:02, no answer yet</); assert.doesNotMatch(stale, /data-thinking/);
   assert.match(box(at + 15 * 60_000), />Expired 14:17, not answered</);
 });
+
+test('first-day 27 Nov: a message the directory let lapse unread while the agent counted as listening says so', () => {
+  const at = new Date(2026, 10, 27, 14, 2).getTime();
+  const html = render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Juniper', now: at + 16 * 60_000,
+    inbox: {connected: true, lastSeenAt: null, queued: 1, latest: {id: 'm', text: 'wave', state: 'sent', sentAt: at}, link: {state: 'connected', reason: 'listening', since: null, holder: null}, waitsMs: 15 * 60_000}}));
+  assert.match(html, /data-not-reading="expired"/); assert.match(html, />Expired</);
+  assert.match(html, /waited until 14:17 and was not read: send it again\./);
+  assert.doesNotMatch(html, /Not picked up yet/);
+});
