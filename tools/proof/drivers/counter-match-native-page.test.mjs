@@ -48,6 +48,19 @@ test('unexpected instancing validates the actual slot but fails closed without r
   f.layer.instancer.pools.get('pool').slots.set('table',3);assert.throws(()=>tools()(f.layer,f.scene,'table'),/instance part unavailable/);
 });
 
+test('role roots and nested descendants reject InstancedMesh before sampling base geometry',()=>{
+  for(const asRoot of [false,true]){
+    const f=boardFixture(),instance=new THREE.InstancedMesh(new THREE.BoxGeometry(.665,.036,.064),new THREE.MeshBasicMaterial(),2);
+    instance.count=2;instance.setMatrixAt(0,new THREE.Matrix4().makeTranslation(20,0,0));instance.setMatrixAt(1,new THREE.Matrix4().makeTranslation(-20,0,0));
+    let baseReads=0;instance.getVertexPosition=()=>{baseReads++;throw Error('must not sample base geometry');};
+    if(asRoot){f.root.remove(f.fill);instance.userData.role='fill';instance.userData.looksRest={scale:[1,1,1]};f.root.add(instance);}
+    else f.fill.add(instance);
+    f.scene.updateMatrixWorld(true);
+    assert.throws(()=>tools()(f.layer,f.scene,'table'),/nested instanced role geometry unsupported/);
+    assert.equal(baseReads,0,'instance count/matrices cannot be ignored in favor of base vertices');
+  }
+});
+
 const sample=(n,remaining=6,turn='second')=>({tick:n*5,frame:n,currentCanvas:true,bodies:[{activity:'idle'},{activity:'idle'},{activity:'idle'}],state:{remaining,turn},board:{fill:{relativeScale:[Math.trunc(remaining*1000/7)/1000,1,1],spanX:.665*Math.trunc(remaining*1000/7)/1000},light:{materials:[turn==='first'?'bb493e':'3d6baf']}}});
 test('state checkpoints reject stale clocks, stale visual fill/tint and missing people',()=>{
   assert(counterDrawCheckpoint([sample(1),sample(2)],{remaining:6,turn:'second'}));

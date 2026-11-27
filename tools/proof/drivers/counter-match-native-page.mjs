@@ -34,6 +34,7 @@ export function counterDrawTools({vector,drawnLoad,maxVertices=10000}) {
       if(!rest||rest.length!==3||rest.some(n=>!Number.isFinite(n)||n===0))fail('role rest scale unavailable');
       const points=[],materials=[],matrices=[];
       root.traverse(mesh=>{
+        if(mesh.isInstancedMesh)fail('nested instanced role geometry unsupported; base geometry is not submitted-instance evidence');
         if(!mesh.isMesh||mesh.userData.shadowProxy||!attached(mesh,scene))return;
         const g=mesh.geometry,pos=g?.attributes.position,index=g?.index,count=index?.count??pos?.count;
         if(!pos||!Number.isInteger(count)||count>maxVertices*12)fail('submitted role geometry unavailable or excessive');
