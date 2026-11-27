@@ -5,13 +5,16 @@
 // worker before the stream; it is taken here, ahead of the worker's own handler.
 type Replica = { default: () => Promise<unknown>; StreamPlayer: unknown; readPointer: unknown; historyAt: unknown; courseAt: unknown };
 
-let address: (url: string) => void = () => {};
-const served = new Promise<string>((y) => { address = y; });
+// #4986: `replicaOrigin` is the origin's copy of a replica posted from the asset CDN (reader.ts), loaded when the CDN's
+// does not load (its module or its WASM): a viewer whose network cannot reach the CDN still gets the stream.
+type Address = { url: string; origin?: string };
+let address: (a: Address) => void = () => {};
+const served = new Promise<Address>((y) => { address = y; });
 (globalThis as unknown as { addEventListener?: (type: 'message', f: (e: MessageEvent) => void) => void }).addEventListener?.('message', (e) => {
-  const url = (e.data as { replica?: unknown } | null)?.replica;
+  const data = e.data as { replica?: unknown; replicaOrigin?: unknown } | null, url = data?.replica;
   if (typeof url !== 'string') return;
   e.stopImmediatePropagation();
-  address(url);
+  address(typeof data?.replicaOrigin === 'string' && data.replicaOrigin !== url ? { url, origin: data.replicaOrigin } : { url });
 });
 
 // Live bindings: set by init(), which the worker awaits before it plays anything (v2/web/src/source/worker.ts run()).
@@ -28,7 +31,8 @@ export let courseAt: any;
 
 /** Loads the served replica.js, which fetches replica_bg.wasm beside itself (wasm-bindgen's `--target web` init). */
 export default async function init(): Promise<void> {
-  const m = await import(/* @vite-ignore */ await served) as Replica;
-  await m.default();
+  const { url, origin } = await served;
+  const load = async (from: string) => { const m = await import(/* @vite-ignore */ from) as Replica; await m.default(); return m; };
+  const m = await load(url).catch((error: unknown) => { if (!origin) throw error; return load(origin); });
   ({ StreamPlayer, readPointer, historyAt, courseAt } = m);
 }

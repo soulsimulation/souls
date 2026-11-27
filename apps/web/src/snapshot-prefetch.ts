@@ -3,7 +3,9 @@
 // as a classic inline script, so the request leaves while the module chunks download; WorldEntityLayer.start then takes
 // that one response (takeSnapshotPrefetch) instead of fetching again. Same URL, same fetch defaults (a plain GET with
 // the page's same-origin credentials, as WorldEntityLayer has always sent it), so the same bytes and visibility.
-// No imports: vite.config.ts loads this file in node, and worldKeyFrom is serialised into the page as it stands.
+// No imports but one as plain as this file: vite.config.ts loads this file in node, and worldKeyFrom is serialised into
+// the page as it stands.
+import { replicaAtCdn } from './v2-engine/replica-cdn.ts';
 
 /** Old worlds (main's e8 behaviour; no entity layer, so nothing to prefetch). world-kind.ts re-exports it. */
 export const OLD_WORLD_KEYS: readonly string[] = ['eden', 'mars', 'littlemartians', 'toy'];
@@ -53,7 +55,8 @@ export function entryPrefetchScript(base: string, oldKeys: readonly string[] = O
     // page arrival: a page the new engine runs reads its stream through the replica (WASM, immutable by version), which
     // its stream worker fetched only once the page's code had run (~1.8 s in, then the WASM after the glue); fetched
     // now, both are in the HTTP cache when the worker asks for them. Same URLs and defaults as the worker's own requests.
-    + `var rc=window.__simConfig,rp=rc&&rc.v2Replica;if(typeof rp==='string'&&/^\\/(?!\\/)[A-Za-z0-9._\\/-]+\\/replica\\.js$/.test(rp)&&rp.indexOf('..')<0&&typeof fetch==='function')[rp,rp.replace(/replica\\.js$/,'replica_bg.wasm')].forEach(function(u){fetch(u).then(function(r){return r.arrayBuffer();}).catch(function(){});});`
+    // #4986: the asset CDN's copy when the config names one for that version (replica-cdn.ts, the worker's own rule)
+    + `var rc=window.__simConfig,rp=rc&&rc.v2Replica;if(typeof rp==='string'&&/^\\/(?!\\/)[A-Za-z0-9._\\/-]+\\/replica\\.js$/.test(rp)&&rp.indexOf('..')<0&&typeof fetch==='function'){rp=(${replicaAtCdn.toString()})(rc,location.search||'')||rp;[rp,rp.replace(/replica\\.js$/,'replica_bg.wasm')].forEach(function(u){fetch(u).then(function(r){return r.arrayBuffer();}).catch(function(){});});}`
     // a v2 world whose old views are not published (v2Views false, cutover.mjs v2Fields) has no snapshot to fetch
     + `if((window.__simConfig&&typeof window.__simConfig.worldEngine==='boolean'?!window.__simConfig.worldEngine:${JSON.stringify(oldKeys)}.indexOf(k)>=0)||window.__simConfig&&window.__simConfig.v2Views===false||typeof fetch!=='function')return;`
     + `var w=b+'/w/'+k,rq=function(u){var c=typeof AbortController==='function'?new AbortController():null,p=c?fetch(u,{signal:c.signal}):fetch(u);p.catch(function(){});return {response:p,abort:function(){if(c)c.abort();}};},g=function(n,u){var r=rq(u);r.url=u;window[n]=r;};`

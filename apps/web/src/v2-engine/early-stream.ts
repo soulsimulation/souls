@@ -7,10 +7,11 @@
 // Small on purpose: phase one loads it.
 import { makeReader } from './reader.ts';
 import { streamReadUrl } from './stream-cdn.ts';
+import { keepReplicaOrigin, replicaAtCdn } from './replica-cdn.ts';
 import { apiPath } from '../world-path.ts';
 import { arrivalMark } from '../arrival-marks.ts';
 
-type PageConfig = { v2Stream?: unknown; v2Replica?: unknown; v2StreamOrigin?: unknown; v2Views?: unknown };
+type PageConfig = { v2Stream?: unknown; v2Replica?: unknown; v2ReplicaCdn?: unknown; v2StreamOrigin?: unknown; v2Views?: unknown };
 const pageConfig = (): PageConfig | undefined => typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: PageConfig }).__simConfig;
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
@@ -20,10 +21,19 @@ export function v2Stream(): string | null {
   return typeof v === 'string' && STREAM.test(v) && !v.split('/').some((s) => s === '.' || s === '..') ? v : null;
 }
 
+// The inline config as this module met it (the page's first phase, before the app takes it): `replicaUrl` is asked with
+// `v2Replica` alone, here and by the stream hook, and both must name the same copy for the hook to claim this reader.
+const AT_LOAD = pageConfig();
+
 /** The replica the reader's worker loads: the one the launcher names by version (`v2Replica`, cutover.mjs: its files are
- *  immutable), else the world's plain path. */
-export function replicaUrl(named: unknown): string {
-  return new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
+ *  immutable), else the world's plain path. #4986: the asset CDN's copy of that version when the page's config names
+ *  one (replica-cdn.ts), with the origin's kept as the worker's fallback. */
+export function replicaUrl(named: unknown, config: PageConfig | undefined = AT_LOAD, search: string = location.search ?? ''): string {
+  const origin = new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
+  const cdn = config && config.v2Replica === named ? replicaAtCdn(config, search) : null;
+  if (!cdn) return origin;
+  keepReplicaOrigin(cdn, origin);
+  return cdn;
 }
 
 /** Not taken by then (the page never mounted its stream hook): the worker is stopped. */
