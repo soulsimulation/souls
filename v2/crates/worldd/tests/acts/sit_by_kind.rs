@@ -333,7 +333,7 @@ fn i3178_a_sit_by_kind_takes_the_nearest_chair_and_a_kind_not_there_is_named() {
     );
     assert_eq!(pew, Err("place.none-of-kind".to_owned()));
     assert!(
-        detail.contains("the nearest free seat there is"),
+        detail.contains("the nearest free place to sit there is"),
         "a next step: {detail}"
     );
 }

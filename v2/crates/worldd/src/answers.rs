@@ -4638,7 +4638,7 @@ impl Clock {
                     replica::world_model::plain(n.kind().as_str()).to_owned()
                 });
             format!(
-                "the nearest free seat there is {} ({of}): sit on it",
+                "the nearest free place to sit there is {} ({of}): sit on it",
                 replica::world_model::show(t)
             )
         });
@@ -4646,7 +4646,7 @@ impl Clock {
             return refused(
                 "place.none-of-kind",
                 format!(
-                    "no {kind} with a seat in {room}{}",
+                    "no {kind} to sit on in {room}{}",
                     other.map_or(String::new(), |o| format!("; {o}"))
                 ),
             );
@@ -4655,7 +4655,7 @@ impl Clock {
             sim::commit::bind::NONE_FREE,
             match other {
                 Some(o) => format!("no {kind} free in {room}; {o}, or wait for one to be left"),
-                None => format!("every seat in {room} is held: wait for one to be left"),
+                None => format!("every place to sit in {room} is held: wait for one to be left"),
             },
         )
     }
