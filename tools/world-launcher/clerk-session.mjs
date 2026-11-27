@@ -42,13 +42,19 @@ export function remoteKeys(issuer, { fetch: get = globalThis.fetch, now = Date.n
     tried = now();
     try {
       const res = await get(url, { signal: AbortSignal.timeout(JWKS_TIMEOUT_MS), redirect: 'error' });
-      if (!res.ok) throw Error('status');
-      const text = await res.text();
-      if (text.length > JWKS_MAX_BYTES) throw Error('size');
-      const out = new Map();
-      for (const k of JSON.parse(text).keys ?? []) {
+      if (res.status !== 200) throw Error('status'); // as jose: exactly 200
+      if (Number(res.headers.get('content-length') ?? 0) > JWKS_MAX_BYTES) throw Error('size');
+      const body = Buffer.from(await res.arrayBuffer());
+      if (body.byteLength > JWKS_MAX_BYTES) throw Error('size');
+      const out = new Map(), dup = new Set();
+      for (const k of JSON.parse(body.toString('utf8')).keys ?? []) {
         if (!k || k.kty !== 'RSA' || typeof k.kid !== 'string' || (k.alg !== undefined && k.alg !== 'RS256') || (k.use !== undefined && k.use !== 'sig')) continue;
-        try { out.set(k.kid, createPublicKey({ key: { kty: 'RSA', n: k.n, e: k.e }, format: 'jwk' })); } catch {}
+        if (k.key_ops !== undefined && !(Array.isArray(k.key_ops) && k.key_ops.includes('verify'))) continue; // as jose
+        if (out.has(k.kid) || dup.has(k.kid)) { out.delete(k.kid); dup.add(k.kid); continue; } // an ambiguous kid is no key
+        try {
+          const pub = createPublicKey({ key: { kty: 'RSA', n: k.n, e: k.e }, format: 'jwk' });
+          if ((pub.asymmetricKeyDetails?.modulusLength ?? 0) >= 2048) out.set(k.kid, pub); // as jose: RSA keys of 2048 bits or more
+        } catch {}
       }
       keys = out; at = now();
     } catch { keys = null; at = -Infinity; }

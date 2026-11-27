@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { generateKeyPairSync, sign as rsaSign } from 'node:crypto';
 import { clerkKeys, ISSUER, ORIGIN, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
 import { bindAccount, remoteKeys, settingsProblem, verifiedAccount, verifiedClaims } from './clerk-session.mjs';
 
@@ -96,6 +97,20 @@ test('a JWKS that cannot be fetched or read fails closed', async () => {
     'wrong key type': async () => new Response(JSON.stringify({ keys: [{ ...k.jwk, kty: 'EC' }] })),
   };
   for (const [name, fetch] of Object.entries(cases)) assert.equal(await verifiedAccount(tok, settings(), { fetch }), null, name);
+});
+
+test('keys jose would not use are not used: under 2048 bits, key_ops without verify, a kid listed twice, a status other than 200', async () => {
+  const k = await clerkKeys(), tok = await k.sign('user_alice');
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 1024 });
+  const { n, e } = publicKey.export({ format: 'jwk' });
+  const input = `${Buffer.from(JSON.stringify({ alg: 'RS256', kid: 'small' })).toString('base64url')}.${tok.split('.')[1]}`;
+  const small = `${input}.${rsaSign('sha256', Buffer.from(input), privateKey).toString('base64url')}`;
+  assert.equal(await verifiedAccount(small, settings(), { fetch: jwksFetch(() => [{ kty: 'RSA', n, e, kid: 'small', alg: 'RS256' }]) }), null, '1024-bit key');
+  assert.equal(await verifiedAccount(tok, settings(), { fetch: jwksFetch(() => [{ ...k.jwk, key_ops: ['encrypt'] }]) }), null, 'key_ops');
+  assert.match(await verifiedAccount(tok, settings(), { fetch: jwksFetch(() => [{ ...k.jwk, key_ops: ['verify'] }]) }), /^acct_/, 'key_ops verify');
+  const other = await clerkKeys();
+  assert.equal(await verifiedAccount(tok, settings(), { fetch: jwksFetch(() => [k.jwk, other.jwk]) }), null, 'the same kid twice');
+  assert.equal(await verifiedAccount(tok, settings(), { fetch: jwksFetch(() => new Response(JSON.stringify({ keys: [k.jwk] }), { status: 203 })) }), null, 'status 203');
 });
 
 test('the old settings checks: an issuer or key that do not match, or a party that is not an exact origin, refuse every token', async () => {
