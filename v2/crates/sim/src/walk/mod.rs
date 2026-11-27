@@ -20,10 +20,13 @@
 //!   plans the stale walks again (`crate::unstick`); the walk skill takes the new route as any other (`F_ROUTE`).
 //! - **A form's walk that stalls** (C21, #3484, [`stall`]): one that gains less than a quarter metre toward its goal
 //!   over 3 s ends `walk.blocked`, naming what blocks it.
+//! - **Through water** (#3225, [`water`]): a body that may wade or swim walks a route across shore links, its ground
+//!   and gait changing at each shore.
 //! - **Integers.** Positions in µm, time in µs.
 
 pub mod stall;
 pub mod town;
+pub mod water;
 
 use crate::mover::Body;
 use crate::spots::{Granted, Target};

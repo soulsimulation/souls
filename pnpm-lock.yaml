@@ -390,6 +390,12 @@ importers:
         specifier: ^22.19.19
         version: 22.20.4
 
+  packages/view-geometry:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.19
+        version: 22.19.19
+
   packages/world-compiler:
     dependencies:
       '@souls/generators':

@@ -691,6 +691,7 @@ pub struct Config {
     /// The tick's length (K7: the loop runs at this rate).
     pub tick: Duration,
     /// The longest an act stays open, from its arrival, when its expiry is later.
+    /// A release's rehearsal waits this long for the last fed intents (`supervisor::deploy::ACT_WITHIN`).
     pub deadline: Micros,
     pub checkers: usize,
     /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
@@ -1237,6 +1238,58 @@ pub fn state_hash(tree: &[(Audience, Hash)], bodies: &[(Id, Pose)]) -> [u8; 32] 
     out
 }
 
+/// Each body's row of the state hash, `[id, pose]` encoded, with the pose it encodes: kept between ticks so a tick
+/// encodes again only the bodies whose pose changed ([`state_hash_kept`]).
+type PoseRows = BTreeMap<Id, (Pose, Vec<u8>)>;
+
+/// [`state_hash`], the same bytes taken by SHA-256 piece by piece: the bodies' rows come from `kept`, and only a body
+/// whose pose changed since is encoded again (with 1,000 Souls, most stand still in a tick). `kept` keeps no body
+/// that is not in `bodies` once it is longer than it. Any row that will not encode gives [`state_hash`]'s answer.
+pub fn state_hash_kept(
+    tree: &[(Audience, Hash)],
+    bodies: &[(Id, Pose)],
+    kept: &mut PoseRows,
+) -> [u8; 32] {
+    let audience = |a: &Audience| match a {
+        Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+        Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+    };
+    let listed = Value::Array(
+        tree.iter()
+            .map(|(a, h)| Value::Array(vec![audience(a), Value::Bytes(h.to_bytes())]))
+            .collect(),
+    );
+    let Ok(listed) = encode(&listed) else {
+        return state_hash(tree, bodies);
+    };
+    if kept.len() > bodies.len() {
+        let here: std::collections::BTreeSet<Id> = bodies.iter().map(|(id, _)| *id).collect();
+        kept.retain(|id, _| here.contains(id));
+    }
+    let mut sha = Hash::taking(Purpose::Fixture);
+    sha.update(&replica::encode::head(4, 2));
+    sha.update(&listed);
+    sha.update(&replica::encode::head(
+        4,
+        u64::try_from(bodies.len()).unwrap_or(u64::MAX),
+    ));
+    for (id, p) in bodies {
+        let row = match kept.get_mut(id) {
+            Some(row) if row.0 == *p => row,
+            _ => {
+                let Ok(bytes) = encode(&Value::Array(vec![id.to_value(), p.to_value()])) else {
+                    kept.remove(id);
+                    return state_hash(tree, bodies);
+                };
+                kept.insert(*id, (*p, bytes));
+                kept.get_mut(id).expect("just kept")
+            }
+        };
+        sha.update(&row.1);
+    }
+    Hash::of_taken(sha).digest()
+}
+
 struct Open {
     actor: Actor,
     key: Vec<u8>,
@@ -1372,6 +1425,8 @@ struct Clock {
     /// Engine acts written this tick, answered with a receipt once their entries are applied.
     engine_done: Vec<Id>,
     order_records: Vec<Effect>,
+    /// Each body's row of the state hash as last encoded, with the pose it encodes ([`state_hash_kept`]).
+    pose_rows: PoseRows,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -5670,12 +5725,17 @@ impl Clock {
     /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
     fn state(&mut self) -> [u8; 32] {
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
+        self.state_of(&poses)
+    }
+
+    /// [`Clock::state`] with the bodies' poses already read (the tick's record reads them once, with what moved).
+    fn state_of(&mut self, poses: &[(Id, Pose)]) -> [u8; 32] {
         let tree = self
             .replica
             .tree_for_seal()
             .state_hashes()
             .unwrap_or_default();
-        state_hash(&tree, &poses)
+        state_hash_kept(&tree, poses, &mut self.pose_rows)
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -5880,10 +5940,14 @@ impl Clock {
             i if i.is_empty() => None,
             i => recorder::record(u64::try_from(n).unwrap_or(0), &i).ok(),
         };
-        let moved = self.bodies.as_mut().map(Bodies::moved).unwrap_or_default();
+        let (moved, poses) = self
+            .bodies
+            .as_mut()
+            .map(Bodies::moved_and_poses)
+            .unwrap_or_default();
         let record =
             (!self.rows.is_empty() || !self.effects.is_empty() || !moved.is_empty()).then(|| {
-                let state = self.state();
+                let state = self.state_of(&poses);
                 let v = Value::Map(BTreeMap::from([
                     (1, Value::Bytes(self.replica.header().hash().to_bytes())),
                     (
@@ -7017,6 +7081,7 @@ pub fn start<S: Storage + 'static>(
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
         order_records,
+        pose_rows: PoseRows::new(),
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
@@ -10299,5 +10364,61 @@ mod no_brick_tests {
             names > 100 && not_names > 100,
             "both kinds tried: {names} names, {not_names} not"
         );
+    }
+}
+
+#[cfg(test)]
+mod state_hash_kept_tests {
+    use super::*;
+
+    fn pose(ground: Id, x: i64) -> Pose {
+        Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: Vec3::new(x, 0, -x),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        }
+    }
+
+    /// The kept rows give the same state hash as the whole encoding, tick after tick, as bodies move, arrive and
+    /// leave, with one audience or two.
+    #[test]
+    fn kept_rows_hash_as_the_whole() {
+        let id = |n| Id::new(Scope([0x5b; 16]), n).unwrap();
+        let ground = id(1);
+        let mut kept = PoseRows::new();
+        let mut bodies: Vec<(Id, Pose)> =
+            (10..30).map(|n| (id(n), pose(ground, n as i64))).collect();
+        let tree = [
+            (Audience::Everyone, Hash::of(Purpose::Fixture, b"a")),
+            (Audience::Of(id(2)), Hash::of(Purpose::Fixture, b"b")),
+        ];
+        for tick in 0..8i64 {
+            match tick {
+                2 => bodies[3].1 = pose(ground, 900),
+                3 => bodies.push((id(40), pose(ground, 40))),
+                4 => {
+                    bodies.remove(0);
+                    bodies.remove(5);
+                }
+                5 => bodies.iter_mut().for_each(|b| b.1.position.x += 1),
+                6 => bodies.clear(),
+                7 => bodies.push((id(11), pose(ground, 11))),
+                _ => {}
+            }
+            let t = if tick % 2 == 0 { &tree[..1] } else { &tree[..] };
+            assert_eq!(
+                state_hash_kept(t, &bodies, &mut kept),
+                state_hash(t, &bodies),
+                "tick {tick}"
+            );
+            assert!(kept.len() <= bodies.len().max(20) + 1);
+        }
     }
 }

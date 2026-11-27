@@ -183,6 +183,8 @@ the root, which `describe` shows), and from then on you place it like any other 
   of at most 256 operations, and the world checks each. It prints one line per op (`ready`, `applied`, `already`,
   `refused` with the code, `unresolved`, `ambiguous`, `moved-since`, ...), then the counts. Run `--dry-run` first;
   a second run finds every op `already` and sends nothing. A thing moved off a roof to the ground gets a new id.
+  If your copy's open ground came without its terrain tiles, a move to the ground is `bad-op`: give the tiles with
+  `--terrain <file>` (`{"tileSize", "tiles"}`, the rows of the ground's field 25), read only for such a copy.
 
 ## Furnishing
 
@@ -204,7 +206,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 - `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
   `--bounds x0,z0,x1,z1` (metres) to cover a box.
 - The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
-  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  carries only the new tiles, so one grow adds at most about 390 of Eden 2026's 64 m tiles; a larger one is refused
   `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
   land edit, so a ground past about 16 MB is refused `edit.too-large`.
 

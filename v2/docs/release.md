@@ -134,7 +134,7 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    library (the previous kept as `.worldd.prev`, `.ops.prev`), the pin (`.placement.json.prev`) and each template (the
    previous under `templates/.aside/<name>`); a file is renamed over the live one, so it is never missing. Nothing
    creates meanwhile: `souls-place.path` is stopped and a placement in flight waited for (`release.placement-busy`
-   after 300 s), and the directory, which reads the catalogue (each template's name, lineage and zone) only at its
+   after 300 s; a path unit systemd failed for its start limit is reset and started again with it), and the directory, which reads the catalogue (each template's name, lineage and zone) only at its
    start and would take a create under the old lineage, is down from just before the renames until just after, when
    that catalogue changed (a republished template has a fresh lineage). It must then answer `401` as above; if it does
    not, or a rename fails, every rename goes back (`release.placement-directory-unhealthy`, `-swap`). Any failure

@@ -334,6 +334,10 @@ fn file(rooms: &mut Rooms, tree: &Tree, thing: Id, floor: Id) {
 /// K18c, #3176). What a restart builds its bodies at.
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
 
+/// The bodies whose pose changed since the tick's record last read them, a seated one with its stance
+/// ([`Bodies::moved`]).
+pub type MovedRows = Vec<(Id, Pose, Option<Stance>)>;
+
 /// About how often a moving body's motion is written while nothing else about it changes (#3799): 200 ms of world
 /// time, counted in whole ticks.
 pub const KEYFRAME_US: Micros = 200_000;
@@ -1229,8 +1233,17 @@ impl Bodies {
     /// The bodies whose pose changed since the last call, in id order, a body in a seat's slot with its stance: what
     /// the tick's record keeps of them (K18), so a restart stands each where it last stood or seats it again.
     pub fn moved(&mut self) -> Vec<(Id, Pose, Option<Stance>)> {
+        self.moved_and_poses().0
+    }
+
+    /// [`Bodies::moved`] and [`Bodies::poses`] from one pass over the bodies: the tick's record reads both. The poses
+    /// are those `poses` gives after `moved` (a carried body's is where it was last logged, which `moved` keeps).
+    pub fn moved_and_poses(&mut self) -> (MovedRows, Vec<(Id, Pose)>) {
+        let every = self.every();
         let mut out = Vec::new();
-        for (id, (pose, stance)) in self.every() {
+        let mut poses = Vec::with_capacity(every.len());
+        for (id, (pose, stance)) in every {
+            poses.push((id, pose));
             if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
                 continue;
             }
@@ -1239,7 +1252,7 @@ impl Bodies {
                 out.push((id, pose, stance));
             }
         }
-        out
+        (out, poses)
     }
 
     /// The bodies' motion to write on their nodes at this tick's end (#3799), in id order: a sample at each hand-off
