@@ -70,7 +70,7 @@ export function v2Switch({ binding: file, back = false, slug, oldWorld, stream, 
     cutoverFence({ binding: whole }); // the launcher's own check: refuses (cutover.binding-invalid) before anything is written
     if (!existsSync(join(binding.clientDir, 'replica.js')) || !existsSync(join(binding.clientDir, 'replica_bg.wasm'))) throw Error('v2-switch.client-missing-replica');
     if (binding.bodiesDir && !existsSync(join(binding.bodiesDir, 'bodies.json'))) throw Error('v2-switch.bodies-missing-catalogue');
-    if (binding.staticDir) { staticWritable(binding.staticDir, stage); mkdirSync(binding.staticDir, { recursive: true }); }
+    if (binding.staticDir) { mkdirSync(binding.staticDir, { recursive: true }); }
     write = whole;
   }
   const table = readJson(binding.routesFile) ?? { schema: 'souls/world-routes/1', worlds: {} };
