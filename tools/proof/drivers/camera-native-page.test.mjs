@@ -26,7 +26,7 @@ test('responsive camera input uses visible direct controls or Menu then Camera, 
   }
 });
 
-test('depicted native ticks may be fractional, but absent, nonfinite or negative values are not readiness', () => {
-  for (const tick of ['0', '42.25', '1024.0001']) assert.equal(displayedNativeTick(tick), true);
-  for (const tick of [null, '', ' ', 'Infinity', 'NaN', '-0.1', 'not-a-tick']) assert.equal(displayedNativeTick(tick), false);
+test('depicted native ticks may be fractional, but absent or nonfinite values are not readiness', () => {
+  for (const tick of ['0', '42.25', '1024.0001', '-0.1']) assert.equal(displayedNativeTick(tick), true);
+  for (const tick of [null, '', ' ', 'Infinity', 'NaN', 'not-a-tick']) assert.equal(displayedNativeTick(tick), false);
 });

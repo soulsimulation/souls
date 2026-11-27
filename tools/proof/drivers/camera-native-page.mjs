@@ -11,7 +11,7 @@ export function suppliedNativeStream(html) {
   return stream;
 }
 export function displayedNativeTick(value) {
-  return typeof value === 'string' && value.trim().length > 0 && Number.isFinite(Number(value)) && Number(value) >= 0;
+  return typeof value === 'string' && value.trim().length > 0 && Number.isFinite(Number(value));
 }
 export function beforeNavigation({ page, base }) {
   const state = { documents: [], responses: [] }; observations.set(page, state);
