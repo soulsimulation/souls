@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -361,6 +361,7 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        clock_json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
         o.push_str(",\"audit\":");
@@ -377,6 +378,24 @@ impl Measures {
         }
         o.push_str("}\n");
         o
+    }
+}
+
+/// How far the world's clock runs ahead of the machine's, ms (O10, #2806): set by a restart that found the machine's
+/// clock behind its last logged tick, and by the watchdog, which compares the two each second. Under a second either
+/// way is `steady`; past it, `stepped` (`clock` in `health.json`).
+pub static CLOCK_AHEAD_MS: AtomicI64 = AtomicI64::new(0);
+
+/// `,"clock":{"state":"steady"}`, or `stepped` with how far the world's clock is ahead of the machine's.
+fn clock_json(o: &mut String) {
+    let ahead = CLOCK_AHEAD_MS.load(Ordering::Relaxed);
+    if ahead.abs() < 1000 {
+        o.push_str(",\"clock\":{\"state\":\"steady\"}");
+    } else {
+        let _ = write!(
+            o,
+            ",\"clock\":{{\"state\":\"stepped\",\"ahead_ms\":{ahead}}}"
+        );
     }
 }
 

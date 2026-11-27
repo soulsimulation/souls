@@ -151,7 +151,7 @@ use replica::select::Spot;
 use replica::select::wire::SPOT;
 use replica::sky::{self, Sky};
 use replica::sync::Records;
-use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
+use replica::time::{Line, Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 use sim::audit::{Auditor, Fault};
@@ -1085,6 +1085,10 @@ pub struct World {
     pub durable: Durable,
     /// Still and next due, for sleep (O2).
     pub quiet: Arc<Quiet>,
+    /// The world's real clock (K7's: the machine's wall clock read once, carried on by the steady clock), carried
+    /// ahead of the machine's by the step a restart found (`clock.stepped`, O10): what every thread beside the clock
+    /// thread reads as real time (the watchdog, the public stream, the sleep watch), so none sees another time.
+    pub real: Real,
     handover: Arc<crate::handover::Handover>,
     clock: Option<JoinHandle<()>>,
 }
@@ -1113,6 +1117,21 @@ pub fn now() -> Micros {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+        .saturating_add(test_step())
+}
+
+/// O10 (#2806): a test's step of the machine's clock, µs, read from the file `$WORLDD_TEST_CLOCK_STEP` names at each
+/// reading, so a test steps it while the world runs or before it starts (`tests/host_faults.rs`); a debug build's
+/// only.
+fn test_step() -> Micros {
+    #[cfg(debug_assertions)]
+    if let Some(f) = std::env::var_os("WORLDD_TEST_CLOCK_STEP") {
+        return std::fs::read_to_string(f)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+    }
+    0
 }
 
 /// The wall clock read once, at start, carried on by the monotonic clock (K7): µs from the Unix epoch, never a step.
@@ -1130,11 +1149,26 @@ impl Real {
             mono0: Instant::now(),
         }
     }
+
+    /// This clock carried `by` µs ahead: a world's whose restart found the machine's clock behind it ([`World::real`]).
+    pub fn ahead(self, by: Micros) -> Real {
+        Real {
+            wall0: self.wall0.saturating_add(by),
+            ..self
+        }
+    }
+}
+
+impl Real {
+    /// The world's real time now, µs from the Unix epoch.
+    pub fn now_us(&self) -> Micros {
+        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+    }
 }
 
 impl Pace for Real {
     fn now(&mut self) -> Micros {
-        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+        self.now_us()
     }
 
     fn sleep_until(&mut self, t: Micros) {
@@ -1142,6 +1176,23 @@ impl Pace for Real {
         if wait > 0 {
             std::thread::sleep(Duration::from_micros(wait as u64));
         }
+    }
+}
+
+/// A clock carried `by` µs ahead of another (O10, #2806): a restart's, when the machine's clock is behind the last
+/// logged tick (`clock.stepped`).
+struct Ahead {
+    pace: Box<dyn Pace + Send>,
+    by: Micros,
+}
+
+impl Pace for Ahead {
+    fn now(&mut self) -> Micros {
+        self.pace.now().saturating_add(self.by)
+    }
+
+    fn sleep_until(&mut self, t: Micros) {
+        self.pace.sleep_until(t.saturating_sub(self.by));
     }
 }
 
@@ -6020,6 +6071,14 @@ type Publish = (Vec<Mapping>, Mapping);
 /// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
 /// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
 /// mappings this start applies, and the one in force, when either is new or the root's fields do not hold it.
+/// The last mapping the world logged (E7b), if any.
+fn logged_mapping(world: &Replica) -> Option<Mapping> {
+    world.tree().time().iter().rev().find_map(|t| match t {
+        TimeEffect::Mapping(m) => Some(*m),
+        _ => None,
+    })
+}
+
 fn timeline(
     world: &Replica,
     rate: Option<(i64, i64)>,
@@ -6280,12 +6339,42 @@ pub fn start<S: Storage + 'static>(
         });
     }
     let shared = Arc::new(Mutex::new(0));
+    // The machine's clock as the world reads it: the threads beside the clock thread read it as [`World::real`].
+    let mut real = Real::start();
     let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
         (true, _) => Box::new(Stepped(Arc::clone(&shared))),
         (false, Some(c)) => c,
-        (false, None) => Box::new(Real::start()),
+        (false, None) => Box::new(real),
     };
-    let real0 = pace.now();
+    let mut real0 = pace.now();
+    // O10 (#2806): a restart whose machine clock went back while it was down (a step) finds its last logged tick in
+    // the clock's future, and once waited, ticking nothing, until the clock came round to it: a frozen world. It is
+    // `clock.stepped`: its clock is carried ahead of the machine's by the step, so world time goes on from the last
+    // tick logged, never back and never waiting, and the step is said by name and in `health.json`. The step is
+    // measured on the logged time line, before a new rate's mapping is made at the start's real time.
+    if let (Some(n), false) = (last, cfg.lockstep) {
+        let logged_rate = cfg.rate.and_then(|_| {
+            let rate = logged_mapping(&world)?.rate();
+            Some((i64::from(rate.num()), i64::from(rate.den())))
+        });
+        let (line, mapping, _) = timeline(&world, logged_rate.or(cfg.rate), real0, tick_us)?;
+        let logged = line.tick_start(n).map_err(time)?;
+        let on = Line::new(mapping.real_us, mapping.world_us, mapping.rate());
+        let behind = on.x_of(logged).map_err(time)? - real0;
+        if behind > 0 {
+            let ahead = behind;
+            pace = Box::new(Ahead { pace, by: ahead });
+            real = real.ahead(ahead);
+            real0 = pace.now();
+            measures::CLOCK_AHEAD_MS.store(ahead / 1000, std::sync::atomic::Ordering::Relaxed);
+            eprintln!(
+                "worldd: clock.stepped: the machine's clock is {} ms behind the last logged tick; world time goes on \
+                 from it, {} ms ahead of the machine's clock",
+                ahead / 1000,
+                ahead / 1000
+            );
+        }
+    }
     // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
     // mappings follow, and the configured rate's (E7b).
     let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
@@ -6950,6 +7039,7 @@ pub fn start<S: Storage + 'static>(
         restart,
         durable: world_durable,
         quiet,
+        real,
         handover: Arc::default(),
         clock: Some(clock),
     })
