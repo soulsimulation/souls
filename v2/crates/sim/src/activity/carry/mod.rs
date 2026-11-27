@@ -123,9 +123,10 @@ pub const HALF_WIDTH: i64 = 150_000;
 pub const REACH: i64 = 350_000;
 /// Between the two carriers' centres, µm.
 pub const SPAN: i64 = 2 * (HALF_LENGTH + REACH);
-/// The board's height above its carriers' feet while carried, µm (#5067: 1 m, where a standing body holds a load in
-/// front of it with its arms down and bent; at 0.9 m no hold let it stand upright).
-pub const HEIGHT: i64 = 1_000_000;
+/// The board's height above its carriers' feet while carried, µm (#5067: 1.05 m, where a standing body holds a load
+/// up to 0.3 m in front of it without bending its knees, so a carrier a few centimetres off its place still stands
+/// upright; at 0.9 m no hold let it).
+pub const HEIGHT: i64 = 1_050_000;
 /// The nearest a carrier's place is to its end grip along a low load, µm, and how far beyond the load's end it is
 /// then at least ([`Load::reach`]).
 pub const REACH_NEAR: i64 = 250_000;

@@ -857,7 +857,7 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
     assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
     // The take moved nothing in one step: the crew's node was first set where the frame stood (the frame in its slot
-    // exactly there), then went into its carriers' hands, 1 m up, a sample a tick, none more than 0.1 m from the last.
+    // exactly there), then went into its carriers' hands, at carrying height, a sample a tick, none more than 0.1 m from the last.
     tokio::time::sleep(Duration::from_millis(1500)).await;
     let track: Vec<Vec3> = effects(&dir)
         .into_iter()

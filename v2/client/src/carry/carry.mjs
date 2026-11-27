@@ -46,7 +46,7 @@ export const REACH = 350_000;
 export const SIDE_REACH = 450_000;
 /** How far beyond the edge it holds each of the two carriers of a part that stands upright (no long axis on the plan)
  * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges on the line its
- * carriers stand on (a rack frame's posts, a timber bent's), its hands 1.0 m and 1.3 m above the ground, and refuses a
+ * carriers stand on (a rack frame's posts, a timber bent's), its hands 1.05 m and 1.35 m above the ground, and refuses a
  * carrier more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.35 m is where a standing body holds both
  * without squatting: 0.96 m from the middle of a 1.22 m rack frame, 10 mm clear of the ground the frame's own columns
  * take in a bay (0.95 m). A frame stand's walk box (1.05 m) is further out: there the walk ends as near as it can.
@@ -384,7 +384,7 @@ export function carryIntents(req, ctx) {
 }
 
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
-export const HEIGHT = 1_000_000;
+export const HEIGHT = 1_050_000;
 /** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
 export const GO_MOST_MS = 20_000;
 
