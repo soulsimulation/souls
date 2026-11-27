@@ -4114,6 +4114,73 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// E16 (#2787) A1, A2, the guard for locked doors. Today a door's `locked` is not read by walks (`sim::links`, module
+/// doc): a shut door is a way any body with hands walks through, so no lock can trap anyone, and nothing here is
+/// checked. The change that makes walks read `locked` must make this test pass, and drop its `ignore`, in the same
+/// change; otherwise that change is where one Soul can lock another in.
+///
+/// The scene: a cottage's bedroom, whose one way out is its inner door (today's e_00385aae, as
+/// `c25_a_cottages_inner_door_from_its_bedroom` walks it). Soul A walks into the bedroom and shuts the door; Soul B,
+/// outside, locks it. The door's `lock` is its owner's, so it is served with `lock` open to anyone, as any owner could
+/// do it. Either the lock is refused before it commits, by the way-out check (`edit.would-cut-off`, naming A), or it
+/// lands and A, inside, still opens the door and walks out (a kind whose form can lock opens from inside for whoever
+/// is inside).
+#[test]
+#[ignore = "the guard for the task that makes walks read a door's `locked`: it fails until then (see its doc)"]
+fn e16_guard_a_door_locked_on_a_soul_inside_is_refused_or_opens_from_inside() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (bedroom, door) = (im.nodes["e_7ff72484"], im.nodes["e_00385aae"]);
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let anyone = std::env::temp_dir().join(format!("eden-e16lock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&anyone);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &anyone);
+    let file = anyone.join("doors/door.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let open = text.replace(r#""who": { "link": "owner" }"#, r#""who": "anyone""#);
+    assert_ne!(text, open, "the door's lock is its owner's");
+    std::fs::write(&file, open).unwrap();
+    let lineage = im.nodes["world"].scope();
+    let (served, mut a, dir, _) = serve_entries(
+        &facts,
+        anyone.to_str().unwrap(),
+        "-99.0,-93.0",
+        "e16lock",
+        lineage,
+    );
+    let mut b = join(&dir, 2, lineage);
+    for s in [&mut a, &mut b] {
+        s.0.set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+    }
+    a.act("eden:walk", Some(bedroom), BTreeMap::new())
+        .expect("A walks into the bedroom");
+    a.act("eden:close", Some(door), BTreeMap::new())
+        .expect("A shuts the bedroom door");
+    let locked = b.act("eden:lock", Some(door), BTreeMap::new());
+    println!("B locks the bedroom door on A: {locked:?}");
+    let out = match &locked {
+        Err(code) => {
+            assert_eq!(code, "edit.would-cut-off", "refused by the way-out check");
+            None
+        }
+        Ok(_) => {
+            let opened = a.act("eden:open", Some(door), BTreeMap::new());
+            println!("A opens the locked door from inside: {opened:?}");
+            let walked = a.act("eden:walk", Some(door), BTreeMap::new());
+            println!("A walks to the door, past it: {walked:?}");
+            Some((opened, walked))
+        }
+    };
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&anyone);
+    if let Some((opened, walked)) = out {
+        opened.expect("a Soul inside opens the door it was locked behind");
+        walked.expect("and walks back out to it");
+    }
+}
+
 /// A step of [`served_steps`]: today's id, the form, its thing arguments by today's id, the ending wanted.
 type Step<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
 
