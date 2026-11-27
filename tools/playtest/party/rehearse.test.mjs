@@ -101,3 +101,26 @@ test('a final leave receipt cannot hide a member still in the public activity', 
   const fixture = publicParty({ leaveStuck: true });
   await assert.rejects(run(fixture), /all members leave/);
 });
+
+test('object-free silent party never inspects or operates a jukebox and forwards the required wave duration', async () => {
+  const fixture = publicParty(), phases = [];
+  const report = await performParty({ seats: fixture.seats, mode: 'silent', jukebox: null,
+    pause: async () => {}, observe: async (stage, details) => { phases.push({ stage, seat: details.seat?.body, seats: details.seats?.length }); } });
+  assert.equal(report.jukebox, 'not-present'); assert.equal(report.soundProved, false);
+  assert(!fixture.calls.some(row => row[1] === 'inspect' && row[2] === 'jukebox'));
+  assert.deepEqual(fixture.calls.find(row => row[1] === 'act' && row[2] === 'wave'), [4, 'act', 'wave', 'for=1', '--wait']);
+  assert.deepEqual(phases.map(p => p.stage), ['greeting-start', 'greeting-done', 'reply-start', 'reply-done',
+    'dance-ready', 'dance-sustained', 'departure-start', 'departure-done', 'cleanup-start', 'party-clean']);
+  assert.equal(phases.find(p => p.stage === 'departure-done').seats, 4);
+});
+
+test('page refusal to observe all dancers prevents choreography from silently continuing', async () => {
+  const fixture = publicParty();
+  await assert.rejects(performParty({ seats: fixture.seats, mode: 'silent', jukebox: null, pause: async () => {},
+    observe: async stage => { if (stage === 'dance-ready') throw Error('missing actual dancer'); } }), /missing actual dancer/);
+  assert(!fixture.calls.some(row => row[1] === 'together' && row[2] === 'leave'));
+});
+
+test('jukebox mode cannot silently turn into an object-free party', async () => {
+  await assert.rejects(performParty({ seats: publicParty().seats, mode: 'jukebox', jukebox: null }), /needs its ordinary discovered thing/);
+});

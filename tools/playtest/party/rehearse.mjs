@@ -73,9 +73,10 @@ export function partyMembers(answer, { id, word, bodies }) {
 }
 
 /** One member leaving must not end the other members' dance. The camera records this entire sequence. */
-export async function performParty({ seats, jukebox, mode = 'jukebox', record = () => {}, pause = sleep }) {
+export async function performParty({ seats, jukebox, mode = 'jukebox', record = () => {}, pause = sleep, observe = async () => {} }) {
   assert.equal(seats.length, 5, 'the rehearsal uses five independent Souls');
   assert(['silent', 'jukebox'].includes(mode), 'choose an explicit supported music mode');
+  assert(mode === 'silent' || jukebox, 'jukebox mode needs its ordinary discovered thing');
   const [operator, ...guests] = seats;
   const command = async (seat, ...words) => {
     const answer = await seat.cli(...words);
@@ -83,7 +84,7 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
     return answer;
   };
   const act = async (seat, form, target, ...args) => completed(await command(seat, 'act', `${form}:${target}`, ...args, '--wait'), form);
-  const body = async (seat, form) => completed(await command(seat, 'act', form, '--wait'), form);
+  const body = async (seat, form, ...args) => completed(await command(seat, 'act', form, ...args, '--wait'), form);
   const walk = (seat, target) => act(seat, 'walk', target);
   let activityId;
   const leave = async (seat) => completed(await command(seat, 'together', 'leave', activityId), 'leave dance');
@@ -118,13 +119,17 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
     discovery.push({ person: seat.label, dance });
   }
   const danceWord = discovery[0].dance.word;
+  await observe('greeting-start', { seat: operator });
   await spoken(operator, guests[0], 'Welcome! Would you like to dance?', 'wave');
+  await observe('greeting-done', { seat: operator });
+  await observe('reply-start', { seat: guests[0] });
   await spoken(guests[0], operator, 'Yes, let us dance together!', 'nod');
+  await observe('reply-done', { seat: guests[0] });
   if (mode === 'jukebox') {
     await walk(operator, jukebox);
     await act(operator, 'switch_on', jukebox);
     await walk(operator, guests[0].body);
-  } else {
+  } else if (jukebox) {
     const music = await command(operator, 'inspect', jukebox);
     assert(music.state?.on === false || music.state?.on === 0, 'silent mode requires the jukebox to remain off');
   }
@@ -153,13 +158,16 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   assert.equal(partyActivityId(together, danceWord), activityId, 'the host must join the offered activity');
   const membership = [];
   for (const seat of seats) membership.push({ person: seat.label, ...partyMembers(await command(seat, 'inspect', activityId), { id: activityId, word: danceWord, bodies: seats.map((s) => s.body) }) });
-  // Allow the last member to finish its ordinary approach before showing several shared cycles.
+  // A page observer can wait for the actual last approach; receipts alone do not establish depiction.
+  await observe('dance-ready', { seats, activityId });
   await pause(12000);
+  await observe('dance-sustained', { seats, activityId });
   const leaving = guests.at(-1);
+  await observe('departure-start', { seat: leaving, seats });
   await leave(leaving);
   // A leave releases a move at its phase boundary. Keep that visible rather than cutting to the next action.
   await pause(850);
-  await body(leaving, 'wave');
+  await body(leaving, 'wave', 'for=1');
   const departed = await command(leaving, 'look');
   assert.equal(departed.ok, true, 'departure look must succeed');
   assert(!(departed.in ?? []).some((line) => line.includes(danceWord)), 'the departing guest must actually leave');
@@ -169,19 +177,22 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
     assert.equal(partyActivityId(remaining, danceWord), activityId, 'the other four keep dancing after one leaves');
     continued.push({ person: seat.label, ...partyMembers(await command(seat, 'inspect', activityId), { id: activityId, word: danceWord, bodies: seats.filter((s) => s !== leaving).map((s) => s.body) }) });
   }
+  await observe('departure-done', { seat: leaving, seats: seats.filter(s => s !== leaving), activityId });
   await pause(2500);
+  await observe('cleanup-start', { seats });
   for (const guest of guests.slice(0, -1)) await leave(guest);
   await leave(operator);
   await pause(850);
   if (mode === 'jukebox') await act(operator, 'switch_off', jukebox);
-  else {
+  else if (jukebox) {
     const music = await command(operator, 'inspect', jukebox);
     assert(music.state?.on === false || music.state?.on === 0, 'silent mode must finish with the jukebox off');
   }
   await body(operator, 'nod');
   const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
   assert(final.every((look) => look.ok === true && !(look.in ?? []).some((line) => line.includes(danceWord))), 'all members leave the dance');
-  return { people: seats.length, jukebox: mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false, independentCollaborationProved: false, discovery, invitations, membership, continued, finalMembership: final.map((look, i) => ({ person: seats[i].label, in: look.in ?? [] })) };
+  await observe('party-clean', { seat: operator, seats });
+  return { people: seats.length, jukebox: !jukebox ? 'not-present' : mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false, independentCollaborationProved: false, discovery, invitations, membership, continued, finalMembership: final.map((look, i) => ({ person: seats[i].label, in: look.in ?? [] })) };
 }
 
 async function pairServedSeat({ world, page, directory, index, record, register }) {
