@@ -13,7 +13,12 @@ function fixture(t) {
   const root = mkdtempSync(join(parent, 'input-')); t.after(() => rmSync(root, { recursive: true, force: true }));
   const sourceRoot = join(root, 'source'), output = join(root, 'sealed'), pkg = join(root, 'pkg');
   const write = (name, bytes) => { const p = join(sourceRoot, name); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, bytes); };
-  const header = Buffer.from('unit header'), headerHash = sha(header), baseline = encode(new Map([[3, new Map()]])), generation = sha(baseline);
+  const multihash = bytes => Buffer.from('1220' + sha(bytes), 'hex');
+  // Production T6 envelope shape with neutral test identities; native semantics are separately exercised by
+  // the retained actual-input admission. Unit reader stubs below do not claim native schema validation.
+  const header = encode(new Map([[1, multihash('unit build')], [2, multihash('unit schema')], [3, new Uint8Array(16)], [4, [new Uint8Array(16), 0]], [5, 0], [6, []], [7, []]]));
+  const headerHash = '1220' + sha(Buffer.concat([encode('souls/header/1'), header]));
+  const baseline = encode(new Map([[1, 1], [2, Buffer.from(headerHash, 'hex')], [3, new Map()]])), generation = sha(baseline);
   const stream = 'views/lineage/zone/0/node/0/everyone', prefix = stream + '/g/' + generation;
   const raw = Buffer.from('unit validated bundle'), digest = Buffer.from(sha(raw), 'hex');
   write('views/world.json', JSON.stringify({ stream: stream + '/', history: 'history/' }));
@@ -38,8 +43,15 @@ function fixture(t) {
   // Synthetic module exercises copying only; it is explicitly not native correctness/playback evidence.
   writeFileSync(join(pkg, 'replica.js'), `export const initSync=()=>{};export const readPointer=b=>new TextDecoder().decode(b);export const readPart=()=>{};export const historyTimeline=()=>new Uint8Array([162,4,0,5,1]);export class StreamPlayer{static fromBaseline(){return new StreamPlayer()}play(){}verify(){}free(){}snapshot(){return new Uint8Array([128])}events(){return new Uint8Array([128])}}`);
   writeFileSync(join(pkg, 'replica_bg.wasm'), 'synthetic binding');
-  return { root, sourceRoot, output, pkg, world: 'unit-world', sourceHead: head, assetBindings, native, calls, write, stream, prefix, raw };
+  return { root, sourceRoot, output, pkg, world: 'unit-world', sourceHead: head, assetBindings, native, calls, write, stream, prefix, raw, header, headerHash, generation };
 }
+test('native-format header uses purpose-labelled multihash and preserves exact original namespace/bytes', t => {
+  const f = fixture(t), a = collectPublicInputs(f), name = 'views/lineage/zone/0/headers/' + f.headerHash;
+  assert.match(f.headerHash, /^1220[0-9a-f]{64}$/); assert.notEqual(f.headerHash.slice(4), sha(f.header));
+  assert.deepEqual(a.records.get(name).bytes, Buffer.from(f.header)); assert.match(f.generation, /^[0-9a-f]{64}$/);
+  const wrong = fixture(t); wrong.write('views/lineage/zone/0/headers/' + wrong.headerHash, Buffer.concat([wrong.header, Buffer.from([0])])); assert.throws(() => collectPublicInputs(wrong), /header-hash/);
+  for (const bad of ['1221' + '0'.repeat(64), '0'.repeat(64)]) { const b = fixture(t), p = JSON.parse(readFileSync(join(b.sourceRoot, b.stream, 'pointer'))); p.header = bad; b.write(b.stream + '/pointer', JSON.stringify(p)); assert.throws(() => collectPublicInputs(b), /pointer/); }
+});
 test('complete graph follows the public pointer and opaque index digest, never sibling audiences', t => {
   const f = fixture(t); f.write('views/do-not-read/private/pointer', 'not public');
   const a = collectPublicInputs(f); assert.equal(a.manifest.stream, '/s/w/unit-world/' + f.stream + '/');

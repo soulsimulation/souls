@@ -9,6 +9,8 @@ const require = createRequire(import.meta.url);
 // Ordinary fixture/origin imports do not load an app dependency until explicit sealing/verification.
 const decode = (...args) => require('../../apps/web/node_modules/cborg/cborg.js').decode(...args);
 const hash = b => createHash('sha256').update(b).digest('hex');
+// Native ids::Hash::of(Purpose::Header): profile text label followed by exact stored bytes, then multihash.
+const headerIdentity = bytes => '1220' + createHash('sha256').update(require('../../apps/web/node_modules/cborg/cborg.js').encode('souls/header/1')).update(bytes).digest('hex');
 const fail = reason => { throw Error('sealed-public-' + reason); };
 const safe = p => {
   if (typeof p !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(p) || p.startsWith('/') || p.split('/').some(s => !s || s.startsWith('.') || s === '_private' || /^(credentials(?:\.json)?|deploy\.env)$/.test(s))) fail('path');
@@ -67,9 +69,9 @@ export function collectPublicInputs({ sourceRoot, world, sourceHead, assetBindin
   const stream = safe(publicView.stream?.replace(/\/$/, ''));
   if (!stream.startsWith('views/') || !stream.endsWith('/everyone') || publicView.history !== 'history/') fail('public-view');
   const pointer = JSON.parse(native.readPointer(take(stream + '/pointer')));
-  if (!/^[a-f0-9]{64}$/.test(pointer.header) || !(pointer.newest === null || Number.isSafeInteger(pointer.newest) && pointer.newest >= 0)) fail('pointer');
+  if (!/^1220[a-f0-9]{64}$/.test(pointer.header) || !(pointer.newest === null || Number.isSafeInteger(pointer.newest) && pointer.newest >= 0)) fail('pointer');
   const headerName = posix.normalize(stream + '/../../../headers/' + pointer.header);
-  const header = take(headerName); if (hash(header) !== pointer.header) fail('header-hash');
+  const header = take(headerName); if (headerIdentity(header) !== pointer.header) fail('header-hash');
   let player, prefix = stream; const words = new Set();
   const text = name => { for (const [id] of textRows(take(name))) words.add(wordKey(id)); };
   try {
