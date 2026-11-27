@@ -25,7 +25,9 @@ use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token, View, ViewToken};
 use crate::views;
-use crate::world_link::{FRAME_MOST, KEPT_MOST, RESTARTING, SLOW_DOWN, Sent, sync_refused};
+use crate::world_link::{
+    FRAME_MOST, KEPT_MOST, RESTARTING, SLOW_DOWN, SYNCS_MOST, Sent, sync_refused,
+};
 use replica::sync::wire;
 use std::collections::BTreeMap;
 
@@ -781,8 +783,18 @@ fn take_intent(
             .collect();
         return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
-            // A sync request is not charged against KEPT_MOST (`ask` never answers `Full`).
-            Sent::Restarting | Sent::Full(_) => Some((sync_refused(n, RESTARTING), false)),
+            Sent::Restarting => Some((sync_refused(n, RESTARTING), false)),
+            // O8 (#2805): its agent's sync requests waiting for the world are at their bound (`SYNCS_MOST`): refused
+            // under its own number, never sent. The gauge is logged at each power of two.
+            Sent::Full(slowed) => {
+                if slowed.is_power_of_two() {
+                    (gw.log)(&format!(
+                        "an agent's sync requests waiting here reached {} KiB; {slowed} refused {SLOW_DOWN} so far",
+                        SYNCS_MOST >> 10
+                    ));
+                }
+                Some((sync_refused(n, SLOW_DOWN), false))
+            }
         };
     }
     let intent = match decode_intent(&bytes) {

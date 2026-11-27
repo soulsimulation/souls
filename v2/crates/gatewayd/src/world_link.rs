@@ -160,6 +160,14 @@ pub const TURN: usize = 4;
 pub const KEPT_MOST: usize = 256 << 10;
 /// What one kept intent's place in the gateway's maps is charged, bytes, besides its own.
 pub const KEPT_EACH: usize = 256;
+/// The most one agent's sync requests (R5b) waiting for the world's answer may hold at once, bytes (O8, #2805): each
+/// request's own and [`KEPT_EACH`], until the world answers it or goes away. A client's daemon asks one at a time, and
+/// a public name or two beside it; 64 KiB is about 200 of the smallest requests, or 15 of the largest. A client that
+/// asks faster than the world's sync thread answers is refused [`SLOW_DOWN`] at once, under its own number, and the
+/// request never reaches the world: unbounded, a flood of them held the gateway's queue to the world and its memory,
+/// and every honest agent's acts waited behind it (honest p95 10 times the no-attack arm's). Apart from
+/// [`KEPT_MOST`]: one concern, its own bound and gauge ([`Link::syncs_slowed`]).
+pub const SYNCS_MOST: usize = 64 << 10;
 /// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`]: send it again once one of
 /// them is answered.
 pub const SLOW_DOWN: &str = "agent.slow-down";
@@ -258,8 +266,8 @@ struct State {
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
     /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes, the asking socket's
-    /// session and the client's number.
-    syncs: BTreeMap<u64, (Vec<u8>, u64, Value)>,
+    /// session, the client's number and the request's charge against [`SYNCS_MOST`].
+    syncs: BTreeMap<u64, (Vec<u8>, u64, Value, usize)>,
     /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
     wake: Option<Wake>,
     asked: bool,
@@ -273,6 +281,9 @@ struct State {
     /// O8: each agent's kept intents' charge, bytes ([`KEPT_MOST`]), and the intents refused [`SLOW_DOWN`] (its gauge).
     charged: BTreeMap<Vec<u8>, usize>,
     slowed: u64,
+    /// O8: each agent's sync requests' charge, bytes ([`SYNCS_MOST`]), and the requests refused [`SLOW_DOWN`].
+    sync_charged: BTreeMap<Vec<u8>, usize>,
+    sync_slowed: u64,
 }
 
 /// What an answer from the world is to the gateway.
@@ -293,6 +304,16 @@ impl State {
             *c = c.saturating_sub(charge);
             if *c == 0 {
                 self.charged.remove(key);
+            }
+        }
+    }
+
+    /// A sync request of `key`'s, charged `charge`, was answered or given up.
+    fn sync_release(&mut self, key: &[u8], charge: usize) {
+        if let Some(c) = self.sync_charged.get_mut(key) {
+            *c = c.saturating_sub(charge);
+            if *c == 0 {
+                self.sync_charged.remove(key);
             }
         }
     }
@@ -448,7 +469,8 @@ impl Link {
     }
 
     /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out, from the
-    /// socket signed in as `session`, which alone is given its answer.
+    /// socket signed in as `session`, which alone is given its answer. It is charged against its agent's
+    /// [`SYNCS_MOST`] until answered, and refused ([`Sent::Full`]) when that would go over.
     pub fn ask(&self, key: Vec<u8>, session: u64, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
@@ -469,7 +491,14 @@ impl Link {
         let Ok(bytes) = encode(&Value::Map(ask)) else {
             return Sent::Restarting;
         };
-        s.syncs.insert(ours, (key, session, n));
+        let charge = bytes.len() + KEPT_EACH;
+        let held = s.sync_charged.get(&key).copied().unwrap_or(0);
+        if held + charge > SYNCS_MOST {
+            s.sync_slowed += 1;
+            return Sent::Full(s.sync_slowed);
+        }
+        s.sync_charged.insert(key.clone(), held + charge);
+        s.syncs.insert(ours, (key, session, n, charge));
         let _ = out.send(bytes);
         Sent::Sent
     }
@@ -486,6 +515,23 @@ impl Link {
             .unwrap_or_else(|e| e.into_inner())
             .out
             .is_some()
+    }
+
+    /// Sync requests sent and not yet answered.
+    pub fn syncs_waiting(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .syncs
+            .len()
+    }
+
+    /// Sync requests refused [`SLOW_DOWN`] since the gateway started (the gauge of [`SYNCS_MOST`]).
+    pub fn syncs_slowed(&self) -> u64 {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .sync_slowed
     }
 
     /// Intents sent and not yet answered.
@@ -583,13 +629,15 @@ impl Link {
             return None;
         };
         let ours = *ours;
-        let kept = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .syncs
-            .remove(&ours);
-        Some(kept.and_then(|(key, session, n)| {
+        let kept = {
+            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let kept = s.syncs.remove(&ours);
+            if let Some((key, _, _, charge)) = &kept {
+                s.sync_release(key, *charge);
+            }
+            kept
+        };
+        Some(kept.and_then(|(key, session, n, _)| {
             m.insert(wire::ASK, n);
             m.remove(&wire::ACTOR);
             Some((key, session, encode(&Value::Map(m)).ok()?))
@@ -630,7 +678,11 @@ impl Link {
         {
             wake();
         }
-        std::mem::take(&mut s.syncs).into_values().collect()
+        s.sync_charged.clear();
+        std::mem::take(&mut s.syncs)
+            .into_values()
+            .map(|(key, session, n, _)| (key, session, n))
+            .collect()
     }
 }
 
@@ -944,5 +996,48 @@ mod kept_tests {
         // The deadline sweep frees every place it answers.
         assert!(link.overdue(u64::MAX / 2).len() as u64 >= fits + 2);
         assert!(link.state.lock().unwrap().charged.is_empty());
+    }
+
+    /// O8 (#2805): one agent's sync requests waiting for the world are bounded by SYNCS_MOST, refused past it and never
+    /// sent, freed by the world's answer and when the world goes away; another agent's are not held by it.
+    #[test]
+    fn o8_an_agents_sync_requests_are_bounded_and_freed() {
+        let link = Link::default();
+        let mut queue = link.connected();
+        let ((key, _), (other, _)) = (soul(1), soul(2));
+        let ask = |key: &Vec<u8>, n: u64| {
+            let a = BTreeMap::from([(wire::IDS, Value::Array(Vec::new()))]);
+            link.ask(key.clone(), 1, Value::Uint(n), a)
+        };
+        let mut n = 0;
+        while ask(&key, n) == Sent::Sent {
+            n += 1;
+            assert!(n < 10_000, "never refused");
+        }
+        let fits = n;
+        assert!(fits >= 100, "far above a daemon's one at a time: {fits}");
+        assert_eq!(ask(&key, n + 1), Sent::Full(2));
+        assert_eq!(link.syncs_slowed(), 2);
+        assert_eq!(link.syncs_waiting() as u64, fits, "a refused request is not kept");
+        let mut sent = Vec::new();
+        while let Ok(b) = queue.try_recv() {
+            sent.push(b);
+        }
+        assert_eq!(sent.len() as u64, fits, "nor sent to the world");
+        // Another agent asks freely.
+        assert_eq!(ask(&other, 0), Sent::Sent);
+        // The world's answer to one frees its place: the next is taken.
+        let ours = match decode(&sent[0]).unwrap().value {
+            Value::Map(m) => m.get(&wire::ASK).cloned().unwrap(),
+            _ => unreachable!(),
+        };
+        let answer = encode(&Value::Map([(wire::ASK, ours), (1, Value::Array(Vec::new()))].into())).unwrap();
+        assert!(matches!(link.sync_answered(&answer), Some(Some(_))));
+        assert_eq!(ask(&key, n + 2), Sent::Sent);
+        // The world going away gives up every request and frees every place.
+        assert_eq!(link.disconnected().len() as u64, fits + 1);
+        assert!(link.state.lock().unwrap().sync_charged.is_empty());
+        let _queue = link.connected();
+        assert_eq!(ask(&key, n + 3), Sent::Sent);
     }
 }
