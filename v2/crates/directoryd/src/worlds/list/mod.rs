@@ -353,6 +353,21 @@ impl<S: Store> Worlds<S> {
         Ok(ended)
     }
 
+    /// Rule 10 for a click asked again: whether its create ended before (past [`PLACE_WITHIN`], unready, and no row of
+    /// its name and lineage left on the list), so the click never makes its world again.
+    fn ended(&self, inner: &Inner<S>, row: &Json, now: u64) -> R<bool> {
+        let made = row.get("made").and_then(Json::as_u64);
+        if row.get("ready") != Some(&Json::Bool(false))
+            || made.is_none_or(|m| now < m.saturating_add(PLACE_WITHIN))
+        {
+            return Ok(false);
+        }
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        Ok(!rows
+            .iter()
+            .any(|r| r.get("name") == row.get("name") && r.get("lineage") == row.get("lineage")))
+    }
+
     /// Rule 10 for one row: whether its create ended now. A row that is ready, has no `ready: false`, is within
     /// [`PLACE_WITHIN`] or whose placement is not known stays; one the placement did place is marked ready.
     fn end_if_stale(&self, inner: &mut Inner<S>, row: &Json, now: u64) -> R<bool> {
@@ -554,7 +569,9 @@ impl<S: Store> Worlds<S> {
                         "this click already names a different world request",
                     );
                 }
-                if self.end_if_stale(inner, &value["row"], now)? {
+                if self.end_if_stale(inner, &value["row"], now)?
+                    || self.ended(inner, &value["row"], now)?
+                {
                     return refuse(
                         "create-failed",
                         format!(
