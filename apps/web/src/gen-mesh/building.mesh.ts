@@ -54,6 +54,9 @@ registerMesh({
       templates.set(key, tpl);
     }
     const g = tpl.clone(true);
+    // Canonical polygons are before L.yaw. The consumer reads this inner world matrix once.
+    g.children[0].userData.cameraEnclosure = cameraBuildingHints(L, ctx.def.hash+':'+hashStr(key), ctx.params, ctx.args);
+    g.children[0].userData.cameraEnclosureId = ctx.entity.id;
     g.userData = { ...tpl.userData };
     if (!ctx.canonicalContext) attachInteriorView(g, L); else removeShadowProxies(g);   // a canonical capture: no render-time hooks at all
     return g;
@@ -61,6 +64,17 @@ registerMesh({
   // no instanceKey: the interior view hides storeys per building per frame, which instancing would lose;
   // the geometry is still shared (one template per def/params/paint, cloned).
 });
+
+/** Small immutable authored hints; no render-cut callbacks or current door-state claim. */
+export function cameraBuildingHints(L: BuildingLayout, revision: string, params: Record<string, unknown> = {}, args: Record<string, unknown> = {}) {
+  const extent=Object.freeze([-L.W/2,0,-L.D/2,L.W/2,L.wallTop+L.roofRise,L.D/2]);
+  const refused = (reason: string) => Object.freeze({schema:'building-camera/1',revision,reason,extent:reason==='metadata-cap'?extent:null});
+  if (['taper','bend','skew'].some(k => Number(params[k] ?? 0) !== 0) || Array.isArray(args.looks_table) && args.looks_table.length) return refused('unsupported-deformation');
+  if (L.rooms.length > 32 || L.openings.length > 128 || L.rooms.some(r => r.poly.length > 64) || L.rooms.reduce((n,r)=>n+r.poly.length,0)>512) return refused('metadata-cap');
+  const rooms=L.rooms.map(r=>Object.freeze({id:r.id.slice(0,96),floor:r.floor,y:r.y,height:r.height,poly:Object.freeze(r.poly.map(p=>Object.freeze([...p])))}));
+  const openings=L.openings.map(o=>Object.freeze({kind:o.kind,floor:o.floor,at:Object.freeze([...o.at]),width:o.width,height:o.height,sill:o.sill,from:o.from?.slice(0,96)??null,to:o.to?.slice(0,96)??null}));
+  return Object.freeze({schema:'building-camera/1',revision,extent,open:L.open,rooms:Object.freeze(rooms),openings:Object.freeze(openings)});
+}
 
 // ---------------------------------------------------------------- lane W1: building geometry in workers
 // A world's first build hands every building to building.worker.ts (two workers) before it starts, so the ~0.3 s of
