@@ -232,6 +232,7 @@ fn subtree(tree: &Tree, id: Id) -> Vec<Id> {
 /// unset (`replica::edit::claims::neutral`, and on the world's root `replica::sky::unset_on_world`), so such a field
 /// and its absence are the same state.
 fn settled(tree: &Tree, id: Id) -> Option<Hash> {
+    // The world's root is the node with no parent, as `inverse` takes it.
     let root = tree
         .handle(id)
         .and_then(|h| tree.node(h))

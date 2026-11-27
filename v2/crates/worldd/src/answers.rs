@@ -9005,12 +9005,12 @@ mod tests {
         );
     }
 
-    /// #5177's review: a second Undo after one that left an unset value. A god clears the arrival (an edit of the
-    /// world node), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each admitted,
+    /// #5177's review: a second Undo after one that left an unset value. A god claims an area (an edit of the world
+    /// node, field 140 new), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each admitted,
     /// as the page and the agent send them (`souls:edit` `{5: 1}` / `{5: 2}`): before, the second Undo was refused
     /// `undo.conflict`, since the storm's undo left 65 at `0` and 69 at `[]`. The world node ends as the storm left it.
     #[test]
-    fn undo_twice_and_redo_twice_across_a_weather_edit_and_an_arrival() {
+    fn undo_twice_and_redo_twice_across_a_weather_edit_and_a_claim() {
         use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
         use replica::edit::{Op, Ref};
         use replica::sky::{self, int};
@@ -9038,7 +9038,15 @@ mod tests {
             field,
             to,
         };
-        let arrival = vec![set(replica::arrival::F_ARRIVAL, Value::Array(Vec::new()))];
+        let claim = Value::Array(vec![Value::Array(vec![
+            Value::Text(Name::new("c:a").unwrap()),
+            Value::Text(Name::new("part:a").unwrap()),
+            Value::Nint(9_999),
+            Value::Nint(9_999),
+            Value::Uint(10_000),
+            Value::Uint(10_000),
+        ])]);
+        let claimed = vec![set(replica::edit::claims::F_CLAIMS, claim.clone())];
         let storm = vec![
             set(
                 sky::F_WEATHER,
@@ -9094,17 +9102,17 @@ mod tests {
             (kind, reason, *version)
         };
         // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
-        let (kind, _, now) = run(intent(1, 0, parameters(&arrival)));
+        let (kind, _, now) = run(intent(1, 0, parameters(&claimed)));
         assert_eq!(kind, 2, "stale");
         let steps = [
-            ("the arrival is cleared", parameters(&arrival)),
+            ("the area is claimed", parameters(&claimed)),
             ("the storm is set", parameters(&storm)),
             ("the storm is undone", parameters_of(&Asked::Undo)),
             (
-                "the arrival is undone, past the storm's unset values",
+                "the claim is undone, past the storm's unset values",
                 parameters_of(&Asked::Undo),
             ),
-            ("the arrival is redone", parameters_of(&Asked::Redo)),
+            ("the claim is redone", parameters_of(&Asked::Redo)),
             ("the storm is redone", parameters_of(&Asked::Redo)),
         ];
         let mut now = now;
@@ -9131,10 +9139,9 @@ mod tests {
                 roots.push(tree.node(tree.root()).unwrap().fields().clone());
             }
         }
-        // The arrival's clear, the storm, the two undos and the storm's redo. The arrival's redo has nothing to
-        // write: the clear and the unset arrival read alike (the empty list).
-        let [cleared, stormy, _, undone, redone] = &roots[..] else {
-            panic!("five creator parts: {}", roots.len())
+        // The claim, the storm, the two undos and the two redos.
+        let [claimed, stormy, _, undone, reclaimed, redone] = &roots[..] else {
+            panic!("six creator parts: {}", roots.len())
         };
         let weather = |f: &BTreeMap<u64, Value>| {
             [
@@ -9142,20 +9149,30 @@ mod tests {
                 sky::F_RAIN,
                 sky::F_WEATHER_UNTIL,
                 sky::F_STRIKE,
-                replica::arrival::F_ARRIVAL,
+                replica::edit::claims::F_CLAIMS,
             ]
             .map(|k| f.get(&k).cloned())
         };
         assert_eq!(
             undone.get(&sky::F_WEATHER),
-            cleared.get(&sky::F_WEATHER),
+            claimed.get(&sky::F_WEATHER),
             "both undone: the weather before the storm"
         );
         assert_eq!(undone.get(&sky::F_STRIKE), Some(&Value::Array(Vec::new())));
         assert_eq!(
+            undone.get(&replica::edit::claims::F_CLAIMS),
+            Some(&Value::Array(Vec::new())),
+            "both undone: no claim"
+        );
+        assert_eq!(
+            reclaimed.get(&replica::edit::claims::F_CLAIMS),
+            Some(&claim),
+            "the claim is back"
+        );
+        assert_eq!(
             weather(redone),
             weather(stormy),
-            "both redone: the storm and the arrival are back"
+            "both redone: the storm and the claim are back"
         );
     }
 

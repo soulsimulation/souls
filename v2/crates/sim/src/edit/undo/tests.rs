@@ -574,11 +574,13 @@ fn a4_an_unset_value_an_undo_left_does_not_block_the_next_undo_or_the_redos() {
 }
 
 /// A real change since the batch is still a conflict by name, an unset value included: another writer's strike on
-/// the field the first undo left unset, or its weather kind.
+/// the field the first undo left unset, its weather kind, or its clearing of the claim (a real value to unset).
 #[test]
 fn a4_another_writers_change_after_an_unset_is_still_a_conflict() {
+    use replica::edit::claims::F_CLAIMS;
     use replica::sky::{F_STRIKE, F_WEATHER};
     for (field, to) in [
+        (F_CLAIMS, Value::Array(Vec::new())),
         (
             F_STRIKE,
             Value::Array(vec![Value::Uint(5), Value::Uint(5), Value::Uint(0)]),

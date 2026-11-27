@@ -105,7 +105,7 @@ pub(crate) fn node_value(tree: &Tree, id: Id) -> Option<Value> {
 
 /// A node's hash (the module's notes), or none for a node not here.
 pub fn node_hash(tree: &Tree, id: Id) -> Option<Hash> {
-    node_hash_without(tree, id, |_, _| false)
+    hash_of(tree, id, node_value(tree, id)?)
 }
 
 /// A node's hash as [`node_hash`], with each field that `unset` names (by number and value) left out: G4's conflict
@@ -117,6 +117,11 @@ pub fn node_hash_without(tree: &Tree, id: Id, unset: impl Fn(u64, &Value) -> boo
     {
         fields.retain(|k, f| !unset(*k, f));
     }
+    hash_of(tree, id, v)
+}
+
+/// The hash of `v`, node `id`'s state as its hash covers it.
+fn hash_of(tree: &Tree, id: Id, v: Value) -> Option<Hash> {
     let purpose = match tree.node(tree.handle(id)?)?.audience() {
         Audience::Everyone => Purpose::StatePublic,
         Audience::Of(_) => Purpose::StatePrivate,
