@@ -56,3 +56,69 @@ test('a gesture that loses the lectern fails the composition before question or 
     'place-taking forms precede the activity that binds those same role links');
   assert(!calls.some((row) => row[2]?.startsWith('post_question:')));
 });
+
+function meetingCast({ refusal = 'already_linked', leaveRises = false, stuckActivity = false } = {}) {
+  const calls = [], events = [], parents = Array(5).fill('ground'); let pending = false, sequence = 0;
+  const interrupted = new Map();
+  const seats = Array.from({ length: 5 }, (_, index) => ({ label: `Person${index}`, soul: `soul${index}`, body: `body${index}`,
+    cli: async (...words) => {
+      calls.push({ index, words }); events.push(`command:${index}:${words[0]}:${words[1]}`);
+      const [verb, form] = words;
+      if (verb === 'inspect') return { ok: true, parent: parents[index] };
+      if (verb === 'look') return { ok: true, doing: stuckActivity ? ['round-of-applause'] : [] };
+      if (verb === 'can') return pending ? { can: 'no', reason: refusal, says: 'question_pending' } : { can: 'yes' };
+      if (verb === 'receipt') {
+        const replaced = interrupted.get(Number(form));
+        return { ok: true, receipt: { going: !replaced, answers: [replaced ? { answer: 'refused', reason: 'left', at: 2 } : { answer: 'accepted', at: 1 }] } };
+      }
+      if (verb === 'together' && form === 'leave' && leaveRises) parents[index] = 'ground';
+      if (verb === 'act') {
+        if (form.startsWith('take_the_lectern:')) parents[index] = 'lectern';
+        if (form.startsWith('attend:')) parents[index] = words.find(w => w.startsWith('seat=')).slice(5).split('/')[0];
+        if (form === 'rise' || form.startsWith('step_down:') || form.startsWith('post_question:')) parents[index] = 'ground';
+        if (form.startsWith('post_question:')) pending = true;
+        if (form.startsWith('withdraw_question:')) pending = false;
+        if (form === 'wave') assert(words.includes('for=1'), 'public wave requires a duration');
+        if (form === 'tell_story' && !words.includes('--wait')) { interrupted.set(++sequence, false); return { ok: true, sequence }; }
+        if (form === 'point') for (const key of interrupted.keys()) interrupted.set(key, true);
+      }
+      return receipt();
+    } }));
+  const observe = async (stage, { seat } = {}) => { events.push(`observe:${seat?.label}:${stage}`); };
+  return { seats, calls, events, observe };
+}
+
+test('full existing meeting observes command-start before sit, seated wave with its argument, question recovery and final cleanup', async () => {
+  const cast = meetingCast();
+  const result = await performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'], interruptStory: true });
+  assert.equal(result.presentations, 2); assert.equal(result.handover, true); assert.equal(result.interruptedStories, 2);
+  const firstSit = cast.events.indexOf('command:1:act:attend:lectern');
+  assert(cast.events.indexOf('observe:Person1:attend-start') < firstSit);
+  assert(cast.events.indexOf('observe:Person1:attend-done') > firstSit);
+  const stages = cast.events.filter(e => e.startsWith('observe:'));
+  assert.equal(stages.filter(e => e.endsWith(':rise-done')).length, 8);
+  assert(stages.indexOf('observe:Person1:question-refused') < stages.indexOf('observe:Person1:question-recovered'));
+  assert.equal(stages.at(-1), 'observe:undefined:conference-clean');
+  for (let i = 0; i < 5; i++) assert(cast.calls.some(c => c.index === i && c.words[0] === 'together' && c.words[1] === 'leave' && c.words[2] === 'round-of-applause'));
+});
+
+test('activity-driven rise is observed from before leaving without issuing a redundant rise', async () => {
+  const cast = meetingCast({ leaveRises: true });
+  await performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'] });
+  assert.equal(cast.calls.filter(c => c.words[0] === 'act' && c.words[1] === 'rise').length, 1, 'questioner rises explicitly; activity departures already released other seats');
+  assert.equal(cast.events.filter(e => e.endsWith(':rise-done')).length, 8);
+});
+
+test('an unrelated question refusal stops the meeting before recovery or handover', async () => {
+  const cast = meetingCast({ refusal: 'out_of_reach' });
+  await assert.rejects(performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'] }), /occupied question link/);
+  assert(!cast.events.some(e => e.endsWith(':question-recovered') || e.endsWith(':introduction-start')));
+});
+
+test('cleanup cannot pass when an ordinary look still reports the activity', async () => {
+  const cast = meetingCast(); let looks = 0;
+  // The introduction's first look ends it; subsequent final cleanup read must reject a lingering activity.
+  for (const seat of cast.seats) { const cli = seat.cli; seat.cli = async (...words) => words[0] === 'look' && ++looks > 1 ? { ok: true, doing: ['round-of-applause'] } : cli(...words); }
+  await assert.rejects(performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'] }), /activities must end/);
+  assert(!cast.events.some(e => e.endsWith(':conference-clean')));
+});

@@ -90,15 +90,22 @@ function conferenceCommands(record) {
   return { command, act, body, parent, offer, leave };
 }
 
-export async function assembleConference({ seats, lecture, benches, record = () => {} }) {
+export async function assembleConference({ seats, lecture, benches, record = () => {}, observe = async () => {} }) {
   assert.equal(seats.length, 5, 'one speaker and four listeners');
   const [speaker, ...listeners] = seats, { act, offer } = conferenceCommands(record);
   // Forms take their places first. Offering first binds the same links, so taking a place then can refuse link-full.
+  await observe('assembly-start', { seat: speaker, listeners });
   await act(speaker, 'take_the_lectern', lecture, 'place=lectern');
+  await observe('lectern-ready', { seat: speaker });
   for (let index = 0; index < listeners.length; index++) {
-    await act(listeners[index], 'attend', lecture, `seat=${benches[Math.floor(index / 2)]}/${index % 2 ? 'right' : 'left'}`);
+    const seat = listeners[index], bench = benches[Math.floor(index / 2)];
+    // Mark before the command starts: a terminal receipt alone cannot witness sit entry.
+    await observe('attend-start', { seat, bench });
+    await act(seat, 'attend', lecture, `seat=${bench}/${index % 2 ? 'right' : 'left'}`);
+    await observe('attend-done', { seat, bench });
   }
   await offer(speaker, 'hall-lecture', listeners);
+  await observe('lecture-ready', { seat: speaker, listeners });
 }
 
 export async function explainConference({ speaker, lecture, question, record = () => {}, storyRepeats = 1, interruptStory = false, observe = async () => {} }) {
@@ -106,7 +113,11 @@ export async function explainConference({ speaker, lecture, question, record = (
   const { command, body, parent } = conferenceCommands(record);
   assert.equal(await parent(speaker), lecture, 'speaker is at the lectern');
   // Each native action remains four seconds; repeated ordinary actions expose the global-clock phrase cycle.
-  for (let repeat = 0; repeat < storyRepeats; repeat++) await body(speaker, 'tell_story');
+  for (let repeat = 0; repeat < storyRepeats; repeat++) {
+    await observe('story-start', { seat: speaker, repeat });
+    await body(speaker, 'tell_story');
+    await observe('story-complete', { seat: speaker, repeat });
+  }
   assert.equal(await parent(speaker), lecture, 'story gesture preserves the lectern');
   let interrupted;
   if (interruptStory) {
@@ -121,7 +132,7 @@ export async function explainConference({ speaker, lecture, question, record = (
       assert(Date.now() < until, 'story run-start progress missing');
       await sleep(50);
     }
-    await observe('tell-story', { sequence: interrupted.sequence });
+    await observe('tell-story', { seat: speaker, sequence: interrupted.sequence });
     await sleep(250); // Real-speed demonstration interval after the observed native start.
   }
   await body(speaker, 'point', `toward=${question}`);
@@ -130,46 +141,64 @@ export async function explainConference({ speaker, lecture, question, record = (
     const receipt = await command(speaker, 'receipt', String(interrupted.sequence));
     const end = receipt.receipt?.answers?.at(-1);
     assert(end?.answer === 'refused' && end.reason === 'left', 'story replacement must end with native refused:left');
-    await observe('point');
+    await observe('point', { seat: speaker });
     await body(speaker, 'clap', 'for=1');
     assert.equal(await parent(speaker), lecture, 'next gesture preserves the lectern');
-    await observe('settled');
+    await observe('settled', { seat: speaker });
   }
   return { interrupted: Boolean(interrupted), storyActions: storyRepeats };
 }
 
-export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false }) {
+export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false, observe = async () => {} }) {
   assert.equal(seats.length, 5, 'one speaker and four listeners');
   const [presenter, next] = seats;
   let interruptedStories = 0;
   const { command, act, body, parent, offer, leave } = conferenceCommands(record);
-  const assemble = (speaker, listeners) => assembleConference({ seats: [speaker, ...listeners], lecture, benches, record });
-  const explain = async speaker => { const result = await explainConference({ speaker, lecture, question, record, storyRepeats, interruptStory }); interruptedStories += Number(result.interrupted); };
+  const assemble = (speaker, listeners) => assembleConference({ seats: [speaker, ...listeners], lecture, benches, record, observe });
+  const explain = async speaker => { const result = await explainConference({ speaker, lecture, question, record, storyRepeats, interruptStory, observe }); interruptedStories += Number(result.interrupted); };
   async function closeLecture(speaker, listeners) {
     // Successful permission-checked step_down also proves the speaker link survived the gestures.
+    await observe('departure-start', { seat: speaker, listeners });
+    // Leaving an activity may itself release a seat. Observe before that command as well as any explicit rise.
+    const seated = [];
+    for (const listener of listeners) if (benches.includes(await parent(listener))) {
+      seated.push(listener); await observe('rise-start', { seat: listener });
+    }
     await act(speaker, 'step_down', lecture);
     for (const listener of listeners) await leave(listener, 'hall-lecture');
     await leave(speaker, 'hall-lecture');
-    for (const listener of listeners) {
-      // A questioner has already stood and walked to the question stand.
+    for (const listener of seated) {
       if (benches.includes(await parent(listener))) await body(listener, 'rise');
+      await observe('rise-done', { seat: listener });
     }
   }
   await assemble(presenter, seats.slice(1));
   await explain(presenter);
-  await body(next, 'wave');
+  const audienceBench = await parent(next);
+  assert(benches.includes(audienceBench), 'questioner begins in an audience seat');
+  await observe('seated-wave-start', { seat: next });
+  await body(next, 'wave', 'for=1');
+  assert.equal(await parent(next), audienceBench, 'audience gesture preserves its seat');
+  await observe('seated-wave-done', { seat: next });
+  await observe('rise-start', { seat: next });
   await body(next, 'rise');
+  await observe('rise-done', { seat: next });
+  await observe('question-start', { seat: next });
   await act(next, 'post_question', question, 'words=How do the parts fit together?');
+  await observe('question-posted', { seat: next });
   const occupied = await command(next, 'can', `post_question:${question}`, 'words=Another question');
   assert.equal(occupied.can, 'no', 'an author cannot replace a pending question silently');
   assert.equal(occupied.reason, 'already_linked', 'the refusal names the occupied question link');
   assert.equal(occupied.says, 'question_pending', 'the refusal identifies the authored pending-question guidance');
+  await observe('question-refused', { seat: next, answer: occupied });
   await body(presenter, 'tell_story');
   await act(next, 'mark_answered', question);
   await act(next, 'withdraw_question', question);
   assert.equal((await command(next, 'can', `post_question:${question}`, 'words=Another question')).can, 'yes',
     'withdrawing makes the question stand usable again');
+  await observe('question-recovered', { seat: next });
   await closeLecture(presenter, seats.slice(1));
+  await observe('introduction-start', { seat: presenter, guest: next });
   await offer(presenter, 'speaker-introduction', [next]);
   // Observe its actual end, including the walk to its places, before attempting the next activity.
   for (const until = Date.now() + 30000;;) {
@@ -178,14 +207,23 @@ export async function performConference({ seats, lecture, benches, question, rec
     assert(Date.now() < until, 'the introduction must finish before the next presentation');
     await sleep(200);
   }
+  await observe('introduction-done', { seat: presenter, guest: next });
   const listeners = [presenter, ...seats.slice(2)];
   await assemble(next, listeners);
   await explain(next);
   await closeLecture(next, listeners);
+  await observe('applause-start', { seat: next, listeners });
   await offer(next, 'round-of-applause', listeners);
   await sleep(3500);
   // Every participant leaves; no background activity is kept running after the demonstration.
   for (const seat of [...listeners, next]) await leave(seat, 'round-of-applause');
+  for (const seat of seats) {
+    const look = await command(seat, 'look');
+    assert.equal(look.ok, true, 'conference cleanup read succeeds');
+    assert(!(look.doing ?? []).some(line => /hall-lecture|speaker-introduction|round-of-applause/.test(line)),
+      'conference activities must end after all participants leave');
+  }
+  await observe('conference-clean', { seats });
   return { people: seats.length, presentations: 2, question: 'posted-answered-withdrawn', handover: true, interruptedStories };
 }
 

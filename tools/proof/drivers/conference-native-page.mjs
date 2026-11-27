@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
-import { assembleConference, discoverConference, explainConference } from '../../playtest/conference/rehearse.mjs';
+import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
 import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
@@ -32,7 +32,8 @@ export function conferenceObservation(frame, soul) {
   for (let i = 0; i < phaseID.length; i++) h = Math.imul(h ^ phaseID.charCodeAt(i), 16777619);
   const phase = (((frame.tick * frame.dt + ((h >>> 0) % 10007) / 10007 * 7) * .23) % 3 + 3) % 3;
   return { at: frame.at, tick: frame.tick, renderFrame: frame.renderFrame, entity, activity: resident.activity,
-    renderActivityAge: resident.activityAge, phase: Math.floor(phase) };
+    renderActivityAge: resident.activityAge, phase: Math.floor(phase),
+    seated: frame.entities[entity].state?.baseActivity === 'sit' && frame.entities[entity].state?.seatHeight > 0 };
 }
 export function conferenceJourney(frames, soul) {
   assert(frames.length >= 2, 'conference depicted samples missing');
@@ -45,6 +46,104 @@ export function conferenceJourney(frames, soul) {
   const settled = observed.slice(lastGesture + 1);
   assert(settled.length >= 2 && settled.at(-1).tick > settled[0].tick, 'conference settled endpoint not depicted');
   return { phases: [...phases].sort(), firstTick: observed[0].tick, lastTick: observed.at(-1).tick, entity: observed[0].entity };
+}
+
+// These are observations of the page's public depicted state, not inputs to its animation.
+export function conferenceMeetingStage(frames, stages, event) {
+  const starts = {
+    'attend-done': 'attend-start', 'story-complete': 'story-start',
+    'seated-wave-done': 'seated-wave-start', 'rise-done': 'rise-start',
+    point: 'tell-story', settled: 'tell-story', 'question-posted': 'question-start',
+    'introduction-done': 'introduction-start', 'conference-clean': 'applause-start',
+  };
+  const before = stages.slice(0, stages.indexOf(event));
+  const start = starts[event.stage] && before.findLast(s => s.stage === starts[event.stage] && s.soul === event.soul);
+  if (starts[event.stage]) assert(start, `conference ${event.stage} has no command-start marker`);
+  const window = frames.slice(start?.frameIndex ?? event.frameIndex, event.endFrameIndex === undefined ? undefined : event.endFrameIndex + 1);
+  assert(window.length >= 2, `conference ${event.stage} depicted samples missing`);
+  assert(window.at(-1).tick > window[0].tick && window.at(-1).renderFrame > window[0].renderFrame,
+    `conference ${event.stage} depicted clock stale`);
+  const person = soul => window.map(frame => conferenceObservation(frame, soul));
+  const seen = event.soul ? person(event.soul) : [];
+  const after = predicate => {
+    const index = seen.findLastIndex(predicate), tail = seen.slice(index + 1);
+    assert(index >= 0 && tail.length >= 2 && tail.at(-1).tick > tail[0].tick, `conference ${event.stage} return not depicted`);
+    return tail;
+  };
+  switch (event.stage) {
+    case 'lectern-ready':
+      assert(seen.at(-1).activity === 'idle' && !seen.at(-1).seated, 'standing lectern not depicted'); break;
+    case 'attend-done': {
+      const sat = seen.findIndex(s => s.seated && s.activity === 'sit');
+      assert(sat > 0 && seen.slice(0, sat).some(s => !s.seated), 'conference sit entry not depicted');
+      assert(seen.at(-1).seated && seen.at(-1).activity === 'sit', 'conference seated endpoint missing'); break;
+    }
+    case 'lecture-ready':
+      for (const soul of event.listeners) assert(person(soul).at(-1).seated, 'conference listener not seated'); break;
+    case 'story-complete':
+      assert(after(s => s.activity === 'tell-story').every(s => s.activity === 'idle'), 'conference normal story return missing'); break;
+    case 'tell-story': {
+      const current = seen.at(-1);
+      assert(current.activity === 'tell-story' && Number.isFinite(current.renderActivityAge) && current.renderActivityAge < 1.5,
+        'conference started story not currently depicted'); break;
+    }
+    case 'point': assert(seen.some(s => s.activity === 'point'), 'conference replacement point not depicted'); break;
+    case 'settled':
+      for (const action of ['point', 'clap']) assert(seen.some(s => s.activity === action), `conference next ${action} not depicted`);
+      assert(after(s => s.activity === 'clap').every(s => s.activity === 'idle'), 'conference next-action rest missing'); break;
+    case 'seated-wave-done': {
+      const tail = after(s => s.activity === 'wave');
+      assert(seen.filter(s => s.activity === 'wave').every(s => s.seated), 'wave lost underlying seat');
+      assert(tail.every(s => s.seated && s.activity === 'sit'), 'seated gesture did not return seated'); break;
+    }
+    case 'rise-done': {
+      const tail = seen.slice(-2);
+      assert(seen.some(s => s.seated) && tail.length === 2 && tail[1].tick > tail[0].tick &&
+        tail.every(s => s.activity === 'idle' && !s.seated), 'conference rise from seat not depicted'); break;
+    }
+    case 'question-posted':
+      assert(seen.some(s => s.activity === 'operate' && !s.seated), 'standing question action not depicted'); break;
+    case 'introduction-done':
+      assert(seen.some(s => s.activity === 'point') && person(event.guest).some(s => s.activity === 'bow'),
+        'conference introduction gestures not depicted'); break;
+    case 'conference-clean':
+      for (const soul of event.seats) {
+        const participant = person(soul);
+        assert(participant.some(s => s.activity === 'clap'), 'conference group applause not depicted');
+        const tail = participant.slice(-2);
+        assert(tail.length === 2 && tail.every(s => s.activity === 'idle' && !s.seated) && tail[1].tick > tail[0].tick,
+          'conference final standing rest not depicted');
+      }
+      break;
+    default: throw Error(`unknown conference observation stage ${event.stage}`);
+  }
+  return { stage: event.stage, firstTick: window[0].tick, lastTick: window.at(-1).tick };
+}
+
+export function conferenceMeetingJourney(frames, stages, seats) {
+  assert.equal(seats.length, 5, 'conference meeting requires five participants');
+  const counts = { 'attend-done': 8, 'lectern-ready': 2, 'lecture-ready': 2, 'story-complete': 2,
+    'seated-wave-done': 1, 'rise-done': 8, point: 2, settled: 2,
+    'question-posted': 1, 'question-refused': 1, 'question-recovered': 1, 'introduction-done': 1, 'conference-clean': 1 };
+  for (const [stage, count] of Object.entries(counts)) assert.equal(stages.filter(s => s.stage === stage).length, count,
+    `conference ${stage} stage coverage incomplete`);
+  const assemblies = stages.filter(s => s.stage === 'assembly-start');
+  assert.equal(assemblies.length, 2, 'conference both assemblies must be captured');
+  assert.notEqual(assemblies[0].soul, assemblies[1].soul, 'conference handover must change speaker');
+  for (let i = 0; i < assemblies.length; i++) {
+    const from = stages.indexOf(assemblies[i]), to = i + 1 < assemblies.length ? stages.indexOf(assemblies[i + 1]) : stages.length;
+    assert.deepEqual(stages.slice(from, to).filter(s => s.stage === 'attend-done').map(s => s.soul).sort(),
+      [...assemblies[i].listeners].sort(), 'conference entry coverage must name every listener in that assembly');
+  }
+  for (const event of stages) if (event.observed) conferenceMeetingStage(frames, stages, event);
+  assert(stages.filter(e => counts[e.stage] && !['question-refused', 'question-recovered'].includes(e.stage)).every(e => e.observed),
+    'conference depicted stage unfinished');
+  const refused = stages.find(s => s.stage === 'question-refused');
+  assert(refused.answer?.can === 'no' && refused.answer.reason === 'already_linked' && refused.answer.says === 'question_pending',
+    'conference unrelated refusal cannot qualify question recovery');
+  assert(stages.indexOf(stages.find(s => s.stage === 'question-recovered')) > stages.indexOf(refused), 'conference recovery precedes refusal');
+  return { people: seats.length, entryTransitions: 8, rises: 8, question: 'posted-refused-recovered', presentations: 2,
+    firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
 }
 
 export async function prepare({ base, paths, recipe, signal }) {
@@ -69,8 +168,8 @@ export async function prepare({ base, paths, recipe, signal }) {
   ]);
   state.fixtures = conferenceFixtures({ lecterns, questions, benches });
   state.discovery = await discoverConference({ seat: state.seats[0], ...state.fixtures, record: state.record });
-  await assembleConference({ seats: state.seats, ...state.fixtures, record: state.record });
-  save(paths, 'conference-discovery.json', { fixtures: state.fixtures, discovery: state.discovery, rows: state.rows });
+  save(paths, 'command-conference-discovery.json', { fixtures: state.fixtures, discovery: state.discovery, rows: state.rows,
+    servedClient: JSON.parse(readFileSync(join(paths.dir, 'conference-served-client.json'), 'utf8')) });
   return { people: state.seats.length, fixtures: state.fixtures };
 }
 
@@ -96,11 +195,11 @@ export function conferenceBrowserStop() {
 export function conferenceFinalization(page, paths, state) {
   state.persistSequence = () => {
     if (state.sequenceSaved) return;
-    save(paths, 'conference-sequence.json', {
-      qualification: 'concise storytelling diagnostic; full question, handover and independent-agent acceptance remain open',
+    save(paths, 'command-conference-sequence.json', {
+      qualification: 'ordinary fixed-sequence conference diagnostic; independent-agent, creator and actual visual/contact acceptance remain separate',
       stage: 'before-observer-collection',
       result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
-      depictedJourney: state.depictedJourney ?? null,
+      depictedJourney: state.depictedJourney ?? null, stages: state.stages ?? [],
       frameReads: state.frameReads ?? [], frameReadErrors: state.frameReadErrors ?? [], finalizationError: state.finalizationError ?? null,
     });
     state.sequenceSaved = true;
@@ -112,14 +211,14 @@ export function conferenceFinalization(page, paths, state) {
       const draw = await page.evaluate(conferenceBrowserStop);
       assert(draw || !state.observerInstalled, 'conference installed observer collection missing');
       if (draw) {
-        save(paths, 'conference-final-draw.json', draw);
+        save(paths, 'command-conference-final-draw.json', draw);
         assert(draw.samples?.length >= 2 && draw.failures?.length === 0, 'conference final collection missing or failed');
       }
       state.finalizationOutcome = { ok: Boolean(draw), samples: draw?.samples?.length ?? 0, failures: draw?.failures ?? [], reason: draw ? null : 'observer not installed' };
     } catch (error) {
       state.finalizationOutcome = { ok: false, error: String(error) }; throw error;
     } finally {
-      save(paths, 'conference-finalization.json', state.finalizationOutcome);
+      save(paths, 'command-conference-finalization.json', state.finalizationOutcome);
     }
   })();
 }
@@ -208,7 +307,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       qualification: 'all stride1 vertices measured; bounded per-part/foot extrema retained every250ms, not every-frame coverage; no native contact certification; root must visually review all5 bodies/both feet and object clearance' };
   }, { oracleURL: state.oracleURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul) });
   state.observerInstalled = true;
-  state.frameReads = []; state.frameReadErrors = [];
+  state.frameReads = []; state.frameReadErrors = []; state.stages = [];
   let reading = true;
   const readFrames = (async () => {
     while (reading && !signal.aborted) {
@@ -227,32 +326,37 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     }
   })();
   try {
-    const soul = state.seats[0].soul;
-    const observe = async activity => {
-      const startingTick = state.frameReads.at(-1)?.tick ?? -Infinity;
+    const immediate = new Set(['assembly-start', 'attend-start', 'story-start', 'seated-wave-start', 'rise-start',
+      'question-start', 'question-refused', 'question-recovered', 'departure-start', 'introduction-start', 'applause-start']);
+    const observe = async (stage, details = {}) => {
+      const event = { stage, at: Date.now(), frameIndex: Math.max(0, state.frameReads.length - 1),
+        soul: details.seat?.soul, body: details.seat?.body, person: details.seat?.label,
+        listeners: details.listeners?.map(s => s.soul), guest: details.guest?.soul,
+        seats: details.seats?.map(s => s.soul), sequence: details.sequence, answer: details.answer };
+      state.stages.push(event);
+      if (immediate.has(stage)) return;
+      // Existing bounded observer: admission, short takes or a stalled page remain failures.
       for (const until = Date.now() + 2500;;) {
         assert.equal(state.frameReadErrors.length, 0, 'conference page observation failed');
-        const frames = state.frameReads, last = frames.at(-1);
-        if (last) {
-          const current = conferenceObservation(last, soul);
-          const fresh = Date.now() - last.receivedAt < 500;
-          if (activity === 'tell-story' && fresh && current.tick > startingTick && current.activity === activity && Number.isFinite(current.renderActivityAge) && current.renderActivityAge < 1.5) return;
-          if (activity === 'point' && frames.some(f => conferenceObservation(f, soul).activity === 'point')) return;
-          if (activity === 'settled') {
-            try { state.depictedJourney = conferenceJourney(frames, soul); return; } catch { /* bounded settling below */ }
-          }
+        const last = state.frameReads.at(-1);
+        try {
+          assert(last && Date.now() - last.receivedAt < 500, 'conference page observation stale');
+          conferenceMeetingStage(state.frameReads, state.stages, event);
+          event.observed = true; event.endFrameIndex = state.frameReads.length - 1; return;
+        } catch (error) {
+          assert(Date.now() < until, `conference ${stage} not observed on advancing page: ${error.message}`);
         }
-        assert(Date.now() < until, `conference ${activity} not observed on advancing page`);
         signal.throwIfAborted(); await new Promise(ok => setTimeout(ok, 50));
       }
     };
-    state.result = await explainConference({ speaker: state.seats[0], ...state.fixtures, record: state.record, storyRepeats: 4, interruptStory: true, observe });
-    state.depictedJourney = conferenceJourney(state.frameReads, soul);
+    state.result = await performConference({ seats: state.seats, ...state.fixtures, record: state.record,
+      storyRepeats: 1, interruptStory: true, observe });
+    state.depictedJourney = conferenceMeetingJourney(state.frameReads, state.stages, state.seats);
     const draw = await page.evaluate(() => ({ samples: window.__conferenceDrawObserver?.samples.length, failures: window.__conferenceDrawObserver?.failures }));
     assert(draw.samples >= 2 && draw.failures?.length === 0, 'conference final-draw measurement missing or failed');
     signal.throwIfAborted();
-    check('conference-presentation-receipts', state.result.storyActions === 4 && state.result.interrupted === true,
-      'Ordinary receipts plus advancing depicted story phrases, point, clap and settled endpoint; natural limbs/contact remain visual acceptance.');
+    check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 2 && state.result.handover,
+      'Ordinary receipts and advancing depicted entry, seated gesture/return, rise, questions/recovery, handover and cleanup; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
   finally {
