@@ -82,7 +82,10 @@ removal end to end (W7) and who may act (F6) are not here.
 
 9. **Removal deletes the words from the store and adds the reference to the redaction list.** The log is not an input
    to removal: no byte and no hash of it changes. Every view built with the list marks the reference `{21: id, 22:
-   1}`. Copies outside the store (a reader's, a cache's) outlive the delete until purged; purging is W7's and V2's.
+   1}`. Copies outside the store (a reader's, a cache's) outlive the delete until purged. W7 (#2826,
+   `worldd remove-words`, `v2/crates/worldd/src/removal.rs`) removes one person's words by author and time: the
+   stream's text files are written again without them (a cache keeps one a minute at most) and a start re-derives
+   history's views with the list.
    The list is a lineage family's (a world and its forks); views name it by hash.
 10. **A fork is a view of a checkpoint through one principal's audiences:** everyone's, its own and those it is a
     member of at the checkpoint. It keeps the ids and the nodes and links it sees; nothing under a node it drops; no

@@ -548,3 +548,246 @@ fn c26_a_shout_is_public_at_a_raised_voice() {
         assert!(!has(&log, l), "{l:?} is not in the log");
     }
 }
+
+/// Every file of a stream's folder but its text files, by name: what a removal never changes.
+fn not_text(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| (e.file_name().into_string().unwrap(), e.path()))
+        .filter(|(n, _)| !n.ends_with(".text"))
+        .map(|(n, p)| (n, std::fs::read(p).unwrap()))
+        .collect()
+}
+
+/// W7 (#2826): one person's words go from the store and every text file of the stream, by time and then all of them;
+/// the other person's words, the log and the parts stay as they were; a dry run counts and changes nothing; each
+/// removal is on the list with who asked and when, never the words.
+#[test]
+fn w7_one_persons_words_go_from_the_store_and_the_stream_and_the_rest_stays() {
+    use std::collections::BTreeSet;
+    use worldd::removal::{self, Ask};
+    let r = run("w7");
+    let folder = std::env::temp_dir().join(format!("worldd-words-{}-w7", std::process::id()));
+    let (a, b) = (r.pairs[0].0, r.pairs[1].0);
+    let lines = [
+        "the bread is still warm",
+        "the well is dry at noon",
+        "meet me at the mill",
+    ];
+    for (body, seq, line) in [(a, 1, lines[0]), (b, 1, lines[1]), (a, 2, lines[2])] {
+        let i = intent(body, "eden:say", None, seq, &[(1, words(line))]);
+        let (k, answer) = kind(&send(&r.world, &i));
+        assert_eq!(k, 1, "a receipt, not {answer}");
+    }
+    let store = r.store.clone();
+    let (log, dir) = r.end(|_, _| {});
+    let said = said(&log);
+    let refs: Vec<Id> = said.iter().map(|s| s.words).collect();
+    assert_eq!(refs.len(), 3);
+    let mut at = BTreeMap::new();
+    let records: Vec<Vec<u8>> = recover(&log).unwrap().records;
+    for rec in records.iter().filter(|r| !sim::recorder::is_input(r)) {
+        for e in Part::read(rec).unwrap().effects {
+            for ev in e
+                .events
+                .iter()
+                .flatten()
+                .filter(|ev| ev.name.as_str() == SAID)
+            {
+                let v = Value::Map(BTreeMap::from([
+                    (1, Value::Text(ev.name.clone())),
+                    (2, Value::Map(ev.fields.clone())),
+                ]));
+                at.insert(
+                    Said::read(&v, e.envelope.audience).unwrap().words,
+                    e.envelope.at,
+                );
+            }
+        }
+    }
+    let words_now =
+        |dir: &Path| -> Vec<String> { stream_files(dir).0.into_iter().map(|(_, w)| w).collect() };
+    assert_eq!(
+        words_now(&dir)
+            .iter()
+            .filter(|w| lines.contains(&w.as_str()))
+            .count(),
+        3
+    );
+    let (parts, text_before) = (not_text(&dir), words_now(&dir));
+    let asker = Id::new(Scope([0x77; 16]), 1).unwrap();
+    let ask = |grade, range, dry_run| Ask {
+        authors: BTreeSet::from([a]),
+        range,
+        grade,
+        by: asker,
+        when_us: 1_000,
+        dry_run,
+    };
+
+    // By time: the first sentence's moment holds A's first say, not their second.
+    let (from, to) = (at[&refs[0]], at[&refs[0]] + 1);
+    let first = removal::in_range(&records, from, to).unwrap();
+    assert!(first.contains(&refs[0]) && !first.contains(&refs[2]) && !first.contains(&refs[1]));
+    let dry = removal::remove(
+        &store,
+        &dir,
+        &ask(Grade::Hidden, Some((from, to)), true),
+        Some(&first),
+    )
+    .unwrap();
+    assert_eq!((dry.found, dry.already, dry.changed), (1, 0, 1));
+    assert!(dry.files >= 1 && dry.rows >= 1, "{dry:?}");
+    assert_eq!(words_now(&dir), text_before, "a dry run writes nothing");
+    assert_eq!(store.read(refs[0], &[]).unwrap(), lines[0].as_bytes());
+    assert!(store.removals().is_empty());
+    let done = removal::remove(
+        &store,
+        &dir,
+        &ask(Grade::Hidden, Some((from, to)), false),
+        Some(&first),
+    )
+    .unwrap();
+    assert_eq!(done, dry, "the dry run counted what went");
+    assert_eq!(store.read(refs[0], &[]).unwrap_err().name, "removed");
+    assert_eq!(store.read(refs[2], &[]).unwrap(), lines[2].as_bytes());
+    let now = words_now(&dir);
+    assert!(!now.contains(&lines[0].to_owned()), "{now:?}");
+    assert!(now.contains(&lines[1].to_owned()) && now.contains(&lines[2].to_owned()));
+
+    // All of A's words, erased: gone from the store's disk too; B's words, the parts and the log as they were.
+    let all = removal::remove(&store, &dir, &ask(Grade::Erased, None, false), None).unwrap();
+    assert_eq!((all.found, all.already, all.changed), (2, 0, 2));
+    for r in [refs[0], refs[2]] {
+        assert_eq!(store.read(r, &[]).unwrap_err().name, "removed");
+    }
+    assert_eq!(store.read(refs[1], &[]).unwrap(), lines[1].as_bytes());
+    let now = words_now(&dir);
+    assert!(
+        !now.contains(&lines[0].to_owned()) && !now.contains(&lines[2].to_owned()),
+        "{now:?}"
+    );
+    assert!(now.contains(&lines[1].to_owned()));
+    assert!(
+        !in_store(&folder, lines[0]) && !in_store(&folder, lines[2]),
+        "erased bytes are deleted"
+    );
+    assert!(in_store(&folder, lines[1]));
+    assert_eq!(not_text(&dir), parts, "no part changes");
+    assert_eq!(said(&log).len(), 3, "the log is untouched");
+    for l in lines {
+        assert!(!has(&log, l));
+    }
+    // The record: each change, who asked and when, never the words.
+    let list = store.removals();
+    assert_eq!(
+        list.iter()
+            .map(|x| (x.reference, x.by, x.when_us, x.grade))
+            .collect::<Vec<_>>(),
+        vec![
+            (refs[0], asker, 1_000, Grade::Hidden),
+            (refs[0], asker, 1_000, Grade::Erased),
+            (refs[2], asker, 1_000, Grade::Erased),
+        ]
+    );
+    let removed_file = std::fs::read(folder.join("text").join("removed")).unwrap();
+    assert!(lines.iter().all(|l| !has(&removed_file, l)));
+    // Erased words stay erased: a restore changes nothing.
+    let back = removal::remove(&store, &dir, &ask(Grade::Restored, None, false), None).unwrap();
+    assert_eq!((back.found, back.already, back.changed), (2, 2, 0));
+}
+
+/// W7 (#2826): `worldd remove-words` on a world's folder: refused while the world holds its store, a dry run that
+/// changes no byte, then the erase, its text file written again without the person's rows.
+#[test]
+fn w7_the_command_on_a_stopped_world_only() {
+    let folder = dir("w7-command");
+    let built = toggles::World::build(1, 3, 0);
+    let header = built.replica.header().clone();
+    std::fs::write(folder.join("header"), header.stored()).unwrap();
+    let (a, b) = (built.pairs[0].0, built.pairs[1].0);
+    let text = |a_line: &str| {
+        Store::open_dir(
+            &folder.join("log.text"),
+            Minter::new(words::scope(header.lineage)),
+        )
+        .unwrap()
+        .write(a_line.as_bytes(), Audience::Everyone, a)
+        .unwrap()
+    };
+    let gone = text("a line to go");
+    let store = Store::open_dir(
+        &folder.join("log.text"),
+        Minter::new(words::scope(header.lineage)),
+    )
+    .unwrap();
+    let kept = store
+        .write(b"a line to keep", Audience::Everyone, b)
+        .unwrap();
+    let stream = folder.join("views").join("s");
+    std::fs::create_dir_all(&stream).unwrap();
+    let row =
+        |r: Id, w: &str| Value::Array(vec![r.to_value(), Value::Bytes(w.as_bytes().to_vec())]);
+    let file = encode(&Value::Array(vec![
+        row(gone, "a line to go"),
+        row(kept, "a line to keep"),
+    ]))
+    .unwrap();
+    std::fs::write(stream.join("0.text"), &file).unwrap();
+    let id = |i: Id| format!("{}-{}", replica::encode::to_hex(&i.scope().0), i.counter());
+    let args = |more: &[&str]| -> Vec<String> {
+        [
+            "worldd",
+            "remove-words",
+            folder.to_str().unwrap(),
+            "--author",
+            &id(a),
+            "--by",
+            &id(b),
+        ]
+        .iter()
+        .chain(more)
+        .map(|s| s.to_string())
+        .collect()
+    };
+    let bytes = |p: &Path| std::fs::read(p).unwrap();
+    let before = (
+        bytes(&stream.join("0.text")),
+        bytes(&folder.join("log.text/text")),
+        bytes(&folder.join("log.text/removed")),
+    );
+    // The world holds the store: refused, nothing touched.
+    assert_eq!(worldd::removal::run(&args(&["--erase"])), 2);
+    store.close();
+    let now = || {
+        (
+            bytes(&stream.join("0.text")),
+            bytes(&folder.join("log.text/text")),
+            bytes(&folder.join("log.text/removed")),
+        )
+    };
+    assert_eq!(now(), before);
+    assert_eq!(worldd::removal::run(&args(&["--erase", "--dry-run"])), 0);
+    assert_eq!(now(), before, "a dry run changes no byte");
+    assert_eq!(
+        worldd::removal::run(&args(&["--from", "5"])),
+        2,
+        "--from needs --to"
+    );
+    assert_eq!(worldd::removal::run(&args(&["--erase"])), 0);
+    let Value::Array(rows) = decode(&bytes(&stream.join("0.text"))).unwrap().value else {
+        panic!("a text file is a list")
+    };
+    assert_eq!(rows, vec![row(kept, "a line to keep")]);
+    assert!(!has(&bytes(&folder.join("log.text/text")), "a line to go"));
+    let store = Store::open_dir(
+        &folder.join("log.text"),
+        Minter::new(words::scope(header.lineage)),
+    )
+    .unwrap();
+    assert_eq!(store.read(gone, &[]).unwrap_err().name, "removed");
+    assert_eq!(store.read(kept, &[]).unwrap(), b"a line to keep");
+    assert_eq!(store.removals().len(), 1);
+    assert_eq!(store.removals()[0].by, b);
+}

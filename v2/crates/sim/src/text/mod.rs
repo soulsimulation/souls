@@ -30,8 +30,12 @@
 //!    tail: cut back and synced (bytes after the last sync, never a returned reference). One that does not check with
 //!    bytes after it is `text-corrupt`, refused and never trimmed.
 //!
+//! 8. **A person's words are found by their author** ([`Store::written_by`], W7 #2826): each record keeps its author,
+//!    so the references one person's Souls wrote are listed from the store alone, with how each is removed now.
+//!
 //! Not here: a fork opening its parent's store (T8 rule 10, K6), checking and naming uploads (G6), who may remove
-//! whose words and purging caches (W7), the view tier (R3), copies off the machine (O20).
+//! whose words and purging the stream's text files (W7, `worldd::removal`), the view tier (R3), copies off the machine
+//! (O20).
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -94,6 +98,15 @@ impl Grade {
             .into_iter()
             .find(|g| *g as u8 == b)
     }
+}
+
+/// One record the store holds, as [`Store::written_by`] lists it: its reference, whether it is an upload, and its
+/// latest removal not restored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Written {
+    pub reference: Id,
+    pub upload: bool,
+    pub removed: Option<Grade>,
 }
 
 /// One entry of the redaction list: a reference, who removed it (a principal id), when (µs of real time, a recorded
@@ -382,6 +395,8 @@ fn write_loop(mut disk: Disk, shared: Arc<Shared>) {
 struct Entry {
     kind: u8,
     audience: Audience,
+    /// Who wrote it (a principal id: a Soul's body, or a creator).
+    author: Id,
     /// The record's first byte, its body's length, and its number: it is on the disk once `durable` reaches `n`.
     at: u64,
     len: u32,
@@ -469,7 +484,7 @@ impl Store {
         let mut entries = BTreeMap::new();
         let mut finish = Vec::new();
         for (i, r) in raws.iter().enumerate() {
-            let Some((kind, id, audience, _author)) = read_meta(r.body) else {
+            let Some((kind, id, audience, author)) = read_meta(r.body) else {
                 return refuse("text-corrupt", format!("text: record at byte {}", r.at));
             };
             if erased(r.body) && r.body[META..].iter().any(|x| *x != 0) {
@@ -481,6 +496,7 @@ impl Store {
             let e = Entry {
                 kind,
                 audience,
+                author,
                 at: r.at as u64,
                 len: r.body.len() as u32,
                 n: i as u64 + 1,
@@ -583,6 +599,7 @@ impl Store {
                 Entry {
                     kind,
                     audience,
+                    author,
                     at,
                     len,
                     n,
@@ -745,6 +762,21 @@ impl Store {
     /// The redaction list every view is built with (T7; T8 rule 8): the references hidden or erased now.
     pub fn redactions(&self) -> Redactions {
         Redactions::new(lock(&self.index).removed.keys().copied())
+    }
+
+    /// The records `authors` wrote that are on the disk, in reference order, each with how it is removed now (rule 8).
+    pub fn written_by(&self, authors: &std::collections::BTreeSet<Id>) -> Vec<Written> {
+        let ix = lock(&self.index);
+        let durable = lock(&self.shared.q).durable;
+        ix.entries
+            .iter()
+            .filter(|(_, e)| e.n <= durable && authors.contains(&e.author))
+            .map(|(r, e)| Written {
+                reference: *r,
+                upload: e.kind == KIND_UPLOAD,
+                removed: ix.removed.get(r).map(|x| x.grade),
+            })
+            .collect()
     }
 
     /// Every entry of the redaction list, in the order written.

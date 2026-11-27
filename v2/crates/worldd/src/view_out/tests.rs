@@ -4953,3 +4953,109 @@ fn flight_output(copy: bool, then: &str, linked: bool) -> Vec<u8> {
     COPY_PART.set(false);
     all
 }
+
+/// W7 (#2826): a text file purged of a removed reference stays purged when the writer starts again from its recovery
+/// chain (never refused as `stream-immutable`), its part and the other words untouched; a restored reference's row is
+/// written again by the next start.
+#[test]
+fn w7_a_purged_text_file_is_written_again_without_its_removed_words_on_a_start() {
+    use sim::text::Grade;
+    let h = header();
+    let d = scratch("w7-purge");
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([59; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let (a, b) = (
+        Id::new(Scope([93; 16]), 1).unwrap(),
+        Id::new(Scope([94; 16]), 1).unwrap(),
+    );
+    let gone = words
+        .write(b"words to be removed", Audience::Everyone, a)
+        .unwrap();
+    let kept = words
+        .write(b"words that stay", Audience::Everyone, b)
+        .unwrap();
+    let open = || {
+        PublicWriter::open(
+            PublicStart {
+                root: &views,
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: Some(words.clone()),
+                names: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+        )
+        .unwrap()
+    };
+    let mut out = open();
+    for (seq, body, reference) in [(0, a, gone), (1, b, kept)] {
+        let mut e = w3e_create(&h, seq, body, h.zone, Audience::Everyone);
+        e.events = Some(vec![replica::effects::Event {
+            name: Name::new("souls:said").unwrap(),
+            fields: BTreeMap::from([(1, Value::Map(BTreeMap::from([(21, reference.to_value())])))]),
+            changes: Vec::new(),
+            rest: Rest::new(),
+        }]);
+        out.push(seq, &w3e_packet(&h, vec![e])).unwrap();
+        out.flush().unwrap();
+    }
+    let g = out.generation_dir();
+    drop(out);
+    let rows = |name: &str| -> Vec<Id> {
+        let Value::Array(rows) = decode(&fs::read(g.join(name)).unwrap()).unwrap().value else {
+            panic!("a text file is a list")
+        };
+        rows.iter()
+            .map(|r| match r {
+                Value::Array(p) => replica::effects::read_id(&p[0]).unwrap(),
+                _ => panic!("a row"),
+            })
+            .collect()
+    };
+    let parts = || {
+        (
+            fs::read(g.join("0")).unwrap(),
+            fs::read(g.join("1")).unwrap(),
+        )
+    };
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![gone], vec![kept]));
+    let (before, baseline) = (parts(), fs::read(g.join("baseline")).unwrap());
+
+    words.remove(gone, a, 1, Grade::Hidden).unwrap();
+    assert_eq!(
+        crate::removal::purge(&views, &words.redactions(), true).unwrap(),
+        (1, 1),
+        "a dry run counts"
+    );
+    assert_eq!(rows("0.text"), vec![gone], "and writes nothing");
+    assert_eq!(
+        crate::removal::purge(&views, &words.redactions(), false).unwrap(),
+        (1, 1)
+    );
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![], vec![kept]));
+
+    // A start recovers from the chain, whose object still holds the row: the file stays without it.
+    let again = open();
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![], vec![kept]));
+    assert_eq!(parts(), before, "parts never change");
+    assert_eq!(fs::read(g.join("baseline")).unwrap(), baseline);
+    drop(again);
+
+    // Hidden words shown again come back in the next start's files.
+    words.restore(gone, a, 2).unwrap();
+    let again = open();
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![gone], vec![kept]));
+    drop(again);
+}
