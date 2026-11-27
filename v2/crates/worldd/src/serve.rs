@@ -155,8 +155,8 @@ use worldd::checkers::Rules;
 use worldd::measures;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out;
-#[cfg(test)]
 use worldd::view_out::History as _;
+#[cfg(test)]
 use worldd::view_out::Writer;
 #[cfg(test)]
 use worldd::views::Tier;
