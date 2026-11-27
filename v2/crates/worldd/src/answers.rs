@@ -1363,6 +1363,9 @@ struct Clock {
     forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
     /// The sits by kind among them (#3178): each one's selector and its intent, bound to a seat when its form starts.
     by_kind: BTreeMap<Id, (Selector, Intent)>,
+    /// Each sit by kind bound on the open ground to a seat in a place there: the words its end writes (field 8), which
+    /// name that place and how far it was ([`Clock::seat_by_kind`]).
+    sat_in: BTreeMap<Id, String>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -1783,6 +1786,27 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name; 8, a done act's
 /// words when its move was made from afar (#5063).
+/// The place on `top` (the open ground) that holds `thing`, for a sit by kind's words (#5152 follow-up): the innermost
+/// node above it and below `top` that `look` shows as a place (a room or a place; a floor or a building is not one),
+/// named by its id so the log holds no words and each reader's copy names it by its title, as `look` does. `None` for
+/// a thing in no such place on `top` (a seat right on the open ground), or not in `tree`.
+fn place_of(tree: &replica::tree::Tree, thing: Id, top: Id) -> Option<Id> {
+    let node = |id: Id| tree.node(tree.handle(id)?);
+    let mut at = node(thing)?.parent()?;
+    for _ in 0..64 {
+        if at == top {
+            return None;
+        }
+        let n = node(at)?;
+        let kind = replica::world_model::plain(n.kind().as_str());
+        if kind.ends_with(":room") || kind.ends_with(":place") {
+            return Some(at);
+        }
+        at = n.parent()?;
+    }
+    None
+}
+
 pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -2095,6 +2119,7 @@ impl Clock {
             return;
         };
         self.walks.remove(&id);
+        self.sat_in.remove(&id);
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
         self.progress.retain(|p| p.0 != id);
@@ -4715,13 +4740,19 @@ impl Clock {
     /// every seat. None free is refused `place.none-free`, naming the next step: the nearest free seat of another
     /// kind there, else to wait for a seat to be left; no seat of the kind there at all, `place.none-of-kind`, which
     /// waiting never clears.
+    ///
+    /// From the open ground (the selector's node is the town's ground) a seat in a place on it (a hall, a room of a
+    /// building) is named by that place's id ([`Clock::place_named`]), which the client reads as its title as `look`
+    /// names places, and how far it is: the bound seat's, in the words its act's end writes (the second of the pair);
+    /// none free, the nearest seat of the kind the Soul may use, in the refusal. Elsewhere, and for a seat right on
+    /// the open ground, the words are as before.
     fn seat_by_kind(
         &self,
         selector: &Selector,
         asked: &Intent,
         body: Id,
         now: Micros,
-    ) -> Result<(Id, String), Refusal> {
+    ) -> Result<((Id, String), Option<String>), Refusal> {
         let Selector::FreeSlot { kind, node, .. } = selector;
         let kind = kind.as_str();
         let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
@@ -4741,29 +4772,42 @@ impl Clock {
             parameters: BTreeMap::new(),
             ..asked.clone()
         });
+        let mine = |t: Id| replica::who_may::private_to(tree, t, soul).is_none();
         let fits = |t: Id| {
             probe.borrow_mut().target = Some(Target::Node(t));
-            replica::who_may::private_to(tree, t, soul).is_none()
-                && self.forms.fixture_sit(tree, &probe.borrow())
+            mine(t) && self.forms.fixture_sit(tree, &probe.borrow())
         };
         let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
-        if let Some(t) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
+        // From the open ground: the place on it holding seat `t`, `gap` µm² away, and how far, in metres to 0.1 m.
+        let outdoors = *node == b.town.ground;
+        let place = |t: Id, gap: i128| {
+            let named = replica::world_model::show(place_of(tree, t, *node)?);
+            let dm = (u128::try_from(gap).unwrap_or(0).isqrt() + 50_000) / 100_000;
+            Some(format!("in {named}, {}.{} m away", dm / 10, dm % 10))
+        };
+        if let Some((t, gap)) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
             let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
-            return Ok((t, form.to_owned()));
+            let words = outdoors
+                .then(|| place(t, gap))
+                .flatten()
+                .map(|p| format!("{kind} {} {p}", replica::world_model::show(t)));
+            return Ok(((t, form.to_owned()), words));
         }
         // The next step: the nearest free seat of any kind there, else to wait (only where a seat of the kind is).
-        let other = b.seat_by_kind(*node, None, body, &fits, &taken).map(|t| {
-            let of = tree
-                .handle(t)
-                .and_then(|h| tree.node(h))
-                .map_or(String::new(), |n| {
-                    replica::world_model::plain(n.kind().as_str()).to_owned()
-                });
-            format!(
-                "the nearest free place to sit there is {} ({of}): sit on it",
-                replica::world_model::show(t)
-            )
-        });
+        let other = b
+            .seat_by_kind(*node, None, body, &fits, &taken)
+            .map(|(t, _)| {
+                let of = tree
+                    .handle(t)
+                    .and_then(|h| tree.node(h))
+                    .map_or(String::new(), |n| {
+                        replica::world_model::plain(n.kind().as_str()).to_owned()
+                    });
+                format!(
+                    "the nearest free place to sit there is {} ({of}): sit on it",
+                    replica::world_model::show(t)
+                )
+            });
         if !b.has_kind(*node, kind) {
             return refused(
                 "place.none-of-kind",
@@ -4773,11 +4817,21 @@ impl Clock {
                 ),
             );
         }
+        // From the open ground, the place holding the nearest seat of the kind the Soul may use (each one held).
+        let near = outdoors
+            .then(|| b.nearest_of_kind(*node, kind, body, &|t| mine(t)))
+            .flatten()
+            .and_then(|(t, gap)| place(t, gap))
+            .map_or(String::new(), |p| format!(" (the nearest {kind} is {p})"));
         refused(
             sim::commit::bind::NONE_FREE,
             match other {
-                Some(o) => format!("no {kind} free in {room}; {o}, or wait for one to be left"),
-                None => format!("every place to sit in {room} is held: wait for one to be left"),
+                Some(o) => {
+                    format!("no {kind} free in {room}{near}; {o}, or wait for one to be left")
+                }
+                None => {
+                    format!("every place to sit in {room} is held{near}: wait for one to be left")
+                }
             },
         )
     }
@@ -4811,7 +4865,12 @@ impl Clock {
             };
             if let Some((selector, asked)) = by_kind {
                 match self.seat_by_kind(&selector, &asked, act.body, now) {
-                    Ok(c) => candidates = vec![c],
+                    Ok((c, place)) => {
+                        candidates = vec![c];
+                        if let Some(p) = place {
+                            self.sat_in.insert(id, p);
+                        }
+                    }
                     Err(r) => {
                         self.end(id, |c| c.refused(actor, sequence, &r));
                         continue;
@@ -5074,6 +5133,9 @@ impl Clock {
         };
         // #5063: a done act whose move was made from afar says so on its end (field 8), which its receipt names.
         self.words_next = why.clone().filter(|_| how == "done");
+        if how == "done" && self.words_next.is_none() {
+            self.words_next = self.sat_in.remove(&id);
+        }
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -6942,6 +7004,7 @@ pub fn start<S: Storage + 'static>(
         },
         forming: Vec::new(),
         by_kind: BTreeMap::new(),
+        sat_in: BTreeMap::new(),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {

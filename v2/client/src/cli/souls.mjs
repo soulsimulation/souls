@@ -578,6 +578,8 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(r?.receipt?.away_m != null ? { away_m: r.receipt.away_m } : {}),
           // #5063: a look or a point at a thing seen beyond its reach, made from afar: the world's words for it
           ...(r?.receipt?.from_afar ? { from_afar: r.receipt.from_afar } : {}),
+          // #5152 follow-up: a sit by kind from the open ground: the seat taken, the place that holds it, how far it was
+          ...(r?.receipt?.sat_in ? { sat_in: r.receipt.sat_in } : {}),
           // First-day round 4: aboard a balloon, when it takes off (done) or when this Soul can get off (refused).
           ...(r?.receipt?.aboard ? { aboard: r.receipt.aboard } : {}),
           // R1b: refused, one offer of the same thing that would work instead.

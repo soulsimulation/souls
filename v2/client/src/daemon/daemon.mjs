@@ -178,7 +178,7 @@ import { risesFromSeat } from '../check/stand.mjs';
 import { BARE, bareAct } from '../check/bare.mjs';
 import { sitByKind } from '../check/by-kind.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
-import { afarFor, afarOf } from './afar.mjs';
+import { afarFor, afarOf, satInOf } from './afar.mjs';
 import { definedIn, kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { folderStamp, keptKinds, keptOne } from '../check/kept.mjs';
 import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
@@ -1086,6 +1086,8 @@ const stuckSeen = [];
 const MOVE_ENDED = 'souls:move-ended', awayEnded = [];
 /** #5063: my acts' ends made from afar (a look or a point past its reach), newest last ({sequence, words}). */
 const afarEnded = [];
+/** #5152 follow-up: my sits by kind's ends from the open ground, naming the place of the seat, newest last ({sequence, words}). */
+const satEnded = [];
 /** 0.133: the newest entry sequence this daemon has seen, and the receipts waiting for an entry. */
 let entrySeq = -1;
 const entryWaiters = [];
@@ -1107,6 +1109,8 @@ function onEntry(e) {
   for (const ev of events) {
     const words = ev.fields?.[8] != null ? afarOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
     if (words) { afarEnded.push({ sequence: Number(e.sequence), words }); if (afarEnded.length > 20) afarEnded.shift(); }
+    const sat = ev.fields?.[8] != null ? satInOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
+    if (sat) { satEnded.push({ sequence: Number(e.sequence), words: sat }); if (satEnded.length > 20) satEnded.shift(); }
   }
   for (const w of entryWaiters.splice(0)) w();
   // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
@@ -2355,13 +2359,19 @@ async function answer(req, conn = null) {
       const after = entriesAt.get(r.sequence) ?? -1, version = r.answers.at(-1)?.version, before = version ? sequenceOf(version) : Infinity;
       const endOf = () => awayEnded.findLast((a) => a.sequence > after && a.sequence < before);
       const afar = () => afarFor(afarEnded, after, before);
-      for (const until = Date.now() + 1000; ((walked && !endOf()) || (aimed && !afar())) && entrySeq < before - 1 && Date.now() < until;) {
+      // #5152 follow-up: a sit by kind (its target a selector, `<kind>@<node>`) sent from the open ground names the
+      // place of the seat it took and how far it was, from its end's entry, which can trail the receipt too
+      const byKind = done && String(r.target ?? '').includes('@') && r.verbs.some((v) => /:sit$/.test(v));
+      const satIn = () => afarFor(satEnded, after, before);
+      for (const until = Date.now() + 1000; ((walked && !endOf()) || (aimed && !afar()) || (byKind && !satIn())) && entrySeq < before - 1 && Date.now() < until;) {
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); entryWaiters.push(() => { clearTimeout(t); ok(); }); });
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
       const far = done ? afar() : null;
       if (far) got.receipt.from_afar = readableDetail(far, rowsOf(copy).values());
+      const sat = byKind ? satIn() : null;
+      if (sat) got.receipt.sat_in = readableDetail(sat, rowsOf(copy).values());
       // What this Soul's body holds once the act is done (a book a shelf's `take` put in its hand): its id for the next act.
       const refused = r.answers.at(-1)?.answer === 'refused';
       return closing(got, done || refused ? (rows) => {
