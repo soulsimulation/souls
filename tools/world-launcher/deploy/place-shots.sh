@@ -50,9 +50,10 @@ for slug in ${SLUGS//,/ }; do
   grep -v '^  ' "$CACHE/$slug.log" | sed 's/^/   /'   # one line per place stays in the log
   [ "$rc" = 0 ] || { echo "   drawing failed ($CACHE/$slug.log)"; FAILED="$FAILED $slug"; continue; }
   [ "$DRY" = 1 ] && continue
-  # pictures first, then the index that names them: a visitor never gets a name with no file
-  "$RSYNC" -a --chmod=D755,F644 --exclude index.json --exclude '*.tmp' "${RSH[@]}" "$local_dir/" "$(remote "$slug")" \
-    && "$RSYNC" -a --chmod=F644 "${RSH[@]}" "$local_dir/index.json" "$(remote "$slug")" \
+  # pictures first, then the index that names them: a visitor never gets a name with no file. Never this machine's owner:
+  # the folder stays the launcher's, so its own drawing runs (place-shots.mjs placeShotKeeper) can still write there
+  "$RSYNC" -a --no-owner --no-group --chmod=D755,F644 --exclude index.json --exclude '*.tmp' "${RSH[@]}" "$local_dir/" "$(remote "$slug")" \
+    && "$RSYNC" -a --no-owner --no-group --chmod=F644 "${RSH[@]}" "$local_dir/index.json" "$(remote "$slug")" \
     || { echo "   copy to the host failed"; FAILED="$FAILED $slug"; continue; }
   echo "   kept on the host: $(ls "$local_dir" | grep -c '\.webp$') pictures"
 done

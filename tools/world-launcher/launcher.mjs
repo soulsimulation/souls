@@ -130,7 +130,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
-import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
+import { cutoverFence, routeOnlyId, searchPlaces, searchText, withV2Stream } from './cutover.mjs';
 import { movedAssets } from './moved-assets.mjs';
 import { placeShotKeeper, placeShots } from './place-shots.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
@@ -896,7 +896,8 @@ export async function openLauncher(cfg = {}) {
       return true;
     }
     const q = searchText((url.searchParams.get('q') ?? '').trim()), ref = url.searchParams.get('ref'), cursor = url.searchParams.get('cursor');
-    const found = pub.places.filter((p) => (ref ? p.target.ref === ref : q ? p.text.includes(q) : p.shown)).map((p) => p.target);
+    // a search lists the places a newcomer means first (cutover.mjs searchPlaces)
+    const found = (ref ? pub.places.filter((p) => p.target.ref === ref) : q ? searchPlaces(pub.places, q) : pub.places.filter((p) => p.shown)).map((p) => p.target);
     const listing = createHash('sha256').update(JSON.stringify([worldIdOf(w), pub.seq, q, ref, found.map((t) => t.ref)])).digest('hex');
     const at = cursor ? /^([a-f0-9]{64}):(\d+)$/.exec(cursor) : null;
     if (cursor && at?.[1] !== listing) { json(res, 409, { ok: false, code: 'context.changed', message: 'Meaning or listing access changed; start a fresh context query' }, { 'cache-control': 'no-store' }); return true; }
