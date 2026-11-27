@@ -74,6 +74,25 @@ export async function prepare({ base, paths, recipe, signal }) {
   return { people: state.seats.length, fixtures: state.fixtures };
 }
 
+// This exact self-contained function is serialized into the page; focused tests exercise the same stop body.
+export function conferenceBrowserStop() {
+  const observer = window.__conferenceDrawObserver;
+  if (!observer) return undefined;
+  if (observer.stopped) {
+    if (observer.stopError) throw observer.stopError;
+    return observer.stopResult;
+  }
+  observer.stopped = true;
+  try {
+    observer.stopRender();
+    if (observer.prototype.show !== observer.show) throw Error('conference people observer ownership changed');
+    observer.prototype.show = observer.original;
+    return observer.stopResult = { cadenceMs: 250, sampleLimit: observer.sampleLimit, meshStride: 1,
+      samples: observer.samples, failures: observer.failures,
+      qualification: observer.qualification };
+  } catch (error) { observer.stopError = error; throw error; }
+}
+
 export function conferenceFinalization(page, paths, state) {
   state.persistSequence = () => {
     if (state.sequenceSaved) return;
@@ -90,7 +109,8 @@ export function conferenceFinalization(page, paths, state) {
     // Preserve command receipts first. Returning a rejected cached promise never calls browser stop twice.
     state.persistSequence();
     try {
-      const draw = await page.evaluate(() => window.__conferenceDrawObserver?.stop());
+      const draw = await page.evaluate(conferenceBrowserStop);
+      assert(draw || !state.observerInstalled, 'conference installed observer collection missing');
       if (draw) {
         save(paths, 'conference-final-draw.json', draw);
         assert(draw.samples?.length >= 2 && draw.failures?.length === 0, 'conference final collection missing or failed');
@@ -184,13 +204,10 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       samples.push({ stage: 'after-world-render', units: 'm', at, frame: stamp.frame, tick: frame.tick, dt: frame.dt,
         currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected, renderTarget: null, bodies });
     }, error => { if (failures.length < 30) failures.push(String(error)); });
-    window.__conferenceDrawObserver = { samples, failures, stop() {
-      stopRender();
-      if (prototype.show !== show) throw Error('conference people observer ownership changed');
-      prototype.show = original;
-      return { cadenceMs: 250, sampleLimit, meshStride: 1, samples, failures, qualification: 'all stride1 vertices measured; bounded per-part/foot extrema retained every250ms, not every-frame coverage; no native contact certification; root must visually review all5 bodies/both feet and object clearance' };
-    } };
+    window.__conferenceDrawObserver = { samples, failures, sampleLimit, stopRender, prototype, show, original,
+      qualification: 'all stride1 vertices measured; bounded per-part/foot extrema retained every250ms, not every-frame coverage; no native contact certification; root must visually review all5 bodies/both feet and object clearance' };
   }, { oracleURL: state.oracleURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul) });
+  state.observerInstalled = true;
   state.frameReads = []; state.frameReadErrors = [];
   let reading = true;
   const readFrames = (async () => {

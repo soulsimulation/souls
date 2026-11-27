@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { conferenceFixtures, conferenceJourney, conferenceFinalization } from './conference-native-page.mjs';
+import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
 
 test('tracked conference fixture preserves the existing authored layout exactly', () => {
@@ -86,4 +86,31 @@ test('render-observer collection is idempotent and a collection error cannot dis
   await good.finalizeDraw(); await good.finalizeDraw();
   assert.equal(calls, 2, 'restored observer is collected once');
   assert.equal(JSON.parse(readFileSync(join(goodPaths.dir, 'conference-final-draw.json'))).samples.length, 2);
+});
+
+test('the exact serialized browser stop restores hooks once and caches both result and ownership error', () => {
+  const previous = globalThis.window; let stops = 0;
+  const show = () => {}, original = () => {}, prototype = { show };
+  const fixture = () => ({ samples: [{ frame: 1 }, { frame: 2 }], failures: [], sampleLimit: 361,
+    stopRender() { stops++; }, prototype, show, original, qualification: 'test' });
+  try {
+    globalThis.window = { __conferenceDrawObserver: fixture() };
+    const first = conferenceBrowserStop();
+    assert.equal(conferenceBrowserStop(), first); assert.equal(prototype.show, original); assert.equal(stops, 1);
+    prototype.show = () => {};
+    globalThis.window.__conferenceDrawObserver = fixture();
+    let failure;
+    try { conferenceBrowserStop(); } catch (error) { failure = error; }
+    assert.match(failure.message, /ownership changed/);
+    assert.throws(conferenceBrowserStop, error => error === failure);
+    assert.equal(stops, 2, 'failed browser cleanup is also never repeated');
+  } finally { if (previous === undefined) delete globalThis.window; else globalThis.window = previous; }
+});
+
+test('an installed observer cannot disappear between the journey check and final collection', async () => {
+  const scratch = resolve(import.meta.dirname, '../../../.local'); mkdirSync(scratch, { recursive: true });
+  const paths = { dir: mkdtempSync(join(scratch, 'conference-finalize-test-')) }, state = { observerInstalled: true, rows: [] };
+  conferenceFinalization({ evaluate: async () => undefined }, paths, state);
+  await assert.rejects(state.finalizeDraw(), /installed observer collection missing/);
+  assert.equal(JSON.parse(readFileSync(join(paths.dir, 'conference-finalization.json'))).ok, false);
 });
