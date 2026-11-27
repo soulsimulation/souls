@@ -608,7 +608,11 @@ fn face_middle(
 /// a carrier who walked up from the side lifted with its back to the load). Its body's own turn, the facing input the
 /// mover turns it to as #423 turns members to their activity's middle ([`crate::bodies::turn_free`]): only a body
 /// whose legs nothing else drives, so one walking or kept in its place by an order keeps its facing.
-fn face_holds(c: &mut Controller, carriers: &[crate::assembly::Carrier], node: (Vec3, replica::pose::Quat)) {
+fn face_holds(
+    c: &mut Controller,
+    carriers: &[crate::assembly::Carrier],
+    node: (Vec3, replica::pose::Quat),
+) {
     for k in carriers {
         let Ok(g) = node.1.rotate(k.grip) else {
             continue;
