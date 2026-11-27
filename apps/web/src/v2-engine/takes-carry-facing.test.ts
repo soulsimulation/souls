@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { chunkOf, motionAt, setCarryHeading, TICK_US, type Body } from './takes.ts';
+import { chunkOf, motionAt, TICK_US, type Body } from './takes.ts';
+import { setCarryHeading } from './carry-heading.ts';
 
 const FROM = 1000, t0 = FROM * TICK_US;
 /** Walks +x at 1 m/s for 2 s, then stands. Travel heading 0. */
