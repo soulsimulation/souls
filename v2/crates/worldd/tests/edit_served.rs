@@ -3083,7 +3083,7 @@ fn a2_parts_rest_at_the_grounds_height() {
             .unwrap()
             .1
     };
-    let ends = |at: Vec3| (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000));
+    let ends = frame_ends;
     // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` lets go.
     let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
         let (p, q) = ends(where_is(&w, fa).2);
@@ -4082,15 +4082,10 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
             .1
     };
     let across = |at: Vec3, dz: i64| (v3(at.x + H, 0, at.z + dz), v3(at.x - H, 0, at.z + dz));
-    let along = |at: Vec3| (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000));
-    // A frame's carriers stand 2.2 m either side of it along z, clear of the stand, the beams and the other frame, so
-    // they walk east side by side and keep their span (a carry whose carriers drift apart breaks off, C3).
-    let ends = |at: Vec3, dx: i64| {
-        (
-            v3(at.x + dx, 0, at.z - 2_200_000),
-            v3(at.x + dx, 0, at.z + 2_200_000),
-        )
-    };
+    let along = beam_ends;
+    // A frame's carriers stand beside its edges ([`frame_ends`]), `dz` along z from it: they walk east in file and
+    // keep their span (a carry whose carriers drift apart breaks off, C3).
+    let ends = |at: Vec3, dz: i64| frame_ends(v3(at.x, 0, at.z + dz));
     let refused = |got: &Got, name: &str, what: &str| {
         println!("{what}: {got:?}");
         assert_eq!((got.kind, got.reason.as_str()), (2, name), "{what}");
@@ -4885,8 +4880,9 @@ fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_ba
 
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], at: Vec3, what: &str| {
-        hands[0].walk_to(g, v3(at.x, 0, at.z - 2_200_000));
-        hands[1].walk_to(g, v3(at.x, 0, at.z + 2_200_000));
+        let (p, q) = frame_ends(at);
+        hands[0].walk_to(g, p);
+        hands[1].walk_to(g, q);
         let x = socket_end(&mut hands[0].s);
         let y = socket_end(&mut hands[1].s);
         assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
@@ -5083,8 +5079,9 @@ fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
     );
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], at: Vec3, what: &str| {
-        hands[0].walk_to(g, v3(at.x, 0, at.z - 2_200_000));
-        hands[1].walk_to(g, v3(at.x, 0, at.z + 2_200_000));
+        let (p, q) = frame_ends(at);
+        hands[0].walk_to(g, p);
+        hands[1].walk_to(g, q);
         let x = socket_end(&mut hands[0].s);
         let y = socket_end(&mut hands[1].s);
         assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
@@ -5243,10 +5240,9 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     };
     // Crew `c` of Souls `ab` takes `p` (a frame across x, a beam along z), carries it to `to` and puts it there.
     let frame_across = |at: Vec3| (v3(at.x + H, 0, at.z), v3(at.x - H, 0, at.z));
-    // A frame's carriers stand 2.2 m either side of it along z, clear of the stand, the beams and the other frame, so
-    // they walk side by side and keep their span (a carry whose carriers drift apart breaks off, C3).
-    let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000));
-    let beam_along = |at: Vec3| (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000));
+    // A frame's carriers stand beside its edges and a beam's at its ends, at a bay's slot at its mouth ([`frame_ends`],
+    // [`beam_ends`]): each within reach of its hold (#5067).
+    let beam_along = beam_ends;
 
     // Build. Frame A by crew A (Souls 1, 2).
     let (f0, f1) = frame_ends(where_is(&w, fa).2);
@@ -5827,13 +5823,39 @@ struct Site<'a> {
     crew: Value,
 }
 
-/// A part's carriers 2.2 m either side of it along z (as A3's): a frame's first carrier on its -z side, a beam's on +z.
+/// From a standing frame's middle to each of its two carriers, along its own x (its width), µm: beside its edges,
+/// 0.49 m from the edge each holds (#5067: a frame taken standing is held at its edges along its carriers' line, so
+/// each carrier is within reach of its hold from there, and not from 2.2 m off its faces), 0.15 m clear of the frame's
+/// own columns once it stands in a bay.
+const FRAME_FROM: i64 = 1_100_000;
+/// From a beam's middle to each of its end carriers along it, µm: `sim::activity::carry::REACH` beyond its end grips.
+const BEAM_END: i64 = 1_097_000 + 350_000;
+/// How far off a bay's beam slot's line a beam's crew stands to put it in or take it out, on the slot's own side of
+/// the bay (its mouth), µm: no carrier can stand on that line within reach of an end grip (the frames' columns stand on
+/// it), so the beam is set in from here on the world's straight track, each end carrier 0.57 m from its grip then.
+const BEAM_MOUTH: i64 = 450_000;
+/// The yard world's bay (`yard_world`): its middle's x, and its beam slots' lines either side of it, µm.
+const BAY_X: i64 = 65_000_000;
+const BEAM_LINE: i64 = 572_000;
+
+/// A standing frame's carriers, the first east of it: beside its edges, along its own x ([`FRAME_FROM`]).
 fn frame_ends(at: Vec3) -> (Vec3, Vec3) {
-    (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000))
+    (
+        v3(at.x + FRAME_FROM, 0, at.z),
+        v3(at.x - FRAME_FROM, 0, at.z),
+    )
 }
 
+/// A beam's carriers, its length along z, the first at its +z end: [`BEAM_END`] from its middle, in line with it; for
+/// a beam slot of the yard world's bay, at the bay's mouth on the slot's side ([`BEAM_MOUTH`] off its line).
 fn beam_ends(at: Vec3) -> (Vec3, Vec3) {
-    (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000))
+    let off = at.x - BAY_X;
+    let x = if (off.abs() - BEAM_LINE).abs() < 1_000 {
+        at.x + off.signum() * BEAM_MOUTH
+    } else {
+        at.x
+    };
+    (v3(x, 0, at.z + BEAM_END), v3(x, 0, at.z - BEAM_END))
 }
 
 /// Where a holder and its helper stand to start a hold crew on a frame at `at` in a bay: the holder 1 m to the side
@@ -7929,15 +7951,19 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
 ///
 /// - **A crew of four** (a front, a back and two sides west of the beam; the beam's entry given two grips between its
 ///   ends, so four may take it) takes beam 1, its length along z. Only the
-///   front's Soul walks: to a point west of the bay with the load turned 60 degrees, then to its end of `beam_low_l`'s
-///   line with the heading along it. Each time the other three walk with it by their own follow orders, turning with
-///   it, and stand at their places (within 0.3 m), the back and the front on the slot's line; the front seats the beam.
+///   front's Soul walks: to a point west of the bay with the load turned 60 degrees, then to its end of a line along
+///   `beam_low_l`'s at the bay's mouth ([`BEAM_MOUTH`] west of it: no carrier can stand on the slot's own line within
+///   reach of an end grip, the frames' columns stand on it) with the heading along it. Each time the other three walk
+///   with it by their own follow orders, turning with it, and stand at their places (within 0.3 m), the back and the
+///   front on that line. The put is then refused `part.grip-out-of-reach`, naming a side carrier, before anything moves
+///   (#5067: the set-in would take the beam 0.45 m from where the sides stand, out of their reach; a set-in that walks
+///   its carriers with the part is not built). The two sides let go, the carry goes on, and the two ends seat the beam.
 /// - **A crew of two** does the same with beam 2 into `beam_high_l`, over the low beam now seated.
 ///
 /// Each beam is in its slot afterwards, and no carry broke off on the way.
 #[tokio::test(flavor = "multi_thread")]
 async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_two() {
-    const ALONG: i64 = 2_200_000;
+    const ALONG: i64 = BEAM_END;
     let d = scratch("hgturn");
     let (facts, slots) = yard_world(&d);
     // The beam with four grips, two between its ends, so a crew of four takes it (0.135 C5: no more than its grips).
@@ -8075,7 +8101,6 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
     };
 
     // The frames, each by a crew of two whose two walks are sent by both (A3's): Soul 1 lets go, the other holds.
-    let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - ALONG), v3(at.x, 0, at.z + ALONG));
     for (frame, slot, other) in [(fa, "upright_a", 1), (fb, "upright_b", 2)] {
         let (f0, f1) = frame_ends(where_is(&w, frame).2);
         walk_all(&mut souls, &[(0, f0), (other, f1)], "to the frame").await;
@@ -8102,7 +8127,8 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
 
     // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
     // (`[along, across]`, +along toward the front, +across to the west while the length runs along +z).
-    let sides = [[500_000, 800_000], [-500_000, 800_000]];
+    // Each side beside its own grip (the first to join at the one nearer the back), 0.45 m off the beam's middle line.
+    let sides = [[-400_000, 450_000], [400_000, 450_000]];
     let at_frame = |mid: Vec3, h: [i64; 2], p: [i64; 2]| {
         let o = worldd::engine::on_plan(p, h);
         v3(mid.x + o[0], 0, mid.z + o[1])
@@ -8129,9 +8155,10 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         // Only the front walks from here, naming the load's heading at its goal.
         let s = slot_of(bay, slots[slot]);
         let staged = v3(s.x - 4_500_000, 0, s.z);
+        let mouth = v3(s.x - BEAM_MOUTH, 0, s.z);
         for (mid, h, what) in [
             (staged, turned, "turned 60 degrees, west of the bay"),
-            (s, [0, M], "square on the slot's line"),
+            (mouth, [0, M], "square at the bay's mouth, along the slot's line"),
         ] {
             let want = places(mid, h);
             let mut walk = to(want[0]);
@@ -8174,19 +8201,34 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             "square on the slot's line: the back {} mm across from the front",
             across / 1000
         );
-        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        let mut got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        if n > 2 {
+            // #5067: the set-in would take the beam out of its side carriers' reach; refused by name, nothing moved.
+            println!("crew of {n} puts beam {} in {slot}: {got:?}", beam.counter());
+            assert_eq!(
+                (got.kind, got.reason.as_str()),
+                (2, "part.grip-out-of-reach"),
+                "a side carrier would be out of reach of its grip: {got:?}"
+            );
+            assert_eq!(where_is(&w, beam).0, Some(c), "the beam still rides its crew");
+            for k in &members[2..] {
+                let left = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
+                assert_eq!(left.kind, 1, "side Soul {} lets go: {left:?}", k + 1);
+            }
+            got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        }
         println!(
             "crew of {n} seats beam {} in {slot}: {got:?}",
             beam.counter()
         );
         assert_eq!(got.kind, 1, "beam seated in {slot}");
-        // #5067: a hold for each carrier, let go of as the beam is seated.
+        // #5067: a hold for each carrier still on it, let go of as the beam is seated.
         let (phase, holding) = grips_said(&w, c, |p, _| p == "souls:released");
         assert_eq!(
             (phase.as_str(), holding),
-            ("souls:released", crew_bodies.clone())
+            ("souls:released", crew_bodies[..2].to_vec())
         );
-        for k in &members {
+        for k in &members[..2] {
             let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
             assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);
         }

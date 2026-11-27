@@ -62,14 +62,18 @@ test('the crew is offered, joined and left; the load lifted and set down', () =>
   assert.equal(carryIntents({ do: 'lift', crew: id(8), load: id(2) }, { ...ctx, ground: null }).code, 'carry-no-ground');
 });
 
-test('a grip is the load\'s place from its entry; a standing part\'s 2.2 m along its z; beside it 1.2 m along its x', () => {
+test('a grip is the load\'s place from its entry; a standing part\'s beside its edges along its x; beside it 1.2 m along its x', () => {
   const beam = loadOf(kinds['mars:rack_beam']);
   assert.deepEqual(beam.places, [-1_447_000, 1_447_000]);
   const walk = (req) => send(req)[0].params[1];
   near(walk({ do: 'grip', thing: id(2), end: 'front' }), [2e6, 0, 6e6 + 1_447_000], 'the beam\'s front');
   near(walk({ do: 'grip', thing: id(2), end: 'back', from: '2.2' }), [2e6, 0, 3.8e6], 'its back, 2.2 m off');
   near(walk({ do: 'grip', thing: id(9), end: 'front' }), [-12e6 + 1_447_000, 0, 20e6], 'a beam turned east: its front is east');
-  near(walk({ do: 'grip', thing: id(4), end: 'back' }), [0, 0, 3.65e6], 'the standing frame\'s back');
+  // #5067: a frame standing in a stand is taken from beside its edges (its own x, 0.49 m beyond its 0.61 m half width),
+  // where each carrier is within part:take's 0.7 m of the edge it holds; 2.2 m off its faces was 2.16 m from the hold.
+  near(walk({ do: 'grip', thing: id(4), end: 'back' }), [-1_099_500, 0, 5.85e6], 'the standing frame\'s back, beside its edge');
+  near(walk({ do: 'grip', thing: id(4), end: 'front' }), [1_099_500, 0, 5.85e6], 'its front, beside its other edge');
+  near(walk({ do: 'grip', thing: id(4), end: 'back', from: '2.2' }), [-2.2e6, 0, 5.85e6], 'its back, 2.2 m from its middle on that line');
   near(walk({ do: 'grip', thing: id(4), end: 'right' }), [1.2e6, 0, 5.85e6], 'beside the frame');
   assert.equal(send({ do: 'grip', thing: id(4), end: 'up' }).code, 'carry-usage');
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
@@ -88,8 +92,10 @@ test('#5067: a frame standing on the floor is approached where carry:lift checks
     const off = Math.hypot(p[0] - mid[0], p[2] - (mid[2] + g));
     assert.ok(off <= GRIP_REACH, `${end} ${Math.round(off / 1000)} mm from its grip`);
   }
-  // In its stand, from clear of it as before (2.2 m along its z).
-  near(send({ do: 'grip', thing: id(4), end: 'back' })[0].params[1], [0, 0, 3.65e6], 'the standing frame\'s back, in its stand');
+  // In its stand it is taken standing, from beside its edges: within part:take's reach of the edge each holds.
+  const edge = frame.halfWidth, back = send({ do: 'grip', thing: id(4), end: 'back' })[0].params[1];
+  near(back, [-1_099_500, 0, 5.85e6], 'the standing frame\'s back, in its stand');
+  assert.ok(Math.abs(back[0] - mid[0]) - edge <= GRIP_REACH, 'within reach of the edge it holds');
 });
 
 test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
@@ -111,14 +117,14 @@ test('a crew of six takes the 6.1 m frame at its six grips: front, back, and fou
   const tall = loadOf(kinds['mars:rack_upright_6m']);
   assert.deepEqual(tall.inner, [-1_649_000, -550_000, 550_000, 1_649_000], 'four grips between its ends');
   assert.equal(tall.halfWidth, 609_500);
-  // It stands at (5, 10) m: its front and back on its own z, as far out as a lift checks its ends (3.1 m, --from); the
-  // sides beside its grips along that line, half its width and REACH off it, alternating.
-  const up = { pos: [5e6, 0, 10e6] }, off = 609_500 + 350_000;
-  near(gripSpot(up, tall, 'back', 3_100_000), [5e6, 10e6 - 3_100_000], 'its back');
-  near(gripSpot(up, tall, 'front', 3_100_000), [5e6, 10e6 + 3_100_000], 'its front');
-  near(gripSpot(up, tall, 'side1'), [5e6 - off, 10e6 - 1_649_000], 'the first side, on its + side');
-  near(gripSpot(up, tall, 'side2'), [5e6 + off, 10e6 - 550_000], 'the second, across');
-  near(gripSpot(up, tall, 'side4'), [5e6 + off, 10e6 + 1_649_000], 'the fourth');
+  // It stands on the floor at (5, 10) m, to be lifted: its front and back on its own z, as far out as a lift checks its
+  // ends (3.1 m, --from); the sides beside its grips along that line, half its width and REACH off it, alternating.
+  const up = { pos: [5e6, 0, 10e6] }, off = 609_500 + 350_000, floor = true;
+  near(gripSpot(up, tall, 'back', 3_100_000, null, floor), [5e6, 10e6 - 3_100_000], 'its back');
+  near(gripSpot(up, tall, 'front', 3_100_000, null, floor), [5e6, 10e6 + 3_100_000], 'its front');
+  near(gripSpot(up, tall, 'side1', null, null, floor), [5e6 - off, 10e6 - 1_649_000], 'the first side, on its + side');
+  near(gripSpot(up, tall, 'side2', null, null, floor), [5e6 + off, 10e6 - 550_000], 'the second, across');
+  near(gripSpot(up, tall, 'side4', null, null, floor), [5e6 + off, 10e6 + 1_649_000], 'the fourth');
   // A beam lying along z has one grip between its ends: one side beside its middle, and no second.
   const walk = (req) => send(req)[0].params[1];
   near(walk({ do: 'grip', thing: id(2), end: 'side1' }), [2e6 - 51_000 - 350_000, 0, 6e6], 'the beam\'s side, half its height across (as it is carried, on its edge)');

@@ -668,3 +668,151 @@ async fn grips_a_frame_set_down_by_carriers_apart_is_lifted_again_from_its_appro
     assert_eq!(lift.map(|_| ()), Ok(()), "admitted from its approach");
     drop(served);
 }
+
+/// #5067 (no exemption at the put): a crew of two takes a rack beam; its back steps 0.9 m back from its
+/// place (under the carry's 1 m stretch, so the carry goes on, the beam between them), which takes both carriers 0.8 m
+/// from their grips. A put from there is refused `part.grip-out-of-reach` before anything moves: no carrier out of reach
+/// where the set-in would start is named as holding on a track (no `set-in` word). The back walks back to its place
+/// (an ordinary walk, the authoritative way there) and the same put is laid, holding the same grips throughout.
+#[tokio::test(flavor = "multi_thread")]
+async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name() {
+    let d = scratch("cstart");
+    let facts = grips_world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, beam) = (im.nodes["ground"], im.nodes["yard-beam-4"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut souls = Vec::new();
+    for (s, t) in ids.iter().zip(&tokens) {
+        souls.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    for (j, s) in souls.iter_mut().enumerate() {
+        s.act(
+            "eden:walk",
+            ground,
+            point(Vec3::new((44 + 2 * j as i64) * M, 0, -18 * M)),
+        )
+        .await
+        .expect("born");
+    }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
+    let l = Load::of(&construction("rack_beam.json")).unwrap();
+    let here = |p: Vec3| {
+        BTreeMap::from([
+            (1, ground.to_value()),
+            (3, Value::Array(vec![int(p.x), int(0), int(p.z)])),
+        ])
+    };
+    let at = beam_at();
+    let places = places_north(at, &l, 2);
+    let carry = crew_at(&mut souls, &dir, ground, &bodies, &[0, 1], &places).await;
+    souls[0]
+        .act("part:take", carry, BTreeMap::from([(1, beam.to_value())]))
+        .await
+        .expect("the crew takes the beam");
+    word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
+    let back = places[1];
+    souls[1]
+        .act(
+            "eden:walk",
+            ground,
+            point(Vec3::new(back.x, 0, back.z + (back.z - at.z).signum() * 900_000)),
+        )
+        .await
+        .expect("the back steps back");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    said(&served);
+    let to = Vec3::new(at.x + 300_000, 0, at.z);
+    let got = souls[0].act("part:put", carry, here(to)).await;
+    println!("put with the back 0.9 m back: {got:?}");
+    assert_eq!(got, Err("part.grip-out-of-reach".to_owned()));
+    assert!(
+        words(&dir, carry).iter().all(|h| h.phase == grips::CARRY),
+        "nobody named as holding on a set-in track while out of reach"
+    );
+    souls[1]
+        .act("eden:walk", ground, point(back))
+        .await
+        .expect("the back walks back to its grip");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    souls[0]
+        .act("part:put", carry, here(to))
+        .await
+        .expect("laid once both reach their grips");
+    let w = words(&dir, carry);
+    let phases: Vec<&str> = w.iter().map(|h| h.phase.as_str()).collect();
+    println!("phases: {phases:?}");
+    assert_eq!(phases.last().copied(), Some(grips::RELEASED));
+    assert!(phases.contains(&grips::SET_IN));
+    assert!(
+        w.windows(2).all(|p| p[0].holds == p[1].holds),
+        "the same holds throughout"
+    );
+    drop(served);
+}
+
+/// #5067 (admission at the take, the initially unreachable frame): two Souls stand 2.2 m off the faces of the loose
+/// 2.4 m rack frame (where the client's approach used to send them), 2.16 m from the edge each would hold, and ask to
+/// take it: refused `part.grip-out-of-reach`, naming a carrier, before anything is written (the frame stands where it
+/// stood, no holds are said). They walk to beside its edges (its own x, 0.49 m beyond each: an ordinary walk, the
+/// authoritative way there) and the same crew takes it, each hold within reach.
+#[tokio::test(flavor = "multi_thread")]
+async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_from_beside_its_edges() {
+    let d = scratch("cfar");
+    let facts = grips_world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, frame) = (im.nodes["ground"], im.nodes["loose-upright"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut souls = Vec::new();
+    for (s, t) in ids.iter().zip(&tokens) {
+        souls.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    for (j, s) in souls.iter_mut().enumerate() {
+        s.act(
+            "eden:walk",
+            ground,
+            point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)),
+        )
+        .await
+        .expect("born");
+    }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
+    let l = Load::of(&construction("rack_upright.json")).unwrap();
+    let at = upright_at();
+    let before = moves_of(&dir, frame).len();
+    // 2.2 m off its faces, along its own z.
+    let far = vec![spot(at, 2_200_000, true), spot(at, -2_200_000, true)];
+    let carry = crew_at(&mut souls, &dir, ground, &bodies, &[0, 1], &far).await;
+    let got = souls[0]
+        .act("part:take", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await;
+    said(&served);
+    println!("taken from 2.2 m off its faces: {got:?}");
+    assert_eq!(got.map(|_| ()), Err("part.grip-out-of-reach".to_owned()));
+    assert!(words(&dir, carry).is_empty(), "no holds said");
+    assert_eq!(moves_of(&dir, frame).len(), before, "the frame did not move");
+    // Beside its edges: its own x, 0.49 m beyond its half width.
+    let edge = l.half_width + 490_000;
+    let near = [spot(at, edge, false), spot(at, -edge, false)];
+    for (k, p) in near.iter().enumerate() {
+        souls[k].send("eden:walk", ground, point(*p)).await;
+    }
+    for s in souls.iter_mut() {
+        s.answer().await.expect("walks beside its edge");
+    }
+    together(&dir, &bodies, &near, 60).await;
+    souls[0]
+        .act("part:take", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await
+        .expect("taken from beside its edges");
+    let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
+    assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
+    drop(served);
+}
