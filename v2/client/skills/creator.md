@@ -175,6 +175,13 @@ the root, which `describe` shows), and from then on you place it like any other 
   `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
   placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
   ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+- `node souls-god.mjs apply-batch <file> [--dry-run]` applies a reviewed fix written as a `souls-named-batch/1` file
+  (`worlds/patches/*/batch.json`), which names things by their template name (`<thing>` or `<building>/<thing>`), not
+  by id. Each name is found on your copy; one that matches nothing or several things, or a thing that stands neither
+  where the op says it was nor where it goes, is reported and skipped, never guessed. The rest go as ordinary edits
+  of at most 256 operations, and the world checks each. It prints one line per op (`ready`, `applied`, `already`,
+  `refused` with the code, `unresolved`, `ambiguous`, `moved-since`, ...), then the counts. Run `--dry-run` first;
+  a second run finds every op `already` and sends nothing. A thing moved off a roof to the ground gets a new id.
 
 ## Furnishing
 

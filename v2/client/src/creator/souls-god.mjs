@@ -58,6 +58,10 @@
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
 //   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
+//   souls-god.mjs apply-batch <file> [--dry-run]   a reviewed souls-named-batch/1 file (worlds/patches/*/batch.json):
+//                                                each thing it names (by its template name, or <building>/<thing>)
+//                                                found on the copy, never guessed; sent as edits of at most 256
+//                                                operations, each op's outcome a line; --dry-run sends nothing (named.mjs)
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist m]   beside another (default e, 1 m)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
@@ -168,6 +172,7 @@ export const VERBS = [
   'access',
   'ack',
   'answer',
+  'apply-batch',
   'arrival',
   'batch',
   'build',
@@ -344,6 +349,8 @@ export const FIX = {
   'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
   'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
   'name-ambiguous': 'give one of the ids in choices',
+  'named.file': 'apply-batch <file>: a souls-named-batch/1 file readable here',
+  'named.format': 'a souls-named-batch/1 file: {"schema": "souls-named-batch/1", "ops": [...]}, as worlds/patches/*/batch.json',
   'unknown-op': 'your daemon is older than this command: run quit, then the command again',
   'when.no-calendar': 'the copy has no world clock yet: run status until connected is true, or give --when <world µs>us',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
@@ -637,6 +644,11 @@ export function requestOf(argv) {
   // `quit` ends the daemon, as souls.mjs's `quit` does a Soul's (#4700); `stop` is kept, a creator having no act to stop
   if (verb === 'quit') return { req: { op: 'stop' }, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
+  if (verb === 'apply-batch') {
+    const files = rest.filter((w) => w !== '--dry-run');
+    if (files.length !== 1) throw usage('apply-batch <souls-named-batch/1 file> [--dry-run]');
+    return { named: { file: absolute(files[0]), dry: rest.includes('--dry-run') }, creator };
+  }
   if (verb === 'export' || verb === 'import') {
     if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
     return { req: { op: verb, file: absolute(rest[0] ?? 'world.souls.json') }, creator };
@@ -1096,6 +1108,14 @@ if (isMain(import.meta.url)) {
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
+    if (asked.named) {
+      // A reviewed named batch (named.mjs): each op's outcome a line, then the summary.
+      const { runNamed } = await import('./named.mjs');
+      const said = await runNamed(asked.named, ask, out);
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
     if (asked.thing !== undefined) {
       const d = await ask({ op: 'describe' }, 15_000), f = d.ok === false ? null : await ask({ op: 'fields', node: asked.thing }, 15_000);
       const said = d.ok === false ? d : f.ok === false ? f : describeThing(asked.thing, d, f.fields, kindsIn(join(home, 'kinds')));
