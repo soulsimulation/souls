@@ -182,10 +182,15 @@ pub fn plan_classes(
     let planned = plan_with(checked, copy, ground, names, |part| {
         for size in sizes {
             if size != Size::Standard && !classes.contains_key(&size) {
+                #[allow(clippy::disallowed_methods)]
+                let t0 = std::time::Instant::now();
                 classes.insert(
                     size,
                     safety::guard_for(copy.tree(), copy.header(), ground, part, size)?,
                 );
+                #[allow(clippy::disallowed_methods)]
+                let t = t0.elapsed();
+                eprintln!("TMP5216 guard_for {size:?}: {t:?}");
             }
         }
         match known {
@@ -260,8 +265,15 @@ fn plan_with(
     if let Some(g) = ground {
         on_ground(copy, g, &part)?;
     }
+    #[allow(clippy::disallowed_methods)]
+    let t0 = std::time::Instant::now();
     let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
+    #[allow(clippy::disallowed_methods)]
+    let t_terrain = t0.elapsed();
     let (guard, map) = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
+    #[allow(clippy::disallowed_methods)]
+    let t_guard = t0.elapsed();
+    eprintln!("TMP5216 plan_with: terrain {t_terrain:?} guard {:?} effects {}", t_guard - t_terrain, part.effects.len());
     Ok(Planned {
         checked,
         guard,

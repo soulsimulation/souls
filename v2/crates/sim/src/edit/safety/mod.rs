@@ -301,8 +301,14 @@ pub fn guard_kept(
 ) -> Result<(Guard, Rebuilt), String> {
     crate::commit::off_clock();
     let g = known.ground;
+    #[allow(clippy::disallowed_methods)]
+    let t0 = std::time::Instant::now();
     let mut after = before.frozen();
+    #[allow(clippy::disallowed_methods)]
+    let t_frozen = t0.elapsed();
     let r = Town::rebuild_on(&mut after, header, g, known.versions, &known.basis, part)?;
+    #[allow(clippy::disallowed_methods)]
+    let t_rebuild = t0.elapsed();
     let v = |n: Id| r.versions.of(n);
     let link_of = |id: Id| known.links.get(&id).map(|l| (*l).clone());
     let (mut map, bs) = match &r.fresh {
@@ -318,8 +324,32 @@ pub fn guard_kept(
     for (b, _) in bs {
         map.replace(b, &v);
     }
+    #[allow(clippy::disallowed_methods)]
+    let t_map = t0.elapsed();
     let sides = Sides::of(before, &after, part, header.zone, g, known.map.clone(), map);
-    Ok((Guard::of(before, part, Some(sides)), r))
+    #[allow(clippy::disallowed_methods)]
+    let t_sides = t0.elapsed();
+    let out = Guard::of(before, part, Some(sides));
+    #[allow(clippy::disallowed_methods)]
+    let t_guard = t0.elapsed();
+    eprintln!(
+        "TMP5216 guard_kept: frozen {:?} rebuild {:?} map {:?} sides {:?} guard {:?}; whole {} why {:?} squares {} buildings {} whole_classes {:?} classes {}",
+        t_frozen,
+        t_rebuild - t_frozen,
+        t_map - t_rebuild,
+        t_sides - t_map,
+        t_guard - t_sides,
+        r.whole(),
+        r.why,
+        r.squares(),
+        match &r.fresh {
+            Fresh::Squares(_, _, bs) | Fresh::Buildings(bs) => bs.len(),
+            Fresh::Whole(_) => 0,
+        },
+        r.whole_classes(),
+        known.basis.classes.len(),
+    );
+    Ok((out, r))
 }
 
 impl Sides {

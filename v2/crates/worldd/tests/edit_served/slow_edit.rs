@@ -102,7 +102,11 @@ async fn i5216_the_27_nov_edit_on_eden_by_stage() {
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
     let mut souls = connect_socket(&socket);
-    for (k, &body) in w.souls.iter().enumerate().take(20) {
+    let walkers: usize = std::env::var("SLOW_EDIT_WALKERS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(20);
+    for (k, &body) in w.souls.iter().enumerate().take(walkers) {
         walk(&mut souls, &w, body, 1, (x0 + 2 * k as i64) * M, (z0 + 8) * M);
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -150,4 +154,8 @@ async fn i5216_the_27_nov_edit_on_eden_by_stage() {
         said("a wall after", &got, took, &edit_check(&w, n));
         version = got.version;
     }
+    println!(
+        "#5216 health: {}",
+        std::fs::read_to_string(w.dir.join("health.json")).unwrap()
+    );
 }
