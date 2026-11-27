@@ -204,3 +204,45 @@ Changing a frozen definition requires an explicit coordinator decision before ne
 a new protocol version and affected-evidence applicability review. Preserve previous failed results. Validation:
 `node --test tools/playtest/camera/definitions.test.mjs`. These declarations add no runtime code, bundle bytes,
 network calls or idle work; runtime cost still requires later actual measurements.
+
+## Owned native-page capture prerequisite (CAM-05a)
+
+`tools/proof/owned-attempt.mjs` accepts `world.kind: 'native-page'` with the committed
+`tools/proof/drivers/camera-native-page.mjs` driver. A thin ignored wrapper supplies the owner, immutable attempt
+ledger/cycle, clean product/helper/driver checkouts, reserved-port-safe entry port, explicit repository-owned
+browser cache/executable, and a portrait or desktop viewport. There is no existing-world URL or personal-profile
+option. Existing attempt limits and independent third-attempt review still apply; do not create a new ledger to
+hide a failed slot.
+
+Before running, create a private `native-page-proof-artifacts/1` receipt with `createNativePageArtifacts` from
+`tools/proof/native-page-fixture.mjs`. Save it under ignored scratch and pass its relative `file`, containing
+`root`, and SHA-256 `hash` as `world.artifacts`. The receipt identifies the selected product source, tracked world
+template, source hashes, exact web/viewer/replica trees, native binaries and Caddy executable. The product may be
+an older pinned build and must be labelled as such; it is never relabelled with the newer helper commit. Both
+native startup and the outer front door use the pinned Caddy; `V2_WEB` prevents an unowned rebuild of the product.
+Mutable world, launcher, routing, client bundle, browser profile and outputs live only in the fresh owned attempt.
+
+Startup process groups and finite commands register with the owner before waiting. Finite children respond to
+abort/deadline with bounded TERM/KILL escalation. Teardown checks the owned process group even if its leader has
+already exited; disappearance is required. Derived native ports and the launcher's allocation range are checked
+against reserved ports. Boot/browser/timeout/interruption failures retain evidence and never qualify.
+
+The native-page browser first renders a neutral calibration, checks raw capture dimensions, and if needed grows
+the browser window by the **measured** deficit without changing the CSS viewport. If window minimum dimensions
+leave a raw-size mismatch, it explicitly sizes the visible render surface to the same declared viewport. Each
+correction waits for bounded compositor presentation; unchanged CSS dimensions and exact raw pixels remain
+mandatory. It then checks encoded frames at 0.25, 0.5 and 0.75 seconds for intended resolution and all four colored corner
+markers. A crop, rescale or gray padded edge fails. No fixed browser-decoration offset is assumed. Calibration
+is isolated from the product page; the original actual-page recording begins afterward and uses no product
+pose injection or calibration overlay. Test desktop and portrait separately; a successful desktop calibration
+does not qualify portrait, physical mobile, or another browser configuration.
+
+The driver retains the exact initial navigation response and verifies its supplied native stream, successful
+matching stream requests and a nonempty finite depicted tick; it never restores a consumed configuration global.
+It waits for the native apps/web world to draw and snapshots accessible controls before each real input. It uses
+the visible direct Camera control or responsive Menu → Camera route, pointer dragging and keyboard input, then
+returns to Broadcast. It changes no actor or camera pose through a test hook. The original actual-page take and calibration files remain under the attempt with their hashes,
+console/network evidence and cleanup outcome. Inspect encoded full-resolution frames and actual-page pixels
+before relying on this capability. Normal-speed perceptual playback is a separate capability; extracted frames
+alone do not demonstrate it. This short journey qualifies capture/input access only, not camera aesthetics,
+physical-mobile performance, causal matched comparisons or CAM-05's two 60-minute controls.
