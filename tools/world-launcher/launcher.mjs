@@ -6,13 +6,15 @@
 //   node tools/world-launcher/launcher.mjs [--port 4980] [--data <dir>] [--range 5101-5149]
 //        [--auth-env <clerk.env> --public-origin https://sim.eden.art] [--soul-skill <skill.md>] [--soul-instructions <instructions.md>]
 //        [--templates-dir <dir>]   genesis templates from another folder (default worlds/templates; a staged scene's own)
+//        [--new-engine-templates <dir>]  the new engine's published templates (SOULS_V2_TEMPLATES; default the directory's)
 //
 //   GET  /                       the web app (homepage: worlds + New world)
 //   GET  /changelog              the public changelog: CHANGELOG.md rendered into the web build (apps/web/changelog.html)
 //   GET  /robots.txt, /sitemap.xml  what crawlers are told (crawl.mjs): public pages and listed worlds only; an unlisted
 //                                world's every response is X-Robots-Tag noindex, as is every /__sim JSON answer
 //   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities; with the worlds that have only a new-engine route (D2)
-//   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain
+//   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain; where New world goes to
+//                                the new engine, its published templates instead (also worlds.json's `templates`)
 //   GET  /__sim/my-souls.json    my-souls/1 (#2466): the signed-in account's own Souls across these worlds (my-souls.mjs), read
 //                                from each world's store (a sleeping world stays asleep; a moved world's from the v2 directory); 401 signed out. GET /__sim/soul-photo/
 //                                <slug>/<soulId>/<sha256>.png: a live Soul's stored photo or portrait by its hash, immutable
@@ -127,7 +129,7 @@ import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constan
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
+import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, listNewEngineTemplates, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
 import { cutoverFence, routeOnlyId, searchPlaces, searchText, withV2Stream } from './cutover.mjs';
@@ -308,6 +310,15 @@ export async function openLauncher(cfg = {}) {
   const shots = placeShots({ dir: join(dataDir, 'place-shots'), log: (s) => log(s) });   // a moved world's kept Explore pictures (place-shots.mjs)
   const movedAsset = movedAssets({ root: resolve(cfg.coreAssetRoot ?? root), assetDir: resolve(cfg.assetDir ?? process.env.ASSET_DIR ?? join(dataDir, 'worlds', 'assets')) });
   const templateList = cachedTemplates(templatesDir);   // P2: never parse ~2 MB of templates per proxied request
+  // 27 Nov: where New world goes to the new engine (v2CreateOn), the dialog offers the directory's published templates
+  // (the folder DIRECTORYD_TEMPLATES names; souls-directory.service's by default), never the old engine's genesis files
+  const v2TemplatesDir = resolve(cfg.v2TemplatesDir ?? process.env.SOULS_V2_TEMPLATES ?? '/usr/local/lib/souls/templates');
+  let v2Templates = { at: -Infinity, list: [] };
+  const newEngineTemplates = () => {
+    if (Date.now() - v2Templates.at > 2000) v2Templates = { at: Date.now(), list: listNewEngineTemplates(v2TemplatesDir) };
+    return v2Templates.list;
+  };
+  const offeredTemplates = () => (v2CreateOn() ? newEngineTemplates() : templateList().map(({ file: _f, ...t }) => t));
   const defaultThumbs = templateThumbs(cfg.templateThumbsDir ?? join(templatesDir, 'thumbs'));   // #887: pulled from the asset CDN, may be absent
   // #887: the site admin's vetoes apply to thumbnails as to every upload. The site log is the one the worlds share: by
   // default <data>/worlds/assets/moderation-site.jsonl (each world's DATA_DIR/../assets), unless the environment names it.
@@ -470,7 +481,7 @@ export async function openLauncher(cfg = {}) {
     await Promise.all([...registry.worlds.map(refreshStats), directory.at ? null : asked]);
     // each world's count once (the sort compares many times, and a moved world's is a read of the routes file)
     const all = [...registry.worlds, ...routeOnlyWorlds()], souls = new Map(all.map((w) => [w, soulsOf(w)]));
-    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(all, (w) => souls.get(w)).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
+    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(all, (w) => souls.get(w)).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: offeredTemplates(), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
   /** A world the site admin marked not claimable, while it still has no god: nobody may claim it or mint for it. */
@@ -1847,7 +1858,7 @@ export async function openLauncher(cfg = {}) {
         if (!bytes) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         res.writeHead(200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable', 'content-length': bytes.length }).end(req.method === 'HEAD' ? undefined : bytes); return;
       }
-      if (path === '/__sim/templates.json' && req.method === 'GET') { json(res, 200, { templates: templateList().map(({ file: _f, ...t }) => t) }); return; }
+      if (path === '/__sim/templates.json' && req.method === 'GET') { json(res, 200, { templates: offeredTemplates() }); return; }
       if (oldRoot && req.method === 'POST' && (path === '/__sim/worlds' || path === '/__sim/op/create-world')) {
         json(res, 403, { ok: false, code: 'creation.elsewhere', message: 'This server keeps the original worlds. Make new worlds at /worlds/.', url: '/worlds/' }); return;
       }
@@ -2415,7 +2426,7 @@ if (isMain(import.meta.url)) {
       publicOrigin: flag('public-origin'), clerkSatellite: flag('clerk-satellite'), clerkLegacySatellites: flag('clerk-legacy-satellites'), clerkSignInUrl: flag('clerk-sign-in-url'), authEnvFile: flag('auth-env') ?? flag('auth-env-file'), devAuth: argv.includes('--dev-auth') ? true : undefined,
       maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), worldsMemMb: num('worlds-mem-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), unloadStill: flag('unload-still') === undefined ? undefined : num('unload-still') === 1, loadParallel: num('load-parallel'), loadHoldMs: num('load-hold-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'), diskMinFreeMb: num('disk-min-free-mb'),
       maxWorldsPerAccount: num('max-worlds-per-account'), newAccountHours: num('new-account-hours'), newAccountWorldLimit: num('new-account-world-limit'), newAccountCreateLimit: num('new-account-create-limit'), newAccountWindowMinutes: num('new-account-window-minutes'),
-      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
+      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), v2TemplatesDir: flag('new-engine-templates'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
       placeShotsDraw: process.env.SIM_PLACE_SHOTS_DRAW !== '0',
       ...(underKeeper ? { listen: false, adopt: process.env.SIM_ADOPT ? JSON.parse(process.env.SIM_ADOPT) : null } : {}) });
     let stopping = false;
