@@ -15,11 +15,14 @@ with one of them steering. Those six tasks build on this page and define no grou
 2. **A rider** is the group's child at a fixed pose: a carried or pushed load, a body in a vehicle's slot, a body on
    a ride. Its T2 parent is the group's node and its owner is the slot, so it moves with the frame and nothing writes
    it while the group moves. Things on a rider (contents of a pushed thing) are the rider's children, not members.
-   An activity's node says where it holds each slot's rider (`replica::activity::F_RIDES`, field 15:
-   `[[slot, x, y, z], ...]`, mm in its own frame), from the effect that makes it: a rider's pose is the node's pose,
-   then that point, then the rider's own. The engine holds a rider in the node's own frame, so each point is its
-   origin; a reader composes from the field and assumes nothing. It is not a thing's slot points (field 13): what
-   stands at one of those is fixed geometry to the ground, and a rider is carried.
+   A vehicle's or a ride's rider stands from its thing's slot point (field 13). An activity's node whose kind gives
+   it a slot (a carry's) says where it holds each slot's rider itself (`replica::activity::F_RIDES`, field 15 of an
+   activity's node: `[[slot, x, y, z], ...]`, mm in its own frame), in the change that makes it: a rider's pose is the
+   node's pose, then that point, then the rider's own. The engine holds such a rider in the node's own frame, so each
+   point is its origin; a reader composes from the field, and places nothing in the slot of a node that has none (one
+   made before the field existed, until its members leave). An activity's node never carries field 13: the ground
+   reads what stands at one of those points as fixed geometry (`sim::ground::scene::carried`), and its rider is
+   carried.
 3. **A walker** is linked to the group's node (B5's membership link, `souls:member`, when the group is an activity),
    keeps its own parent and its own mover, and steers toward its **place**, a point in the group's frame. The place
    is a target, never a constraint. A walker is never the group's child: its pose would be rewritten on every step
