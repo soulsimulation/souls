@@ -513,7 +513,7 @@ impl Client {
                 Some(Value::Text(t)) => {
                     // The refusal's words (field 8), for reading.
                     if let Some(Value::Text(d)) = a.get(&8) {
-                        println!("refused {}: {d}", t.as_str());
+                        println!("refused {}: {}", t.as_str(), d.as_str());
                     }
                     Err(t.as_str().to_owned())
                 }
