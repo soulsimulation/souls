@@ -56,6 +56,7 @@ for (let k = 1; (k - 1) * TAKE_MS < SECS * 1000; k++) {
   for (const x of takes) {
     for (const [key, v] of Object.entries(x)) {
       if (typeof v === 'number') sum[key] = (sum[key] ?? 0) + v;
+      else if (typeof v === 'string') sum[key] ??= v;
       else if (v && typeof v === 'object') {
         sum[key] ??= {};
         for (const [a, b] of Object.entries(v)) {

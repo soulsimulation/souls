@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // #4985: one arm's figures from v2-remote-modal.py's JSON lines, and (with --host) the origin host's samples over the
 // arm's span: JSON lines of {t (unix ms), busy, idle (/proc/stat jiffies), origin, caddy (process jiffies), tx (bytes),
-// seg (requests in from the proxy to the origin, as TCP data segments), ticks, healthAt (the world's tick count and
+// seg (requests in from the proxy to the origin, as TCP data segments on its open sockets; a socket that closes
+// loses its count, so a drop is skipped), ticks, healthAt (the world's tick count and
 // its health file's time)}. Steady windows are those after the arrivals (40 s in). Prints one JSON object.
 //
 //   node tools/bench/capacity/viewers/v2-remote-report.mjs <arm.jsonl> [--host <host.jsonl>]
@@ -16,7 +17,7 @@ for (const r of rows) {
   const w = byT.get(r.t) ?? { t: r.t, shares: 0, viewers: 0, waiting: 0, slow: 0, requests: {}, bytes: {}, cache: {}, rtt: {}, latency: {}, firstPicture: {}, installed: {}, errors: {}, behind: 0, reinstalls: 0, crossed: 0, recovered: 0, cpuSeconds: 0, loopP99Ms: 0 };
   w.shares++;
   for (const k of ['viewers', 'waiting', 'slow', 'behind', 'reinstalls', 'crossed', 'recovered', 'cpuSeconds']) w[k] += r[k] ?? 0;
-  for (const k of ['requests', 'bytes', 'errors']) merge(w[k], r[k] ?? {});
+  for (const k of ['requests', 'bytes', 'errors', 'colo']) merge((w[k] ??= {}), r[k] ?? {});
   for (const k of ['latency', 'firstPicture', 'installed']) merge(w[k], r[k] ?? {});
   for (const k of ['cache', 'rtt']) for (const [type, h] of Object.entries(r[k] ?? {})) merge((w[k][type] ??= {}), h);
   w.loopP99Ms = Math.max(w.loopP99Ms, r.loopP99Ms ?? 0);
@@ -38,11 +39,16 @@ const out = {
   requestsPerS: Math.round(sum(steady, (w) => Object.values(w.requests).reduce((a, b) => a + b, 0)) / secs),
   mbPerS: +(sum(steady, (w) => Object.values(w.bytes).reduce((a, b) => a + b, 0)) / secs / 1e6).toFixed(2),
   pointerRtt: q(all('rtt', 'pointer')), partRtt: q(all('rtt', 'part')), baselineRtt: q(windows.reduce((h, w) => merge(h, w.rtt.baseline ?? {}), {})),
-  streamLatency: q(all('latency')), firstPicture: q(anyW('firstPicture')), baselineDrawn: q(anyW('installed')),
+  streamLatency: q(all('latency')), firstPicture: q(anyW('firstPicture')),
+  // the first arrivals (the first minute) and, on uneven, the churn wave's joiners (after it) apart
+  firstPictureArrivals: q(windows.filter((w) => w.t <= 60).reduce((h, w) => merge(h, w.firstPicture), {})),
+  firstPictureLater: q(windows.filter((w) => w.t > 60).reduce((h, w) => merge(h, w.firstPicture), {})), baselineDrawn: q(anyW('installed')),
   hitRatio: cached ? +((cacheAll.HIT ?? 0) / cached).toFixed(4) : null,
   cacheByType: Object.fromEntries(Object.entries(cache).map(([t, h]) => [t, { ...h, hit: +((h.HIT ?? 0) / hcount(h)).toFixed(4) }])),
+  hitRatioWithJoins: (() => { const h = {}; for (const w of windows) for (const x of Object.values(w.cache)) merge(h, x); const n = hcount(h); return n ? +((h.HIT ?? 0) / n).toFixed(4) : null; })(),
   notHitPerS: +((cached - (cacheAll.HIT ?? 0)) / secs).toFixed(2),
   errors: windows.reduce((s, w) => merge(s, w.errors), {}), behind: sum(windows, (w) => w.behind), reinstalls: sum(windows, (w) => w.reinstalls),
+  edgeLocations: windows.reduce((s, w) => merge(s, w.colo ?? {}), {}),
   readerCores: +(sum(windows, (w) => w.cpuSeconds) / (10 * windows.length)).toFixed(2), readerLoopP99Ms: Math.max(...windows.map((w) => w.loopP99Ms)),
 };
 // baseline joins: bytes per baseline as sent (br when the reader asks for it)
@@ -51,17 +57,18 @@ out.baselineBytesEach = jn ? Math.round(jb / jn) : null;
 const hostFile = opt('host');
 if (hostFile) {
   const from = head.start_at + 40_000, to = head.start_at + head.secs * 1000;
-  const hs = readFileSync(hostFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const hs = readFileSync(hostFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).sort((a, b) => a.t - b.t);
   const span = (a, b) => { const s = hs.filter((x) => x.t >= a && x.t <= b); return s.length >= 2 ? [s[0], s.at(-1)] : null; };
+  const inSpan = (a, b) => hs.filter((x) => x.t >= a.t && x.t <= b.t);
   const fig = (pair) => {
     if (!pair) return null;
     const [a, b] = pair, dt = (b.t - a.t) / 1000, ht = (b.healthAt - a.healthAt) / 1000;
     return {
       hostBusy: +((b.busy - a.busy) / (b.busy - a.busy + b.idle - a.idle)).toFixed(3),
       originCores: +((b.origin - a.origin) / 100 / dt).toFixed(3), caddyCores: +((b.caddy - a.caddy) / 100 / dt).toFixed(3),
-      originReqPerS: +((b.seg - a.seg) / dt).toFixed(1), egressMBps: +((b.tx - a.tx) / dt / 1e6).toFixed(2),
+      originReqPerS: +(inSpan(a, b).reduce((n, x, i, s) => n + (i ? Math.max(0, x.seg - s[i - 1].seg) : 0), 0) / dt).toFixed(1), egressMBps: +((b.tx - a.tx) / dt / 1e6).toFixed(2),
       tickRate: ht > 0 ? +((b.ticks - a.ticks) / ht).toFixed(2) : null, overBudget: b.overBudget - a.overBudget,
-      hostBusyMax: Math.max(...hs.filter((x) => x.t >= a.t && x.t <= b.t).map((x, i, s) => (i ? (x.busy - s[i - 1].busy) / (x.busy - s[i - 1].busy + x.idle - s[i - 1].idle) : 0))).toFixed(3) * 1,
+      hostBusyMax: Math.max(...inSpan(a, b).map((x, i, s) => (i ? (x.busy - s[i - 1].busy) / (x.busy - s[i - 1].busy + x.idle - s[i - 1].idle) : 0))).toFixed(3) * 1,
     };
   };
   out.hostBefore = fig(span(head.start_at - 90_000, head.start_at));

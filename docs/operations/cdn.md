@@ -271,6 +271,18 @@ first; until then the binding field is ignored.
    `https://soul.game/w/eden/` in a browser: in DevTools, Network, filtered on `stream.soul.game`, the pointer and the
    parts answer `200` with `cf-cache-status: HIT` once warm, and the world moves.
 
+**Measured through the real CDN (#4985, 27 Nov 2026).** Remote readers (the page's stream worker without the
+drawing, asking `br, gzip` as a browser does) on Modal machines of 250 readers each, which Cloudflare's anycast spread
+over 6 to 8 edge locations on three continents, read Eden through `stream.soul.game` at 1,000, 2,500 and 5,000, each
+even (arrivals over 30 s, then held) and uneven (one join wave within 5 s, a churn wave of a quarter at the middle,
+2 % slow readers), two repeats. At 5,000 the edges answered about 20,000 requests a second at a 99.99 % hit ratio,
+and the origin host saw what it sees with no viewers: about 6 requests a second, under 0.01 of a core for the origin,
+the host near 7 % busy, Eden at 20 ticks a second with no tick over budget. To join, a reader downloads about
+1.27 MB (the baseline 1.12 MB as br) against 9.2 MB without compression. The rerun:
+`REMOTE_PKG=<the world's replica package> modal run tools/bench/capacity/viewers/v2-remote-modal.py --base
+https://stream.soul.game --stream <v2Stream> --viewers 5000 --arm uneven --per-share 250 --slow 100 --out <file>`,
+then `node tools/bench/capacity/viewers/v2-remote-report.mjs <file>`. The per-arm table is on #4985.
+
 **Rollback:** `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs eden off` (pages loaded
 after it read `soul.game/s/` again; an open page reads the CDN until it reloads). If the CDN itself is wrong, also set
 the record to DNS only. The site file can stay.
