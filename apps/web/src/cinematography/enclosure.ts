@@ -3,7 +3,7 @@ import {Matrix4,Vector3} from 'three';
 import type {Object3D} from 'three';
 export type AuthoredRoom=Readonly<{id:string;floor:number;y:number;height:number;poly:readonly (readonly number[])[]}>;
 type Room=AuthoredRoom;
-export type AuthoredOpening={kind:'door'|'window'|'arch';floor:number;at:readonly number[];width:number;height:number;sill:number;from:string|null;to:string|null};
+export type AuthoredOpening={kind:'door'|'window'|'arch';floor:number;at:readonly [number,number];width:number;height:number;sill:number;from:string|null;to:string|null};
 type Hints={schema:string;revision:string;reason?:string;extent?:readonly number[]|null;open:boolean;rooms:readonly Room[];openings:readonly AuthoredOpening[]};
 export const ENCLOSURE_LIMITS=Object.freeze({buildings:64,rooms:32,edges:2048,entry:.15,exit:.15,proposalMargin:.4});
 export type EnclosureResult={status:string;reason:string;building:string|null;revision:string|null;sourceRevision:string|null;room:string|null;floor:number|null;canonical:number[]|null;worldMatrix:number[]|null;region:AuthoredRoom|null;proposalMarginM:number;openingProposals:readonly AuthoredOpening[];proposals:number[][];openings:Record<string,number>;connectivity:'unknown';validation:'full-authored-geometry-required';work:{buildings:number;rooms:number;edges:number};retained:number};
