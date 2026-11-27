@@ -228,16 +228,20 @@ already exited; disappearance is required. Derived native ports and the launcher
 against reserved ports. Boot/browser/timeout/interruption failures retain evidence and never qualify.
 
 The native-page browser first renders a neutral calibration, checks raw capture dimensions, and if needed grows
-the browser window by the **measured** deficit without changing the CSS viewport. It verifies the corrected raw
-frame, then checks encoded frames at 0.25, 0.5 and 0.75 seconds for intended resolution and all four colored corner
+the browser window by the **measured** deficit without changing the CSS viewport. If window minimum dimensions
+leave a raw-size mismatch, it explicitly sizes the visible render surface to the same declared viewport. Each
+correction waits for bounded compositor presentation; unchanged CSS dimensions and exact raw pixels remain
+mandatory. It then checks encoded frames at 0.25, 0.5 and 0.75 seconds for intended resolution and all four colored corner
 markers. A crop, rescale or gray padded edge fails. No fixed browser-decoration offset is assumed. Calibration
 is isolated from the product page; the original actual-page recording begins afterward and uses no product
 pose injection or calibration overlay. Test desktop and portrait separately; a successful desktop calibration
 does not qualify portrait, physical mobile, or another browser configuration.
 
-The driver waits for the native apps/web world to draw, uses visible mode controls, pointer dragging and keyboard
-input, and returns to Broadcast. It observes mode/readiness only and changes no actor or camera pose through a
-test hook. The original actual-page take and calibration files remain under the attempt with their hashes,
+The driver retains the exact initial navigation response and verifies its supplied native stream, successful
+matching stream requests and a nonempty finite depicted tick; it never restores a consumed configuration global.
+It waits for the native apps/web world to draw and snapshots accessible controls before each real input. It uses
+the visible direct Camera control or responsive Menu → Camera route, pointer dragging and keyboard input, then
+returns to Broadcast. It changes no actor or camera pose through a test hook. The original actual-page take and calibration files remain under the attempt with their hashes,
 console/network evidence and cleanup outcome. Inspect encoded full-resolution frames and actual-page pixels
 before relying on this capability. Normal-speed perceptual playback is a separate capability; extracted frames
 alone do not demonstrate it. This short journey qualifies capture/input access only, not camera aesthetics,
