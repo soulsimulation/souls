@@ -8032,9 +8032,15 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         }
         c
     };
-    // Waits until each body stands within 0.3 m of its place, at most 30 s.
+    // Waits until each body stands within 0.3 m of its place. The wait follows progress, not a fixed time: a slow CI
+    // runner walks the crew far slower than a quiet machine (a fixed 30 s failed with one carrier 0.48 m out and still
+    // closing, #5128), so it goes on while some body not yet at its place gets nearer it, up to 180 s, and fails once
+    // none has for 10 s.
     let settle = async |places: &[(Id, Vec3)], what: &str| {
+        const MOST: Duration = Duration::from_secs(180);
+        const STALL: Duration = Duration::from_secs(10);
         let t0 = std::time::Instant::now();
+        let (mut best, mut nearer) = (vec![i64::MAX; places.len()], t0);
         loop {
             let off: Vec<i64> = places
                 .iter()
@@ -8046,9 +8052,23 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             if off.iter().all(|d| *d < 300_000) {
                 return t0.elapsed();
             }
+            // Progress: a body not at its place yet stands 10 mm nearer it than it has been.
+            for (b, d) in best.iter_mut().zip(&off) {
+                if *d >= 300_000 && *d + 10_000 < *b {
+                    *b = *d;
+                    nearer = std::time::Instant::now();
+                }
+            }
             assert!(
-                t0.elapsed() < Duration::from_secs(30),
-                "{what}: not all at their places within 30 s, µm off {off:?}"
+                nearer.elapsed() < STALL,
+                "{what}: nobody nearer their place for {} s, {} ms after the walk, µm off {off:?}",
+                STALL.as_secs(),
+                t0.elapsed().as_millis()
+            );
+            assert!(
+                t0.elapsed() < MOST,
+                "{what}: not all at their places within {} s, µm off {off:?}",
+                MOST.as_secs()
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
