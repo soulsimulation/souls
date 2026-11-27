@@ -2381,14 +2381,16 @@ fn a_created_world_names_its_creator_in_its_tokens_file_once_placed() {
     use crate::worlds::list::{Template, Worlds};
     use serde_json::json;
     use std::sync::Arc;
-    let root = std::env::temp_dir().join(format!("souls-created-marker-{}", to_hex(&random::<8>())));
+    let root =
+        std::env::temp_dir().join(format!("souls-created-marker-{}", to_hex(&random::<8>())));
     std::fs::create_dir_all(root.join("worlds")).unwrap();
     let root = root.canonicalize().unwrap();
     let registry = root.join("authority.json");
     let place = {
         let (root, registry) = (root.clone(), registry.clone());
         move |worlds: serde_json::Value| {
-            let map = json!({"format": "souls/world-authority/1", "worldsRoot": root, "worlds": worlds});
+            let map =
+                json!({"format": "souls/world-authority/1", "worldsRoot": root, "worlds": worlds});
             std::fs::write(&registry, serde_json::to_vec(&map).unwrap()).unwrap();
         }
     };
@@ -2402,7 +2404,11 @@ fn a_created_world_names_its_creator_in_its_tokens_file_once_placed() {
     let mut templates = BTreeMap::new();
     templates.insert(
         "hello-hamlet".to_owned(),
-        Template { dir: "hello-hamlet".into(), lineage: [0xe0; 16], zone },
+        Template {
+            dir: "hello-hamlet".into(),
+            lineage: [0xe0; 16],
+            zone,
+        },
     );
     // The placement, as place-created-world.mjs runs it: the fork's tokens file (no marker) and the registry row, both
     // before the world is ready.
@@ -2412,11 +2418,22 @@ fn a_created_world_names_its_creator_in_its_tokens_file_once_placed() {
         templates,
         Box::new(move |s| {
             let creator = crate::accounts::principal_text(s.creator);
-            let instance = format!("{}-{}", to_hex(&s.lineage), crate::accounts::principal_text(zone).replace(':', "-"));
+            let instance = format!(
+                "{}-{}",
+                to_hex(&s.lineage),
+                crate::accounts::principal_text(zone).replace(':', "-")
+            );
             std::fs::create_dir_all(placing.join("worlds").join(&instance)).unwrap();
-            std::fs::write(placing.join("worlds").join(&instance).join("tokens"), "# World-bound pairing authority\n").unwrap();
+            std::fs::write(
+                placing.join("worlds").join(&instance).join("tokens"),
+                "# World-bound pairing authority\n",
+            )
+            .unwrap();
             let mut row = serde_json::Map::new();
-            row.insert(s.name.to_owned(), json!({"instance": instance, "creator": creator}));
+            row.insert(
+                s.name.to_owned(),
+                json!({"instance": instance, "creator": creator}),
+            );
             place(serde_json::Value::Object(row));
             Ok(())
         }),
@@ -2437,14 +2454,23 @@ fn a_created_world_names_its_creator_in_its_tokens_file_once_placed() {
     let serving = app.clone();
     std::thread::spawn(move || run(listener, serving));
 
-    let ask = json!({"key": "click-1", "name": "walk-0148", "template": "hello-hamlet", "label": "Walk"});
+    let ask =
+        json!({"key": "click-1", "name": "walk-0148", "template": "hello-hamlet", "label": "Walk"});
     let (status, made) = served(&addr, "/v1/worlds", Some("test:Ada"), &ask);
     assert_eq!(status, 200, "{made}");
     let row = &made["world"];
     let creator = row["creator"].as_str().unwrap();
-    let instance = format!("{}-{}", row["lineage"].as_str().unwrap(), row["zone"].as_str().unwrap().replace(':', "-"));
-    let tokens = std::fs::read_to_string(root.join("worlds").join(&instance).join("tokens")).unwrap();
-    assert!(tokens.contains(&format!("# souls-creator/1 0 {creator}\n")), "{tokens}");
+    let instance = format!(
+        "{}-{}",
+        row["lineage"].as_str().unwrap(),
+        row["zone"].as_str().unwrap().replace(':', "-")
+    );
+    let tokens =
+        std::fs::read_to_string(root.join("worlds").join(&instance).join("tokens")).unwrap();
+    assert!(
+        tokens.contains(&format!("# souls-creator/1 0 {creator}\n")),
+        "{tokens}"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
