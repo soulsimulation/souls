@@ -708,7 +708,12 @@ fn every_checkpoint_record_with_a_key_this_build_does_not_read_is_refused_at_res
     let linked = with(part("5-link"));
     let timed = with(part("10-timer"));
     let flying = with(first_of("11-away"));
-    let big = with(set_on(0, 1, 25, Value::Bytes(vec![7; replica::tree::BIG_FIELD])));
+    let big = with(set_on(
+        0,
+        1,
+        25,
+        Value::Bytes(vec![7; replica::tree::BIG_FIELD]),
+    ));
     for (name, tree) in [
         ("5-link", &linked),
         ("10-timer", &timed),
