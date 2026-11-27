@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { silentPartyTemplate } from '../../playtest/party/rehearse.mjs';
-import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyCaptureMs, partyStageWaitMs } from './party-native-page.mjs';
+import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyCaptureMs, partyStageWaitMs, partyDrawSnapshot } from './party-native-page.mjs';
 
 const souls = ['s0','s1','s2','s3','s4'];
 const sample = (n, activities) => ({ at:n*250, tick:n*5, frame:n, currentCanvas:true,
@@ -43,6 +43,22 @@ test('receipts cannot substitute for advancing five-person final draws',()=>{
   assert.throws(()=>partyStage([sample(1,dance),missing],[e],e),/whole-group/);
   assert.throws(()=>partyStage([sample(1,dance),sample(2,[...dance.slice(0,4),'walk'])],[e],e),/all five/);
   assert.equal(partyStage([sample(1,dance),sample(2,dance)],[e],e).lastTick,10);
+});
+
+test('freshness uses the browser snapshot clock without counting later transport time',t=>{
+  const old=globalThis.window;
+  let now=1499;
+  t.mock.method(performance,'now',()=>now);
+  try {
+    globalThis.window={__partyDrawObserver:{samples:[{at:1000}],failures:[]}};
+    const draw=partyDrawSnapshot();
+    now+=5000; // Serialization/transport can finish after the sample's freshness boundary.
+    assert.equal(draw.sampledNow,1499);assert.equal(draw.lastSampleAt,1000);
+    assert.equal(draw.lastSampleAgeMs,499);assert.equal(draw.fresh,true);
+    now=1500;assert.equal(partyDrawSnapshot().fresh,false);
+    window.__partyDrawObserver.samples=[];
+    assert.equal(partyDrawSnapshot().lastSampleAgeMs,null);assert.equal(partyDrawSnapshot().fresh,false);
+  } finally {globalThis.window=old;}
 });
 
 test('dance readiness waits for the delayed fifth approach and two actual all-dance tails',()=>{

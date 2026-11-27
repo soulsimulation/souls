@@ -35,6 +35,15 @@ export function partyBoot(kindsBytes, activitiesBytes) {
     qualification: 'actual boot registration and served activity metadata; no creator place/use command exists for an object-free activity' };
 }
 
+// This function executes in the browser: transfer time must not become render-sample age.
+export function partyDrawSnapshot() {
+  const { samples, failures } = window.__partyDrawObserver;
+  const sampledNow = performance.now(), lastSampleAt = samples.at(-1)?.at ?? null;
+  const lastSampleAgeMs = lastSampleAt === null ? null : sampledNow - lastSampleAt;
+  return { samples, failures, sampledNow, lastSampleAt, lastSampleAgeMs,
+    fresh: lastSampleAgeMs !== null && lastSampleAgeMs < 500 };
+}
+
 // Depicted state is read only at the final world/camera/null-target draw. It is not native contact truth.
 export function partyStage(samples, stages, event) {
   const startName = { 'greeting-done': 'greeting-start', 'reply-done': 'reply-start',
@@ -202,9 +211,12 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       state.stages.push(event); if (immediate.has(stage)) return;
       for (const until = Date.now() + partyStageWaitMs(stage);;) {
         signal.throwIfAborted(); assert(Date.now() - began < partyCaptureMs, 'party hard90s journey exceeded');
-        const draw = await page.evaluate(() => ({ samples: window.__partyDrawObserver.samples, failures: window.__partyDrawObserver.failures }));
+        const requestStarted = performance.now();
+        const draw = await page.evaluate(partyDrawSnapshot);
+        (event.observationPolls ??= []).push({ sampledNow: draw.sampledNow, lastSampleAt: draw.lastSampleAt,
+          lastSampleAgeMs: draw.lastSampleAgeMs, requestTransportMs: performance.now() - requestStarted });
         assert.equal(draw.failures.length, 0, 'party actual draw observation failed');
-        assert(draw.samples.at(-1) && await page.evaluate(at => performance.now() - at < 500, draw.samples.at(-1).at), 'party draw observation stale');
+        assert(draw.fresh, 'party draw observation stale');
         try { event.observed = partyStage(draw.samples, state.stages, event); event.endSampleIndex = draw.samples.length - 1; return; }
         catch (error) { assert(Date.now() < until, `party ${stage} not depicted: ${error.message}`); }
         await new Promise(done => setTimeout(done, 50));
