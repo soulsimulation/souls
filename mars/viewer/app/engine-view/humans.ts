@@ -31,6 +31,8 @@ import {BODY_MODEL as ENGINE_BODY} from '../../engine/body/model.ts';
 // All of it is a pure function of (world history, entity id): no randomness.
 import * as THREE from 'three';
 import { hashId, humanGroundAt, humanGroundSampler, setHumanGround, templateNameFor } from './people-light.ts';
+import { seatedFootWeight, seatedSupportY } from './seated-ground.ts';
+import { seatTransition } from './seat-transition.ts';
 import type { Entity, Pose, WorldState } from '../../engine/world/types.ts';
 import type { Vec3 } from '../../engine/core/math.ts';
 import type { Link } from '../../engine/spatial/types.ts';
@@ -90,7 +92,7 @@ export type ClipOrigin = {
   /** Internal collapsed pose, used only by the isolated iterative evaluator. */
   drawn?: DrawnOrigin;
 };
-type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion };
+type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion; feet?: THREE.Vector3[]; arms?: { name: string; p: THREE.Vector3; q: THREE.Quaternion }[] };
 function poseBones(model:THREE.Object3D) {
   const joints:THREE.Object3D[]=[];model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});return joints;
 }
@@ -102,11 +104,30 @@ function blendDrawn(holder:THREE.Object3D,joints:THREE.Object3D[],target:{bones:
   holder.position.copy(root).add(origin.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));
   holder.quaternion.copy(nativeQ).multiply(origin.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));holder.updateMatrixWorld(true);
 }
+/** Root-sibling feet retain the authored shin-end offset during a seated pose blend. */
+function seatFootOffsets(v: View) {
+  v.rig.holder.updateMatrixWorld(true);
+  return v.legs.map((leg, i) => leg.foot.getWorldPosition(V()).sub(leg.lower.localToWorld(v.ankle[i].clone())));
+}
+function armBases(v: View) {
+  return v.arms.flatMap(a => [...(a.shoulder ? [a.shoulder] : []), a.upper, a.lower, a.hand, ...a.fingers, ...a.thumb]).map(o => ({ name: o.name, p: o.position.clone(), q: o.quaternion.clone() }));
+}
+function blendSeatDrawn(v: View, joints: THREE.Object3D[], target: { bones: DrawnOrigin['bones']; p: THREE.Vector3; q: THREE.Quaternion }, origin: DrawnOrigin, k: number, root: THREE.Vector3, nativeQ: THREE.Quaternion) {
+  const offsets = seatFootOffsets(v);
+  const arms = v.cur.hands.left || v.cur.hands.right || v.formPress?.length ? new Map(origin.arms?.map(b => [b.name, b])) : null;
+  const input = arms?.size ? { ...origin, bones: origin.bones.map((b, i) => arms.get(joints[i].name) ?? b) } : origin;
+  blendDrawn(v.rig.holder, joints, target, input, k, root, nativeQ);
+  if (origin.feet) v.legs.forEach((leg, i) => place(leg.foot, leg.lower.localToWorld(v.ankle[i].clone()).add(origin.feet![i].clone().lerp(offsets[i], k))));
+}
 type View = {
   postureOrigins?: Map<string, DrawnOrigin>;
   clipOrigins?: Map<string, DrawnOrigin>;
   clipContext?: object;
   clipOrigin?: ClipOrigin;
+  seatSample?: SampledHuman;
+  seatPlan?: ReturnType<typeof seatTransition>;
+  seatOrigins?: Map<string, DrawnOrigin>;
+  ownerArmBase?: NonNullable<DrawnOrigin['arms']>;
   clipReference?: {o:THREE.Object3D;p:THREE.Vector3;q:THREE.Quaternion;s:THREE.Vector3}[];
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
@@ -357,6 +378,8 @@ export type SampledHuman = {
   activityAge?: number;
   /** Immutable prior drawn context at the newest activity boundary, including any still-visible origin. */
   clipOrigin?: ClipOrigin;
+  /** Recorded seat before departure, retained separately from the current (now absent) seat. */
+  seatOrigin?: { height?: number; tick?: number; phase?: number; sample?: SampledHuman };
   /** Existing v2 press record, including its native hand and phase clock. */
   formPress?: readonly FormPress[];
   /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
@@ -937,7 +960,8 @@ export class HumanViews {
       if(f.bodyModel?!this.bodyTemplates.has(f.bodyModel):!templateFor(f.id,this.templates))continue;
       seen.add(f.id);
       // a record that goes straight between standing and a seat draws the old engine's own sit-down / stand-up phase
-      const pc = f.postureChange, seatMove = pc ? postureNow(pc, f.activity ?? 'idle', f.baseActivity) : null;
+      const pc = f.postureChange, seatPlan = seatTransition(pc, f.activity ?? 'idle', f.baseActivity);
+      const seatMove = seatPlan ? pc!.age < seatPlan.end ? seatPlan : null : pc ? postureNow(pc, f.activity ?? 'idle', f.baseActivity) : null;
       const act = seatMove?.activity ?? f.activity ?? 'idle';
       const base = baseOf(act, seatMove?.activity ?? f.baseActivity);
       let v = this.views.get(f.id);
@@ -965,7 +989,8 @@ export class HumanViews {
       v.carryWeight = f.carryWeight;
       v.on = f.on;
       v.frame = frameCtx(f.on, act, (id) => parts[id], this.climbs);
-      v.seat = act==='cycle'?BIKE_SADDLE:SEATED.has(base)&&!f.on&&!f.grip&&!f.hands?.left&&!f.hands?.right&&typeof f.seatHeight==='number'&&Number.isFinite(f.seatHeight)&&f.seatHeight>0&&f.seatHeight<=1.2?f.seatHeight:SEAT_DEFAULT;
+      const seatHeight = seatPlan?.activity === 'stand-up' ? f.seatOrigin?.height ?? f.seatHeight : f.seatHeight;
+      v.seat = act==='cycle'?BIKE_SADDLE:SEATED.has(base)&&!f.on&&!f.grip&&typeof seatHeight==='number'&&Number.isFinite(seatHeight)&&seatHeight>0&&seatHeight<=1.2?seatHeight:SEAT_DEFAULT;
       v.bench = LYING.has(act)||act==='bench-press'?(typeof f.seatHeight==='number'&&Number.isFinite(f.seatHeight)&&f.seatHeight>0&&f.seatHeight<=1.2?f.seatHeight:0):0;
       v.groundSeat = onGround(act, f.baseActivity);
       if (v.groundSeat) v.seat = GROUND_SEAT;
@@ -975,7 +1000,9 @@ export class HumanViews {
       v.gait = chooseGait(v.gait, v.speed, t, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.since = seatMove?.activity ? seatMove.since : f.activityAge;
       v.clipOrigin = f.clipOrigin;
-      v.postureChange = seatMove?.activity ? undefined : f.postureChange;
+      v.seatSample = seatPlan || SEATED.has(base) || f.clipOrigin && SEATED.has(baseOf(f.clipOrigin.sample.activity ?? 'idle', f.clipOrigin.sample.baseActivity)) ? f : undefined;
+      v.seatPlan = seatPlan;
+      v.postureChange = f.postureChange;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
       v.restAge = v.restFrom !== undefined && t >= v.restFrom ? t - v.restFrom : undefined;
@@ -1057,7 +1084,8 @@ export class HumanViews {
     const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
     const clipHistoryReset=!!v.clipOrigin&&!v.speaking&&!v.instrument&&!v.propWanted&&!v.prop?.obj.visible&&!v.itemPose&&!v.handActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.lastHandActuator&&!v.handHold&&!v.rps&&!v.grip&&!v.on&&!v.formPress?.length&&v.cur.walkW<.01&&v.cur.sitW===0&&postureKind(v.activity,v.base)==='stand'&&postureKind(v.clipOrigin.sample.activity??'idle',v.clipOrigin.sample.baseActivity)==='stand';
     const plainIdle=v.activity==='idle'&&!v.postureChange&&!clipHistoryReset;
-    if(!nativeHandOwner && !plainIdle){
+    const seatReset=!!v.seatSample&&!v.itemPose&&!v.handActuator&&(SEATED.has(v.base)||!!v.seatPlan&&v.seatSample.postureChange!.age<v.seatPlan.end+ACT_BLEND);
+    if((!nativeHandOwner || seatReset) && !plainIdle){
       v.rig.mixer.stopAllAction();
       for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
       v.rig.idle.play();v.rig.walk.play();v.layered=false;
@@ -1318,7 +1346,9 @@ export class HumanViews {
     const held = !!propKind && propKind === v.propWanted;
     const carried = held && !act?.hands && !clipBody && sitW === 0 && !fp && !gait;
     if (!carried) v.carrySince = undefined; else if (v.carrySince === undefined || v.carrySince > tSec) v.carrySince = tSec;
-    const carryW = carried ? smooth(Math.min(1, (tSec - v.carrySince!) / CARRY_EASE)) : 0;
+    const seatExit = v.seatPlan;
+    const carryAge = seatExit?.activity === 'stand-up' ? v.seatSample!.postureChange!.age - seatExit.end : tSec - v.carrySince!;
+    const carryW = carried ? smooth(Math.min(1, carryAge / CARRY_EASE)) : 0;
     const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     // A free standing overlay shares ordinary idle's foot policy. Floor layout and
@@ -1336,6 +1366,7 @@ export class HumanViews {
     _fwd.set(Math.cos(yaw), 0, Math.sin(yaw)); // engine yaw 0 faces +x; holder.rotation.y = -yaw
     _right.set(-Math.sin(yaw), 0, Math.cos(yaw));
     const seatClip = this.libraryBody(v, lib, curW, prevW, yaw);
+    const seatHands = seatClip || !!v.seatSample && (lib.cur?.pick.body === 'seat' || lib.prev?.pick.body === 'seat');
     h.updateMatrixWorld(true);
     let waterStart:{p:THREE.Vector3;q:THREE.Quaternion}[]|null=null;
     if(waterFrom){
@@ -1386,6 +1417,15 @@ export class HumanViews {
         legTo(l, v.ankle[i], ankle.setY(ankle.y + dip), knee.sub(hip.add(ankle).multiplyScalar(0.5)), 0.999, l.foot.getWorldQuaternion(new THREE.Quaternion()));
       });
     }
+    // Seated continuity precedes existing native-hand, held-prop and selected-press
+    // owners. Each applies once below, after the attained base has been blended.
+    const seatHandOwner = !!(hasHands || v.propWanted || v.formPress?.length) && !v.itemPose && !v.handActuator && !v.transfer && !v.watering && !v.cup && !v.letGo;
+    let seatOwnerShare = 1;
+    if (v.seatSample && seatHandOwner && freeBody && !gripping && !v.handHold && !v.rps) {
+      seatOwnerShare = this.blendSeat(v, tSec, sourcePose);
+      if (act && seatOwnerShare < 1) act = blendFrames(null, act, seatOwnerShare);
+    }
+    v.ownerArmBase = sourcePose && (hasHands || v.formPress?.length) ? armBases(v) : undefined;
     if (act && v.spine && !hasHands && !gripping) {
       if (act.lying) {
         if (act.lying.face === 'back' && act.lying.raise > 0) bendTorso(v.spine, act.lying.raise);
@@ -1506,7 +1546,7 @@ export class HumanViews {
       const armBase=v.arms.some((_,i)=>armW(i)<1)?v.arms.flatMap((arm,i)=>[...(arm.shoulder?[arm.shoulder]:[]),arm.upper,arm.lower,arm.hand].map(o=>({o,w:armW(i)}))).map(({o,w})=>({o,w,q:o.quaternion.clone(),p:o.position.clone()})):[];
       const k = reachTo(v, targets, pz.rise > 0, BODY_MODEL.maxExtension, undefined, pa);
       v.arms.forEach((arm, i) => {
-        if (!targets[i] && sitW > 0 && !seatClip) handOnThigh(v, i, sitW);
+        if (!targets[i] && sitW > 0 && !seatHands) handOnThigh(v, i, sitW);
       });
       // an opted-in item reach bends up to ~60° in 1 s: let the free arm hang from the first degree of bend,
       // not swing down between 30° and 63° in a fifth of a second; an idle gesture still fading out (folded arms at a
@@ -1559,7 +1599,7 @@ export class HumanViews {
       const floor = (act.lying ? (act.lying.face === 'back' ? lieFloor : h.position.y - 0.1) : h.position.y - act.hop) + 0.06;
       v.arms.forEach((arm, i) => {
         const left = armSide(v, i) === 'left', q = act.hands![left ? 0 : 1], r = act.rootHands?.[left ? 0 : 1], wgt = act.handW?.[left ? 0 : 1] ?? 1;
-        if (!q && !r) { if (sitW > 0 && !seatClip) handOnThigh(v, i, sitW); return; }
+        if (!q && !r) { if (sitW > 0 && !seatHands) handOnThigh(v, i, sitW); return; }
         const weight=act.handWeights?.[left?0:1]??1;
         const saved=weight<1?[arm.upper,arm.lower,arm.hand].map(o=>({o,p:o.position.clone(),q:o.quaternion.clone()})):[];
         arm.upper.getWorldPosition(_s);
@@ -1601,12 +1641,12 @@ export class HumanViews {
         const arm = v.arms[i], out = side === 'left' ? -1 : 1;
         const t = arm.upper.getWorldPosition(V()).addScaledVector(_fwd, CARRY_HAND[0]).addScaledVector(_right, out * CARRY_HAND[1]).addScaledVector(UP, CARRY_HAND[2]);
         targets[i] = t;
-        armTo(arm, t, carryW, 0.98, h, V().copy(_right).multiplyScalar(out * 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
-        curlHand(arm, smooth((0.6 * carryW - 0.3) / 0.5));
+        armTo(arm, t, carryW * seatOwnerShare, 0.98, h, V().copy(_right).multiplyScalar(out * 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
+        curlHand(arm, smooth((0.6 * carryW - 0.3) / 0.5) * seatOwnerShare);
       }
     } else if (runFallback && !gait && !fp && !posed && proneW===0 && sitW===0) {
       source='expression';v.arms.forEach((arm,i)=>{const f=runFallback.hands[arm.side>0?0:1];targets[i]=arm.upper.getWorldPosition(V()).addScaledVector(_fwd,f.forward).addScaledVector(_right,-arm.side*.06).addScaledVector(UP,f.up);});reachTo(v,targets,false);closeHands(v,targets.map(()=>.45));
-    } else if (sitW > 0 && !seatClip) v.arms.forEach((_, i) => handOnThigh(v, i, sitW));
+    } else if (sitW > 0 && !seatHands) v.arms.forEach((_, i) => handOnThigh(v, i, sitW));
     else if (fp && fw > 0 && (fp.hands[0] || fp.hands[1])) {
       // free hands on the frame (climbing: the ladder cycle's holds; on the bracing: column + brace) or held
       // out for balance on a beam — renderer-chosen, within reach by construction, reach-honest all the same
@@ -1737,6 +1777,7 @@ export class HumanViews {
     if (clipBoundary) {
       this.blendClipOrigin(v, origin!, tSec, sourcePose);
     }
+    if (v.seatSample && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.handHold && !v.rps && !v.propWanted && !v.formPress?.length && !v.instrument && !act?.pairedContact) this.blendSeat(v, tSec, sourcePose);
     const freeContacts=noOwner||freeFloor&&freeBody&&!engineHands&&!gripping&&!v.handHold&&!v.rps&&!v.partner&&!v.propWanted&&!v.prop?.obj.visible&&!v.shore&&!waterFrom&&sitW===0;
     if (freeContacts && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
@@ -1757,7 +1798,7 @@ export class HumanViews {
       // A cached collapsed prefix is a complete fixed-size pose, including every earlier contribution.
       // Warm playback evaluates only new boundaries; a cold seek folds the retained chain once, without recursion.
       let start=sources.length-1;
-      for(let i=0;i<sources.length;i++){const found=cache.get(key(i));if(found){origin=found;start=i-1;break;}}
+      for(let i=0;i<sources.length;i++){const found=cache.get(key(i));if(found&&(!v.seatSample||found.feet)){origin=found;start=i-1;break;}}
       if(start>=0){
         const evaluator=new HumanViews(false);evaluator.setTemplates([v.rig.template]);
         try {
@@ -1765,8 +1806,10 @@ export class HumanViews {
             const source=sources[i],prior=sources[i+1];
             const sample={...source.sample,id:h.name,p:[...v.cur.p] as [number,number,number],yaw:v.cur.yaw,
               ...(origin&&prior?{clipOrigin:{age:prior.age,sample:prior.sample,drawn:origin}}:{})};
-            evaluator.setFrame([sample],boundary-source.offset);evaluator.render(1);
+            evaluator.setFrame([sample],boundary-source.offset);
+            if(v.seatSample&&(v.cur.hands.left||v.cur.hands.right||v.formPress?.length))evaluator.pose(evaluator.views.get(h.name)!,1,undefined,true);else evaluator.render(1);
             const old=evaluator.bodyObject(h.name)!;origin=drawnOrigin(old,old,root,nativeQ);
+            if(v.seatSample){const view=evaluator.views.get(h.name)!;origin.feet=seatFootOffsets(view);origin.arms=view.ownerArmBase;}
             if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
           }
         } finally {evaluator.clear();}
@@ -1774,7 +1817,7 @@ export class HumanViews {
     }
     if(!origin)return;
     const k=smooth(c.age/CLIP_FADE);
-    blendDrawn(h,joints,target,origin,k,root,nativeQ);
+    if(v.seatSample)blendSeatDrawn(v,joints,target,origin,k,root,nativeQ);else blendDrawn(h,joints,target,origin,k,root,nativeQ);
   }
 
   private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {
@@ -1808,6 +1851,54 @@ export class HumanViews {
     }
     const k=smooth((pc.age-phase)/ACT_BLEND);
     blendDrawn(h,joints,target,origin!,k,root,nativeQ);
+  }
+
+  /** Seat phase endpoints and activity interruptions share immutable recorded origins. */
+  private blendSeat(v: View, time: number, sourcePose: boolean): number {
+    const sample = v.seatSample!, pc = sample.postureChange, plan = v.seatPlan;
+    const endpoint = plan && pc && pc.age >= plan.end && pc.age - plan.end < ACT_BLEND ? plan.end : undefined;
+    const initial = pc && pc.age < ACT_BLEND && plan ? 0 : undefined;
+    const phase = endpoint ?? initial;
+    let origin: SampledHuman | undefined, age: number;
+    const shift = (p: PostureChange, dt: number): PostureChange => ({ ...p, age: p.age - dt, ...(p.before ? { before: shift(p.before, dt) } : {}) });
+    if (phase !== undefined && sample.seatOrigin?.phase === phase && sample.seatOrigin.sample) {
+      origin = sample.seatOrigin.sample; age = pc!.age - phase!;
+    } else if (phase === 0 && sample.clipOrigin && Math.abs(sample.clipOrigin.age - pc!.age) < 1e-5) {
+      this.blendClipOrigin(v, sample.clipOrigin, time, sourcePose);
+      v.legs.forEach((_, i) => fitSeatedFoot(v, i, 1, true)); return smooth(sample.clipOrigin.age / CLIP_FADE);
+    }
+    else if (phase !== undefined && pc) {
+      age = pc.age - phase;
+      const delta = age + 1e-6;
+      origin = phase > 0 ? { ...sample, activityAge: sample.activityAge === undefined ? undefined : Math.max(0, sample.activityAge - delta), postureChange: shift(pc, delta), clipOrigin: sample.clipOrigin && sample.clipOrigin.age >= delta ? { ...sample.clipOrigin, age: sample.clipOrigin.age - delta } : undefined }
+        : { ...sample, activity: pc.from, baseActivity: pc.fromBase, activityAge: sample.activity === pc.from && sample.activityAge !== undefined ? Math.max(0, sample.activityAge - delta) : pc.fromAge, postureChange: pc.before ? shift(pc.before, delta) : undefined, clipOrigin: undefined,
+          ...(sample.seatOrigin ? { seatHeight: sample.seatOrigin.height } : {}) };
+    } else if (sample.clipOrigin && sample.clipOrigin.age < CLIP_FADE && postureKind(sample.activity ?? 'idle', sample.baseActivity) === postureKind(sample.clipOrigin.sample.activity ?? 'idle', sample.clipOrigin.sample.baseActivity)) {
+      this.blendClipOrigin(v, sample.clipOrigin, time, sourcePose);
+      v.legs.forEach((_, i) => fitSeatedFoot(v, i, 1, true)); return smooth(sample.clipOrigin.age / CLIP_FADE);
+    } else return 1;
+    const h = v.rig.holder, root = new THREE.Vector3(...v.cur.p), nativeQ = new THREE.Quaternion().setFromAxisAngle(UP, -v.cur.yaw), joints = poseBones(v.rig.model);
+    const target = { bones: joints.map(o => ({ p: o.position.clone(), q: o.quaternion.clone() })), p: h.position.clone(), q: h.quaternion.clone() };
+    const key = JSON.stringify([time - age!, origin, v.cur.p, v.cur.yaw], (_key, value) => typeof value === 'number' ? Math.round(value * 1e6) / 1e6 : value);
+    const cache = v.seatOrigins ??= new Map();
+    let drawn = cache.get(key);
+    if (!drawn) {
+      const evaluator = new HumanViews(false); evaluator.setTemplates([v.rig.template]);
+      try {
+        evaluator.setFrame([{ ...origin, id: h.name, p: [...v.cur.p], yaw: v.cur.yaw }], time - age! - 1e-6);
+        const old = evaluator.views.get(h.name)!; evaluator.pose(old, 1, undefined, true);
+        drawn = drawnOrigin(old.rig.model, old.rig.holder, root, nativeQ); drawn.feet = seatFootOffsets(old); drawn.arms = old.ownerArmBase;
+      } finally { evaluator.clear(); }
+      if (!sourcePose) { if (cache.size >= 32) cache.delete(cache.keys().next().value!); cache.set(key, drawn); }
+    }
+    let share = smooth(age! / ACT_BLEND);
+    blendSeatDrawn(v, joints, target, drawn, share, root, nativeQ);
+    // A newer gesture can interrupt a still-blending seat endpoint. Its origin is
+    // the whole attained endpoint blend, not just the outgoing chair clip.
+    if (phase !== undefined && sample.clipOrigin && sample.clipOrigin.age < CLIP_FADE && pc!.age - sample.clipOrigin.age > phase + 1e-5) { this.blendClipOrigin(v, sample.clipOrigin, time, sourcePose); share *= smooth(sample.clipOrigin.age / CLIP_FADE); }
+    // Bone interpolation must not bury a shoe cuff; never lower an already fitted origin twice.
+    v.legs.forEach((_, i) => fitSeatedFoot(v, i, 1, true));
+    return share;
   }
 
   /**
@@ -1858,7 +1949,7 @@ export class HumanViews {
   private libraryBody(v: View, lib: LibPlan, curW: number, prevW: number, yaw: number): boolean {
     const h = v.rig.holder, t = v.rig.template;
     if (!v.spine || v.legs.length < 2) return false;
-    let seatW = 0, seatShift = 0, seatX = 0, seatZ = 0;
+    let seatW = 0, seatShift = 0, seatX = 0, seatZ = 0, supportW = 0;
     for (const [one, wgt] of [[lib.cur, curW], [lib.prev, prevW]] as [LibOne | null, number][]) {
       if (!one || wgt <= 1e-4) continue;
       const body = one.pick.body;
@@ -1873,6 +1964,7 @@ export class HumanViews {
           // through the plank's front. Translate the fitted seated layout,
           // including foot goals, rather than stretching legs or moving a seat.
           if (body === 'seat') {
+            supportW += wgt * k;
             seatX -= wgt * k * (rest.hip.x * Math.cos(yaw) - rest.hip.z * Math.sin(yaw));
             seatZ -= wgt * k * (rest.hip.x * Math.sin(yaw) + rest.hip.z * Math.cos(yaw));
           }
@@ -1926,6 +2018,7 @@ export class HumanViews {
       const goal = feet[i].p.clone(); goal.x += seatX; goal.z += seatZ;
       goal.y = Math.max(goal.y, floorY);
       legTo(l, v.ankle[i], goal, V().copy(_fwd).addScaledVector(UP, 0.35), 0.995, feet[i].q);
+      fitSeatedFoot(v, i, supportW);
     });
     return seatW > 0.5;
   }
@@ -2786,6 +2879,37 @@ function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number)
   }
 }
 
+/** Seat-owned leg correction, after its pelvis fit. No root/pelvis/bearing or hand-contact target changes. */
+function fitSeatedFoot(v: View, i: number, phase: number, liftOnly = false) {
+  if (phase <= 0 || v.grip || v.on || v.frame) return;
+  const leg = v.legs[i], holder = v.rig.holder, refs = v.surf.foot.get(leg.side);
+  if (!refs?.length) return;
+  holder.updateMatrixWorld(true);
+  const ankle = leg.foot.getWorldPosition(V()), hip = leg.upper.getWorldPosition(V()), knee = leg.lower.getWorldPosition(V());
+  const end = leg.lower.localToWorld(v.ankle[i].clone()), length = hip.distanceTo(knee) + knee.distanceTo(end);
+  const ground = humanGroundSampler(), legRefs = v.surf.leg?.get(leg.side);
+  const clearance = () => {
+    let low = Infinity;
+    eachSkinnedWorld(refs, _vp, p => { low = Math.min(low, p.y - seatedSupportY(holder.position.y, ground?.(p.x, p.z)) - (liftOnly ? 0 : .003)); });
+    // Trouser cuffs blend across the ankle; they must also clear the support.
+    if (legRefs) eachSkinnedWorld(legRefs, _vp, p => { low = Math.min(low, p.y - seatedSupportY(holder.position.y, ground?.(p.x, p.z))); });
+    return low;
+  };
+  const before = clearance();
+  if (!Number.isFinite(before) || liftOnly && before >= 0) return;
+  const supportGoal = ankle.clone(); supportGoal.y -= before;
+  const weight = seatedFootWeight(hip.toArray(), supportGoal.toArray(), length, phase);
+  if (weight <= 0) return;
+  const targetClearance = before * (1 - weight), rotation = leg.foot.getWorldQuaternion(new THREE.Quaternion());
+  for (let pass = 0; pass < 3; pass++) {
+    const delta = targetClearance - clearance();
+    if (Math.abs(delta) < .0001) break;
+    leg.foot.getWorldPosition(ankle); ankle.y += delta;
+    legTo(leg, v.ankle[i], ankle, V().copy(_fwd).addScaledVector(UP, .35), .995, rotation);
+    holder.updateMatrixWorld(true);
+  }
+}
+
 /**
  * Stairs: plant each foot on its tread (stair-gait.ts), lower the pelvis just enough that no leg has
  * to over-extend (it rises riser by riser with the body point), knees forward, feet flat except the
@@ -2925,6 +3049,7 @@ function sitPose(v: View, w: number, ground: number) {
       kp = pole.clone().addScaledVector(UP, 1.2 * crossW).addScaledVector(_right, -0.6 * crossW);
     }
     legTo(l, v.ankle[i], goal, kp, 0.995);
+    if (crossW <= 0 || l.side > 0) fitSeatedFoot(v, i, w);
   }
 }
 
