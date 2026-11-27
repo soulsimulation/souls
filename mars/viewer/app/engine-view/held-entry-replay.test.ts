@@ -28,7 +28,7 @@ test('take replay delivers sampled held records to the human view through forwar
   const frames: SampledHuman[][] = [];
   humans.setFrame = frame => { frames.push(frame); };
   try {
-    for (const [seconds, soup] of [[.25, 2], [.75, 1], [1.25, 0], [1.55, undefined], [1.7, 2], [.25, 2], [1.25, 0]]) {
+    for (const [seconds, soup] of [[.25, 2], [.75, 1], [1.25, 0], [1.55, undefined], [1.7, 2], [.25, 2], [1.25, 0]] as const) {
       people.show(seconds, 50 + seconds);
       const person = frames.at(-1)!.find(p => p.id === 'person')!;
       assert(person.heldEntries, 'actual replay must project metadata into its production HumanViews input');

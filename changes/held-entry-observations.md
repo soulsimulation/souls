@@ -1,1 +1,5 @@
-Preserve public held-object identity, native local attachment records and contents changes through page takes and replay, including transfers and rewind. Keep existing pictures and contact ownership while native attachment observations and canonical held-object drawing are validated.
+---
+type: internal
+pr: 5236
+---
+Preserve public held-object identity, local attachment records and contents changes through page replay, including transfers and rewind, while retaining existing pictures and contact ownership.

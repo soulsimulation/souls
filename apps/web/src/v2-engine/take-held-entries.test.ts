@@ -9,8 +9,8 @@ import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { recordedHeldSet } from '../../../../mars/viewer/app/engine-view/held-entry.ts';
 
 const Q = 2 ** 30, T0 = 10_000_000;
-const node = (id: string, kind: string, parent: string | null, extra: object = {}) => ({ id, kind, parent, slot: null,
-  pos: [0, 0, 0] as [number, number, number], rot: [Q, 0, 0, 0] as [number, number, number, number], at: null, ...extra });
+const node = <T extends object = object>(id: string, kind: string, parent: string | null, extra: T = {} as T) => ({ id, kind, parent, slot: null as number | null,
+  pos: [0, 0, 0] as [number, number, number], rot: [Q, 0, 0, 0] as [number, number, number, number], at: null as number | null, ...extra });
 const world = node('world', 'souls:place@1', null);
 const a = node('body-a', 'souls:body@1', world.id, { soul: 'a', at: T0 });
 const b = node('body-b', 'souls:body@1', world.id, { soul: 'b', at: T0 });
