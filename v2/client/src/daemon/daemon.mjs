@@ -178,7 +178,7 @@ import { risesFromSeat } from '../check/stand.mjs';
 import { BARE, bareAct } from '../check/bare.mjs';
 import { sitByKind } from '../check/by-kind.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
-import { afarFor, afarOf } from './afar.mjs';
+import { afarFor, afarOf, satInOf } from './afar.mjs';
 import { definedIn, kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { folderStamp, keptKinds, keptOne } from '../check/kept.mjs';
 import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
@@ -304,6 +304,51 @@ const serving = new Map(); // sequence → the message its act serves
 const replyOf = new Map(); // C15: a message's reply, sent with its close
 const closedMail = new Map(); // Q1: messages this daemon closed (id → state), so a later `--for` or `ack` on one is told, not refused
 const closes = []; // closes not yet sent, for the next sign-in
+// First-day 27 Nov: the owner's card says "listening" only while a reader (`listen`, `wait`) is open here, and
+// "Thinking…" only once the model's turn has a message, not when this daemon was given it. Told to the gateway as
+// `{"listening": true|false}` and `{"read": {"id"}}`; it tells the owner's page.
+// An agent that loops on `wait` works through what it was handed between readers: it still listens until this long
+// after both its last reader closed and its last command (a model's turn can take a minute).
+const LISTEN_GAP_MS = 60_000;
+let listeners = 0, listeningSaid = false, listenOff = null, readerClosedAt = 0;
+const handedMail = new Set(); // ids a reader handed out: read once the model's turn sends a command
+const readMail = new Set(); // ids the model's turn has (read)
+const toldRead = new Set(); // of those, the ids told on this sign-in
+function sayListening() {
+  const on = listeners > 0 || listenOff !== null; // within the grace after a reader, still listening (a reconnect too)
+  if (on === listeningSaid || !ws || !signedIn) return;
+  listeningSaid = on;
+  ws.send(JSON.stringify({ listening: on }));
+}
+function readerOpened() { listeners++; clearTimeout(listenOff); listenOff = null; sayListening(); }
+function listenGap() {
+  clearTimeout(listenOff);
+  const left = Math.max(readerClosedAt, lastCommand) + LISTEN_GAP_MS - Date.now();
+  if (listeners > 0 || left <= 0) { listenOff = null; sayListening(); return; }
+  listenOff = setTimeout(listenGap, left);
+  listenOff.unref?.();
+}
+function readerClosed() {
+  listeners = Math.max(listeners - 1, 0);
+  readerClosedAt = Date.now();
+  listenGap();
+}
+/** Reads are told to the gateway as soon as the socket is signed in; one made while it is not waits for the next. */
+function tellRead() {
+  if (!ws || !signedIn) return;
+  for (const id of readMail) {
+    if (toldRead.has(id)) continue;
+    toldRead.add(id);
+    ws.send(JSON.stringify({ read: { id } }));
+  }
+}
+function markRead(ids) {
+  for (const id of ids) {
+    handedMail.delete(id);
+    if (mail.has(id)) readMail.add(id);
+  }
+  tellRead();
+}
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
 // Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
@@ -501,8 +546,10 @@ async function sendBulk(bytes, sequence) {
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
-  if (!signedIn) signedInAt = Date.now();
+  if (!signedIn) { signedInAt = Date.now(); listeningSaid = false; toldRead.clear(); } // a new sign-in knows nothing yet
   signedIn = true;
+  sayListening();
+  tellRead();
   // #4977: a `wait` under way is told the connection is back, and how long it was gone.
   if (lostAt !== null) {
     const gap = Date.now() - lostAt;
@@ -577,7 +624,12 @@ function onText(text, sock) {
     return;
   }
   const m = f.mail;
-  if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
+  if (!m || typeof m.id !== 'string') return;
+  if (mail.has(m.id)) {
+    // given again (a new sign-in): the gateway forgot it was read, so it is told again
+    if (readMail.has(m.id)) { toldRead.delete(m.id); tellRead(); }
+    return;
+  }
   mail.set(m.id, m);
   log(`message ${m.id}`); // never its words
   note({ kind: 'mail', id: m.id, text: String(m.text), at: m.at });
@@ -646,6 +698,9 @@ function closeMail(id, state, outcome) {
   const reply = replyOf.get(id);
   const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
+  handedMail.delete(id);
+  readMail.delete(id);
+  toldRead.delete(id);
   replyOf.delete(id);
   closedMail.set(id, state);
   if (closedMail.size > 200) closedMail.delete(closedMail.keys().next().value);
@@ -1031,6 +1086,8 @@ const stuckSeen = [];
 const MOVE_ENDED = 'souls:move-ended', awayEnded = [];
 /** #5063: my acts' ends made from afar (a look or a point past its reach), newest last ({sequence, words}). */
 const afarEnded = [];
+/** #5152 follow-up: my sits by kind's ends from the open ground, naming the place of the seat, newest last ({sequence, words}). */
+const satEnded = [];
 /** 0.133: the newest entry sequence this daemon has seen, and the receipts waiting for an entry. */
 let entrySeq = -1;
 const entryWaiters = [];
@@ -1052,6 +1109,8 @@ function onEntry(e) {
   for (const ev of events) {
     const words = ev.fields?.[8] != null ? afarOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
     if (words) { afarEnded.push({ sequence: Number(e.sequence), words }); if (afarEnded.length > 20) afarEnded.shift(); }
+    const sat = ev.fields?.[8] != null ? satInOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
+    if (sat) { satEnded.push({ sequence: Number(e.sequence), words: sat }); if (satEnded.length > 20) satEnded.shift(); }
   }
   for (const w of entryWaiters.splice(0)) w();
   // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
@@ -1824,7 +1883,10 @@ async function answer(req, conn = null) {
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) {
+    wakes.confirm(); lastCommand = Date.now();
+    markRead([...handedMail, ...[req.id, req.for].filter((x) => typeof x === 'string')]);
+  }
   if (!PASSIVE.has(req.op)) takeBack();
   switch (req.op) {
     case 'pending': {
@@ -1842,6 +1904,7 @@ async function answer(req, conn = null) {
       const got = events.splice(0), served = new Set(serving.values());
       heardSince.length = 0;
       const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
+      markRead(open.map((m) => m.id));
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
         ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" --close done|failed' } : {}) },
@@ -1924,15 +1987,19 @@ async function answer(req, conn = null) {
       // A reader whose socket closed takes nothing: what came stays for the next reader (an owner's message, a wake).
       const gone = () => conn?.destroyed === true;
       let handed = gone() ? [] : wakes.deliver(Date.now());
-      while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
-        const free = wakes.nextFree(Date.now());
-        const left = Math.min(until, free ?? until) - Date.now();
-        await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        handed = gone() ? [] : wakes.deliver(Date.now());
-      }
+      readerOpened();
+      try {
+        while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
+          const free = wakes.nextFree(Date.now());
+          const left = Math.min(until, free ?? until) - Date.now();
+          await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+          handed = gone() ? [] : wakes.deliver(Date.now());
+        }
+      } finally { readerClosed(); }
       if (gone()) return { ok: false, code: 'reader-gone' };
       if (handed.length) saveWakes();
       const got = events.splice(0);
+      for (const e of got) if (e.kind === 'mail') handedMail.add(e.id);
       const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
       heardSince.length = 0; // shown here, so not again in the next brief
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
@@ -1951,11 +2018,15 @@ async function answer(req, conn = null) {
       // R5: the wakes the owner's rules queued are handed here too, as `wait` hands them, within the budget.
       const gone = () => conn?.destroyed === true;
       let handed = gone() ? [] : wakes.deliver(Date.now());
-      while (got.length === 0 && handed.length === 0 && !gone() && Date.now() < until) {
-        await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        got = fresh(since);
-        handed = gone() ? [] : wakes.deliver(Date.now());
-      }
+      readerOpened();
+      try {
+        while (got.length === 0 && handed.length === 0 && !gone() && Date.now() < until) {
+          await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+          got = fresh(since);
+          handed = gone() ? [] : wakes.deliver(Date.now());
+        }
+      } finally { readerClosed(); }
+      for (const m of got) handedMail.add(m.id);
       if (handed.length) saveWakes();
       return { ok: true, cursor: eventN, daemon: process.pid, mail: got, ...(handed.length ? { wakes: handed } : {}), ...(got.length || handed.length ? {} : { timedOut: true }) };
     }
@@ -2288,13 +2359,19 @@ async function answer(req, conn = null) {
       const after = entriesAt.get(r.sequence) ?? -1, version = r.answers.at(-1)?.version, before = version ? sequenceOf(version) : Infinity;
       const endOf = () => awayEnded.findLast((a) => a.sequence > after && a.sequence < before);
       const afar = () => afarFor(afarEnded, after, before);
-      for (const until = Date.now() + 1000; ((walked && !endOf()) || (aimed && !afar())) && entrySeq < before - 1 && Date.now() < until;) {
+      // #5152 follow-up: a sit by kind (its target a selector, `<kind>@<node>`) sent from the open ground names the
+      // place of the seat it took and how far it was, from its end's entry, which can trail the receipt too
+      const byKind = done && String(r.target ?? '').includes('@') && r.verbs.some((v) => /:sit$/.test(v));
+      const satIn = () => afarFor(satEnded, after, before);
+      for (const until = Date.now() + 1000; ((walked && !endOf()) || (aimed && !afar()) || (byKind && !satIn())) && entrySeq < before - 1 && Date.now() < until;) {
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); entryWaiters.push(() => { clearTimeout(t); ok(); }); });
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
       const far = done ? afar() : null;
       if (far) got.receipt.from_afar = readableDetail(far, rowsOf(copy).values());
+      const sat = byKind ? satIn() : null;
+      if (sat) got.receipt.sat_in = readableDetail(sat, rowsOf(copy).values());
       // What this Soul's body holds once the act is done (a book a shelf's `take` put in its hand): its id for the next act.
       const refused = r.answers.at(-1)?.answer === 'refused';
       return closing(got, done || refused ? (rows) => {

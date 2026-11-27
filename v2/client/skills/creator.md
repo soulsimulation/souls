@@ -20,7 +20,8 @@ With the client a world serves (`<world url>/eden.mjs`), the command is `node ed
    (`kinds`: each kind and the kinds it `admits`). Read it before you build, and again whenever you are unsure.
 
 If the home has no creator yet, pair first: `node souls-god.mjs pair <world url> --creator <creator grant>`. It prints
-a link and a short code; the world's owner opens the link signed in and approves. Then run `status`.
+a link and a short code; the world's owner opens the link signed in and approves. Then run `status`: while the
+pairing is still collecting its approval it waits (up to 20 s), and if the owner has not approved yet it says so.
 
 On a large world, save `node souls-god.mjs describe > world.json` in your scratch folder. Inspect selected JSON with
 `jq '.kinds | keys' world.json` and `jq '.nodes[] | select(.kind == "eden:ground")' world.json`; filter other kinds or

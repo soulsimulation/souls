@@ -125,6 +125,18 @@ pub fn on_text(gw: &Arc<Gateway>, grant: Grant, session: u64, text: &str) {
     if text.starts_with("{\"note\"") {
         return note(gw, &grant, text);
     }
+    // first-day 27 Nov: whether the agent reads what its client is given, and which message it read
+    match text {
+        r#"{"listening":true}"# => return gw.set_listening(grant, session, true),
+        r#"{"listening":false}"# => return gw.set_listening(grant, session, false),
+        _ => {}
+    }
+    if let Some((id, _)) = text
+        .strip_prefix("{\"read\":{\"id\":\"")
+        .and_then(|t| t.split_once('"'))
+    {
+        return gw.read_mail(grant, id);
+    }
     let Some((_, path)) = PASSED.iter().find(|(p, _)| text.starts_with(p)) else {
         return;
     };
@@ -221,11 +233,12 @@ pub fn on_view_text(gw: &Arc<Gateway>, grants: &[Grant], text: &str, reply: mpsc
     });
 }
 
-/// The owner's box's presence frame: whether a socket is signed in for `grant` (its agent's client is connected),
-/// `{"agent":{"grant":"<grant>","connected":true}}`. Told only to view sockets whose token holds the grant.
-pub fn agent(grant: Grant, connected: bool) -> String {
+/// The owner's box's presence frame: whether a socket is signed in for `grant` (its agent's client is connected) and
+/// whether that client said a reader of its messages is open now, `{"agent":{"grant":"<grant>","connected":true,
+/// "listening":false}}`. Told only to view sockets whose token holds the grant.
+pub fn agent(grant: Grant, connected: bool, listening: bool) -> String {
     format!(
-        r#"{{"agent":{{"grant":"{}","connected":{connected}}}}}"#,
+        r#"{{"agent":{{"grant":"{}","connected":{connected},"listening":{listening}}}}}"#,
         grant.to_text()
     )
 }

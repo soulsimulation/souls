@@ -514,6 +514,8 @@ echo "$$" > "$o/$n/lineage"; echo "$(cat "$s/boot") lineage $$" > "$o/$n/templat
   // logs every other call. curl answers the directory 401, or 500 while BAD_DIRECTORY is set.
   exe(join(shim, 'systemctl'), `case "$*" in
   "is-active --quiet souls-place.service") [ -n "$BUSY" ] ;;
+  "is-active --quiet souls-place.path") [ -z "$PATH_FAILED" ] ;;
+  "is-failed --quiet souls-place.path") [ -n "$PATH_FAILED" ] ;;
   "is-active --quiet "*) exit 0 ;;
   *) echo "$*" >> ${log} ;;
 esac`);
@@ -553,6 +555,16 @@ esac`);
   assert.match(busy.stdout, /refused: release\.placement-busy: souls-place\.service was still placing a world after 1 s; nothing renamed/);
   unchanged('a placement in flight');
   assert.deepEqual(restarts(), ['stop souls-place.path', 'start souls-place.path']);
+  rmSync(log);
+
+  // A path unit systemd failed for its start limit is cleared and started again, even when nothing is renamed.
+  const revived = run(['placement', sha, 'run'], { ...env, BUSY: '1', RELEASE_PLACE_WAIT_S: '1', PATH_FAILED: '1' });
+  assert.equal(revived.status, 3, revived.stdout + revived.stderr);
+  unchanged('a revived path unit');
+  assert.match(revived.stdout, /^placement: souls-place\.path had failed \(New world was not placing\): reset/m);
+  // The shim keeps it failed: the release names that it did not come back.
+  assert.match(revived.stdout, /^placement: warning: souls-place\.path is not active after its reset/m);
+  assert.deepEqual(restarts(), ['reset-failed souls-place.path souls-place.service', 'start souls-place.path']);
   rmSync(log);
 
   // A directory that does not answer on the new catalogue: all of it goes back, and it is restarted on the previous one.

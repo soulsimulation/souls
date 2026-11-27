@@ -103,6 +103,36 @@ pub const REPLAN_WITHIN: Micros = 1_000_000;
 /// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
 pub use crate::routes::may_stand;
 
+/// Across `line` at `at`, as [`aside`] steps: the direction across (x, z), how far across the line `at` is (0 for a line
+/// of no length, whose direction is across the way from the walker to `at`), and the direction's length, rounded down.
+fn across(at: Vec3, line: (Vec3, Vec3)) -> (i64, i64, i64, i64) {
+    let (a, b) = line;
+    let (dx, dz) = (b.x - a.x, b.z - a.z);
+    let d = len(a, b);
+    let (nx, nz, lat) = if d > 0 {
+        let lat = (i128::from(at.x - a.x) * i128::from(-dz)
+            + i128::from(at.z - a.z) * i128::from(dx))
+            / i128::from(d);
+        (-dz, dx, lat as i64)
+    } else {
+        (at.z - a.z, a.x - at.x, 0)
+    };
+    (nx, nz, lat, len(Vec3::ZERO, Vec3::new(nx, 0, nz)))
+}
+
+/// How far from `at` a place in `taken` can be and still change what [`aside`] answers for `at` and `line`: a place
+/// farther than this is two radii or more from every spot it tries, so leaving it out gives the same answer. A step is
+/// under four [`CLEAR`]s across, but its direction's length is rounded down (a short line's is a few µm), so a spot
+/// can be up to `1 + 1/n` times as far; one µm more for the rounding of `len`, and a millimetre to spare.
+pub fn away(at: Vec3, line: (Vec3, Vec3)) -> i64 {
+    let (_, _, _, n) = across(at, line);
+    if n == 0 {
+        return 0;
+    }
+    let far = 4 * CLEAR;
+    far + (far + n - 1) / n + 1 + 2 * crate::ground::HUMAN_RADIUS * 1000 + 1_000
+}
+
 /// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to), when it is on
 /// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from
 /// it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal ground and at least
@@ -118,15 +148,7 @@ pub fn aside(
     let (dx, dz) = (b.x - a.x, b.z - a.z);
     let d = len(a, b);
     // Across the line (a line of no length: across the way from the walker to the body).
-    let (nx, nz, lat) = if d > 0 {
-        let lat = (i128::from(at.x - a.x) * i128::from(-dz)
-            + i128::from(at.z - a.z) * i128::from(dx))
-            / i128::from(d);
-        (-dz, dx, lat as i64)
-    } else {
-        (at.z - a.z, a.x - at.x, 0)
-    };
-    let n = len(Vec3::ZERO, Vec3::new(nx, 0, nz));
+    let (nx, nz, lat, n) = across(at, line);
     if n == 0 {
         return None;
     }
@@ -151,8 +173,8 @@ pub fn aside(
                 at.y,
                 at.z + (i128::from(nz) * i128::from(step) / i128::from(n)) as i64,
             );
-            let legal = world.nearest(node, to).is_some_and(|q| len(q, to) == 0);
-            if legal && taken.iter().all(|&t| len(t, to) >= apart) {
+            // Free first: in a crowd most spots are taken, and the ground's nearest point is the dearer question.
+            if taken.iter().all(|&t| len(t, to) >= apart) && world.legal(node, to) {
                 return Some(to);
             }
         }
@@ -251,6 +273,10 @@ pub trait Unstick: World {
     fn far_end(&self, link: Id, node: Id, at: Vec3) -> Option<(Id, Vec3)>;
     /// The nearest legal point on `node` to `at` (µm): `at` itself when it is legal.
     fn nearest(&self, node: Id, at: Vec3) -> Option<Vec3>;
+    /// Whether `at` is legal on `node`: its own nearest legal point. A world may answer it faster, never otherwise.
+    fn legal(&self, node: Id, at: Vec3) -> bool {
+        self.nearest(node, at).is_some_and(|q| len(q, at) == 0)
+    }
 }
 
 /// One rung climbed, or the last rung walked.
@@ -785,6 +811,8 @@ impl Ladder {
         // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out. Read
         // the first time a walker asks (N17b): nothing below moves a body, starts a run or changes the walk-outs.
         let mut still: Option<Vec<(Id, Id, Vec3)>> = None;
+        // Every body's place by node, read once the same way: what a step aside keeps apart from.
+        let mut placed: Option<BTreeMap<Id, Vec<(Id, Vec3)>>> = None;
         let mut asked: BTreeSet<(Id, Id)> = BTreeSet::new();
         let ids: Vec<Id> = self.walkers.keys().copied().collect();
         // Each walker's own reads, on the runner's threads (N17b): nothing below changes another walker's.
@@ -932,14 +960,31 @@ impl Ladder {
                             Some((_, fp)) if blocks => (p, fp),
                             _ => (p, leg.to),
                         };
-                        let taken = runner
-                            .controller
-                            .bodies()
-                            .filter(|b| b.id != s)
-                            .map(|b| (node_of(b), b.pose.position))
-                            .chain(self.aside.iter().map(|&(n, at)| (n, at)))
-                            .filter(|(n, _)| *n == sn)
-                            .map(|(_, at)| at)
+                        let placed = placed.get_or_insert_with(|| {
+                            let mut by: BTreeMap<Id, Vec<(Id, Vec3)>> = BTreeMap::new();
+                            for b in runner.controller.bodies() {
+                                by.entry(node_of(b))
+                                    .or_default()
+                                    .push((b.id, b.pose.position));
+                            }
+                            by
+                        });
+                        // Only the places `aside` could find too near ([`away`]): with 1,000 bodies on a node, a
+                        // crowd's step asides each read every one, and a tick ran over its budget.
+                        let reach = away(sp, line);
+                        let taken = placed
+                            .get(&sn)
+                            .into_iter()
+                            .flatten()
+                            .filter(|&&(id, _)| id != s)
+                            .map(|&(_, at)| at)
+                            .chain(
+                                self.aside
+                                    .iter()
+                                    .filter(|&&(n, _)| n == sn)
+                                    .map(|&(_, at)| at),
+                            )
+                            .filter(|&at| len(at, sp) <= reach)
                             .collect::<Vec<_>>();
                         if let Some(to) = aside(town, sn, sp, line, &taken) {
                             let track = Track {
@@ -1179,5 +1224,153 @@ mod tests {
         // Held where its line begins, it is routed again at 3 s and ends at [`END`].
         let held = |_, _| ([0, 0], Some([0, 14_000_000]), to);
         assert_eq!(run(1400, held, |_| false), (Some(END), 1));
+    }
+
+    /// Open ground everywhere: every point legal, no links.
+    struct Open;
+    impl World for Open {
+        fn plan(&mut self, _: &crate::mover::Body, _: Id, _: Vec3) -> Result<Vec<Leg>, Refusal> {
+            Ok(Vec::new())
+        }
+    }
+    impl Unstick for Open {
+        fn moved(&self, _: Id) -> Option<Micros> {
+            None
+        }
+        fn far_end(&self, _: Id, _: Id, _: Vec3) -> Option<(Id, Vec3)> {
+            None
+        }
+        fn nearest(&self, _: Id, at: Vec3) -> Option<Vec3> {
+            Some(at)
+        }
+    }
+
+    /// The ladder leaves out of `taken` the places farther than [`away`] from the still body: `aside` gives the same
+    /// answer without them, for long lines and lines of a few µm or none (whose direction across is rounded down the
+    /// most), with places on every spot it tries and just past the bound.
+    #[test]
+    fn places_beyond_away_never_change_a_step_aside() {
+        let node = Id::new(replica::ids::Scope([7; 16]), 1).unwrap();
+        // The review's case: a line of 1 µm, a place on each of the six spots `aside` tries (none free), and one
+        // farther out that is free only when those six are left out.
+        let (line, at) = (
+            (Vec3::ZERO, Vec3::new(1, 0, 1)),
+            Vec3::new(330_000, 0, -329_999),
+        );
+        let mut spots = Vec::new();
+        let mut taken: Vec<Vec3> = Vec::new();
+        while let Some(to) = aside(&Open, node, at, line, &taken) {
+            spots.push(to);
+            taken.push(to);
+        }
+        assert_eq!(spots.len(), 6, "{spots:?}");
+        for to in &spots {
+            assert!(len(*to, at) <= away(at, line), "{to:?} past away");
+        }
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut found = 0;
+        for case in 0..6000 {
+            let a = Vec3::new(next(400_000), 0, next(400_000));
+            // Long lines, lines of a few µm, and none.
+            let reach = [3_000_000, 3_000, 2][case % 3];
+            let line = (a, Vec3::new(a.x + next(reach), 0, a.z + next(reach)));
+            let at = Vec3::new(a.x + next(700_000), 0, a.z + next(700_000));
+            let bound = away(at, line);
+            // Every spot it would try is taken, then places in a ring just inside and just past the bound.
+            let mut taken: Vec<Vec3> = Vec::new();
+            while let Some(to) = aside(&Open, node, at, line, &taken) {
+                taken.push(to);
+            }
+            for _ in 0..1 + next(30).unsigned_abs() {
+                let r = bound + next(40_000);
+                let (x, z) = (next(1_000), next(1_000));
+                let k = len(Vec3::ZERO, Vec3::new(x, 0, z)).max(1);
+                taken.push(Vec3::new(at.x + x * r / k, 0, at.z + z * r / k));
+            }
+            // Free some spots at random, so some cases step aside.
+            taken.retain(|_| next(2) != 0);
+            let near: Vec<Vec3> = taken
+                .iter()
+                .copied()
+                .filter(|&t| len(t, at) <= bound)
+                .collect();
+            let whole = aside(&Open, node, at, line, &taken);
+            assert_eq!(aside(&Open, node, at, line, &near), whole, "case {case}");
+            found += usize::from(whole.is_some());
+        }
+        assert!(found > 100, "the cases step bodies aside ({found})");
+    }
+
+    /// A surface's `holds` (its cells, then its triangles) says a point is on the ground exactly when
+    /// `exits::piece_of` (every triangle) does: inside, outside, on edges and corners, across two cells, with triangles
+    /// wound either way and one of no area lying inside another.
+    #[test]
+    fn a_surface_holds_what_its_pieces_hold() {
+        let node = Id::new(replica::ids::Scope([7; 16]), 2).unwrap();
+        let piece = |vertices: Vec<[i32; 3]>, triangles: Vec<[u32; 3]>| crate::ground::Piece {
+            outline: vec![vertices.clone()],
+            vertices,
+            triangles,
+            ground: Ground::Dry,
+        };
+        let pieces = vec![
+            // A square across the 16 m cells' corner, one triangle wound each way.
+            piece(
+                vec![
+                    [10_000, 0, 10_000],
+                    [22_000, 0, 10_000],
+                    [22_000, 0, 22_000],
+                    [10_000, 0, 22_000],
+                ],
+                vec![[0, 1, 2], [0, 3, 2]],
+            ),
+            // A thin wedge, and a triangle of no area along a line inside the square.
+            piece(
+                vec![
+                    [-3_000, 0, -3_000],
+                    [9_000, 0, -2_000],
+                    [-2_000, 0, 7_000],
+                    [12_000, 0, 12_000],
+                    [14_000, 0, 14_000],
+                    [18_000, 0, 18_000],
+                ],
+                vec![[0, 1, 2], [3, 4, 5]],
+            ),
+        ];
+        let surface = crate::mover::Surface::new(node, pieces.clone());
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * m as u64 + 1)) as i64 - m
+        };
+        let corners = [
+            -3_000, 9_000, -2_000, 7_000, 10_000, 12_000, 14_000, 16_000, 18_000, 22_000,
+        ];
+        let (mut on, mut off) = (0, 0);
+        for case in 0..20_000 {
+            // Points anywhere, and points on the grid of the corners (edges and corners exactly).
+            let at = if case % 2 == 0 {
+                Vec3::new(
+                    8_000_000 + next(16_000_000),
+                    0,
+                    8_000_000 + next(16_000_000),
+                )
+            } else {
+                let c = |k: i64| corners[k.unsigned_abs() as usize % corners.len()] as i64 * 1000;
+                Vec3::new(c(next(20)), 0, c(next(20)))
+            };
+            let held = crate::ground::exits::piece_of(&pieces, at).is_some();
+            assert_eq!(surface.holds([at.x, at.z]), held, "{at:?}");
+            if held { on += 1 } else { off += 1 }
+        }
+        assert!(on > 1000 && off > 1000, "{on} on, {off} off");
     }
 }

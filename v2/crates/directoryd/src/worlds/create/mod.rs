@@ -3,7 +3,7 @@
 //!
 //! 1. **The name first.** A world's name record, at `world-name/<name>`, is written create-only before anything else:
 //!    `{1: name (UTF-8 bytes), 2: lineage, 3: zone, 4: creator, 5: source lineage}`. It records the world's founder:
-//!    one field, written once, never replaced; the validated world-list records later creator handoffs. Of two creates of one name, the store lets one through and the other
+//!    one field, written once, never replaced (but removed when the create ends unplaced, list rule 10); the validated world-list records later creator handoffs. Of two creates of one name, the store lets one through and the other
 //!    is refused, `name-taken`. Today's reserved names (`eden`, `api`, `god`, `assets`) are refused, `name-reserved`.
 //! 2. **Then the first epoch:** the world's record, its build pinned (W8 `set_build`, create-only), then claimed (W8
 //!    `claim`, epoch 1), so the machine that forks is the one that holds the claim.

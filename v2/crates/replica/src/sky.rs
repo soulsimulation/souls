@@ -52,6 +52,18 @@ pub const F_SKY_HOUR: u64 = 91;
 /// ground and the world time it struck. A page draws the bolt and plays the thunder once, near `at`; nothing reads it.
 pub const F_STRIKE: u64 = 69;
 
+/// The value a creator's sky field on the world node reads as unset, so an undo can take back the batch that added it
+/// (T6 has no unset; `sim::edit::undo`): a creator's weather that ended at world time 0, which `sim::daylight` reads
+/// as none, and no strike, as both page readers read a list that is not three numbers. Only on the world's root node:
+/// a content kind may number a thing's own state field 65 or 69 (`crate::fields`).
+pub fn unset_on_world(field: u64) -> Option<Value> {
+    match field {
+        F_WEATHER_UNTIL => Some(Value::Uint(0)),
+        F_STRIKE => Some(Value::Array(Vec::new())),
+        _ => None,
+    }
+}
+
 /// The light now, and the world time it next changes.
 pub const F_LIGHT: u64 = 70;
 pub const F_LIGHT_NEXT: u64 = 71;

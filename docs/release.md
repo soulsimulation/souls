@@ -80,7 +80,9 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 9. **Explore's place pictures.** Nothing to do: a minute after it starts, the launcher draws each moved world's places
    that have no kept picture in the background (one run at a time, its own headless browser at the lowest CPU priority;
    [cutover](../v2/docs/cutover.md)); kept pictures survive releases. `/__sim/launcher`'s `placeShots` shows the run and
-   what is still missing. If the host cannot draw them (its log says `still missing`), draw them on a machine with a GPU:
+   what is still missing. A run needs the release's Playwright Chromium in the launcher's `PLAYWRIGHT_BROWSERS_PATH`
+   (`browserType.launch: Executable doesn't exist` in `<data>/place-shots/<slug>/draw.log` means it is not installed).
+   If the host cannot draw them (its log says `still missing`), draw them on another machine:
    `tools/world-launcher/deploy/place-shots.sh --dry-run`, then `tools/world-launcher/deploy/place-shots.sh`.
 10. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.

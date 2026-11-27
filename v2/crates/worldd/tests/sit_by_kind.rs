@@ -27,7 +27,7 @@ use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::{Value as Json, parse};
 use replica::selector::{Rule, Selector};
 use replica::tree::Rules as TreeRules;
-use replica::world_model::{Audience, Kind};
+use replica::world_model::{Audience, Kind, show};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::walk::town::Town;
@@ -264,6 +264,18 @@ fn world() -> Replica {
 
 /// One world-caused create of `node` of `kind` under `parent` at `at`, as an effect's value.
 fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
+    create_with(sequence, node, kind, parent, at, BTreeMap::new())
+}
+
+/// [`create`] with the node's fields.
+fn create_with(
+    sequence: u64,
+    node: Id,
+    kind: &str,
+    parent: Id,
+    at: Vec3,
+    fields: BTreeMap<u64, Value>,
+) -> Value {
     Effect {
         envelope: Envelope {
             sequence,
@@ -290,7 +302,7 @@ fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
                     },
                 },
                 audience: Audience::Everyone,
-                fields: BTreeMap::new(),
+                fields,
             },
             rest: Rest::new(),
         }]),
@@ -332,20 +344,42 @@ fn souls() -> Vec<(Id, Vec3)> {
     out
 }
 
+/// The bandstand (#5152 follow-up): a place on the open ground, titled by a public name, at the ground's origin.
+fn bandstand() -> Id {
+    id(150)
+}
+const BANDSTAND: &str = "the bandstand";
+
 /// The hall's creates under `ground`, numbered from `next`: the chairs and the stool, and the eleven more walkers.
-fn hall_part(header: &Header, next: u64, ground: Id) -> Part {
-    let effects = chairs()
+/// With `titled`, the chairs and the stool stand in [`bandstand`], made first, a place on the open ground.
+fn hall_part(header: &Header, next: u64, ground: Id, titled: bool) -> Part {
+    let under = if titled { bandstand() } else { ground };
+    let title = BTreeMap::from([(
+        import_eden::F_NAME,
+        Value::Bytes(replica::ids::sha256(BANDSTAND.as_bytes()).to_vec()),
+    )]);
+    let place =
+        titled.then(|| create_with(next, bandstand(), &pinned(PLACE), ground, Vec3::ZERO, title));
+    let first = next + u64::from(titled);
+    let seats = chairs()
         .into_iter()
         .map(|(n, at)| (n, pinned(CHAIR), at))
         .chain(std::iter::once((stool().0, pinned(STOOL), stool().1)))
+        .map(|(node, kind, at)| (node, kind, at, under));
+    let walkers = souls()
+        .into_iter()
+        .skip(2)
+        .map(|(n, at)| (n, pinned(WALKER), at, ground));
+    let effects = place
+        .into_iter()
         .chain(
-            souls()
-                .into_iter()
-                .skip(2)
-                .map(|(n, at)| (n, pinned(WALKER), at)),
+            seats
+                .chain(walkers)
+                .enumerate()
+                .map(|(k, (node, kind, at, parent))| {
+                    create(first + k as u64, node, &kind, parent, at)
+                }),
         )
-        .enumerate()
-        .map(|(k, (node, kind, at))| create(next + k as u64, node, &kind, ground, at))
         .collect();
     Part::read(
         &encode(&Value::Map(BTreeMap::from([
@@ -383,10 +417,10 @@ fn seat(thing: Id, at: Vec3, up: i64, ahead: i64, stand: i64, floor: Id) -> sim:
     }
 }
 
-fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
+fn hall_bodies(titled: bool) -> Result<Bodies, replica::effects::Refusal> {
     let (mut base, ground) = town();
     let header = header();
-    let part = hall_part(&header, base.tree.next(), ground);
+    let part = hall_part(&header, base.tree.next(), ground, titled);
     base.tree.apply(&header, &part)?;
     base.doors.header = header;
     base.doors.next = base.tree.next();
@@ -412,16 +446,16 @@ fn hall_bodies() -> Result<Bodies, replica::effects::Refusal> {
     Ok(b)
 }
 
-fn hall(tag: &str) -> (answers::World, Mem, Replica, std::path::PathBuf) {
+fn hall(tag: &str, titled: bool) -> (answers::World, Mem, Replica, std::path::PathBuf) {
     let old = world();
     let header = header();
     let mut initial = Replica::restored(header.clone(), old.tree().frozen(), old.version());
     initial
-        .apply(&hall_part(&header, initial.version(), ground()))
+        .apply(&hall_part(&header, initial.version(), ground(), titled))
         .unwrap();
     let rules = tree_rules();
     let mut cfg = Config::new(LINEAGE, 1);
-    cfg.bodies = Some(Box::new(|_| hall_bodies()));
+    cfg.bodies = Some(Box::new(move |_| hall_bodies(titled)));
     cfg.engine = Some((rules, Vec::new()));
     let kinds = Json::Obj(vec![
         (
@@ -489,6 +523,7 @@ fn sit_by(c: &mut Client, kind: &str) {
 /// The hall served on a socket, and a client for each Soul.
 fn served(
     tag: &str,
+    titled: bool,
 ) -> (
     answers::World,
     Mem,
@@ -496,7 +531,7 @@ fn served(
     std::path::PathBuf,
     Vec<Client>,
 ) {
-    let (world, store, initial, path) = hall(tag);
+    let (world, store, initial, path) = hall(tag, titled);
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).unwrap();
     let door = world.door();
@@ -522,7 +557,7 @@ fn served(
 /// which waiting never clears, and told the nearest free seat there.
 #[test]
 fn i3178_a_sit_by_kind_takes_the_nearest_chair_and_a_kind_not_there_is_named() {
-    let (world, store, initial, path, mut clients) = served("nearest");
+    let (world, store, initial, path, mut clients) = served("nearest", false);
     sit_by_kind(&mut clients[0]);
     let sat = clients[0].answer();
     println!("#3178 nearest: {sat:?}");
@@ -557,7 +592,7 @@ fn i3178_a_sit_by_kind_takes_the_nearest_chair_and_a_kind_not_there_is_named() {
 
 #[test]
 fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
-    let (world, store, initial, path, mut clients) = served("burst");
+    let (world, store, initial, path, mut clients) = served("burst", false);
     // All thirteen at once, then every answer.
     for c in &mut clients {
         sit_by_kind(c);
@@ -613,4 +648,139 @@ fn i3178_thirteen_souls_sit_by_kind_at_once_in_a_hall_of_twelve_chairs() {
     );
     world.stop();
     let _ = std::fs::remove_file(&path);
+}
+
+/// Each act end's words (field 8) in the log, as the world wrote them.
+fn ended_words(log: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    for rec in recover(log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for v in e.events.unwrap_or_default() {
+                if v.name.as_str() == answers::FORM_ENDED
+                    && let Some(Value::Bytes(w)) = v.fields.get(&8)
+                {
+                    out.push(String::from_utf8_lossy(w).into_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #5152 follow-up: from the open ground, a sit by kind names the place on it that holds the seats, by its id (each
+/// reader's copy names it by its title), and how far: the twelve seated, in their act's end; the thirteenth, refused `place.none-free`, in its refusal.
+#[test]
+fn i5152_from_the_open_ground_a_sit_by_kind_names_the_place_of_the_seats() {
+    let (world, store, _, path, mut clients) = served("bandstand", true);
+    for c in &mut clients {
+        sit_by_kind(c);
+    }
+    let mut seated = 0;
+    let mut refused = Vec::new();
+    for c in &mut clients {
+        match c.answer() {
+            Ok(_) => seated += 1,
+            Err(reason) => refused.push((reason, c.detail().unwrap_or_default())),
+        }
+    }
+    let log = store.0.lock().unwrap().bytes.clone();
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let words = ended_words(&log);
+    println!("#5152: {seated} seated, ends {words:?}, refused {refused:?}");
+    assert_eq!(seated, 12, "every chair filled");
+    let sat: Vec<&String> = words.iter().filter(|w| w.starts_with(CHAIR)).collect();
+    assert_eq!(
+        sat.len(),
+        12,
+        "each seated act's end names its place: {words:?}"
+    );
+    for w in sat {
+        assert!(
+            w.contains(&format!("in {}, ", show(bandstand()))) && w.ends_with(" m away"),
+            "the place and how far: {w}"
+        );
+    }
+    let [(reason, detail)] = &refused[..] else {
+        panic!("one refused: {refused:?}")
+    };
+    assert_eq!(reason, "place.none-free");
+    assert!(
+        detail.contains(&format!(
+            "(the nearest {CHAIR} is in {}, ",
+            show(bandstand())
+        )) && detail.contains(" m away)"),
+        "the refusal names the place: {detail}"
+    );
+}
+
+/// #5152 follow-up: a seat on another floor than the body's (a place's, from the open ground) is measured in the
+/// body's frame, by the poses between: the bandstand stands 10 m east, its chair 2 m north in it.
+#[test]
+fn i5152_a_seat_on_another_floor_is_measured_from_the_open_ground() {
+    let (mut base, ground) = town();
+    let header = header();
+    let east = Vec3::new(10_000_000, 0, 0);
+    let chair = id(160);
+    let next = base.tree.next();
+    let part = Part::read(
+        &encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(vec![
+                    create(
+                        next,
+                        bandstand(),
+                        &pinned(PLACE),
+                        ground,
+                        at1().plus(east).unwrap(),
+                    ),
+                    create(
+                        next + 1,
+                        chair,
+                        &pinned(CHAIR),
+                        bandstand(),
+                        Vec3::new(0, 0, -2_000_000),
+                    ),
+                ]),
+            ),
+        ])))
+        .unwrap(),
+    )
+    .unwrap();
+    base.tree.apply(&header, &part).unwrap();
+    base.doors.header = header;
+    base.doors.next = base.tree.next();
+    let town = Town::new(base.tree, ground, base.doors).expect("the town");
+    let planner = town.copy().expect("a planner town");
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let placed = town.surfaces[&ground]
+        .place(w1(), frame, at1(), Quat::IDENTITY)
+        .unwrap();
+    let mut b = Bodies::with_planner(town, planner, 50_000).unwrap();
+    b.add_body(humanoid(), placed).unwrap();
+    // Its seat stood at 500 mm in front of the slot, in the bandstand's frame.
+    b.add_place(seat(
+        chair,
+        Vec3::new(0, 0, -2_000_000),
+        470_000,
+        0,
+        500_000,
+        bandstand(),
+    ))
+    .unwrap();
+    let (t, gap) = b
+        .nearest_of_kind(ground, CHAIR, w1(), &|_| true)
+        .expect("the chair");
+    assert_eq!(t, chair);
+    // 10 m east and 1.5 m north of the body: its stand point, moved into the ground's frame.
+    let want = 10_000_000_i128.pow(2) + 1_500_000_i128.pow(2);
+    assert_eq!(gap, want, "measured in the ground's frame");
 }

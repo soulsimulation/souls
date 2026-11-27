@@ -24,6 +24,9 @@ impl Store for Counted<'_> {
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
         self.inner.put(key, bytes, when)
     }
+    fn delete(&self, key: &str) -> R<()> {
+        self.inner.delete(key)
+    }
 }
 
 fn person(n: u8) -> Id {
@@ -143,6 +146,119 @@ fn a4_two_clicks_make_one_world() {
         .expect_err("taken");
     assert_eq!(e.name, "name-taken");
     assert_eq!(forks.load(Ordering::SeqCst), 1);
+}
+
+/// Registers `n` imported worlds (`imp-<i>`) founded by `creator`, made at `made`, as the operator's
+/// `register-world` does.
+fn import(store: &Memory, creator: Id, n: u8, made: u64) {
+    for i in 1..=n {
+        let name = format!("imp-{i}");
+        register::register(
+            store,
+            &register::Imported {
+                name: &name,
+                label: "Bo",
+                lineage: [0x40 + i; 16],
+                zone: Id::new(Scope([0x40 + i; 16]), 1).expect("an id"),
+                creator,
+                now: made,
+            },
+        )
+        .expect("registered");
+    }
+}
+
+#[test]
+fn a5_imported_worlds_count_toward_no_limit() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let made = 1_000_000u64;
+    // Six imported worlds, the last a minute ago, founded by a first-day account: more than every limit.
+    import(&store, person(2), 6, made + 60);
+    let w = worlds(&store, &gets, forks);
+    assert_eq!(
+        w.list().expect("a list")["worlds"].as_array().map(Vec::len),
+        Some(6)
+    );
+    w.create(&ask("a", "new-1", "Bo"), person(2), made, made + 120)
+        .expect("imported worlds count toward no limit");
+    // Worlds made through New world still count: the hour, then the first day, then five.
+    let e = w
+        .create(&ask("b", "new-2", "Bo"), person(2), made, made + 180)
+        .expect_err("an hour");
+    assert_eq!(e.name, "world-limit-hourly");
+    w.create(&ask("c", "new-2", "Bo"), person(2), made, made + 3800)
+        .expect("after the hour");
+    let e = w
+        .create(&ask("d", "new-3", "Bo"), person(2), made, made + 8000)
+        .expect_err("the first day");
+    assert_eq!(e.name, "world-limit-new-account");
+    for i in 3..=5 {
+        w.create(
+            &ask(&format!("o{i}"), &format!("new-{i}"), "Bo"),
+            person(2),
+            made,
+            made + DAY + i,
+        )
+        .expect("an older account");
+    }
+    let e = w
+        .create(&ask("o6", "new-6", "Bo"), person(2), made, made + 2 * DAY)
+        .expect_err("five made");
+    assert_eq!(e.name, "world-limit");
+}
+
+#[test]
+fn a5_a_site_owner_has_no_limits_and_a_newcomer_keeps_them() {
+    assert_eq!(
+        site_owners(" acct_site, ,acct_other ,"),
+        ["acct_other".to_owned(), "acct_site".to_owned()].into()
+    );
+    assert!(site_owners("").is_empty());
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let made = 1_000_000u64;
+    import(&store, person(2), 6, made);
+    let mut w = worlds(&store, &gets, forks);
+    w.site_owners = site_owners("acct_site");
+    // A site owner in their account's first minutes: seven worlds, a minute apart, past all three limits.
+    for i in 1..=7u64 {
+        w.create_for(
+            &ask(&format!("s{i}"), &format!("site-{i}"), "Bo"),
+            person(2),
+            "acct_site",
+            made,
+            made + 60 * i,
+        )
+        .expect("a site owner has no limits");
+    }
+    // A newcomer, with site owners configured: all three limits, exactly as before.
+    let nb = |k: &str, name: &str, at: u64| {
+        w.create_for(&ask(k, name, "Cy"), person(3), "acct_new", made, made + at)
+    };
+    nb("a", "cy-1", 60).expect("first");
+    assert_eq!(
+        nb("b", "cy-2", 120).expect_err("an hour").name,
+        "world-limit-hourly"
+    );
+    nb("c", "cy-2", 3700).expect("after the hour");
+    assert_eq!(
+        nb("d", "cy-3", 8000).expect_err("the first day").name,
+        "world-limit-new-account"
+    );
+    for i in 3..=5 {
+        nb(&format!("o{i}"), &format!("cy-{i}"), DAY + i).expect("an older account");
+    }
+    assert_eq!(
+        nb("o6", "cy-6", 2 * DAY).expect_err("five").name,
+        "world-limit"
+    );
 }
 
 #[test]
@@ -363,6 +479,332 @@ fn w3b_pending_retry_survives_directory_restart_and_keeps_owned_identity() {
             .unwrap()
             .map(|o| NameRecord::read(&o.bytes).unwrap().lineage),
         Some(expected)
+    );
+}
+
+/// A placement that places only while `place` is set, counting the starts it is asked for (probes apart); a probe
+/// answers `probe` (`None`: placed).
+fn placing<'a>(
+    store: &'a Memory,
+    gets: &'a AtomicUsize,
+    starts: Arc<AtomicUsize>,
+    place: Arc<std::sync::atomic::AtomicBool>,
+    probe: Option<&'static str>,
+) -> Worlds<Counted<'a>> {
+    let mut w = worlds(store, gets, Arc::new(AtomicUsize::new(0)));
+    w.starter = Box::new(move |s: &Start| {
+        if s.probe {
+            return match probe {
+                None => Ok(()),
+                Some(name) => refuse(name, "probe"),
+            };
+        }
+        starts.fetch_add(1, Ordering::SeqCst);
+        if place.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            refuse("world-starting", "pending")
+        }
+    });
+    w
+}
+
+#[test]
+fn rule10_an_unplaced_create_ends_named_and_frees_its_name() {
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    let t = 10 * DAY;
+    let click = ask("lab-click", "my-mars-lab", "Mars Lab");
+    assert_eq!(
+        w.create(&click, person(1), 0, t).unwrap_err().name,
+        "world-starting"
+    );
+    // Within the limit, the same click asks the placement again (reprocessed), and keeps the name.
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN - 1)
+            .unwrap_err()
+            .name,
+        "world-starting"
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_some()
+    );
+    // Past it: a named refusal, the row off the list, the name record gone, and no placement asked for.
+    let ended = w
+        .create(&click, person(1), 0, t + PLACE_WITHIN)
+        .unwrap_err();
+    assert_eq!(ended.name, "create-failed");
+    assert!(ended.detail.contains("my-mars-lab"), "{}", ended.detail);
+    assert_eq!(w.list().unwrap()["worlds"], json!([]));
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    // The same click stays ended; the owner's new click takes the name and is placed.
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 1)
+            .unwrap_err()
+            .name,
+        "create-failed"
+    );
+    place.store(true, Ordering::SeqCst);
+    let again = w
+        .create(
+            &ask("lab-click-2", "my-mars-lab", "Mars Lab"),
+            person(1),
+            0,
+            t + PLACE_WITHIN + 2,
+        )
+        .expect("the name is free");
+    assert_eq!(again["world"]["ready"], true);
+    // The first click, retried later, still cannot touch the new world.
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 3)
+            .unwrap_err()
+            .name,
+        "create-failed"
+    );
+    assert_eq!(
+        w.list().unwrap()["worlds"][0]["lineage"],
+        again["world"]["lineage"]
+    );
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn rule10_a_stale_create_with_no_click_left_ends_at_the_start_or_at_anyones_create() {
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    {
+        let w = placing(
+            &store,
+            &gets,
+            starts.clone(),
+            place.clone(),
+            Some("world-starting"),
+        );
+        w.create(
+            &ask("lost-click", "my-mars-lab", "Mars Lab"),
+            person(1),
+            0,
+            t,
+        )
+        .unwrap_err();
+        w.create(
+            &ask("lost-click-2", "other-lab", "Other"),
+            person(1),
+            0,
+            t + 1,
+        )
+        .unwrap_err();
+    }
+    // A directory started within the limit keeps them; one started past it ends both.
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN - 1).unwrap(), 0);
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN + 1).unwrap(), 2);
+    assert_eq!(w.list().unwrap()["worlds"], json!([]));
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.get(&NameRecord::key("other-lab")).unwrap().is_none());
+    // Someone else's create also ends a stale one, here before its own name check.
+    place.store(false, Ordering::SeqCst);
+    w.create(
+        &ask("c3", "third", "Third"),
+        person(1),
+        0,
+        t + 2 * PLACE_WITHIN,
+    )
+    .unwrap_err();
+    place.store(true, Ordering::SeqCst);
+    let taken = w
+        .create(
+            &ask("c4", "third", "Taken"),
+            person(2),
+            0,
+            t + 3 * PLACE_WITHIN,
+        )
+        .expect("the stale reservation of another account ended first");
+    assert_eq!(taken["world"]["creator"], principal_text(person(2)));
+}
+
+#[test]
+fn rule10_a_placed_or_unknown_placement_keeps_the_create() {
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    placing(&store, &gets, starts.clone(), place.clone(), None)
+        .create(&ask("k", "placed", "Placed"), person(1), 0, t)
+        .unwrap_err();
+    // Not known (status unreadable, or a placement still running): kept as it is.
+    let unknown = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("start-failed"),
+    );
+    assert_eq!(unknown.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(unknown.list().unwrap()["worlds"][0]["ready"], false);
+    // Placed after all (the page never asked again): its row is ready and its name stays.
+    let placed = placing(&store, &gets, starts.clone(), place.clone(), None);
+    assert_eq!(placed.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(placed.list().unwrap()["worlds"][0]["ready"], true);
+    assert!(store.get(&NameRecord::key("placed")).unwrap().is_some());
+}
+
+#[test]
+fn rule10_a_ready_list_row_keeps_its_name_whatever_its_intent_says() {
+    // The list row was marked ready, but the intent's last write was lost: the intent still says unready.
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let t = 10 * DAY;
+    let click = ask("k", "live", "Live");
+    placing(&store, &gets, starts.clone(), place.clone(), None)
+        .create(&click, person(1), 0, t)
+        .expect("placed");
+    let key = store
+        .keys()
+        .into_iter()
+        .find(|k| k.starts_with("world-create/"))
+        .unwrap();
+    let prior = store.get(&key).unwrap().unwrap();
+    let mut intent: Json = serde_json::from_slice(&prior.bytes).unwrap();
+    intent["row"]["ready"] = json!(false);
+    store
+        .put(
+            &key,
+            &serde_json::to_vec(&intent).unwrap(),
+            When::Is(&prior.etag),
+        )
+        .unwrap();
+    // The probe says not placed (its status lost or unreadable as `world-starting`): the name of the ready world stays.
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    assert_eq!(w.end_stale_creates(t + 2 * PLACE_WITHIN).unwrap(), 0);
+    let again = w
+        .create(&click, person(1), 0, t + 2 * PLACE_WITHIN)
+        .expect("the same world");
+    assert_eq!(again["world"]["ready"], true);
+    assert!(store.get(&NameRecord::key("live")).unwrap().is_some());
+    assert_eq!(w.list().unwrap()["worlds"][0]["ready"], true);
+}
+
+#[test]
+fn rule10_a_placement_that_starts_while_a_create_ends_keeps_it() {
+    // The first probe finds no status; by the second (after the row went) the placement has written one.
+    let (store, gets) = (Memory::default(), AtomicUsize::new(0));
+    let t = 10 * DAY;
+    let mut w = worlds(&store, &gets, Arc::new(AtomicUsize::new(0)));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let seen = probes.clone();
+    w.starter = Box::new(move |s: &Start| {
+        if !s.probe {
+            return refuse("world-starting", "pending");
+        }
+        match seen.fetch_add(1, Ordering::SeqCst) {
+            0 => refuse("world-starting", "no status yet"),
+            _ => refuse("start-failed", "a placement may be running"),
+        }
+    });
+    w.create(&ask("k", "racing", "Racing"), person(1), 0, t)
+        .unwrap_err();
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(probes.load(Ordering::SeqCst), 2);
+    let rows = w.list().unwrap()["worlds"].clone();
+    assert_eq!(rows.as_array().unwrap().len(), 1, "the row is back");
+    assert_eq!(rows[0]["name"], "racing");
+    assert!(store.get(&NameRecord::key("racing")).unwrap().is_some());
+}
+
+#[test]
+fn rule10_a_name_record_left_without_its_row_is_ended_whole_by_its_click() {
+    // A stop between the row's removal and the name record's: the click lists the row again, then it ends whole.
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    let click = ask("k", "half", "Half");
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    w.create(&click, person(1), 0, t).unwrap_err();
+    let list = store.get(KEY).unwrap().unwrap();
+    store
+        .put(KEY, br#"{"worlds":[]}"#, When::Is(&list.etag))
+        .unwrap();
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN)
+            .unwrap_err()
+            .name,
+        "world-starting",
+        "the name record is still there: the row is listed again"
+    );
+    assert_eq!(w.list().unwrap()["worlds"][0]["name"], "half");
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN).unwrap(), 1);
+    assert!(store.get(&NameRecord::key("half")).unwrap().is_none());
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 1)
+            .unwrap_err()
+            .name,
+        "create-failed"
     );
 }
 

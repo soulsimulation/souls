@@ -2369,3 +2369,77 @@ fn a_created_world_pairs_its_creator_by_any_key_and_a_soul_there_keeps_its_world
     assert_eq!(mine["souls"][0]["world"], "my-mars-lab-2", "{mine}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// W7 (#2826, A5): only the person for their own Soul's words, the creator within their world, or a site owner may
+/// remove words; anyone else is refused.
+#[test]
+fn w7_who_may_remove_words() {
+    use super::removal::Role;
+    let (mut p, legacy) = store();
+    let root = legacy.parent().unwrap().canonicalize().unwrap();
+    let (mine, theirs) = (
+        "0123456789abcdef0123456789abcdef:0",
+        "fedcba9876543210fedcba9876543210:0",
+    );
+    let instance_a = "11111111111111111111111111111111-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-0";
+    let instance_b = "22222222222222222222222222222222-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-0";
+    for instance in [instance_a, instance_b] {
+        std::fs::create_dir_all(root.join("worlds").join(instance)).unwrap();
+        std::fs::write(root.join("worlds").join(instance).join("tokens"), "").unwrap();
+    }
+    let registry = root.join("authority.json");
+    std::fs::write(&registry, serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,
+        "worlds":{"one":{"instance":instance_a,"creator":mine},"two":{"instance":instance_b,"creator":theirs}}})
+        .to_string()).unwrap();
+    p.authority_file = Some(registry);
+    let (_, fern) = pair_in(&p, "acct_fern", "one");
+    let (_, moss) = pair_in(&p, "acct_moss", "one");
+    let creator_grant = format!("creator-{}", mine.replace(':', "-"));
+    let creator = |g: &str| g == creator_grant;
+    let nobody = |_: &str| false;
+    let site: std::collections::BTreeSet<String> = ["acct_site".to_string()].into();
+    let may = |account: &str, world: &str, souls: &[&str], holds: &dyn Fn(&str) -> bool| {
+        p.may_remove_words(account, world, souls, holds, &site)
+    };
+
+    // The person, for their own Soul's words, in any world; not for another's, nor for one of theirs and another's.
+    assert_eq!(may("acct_fern", "one", &[&fern], &nobody), Ok(Role::Own));
+    assert_eq!(may("acct_fern", "two", &[&fern], &nobody), Ok(Role::Own));
+    assert_eq!(
+        may("acct_fern", "one", &[&moss], &nobody),
+        Err("removal.not-allowed")
+    );
+    assert_eq!(
+        may("acct_fern", "one", &[&fern, &moss], &nobody),
+        Err("removal.not-allowed")
+    );
+    // The creator, any Soul's words within their world; not in a world someone else created.
+    assert_eq!(
+        may("acct_maker", "one", &[&fern, &moss], &creator),
+        Ok(Role::Creator)
+    );
+    assert_eq!(
+        may("acct_maker", "two", &[&fern], &creator),
+        Err("removal.not-allowed")
+    );
+    // A site owner, anywhere, even in a world the registry does not place.
+    assert_eq!(may("acct_site", "two", &[&moss], &nobody), Ok(Role::Site));
+    assert_eq!(
+        may("acct_site", "nowhere", &[&moss], &nobody),
+        Ok(Role::Site)
+    );
+    // Anyone else is refused; and an ask names Souls.
+    assert_eq!(
+        may("acct_stranger", "one", &[&fern], &nobody),
+        Err("removal.not-allowed")
+    );
+    assert_eq!(
+        may("acct_stranger", "nowhere", &[&fern], &nobody),
+        Err("removal.not-allowed")
+    );
+    assert_eq!(may("acct_fern", "one", &[], &nobody), Err("souls-required"));
+    assert_eq!(
+        may("acct_maker", "one", &[&creator_grant], &creator),
+        Err("soul-grant")
+    );
+}
