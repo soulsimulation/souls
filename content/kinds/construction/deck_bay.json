@@ -1,0 +1,182 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:deck_bay",
+ "owner": "thing",
+ "slots": {
+  "upright_a": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_upright_12ft"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    0,
+    -1448
+   ]
+  },
+  "upright_b": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_upright_12ft"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    0,
+    1448
+   ]
+  },
+  "beam_low_l": {
+   "admits": "thing",
+   "kinds": [
+    "mars:deck_beam"
+   ],
+   "most": 1,
+   "at_mm": [
+    -572,
+    500,
+    0
+   ]
+  },
+  "beam_low_r": {
+   "admits": "thing",
+   "kinds": [
+    "mars:deck_beam"
+   ],
+   "most": 1,
+   "at_mm": [
+    572,
+    500,
+    0
+   ]
+  },
+  "beam_high_l": {
+   "admits": "thing",
+   "kinds": [
+    "mars:deck_beam"
+   ],
+   "most": 1,
+   "at_mm": [
+    -572,
+    1800,
+    0
+   ]
+  },
+  "beam_high_r": {
+   "admits": "thing",
+   "kinds": [
+    "mars:deck_beam"
+   ],
+   "most": 1,
+   "at_mm": [
+    572,
+    1800,
+    0
+   ]
+  },
+  "j1": {
+   "admits": "thing",
+   "kinds": [
+    "mars:two_by_four"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1902,
+    -1172
+   ]
+  },
+  "j2": {
+   "admits": "thing",
+   "kinds": [
+    "mars:two_by_four"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1902,
+    -572
+   ]
+  },
+  "j3": {
+   "admits": "thing",
+   "kinds": [
+    "mars:two_by_four"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1902,
+    -2
+   ]
+  },
+  "j4": {
+   "admits": "thing",
+   "kinds": [
+    "mars:two_by_four"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1902,
+    578
+   ]
+  },
+  "j5": {
+   "admits": "thing",
+   "kinds": [
+    "mars:two_by_four"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1902,
+    1178
+   ]
+  },
+  "s1": {
+   "admits": "thing",
+   "kinds": [
+    "mars:plywood_sheet"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1991,
+    -612
+   ]
+  },
+  "s2": {
+   "admits": "thing",
+   "kinds": [
+    "mars:plywood_sheet"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    1991,
+    607
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1219,
+   3658,
+   2972
+  ]
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A deck bay: two 12 ft frames, four beams, five joists at 1.9 m, two sheets."
+ },
+ "card": {
+  "text": "card"
+ }
+}

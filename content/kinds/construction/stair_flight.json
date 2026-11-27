@@ -1,0 +1,226 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:stair_flight",
+ "owner": "thing",
+ "state": {
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "slots": {
+  "tread_1": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    -1125,
+    180,
+    0
+   ]
+  },
+  "tread_2": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    -875,
+    360,
+    0
+   ]
+  },
+  "tread_3": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    -625,
+    540,
+    0
+   ]
+  },
+  "tread_4": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    -375,
+    720,
+    0
+   ]
+  },
+  "tread_5": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    -125,
+    900,
+    0
+   ]
+  },
+  "tread_6": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    125,
+    1080,
+    0
+   ]
+  },
+  "tread_7": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    375,
+    1260,
+    0
+   ]
+  },
+  "tread_8": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    625,
+    1440,
+    0
+   ]
+  },
+  "tread_9": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    875,
+    1620,
+    0
+   ]
+  },
+  "tread_10": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_tread"
+   ],
+   "most": 1,
+   "at_mm": [
+    1125,
+    1800,
+    0
+   ]
+  }
+ },
+ "points": {
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [
+    -1000,
+    0,
+    0
+   ]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [
+    1000,
+    0,
+    0
+   ]
+  },
+  "bottom": {
+   "role": "stand",
+   "at_mm": [
+    -1550,
+    0,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   2500,
+   1980,
+   900
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 3,
+   "palette": {
+    "timber": "#b8905a"
+   },
+   "tags": [
+    "stair",
+    "stringer",
+    "deck"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      990,
+      -431
+     ],
+     "size": [
+      2500,
+      60,
+      38
+     ],
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      990,
+      431
+     ],
+     "size": [
+      2500,
+      60,
+      38
+     ],
+     "tint": "timber"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A ten-tread stair flight, 1.98 m rise: two to four carry it; treads go in."
+ },
+ "card": {
+  "text": "card"
+ }
+}

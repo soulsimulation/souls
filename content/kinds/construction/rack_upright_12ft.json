@@ -1,0 +1,269 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:rack_upright_12ft",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "stand_front": {
+   "role": "stand",
+   "at_mm": [
+    0,
+    0,
+    500
+   ]
+  },
+  "grip_low": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    658,
+    0
+   ]
+  },
+  "grip_high": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    3000,
+    0
+   ]
+  },
+  "seat_front_l_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    -572,
+    500,
+    38
+   ],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    572,
+    500,
+    38
+   ],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    -572,
+    500,
+    -38
+   ],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    572,
+    500,
+    -38
+   ],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    -572,
+    1800,
+    38
+   ],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    572,
+    1800,
+    38
+   ],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    -572,
+    1800,
+    -38
+   ],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    572,
+    1800,
+    -38
+   ],
+   "yaw_mdeg": 180000
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1219,
+   3658,
+   76
+  ],
+  "solids_mm": [
+   [
+    -572,
+    0,
+    38,
+    38,
+    0,
+    0,
+    3658
+   ],
+   [
+    572,
+    0,
+    38,
+    38,
+    0,
+    0,
+    3658
+   ]
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {
+    "steel": "#3f6fa8"
+   },
+   "tags": [
+    "rack",
+    "upright",
+    "frame"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      -572,
+      1829,
+      0
+     ],
+     "size": [
+      76,
+      3658,
+      76
+     ],
+     "tint": "steel"
+    },
+    {
+     "kind": "box",
+     "at": [
+      572,
+      1829,
+      0
+     ],
+     "size": [
+      76,
+      3658,
+      76
+     ],
+     "tint": "steel"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      319,
+      0
+     ],
+     "size": [
+      1144,
+      38,
+      38
+     ],
+     "tint": "steel"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      1829,
+      0
+     ],
+     "size": [
+      1144,
+      38,
+      38
+     ],
+     "tint": "steel"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      3339,
+      0
+     ],
+     "size": [
+      1144,
+      38,
+      38
+     ],
+     "tint": "steel"
+    }
+   ]
+  }
+ },
+ "children": {
+  "crew": {
+   "kind": "mars:carry_activity",
+   "most": 2
+  }
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A 3.7 m (12 ft) rack frame: two carry it; one holds it up for its beams."
+ },
+ "card": {
+  "text": "card"
+ }
+}

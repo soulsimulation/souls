@@ -1,0 +1,71 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:stair_tread",
+ "owner": "thing",
+ "points": {
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [
+    -350,
+    19,
+    0
+   ]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [
+    350,
+    19,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   900,
+   38,
+   235
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 2,
+   "palette": {
+    "timber": "#c9a36b"
+   },
+   "tags": [
+    "timber",
+    "tread",
+    "stair"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      19,
+      0
+     ],
+     "size": [
+      900,
+      38,
+      235
+     ],
+     "tint": "timber"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A 0.9 m 2x10 stair tread: it goes into a stair flight."
+ },
+ "card": {
+  "text": "card"
+ }
+}
