@@ -27,7 +27,7 @@ export function rehearsalTemplate(eden) {
     schema: 'genesis/1', name: 'Presentation rehearsal', description: 'A lectern and four audience seats.',
     constants: { extent: 50, ground: 'land' },
     batches: [{ group: 'conference-rehearsal', ops: [...definitions,
-      { op: 'place', def: 'core/hall_lecture@1', name: 'presentation-lectern', p: [0, 0, 4] },
+      { op: 'place', def: 'core/hall_lecture@1', name: 'presentation-lectern', p: [0, 0, 4], r: Math.PI },
       { op: 'place', def: 'core/conference_question@1', name: 'question-stand', p: [3, 0, 3] },
       { op: 'place', def: 'core/bench@1', name: 'audience-left', p: [-1.4, 0, 0], r: 0 },
       { op: 'place', def: 'core/bench@1', name: 'audience-right', p: [1.4, 0, 0], r: 0 },

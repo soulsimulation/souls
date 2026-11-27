@@ -8,14 +8,14 @@ import { join, resolve } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { projectRecords } from './owner-overview-data.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
-import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(3);
 
 const PORT = P0, RANGE = [P0 + 1, P0 + 2], ORIGIN = `http://127.0.0.1:${PORT}`;
 const dir = mkdtempSync(join(tmpdir(), 'owner-overview-auth-'));
 const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
-const preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
+const preload = new URL('../../tools/lib/clerk-jwks-preload.mjs', import.meta.url).pathname;
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const PROXIED = { 'x-forwarded-for': '203.0.113.7' };   // as through Caddy: not the operator
 let L, sign, envFile;

@@ -12,11 +12,11 @@ import { authorCentaur } from '../../../tools/body-authoring/centaur/author.mjs'
 import { authorGhost } from '../../../tools/body-authoring/ghost/author.mjs';
 import { authorMonster } from '../../../tools/body-authoring/monster/author.mjs';
 import { authorPip } from '../../../tools/body-authoring/robot/author.mjs';
-import { bindBodyDefinition, admitBodyGLB } from '../../../apps/server/src/edge/body/admission.ts';
-import { validateUpload, BODY_UPLOAD_POLICY } from '../../../apps/server/src/moderation/validate.ts';
-import { coreAsset } from '../../../apps/server/src/edge/body/core-revisions.ts';
-import { PIP_PRESET } from '../../../apps/server/src/edge/body/pip.ts';
-import { MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET } from '../../../apps/server/src/edge/body/shared-bodies.ts';
+import { bindBodyDefinition, admitBodyGLB } from '../../../tools/body-authoring/admit/admission.ts';
+import { validateUpload, BODY_UPLOAD_POLICY } from '../../../tools/body-authoring/admit/validate.ts';
+import { coreAsset } from '../../../tools/body-authoring/admit/core-revisions.ts';
+import { PIP_PRESET } from '../../../tools/body-authoring/admit/pip.ts';
+import { MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET } from '../../../tools/body-authoring/admit/shared-bodies.ts';
 import { HUMANOID2_DEF } from '../../../packages/world-compiler/src/core-kit/humanoid2.ts';
 import { sha256Hex, stableStringify } from '../../../packages/world-compiler/src/hash.ts';
 import { BODY_SOURCE_FILES } from '../../web/body-assets.ts';

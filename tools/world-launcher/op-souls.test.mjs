@@ -11,13 +11,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { openLauncher } from './launcher.mjs';
 import { notTestWorld, deniedSoul, opSoul, NEVER_TEST_SLUGS } from './op-souls.mjs';
-import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const PORT = Number(process.env.OPSOULS_TEST_PORT ?? await testPort(9)), RANGE = [PORT + 1, PORT + 8], ORIGIN = `http://127.0.0.1:${PORT}`;
 const dir = mkdtempSync(join(tmpdir(), 'launcher-op-souls-test-'));
 const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
-const preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
+const preload = new URL('../../tools/lib/clerk-jwks-preload.mjs', import.meta.url).pathname;
 const OP = new URL('./op.mjs', import.meta.url).pathname;
 let L, sign;
 const api = (p, o = {}) => fetch(`${ORIGIN}${p}`, o);
