@@ -77,14 +77,32 @@ test('public world selection rejects foreign and ambiguous pages',()=>{
   assert.throws(()=>counterWorldPage({worlds:[{...row,url:'https://other.test/w/counter/'}]},'https://example.test'),/owned origin/);
 });
 
-test('creator uses one returned identity, with no guessed placement fallback or registry edit',async()=>{
+const creatorKind='eden:counter_match@1220b0a7c599c29450758b906827b46e9ac0daa8154927f9d9a43c84ec525f7fab0c';
+test('creator places the exact qualified registry key and reads back the public plain kind and returned identity',async()=>{
   const calls=[],creator={label:'creator',cli:async(...words)=>{calls.push(words);if(words[0]==='place')return{ok:true,sequence:7,names:{1:'returned-thing'}};
-    if(words.length===1)return{ok:true,kinds:{'eden:counter_match@revision':{}},nodes:[{id:'ground',kind:'souls:ground'}]};
-    return{ok:true,id:words[1],kind:'eden:counter_match@revision',in:[{id:'ground'}],at:[12,0,12]};}};
+    if(words.length===1)return{ok:true,kinds:{[creatorKind]:{}},nodes:[{id:'ground',kind:'souls:ground'}]};
+    return{ok:true,id:'returned-thing',kind:'eden:counter_match',in:[{id:'ground'}],at:[12,0,12]};}};
   const result=await proveCounterCreator({creator});assert.equal(result.id,'returned-thing');assert.deepEqual(calls.at(-1),['describe','returned-thing']);
-  assert.equal(calls.filter(w=>w[0]==='place').length,1);
+  assert.deepEqual(calls.filter(w=>w[0]==='place'),[['place',creatorKind,'--in','ground','--at','12,0,12']]);
+  assert.equal(result.kind,creatorKind);assert.equal(result.readbackKind,'eden:counter_match');
   const bad={...creator,cli:async(...words)=>words[0]==='place'?{ok:false,code:'place-refused'}:creator.cli(...words)};
   await assert.rejects(proveCounterCreator({creator:bad}),/place refused/);
+});
+
+test('creator plain-kind readback still rejects wrong kind, identity, parent and coordinates',async()=>{
+  const correct={ok:true,id:'returned-thing',kind:'eden:counter_match',in:[{id:'ground'}],at:[12,0,12]};
+  for(const changed of [{kind:'other:counter_match'},{kind:'eden:counter_match_extra'},{kind:creatorKind},{id:'another-thing'},{in:[{id:'another-ground'}]},{at:[12,0,13]}]){
+    const creator={label:'creator',cli:async(...words)=>words[0]==='place'?{ok:true,sequence:7,names:{1:'returned-thing'}}:
+      words.length===1?{ok:true,kinds:{[creatorKind]:{}},nodes:[{id:'ground',kind:'souls:ground'}]}:{...correct,...changed}};
+    await assert.rejects(proveCounterCreator({creator}),assert.AssertionError);
+  }
+});
+
+test('creator never places a plain or malformed registry key',async()=>{
+  for(const key of ['eden:counter_match','eden:counter_match@revision']){
+    let placed=false;const creator={label:'creator',cli:async(...words)=>{if(words[0]==='place')placed=true;return{ok:true,kinds:{[key]:{}},nodes:[{id:'ground',kind:'souls:ground'}]};}};
+    await assert.rejects(proveCounterCreator({creator}),/revision-qualified kind missing/);assert.equal(placed,false);
+  }
 });
 
 test('browser stop and host finalization cache failures and preserve command receipts before collection',async()=>{

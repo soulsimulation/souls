@@ -84,13 +84,14 @@ export async function proveCounterCreator({creator,record=()=>{},signal}) {
     if(kinds.length&&grounds.length)break;assert(Date.now()<until,'counter creator boot kind/ground unavailable');await new Promise(ok=>setTimeout(ok,100));
   }
   assert.equal(kinds.length,1,'counter creator kind ambiguous');assert.equal(grounds.length,1,'counter creator ground ambiguous');
-  const kind=kinds[0],parent=grounds[0].id,place=await cli('place',kind,'--in',String(parent),'--at','12,0,12');
+  const kind=kinds[0];assert.match(kind,/^eden:counter_match@1220[a-f0-9]{64}$/,'counter creator revision-qualified kind missing');
+  const parent=grounds[0].id,place=await cli('place',kind,'--in',String(parent),'--at','12,0,12');
   assert(Number.isSafeInteger(place.sequence)&&place.sequence>0,'counter creator edit sequence missing');
   assert.deepEqual(Object.keys(place.names??{}),['1'],'counter creator place identity ambiguous');
   const id=place.names['1'];assert(typeof id==='string'&&id,'counter creator place identity missing');
-  const readback=await cli('describe',id);assert.equal(readback.id,id);assert.equal(readback.kind,kind);
+  const readback=await cli('describe',id);assert.equal(readback.id,id);assert.equal(readback.kind,'eden:counter_match');
   assert.equal(String(readback.in?.[0]?.id),String(parent));assert.deepEqual(readback.at,[12,0,12]);
-  return {kind,id,parent,at:readback.at,sequence:place.sequence,qualification:'ordinary creator describe/place/returned-ID readback; boot board supplies the clip, post-boot drawing not claimed'};
+  return {kind,readbackKind:readback.kind,id,parent,at:readback.at,sequence:place.sequence,qualification:'ordinary registry discovery and place use the exact revision-qualified key; returned-ID describe proves plain kind, parent and position, not revision; boot board supplies the clip, post-boot drawing not claimed'};
 }
 
 export async function prepare({base,paths,recipe,signal}) {
