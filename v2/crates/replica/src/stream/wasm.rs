@@ -282,3 +282,23 @@ pub fn history_at(
     ]);
     crate::encode::encode(&Value::Map(out)).map_err(|e| JsError::new(&e.to_string()))
 }
+
+/// One validated public bundle's exact native-time node timeline. CBOR: {1: from µs, 2: initial nodes,
+/// 3: [{1: at µs, 2: replacement nodes, 3: removed ids}], 4: bundle start, 5: length, 6: to µs,
+/// 7: [records replayed, candidate node inspections, output node rows]}. Nodes have historyAt's shape.
+/// Memory is replay state plus input and requested changes. This is not mobile cost qualification.
+#[wasm_bindgen(js_name = historyTimeline)]
+pub fn history_timeline(
+    header: &[u8],
+    bundle: &[u8],
+    sha256: &[u8],
+    from: i64,
+    to: i64,
+) -> Result<Vec<u8>, JsError> {
+    let hash: [u8; 32] = sha256
+        .try_into()
+        .map_err(|_| JsError::new("a SHA-256 is 32 bytes"))?;
+    let timeline =
+        crate::history::timeline::Timeline::read(header, bundle, &hash, from, to).map_err(js)?;
+    crate::encode::encode(&timeline.to_value()).map_err(|e| JsError::new(&e.to_string()))
+}

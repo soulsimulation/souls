@@ -14,8 +14,8 @@ import { LOCAL, OPS, help, requestOf } from './souls.mjs';
 const client = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const skill = readFileSync(join(client, 'skill/SKILL.md'), 'utf8');
 const COMMANDS = new Set([...OPS, ...LOCAL, ...HOME_COMMANDS, 'shoot', 'view', 'map', 'views', 'upgrade']);
-// Code spans that are not commands: values, act words and the event pattern the skill quotes.
-const NOT_COMMANDS = /^(node eden\.mjs|in 10m|which-soul|ok: (true|false)|<|'\{|20:00|stopped-locally|not-connected)/;
+// Code spans that are not commands: values, act words, the event pattern the skill quotes and the shell's `cd`.
+const NOT_COMMANDS = /^(node eden\.mjs|cd <folder> && |in 10m|which-soul|ok: (true|false)|<|'\{|20:00|stopped-locally|not-connected)/;
 
 /** Each code span that reads as a command line: a lowercase word, then arguments. */
 const spans = [...skill.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]);

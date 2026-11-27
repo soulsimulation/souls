@@ -23,6 +23,11 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A low disk** (`disk.low`, #2806 follow-up). Before the disk is full: under `WORLDD_DISK_LOW_BYTES` (1 GiB) or
+  `WORLDD_DISK_LOW_PCT` (5 %) free, the world says `worldd: disk.low: …` once, with what it sheds, and `health.json`
+  has `"disk":{"state":"low",…}`; `disk.low cleared` once it is back past both by a tenth. Nothing is refused. With
+  a store, the compactor gives back the log's bytes the store holds once 1 MiB has passed every reader; with none,
+  nothing is shed and the line says so. What to do: [operations](../../../docs/operations.md) (low disk).
 - **A full disk** (O10, #2806). The running world exits 87 at the first write the disk refuses; nothing unwritten
   was acknowledged. Its restart waits for room before it writes anything: `worldd: disk.full: <free> bytes free under
   the world, <need> to start; the start waits for room` (`need` is 4 MiB and the largest checkpoint's size), saying

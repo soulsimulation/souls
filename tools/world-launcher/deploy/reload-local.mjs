@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // A release reload on this machine, watched by the release probe (R14): the keeper and launcher of this checkout, one
-// Eden 2026 world (fake minds), release-probe.mjs in real headless Chrome on its page, then one SIGHUP handover (what
+// Eden 2026 world (fake minds), release-probe.mjs in headless Chromium on its page, then one SIGHUP handover (what
 // activate.sh's `systemctl reload` does) and the probe's bar. Nothing outside <out> is written; no production anything.
 //
 //   node tools/world-launcher/deploy/reload-local.mjs [--out .local/reload-local/<ts>] [--port 24900] [--after-s 30]
 //        [--settle-s 10] [--warm-s 20]
 //
-// Needs: pnpm install, the web build (pnpm -C apps/web build) and Google Chrome (the probe's `channel: 'chrome'`). The
+// Needs: pnpm install, the web build (pnpm -C apps/web build) and Playwright's Chromium (`channel: 'chromium'`). The
 // new generation runs the same code as the old one: what is measured is the reload itself (stop, standby go, boot,
 // /healthz, the viewer's upgrade), as production's probe measures it (reconnectMs, heldMs; bar RECONNECT_BAR_MS).
 // Exit: the probe's own (0 pass, 1 fail, 3 rolled back); 2 when the setup could not run.

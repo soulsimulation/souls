@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // W6 + W7 proof on a fresh dev world (fake minds, $0): the creator builds a small gallery, the creator's agent and a
 // resident's agent hang images and looping videos through tools/art/eden-art.mjs, a resident is refused someone
-// else's slot, then real Chrome (through the shared lease) looks at it: videos play, hovering a piece shows its title
+// else's slot, then Chromium (through the shared lease) looks at it: videos play, hovering a piece shows its title
 // and maker, the soundscape logs which sources play where, and the mute button survives a reload.
 //
 //   node tools/art/e2e-art.mjs --port 6031 --out .local/artsound/e2e [--media <dir>] [--keep]
@@ -81,7 +81,7 @@ try {
     const release = await chromeLease('artsound');
     try {
       for (const dpr of [2, 1]) {
-        const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+        const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
         const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
         const look = (eye, at) => page.evaluate(([e, a]) => { const s = window.__soulsEntity; s.controls.target.set(...a); s.camera.position.set(...e); s.controls.update?.(); return true; }, [eye, at]);
         const shot = async (name) => { const f = resolve(out, `${name}-dpr${dpr}.png`); await page.screenshot({ path: f }); report.shots.push(f); };

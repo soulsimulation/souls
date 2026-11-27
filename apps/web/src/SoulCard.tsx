@@ -87,8 +87,10 @@ export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|
   *  known link and activity, nothing blames the agent, and the box stays with its draft, unable to send. */
  unavailable?:boolean;
  /** B3-3: what it is doing now ("Walking"), shown in the status line while it is awake; null when not known */
- doing?:string|null};
-export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,retireAsked=false,keep,clock,open,mailbox=false,unavailable=false,doing=null}:SoulCardViewProps){
+ doing?:string|null;
+ /** owner only, fixtures and shots: when the card began waiting for its agent's state (else when it first rendered without one) */
+ checkingSince?:number};
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,retireAsked=false,keep,clock,open,mailbox=false,unavailable=false,doing=null,checkingSince}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -104,6 +106,11 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
  const slowed=readSlowed(soul.slowed),slowedNow=slowedText(slowed,t);
  useEffect(()=>{if(!slowed)return;const left=slowed.until-Date.now();if(left<=0)return;const k=setTimeout(()=>tick(n=>n+1),left+50);return()=>clearTimeout(k);},[slowed?.until,slowed?.reason]);
  useEffect(()=>{if(waitingSince==null)return;const left=waitingSince+WAITING_PROMPT_MS-Date.now();if(left<=0)return;const k=setTimeout(()=>tick(n=>n+1),left+50);return()=>clearTimeout(k);},[waitingSince]);
+ // first day (27 Nov): an owner's card with no word of its agent says, after CHECKING_MS, what it is still waiting for
+ const unknownSince=useRef<number|null>(null),unknown=view==='owner'&&!unavailable&&!link;
+ if(!unknown)unknownSince.current=null;else unknownSince.current??=checkingSince??Date.now();
+ const waited=unknown&&t-(checkingSince??unknownSince.current??t)>=CHECKING_MS;
+ useEffect(()=>{if(!unknown||waited)return;const k=setTimeout(()=>tick(n=>n+1),(unknownSince.current??Date.now())+CHECKING_MS-Date.now()+50);return()=>clearTimeout(k);},[unknown,waited]);
  const share=async()=>{try{await navigator.clipboard.writeText(publicSoulLink(location.origin,worldPath,soul.id,BASE));if(alive.current)setCopied('ok');}catch{if(alive.current)setCopied('failed');}};
 
  // Pairing: the card is the approval (nothing else on it)
@@ -123,10 +130,11 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
  return <article className="soul-card" aria-labelledby="soul-card-name" data-soul-state={state} data-body={body?.state} data-sleeping={sleeping?'1':undefined}>
   <Head soul={soul} title={title} share={share} copied={copied}/>
   <p className="soul-meta">
-   {down?<span className="soul-status" data-status="unavailable"><i aria-hidden="true"/>World unavailable</span>:owner?<OwnerStatus link={link} waiting={waiting} details={details} toggle={()=>setDetails(v=>!v)}/>:<VisitorStatus body={body}/>}
+   {down?<span className="soul-status" data-status="unavailable"><i aria-hidden="true"/>World unavailable</span>:owner?<OwnerStatus link={link} waiting={waiting} details={details} waited={waited} toggle={()=>setDetails(v=>!v)}/>:<VisitorStatus body={body}/>}
    <StatusPlace text={down?'':doing&&(!body||body.state==='awake')?`${doing}${place?` at ${place}`:''}`:!owner?visitorPhrase(body,place,t):waiting?(link?.since&&t-link.since<WAITING_PROMPT_MS?'approved just now':'approved'):disconnected&&!body?(link?.since?`since ${clockAt(link.since,t)}`:''):bodyPhrase(body,place,t)} title={body?.since?clockTitle(body.since):undefined}/>
    <VisitorFrom soulId={soul.id}/>
   </p>
+  {waited&&<p className="soul-dim soul-checking" role="status" data-checking-why={inbox?'agent':'mailbox'}>{checkingNote(!!inbox)}</p>}
   {slowedNow&&<p className="soul-slowed soul-dim" role="status" data-slowed={slowed!.reason}>{slowedNow}</p>}
   {connected&&details&&<LinkDetails name={soul.name} link={link!} here={here} prompt={prompt} disconnect={disconnect} clock={t} pairOpen={!!open?.pair}/>}
   {now&&<p className={'soul-now'+(sleeping?' soul-now-dim':'')} data-now="1"><q>{now.text}</q>{now.at>0&&<span className="soul-dim" title={clockTitle(now.at)}> · {ageText(now.at,t)}</span>}</p>}
@@ -161,8 +169,15 @@ function Head({soul,title,share,copied}:{soul:PublicSoul;title:React.RefObject<H
 /** A small chevron (a text ▾ reads as a second dot next to the · separator at 13 px). */
 const Chevron=({up,right}:{up:boolean;right?:boolean})=><svg className="soul-caret" data-caret={up?'up':right?'right':'down'} viewBox="0 0 10 10" aria-hidden="true"><path d={up?'M2 6.5 5 3.5 8 6.5':right?'M3.5 2 6.5 5 3.5 8':'M2 3.5 5 6.5 8 3.5'} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 const StatusPlace=({text,title}:{text:string;title?:string})=>text?<span className="soul-place" title={title}><span className="soul-sep" aria-hidden="true"> · </span>{text}</span>:null;
-function OwnerStatus({link,waiting,details,toggle}:{link:Link|null;waiting:boolean;details:boolean;toggle():void}){
- if(!link)return <span className="soul-status" data-status="checking"><i aria-hidden="true"/>Checking…</span>;
+/** How long an owner's card says Checking… before it says what it is waiting for. */
+export const CHECKING_MS=10_000;
+/** What a card still without its agent's state is waiting for: `reached`, the world's mailbox answered this page but the
+ *  world has not said whether the agent is connected; else this page has not reached the mailbox. */
+export const checkingNote=(reached:boolean)=>reached
+ ?'Waiting for the world to say whether your agent is connected.'
+ :'Waiting to reach this world’s mailbox, which says whether your agent is connected. Still trying.';
+function OwnerStatus({link,waiting,details,waited,toggle}:{link:Link|null;waiting:boolean;details:boolean;waited:boolean;toggle():void}){
+ if(!link)return <span className="soul-status" data-status="checking"><i aria-hidden="true"/>{waited?'Not known yet':'Checking…'}</span>;
  if(link.state==='connected')return <button type="button" className="soul-status soul-link" data-status="connected" aria-expanded={details} aria-controls="soul-link-details" title="Link details" onClick={toggle}><i aria-hidden="true"/>Connected<Chevron up={details}/></button>;
  return <span className="soul-status" data-status={waiting?'approved-waiting':'disconnected'}><i aria-hidden="true"/>Disconnected</span>;
 }

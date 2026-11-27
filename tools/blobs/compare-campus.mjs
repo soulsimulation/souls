@@ -45,7 +45,7 @@ const server = createServer((req, res) => {
 }).listen(port, '127.0.0.1');
 const { chromium } = findPlaywright(); const release = await chromeLease('blobs-compare'); const report = {};
 try {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   for (const dpr of [1, 2]) for (const which of ['orig', 'cand']) {
     const page = await browser.newPage({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
     page.on('pageerror', (e) => console.error(which, String(e)));

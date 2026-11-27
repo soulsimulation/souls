@@ -22,7 +22,7 @@ const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@
 const release = await chromeLease('L11-parity');
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   for (const j of jobs) {
     const page = await (await browser.newContext({ viewport: { width: 1280, height: 760 } })).newPage();
     page.setDefaultTimeout(300000);

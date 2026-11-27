@@ -53,8 +53,9 @@ request of the world is answered by the launcher: its page is the launcher's own
 for a world with no old twin), a crawler's too; each view from the published files, else 404 `world.new-engine` (the page
 draws it from its stream); `/v1/me` with its sign-in; `/v1/world/visitors` as a world without travel (`available:
 false`); `/v1/world/seq` from the published snapshot (else seq 0); `/v1/world/context` (Explore's places) from the published snapshot
-too: each thing at the world's root, the ones with an authored meaning listed and every one found by a search, paged as
-the old process pages them, and with nothing published a listing with no places; Explore's place pictures (25 Nov) as the
+too: each thing at the world's root, the ones with an authored meaning listed and every one found by a search (those
+with an authored meaning first, then by how the title matches: `cutover.mjs` `searchPlaces`), paged as the old process
+pages them, and with nothing published a listing with no places; Explore's place pictures (25 Nov) as the
 world's kept picture of the place as it is now, a small WebP served immutable at `/w/<slug>/v1/world/context/shot/<sha>.webp`,
 else `unavailable` with `draw: 'page'`, and the page draws that place itself from what it shows (kept in the browser per
 build). The kept pictures are made ahead of visitors (#5038): a minute after the launcher starts (a release) and every

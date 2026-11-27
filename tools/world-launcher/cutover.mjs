@@ -86,6 +86,24 @@ export function snapshotPlaces(s) {
   }
   return out;
 }
+/** 27 Nov (first day): Explore's search, `places` (snapshotPlaces) that match `q` (searchText), best first. A search for
+ *  "park" listed 51 things in id order, "Park pond lilies 3" first and Town Park 26th. Now the places with an authored
+ *  meaning (`shown`) come before things with none (a lily, a drinking fountain: still found, after them), and within
+ *  each, by how the title matches: the title itself, then its last words (English names a thing last: "Town Park" is a
+ *  park, "Park Gazebo" a gazebo), then a word of it, then any part of it, then only the description or an alias; then
+ *  the shorter title, then by title. */
+export function searchPlaces(places, q) {
+  const word = new RegExp(`(^|[^a-z0-9])${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+  const rank = (title) => {
+    if (title === q) return 0;
+    if (title.endsWith(q) && word.test(title.slice(-q.length - 1))) return 1;
+    return word.test(title) ? 2 : title.includes(q) ? 3 : 4;
+  };
+  return places.filter((p) => p.text.includes(q))
+    .map((p) => { const title = searchText(p.target.title); return { p, title, key: [p.shown ? 0 : 1, rank(title), title.length] }; })
+    .sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2] - b.key[2] || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0) || (a.p.target.ref < b.p.target.ref ? -1 : 1))
+    .map((x) => x.p);
+}
 /** #4177: the world page with `v2Stream` (and `v2Bodies`, when given) written into its inline config
  *  (page-meta.mjs writes that `<script>` first in <head>; the page's v2-engine reads the fields).
  *  `fields` is the body catalogue's directory, or (B3-2b) an object of the page's other v2 fields (`v2Bodies`,
