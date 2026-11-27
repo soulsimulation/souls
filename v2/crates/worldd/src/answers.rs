@@ -4598,6 +4598,7 @@ impl Clock {
         now: Micros,
     ) -> Result<(Id, String), Refusal> {
         let Selector::FreeSlot { kind, node, .. } = selector;
+        let kind = kind.as_str();
         let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
         let Some(b) = self.bodies.as_ref() else {
             return Err(Refusal {
@@ -4631,7 +4632,7 @@ impl Clock {
             let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
             b.seat_by_kind(*node, body, &fits, &taken)
         };
-        if let Some(t) = seat(Some(kind.as_str())) {
+        if let Some(t) = seat(Some(kind)) {
             let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
             return Ok((t, form.to_owned()));
         }
