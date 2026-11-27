@@ -288,7 +288,10 @@ pub enum Entry {
 #[derive(Default)]
 pub struct Spots {
     pub owners: BTreeMap<Id, BTreeMap<[i64; 3], Table>>,
+    /// Every grant, release and refusal, in order, unless the record is not kept ([`Spots::forget_record`]).
     pub record: Vec<Entry>,
+    /// The record is not kept.
+    unrecorded: bool,
     /// Per asker: the target and place it holds.
     held: BTreeMap<Id, Held>,
     /// Geometry caches only: every class uses the one held/refused/record authority below.
@@ -997,6 +1000,15 @@ impl Spots {
         Spots::default()
     }
 
+    /// Stops keeping the record, and drops what was kept (#2803). The record is one entry for each grant, release and
+    /// refusal, which nothing drains; tests and tools read it. A world that runs for days (`worldd`) says what it
+    /// granted in its own log, so it keeps none: at 1,000 agents the record grew by about a megabyte a minute. The
+    /// tables, what each asker holds and every answer are the same with or without it.
+    pub fn forget_record(&mut self) {
+        self.unrecorded = true;
+        self.record = Vec::new();
+    }
+
     /// Prepared geometry changed; retain shared physical holders until they are revalidated against it.
     pub fn invalidate_geometry(&mut self) {
         self.owners.clear();
@@ -1109,13 +1121,15 @@ impl Spots {
                     None => {
                         self.held.remove(&who);
                         self.revoked.push(who);
-                        self.record.push(Entry::Release {
-                            at,
-                            who,
-                            target: h.target,
-                            place: h.place,
-                            why: "ground-changed",
-                        });
+                        if !self.unrecorded {
+                            self.record.push(Entry::Release {
+                                at,
+                                who,
+                                target: h.target,
+                                place: h.place,
+                                why: "ground-changed",
+                            });
+                        }
                     }
                 }
             }
@@ -1157,13 +1171,15 @@ impl Spots {
                 continue;
             };
             p.holder = None;
-            self.record.push(Entry::Release {
-                at,
-                who,
-                target: held.target,
-                place: (p.ring, p.k),
-                why,
-            });
+            if !self.unrecorded {
+                self.record.push(Entry::Release {
+                    at,
+                    who,
+                    target: held.target,
+                    place: (p.ring, p.k),
+                    why,
+                });
+            }
         }
         self.refused.retain(|who, (t, size, _)| {
             asking
@@ -1308,25 +1324,29 @@ impl Spots {
                             overflow,
                         },
                     );
-                    self.record.push(Entry::Grant {
-                        at,
-                        who: a.who,
-                        target: t,
-                        place: (p.ring, p.k),
-                        to: p.at,
-                        cost,
-                        cause: Cause::Intent(a.order),
-                        actor: Actor::World,
-                    });
+                    if !self.unrecorded {
+                        self.record.push(Entry::Grant {
+                            at,
+                            who: a.who,
+                            target: t,
+                            place: (p.ring, p.k),
+                            to: p.at,
+                            cost,
+                            cause: Cause::Intent(a.order),
+                            actor: Actor::World,
+                        });
+                    }
                 }
                 Err(name) => {
                     self.refused.insert(a.who, (t, *size, name));
-                    self.record.push(Entry::Refuse {
-                        at,
-                        who: a.who,
-                        target: t,
-                        name,
-                    });
+                    if !self.unrecorded {
+                        self.record.push(Entry::Refuse {
+                            at,
+                            who: a.who,
+                            target: t,
+                            name,
+                        });
+                    }
                 }
             }
         }

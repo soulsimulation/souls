@@ -27,10 +27,10 @@ use sim::host::{Planned, Runner};
 use sim::unstick::{Ladder, Record, Rung};
 use sim::walk::town::Town;
 
-/// The ladder over a served world's walkers, and how many of its records are written.
+/// The ladder over a served world's walkers. Its records are taken from it as they are written ([`Unstuck::after`]),
+/// so it holds a tick's at most, never every rung climbed in the world's life (#2803).
 pub struct Unstuck {
     pub ladder: Ladder,
-    written: usize,
     /// The bodies off the ground a walk-out was asked for (each once while it is off the ground).
     asked_out: BTreeSet<Id>,
 }
@@ -39,7 +39,6 @@ impl Default for Unstuck {
     fn default() -> Unstuck {
         Unstuck {
             ladder: Ladder::served(),
-            written: 0,
             asked_out: BTreeSet::new(),
         }
     }
@@ -101,9 +100,13 @@ impl Unstuck {
         }
         self.ladder.after(runner, town);
         self.ladder.forget_ended(runner);
-        let new = &self.ladder.log[self.written..];
-        self.written = self.ladder.log.len();
-        new.iter().map(entry).collect()
+        self.written()
+    }
+
+    /// The world's entries for the rungs climbed since the last call, taken from the ladder: its records are not
+    /// kept once they are written (#2803; kept, they grew by about half a megabyte a minute at 1,000 agents).
+    fn written(&mut self) -> Vec<Effect> {
+        self.ladder.log.drain(..).map(|r| entry(&r)).collect()
     }
 }
 
@@ -217,5 +220,49 @@ pub fn restarted(at: Micros, body: Id, how: &str, node: Id, from: Vec3, to: Vec3
             rest: Rest::new(),
         }]),
         rest: Rest::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2803: each rung climbed is written once, and the ladder keeps none of them afterwards, however long the
+    /// world runs.
+    #[test]
+    fn the_ladders_records_are_written_once_and_not_kept() {
+        let id = |n| Id::new(replica::ids::Scope([0x2b; 16]), n).expect("an id");
+        let mut u = Unstuck::default();
+        let mut all = Vec::new();
+        for tick in 0..1000i64 {
+            for k in 0..3 {
+                u.ladder.log.push(Record {
+                    at: tick,
+                    who: id(1 + k),
+                    order: id(100 + tick as u64),
+                    rung: if k == 0 {
+                        Rung::Reroute
+                    } else {
+                        Rung::MakeWay { to: id(50) }
+                    },
+                });
+            }
+            let wrote = u.written();
+            assert_eq!(wrote.len(), 3, "a tick's rungs are written with it");
+            assert!(u.ladder.log.is_empty(), "none is kept once written");
+            all.extend(wrote);
+        }
+        assert!(u.written().is_empty(), "nothing is written twice");
+        let names: Vec<String> = all
+            .iter()
+            .take(3)
+            .map(|e| e.events.as_ref().expect("an event")[0].name.as_str().to_owned())
+            .collect();
+        assert_eq!(
+            names,
+            ["souls:reroute", "souls:make-way", "souls:make-way"],
+            "in the order climbed"
+        );
+        assert_eq!(all.len(), 3000);
     }
 }
