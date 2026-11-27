@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
-import { downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident } from './owned-seats.mjs';
+import { conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident } from './owned-seats.mjs';
 
 const scratch = resolve(import.meta.dirname, '../../../.local'); mkdirSync(scratch, { recursive: true });
 const directory = mkdtempSync(join(scratch, 'conference-owned-seat-tests-'));
@@ -67,12 +67,29 @@ test('post-pair resident readiness failure stays owned and stops on owner cleanu
 test('served client hash mismatch refuses without launching a child', async () => {
   const before = children.length;
   const server = createServer((req, res) => {
-    if (req.url === '/v1/config') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ soulClient: { sha256: '0'.repeat(64), bytes: 4 } })); }
+    if (req.url === '/w/conference/v1/config') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ soulClient: { sha256: '0'.repeat(64), bytes: 4 } })); }
     else res.end('wrong');
   });
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
   try {
-    await assert.rejects(downloadConferenceClient({ base: `http://127.0.0.1:${server.address().port}`, paths: { data: directory, dir: directory }, signal: controller.signal }), /served client SHA256/);
+    await assert.rejects(downloadConferenceClient({ base: `http://127.0.0.1:${server.address().port}/w/conference/`, paths: { data: directory, dir: directory }, signal: controller.signal }), /served client SHA256/);
   } finally { await new Promise((ok, no) => server.close(error => error ? no(error) : ok())); }
   assert.equal(children.length, before);
+});
+
+test('ordinary world discovery rejects ambiguity and a route leaving its owned origin', async () => {
+  let worlds = [{ name: 'Presentation rehearsal', template: 'conference-rehearsal', url: '/w/conference/?dev=1' }];
+  const server = createServer((req, res) => {
+    assert.equal(req.url, '/__sim/worlds.json');
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ worlds }));
+  });
+  await new Promise(ok => server.listen(0, '127.0.0.1', ok));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    assert.equal(await conferenceWorldPage({ base, signal: controller.signal }), base + '/w/conference/');
+    worlds.push({ ...worlds[0] });
+    await assert.rejects(conferenceWorldPage({ base, signal: controller.signal }), /unambiguous/);
+    worlds = [{ ...worlds[0], url: 'https://example.invalid/w/conference/' }];
+    await assert.rejects(conferenceWorldPage({ base, signal: controller.signal }), /owned origin/);
+  } finally { await new Promise((ok, no) => server.close(error => error ? no(error) : ok())); }
 });

@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { assembleConference, discoverConference, explainConference } from '../../playtest/conference/rehearse.mjs';
-import { downloadConferenceClient, pairConferenceSeat, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
+import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
@@ -52,7 +52,9 @@ export async function prepare({ base, paths, recipe, signal }) {
   const state = { paths, signal, rows: [], seats: [] };
   states.set(paths.dir, state);
   state.record = row => state.rows.push({ at: Date.now(), ...row });
-  const bundle = await downloadConferenceClient({ base, paths, signal });
+  const worldPage = await conferenceWorldPage({ base, signal });
+  state.worldPage = worldPage;
+  const bundle = await downloadConferenceClient({ base: worldPage, paths, signal });
   state.seats = await Promise.all(names.map((name, index) => pairConferenceSeat({
     recipe, paths, bundle, label: `conference-${index}`, name, signal,
   })));

@@ -44,12 +44,25 @@ export function ownedConferenceCommand(recipe, args, { cwd, env, signal, log, on
   });
 }
 
+/** Follow the public world-list route; the front-door origin itself is not a world's client endpoint. */
+export async function conferenceWorldPage({ base, signal }) {
+  const response = await fetch(new URL('/__sim/worlds.json', base), { signal });
+  assert.equal(response.status, 200, 'conference-proof public world list');
+  const catalog = await response.json();
+  const worlds = catalog.worlds?.filter(w => w.name === 'Presentation rehearsal' && w.template === 'conference-rehearsal') ?? [];
+  assert.equal(worlds.length, 1, 'conference-proof public world discovery must be unambiguous');
+  const page = new URL(worlds[0].url, base);
+  assert(page.origin === new URL(base).origin && /^\/w\/[a-z][a-z0-9-]*\/$/.test(page.pathname), 'conference-proof world page must stay on the owned origin');
+  page.search = ''; page.hash = '';
+  return page.href;
+}
+
 /** Fetch the actual served bytes; version only unpacks the loader and cannot start pairing or a daemon. */
 export async function downloadConferenceClient({ base, paths, signal }) {
-  const configResponse = await fetch(new URL('/v1/config', base), { signal });
+  const configResponse = await fetch(new URL('v1/config', base), { signal });
   assert.equal(configResponse.status, 200, 'conference-proof served config');
   const described = (await configResponse.json()).soulClient;
-  const response = await fetch(new URL('/eden.mjs', base), { signal });
+  const response = await fetch(new URL('eden.mjs', base), { signal });
   assert.equal(response.status, 200, 'conference-proof served client');
   const bytes = Buffer.from(await response.arrayBuffer());
   assert.equal(hash(bytes), described?.sha256, 'conference-proof served client SHA256');
