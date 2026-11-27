@@ -1186,18 +1186,26 @@ mod each_step {
         assert!(way(&fixed, &beam, at(10 * M), at(10 * M), &[]).is_err());
     }
 
-    /// Held at its carriers' height, a load passes over a low box (a beam seated low in a bay) and is stopped by one
-    /// as high as it is carried (a beam seated high).
+    /// Held at its carriers' height (1.05 m), a load passes over a low box (a beam seated low in a bay, and one seated
+    /// in its high slot, whose top is 0.965 m up) and is stopped by one as high as it is carried.
     #[test]
     fn c7_a_load_passes_over_a_low_box_not_through_a_high_one() {
         let load = frame();
         let [b, f] = load.places();
         let at = |x: i64| ([x + f, 0], [x + b, 0]);
         let band = load.as_held().unwrap().1;
-        assert!(band[0] < 1_000_000 && band[1] > 1_000_000, "{band:?}");
+        assert!(
+            band[0] < super::super::HEIGHT && band[1] > super::super::HEIGHT,
+            "{band:?}"
+        );
         let low = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[254_000, 356_000]]);
         assert!(way(&low, &load, at(0), at(8 * M), &[]).is_ok());
-        let high = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[863_000, 965_000]]);
+        let seated = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[863_000, 965_000]]);
+        assert!(way(&seated, &load, at(0), at(8 * M), &[]).is_ok());
+        let high = Fixed::with_heights(
+            vec![post(6 * M, 0, 100_000)],
+            vec![[super::super::HEIGHT - 50_000, super::super::HEIGHT + 50_000]],
+        );
         let r = way(&high, &load, at(0), at(8 * M), &[]).unwrap_err();
         assert_eq!(r.name, "carry-load-blocked");
     }
@@ -1227,7 +1235,10 @@ mod each_step {
         assert!(near(e, Vec3::new(609_500, 1_219_000, 38_000)), "{e:?}");
         let (plan, band) = standing.as_held().unwrap();
         assert_eq!((plan.half_length, plan.half_width), (e.x, e.z));
-        assert_eq!(band, [1_000_000 - e.y, 1_000_000 + e.y]);
+        assert_eq!(
+            band,
+            [super::super::HEIGHT - e.y, super::super::HEIGHT + e.y]
+        );
     }
 
     /// What its load already met where the carry began (a part taken from beside the parts of its bay) is passed, so

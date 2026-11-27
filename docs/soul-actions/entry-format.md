@@ -105,8 +105,8 @@ ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and 
 broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
 is held (a frame taken standing) is held by its front and its back at its edge on the line they stand on (a rack
 frame's posts, a timber bent's), its lower hand at the carry's height and its upper 0.3 m above: for the 2.4 m rack
-frame `[±609.5, 0, 0]` and `[±609.5, 300, 0]` mm in its own frame, which carried (its foot 1 m up) is 1.0 m and 1.3 m
-above the ground. A load is carried 1 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
+frame `[±609.5, 0, 0]` and `[±609.5, 300, 0]` mm in its own frame, which carried (its foot 1.05 m up) is 1.05 m and
+1.35 m above the ground. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
 or as near as 0.25 m for a load too low to block a walker where it is set down (a rack beam: its hands 0.15 m and
 0.35 m ahead of it). Every carrier must be within reach of its
 own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its

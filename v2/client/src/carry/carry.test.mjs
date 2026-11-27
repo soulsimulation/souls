@@ -202,22 +202,27 @@ test('into a slot, the walk names the load\'s heading there, from its back towar
 
 test('a beam carried into a slot past a beam seated at the height it is carried is refused before anyone moves', () => {
   // The bay at (12, 6) m: a beam seated in beam_high_l (slot 3) or beam_low_l (slot 5); the crew holds a beam, its
-  // length along the bay's z, west of the bay or east of it.
+  // length along the bay's z, west of the bay or east of it. A beam is carried 1.05 m up (999 to 1101 mm): over a beam
+  // seated in the bay's high slot (863 to 965 mm) as over a low one. In a bay whose high slots are 1 m up it is met.
   const crew = id(8), held = id(10), seated = id(11);
-  const copy = (slot) => {
+  const tall = structuredClone(kinds['mars:rack_bay']);
+  tall.slots.beam_high_l.at_mm[1] = 1000;
+  const copy = (slot, bay = kinds['mars:rack_bay']) => {
     const r = new Map(rows);
     r.set(held, { id: held, kind: 'mars:rack_beam', parent: crew, pos: [0, 0, 0], rot: YAW90 });
     r.set(seated, { id: seated, kind: 'mars:rack_beam', parent: id(5), pos: [0, 0, 0] });
-    const place = placer(r, (n) => (n === seated ? slot : null), (x) => kinds[x?.kind]);
-    return { ...ctx, placeOf: place, kindOf: (n) => r.get(n)?.kind, seated: (n) => (n === id(5) ? [{ id: seated, slot }] : []), heldBy: (c) => (c === crew ? held : null) };
+    const k = { ...kinds, 'mars:rack_bay': bay };
+    const place = placer(r, (n) => (n === seated ? slot : null), (x) => k[x?.kind]);
+    return { ...ctx, kinds: k, placeOf: place, kindOf: (n) => r.get(n)?.kind, seated: (n) => (n === id(5) ? [{ id: seated, slot }] : []), heldBy: (c) => (c === crew ? held : null) };
   };
-  const to = (slot, from, high = 3) => carryIntents({ do: 'to', crew, where: id(5), slot }, { ...copy(high), crewMiddle: () => from });
-  const r = to('beam_high_r', [4e6, 6e6]);
-  assert.equal(r.code, 'carry-way-crossed', 'from the west, past the first high beam');
+  const to = (slot, from, high = 3, bay = undefined) => carryIntents({ do: 'to', crew, where: id(5), slot }, { ...copy(high, bay), crewMiddle: () => from });
+  assert.equal(to('beam_high_r', [4e6, 6e6])[0].verb, 'eden:walk', 'from the west, over the first high beam, 34 mm clear');
+  const r = to('beam_high_r', [4e6, 6e6], 3, tall);
+  assert.equal(r.code, 'carry-way-crossed', 'past a beam seated at the height it is carried');
   assert.match(r.detail, /beam_high_l/);
-  assert.equal(to('beam_high_r', [20e6, 6e6])[0].verb, 'eden:walk', 'from the east it does not pass it');
+  assert.equal(to('beam_high_r', [20e6, 6e6], 3, tall)[0].verb, 'eden:walk', 'from the east it does not pass it');
   assert.equal(to('beam_high_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'a beam seated low is carried over');
-  assert.equal(to('beam_low_l', [20e6, 6e6]).code, 'carry-way-crossed', 'across the bay, under a high beam already seated, at the height it is carried');
+  assert.equal(to('beam_low_l', [20e6, 6e6], 3, tall).code, 'carry-way-crossed', 'across the bay, under a beam seated at the height it is carried');
   assert.equal(to('beam_low_l', [4e6, 6e6])[0].verb, 'eden:walk', 'from its own side it stops outside, under nothing');
   assert.equal(to('beam_low_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'past a low beam to the far low slot');
   // Without the copy's slots (an older daemon), nothing is read and the walk is sent.
