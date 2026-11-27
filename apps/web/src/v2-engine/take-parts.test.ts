@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { placedOf, WorldState } from './world-state.ts';
-import { CarriedParts, bundledEntries, headingAt, sampleAt, type PartNode } from './take-parts.ts';
+import { CarriedParts, bundledEntries, sampleAt, type PartNode } from './take-parts.ts';
 import { kindDef } from './creator-kinds.ts';
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000;
@@ -25,14 +25,14 @@ test('a carried load is where its carry\'s samples have the carry at the time dr
   const { kinds } = fake(), parts = new CarriedParts(kinds);
   parts.receive({ t: 'snapshot', s: { nodes: [place, ground, carry, beam], removed: [] } });
   // the carry walks east 1 m a second, 0 to 4 s
-  const samples = [0, 1, 2, 3, 4].map((k): [string, string, number | null, number, number, number, number] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0]);
+  const samples = [0, 1, 2, 3, 4].map((k): [string, string, number | null, number, number, number, number, [number,number,number,number]] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0, [Q,0,0,0]]);
   parts.receive({ t: 'part', p: { nodes: [], removed: [], samples } });
   const at = (s: number) => { const f = parts.frames(T0 + s * 1e6); const m = new Map([place, ground, carry, beam].map((n) => [n.id, n])); for (const n of f) m.set(n.id, n); return placedOf(m as never, 'b.3')!; };
   assert.deepEqual(at(0).p.map((v) => +v.toFixed(3)), [10, 1, 0]);
   assert.deepEqual(at(2.5).p.map((v) => +v.toFixed(3)), [12.5, 1, 0], 'between the samples around the time drawn');
   assert.deepEqual(at(9).p.map((v) => +v.toFixed(3)), [14, 1, 0], 'past the newest: the newest');
-  // turning north (-z) from 4 s, the carry and its load turn by as much as its way has turned
-  parts.receive({ t: 'part', p: { nodes: [], removed: [], samples: [5, 6].map((k): [string, string, number | null, number, number, number, number] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 14_000_000, 0, -(k - 4) * 1_000_000]) } });
+  // Native orientation turns north (-z), independently of its translation.
+  parts.receive({ t: 'part', p: { nodes: [], removed: [], samples: [5, 6].map((k): [string, string, number | null, number, number, number, number, [number,number,number,number]] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 14_000_000, 0, -(k - 4) * 1_000_000, [Math.round(Math.SQRT1_2*Q),0,Math.round(Math.SQRT1_2*Q),0]]) } });
   assert.ok(Math.abs(at(6).yaw - Math.PI / 2) < 0.01, `a quarter turn, not ${at(6).yaw}`);
   // nothing carried: no frame handed on
   parts.receive({ t: 'part', p: { nodes: [{ ...beam, parent: 'g.1', pos: [14_000_000, 0, -2_000_000] }], removed: [], samples: [] } });
@@ -73,12 +73,11 @@ test('a seated part is drawn in its bay\'s slot; a part with an origin the layer
   assert.deepEqual(parts.frames(0), []);
 });
 
-test('samples between two times are interpolated; the heading is the way of the last 5 cm or more', () => {
+test('legacy position-only sampling interpolates without inventing orientation', () => {
   const s = [{ at: 0, frame: 'g', slot: null, p: [0, 0, 0] as [number, number, number] }, { at: 10, frame: 'g', slot: null, p: [1000, 0, 0] as [number, number, number] }];
   assert.deepEqual(sampleAt(s, 5)?.p, [500, 0, 0]);
-  assert.equal(headingAt(s, 10), null, '1 mm is not a direction');
   s.push({ at: 20, frame: 'g', slot: null, p: [0, 0, 100_000] });
-  assert.ok(Math.abs(headingAt(s, 20)! + Math.PI / 2) < 0.02, 'south (+z) is a quarter turn the other way');
+  assert.deepEqual(sampleAt(s, 15)?.p,[500,0,50_000]);
 });
 
 test('W4: a bay placed live (no origin) is defined as its frame, the edges of its bounds, not one box; a stand stays a box', () => {
@@ -146,7 +145,7 @@ test('K5: a carried thing of the captured world moves with its carriers laid fla
   assert.equal(step(0), null, 'at rest where the layer has it');
   // lifted at 0.5 s, laid flat (a quarter turn about z), and carried east 1 m a second from x = 10 m
   const flat: [number, number, number, number] = [Math.round(Math.cos(-Math.PI / 4) * Q), 0, 0, Math.round(Math.sin(-Math.PI / 4) * Q)];
-  const samples = [0, 1, 2, 3, 4].map((k) => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0]);
+  const samples = [0, 1, 2, 3, 4].map((k) => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0, [Q,0,0,0]]);
   both({ t: 'part', p: { from: T0, to: T0 + 500_000, nodes: [{ ...frame, parent: 'c.7', pos: [0, 900_000, 0], rot: flat }], removed: [], samples } });
   assert.equal(step(0.2), null, 'not lifted before the time drawn reaches its lift');
   const up = step(2)!;

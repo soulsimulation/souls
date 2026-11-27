@@ -1,3 +1,4 @@
+import {carryPageAt,carryOwnerBetween,nativeBodyEntities,type CarryPageFrame} from './v2-engine/carry-page.ts';
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
 import { setPosterDay } from '../../../mars/viewer/app/engine-view/poster-sheet.ts';
 import {WorldContextViews,contextLocation,type Target as ContextTarget} from './WorldContextViews.ts';
@@ -965,6 +966,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           if(locationRegions!==take.finalState.regions){locationRegions=take.finalState.regions;depictedLocations=depictedWorldLocations(take.finalState.regions,base?.levels??[],(x,z,y)=>platformFloorOffset(floors,x,z,y,base?.levels.find(l=>l.id===0)?.y??0));}
           const beat=worldDepictionBeat(context.current.depictionBeatAt,s.conn.welcome?.worldId,take,depictedTick,past.current?'history':'live',pick.exact);
           if(!eyes&&!shotMode){camera.updateMatrixWorld();bodyViewer.frustum.setFromProjectionMatrix(bodyViewerM.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));bodyViewer.eye.copy(camera.position);people.setViewer(bodyViewer);entityLayer.viewer=bodyViewer;viewerLive=true;}else{people.setViewer(null);entityLayer.viewer=null;viewerLive=false;}  // PERF-EDEN: far / off-screen bodies are posed at a lower rate
+          const carryAtUs=Math.round(depictedTick*dt*1e6),carryPast=past.current?v2History()?.carry(carryAtUs):null;
+          const nativeCarry=carryPageAt(carryAtUs,carryPast?.bodies??nativeBodyEntities(),past.current?carryPast?.parts??null:undefined);
+          people.setNativeCarry(nativeCarry?.bodies??{},(id,from,to)=>carryOwnerBetween(id,from,to,carryPast?.bodies??nativeBodyEntities(),past.current?carryPast?.parts??null:undefined));
           const sampled = people.show(local * take.dt, depictedTick * dt,beat,(depictedTick - take.startTick) * take.dt,!eyes&&!shotMode?rigBudget:undefined);
           games.update(sampled.entities,depictedTick);entityLayer.setJuggled(games.juggledSets);
           bodyModels.sync(records,sampled.entities);
@@ -1164,6 +1168,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // (never for ?shot pictures or a Soul's eyes: those tools time their own frames)
       const holdDraw=!shotMode&&!eyes&&(programsPending||(arrivalStage!==undefined&&!arrivedOnce)),warmFrame=warmLayer===1;
       {const still=quality.freezeStill&&!eyes&&!shotMode;entityLayer.interiorFrom=still&&quality.tier==='phone'?camera.position:null;entityLayer.freezeSettled=still;}  // P1 phones: far buildings' furniture is not drawn; PERF-EDEN: still things freeze and cull on every tier
+      const loadAtUs=Math.round(shown.current.tick*dt*1e6),loadPast=past.current?v2History()?.carry(loadAtUs):null;
+      const nativeLoads=carryPageAt(loadAtUs,loadPast?.bodies??nativeBodyEntities(),past.current?loadPast?.parts??null:undefined);
+      entityLayer.nativeTransportPoses(nativeLoads?.loads??{});
+      (window as unknown as {__soulsCarry?:CarryPageFrame|null}).__soulsCarry=nativeLoads;
       entityLayer.applyEdge(context.current.sim.edge??[],shown.current?.tick??-Infinity);if(!holdDraw||warmFrame){entityLayer.streamFrom(camera.position);entityLayer.itemPoses(shown.current.entities);entityLayer.update(step,now,geometry.group);}
       // PERF-LOAD: the built layer's first update runs under the card and its programs (scatter and kit pools, creatures,
       // atmosphere: ~0.3 s of links on the first drawn frame) link in parallel before any frame draws them
@@ -1226,10 +1234,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // Idle life: breathing, weight shifts, head turns, speaking nods (render-time only).
       idleSouls.length=0;if(!past.current){const nowMs=Date.now();for(const soul of s.conn.replica.souls.values()){const e=at.entities[soul.entityId];if(!e)continue;
         const offscreen=viewerLive&&!bodyViewer.frustum.intersectsSphere(idleSphere.set(idleSphere.center.set(e.p[0],e.p[1]+.9,e.p[2]),1.3));  // PERF-PASSES: no idle offsets for a body outside the view
-        idleSouls.push({id:soul.id,root:people?.bodyObject(soul.entityId)??null,p:e.p,yaw:e.yaw??0,activity:String(e.activity??'idle'),speaking:speeches.some(sp=>sp.speaker===soul.id&&nowMs-sp.at<4000),attention:attentionTargets.get(soul.id),offscreen});}}
+        idleSouls.push({id:soul.id,root:people?.bodyObject(soul.entityId)??null,p:e.p,yaw:e.yaw??0,activity:String(e.activity??'idle'),speaking:speeches.some(sp=>sp.speaker===soul.id&&nowMs-sp.at<4000),attention:attentionTargets.get(soul.id),offscreen,contactOwned:!!e.state.nativeCarry});}}
       if(refresh)idleLife.forget(new Set(idleSouls.map(s=>s.id)));
       idleLife.apply(idleSouls,atmosphereSeconds,step,!!reducedMotionQuery?.matches);
-      bodyPoses.apply(idleSouls.map(x=>({...x,body:s.conn.replica.souls.get(x.id)?.body})),atmosphereSeconds,!!reducedMotionQuery?.matches);  // LINK: zombie arms/lurch, floating sleepers
+      bodyPoses.apply(idleSouls.filter(x=>!x.contactOwned).map(x=>({...x,body:s.conn.replica.souls.get(x.id)?.body})),atmosphereSeconds,!!reducedMotionQuery?.matches);  // LINK: zombie arms/lurch, floating sleepers
       if(seatSurvey&&!seatSurvey.done&&sceneSettled&&(!initialGate||initialGate.snapshot().stage==='ready')&&(seatSurvey.since??=now)<now-12000){seatSurvey.done=true;try{const seats=findSeats(scene),solids=scene.children.filter(o=>o!==people?.group&&!o.name.startsWith('atmosphere'));(window as unknown as {__soulsSeatSurvey?:unknown}).__soulsSeatSurvey=surveySeats(seats,solids,(x,z)=>cameraGround.heightAt(scene,x,z));}catch(e){(window as unknown as {__soulsSeatSurvey?:unknown}).__soulsSeatSurvey={error:String(e)};}}  // W8 ?survey=seats
       if(!waterDetailOff)try{waterDetail.update(scene,camera,idleSouls,shown.current.take?shown.current.tick*dt:atmosphereSeconds,light.daylight,undefined,soulId=>{const e=s.conn.replica.souls.get(soulId)?.entityId;return e?floaters.object(e)??standIns.getObjectByName(e)??null:null;});}catch{}  // W11: ripples, glitter, underwater fade (render-time only)
       people?.setSpeaking(new Set(idleSouls.flatMap(x=>{const id=x.speaking?s.conn.replica.souls.get(x.id)?.entityId:undefined;return id?[id]:[];})));  // speakers talk with their hands (library clips)

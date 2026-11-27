@@ -3,21 +3,22 @@
 // bundle that holds the moment, inflated here and applied on R1's replica (WASM, `historyAt`), so the page's thread
 // only turns the records into takes (history.ts). Only the WASM module, the header and the day indexes read are kept
 // between seeks. The node records are read as the stream worker reads them, the fields the bridge reads.
-import init, { historyAt } from 'replica';
+import init, { historyTimeline } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
+import {carryGrips,crewMembers,carryChangesInBundle,type CarryChange,type CarryGrips,type CrewMember} from './source/carry-record.ts';
+import {fieldsOf} from './source/kinds-state.ts';
+import type {NodeRec} from './source/source.ts';
 import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
-export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
-  rot: [number, number, number, number]; at: number | null; origin?: string; slots?: number[][]; body?: string; sky?: Record<number, unknown>;
-  /** K4 (0.135): a moving node's course (field 80), re-encoded canonically as the stream worker does. */
-  course?: Uint8Array };
+export type HistoryNode = NodeRec;
+export type HistoryTransition = {at:number;nodes:HistoryNode[];removed:string[];samples:HistorySample[]};
 /** A body's motion sample `[body, frame, slot, at µs, x, y, z µm]` (source.ts SampleRec). */
-export type HistorySample = [string, string, number | null, number, number, number, number];
+export type HistorySample = [string, string, number | null, number, number, number, number, [number,number,number,number]?];
 /** What one seek gives the page: the moment's state, its bundle's samples, and where the next bundle starts. */
-export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[];
+export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[]; carryChanges?:CarryChange[]; timeline?:{from:number;transitions:HistoryTransition[]};
   /** K4 (0.135): where each node on a course is over the bundle, worked out here so the page never loads the replica. */
   courses?: CoursePlaces };
 export type HistoryMsg = { t: 'seeked'; s: Seeked } | { t: 'error'; seq: number; message: string };
@@ -53,6 +54,13 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
     rot: ((pose?.get(3) as unknown[]) ?? [1 << 30, 0, 0, 0]).map(num) as HistoryNode['rot'],
     at: moved ? num(moved.get(1)) : null,
   };
+  rec.crewMembers=crewMembers(f.get(4));rec.carryGrips=carryGrips(f.get(6));
+  rec.fields=fieldsOf(f);
+  const origin=f.get(1),definition=f.get(2);
+  if(typeof origin==='string'&&definition instanceof Uint8Array){rec.defines=origin;rec.entry=definition;}
+  if(origin instanceof Uint8Array&&(typeof definition==='string'||definition instanceof Uint8Array))rec.def=typeof definition==='string'?definition:text.decode(definition);
+  if(f.get(19) instanceof Uint8Array)try{rec.params=JSON.parse(text.decode(f.get(19) as Uint8Array));}catch{ /* retained canonical defaults */ }
+  if(Array.isArray(f.get(102)))rec.defBodies=(f.get(102) as unknown[][]).flatMap(r=>r[0] instanceof Uint8Array&&r[1] instanceof Uint8Array?[[text.decode(r[0]),text.decode(r[1])] as [string,string]]:[]);
   if (f.get(1) instanceof Uint8Array) rec.origin = text.decode(f.get(1) as Uint8Array);
   if (f.has(13)) rec.slots = rows(f.get(13));
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
@@ -139,16 +147,18 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
   // a read ahead stopped before the seek knew it wanted that bundle: read it again
   const stored = await bundle(base, found.key).catch(() => bundle(base, found.key));
   await ready;
-  const out = decode(historyAt(await header, await inflate(stored), found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
-  const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
-  const samples: HistorySample[] = (out.get(3) as Map<number, unknown>[]).map((s) => {
-    const p = (s.get(5) as unknown[]).map(num);
-    return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
-  });
-  const later = await found.later();
-  const start = num(out.get(4)), length = num(out.get(5));
-  const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
-  post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
+  const inflated=await inflate(stored);
+  // Read the extent only to request the validated API. No node/effect is exposed before it validates the entire batch.
+  const extent=decode(inflated,{useMaps:true}) as Map<number,unknown>,from=num(extent.get(3)),to=from+num(extent.get(4));
+  if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||to<from)throw Error('history: invalid bundle extent');
+  if(typeof historyTimeline!=='function')throw Error('history: served replica lacks validated node timeline');
+  const out=decode(historyTimeline(await header,inflated,found.sha,BigInt(from),BigInt(to)),{useMaps:true}) as Map<number,unknown>;
+  const nodes=(out.get(2) as Map<number,unknown>[]).map(nodeRec);
+  const motion=(nodes:HistoryNode[],at:number):HistorySample[]=>nodes.flatMap(n=>n.parent&&n.at===at?[[n.id,n.parent,n.slot,at,...n.pos,n.rot] as HistorySample]:[]);
+  const transitions:HistoryTransition[]=(out.get(3) as Map<number,unknown>[]).map(t=>{const at=num(t.get(1)),nodes=(t.get(2) as Map<number,unknown>[]).map(nodeRec);return{at,nodes,removed:(t.get(3) as IdValue[]).map(key),samples:motion(nodes,at)};});
+  const samples=motion(nodes,from),later=await found.later(),start=num(out.get(4)),length=num(out.get(5));
+  const courses=replica.courseAt?coursePlaces(replica.courseAt,nodes,start,start+length):{};
+  post({t:'seeked',s:{seq,at,start,length,next:later,nodes,samples,timeline:{from:num(out.get(1)),transitions},carryChanges:carryChangesInBundle(inflated),...(Object.keys(courses).length?{courses}:{})}});
 }
 
 self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number; ahead?: true }>) => {

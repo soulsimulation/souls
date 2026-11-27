@@ -16,6 +16,7 @@ import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
 import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
+import {carryGrips,crewMembers,carryChangesInPart} from './carry-record.ts';
 import { moveRec } from './move-record.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
@@ -124,6 +125,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const tint = f.get(145);
   const text = (t: unknown) => (typeof t === 'string' ? t : t instanceof Uint8Array ? new TextDecoder().decode(t) : null);
   if (Array.isArray(tint)) rec.tint = tint.flatMap((r) => (Array.isArray(r) && r.length === 2 && text(r[0]) !== null ? [[text(r[0])!, num(r[1])] as [string, number]] : []));
+  rec.crewMembers=crewMembers(f.get(4)); rec.carryGrips=carryGrips(f.get(6));
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
   if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
@@ -353,7 +355,9 @@ async function run(stream: URL) {
     if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
     for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
-    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds });
+    let carryChanges:PartRec['carryChanges']=[],carryError:string|undefined;
+    try{carryChanges=carryChangesInPart(bytes);}catch(error){carryError=String(error);}
+    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds, carryChanges, ...(carryError?{carryError}:{}) });
     return true;
   };
   const tell = () => {
