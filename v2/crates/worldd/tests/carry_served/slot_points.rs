@@ -70,12 +70,15 @@ async fn slots_a_synced_public_copy_of_a_carry_holds_its_riders_points_through_t
     let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
     let entry = construction("rack_beam.json");
     let carry = gather(&mut a, &mut b, &dir, ground, beam, &entry, beam_at(), true).await;
+    // The stream is cut every half second of world time: the crew stands a moment, so the part that makes the carry
+    // is published before the part of its lift (a lift in the carry's own part is read from that same part).
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     a.act("carry:lift", carry, BTreeMap::from([(1, beam.to_value())]))
         .await
         .expect("lifted");
 
-    // The stream is cut every half second of world time: wait (at most 60 s) for the part whose lift puts the beam in
-    // the carry's slot, and two parts after it (the lift's track ends within 1.2 s).
+    // Wait (at most 60 s) for the part whose lift puts the beam in the carry's slot, and two parts after it (the
+    // lift's track ends within 1.2 s).
     let held = |nodes: &BTreeMap<Id, NodeState>| {
         nodes
             .get(&beam)
