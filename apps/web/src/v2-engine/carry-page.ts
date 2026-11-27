@@ -3,7 +3,7 @@ import type {CarriedParts} from './take-parts.ts';
 import {entityId} from './entity-id.ts';
 import {layerDraws} from './layer-draws.ts';
 import {worldPoint,type NativePose} from './recorded-carry.ts';
-import {setCarryHeading} from './takes.ts';
+import {setCarryHeading} from './carry-heading.ts';
 import type {CarryObservation} from './recorded-carry.ts';
 import type {CarryGrips} from './source/carry-record.ts';
 export type CarryHands={left:[number,number,number];right:[number,number,number]};
@@ -14,7 +14,7 @@ let bodies:ReadonlyMap<string,string>=new Map();
 export const setNativeBodyEntities=(map:ReadonlyMap<string,string>)=>{bodies=map;};
 export const nativeBodyEntities=()=>bodies;
 export const setCarryPage=(parts:CarriedParts|null)=>{current=parts;setCarryHeading(parts?carryHeadingAt:null);};
-/** takes.ts `setCarryHeading`: the heading (atan2(dz, dx), as bridge.ts reads a turn) the world has the body drawn as
+/** carry-heading.ts: the heading (atan2(dz, dx), as bridge.ts reads a turn) the world has the body drawn as
  *  `entity` turned to at `at` µs while it is in an unreleased native hold, else null. The live take only: a replayed past
  *  builds its chunks in the history worker, which has no carry feed, so its carriers still face their travel. */
 export function carryHeadingAt(entity:string,at:number,byBody:ReadonlyMap<string,string>=bodies,source:CarriedParts|null=current):number|null{
