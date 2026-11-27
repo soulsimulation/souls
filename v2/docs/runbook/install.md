@@ -161,7 +161,10 @@ so nothing else puts it in the directory's list. `register-world` writes its nam
 the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
 and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
 with the map naming it: a map entry the directory cannot find in its own list has no owner to check, so its pairings
-are refused (`world-authority-missing`) until it is registered.
+are refused (`world-authority-missing`) until it is registered. `place-world.sh` gives a world whose `world.json` names
+a creator its creator's flags (`--creator --directory --creator-authority-required`); its creator's sign-in works once
+the directory has written the creator marker into the world's tokens file, after it is registered. A world whose
+creator no account holds: `give-world.mjs` (docs/operations.md).
 
 A slow or stalled store never stops the directory or refuses an approval. Each request waits at most 2 s for a
 world's owner record, then uses the owner last read (after a restart, the one in that world's tokens file) and says so

@@ -21,10 +21,11 @@ CREATE TABLE account_principals_v1(account_id TEXT PRIMARY KEY REFERENCES provid
 CREATE TABLE account_grants_v1(account_id TEXT NOT NULL REFERENCES provider_accounts_v1(account_id),
   grant_text TEXT NOT NULL, follow TEXT, UNIQUE(account_id, grant_text));`;
 
-async function machine({ worlds, principals = [], grants = [] }) {
+async function machine({ worlds, principals = [], grants = [], markers = {} }) {
   const scratch = resolve('.local'); mkdirSync(scratch, { recursive: true });
   const root = mkdtempSync(join(scratch, 'give-world-'));
-  const server = createServer((q, s) => { s.statusCode = q.url === '/healthz' ? 200 : 404; s.end('{}'); });
+  // The directory's /healthz and, on the same port here, a gateway's creator exchange (401 with no session).
+  const server = createServer((q, s) => { s.statusCode = q.url === '/healthz' ? 200 : q.url === '/v2/creator-token' ? 401 : 404; s.end('{}'); });
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
   const listen = `127.0.0.1:${server.address().port}`;
   const etc = join(root, 'etc/souls'), data = join(root, 'var/lib/souls');
@@ -35,8 +36,8 @@ async function machine({ worlds, principals = [], grants = [] }) {
     map.worlds[name] = { creator, instance: i };
     const f = join(data, 'worlds/worlds', i); mkdirSync(f, { recursive: true });
     writeFileSync(join(f, 'world.json'), JSON.stringify({ format: 'souls/world/1', name: i, creator: creator.replace(':', '-') }));
-    writeFileSync(join(f, 'tokens'), `# World-bound pairing authority\n# souls-creator/1 0 ${creator}\n`);
-    writeFileSync(join(etc, `gateway-${i}.env`), `GATEWAYD_ARGS=--listen 127.0.0.1:7400 --world /var/lib/souls/run/${i}.sock${flags ?? ''} --view-key /etc/souls/view.key\n`);
+    writeFileSync(join(f, 'tokens'), `# World-bound pairing authority\n${markers[name] ?? `# souls-creator/1 0 ${creator}`}\n`);
+    writeFileSync(join(etc, `gateway-${i}.env`), `GATEWAYD_ARGS=--listen ${listen} --world /var/lib/souls/run/${i}.sock${flags ?? ''} --view-key /etc/souls/view.key\n`);
   }
   writeFileSync(join(etc, 'placement-data/authority.json'), JSON.stringify(map));
   const db = new DatabaseSync(join(data, 'directory/accounts.sqlite'));
@@ -49,7 +50,7 @@ async function machine({ worlds, principals = [], grants = [] }) {
   writeFileSync(stub, `#!/bin/sh\necho "$*" >> '${log}'\n`); chmodSync(stub, 0o755);
   // Not spawnSync: the test's /healthz must answer while the script runs.
   const give = (...args) => new Promise((ok) => {
-    const c = spawn(process.execPath, [SCRIPT, ...args], { env: { ...process.env, GIVE_ROOT: root, GIVE_SYSTEMCTL: stub, GIVE_STAMP: 'T1' } });
+    const c = spawn(process.execPath, [SCRIPT, ...args], { env: { ...process.env, GIVE_ROOT: root, GIVE_SYSTEMCTL: stub, GIVE_STAMP: 'T1', GIVE_SETTLE_MS: '0' } });
     let stdout = '', stderr = ''; c.stdout.on('data', (d) => { stdout += d; }); c.stderr.on('data', (d) => { stderr += d; });
     c.on('exit', (status) => ok({ status, stdout, stderr: stderr.replace(/^.*ExperimentalWarning.*\n(.*--trace-warnings.*\n)?/m, '') }));
   });
@@ -74,16 +75,16 @@ test('Eden as on 27 Nov: the account gives up a principal that creates nothing, 
     const run = await m.give('eden', GENE, 'run');
     assert.equal(run.status, 0, run.stderr + run.stdout);
     assert.deepEqual(m.rows(), { principals: [`${GENE} ${ORPHAN}`], grants: [`${GENE} creator-${'9'.repeat(32)}-0`, `${GENE} soul-x-0`] }, 'the Soul grant stays');
-    assert.equal(m.env(inst('a')), `GATEWAYD_ARGS=--listen 127.0.0.1:7400 --world /var/lib/souls/run/${inst('a')}.sock --view-key /etc/souls/view.key --creator ${'9'.repeat(32)}-0 --directory ${m.listen} --creator-authority-required\n`);
+    assert.equal(m.env(inst('a')), `GATEWAYD_ARGS=--listen ${m.listen} --world /var/lib/souls/run/${inst('a')}.sock --view-key /etc/souls/view.key --creator ${'9'.repeat(32)}-0 --directory ${m.listen} --creator-authority-required\n`);
     assert.equal(readFileSync(join(m.etc, `gateway-${inst('a')}.env.before-creator-T1`), 'utf8'), envBefore, 'the gateway file backed up');
     const backup = new DatabaseSync(join(m.data, 'directory/accounts.sqlite.before-give-eden-T1'), { readOnly: true });
     assert.equal(backup.prepare('SELECT principal_id p FROM account_principals_v1').get().p, OLD, 'the store backed up before the write'); backup.close();
-    assert.deepEqual(m.calls(), ['stop souls-directory.service', 'start souls-directory.service', `restart souls-gateway@${inst('a')}.service`, `is-active --quiet souls-gateway@${inst('a')}.service`]);
+    assert.deepEqual(m.calls(), ['stop souls-directory.service', 'start souls-directory.service', `restart souls-gateway@${inst('a')}.service`]);
 
     const again = await m.give('eden', GENE, 'run');
     assert.equal(again.status, 0, again.stderr);
     assert.match(again.stdout, /no change[\s\S]*no change/);
-    assert.equal(m.calls().length, 4, 'a second run stops and restarts nothing');
+    assert.equal(m.calls().length, 3, 'a second run stops and restarts nothing');
   } finally { await m.done(); }
 });
 
@@ -94,7 +95,7 @@ test('production after the Eden fix: the account already holds the creator, so o
     const run = await m.give('rna-studio', GENE, 'run');
     assert.equal(run.status, 0, run.stderr);
     assert.match(m.env(inst('b')), / --creator 9{32}-0 --directory 127\.0\.0\.1:\d+ --creator-authority-required\n$/);
-    assert.deepEqual(m.calls(), [`restart souls-gateway@${inst('b')}.service`, `is-active --quiet souls-gateway@${inst('b')}.service`]);
+    assert.deepEqual(m.calls(), [`restart souls-gateway@${inst('b')}.service`]);
     assert.ok(!readdirSync(join(m.data, 'directory')).some((f) => f.includes('before-give')), 'no store change, no store backup');
   } finally { await m.done(); }
 });
@@ -114,6 +115,25 @@ test('refusals change nothing: a principal another account holds, an account who
     assert.equal((await m.give('nowhere', DIMI, 'check')).status, 3);
     assert.deepEqual(m.rows().grants, before.grants);
     assert.deepEqual(m.calls(), [], 'nothing stopped or restarted');
+  } finally { await m.done(); }
+});
+
+test('review of #5181: a world handed off to the account\'s principal is counted, and a world with no creator marker is refused', async () => {
+  // handed: founded by OLD, handed off to OTHER (generation 2), which DIMI holds. Taking ORPHAN would leave it with none.
+  const m = await machine({ worlds: [['handed', inst('b'), OLD], ['orphan', inst('c'), ORPHAN], ['unmarked', inst('d'), ORPHAN]],
+    principals: [[DIMI, OTHER]], markers: { handed: `# souls-creator/1 2 ${OTHER}`, unmarked: '# no marker yet' } });
+  try {
+    rmSync(join(m.data, 'worlds/worlds', inst('d'), 'tokens'));
+    writeFileSync(join(m.data, 'worlds/worlds', inst('d'), 'tokens'), '# World-bound pairing authority\n');
+    const unmarked = await m.give('unmarked', DIMI, 'check');
+    assert.equal(unmarked.status, 3); assert.match(unmarked.stderr, /^refused: tokens-marker: /);
+    // Every placed world's marker is read, so 'unmarked' blocks 'orphan' too: put a marker back first.
+    writeFileSync(join(m.data, 'worlds/worlds', inst('d'), 'tokens'), `# souls-creator/1 0 ${ORPHAN}\n`);
+    const taken = await m.give('orphan', DIMI, 'run');
+    assert.equal(taken.status, 3); assert.match(taken.stderr, /^refused: account-creates-other-worlds: .*handed/);
+    const handed = await m.give('handed', DIMI, 'check');
+    assert.equal(handed.status, 3); assert.match(handed.stderr, /^refused: world-handed-off: /);
+    assert.deepEqual(m.calls(), []);
   } finally { await m.done(); }
 });
 

@@ -60,8 +60,9 @@ ACCOUNT=$(node --no-warnings -e '
 [[ "$ACCOUNT" =~ ^acct_ ]] && ok "the test sign-in made an account with a principal of its own" || no "no account ($ACCOUNT)"
 [ "$(token gene)" = 404 ] && ok "before: the gateway has no creator flags, so the account gets no creator token (404)" || no "before: $(token gene)"
 
+calls=$(wc -l < "$R/systemctl.log")
 node --no-warnings "$HERE/give-world.mjs" eden "$ACCOUNT" check > "$R/check.out"
-[ ! -s "$R/systemctl.log.after-check" ] && grep -q 'check only' "$R/check.out" && ok "check: $(grep -c give-world "$R/check.out") lines, nothing changed" || no "check"
+[ "$(wc -l < "$R/systemctl.log")" = "$calls" ] && grep -q 'check only' "$R/check.out" && ok "check: $(grep -c give-world "$R/check.out") lines, nothing changed" || no "check"
 node --no-warnings "$HERE/give-world.mjs" eden "$ACCOUNT" run > "$R/run.out" 2>&1 && ok "run: $(tail -1 "$R/run.out")" || { cat "$R/run.out"; no "run failed"; }
 [ "$(token gene)" = 200 ] && ok "after: the account's sign-in gets the world's creator token (200)" || no "after: $(token gene)"
 [ "$(token someone)" = 403 ] && ok "after: another account's sign-in is refused not-the-creator (403)" || no "another: $(token someone)"

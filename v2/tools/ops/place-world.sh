@@ -64,7 +64,8 @@ if [ "$CONFIG_ONLY" = 0 ]; then
   CREATOR=$(sed -n 's/.*"creator": *"\([0-9a-f-]*\)".*/\1/p' "$SRC/world.json")
 fi
 [[ "$NAME" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] || die "no valid world instance"
-if [ -n "$DIRECTORY" ] || [ -n "$CREATOR" ]; then [[ "$CREATOR" =~ ^[0-9a-f]{32}-[0-9]+$ ]] || die "no valid world creator"; fi
+# A data-only placement writes no gateway file, so only the others check the creator they would write.
+if [ -n "$DIRECTORY" ] || { [ "$DATA_ONLY" = 0 ] && [ -n "$CREATOR" ]; }; then [[ "$CREATOR" =~ ^[0-9a-f]{32}-[0-9]+$ ]] || die "no valid world creator"; fi
 DATA=/var/lib/souls
 WORLD=$DATA/worlds/worlds/$NAME
 SOCKET=$DATA/run/$NAME.sock
@@ -107,7 +108,9 @@ if [ "$DATA_ONLY" = 0 ]; then
   # The world's store is the directory's (#1960 B7): with a bucket, the DIRECTORY_STORE_URL the install drop-in's
   # secrets file gives every worldd@; only a machine whose directory keeps a folder (--folder-store) names that folder.
   # A world with a creator (an imported world too, placed with no --directory) gets its creator's exchange through the
-  # installed directory: without it its creator's page is refused God Mode (27 Nov: every imported world was so).
+  # installed directory: without it its creator's page is refused God Mode (27 Nov: every imported world was so). Its
+  # creator signs in once the directory has written the creator marker into its tokens file, i.e. once the world is
+  # registered (register-world, install.md); until then the gateway refuses it `creator-authority-required`.
   if [ -n "$CREATOR" ]; then EXCHANGE=" --creator $CREATOR --directory ${DIRECTORY:-127.0.0.1:7310} --creator-authority-required"; fi
   if [ -n "$DIRECTORY" ] && [ "$FOLDER_STORE" = 1 ]; then STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
   # --wake (O2, 0.133 S3b): an intent for the world while it sleeps is held and the alarm daemon asked to wake it.
