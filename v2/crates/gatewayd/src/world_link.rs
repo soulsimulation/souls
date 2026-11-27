@@ -48,8 +48,10 @@
 //! agent's intents are in the world's line at a time, from when they are sent until the world first answers them
 //! (progress, a receipt or a refusal); the agent's next ones wait in its own queue, in order, and go as those are
 //! answered. A flooding agent waits behind its own intents; one that sends now and then finds its place free. Nothing
-//! is refused or dropped for speed: a waiting intent keeps its deadline (C8) like any other. Sync requests are not
-//! intents and go at once.
+//! is refused or dropped for speed: a waiting intent keeps its deadline (C8) like any other. Sync requests take turns
+//! the same way, apart (O8, #2805): the world answers them on one thread, first come, first served, so at most
+//! [`SYNC_TURN`] of an agent's are in that line at a time and the rest wait here, in order, bounded in bytes by
+//! [`SYNCS_MOST`]; one past that is refused [`SLOW_DOWN`] at once and never sent.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -168,8 +170,12 @@ pub const KEPT_EACH: usize = 256;
 /// and every honest agent's acts waited behind it (honest p95 10 times the no-attack arm's). Apart from
 /// [`KEPT_MOST`]: one concern, its own bound and gauge ([`Link::syncs_slowed`]).
 pub const SYNCS_MOST: usize = 64 << 10;
-/// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`]: send it again once one of
-/// them is answered.
+/// How many of one agent's sync requests may be in the world's sync line at a time, sent and not yet answered (O8):
+/// the rest wait here, in order, so a flood of them stands behind its own and an honest client's request waits behind
+/// at most this many of each other agent's. A client's daemon has one out, and a public names request beside it.
+pub const SYNC_TURN: usize = 2;
+/// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`], or to a sync request whose
+/// agent's waiting requests are at [`SYNCS_MOST`]: send it again once one of them is answered.
 pub const SLOW_DOWN: &str = "agent.slow-down";
 
 /// The key of the frame sent first on each connection to the world, `{31: []}`: this is the world's gateway, so the
@@ -227,8 +233,9 @@ pub enum Sent {
     Sent,
     /// The world is away: answer it with [`RESTARTING`].
     Restarting,
-    /// Its agent's kept intents are at [`KEPT_MOST`]: answer it with [`SLOW_DOWN`]. Not kept. With the intents so
-    /// refused since the gateway started (the gauge).
+    /// Its agent's kept intents are at [`KEPT_MOST`] (a sync request's: its waiting requests at [`SYNCS_MOST`]):
+    /// answer it with [`SLOW_DOWN`]. Not kept. With the intents (or sync requests) so refused since the gateway
+    /// started (the gauge).
     Full(u64),
 }
 
@@ -284,6 +291,9 @@ struct State {
     /// O8: each agent's sync requests' charge, bytes ([`SYNCS_MOST`]), and the requests refused [`SLOW_DOWN`].
     sync_charged: BTreeMap<Vec<u8>, usize>,
     sync_slowed: u64,
+    /// O8: each agent's sync requests in the world's sync line now ([`SYNC_TURN`]), and those waiting their turn.
+    sync_flying: BTreeMap<Vec<u8>, usize>,
+    sync_waiting: BTreeMap<Vec<u8>, VecDeque<Vec<u8>>>,
 }
 
 /// What an answer from the world is to the gateway.
@@ -315,6 +325,27 @@ impl State {
             if *c == 0 {
                 self.sync_charged.remove(key);
             }
+        }
+    }
+
+    /// One of `key`'s sync requests left the world's sync line: its next waiting one goes in its place.
+    fn sync_landed(&mut self, key: &[u8]) {
+        let next = self.sync_waiting.get_mut(key).and_then(VecDeque::pop_front);
+        match (next, self.out.clone()) {
+            (Some(bytes), Some(out)) => {
+                let _ = out.send(bytes);
+            }
+            _ => {
+                if let Some(line) = self.sync_flying.get_mut(key) {
+                    *line = line.saturating_sub(1);
+                    if *line == 0 {
+                        self.sync_flying.remove(key);
+                    }
+                }
+            }
+        }
+        if self.sync_waiting.get(key).is_some_and(VecDeque::is_empty) {
+            self.sync_waiting.remove(key);
         }
     }
 
@@ -498,8 +529,14 @@ impl Link {
             return Sent::Full(s.sync_slowed);
         }
         s.sync_charged.insert(key.clone(), held + charge);
-        s.syncs.insert(ours, (key, session, n, charge));
-        let _ = out.send(bytes);
+        s.syncs.insert(ours, (key.clone(), session, n, charge));
+        let line = s.sync_flying.entry(key.clone()).or_insert(0);
+        if *line >= SYNC_TURN {
+            s.sync_waiting.entry(key).or_default().push_back(bytes);
+        } else {
+            *line += 1;
+            let _ = out.send(bytes);
+        }
         Sent::Sent
     }
 
@@ -634,6 +671,7 @@ impl Link {
             let kept = s.syncs.remove(&ours);
             if let Some((key, _, _, charge)) = &kept {
                 s.sync_release(key, *charge);
+                s.sync_landed(key);
             }
             kept
         };
@@ -679,6 +717,8 @@ impl Link {
             wake();
         }
         s.sync_charged.clear();
+        s.sync_flying.clear();
+        s.sync_waiting.clear();
         std::mem::take(&mut s.syncs)
             .into_values()
             .map(|(key, session, n, _)| (key, session, n))
@@ -1027,7 +1067,11 @@ mod kept_tests {
         while let Ok(b) = queue.try_recv() {
             sent.push(b);
         }
-        assert_eq!(sent.len() as u64, fits, "nor sent to the world");
+        assert_eq!(
+            sent.len(),
+            SYNC_TURN,
+            "its turn in the world's line; the rest wait here"
+        );
         // Another agent asks freely.
         assert_eq!(ask(&other, 0), Sent::Sent);
         // The world's answer to one frees its place: the next is taken.
@@ -1040,6 +1084,15 @@ mod kept_tests {
         ))
         .unwrap();
         assert!(matches!(link.sync_answered(&answer), Some(Some(_))));
+        let mut next = Vec::new();
+        while let Ok(b) = queue.try_recv() {
+            next.push(b);
+        }
+        assert_eq!(
+            next.len(),
+            2,
+            "the other agent's, and the flooder's next in its turn"
+        );
         assert_eq!(ask(&key, n + 2), Sent::Sent);
         // The world going away gives up every request and frees every place.
         assert_eq!(link.disconnected().len() as u64, fits + 1);

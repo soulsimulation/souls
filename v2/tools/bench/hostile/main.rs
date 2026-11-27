@@ -23,6 +23,7 @@
 //! - `shared`: one token on 500 sockets, each signing in again once it is taken from it.
 //! - `all`: every attack above at once, each in its own process on a token of its own.
 //!
+//! With `--sync`, each honest act also sends a sync request for the agent's granted scope, and its wait is measured.
 //! The honest agents act every `--every` ms (default 1000; 12000 at 1,000 agents is the tranche's 5,000 acts a minute).
 //! The world and the gateway's processor seconds are over the attack window. Run under `ulimit -n 65536`, the agents'
 //! relay unit's own limit (`v2/tools/ops/units/souls-agents.service`), for `silent`.
@@ -189,6 +190,12 @@ fn told(bytes: &[u8]) -> (Option<(u64, bool)>, String) {
     let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
         return (None, "undecodable".into());
     };
+    if m.contains_key(&20) {
+        return match m.get(&24) {
+            Some(Value::Text(n)) => (None, format!("sync {}", n.as_str())),
+            _ => (None, "sync answer".into()),
+        };
+    }
     if let Some(Value::Text(n)) = m.get(&4) {
         return (None, n.as_str().to_owned());
     }
@@ -236,6 +243,21 @@ struct Honest {
     closed: AtomicU64,
     ready: AtomicU64,
     reasons: Mutex<BTreeMap<String, u64>>,
+    /// With `--sync`: each act's sync request's wait, send to answer, those not answered and those refused.
+    sync_waits_us: Mutex<Vec<u64>>,
+    sync_unanswered: AtomicU64,
+    sync_refused: AtomicU64,
+}
+
+/// A sync answer's number, and whether it is a refusal.
+fn sync_answer(bytes: &[u8]) -> Option<(u64, bool)> {
+    let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
+        return None;
+    };
+    match m.get(&20) {
+        Some(Value::Uint(n)) => Some((*n, m.contains_key(&24))),
+        _ => None,
+    }
 }
 
 /// One honest agent: first frame, sign-in, then its own lamp toggled every `every` from `offset` until `stop`, then a
@@ -247,6 +269,7 @@ async fn honest(
     pair: (Id, Id),
     offset: Duration,
     every: Duration,
+    sync: bool,
     go: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     h: Arc<Honest>,
@@ -269,6 +292,8 @@ async fn honest(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let mut sent: BTreeMap<u64, Instant> = BTreeMap::new();
+    let mut syncs: BTreeMap<u64, Instant> = BTreeMap::new();
+    let mut sync_waits = Vec::new();
     let mut waits = Vec::new();
     let mut seq = 0u64;
     let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + offset, every);
@@ -276,7 +301,9 @@ async fn honest(
     let mut drain: Option<Instant> = None;
     let mut closed = false;
     loop {
-        if drain.is_some_and(|d| Instant::now() >= d) || (drain.is_some() && sent.is_empty()) {
+        if drain.is_some_and(|d| Instant::now() >= d)
+            || (drain.is_some() && sent.is_empty() && syncs.is_empty())
+        {
             break;
         }
         tokio::select! {
@@ -291,9 +318,25 @@ async fn honest(
                     closed = true;
                     break;
                 }
+                if sync {
+                    syncs.insert(seq, Instant::now());
+                    if tx.send(Message::Binary(sync_ask(seq).into())).await.is_err() {
+                        closed = true;
+                        break;
+                    }
+                }
             }
             m = rx.next() => match m {
                 Some(Ok(Message::Binary(b))) => {
+                    if let Some((n, refused)) = sync_answer(&b) {
+                        if let Some(at) = syncs.remove(&n) {
+                            sync_waits.push(at.elapsed().as_micros() as u64);
+                            if refused {
+                                h.sync_refused.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        continue;
+                    }
                     let (s, name) = told(&b);
                     if let Some((s, true)) = s && let Some(at) = sent.remove(&s) {
                         waits.push(at.elapsed().as_micros() as u64);
@@ -313,6 +356,12 @@ async fn honest(
         h.closed.fetch_add(1, Ordering::Relaxed);
     }
     h.unanswered.fetch_add(sent.len() as u64, Ordering::Relaxed);
+    h.sync_unanswered
+        .fetch_add(syncs.len() as u64, Ordering::Relaxed);
+    h.sync_waits_us
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend(sync_waits);
     h.waits_us
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -682,6 +731,7 @@ struct Args {
     seconds: u64,
     repeats: usize,
     every_ms: u64,
+    sync: bool,
     arms: Vec<String>,
 }
 
@@ -694,6 +744,7 @@ fn args(a: &[String]) -> Option<Args> {
         seconds: num("--seconds", 20)?,
         repeats: num("--repeats", 2)? as usize,
         every_ms: num("--every", 1000)?,
+        sync: a.iter().any(|x| x == "--sync"),
         arms: get("--arms").map_or_else(
             || ARMS.iter().map(|s| (*s).to_owned()).collect(),
             |s| s.split(',').map(str::to_owned).collect(),
@@ -808,6 +859,7 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
             pairs[i],
             offset,
             Duration::from_millis(a.every_ms),
+            a.sync,
             go.clone(),
             stop.clone(),
             h.clone(),
@@ -888,6 +940,9 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let mut waits = std::mem::take(&mut *h.waits_us.lock().unwrap_or_else(|e| e.into_inner()));
     waits.sort_unstable();
     let reasons = h.reasons.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut sync_waits =
+        std::mem::take(&mut *h.sync_waits_us.lock().unwrap_or_else(|e| e.into_inner()));
+    sync_waits.sort_unstable();
     let hostile_told = if hostile.is_empty() {
         "—".to_owned()
     } else {
@@ -902,7 +957,7 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
             .join(" / ")
     };
     format!(
-        "| {arm} | {rep} | {tick_n} | {:.1} | {:.1} | {over} | {} | {:.1} | {:.1} | {:.1} | {} | {} {:?} | {} | {} | {} | {:.1} | {} | {:.1} | {} |",
+        "| {arm} | {rep} | {tick_n} | {:.1} | {:.1} | {over} | {} | {:.1} | {:.1} | {:.1} | {} | {} {:?} | {} | {} | {} | {:.1} | {} | {:.1} | {} | {:.1} / {:.1} / {} / {} | {} |",
         tick_p99 as f64 / 1000.0,
         tick_max as f64 / 1000.0,
         waits.len(),
@@ -918,6 +973,11 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
         cpu1.0 - cpu0.0,
         wrss_max.load(Ordering::Relaxed) / 1024,
         cpu1.1 - cpu0.1,
+        sync_waits.len(),
+        pct(&sync_waits, 0.5),
+        pct(&sync_waits, 0.95),
+        h.sync_unanswered.load(Ordering::Relaxed),
+        h.sync_refused.load(Ordering::Relaxed),
         hostile_told.trim(),
     )
 }
@@ -963,9 +1023,11 @@ async fn main() {
         a.honest, a.every_ms, a.seconds
     );
     println!(
-        "| arm | repeat | ticks | tick p99 ms | tick longest ms | over budget | honest acts | wait p50 ms | p95 ms | p99 ms | unanswered | refused | honest closed | gatewayd MiB idle | MiB max | CPU s | worldd MiB max | CPU s | hostile |"
+        "| arm | repeat | ticks | tick p99 ms | tick longest ms | over budget | honest acts | wait p50 ms | p95 ms | p99 ms | unanswered | refused | honest closed | gatewayd MiB idle | MiB max | CPU s | worldd MiB max | CPU s | honest syncs | sync p50 / p95 ms / unanswered / refused | hostile |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!(
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    );
     for arm in &a.arms {
         for rep in 1..=a.repeats {
             println!("{}", run(&a, arm, rep).await);
