@@ -1,0 +1,431 @@
+{
+  "schema": "genesis/1",
+  "name": "Shared camp meal",
+  "constants": {
+    "extent": 80,
+    "ground": "land"
+  },
+  "batches": [
+    {
+      "note": "Existing kitchen and dining shapes",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-camp_soup_pot",
+            "version": 1,
+            "description": "Cook once for 6 soup units; ladle 2 into an empty bowl on this pot's shelf.",
+            "tags": [
+              "camping",
+              "cooking",
+              "soup",
+              "object"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "round": 0,
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.4,
+                      0.45,
+                      -0.22
+                    ],
+                    "size": [
+                      0.05,
+                      0.9,
+                      0.05
+                    ],
+                    "tint": "iron"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.4,
+                      0.45,
+                      0.22
+                    ],
+                    "size": [
+                      0.05,
+                      0.9,
+                      0.05
+                    ],
+                    "tint": "iron"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.4,
+                      0.45,
+                      -0.22
+                    ],
+                    "size": [
+                      0.05,
+                      0.9,
+                      0.05
+                    ],
+                    "tint": "iron"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.4,
+                      0.45,
+                      0.22
+                    ],
+                    "size": [
+                      0.05,
+                      0.9,
+                      0.05
+                    ],
+                    "tint": "iron"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0
+                    ],
+                    "size": [
+                      0.95,
+                      0.08,
+                      0.55
+                    ],
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.22,
+                      0.98,
+                      0
+                    ],
+                    "size": [
+                      0.38,
+                      0.04,
+                      0.4
+                    ],
+                    "tint": "iron"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.22,
+                      1.01,
+                      0
+                    ],
+                    "size": [
+                      0.27,
+                      0.025,
+                      0.27
+                    ],
+                    "tint": "fire",
+                    "when": "@fuel>=1"
+                  },
+                  {
+                    "kind": "lathe",
+                    "at": [
+                      -0.22,
+                      1.02,
+                      0
+                    ],
+                    "profile": [
+                      [
+                        0,
+                        0
+                      ],
+                      [
+                        0.16,
+                        0
+                      ],
+                      [
+                        0.18,
+                        0.19
+                      ],
+                      [
+                        0.16,
+                        0.19
+                      ],
+                      [
+                        0.14,
+                        0.025
+                      ],
+                      [
+                        0,
+                        0.025
+                      ]
+                    ],
+                    "segments": 10,
+                    "tint": "iron"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.22,
+                      1.19,
+                      0
+                    ],
+                    "size": [
+                      0.23,
+                      0.04,
+                      0.23
+                    ],
+                    "tint": "raw",
+                    "when": "@vegetables>=1"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.22,
+                      1.2,
+                      0
+                    ],
+                    "size": [
+                      0.3,
+                      0.016,
+                      0.3
+                    ],
+                    "tint": "soup",
+                    "when": "@soup>=3"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.22,
+                      1.16,
+                      0
+                    ],
+                    "size": [
+                      0.27,
+                      0.016,
+                      0.27
+                    ],
+                    "tint": "soup",
+                    "when": "@soup>=1&@soup<3"
+                  }
+                ]
+              }
+            },
+            "params": {},
+            "palette": {
+              "iron": "#454b50",
+              "wood": "#a4865c",
+              "fire": "#ef8932",
+              "raw": "#78a252",
+              "soup": "#d88b3b"
+            },
+            "state": {
+              "vegetables": {
+                "type": "number",
+                "default": 3
+              },
+              "water": {
+                "type": "number",
+                "default": 1500
+              },
+              "fuel": {
+                "type": "number",
+                "default": 1
+              },
+              "cooked": {
+                "type": "bool",
+                "default": false
+              },
+              "soup": {
+                "type": "number",
+                "default": 0
+              }
+            },
+            "size": {
+              "box": [
+                0.95,
+                1.22,
+                0.55
+              ]
+            },
+            "slots": [
+              {
+                "id": "shelf",
+                "kind": "shelf",
+                "p": [
+                  0.3,
+                  0.96,
+                  0
+                ],
+                "yaw": 0,
+                "accepts": {},
+                "capacity": 1
+              }
+            ]
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-soup_bowl",
+            "version": 1,
+            "description": "Hold this bowl to bite 1 soup unit at a time; a full bowl holds 2.",
+            "tags": [
+              "camping",
+              "item",
+              "bowl",
+              "food",
+              "object"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "round": 0,
+                "shapes": [
+                  {
+                    "kind": "lathe",
+                    "at": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "profile": [
+                      [
+                        0,
+                        0
+                      ],
+                      [
+                        0.065,
+                        0
+                      ],
+                      [
+                        0.12,
+                        0.1
+                      ],
+                      [
+                        0.107,
+                        0.1
+                      ],
+                      [
+                        0.057,
+                        0.014
+                      ],
+                      [
+                        0,
+                        0.014
+                      ]
+                    ],
+                    "segments": 10,
+                    "tint": "shell"
+                  },
+                  {
+                    "kind": "cyl",
+                    "at": [
+                      0,
+                      0.075,
+                      0
+                    ],
+                    "r": 0.096,
+                    "h": 0.018,
+                    "segments": 10,
+                    "tint": "soup",
+                    "when": "@soup>=2"
+                  },
+                  {
+                    "kind": "cyl",
+                    "at": [
+                      0,
+                      0.05,
+                      0
+                    ],
+                    "r": 0.088,
+                    "h": 0.016,
+                    "segments": 10,
+                    "tint": "soup",
+                    "when": "@soup=1"
+                  }
+                ]
+              }
+            },
+            "params": {},
+            "palette": {
+              "shell": "#e7ddbd",
+              "soup": "#d88b3b"
+            },
+            "state": {
+              "soup": {
+                "type": "number",
+                "default": 0
+              }
+            },
+            "size": {
+              "box": [
+                0.24,
+                0.1,
+                0.24
+              ]
+            },
+            "slots": []
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/camp_soup_pot@1",
+          "name": "soup-pot",
+          "tmp": "$pot",
+          "p": [
+            -3,
+            0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/soup_bowl@1",
+          "name": "meal-bowl",
+          "in": {
+            "parent": "$pot",
+            "slot": "shelf"
+          },
+          "p": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/sink@1",
+          "name": "wash-sink",
+          "p": [
+            3,
+            0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/table@1",
+          "name": "meal-table",
+          "p": [
+            0,
+            3
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/chair@1",
+          "name": "diner-chair",
+          "p": [
+            0,
+            4.1
+          ],
+          "r": 3.141592653589793
+        }
+      ]
+    }
+  ],
+  "description": "One cook, one server and one diner; the same bowl has two portions, then one, then none."
+}

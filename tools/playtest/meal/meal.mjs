@@ -55,6 +55,20 @@ export function sceneOf(entries) {
   };
 }
 
+/** Tracked boot template: existing canonical sink/table/chair, and unchanged authored pot/bowl pictures. */
+export function mealTemplate(entries) {
+  const { template, map } = sceneOf(entries);
+  const refs = new Map(map.rows.map(row => [row.def, `core/${row.entry.split(':')[1]}@1`]));
+  const food = new Map(entries.filter(e => ['eden:camp_soup_pot', 'eden:soup_bowl'].includes(e.kind))
+    .map(e => [`meal-${e.kind.split(':')[1].replaceAll('_', '-')}`, `core-${e.kind.split(':')[1]}`]));
+  template.description = 'One cook, one server and one diner; the same bowl has two portions, then one, then none.';
+  template.batches[0].ops = template.batches[0].ops.flatMap(op => {
+    if (op.op === 'define') return food.has(op.def.name) ? [{ ...op, def: { ...op.def, name: food.get(op.def.name) } }] : [];
+    return [{ ...op, def: refs.get(op.def) }];
+  });
+  return template;
+}
+
 export function writeScene(dir) {
   mkdirSync(dir, { recursive: true });
   const entries = ENTRIES.map((p) => JSON.parse(readFileSync(join(REPO_ROOT, 'content/kinds', p + '.json'), 'utf8')));
@@ -98,7 +112,7 @@ export async function discoverMeal({ seats, record }) {
   const discovery = {};
   for (const seat of seats) {
     const help = await record(seat, 'discover commands', 'help');
-    for (const command of ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt']) {
+    for (const command of ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait']) {
       if (!help.commands?.includes(command)) throw new Error(`meal discovery: missing ${command} command`);
     }
     const look = await record(seat, 'look before meal', 'look');
@@ -152,7 +166,8 @@ export async function servedSeats({ world, page, dir, pkg }) {
 }
 
 /** Fail on the first refusal or missing quantity/ownership proof; never use creator edits to repair the scene. */
-export async function meal({ seats, report, log = () => {} }) {
+export async function meal({ seats, report, log = () => {}, observe = async () => {}, endpoint = 'full' }) {
+  if (!['full', 'empty-bowl-risen'].includes(endpoint)) throw new Error('unknown meal endpoint');
   const [cook, server, diner] = seats;
   const record = async (seat, label, ...words) => { const a = await seat.run(...words); report.steps.push({ role: seat.label, label, answer: a }); log(`${seat.label}: ${label} -> ${a.phase ?? (a.ok ? 'ok' : a.code)}`); return a; };
   const act = async (seat, label, ...words) => requireDone(await record(seat, label, 'act', ...words, '--wait'), label);
@@ -194,29 +209,54 @@ export async function meal({ seats, report, log = () => {} }) {
   const servingBowl = await inspect(server, 'meal-bowl');
   if (!serverBody || servingBowl.parent !== serverBody) throw new Error('filled bowl is not parented to the server');
   requireField(servingBowl, 'soup', 2, 'same filled bowl');
+  await observe({ phase: 'server-held', soup: 2, bowl: servingBowl, holder: serverBody, role: server.label });
   const dinerBody = (await record(diner, 'body', 'status')).body;
   if (!dinerBody) throw new Error('diner body is not known');
   await act(diner, 'approach server', `walk:${serverBody}`);
-  await record(server, 'offer bowl', 'give', ids['meal-bowl'], '--to', dinerBody);
+  const prior = await record(diner, 'read prior invitations', 'events');
+  if (prior.ok !== true) throw new Error('prior invitations read failed');
+  const oldOffers = new Set((prior.events ?? []).filter(e => e.kind === 'give').map(e => e.offer));
+  requireDone(await record(server, 'offer bowl', 'give', ids['meal-bowl'], '--to', dinerBody, '--wait'), 'offer bowl');
   let offer;
   for (let n = 0; n < 10 && !offer; n++) {
     const answer = await record(diner, 'read bowl offer', 'wait', '1');
-    offer = answer.give?.offer ?? answer.events?.find((e) => e.kind === 'give' && e.what === 'offered')?.offer;
+    if (answer.ok !== true) throw new Error('read bowl invitation failed');
+    const events = answer.events ?? [];
+    offer = events.find(e => e.kind === 'give' && e.what === 'offered' && typeof e.offer === 'string' && e.offer
+      && !oldOffers.has(e.offer) && e.thing === ids['meal-bowl'] && e.from_id === serverBody)?.offer;
+    if (offer && events.some(e => e.kind === 'give' && e.offer === offer && ['declined', 'expired', 'ended', 'withdrawn'].includes(e.what))) throw new Error('bowl invitation no longer available');
   }
   if (!offer) throw new Error('give offer not observed by diner');
   requireDone(await record(diner, 'accept bowl', 'give', 'accept', offer, '--wait'), 'accept bowl');
   const heldBowl = await inspect(diner, 'meal-bowl');
   if (heldBowl.parent !== dinerBody) throw new Error('accepted bowl is not parented to the diner');
   requireField(heldBowl, 'soup', 2, 'accepted filled bowl');
+  await observe({ phase: 'diner-held', soup: 2, bowl: heldBowl, holder: dinerBody, role: diner.label });
   await use(diner, 'carry bowl to chair', 'diner-chair', 'walk');
   await use(diner, 'sit holding bowl', 'diner-chair', 'sit');
+  const seatedBowl = await inspect(diner, 'meal-bowl');
+  requireField(seatedBowl, 'soup', 2, 'seated full bowl');
+  if (seatedBowl.parent !== dinerBody) throw new Error('seated bowl left the diner');
+  await observe({ phase: 'seated', soup: 2, bowl: seatedBowl, holder: dinerBody, role: diner.label });
   for (const expected of [1, 0]) {
     await use(diner, 'consume one soup unit', 'meal-bowl', 'bite');
     const consumed = await inspect(diner, 'meal-bowl');
     requireField(consumed, 'soup', expected, 'bowl consumed');
     if (consumed.parent !== dinerBody) throw new Error('consumed bowl left the diner');
+    await observe({ phase: 'bitten', soup: expected, bowl: consumed, holder: dinerBody, role: diner.label });
   }
   await act(diner, 'rise holding empty bowl', 'rise');
+  const risenBowl = await inspect(diner, 'meal-bowl');
+  requireField(risenBowl, 'soup', 0, 'risen empty bowl');
+  if (risenBowl.parent !== dinerBody) throw new Error('risen bowl left the diner');
+  await observe({ phase: 'risen', soup: 0, bowl: risenBowl, holder: dinerBody, role: diner.label });
+  if (endpoint === 'empty-bowl-risen') {
+    report.complete = false; report.portionComplete = true; report.diagnosticOnly = true;
+    report.bowlIdentity = { id: ids['meal-bowl'], server: serverBody, diner: dinerBody, heldBy: dinerBody };
+    report.quantities = { cooked: 6, remaining: 4, eaten: 2 };
+    report.limitations = ['Reduced payload diagnostic: washing and table return were not attempted.', 'Holding, consumption, grounding and clearance need actual-page qualification.', 'Fixed composition is not independent-agent collaboration.'];
+    return report;
+  }
   await use(diner, 'carry empty bowl to sink', 'wash-sink', 'walk');
   await use(diner, 'turn on tap', 'wash-sink', 'turn_on');
   const water = await inspect(diner, 'wash-sink');

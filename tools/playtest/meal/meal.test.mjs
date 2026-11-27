@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { ENTRIES, sceneOf, foundId, requireDone, requireField, terminalReceipt, meal } from './meal.mjs';
+import { batchSchema } from '../../../packages/world-compiler/src/schemas.ts';
+import { ENTRIES, sceneOf, mealTemplate, foundId, requireDone, requireField, terminalReceipt, meal } from './meal.mjs';
 const entries = ENTRIES.map((p) => JSON.parse(readFileSync(resolve('content/kinds', p + '.json'), 'utf8')));
 
 test('the scene keeps original entry defaults and the bowl on the only serving shelf', () => {
@@ -62,7 +63,7 @@ test('set-down waits for its final receipt rather than treating sent as success'
 
 test('already arrived Souls are not joined a second time', async () => {
   const calls = [], seats = ['cook', 'server', 'diner'].map(label => ({ label, run: async (...words) => {
-    calls.push(words); return words[0] === 'status' ? { ok: true, in_world: true, body: label + '-body' } : words[0] === 'help' ? { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt'] } : { ok: true, found: [] };
+    calls.push(words); return words[0] === 'status' ? { ok: true, in_world: true, body: label + '-body' } : words[0] === 'help' ? { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait'] } : { ok: true, found: [] };
   } }));
   await assert.rejects(meal({ seats, report: { complete: false, steps: [] } }), /expected one named thing/);
   assert.equal(calls.filter(w => w[0] === 'status').length, 3);
@@ -81,7 +82,7 @@ test('the meal table preserves canonical physical surface metadata without addin
 
 // Public reply fixtures, deliberately independent of the client implementation. Act aliases make it observable
 // that the workflow uses inspected offers rather than reconstructing form:<id> from authored fixture entries.
-function publicMeal({ lostHolder = false, missingBowlParameter = false } = {}) {
+function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchingOffer = false, expiredOffer = false } = {}) {
   const calls = [], state = { cooked: false, soup: 0, bowl: 0, parent: 'pot', water: 5000, running: false };
   const ids = { 'soup-pot': 'pot', 'meal-bowl': 'bowl', 'wash-sink': 'sink', 'meal-table': 'table', 'diner-chair': 'chair' };
   const offer = (id, name, params, who = 'anyone') => ({ name, act: `${name}-public:${id}`, who, ...(params ? { params } : {}) });
@@ -96,16 +97,23 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false } = {}) {
     calls.push({ label, words });
     const [command, word] = words;
     if (command === 'status') return { ok: true, in_world: true, body: `${label}-body` };
-    if (command === 'help') return { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt'] };
+    if (command === 'help') return { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait'] };
     if (command === 'look') return { ok: true, nearby: Object.entries(ids).map(([name, id]) => ({ name, id })) };
     if (command === 'find') return { ok: true, found: [{ name: word, id: ids[word] }] };
     if (command === 'inspect') return inspect(word);
     if (command === 'can') return state.cooked ? { ok: true, can: 'yes', current: true } : { ok: true, can: 'no', reason: 'field_differs', field: 'cooked', current: true };
     if (command === 'give') {
-      if (word === 'accept') { state.parent = 'diner-body'; return { ok: true, phase: 'done' }; }
-      return { ok: true, sent: true };
+      if (word === 'accept') { assert.equal(words[2], 'bowl-offer'); state.parent = 'diner-body'; return { ok: true, phase: 'done' }; }
+      return { ok: true, phase: 'done' };
     }
-    if (command === 'wait') return { ok: true, give: { offer: 'bowl-offer' } };
+    if (command === 'events') return { ok: true, events: [{ kind: 'give', what: 'offered', offer: 'old-bowl-offer', thing: 'bowl', from_id: 'server-body' }] };
+    if (command === 'wait') return { ok: true, give: { offer: 'untrusted-shortcut' }, events: [
+      { kind: 'give', what: 'offered', offer: 'wrong-bowl', thing: 'other-bowl', from_id: 'server-body' },
+      { kind: 'give', what: 'offered', offer: 'wrong-giver', thing: 'bowl', from_id: 'other-body' },
+      { kind: 'give', what: 'offered', offer: 'old-bowl-offer', thing: 'bowl', from_id: 'server-body' },
+      ...(!noMatchingOffer ? [{ kind: 'give', what: 'offered', offer: 'bowl-offer', thing: 'bowl', from_id: 'server-body' }] : []),
+      ...(expiredOffer ? [{ kind: 'give', what: 'expired', offer: 'bowl-offer' }] : []),
+    ] };
     if (command === 'set-down') return { ok: true, sequence: 17 };
     if (command === 'receipt') { state.parent = 'table'; return { ok: true, receipt: { answers: [{ answer: 'receipt' }] } }; }
     if (command === 'act') {
@@ -151,4 +159,49 @@ test('a bowl that leaves its holder during eating stops before washing or claimi
   await assert.rejects(meal({ seats: fixture.seats, report }), /consumed bowl left the diner/);
   assert.equal(report.complete, false);
   assert(!fixture.calls.some((c) => c.words.includes('wash-public:sink')));
+});
+
+
+test('reduced endpoint observes the same bowl phases, rises, and never claims full cleanup', async () => {
+  const fixture = publicMeal(), report = { complete: false, steps: [] }, phases = [];
+  await meal({ seats: fixture.seats, report, endpoint: 'empty-bowl-risen', observe: async row => phases.push(row) });
+  assert.deepEqual(phases.map(p => [p.phase, p.soup]), [['server-held', 2], ['diner-held', 2], ['seated', 2], ['bitten', 1], ['bitten', 0], ['risen', 0]]);
+  assert(phases.every(p => p.bowl.id === 'bowl' && p.bowl.parent === p.holder));
+  assert.equal(report.portionComplete, true); assert.equal(report.complete, false);
+  assert.equal(report.diagnosticOnly, true); assert.equal(report.bowlIdentity.heldBy, 'diner-body');
+  assert(fixture.calls.some(c => c.words[0] === 'act' && c.words[1] === 'rise'));
+  assert(!fixture.calls.some(c => c.words[0] === 'set-down' || c.words.includes('wash-public:sink')));
+});
+
+test('only a fresh matching bowl invitation can be accepted; a shortcut cannot grant consent', async () => {
+  const fixture = publicMeal({ noMatchingOffer: true });
+  await assert.rejects(meal({ seats: fixture.seats, report: { complete: false, steps: [] } }), /give offer not observed/);
+  assert(!fixture.calls.some(c => c.words[0] === 'give' && c.words[1] === 'accept'));
+});
+
+test('an expired matching invitation stops before acceptance', async () => {
+  const fixture = publicMeal({ expiredOffer: true });
+  await assert.rejects(meal({ seats: fixture.seats, report: { complete: false, steps: [] } }), /no longer available/);
+  assert(!fixture.calls.some(c => c.words[0] === 'give' && c.words[1] === 'accept'));
+});
+
+test('a failed phase observer stops before the next native action or a completion claim', async () => {
+  const fixture = publicMeal(), report = { complete: false, steps: [] };
+  await assert.rejects(meal({ seats: fixture.seats, report, observe: async () => { throw Error('depicted metadata absent'); } }), /depicted metadata absent/);
+  assert.equal(report.complete, false);
+  assert(!fixture.calls.some(c => c.words[0] === 'give'));
+});
+
+
+test('tracked meal boot template reuses existing entry pictures and canonical core furniture', () => {
+  const expected = mealTemplate(entries), tracked = JSON.parse(readFileSync(resolve('worlds/templates/shared-camp-meal.json')));
+  assert.deepEqual(tracked, expected);
+  for (const batch of tracked.batches) assert.equal(batchSchema.safeParse(batch).success, true, 'normal creator batch schema');
+  const ops = tracked.batches[0].ops, defs = ops.filter(o => o.op === 'define');
+  assert.deepEqual(defs.map(o => o.def.name), ['core-camp_soup_pot', 'core-soup_bowl']);
+  const original = sceneOf(entries).template.batches[0].ops.filter(o => o.op === 'define').slice(0, 2);
+  defs.forEach((o, i) => assert.deepEqual({ ...o.def, name: original[i].def.name }, original[i].def));
+  for (const name of ['core/sink@1', 'core/table@1', 'core/chair@1']) assert(ops.some(o => o.op === 'place' && o.def === name));
+  assert.deepEqual(ops.find(o => o.name === 'meal-bowl').in, { parent: '$pot', slot: 'shelf' });
+  assert.deepEqual(ops.filter(o => o.op === 'place').map(o => o.p), [[-3, 0], [0, 0, 0], [3, 0], [0, 3], [0, 4.1]]);
 });
