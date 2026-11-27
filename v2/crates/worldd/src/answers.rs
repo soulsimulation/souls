@@ -8775,9 +8775,9 @@ mod tests {
             offsets: vec![(0, 0)],
         };
         cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
-        // Ten-minute ticks, so the run reaches the weather's next change after the undo.
-        cfg.tick = Duration::from_secs(600);
-        let tick_us: i64 = 600_000_000;
+        // One-second ticks (the longest a tick may be), so the run reaches the weather's next change after the undo.
+        cfg.tick = Duration::from_secs(1);
+        let tick_us: i64 = 1_000_000;
         let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
         let until: i64 = 40 * 3_600_000_000;
         let storm: Vec<Op> = [
