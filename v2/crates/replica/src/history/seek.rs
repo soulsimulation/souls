@@ -120,6 +120,16 @@ pub fn state_at(bundle: &Bundle, header: &crate::effects::Header, at: i64) -> R<
     if let Some(observation) = &bundle.observation {
         return observed_state(bundle, header, observation, at);
     }
+    walk_legacy(bundle, header, at, |_, _, _, _| Ok(()))
+}
+
+/// Read-only replay hook; application and carried context retain the existing seek semantics.
+pub(crate) fn walk_legacy(
+    bundle: &Bundle,
+    header: &crate::effects::Header,
+    at: i64,
+    mut visit: impl FnMut(&State, &Effect, Option<&BTreeMap<u64, Value>>, bool) -> R<()>,
+) -> R<State> {
     let mut s = snapshot_state(&bundle.snapshot)?;
     let Value::Map(view) = &bundle.view else {
         return bad("a view is a map");
@@ -140,17 +150,20 @@ pub fn state_at(bundle: &Bundle, header: &crate::effects::Header, at: i64) -> R<
         if e.envelope.at > at {
             break;
         }
+        visit(&s, &e, carried, false)?;
         if let Some(c) = carried.take() {
             insert(&mut s, c.get(&2), c.get(&3))?;
         }
         // A snapshot holds no timers (they are not public state), so a timer set before the window and cleared in
         // it would be refused (`timer-missing`, 24 Nov: Eden's past on soul.game). Timers change no node or link.
         if matches!(e.body, crate::effects::Body::Timers(_)) {
+            visit(&s, &e, None, true)?;
             continue;
         }
         // The view leaves entries out (other audiences, thinned samples): each applies after the last it holds.
         s.next = e.envelope.sequence;
         s.apply_entry(header, &e)?;
+        visit(&s, &e, None, true)?;
     }
     Ok(s)
 }
@@ -168,6 +181,32 @@ fn observed_state(
     observation: &Value,
     at: i64,
 ) -> R<State> {
+    if at < bundle.start {
+        return bad("observation predates its genuine start");
+    }
+    let mut selected = None;
+    walk_observation(bundle, header, observation, |time, projection, _| {
+        if time <= at {
+            selected = Some(projection.clone());
+        }
+        Ok(())
+    })?;
+    live_observation(
+        header,
+        &selected.ok_or_else(|| Refusal {
+            name: "history-bad",
+            detail: "missing baseline".into(),
+        })?,
+    )
+}
+
+/// Validate the existing authorized chain once while exposing each accepted exact-time projection delta.
+pub(crate) fn walk_observation(
+    bundle: &Bundle,
+    header: &crate::effects::Header,
+    observation: &Value,
+    mut visit: impl FnMut(i64, &Value, Option<&Value>) -> R<()>,
+) -> R<()> {
     use crate::stream::public::{apply_observation, digest, validate_projection};
     let Value::Map(m) = observation else {
         return bad("observation is a map");
@@ -178,9 +217,7 @@ fn observed_state(
     {
         return bad("observation format or header");
     }
-    if at < bundle.start {
-        return bad("observation predates its genuine start");
-    }
+
     let mut projection = m.get(&3).cloned().ok_or_else(|| Refusal {
         name: "history-bad",
         detail: "missing public baseline".into(),
@@ -199,7 +236,7 @@ fn observed_state(
     if !matches!(m.get(&8),Some(Value::Bytes(hash)) if hash.len()==32) {
         return bad("original archive base digest");
     }
-    let mut selected = projection.clone();
+    visit(bundle.start, &projection, None)?;
     let mut previous_at = bundle.start;
     for row in rows {
         let Value::Array(row) = row else {
@@ -259,9 +296,7 @@ fn observed_state(
         }
         projection = next;
         (record, offset, previous_at) = (*r, *o, time);
-        if time <= at {
-            selected = projection.clone();
-        }
+        visit(time, &projection, Some(delta))?;
     }
     if m.get(&6) != Some(&Value::Bytes(digest(&projection)?))
         || m.get(&7)
@@ -272,7 +307,7 @@ fn observed_state(
     {
         return bad("observation terminal differs");
     }
-    live_observation(header, &selected)
+    Ok(())
 }
 
 /// Existing history callers consume the live authorized nodes/links, while the reader retains carry context.
