@@ -1,4 +1,4 @@
-import test from'node:test';import assert from'node:assert/strict';import{itemPresentation,itemPostureK,ITEM_RECOVERY_SECONDS,ITEM_REACH_SECONDS,HANDOVER_SETTLE_SECONDS,HANDOVER_IDLE_RETURN_SECONDS}from'../../mars/viewer/engine/items/presentation.ts';
+import test from'node:test';import assert from'node:assert/strict';import{itemPresentation,itemPostureK,ITEM_RECOVERY_SECONDS,ITEM_REACH_SECONDS,HANDOVER_SETTLE_SECONDS,HANDOVER_IDLE_RETURN_SECONDS}from'../../../mars/viewer/engine/items/presentation.ts';
 test('native item reach/recovery blends are random-access and end exactly before the field clears',()=>{const p={item:'lamp',hand:'right',action:'a1',startTick:0,reachTick:10};const R=Math.round(ITEM_REACH_SECONDS/.05);assert.equal(itemPresentation(p,undefined,10,.05).weight,0);assert.equal(itemPresentation(p,undefined,10+R,.05).weight,1);assert.equal(itemPresentation(p,{right:'lamp'},12,.05).weight,1,'custody keeps full grip');const r={...p,releaseTick:40};assert.deepEqual(itemPresentation(r,undefined,40,.05),{weight:1,idleBlend:0,transfer:true},'released arm starts at the kept rest point');const end=itemPresentation(r,undefined,40+ITEM_RECOVERY_SECONDS/.05,.05);assert.equal(end.idleBlend,1);assert.equal(end.weight,0,'and has eased fully back to the clip when recovery ends');assert.deepEqual(itemPresentation(r,{right:'lamp'},40,.05),{weight:1,idleBlend:0,transfer:true});assert.equal(itemPresentation(undefined,undefined,100,.05),undefined,'old takes unchanged');assert.deepEqual(itemPresentation(undefined,{right:'lamp'},100,.05),{weight:1,idleBlend:0},'plain holding is not a transfer');});
 test('item posture hump: zero at reach start and withdraw end, full at the grasp, continuous on the hand clock',()=>{
  const dt=.05,R=Math.round(ITEM_REACH_SECONDS/dt),p={item:'lamp',hand:'right',action:'a1',startTick:0,reachTick:10,target:[1,.75,2]};
@@ -11,7 +11,7 @@ test('item posture hump: zero at reach start and withdraw end, full at the grasp
  assert.equal(itemPresentation({...p,target:undefined},undefined,10+R,dt).posture,undefined,'older records keep no item posture');
 });
 test('pick-up presentation (entry 29 on M04): one reach clock for the drawn hand, a gesture fade through the grasp, an interrupted reach returns smoothly',async()=>{
- const{ITEM_GESTURE_FADE_SECONDS,ITEM_ARM_LEAD_SECONDS}=await import('../../mars/viewer/engine/items/presentation.ts');
+ const{ITEM_GESTURE_FADE_SECONDS,ITEM_ARM_LEAD_SECONDS}=await import('../../../mars/viewer/engine/items/presentation.ts');
  const dt=.05,R=Math.round(ITEM_REACH_SECONDS/dt),sm=n=>{const k=Math.max(0,Math.min(1,n));return k*k*(3-2*k)},take={item:'bowl',hand:'right',action:'a1',mode:'take',startTick:0,reachTick:10,target:[1,.75,2]};
  const at=(t,rec=take)=>itemPresentation(rec,t>=10+R&&!rec.cancelTick?{right:'bowl'}:undefined,t,dt);
  // the drawn palm's share of the way (goal k × arm weight) is exactly the reach clock: a single smoothstep
