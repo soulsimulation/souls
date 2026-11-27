@@ -103,6 +103,11 @@ pub const REPLAN_WITHIN: Micros = 1_000_000;
 /// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
 pub use crate::routes::may_stand;
 
+/// How far from a body standing still `aside` may set it, and still find a place too near: farther than this from
+/// where it stands, a place can never be within two radii of a spot it tries (each within four [`CLEAR`]s of it),
+/// so the ladder leaves such places out of `taken` and the answer is the same.
+const AWAY: i64 = 4 * CLEAR + 2 * crate::ground::HUMAN_RADIUS * 1000 + 1_000;
+
 /// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to), when it is on
 /// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from
 /// it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal ground and at least
@@ -785,6 +790,8 @@ impl Ladder {
         // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out. Read
         // the first time a walker asks (N17b): nothing below moves a body, starts a run or changes the walk-outs.
         let mut still: Option<Vec<(Id, Id, Vec3)>> = None;
+        // Every body's place by node, read once the same way: what a step aside keeps apart from.
+        let mut placed: Option<BTreeMap<Id, Vec<(Id, Vec3)>>> = None;
         let mut asked: BTreeSet<(Id, Id)> = BTreeSet::new();
         let ids: Vec<Id> = self.walkers.keys().copied().collect();
         // Each walker's own reads, on the runner's threads (N17b): nothing below changes another walker's.
@@ -932,14 +939,29 @@ impl Ladder {
                             Some((_, fp)) if blocks => (p, fp),
                             _ => (p, leg.to),
                         };
-                        let taken = runner
-                            .controller
-                            .bodies()
-                            .filter(|b| b.id != s)
-                            .map(|b| (node_of(b), b.pose.position))
-                            .chain(self.aside.iter().map(|&(n, at)| (n, at)))
-                            .filter(|(n, _)| *n == sn)
-                            .map(|(_, at)| at)
+                        let placed = placed.get_or_insert_with(|| {
+                            let mut by: BTreeMap<Id, Vec<(Id, Vec3)>> = BTreeMap::new();
+                            for b in runner.controller.bodies() {
+                                by.entry(node_of(b)).or_default().push((b.id, b.pose.position));
+                            }
+                            by
+                        });
+                        // Only the places `aside` could find too near: none farther than AWAY from where the body
+                        // stands can come within its two radii of a spot it tries (with 1,000 bodies on a node, a
+                        // crowd's step asides each read every one, and a tick ran over its budget).
+                        let taken = placed
+                            .get(&sn)
+                            .into_iter()
+                            .flatten()
+                            .filter(|&&(id, _)| id != s)
+                            .map(|&(_, at)| at)
+                            .chain(
+                                self.aside
+                                    .iter()
+                                    .filter(|&&(n, _)| n == sn)
+                                    .map(|&(_, at)| at),
+                            )
+                            .filter(|&at| len(at, sp) <= AWAY)
                             .collect::<Vec<_>>();
                         if let Some(to) = aside(town, sn, sp, line, &taken) {
                             let track = Track {
@@ -1179,5 +1201,56 @@ mod tests {
         // Held where its line begins, it is routed again at 3 s and ends at [`END`].
         let held = |_, _| ([0, 0], Some([0, 14_000_000]), to);
         assert_eq!(run(1400, held, |_| false), (Some(END), 1));
+    }
+
+    /// Open ground everywhere: every point legal, no links.
+    struct Open;
+    impl World for Open {
+        fn plan(&mut self, _: &crate::mover::Body, _: Id, _: Vec3) -> Result<Vec<Leg>, Refusal> {
+            Ok(Vec::new())
+        }
+    }
+    impl Unstick for Open {
+        fn moved(&self, _: Id) -> Option<Micros> {
+            None
+        }
+        fn far_end(&self, _: Id, _: Id, _: Vec3) -> Option<(Id, Vec3)> {
+            None
+        }
+        fn nearest(&self, _: Id, at: Vec3) -> Option<Vec3> {
+            Some(at)
+        }
+    }
+
+    /// The ladder leaves out of `taken` the places farther than [`AWAY`] from the still body: `aside` gives the same
+    /// answer without them, for bodies on the line and off it, crowded round or far, at every distance near the bound.
+    #[test]
+    fn places_beyond_away_never_change_a_step_aside() {
+        let node = Id::new(replica::ids::Scope([7; 16]), 1).unwrap();
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut found = 0;
+        for _ in 0..4000 {
+            let at = Vec3::new(next(400_000), 0, next(400_000));
+            let line = (
+                Vec3::new(next(3_000_000), 0, next(3_000_000)),
+                Vec3::new(next(3_000_000), 0, next(3_000_000)),
+            );
+            let n = 1 + next(40).unsigned_abs() as usize;
+            let spread = [AWAY / 2, AWAY, AWAY + 20_000][next(1).unsigned_abs() as usize % 3];
+            let taken: Vec<Vec3> = (0..n)
+                .map(|_| Vec3::new(at.x + next(spread), 0, at.z + next(spread)))
+                .collect();
+            let near: Vec<Vec3> = taken.iter().copied().filter(|&t| len(t, at) <= AWAY).collect();
+            let whole = aside(&Open, node, at, line, &taken);
+            assert_eq!(aside(&Open, node, at, line, &near), whole);
+            found += usize::from(whole.is_some());
+        }
+        assert!(found > 100, "the cases step bodies aside ({found})");
     }
 }
