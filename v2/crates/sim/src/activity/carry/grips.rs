@@ -422,11 +422,11 @@ mod tests {
         let (front, back, side) = (id(1), id(2), id(3));
         let sides = [(side, [0, -400_000])];
         let h = assign(&g, &load, load.held().unwrap(), front, back, &sides).unwrap();
-        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_mid"]);
+        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_r2"]);
         // Lifted the other way round, its + end behind: the front takes the other end.
         let r = load.reversed().unwrap();
         let h = assign(&g, &load, r.held().unwrap(), front, back, &sides).unwrap();
-        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_mid"]);
+        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_l2"]);
         for hold in &h {
             let [a, b] = hold.hands;
             // Its hands either side of its grip along the beam's length (its z), 0.4 m apart: an end's at its grip, the
@@ -452,10 +452,12 @@ mod tests {
     fn a_crew_of_six_holds_each_grip_once_in_join_order_hands_within_its_length() {
         for (family, kind) in [
             ("construction", "timber_bundle"),
+            ("construction", "rack_beam"),
             ("carpentry", "shade_cloth"),
         ] {
             let e = entry(family, kind);
             let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+            assert_eq!(load.most(), 6, "{kind}: six grips, six carriers");
             let places = load.side_places();
             let sides: Vec<(Id, [i64; 2])> = places
                 .iter()
