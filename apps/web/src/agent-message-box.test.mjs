@@ -217,3 +217,16 @@ test('first-day 27 Nov: a Soul\'s unread message says plainly when its agent is 
   assert.doesNotMatch(box({link: link('disconnected', 'stopped-listening'), unavailable: true}), /data-not-reading/);
   assert.doesNotMatch(render(h(AgentMessageBoxView, {...props, kind: 'god', inbox: {connected: false, lastSeenAt: null, latest: sent, link: link('disconnected', 'never')}, now: at + 90_000})), /data-not-reading/, 'the god box is unchanged');
 });
+
+test('first-day 27 Nov: Thinking… lasts only while connected and a few minutes after the read, then says when it was read, then that it expired', () => {
+  const at = new Date(2026, 10, 27, 14, 2).getTime(), readAt = at + 30_000;
+  const latest = {id: 'm', text: 'wave', state: 'delivered', sentAt: at, readAt};
+  const link = (state, reason) => ({state, reason, since: null, holder: null});
+  const box = (now, l = link('connected', 'listening')) => render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Juniper', now,
+    inbox: {connected: true, lastSeenAt: null, queued: 1, latest, doing: {phase: 'thinking'}, link: l, waitsMs: 15 * 60_000}}));
+  assert.match(box(readAt + 60_000), />Thinking…</);
+  assert.match(box(readAt + 60_000, link('disconnected', 'stopped-listening')), />Read 14:02, no answer yet</, 'gone: not thinking');
+  const stale = box(readAt + 3 * 60_000);
+  assert.match(stale, />Read 14:02, no answer yet</); assert.doesNotMatch(stale, /data-thinking/);
+  assert.match(box(at + 15 * 60_000), />Expired 14:17, not answered</);
+});

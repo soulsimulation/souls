@@ -21,6 +21,8 @@ export type BoxMessage = {
   outcome: string | null;
   reply?: string | null;
   notes?: string[];
+  /** When the agent's client said the agent read it (first-day 27 Nov), by this page's clock. */
+  readAt?: number;
 };
 /** The directory's test sign-in by name (`?as=` on a loopback page), or the page's own sign-in (B3-2): its session is
  *  exchanged for the gateway's view token (a provider's session token as the bearer; a local `dev:<name>` as the
@@ -80,7 +82,7 @@ export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<Box
   return {
     connected, lastSeenAt: null,
     latest: {
-      id: m.id ?? '', text: m.words, state, ...(sentAt.has(m) ? { sentAt: sentAt.get(m)! } : {}),
+      id: m.id ?? '', text: m.words, state, ...(sentAt.has(m) ? { sentAt: sentAt.get(m)! } : {}), ...(m.readAt !== undefined ? { readAt: m.readAt } : {}),
       reply: m.reply ?? null,
       result: m.state === 'done' ? m.outcome ?? 'done' : m.state === 'failed' ? m.outcome ?? 'failed' : null,
       ...(closed ? { outcome: m.state as 'done' | 'failed' } : {}),
@@ -108,8 +110,8 @@ export class MailBox {
   readonly agents = new Map<string, boolean>();
   /** Whether each grant's client said a reader of its messages is open (the same frame's `listening`). */
   readonly listening = new Map<string, boolean>();
-  /** Ids the agent read before the put's answer came. */
-  private readonly read = new Set<string>();
+  /** Ids the agent read before the put's answer came, and when. */
+  private readonly read = new Map<string, number>();
   onChange: () => void = () => {};
 
   /** The frame that puts `words` for `grant`; null for empty or long words. */
@@ -137,14 +139,15 @@ export class MailBox {
       const m = this.messages.find((x) => x.state === 'sending');
       if (!m) return true;
       const id = str(f.sent.id);
-      if (id) { m.id = id; m.state = this.read.delete(id) ? 'thinking' : 'waiting'; }
+      const readAt = id ? this.read.get(id) : undefined;
+      if (id) { m.id = id; m.state = readAt !== undefined ? 'thinking' : 'waiting'; if (readAt !== undefined) { m.readAt = readAt; this.read.delete(id); } }
       else { m.state = 'refused'; m.outcome = str(f.sent.refused) ?? 'refused'; }
     } else if (f.mail) {
       // first-day 27 Nov: `picked` is only its client given it; the agent has it once the client says it read it
       if (f.mail.state !== 'read') return true;
       const m = byId(f.mail.id);
-      if (!m) this.read.add(String(f.mail.id)); // read before the put's answer came
-      else if (m.state === 'waiting') m.state = 'thinking';
+      if (!m) this.read.set(String(f.mail.id), Date.now()); // read before the put's answer came
+      else if (m.state === 'waiting') { m.state = 'thinking'; m.readAt = Date.now(); }
     } else if (f.doing) {
       // an act the agent began after it picked up a message: the newest open message's
       const m = [...this.messages].reverse().find((x) => OPEN.has(x.state));
