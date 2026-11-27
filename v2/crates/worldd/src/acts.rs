@@ -1654,15 +1654,16 @@ pub const HERE_REACH_MM: i64 = 20_000;
 /// How near a body stands to a thing to be within a form's reach of it, mm, beyond the thing's own half size.
 const NEAR_MM: i64 = 1_500;
 
-/// A node's place in the zone's frame, µm: its position carried up the tree through each parent's place, turns
-/// included.
+/// A node's place in the zone's frame, µm: its position from its slot's point ([`slot_at`]), carried up the tree
+/// through each parent's place, turns included.
 pub(crate) fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
     let n = tree.node(tree.handle(node)?)?;
-    carried(
-        tree,
-        n.parent(),
-        n.place().map_or(Vec3::ZERO, |p| p.position),
-    )
+    let at = n.place().map_or(Vec3::ZERO, |p| p.position);
+    let at = match slot_at(tree, &n) {
+        Some(s) => at.plus(s).ok()?,
+        None => at,
+    };
+    carried(tree, n.parent(), at)
 }
 
 /// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included,
