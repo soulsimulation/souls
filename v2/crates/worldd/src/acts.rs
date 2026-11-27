@@ -1937,21 +1937,25 @@ fn ranked_things(
     let of_kind = |n: &replica::tree::NodeRef<'_>| {
         kind.is_none_or(|k| plain(n.kind()) == k || entry_of(n).split('@').next() == Some(k))
     };
+    // Every test is pure, so their order changes only the work. `here` reads every node of the tree: its reach is
+    // asked before the frame and container walks, which then run only for the few things near the anchor (an even
+    // load at 1,000 Souls held the clock for seconds walking every node's frame, many form starts a tick).
     let mut ranked: Vec<(Option<i128>, Id)> = handles
         .into_iter()
         .filter_map(|h| tree.node(h))
         .filter(|n| n.id() != node && n.id() != body)
         .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
         .filter(|n| of_kind(n))
-        .filter(|n| !is_body(n.id()))
-        .filter(|n| !here || (same_place(n.id()) && !closed_above(n.id())))
         .filter_map(|n| {
             let p = world_at(tree, n.id());
             if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
                 return None;
             }
-            Some((anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
+            Some((n, p))
         })
+        .filter(|(n, _)| !is_body(n.id()))
+        .filter(|(n, _)| !here || (same_place(n.id()) && !closed_above(n.id())))
+        .map(|(n, p)| (anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
         .collect();
     ranked.sort_by(|(da, a), (db, b)| {
         let by = match (da, db) {
