@@ -29,10 +29,10 @@
 //!    variable unset), or one written more than [`SOULS_FRESH`] seconds ago (not running here now), lists
 //!    `souls: null`. The home page's card shows it.
 //! 10. **A create ends** (27 Nov). A create the placement has not finished within [`PLACE_WITHIN`] of its `made` is
-//!    asked of the placement once more ([`Start::probe`]): placed, its row is ready; not placed, it ends, its row taken
-//!    off the list and its name record removed, and its click is answered `create-failed`. Every create checks the
-//!    others ([`Worlds::end_stale_creates`]), and so does the directory at its start, so no unplaced name is held
-//!    for good. A placement not known (its status unreadable, or written in the last ten minutes) keeps the create.
+//!     asked of the placement once more ([`Start::probe`]): placed, its row is ready; not placed, it ends, its row
+//!     taken off the list and its name record removed, and its click is answered `create-failed`. Every create checks
+//!     the others ([`Worlds::end_stale_creates`]), and so does the directory at its start, so no unplaced name is held
+//!     for good. A placement not known (its status unreadable, or written in the last ten minutes) keeps the create.
 
 pub mod archive;
 pub mod handoff;

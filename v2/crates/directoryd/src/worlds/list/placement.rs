@@ -103,12 +103,14 @@ fn placed(root: &std::path::Path, s: &Start) -> R<()> {
         if value["ready"] == true {
             return Ok(());
         }
-        let recent = e
+        let written = e
             .metadata()
             .and_then(|m| m.modified())
             .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_none_or(|d| d.as_secs() < PLACING_FOR);
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        let recent =
+            written.is_none_or(|at| crate::accounts::serve::now() < at.saturating_add(PLACING_FOR));
         if recent {
             return refuse(
                 "start-failed",
@@ -155,7 +157,8 @@ mod tests {
                 serde_json::json!({"name": name, "lineage": lineage, "ready": ready}).to_string(),
             )
             .unwrap();
-            let at = std::time::SystemTime::now() - std::time::Duration::from_secs(age);
+            let at = std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(crate::accounts::serve::now() - age);
             std::fs::File::options()
                 .write(true)
                 .open(&path)
