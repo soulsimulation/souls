@@ -1616,6 +1616,18 @@ impl Heavens {
     }
 }
 
+/// Whether `part` sets one of the creator's weather fields or E6's next weather change (`sim::edit::weather::FIELDS`,
+/// `sky::F_WEATHER_NEXT`): an undo or redo of a creator's weather, after which E6 takes the weather back.
+fn sets_weather(part: &Part) -> bool {
+    part.effects.iter().any(|e| match &e.body {
+        Body::Changes(cs) => cs.iter().any(|c| {
+            matches!(&c.change, Change::Set { field, .. }
+                if *field == sky::F_WEATHER_NEXT || sim::edit::weather::FIELDS.contains(field))
+        }),
+        _ => false,
+    })
+}
+
 /// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
 /// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
 /// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
@@ -3068,7 +3080,11 @@ impl Clock {
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
+                    let weather = sets_weather(&c.part);
                     self.parts.push(c.part);
+                    if weather {
+                        self.weather_back(now);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -3196,7 +3212,7 @@ impl Clock {
             let step = self.steps.remove(&id);
             match committed {
                 Ok((c, mine, places, before)) => {
-                    self.history.record(&before, &self.replica, &c.part, step);
+                    let part = Arc::clone(&c.part);
                     if let Some(b) = &mut self.bodies {
                         if let Err(e) = places.install(&mut b.slots, &c.names) {
                             self.faults += 1;
@@ -3217,6 +3233,9 @@ impl Clock {
                     if let Some(w) = weather {
                         self.put_weather(now, w);
                     }
+                    // Kept for its undo after E6's write, so its inverse sets the weather's next change back too and
+                    // the world node's hash it left is the one that write left (#5073 follow-up).
+                    self.history.record(&before, &self.replica, &part, step);
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -4314,6 +4333,54 @@ impl Clock {
         }
         sim::edit::weather::check(asked.levels, now, asked.until)?;
         Ok(Some(asked))
+    }
+
+    /// After an undo or redo that set the weather back (#5073 follow-up): E6 takes the world node's weather as it now
+    /// stands, its creator's end (none at 0) and its weather timer due at the next change the node holds (at once, if
+    /// that has passed). The fields are the undo's; only the timer is written, so the node's hash stays the one the undo
+    /// left and its redo is not refused as a conflict.
+    fn weather_back(&mut self, now: Micros) {
+        let tree = self.replica.tree();
+        let Some(f) = tree.node(tree.root()).map(|n| n.fields().clone()) else {
+            return;
+        };
+        let Some(h) = self.sky.as_mut() else { return };
+        let Some(next) = f.get(&sky::F_WEATHER_NEXT).and_then(sky::as_int) else {
+            return;
+        };
+        h.daylight.cfg.until = f.get(&sky::F_WEATHER_UNTIL).and_then(sky::as_int);
+        let Ok(id) = h.mint.mint() else {
+            eprintln!("worldd: the sky's timer ids are spent");
+            return;
+        };
+        let (world, name) = (
+            h.daylight.world,
+            Name::new(sky::T_WEATHER).expect("a constant name"),
+        );
+        let due = next.max(now);
+        let mut recs = Vec::new();
+        if let Some(old) = h.timers.insert(name.clone(), id) {
+            let _ = h.due.clear(world, old);
+            recs.push(TimerRec::Clear { timer: old });
+        }
+        recs.push(TimerRec::Set {
+            timer: id,
+            due,
+            name: name.clone(),
+        });
+        let _ = h.due.set(Timer {
+            node: world,
+            id,
+            due,
+            name,
+        });
+        let timers = Effect {
+            envelope: Clock::own(world, now),
+            body: Body::Timers(recs),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write_own(vec![timers], "the sky's weather timer");
     }
 
     /// After the creator's batch commits: E6's weather write (its event, and the weather timer set for its end).
@@ -8677,6 +8744,216 @@ mod tests {
             events.last().map(|(_, n)| n.as_str()),
             Some(sky::EV_WEATHER),
             "E6's weather event follows the creator's record"
+        );
+    }
+
+    /// #5073 follow-up: a creator's weather (the panel's Lightning: with a strike) is undone to the weather before it,
+    /// through the same served undo the page and the agent send: the kind, its levels and E6's next change as they
+    /// were, the creator's end and the strike read as none (0 and [], as T6 has no unset), and E6's weather timer due
+    /// where it was. The edit log names the undo (`souls:undone`) and the redo (`souls:redone`) by the creator, and
+    /// the redo gives the storm and its end back.
+    #[test]
+    fn a_creators_weather_is_undone_to_the_weather_before_it_and_redone() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let until: i64 = 40 * 3_600_000_000;
+        let storm: Vec<Op> = [
+            (
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            (sky::F_CLOUD, int(100)),
+            (sky::F_RAIN, int(90)),
+            (sky::F_WIND, int(80)),
+            (sky::F_WEATHER_UNTIL, int(until)),
+            // The panel's Lightning: the storm and one strike, in one batch (#5006 row 13).
+            (
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ]
+        .into_iter()
+        .map(|(field, to)| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        })
+        .collect();
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let run = |i: Intent, tick: i64| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&storm)), 2);
+        assert_eq!(kind, 2, "stale");
+        let (kind, reason, now) = run(intent(2, now, parameters(&storm)), 4);
+        assert_eq!(kind, 1, "the storm is set: {reason:?}");
+        let (kind, reason, now) = run(intent(3, now, parameters_of(&Asked::Undo)), 6);
+        assert_eq!(kind, 1, "the storm is undone: {reason:?}");
+        let (kind, reason, _) = run(intent(4, now, parameters_of(&Asked::Redo)), 8);
+        assert_eq!(kind, 1, "and redone: {reason:?}");
+        world.stop();
+        // The world node's fields and E6's weather timer: before the storm, after its undo, after the redo.
+        let at = |live: &Replica| {
+            let tree = live.tree();
+            let f = tree.node(tree.root()).unwrap().fields().clone();
+            let due: Vec<i64> = tree
+                .timers()
+                .iter()
+                .filter(|(_, t)| t.name.as_str() == sky::T_WEATHER)
+                .map(|(_, t)| t.due)
+                .collect();
+            (f, due)
+        };
+        let mut live = initial;
+        let mut snaps = Vec::new();
+        let mut log = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            let named: Vec<(Actor, String)> = part
+                .effects
+                .iter()
+                .flat_map(|e| {
+                    e.events
+                        .iter()
+                        .flatten()
+                        .map(move |ev| (e.envelope.actor, ev.name.as_str().to_owned()))
+                })
+                .collect();
+            // Snapshots just before the storm's part, the undo's and the redo's (each by the creator).
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                snaps.push(at(&live));
+            }
+            log.extend(named);
+            live.apply(&part).unwrap();
+        }
+        snaps.push(at(&live));
+        let [before, stormy, undone, redone] = &snaps[..] else {
+            panic!(
+                "the storm, its undo and its redo: {} snapshots",
+                snaps.len()
+            )
+        };
+        let weather = [
+            sky::F_WEATHER,
+            sky::F_CLOUD,
+            sky::F_RAIN,
+            sky::F_WIND,
+            sky::F_WEATHER_NEXT,
+        ];
+        let of = |f: &BTreeMap<u64, Value>| weather.map(|k| f.get(&k).cloned());
+        assert_ne!(
+            of(&before.0),
+            of(&stormy.0),
+            "the storm changed the weather"
+        );
+        assert_eq!(
+            of(&undone.0),
+            of(&before.0),
+            "the undo gives the weather before the storm back"
+        );
+        assert_eq!(before.0.get(&sky::F_WEATHER_UNTIL), None);
+        assert_eq!(
+            undone.0.get(&sky::F_WEATHER_UNTIL),
+            Some(&Value::Uint(0)),
+            "the creator's end reads as none"
+        );
+        assert_eq!(
+            undone.0.get(&sky::F_STRIKE),
+            Some(&Value::Array(Vec::new())),
+            "no strike"
+        );
+        let mut same = undone.0.clone();
+        same.remove(&sky::F_WEATHER_UNTIL);
+        same.remove(&sky::F_STRIKE);
+        assert_eq!(same, before.0, "nothing else on the world node moved");
+        assert_eq!(undone.1, before.1, "E6's weather timer is due where it was");
+        assert_eq!(
+            of(&redone.0),
+            of(&stormy.0),
+            "the redo gives the storm back"
+        );
+        assert_eq!(redone.0.get(&sky::F_WEATHER_UNTIL), Some(&int(until)));
+        assert_eq!(
+            redone.1,
+            [until],
+            "the storm's timer is due at its end again"
+        );
+        let mine: Vec<&str> = log
+            .iter()
+            .filter(|(a, _)| *a == Actor::Creator(creator))
+            .map(|(_, n)| n.as_str())
+            .collect();
+        assert!(
+            mine.contains(&sim::edit::undo::EV_UNDONE)
+                && mine.contains(&sim::edit::undo::EV_REDONE),
+            "the edit log names the undo and the redo: {mine:?}"
+        );
+        let first = |e: &str| mine.iter().position(|n| *n == e);
+        assert!(
+            first(sim::edit::undo::EV_UNDONE) < first(sim::edit::undo::EV_REDONE),
+            "the undo before the redo: {mine:?}"
         );
     }
 
