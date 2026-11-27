@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {Group,Mesh,BoxGeometry,MeshBasicMaterial,Vector3,PerspectiveCamera,PlaneGeometry} from 'three';
+import {Group,Mesh,BoxGeometry,MeshBasicMaterial,Vector3,PerspectiveCamera,PlaneGeometry,ShaderMaterial} from 'three';
 import{FollowGeometry,FollowCamera,FOLLOW_LIMITS,publishedFollowGround}from'./follow-camera.ts';import{DisplayedCameraObserver}from'./observation.ts';
 const v=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 function box(){return new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());}
@@ -20,3 +20,5 @@ test('selected published ground remains bounded and distinct across recorded sce
 test('ground refusal and sweep refusal remain distinct in actual policy output',()=>{const {q}=space(),camera=new PerspectiveCamera(45,1,.1,100);camera.position.set(0,5,10);const aim=v(0,1,0);camera.lookAt(aim);camera.updateMatrixWorld(true);let r=new FollowCamera().step(subject(2),camera,aim,1/60,q,()=>null);assert.equal(r.reason,'ground-unavailable');assert.deepEqual(r.motion,{groundY:null,sweep:'clear',unknown:null,unknownMesh:null});q.segment=()=>{q.stats.unknown='unsupported-deformation-or-raycast';return'unknown';};r=new FollowCamera().step(subject(2),camera,aim,1/60,q,()=>0);assert.equal(r.reason,'motion-unknown');assert.equal(r.motion?.unknown,'unsupported-deformation-or-raycast');});
 
 test('unknown geometry retains a bounded concrete first offender without querying its custom raycast',()=>{const {g,q}=space(),m=box();g.name='owned-static';m.name='x'.repeat(300);m.raycast=()=>{throw Error('custom picking invoked');};g.add(m);g.updateMatrixWorld(true);q.prepare([g],'1');assert.equal(q.segment(v(-4),v(4)),'unknown');assert.equal(q.stats.unknownMesh?.name,'x'.repeat(128));assert.equal(q.stats.unknownMesh?.root,'owned-static');assert.equal(q.stats.unknownMesh?.customRaycast,true);assert.equal(q.stats.unknownMesh?.skinned,false);});
+
+test('explicit colour-pass-empty shadow proxies do not obstruct; other custom raycasts remain unknown',()=>{const {g,q}=space(),m=new Mesh(new BoxGeometry(2,2,2),new ShaderMaterial({colorWrite:false,depthWrite:false}));m.userData.shadowProxy=true;m.material.name='shadow-proxy';m.raycast=()=>{throw Error('picking must not run');};g.add(m);g.updateMatrixWorld(true);q.prepare([g],'1');assert.equal(q.segment(v(-4),v(4)),'clear');m.material.colorWrite=true;q.prepare([g],'1');assert.equal(q.segment(v(-4),v(4)),'unknown');m.material.colorWrite=false;m.userData.shadowProxy=false;q.prepare([g],'1');assert.equal(q.segment(v(-4),v(4)),'unknown');});

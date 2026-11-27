@@ -41,7 +41,11 @@ export class FollowGeometry{
  }
  segment(from:Vector3,to:Vector3):Sight{
   const unknown=(reason:string,mesh?:Mesh):Sight=>{this.stats.unknown=reason;if(mesh){const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];this.stats.unknownMesh={name:mesh.name.slice(0,128),type:mesh.type.slice(0,64),constructor:mesh.constructor.name.slice(0,64),root:this.rootOf.get(mesh)?.name.slice(0,128)??null,geometry:mesh.geometry.type.slice(0,64),vertices:mesh.geometry.attributes.position?.count??null,skinned:!!(mesh as Mesh&{isSkinnedMesh?:boolean}).isSkinnedMesh,morphCount:mesh.geometry.morphAttributes.position?.length??0,customRaycast:mesh.raycast!==Mesh.prototype.raycast,shadowProxy:mesh.userData.shadowProxy===true,materialCount:materials.length,materials:materials.slice(0,4).map(m=>({name:m.name.slice(0,64),type:m.type.slice(0,64),visible:m.visible,colorWrite:m.colorWrite,depthWrite:m.depthWrite,transparent:m.transparent,opacity:m.opacity}))};}return'unknown';};this.stats.queries++;if(!this.stats.complete)return'unknown';const length=from.distanceTo(to);if(length===0)return'clear';let invalidMatrix=false;
-  for(const mesh of this.meshes){if(!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap',mesh);if(materials.every(m=>!m.visible||m.transparent&&m.opacity<.5))continue;
+  for(const mesh of this.meshes){if(!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap',mesh);
+   // The renderer's explicit shadow proxy clips every vertex in the colour pass.
+   // Its disabled picking hook is not unsupported visible geometry.
+   if(mesh.userData.shadowProxy===true&&materials.length===1&&materials[0].name==='shadow-proxy'&&materials[0].type==='ShaderMaterial'&&!materials[0].colorWrite&&!materials[0].depthWrite)continue;
+   if(materials.every(m=>!m.visible||m.transparent&&m.opacity<.5))continue;
    const g=mesh.geometry,bounds=this.bounds.get(g),p=g.attributes.position;if(!bounds||bounds.next<p.count)return unknown('bounds-incomplete',mesh);
    // Unsupported deformation has no proven conservative bounds. Refuse before culling.
    if((mesh as Mesh&{isSkinnedMesh?:boolean}).isSkinnedMesh||g.morphAttributes.position?.length||mesh.raycast!==Mesh.prototype.raycast&&!(mesh as InstancedMesh).isInstancedMesh)return unknown('unsupported-deformation-or-raycast',mesh);
