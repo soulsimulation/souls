@@ -496,6 +496,69 @@ fn a_childs_change_leaves_the_record_holding_its_parents_big_field_as_it_was() {
     assert_eq!(n.fields().get(&TERRAIN), Some(&terrain));
 }
 
+/// Eden lost its terrain on 25 Nov: a build from before #4713, put back after a newer one had checkpointed the world,
+/// read the ground's record, left out key 0 (its terrain's record), and every checkpoint after held the ground without
+/// it. A node's record with a key this build does not read is refused by name at restore, never read in part.
+#[test]
+fn a_records_key_this_build_does_not_read_is_refused_at_restore() {
+    use replica::encode::{Value, decode, encode};
+    use replica::ids::Purpose;
+    let h = header();
+    let tree = base(&h);
+    let whole = tree.seal_whole().unwrap();
+    let mut records = std::collections::BTreeMap::new();
+    for (h, b) in &whole.nodes {
+        records.insert(h.to_bytes(), b.clone());
+    }
+    let read = |records: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>, a: &[(replica::world_model::Audience, Vec<u8>)]| {
+        Tree::unseal(a, &mut |h| {
+            records.get(h).cloned().ok_or(Refusal {
+                name: "checkpoint-missing",
+                detail: String::new(),
+            })
+        })
+    };
+    let map = |b: &[u8]| match decode(b).unwrap().value {
+        Value::Map(m) => m,
+        _ => unreachable!("a record is a map"),
+    };
+    let label = |m: &std::collections::BTreeMap<u64, Value>| match m.get(&5).or(m.get(&1)) {
+        Some(Value::Map(a)) if a.get(&1) == Some(&Value::Uint(1)) => Purpose::StatePublic,
+        _ => Purpose::StatePrivate,
+    };
+    // As written, the records read back.
+    let mut audiences = Vec::new();
+    for (a, ah, ab) in &whole.audiences {
+        records.insert(ah.to_bytes(), ab.clone());
+        audiences.push((*a, ah.to_bytes()));
+    }
+    assert!(read(&records, &audiences).is_ok(), "the records as sealed");
+    // The first audience's first top with a key no build reads yet, and its audience's record naming it.
+    let (a, _, ab) = &whole.audiences[0];
+    let mut am = map(ab);
+    let Some(Value::Array(tops)) = am.get_mut(&2) else {
+        unreachable!("an audience's tops")
+    };
+    let Value::Bytes(top) = tops[0].clone() else {
+        unreachable!("a top's hash")
+    };
+    let mut tm = map(&records[&top]);
+    tm.insert(11, Value::Uint(1));
+    let tb = encode(&Value::Map(tm.clone())).unwrap();
+    let th = Hash::of(label(&tm), &tb).to_bytes();
+    records.insert(th.clone(), tb);
+    tops[0] = Value::Bytes(th);
+    let ab = encode(&Value::Map(am.clone())).unwrap();
+    let ah = Hash::of(label(&am), &ab).to_bytes();
+    records.insert(ah.clone(), ab);
+    audiences[0] = (*a, ah);
+    let e = read(&records, &audiences)
+        .err()
+        .expect("a record holding a key this build does not read");
+    assert_eq!(e.name, "checkpoint-record");
+    assert!(e.detail.contains("key 11"), "{}", e.detail);
+}
+
 /// A made-up world for the let go: a tree of records by hash (`{1: tag, 10: [children]}`), every version kept, and the
 /// tags of leaves served withheld (empty bytes).
 #[derive(Default)]
