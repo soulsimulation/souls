@@ -67,8 +67,7 @@ function changed(fix, snapshots, inspectChange) {
   const actual = inspectChange(found.root, fix.from, fix.to);
   requireThat(actual.some(Boolean) && fix.paths.every(p => p?.trim() && !isAbsolute(p) && !p.startsWith('../') && actual.includes(p)), 'change-paths-mismatch');
 }
-function reviewThird(review, attempts, owner, current, repair, now, lineChanged) {
-  const previous = attempts.slice(-2);
+function reviewEvidence(review, previous, owner, current, repair, now, lineChanged) {
   requireThat(review?.evidenceOnly === true && review.reviewer && review.reviewer !== owner, 'independent-review-required');
   requireThat(review.decision === 'TRY', 'review-escalate-or-missing');
   requireThat(Date.parse(review.at) > Date.parse(previous.at(-1).endedAt) && Date.parse(review.at) <= now + 1000, 'review-stale');
@@ -79,6 +78,17 @@ function reviewThird(review, attempts, owner, current, repair, now, lineChanged)
   const path = resolve(repair.root, review.change.path);
   requireThat(within(repair.root, path) && readFileSync(path, 'utf8').split('\n').length >= review.change.line, 'review-file-line-invalid');
   requireThat(lineChanged(repair.root, repair.from, repair.to, review.change.path, review.change.line), 'review-line-not-changed');
+}
+function reviewContinuation(continuation, review, cycle, chain, ledger) {
+  requireThat(continuation && continuation.cycle === cycle.id && continuation.slot === cycle.cursor &&
+    continuation.repairAttempt === cycle.chain + 1, 'continuation-slot-mismatch');
+  requireThat(chain.length === cycle.chain && continuation.ledgerHash === digest(readFileSync(ledger)), 'continuation-ledger-mismatch');
+  const authority = continuation.authorization;
+  requireThat(/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[1-9][0-9]*$/.test(authority?.issue ?? '') &&
+    authority?.directive?.trim() && authority.evidence?.file && authority.evidence?.hash, 'continuation-authorization-required');
+  requireThat(digest(readFileSync(authority.evidence.file)) === authority.evidence.hash, 'continuation-authorization-changed');
+  // The independent reviewer approves this exact one-use course decision, not a generic retry allowance.
+  requireThat(review?.continuationHash === digest(continuation), 'continuation-review-mismatch');
 }
 function verifyRecords(state) {
   for (const attempt of state.attempts) {
@@ -142,7 +152,7 @@ const production = { source, changed: (root, from, to) => git(root, 'diff', '--n
   boot: o => o.kind === 'native-page' ? startNativePageFixture(o) : o.kind === 'v2-bodies' ? startV2BodyFixture(o) : o.kind === 'v2-account' ? startV2AccountFixture(o) : (requireThat(o.kind === undefined, 'unknown-fixture-kind'), startWorld(o)), browser: openBrowser, stop: stopOwnedChild, portFree, now: () => Date.now(), test: false };
 
 /** Exactly one invocation = one fresh owned lifecycle. A failed slot cannot be replaced by another sample id.
- * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot's repair loop is capped3.
+ * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot defaults to three attempts; explicit reviewed continuations retain that same slot.
  * A material corrective cycle must be explicit; changing HEAD never starts one. No URL parameter is accepted. */
 export const runOwnedAttempt = options => run(options, production);
 
@@ -230,7 +240,8 @@ async function run(o, d) {
     } else requireThat(digest(cycle.plan) === digest(o.cycle.plan) && digest(cycle.arms) === digest(o.cycle.arms) && digest(cycle.fix) === digest(o.cycle.fix), 'cycle-plan-changed');
     requireThat((cycle.role ?? 'journey') === role.role && digest(cycle.measurement ?? null) === digest(o.measurement ?? null), 'measurement-plan-changed');
     requireThat(cycle.cursor < cycle.plan.length, 'passing-scenario-rerun');
-    requireThat(!cycle.stopped && cycle.chain < config.iterationCap, 'repair-ceiling');
+    requireThat(!cycle.stopped && (cycle.chain < config.iterationCap || o.continuation), 'repair-ceiling');
+    requireThat(!o.continuation || cycle.chain >= config.iterationCap, 'continuation-not-needed');
     const slot = cycle.plan[cycle.cursor];
     requireThat(slot.arm === o.arm && slot.repeat === o.repeat, 'failed-slot-cannot-be-skipped');
     if (cycle.driverPath) requireThat(o.driver?.path === cycle.driverPath, 'driver-path-changed');
@@ -243,7 +254,10 @@ async function run(o, d) {
       if (chain.length) requireThat(!sameSource(chain.at(-1).source, current), 'unchanged-retry');
       requireThat(Object.values(planned).some(s => s.root === resolve(o.repair.root) && s.head === o.repair.from), 'repair-from-mismatch');
     }
-    if (cycle.chain === 2) reviewThird(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    if (cycle.chain >= config.iterationCap) {
+      reviewContinuation(o.continuation, o.review, cycle, chain, ledger);
+      reviewEvidence(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    } else if (cycle.chain === 2) reviewEvidence(o.review, chain.slice(-2), o.owner, current, o.repair, d.now(), d.lineChanged);
     checkPort(o.world.port);
     requireThat(await d.portFree(o.world.port), 'occupied-resource');
     controller.signal.throwIfAborted();
@@ -255,7 +269,7 @@ async function run(o, d) {
     report = { version: 1, qualified: false, injected: d.test, owner: o.owner, cycle: cycle.id, slot: cycle.cursor,
       arm: slot.arm, repeat: slot.repeat, repairAttempt: cycle.chain, cumulativeRun: state.attempts.length + 1,
       startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: o.review?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
-      paths, driver: o.driver ?? null, role: role.role, measurement: o.measurement ?? null, videoClass: role.role === 'measurement' ? 'measurement-original' : 'ordinary-proof-original', browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [], evidence: [], teardown: {}, review: o.review ?? null };
+      paths, driver: o.driver ?? null, role: role.role, measurement: o.measurement ?? null, videoClass: role.role === 'measurement' ? 'measurement-original' : 'ordinary-proof-original', browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [], evidence: [], teardown: {}, review: o.review ?? null, continuation: o.continuation ?? null };
     cycle.inFlight = paths.dir; save(); // a crash remains an explicit unfinished ownership record
     requireThat(!state.attempts.some(a => a.runDir === paths.dir), 'reused-run-directory');
     const world = await d.boot({ ...o.world, checkout: current.product.root, data: paths.data, fresh: false, log: paths.log,

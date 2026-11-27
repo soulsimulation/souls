@@ -67,7 +67,7 @@ test('failed assertion preserves immutable observations, fresh retry, and pins t
   writeFileSync(join(one.paths.dir, 'explanation.md'), 'tampered'); f.o.repeat = 2;
   await assert.rejects(f.runner(f.o), /evidence-changed/);
 });
-test('third attempt requires fresh independent evidence-bound review and is the last attempt', async t => {
+test('third attempt requires fresh independent evidence-bound review and is the last default attempt', async t => {
   let changedLine = true; const f = setup(t, { lineChanged: () => changedLine }); f.o.journey = async c => c.check('contact', false);
   await f.runner(f.o); f.change('p2', 'adjust hand approach'); await f.runner(f.o); f.change('p3', 'repair target fixture');
   await assert.rejects(f.runner(f.o), /independent-review-required/);
@@ -85,6 +85,58 @@ test('third attempt requires fresh independent evidence-bound review and is the 
   changedLine = false; await assert.rejects(f.runner(f.o), /review-line-not-changed/); changedLine = true;
   const third = await f.runner(f.o); assert.equal(third.repairAttempt, 3); assert.equal(third.status, 'FAIL');
   f.change('p4'); await assert.rejects(f.runner(f.o), /repair-ceiling/);
+});
+for (const fourthPasses of [false, true]) test(`reviewed continuation preserves original slot and cumulative failures; fourth passes=${fourthPasses}`, async t => {
+  const f = setup(t), hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  f.o.history = { count: 16, evidence: [] };
+  f.o.journey = async c => c.check('contact', false);
+  await f.runner(f.o); f.change('p2', 'second repair'); await f.runner(f.o); f.change('p3', 'third repair');
+  const review = (attempts, hypothesis) => ({ reviewer: '/test/independent-reviewer', evidenceOnly: true, decision: 'TRY',
+    at: new Date(f.now()).toISOString(), evidence: attempts.map(a => a.reportHash),
+    source: { product: f.identity(f.product), tool: f.identity(f.root) }, hypothesis, change: { path: 'fix.ts', line: 1 } });
+  f.o.review = review(f.ledger().attempts, 'third diagnosis'); await f.runner(f.o);
+  const original = f.ledger().attempts.map(a => ({ ...a, bytes: readFileSync(a.report) }));
+  const authority = join(f.root, 'authorization.json'); writeFileSync(authority, JSON.stringify({ issue: 5175, directive: 'Continue diagnosed recovery with independent review' }));
+  const continuation = () => ({ cycle: f.o.cycle.id, slot: 0, repairAttempt: f.ledger().cycles[0].chain + 1,
+    ledgerHash: hash(readFileSync(f.o.ledger)), authorization: { issue: 'https://github.com/soulsimulation/souls/issues/5175',
+      directive: 'Continue diagnosed recovery with independent review', evidence: { file: authority, hash: hash(readFileSync(authority)) } } });
+  f.o.continuation = continuation(); await assert.rejects(f.runner(f.o), /unchanged-retry/);
+  f.change('p4', 'fourth repair'); f.o.continuation = continuation();
+  f.o.review = { ...review(f.ledger().attempts, 'fourth independent diagnosis'), continuationHash: hash(JSON.stringify(f.o.continuation)) };
+  const good = structuredClone(f.o.continuation), goodReview = structuredClone(f.o.review);
+  for (const edit of [c => c.cycle = 'replacement', c => c.slot = 1, c => c.repairAttempt = 3]) {
+    f.o.continuation = structuredClone(good); edit(f.o.continuation);
+    await assert.rejects(f.runner(f.o), /continuation-slot-mismatch/);
+  }
+  f.o.continuation = { ...good, ledgerHash: 'stale' }; await assert.rejects(f.runner(f.o), /continuation-ledger-mismatch/);
+  f.o.continuation = { ...good, authorization: {} }; await assert.rejects(f.runner(f.o), /continuation-authorization-required/);
+  f.o.continuation = { ...good, authorization: { ...good.authorization, evidence: { file: authority, hash: 'stale' } } };
+  await assert.rejects(f.runner(f.o), /continuation-authorization-changed/);
+  f.o.continuation = { ...good, authorization: { ...good.authorization, directive: 'different permission' } };
+  await assert.rejects(f.runner(f.o), /continuation-review-mismatch/); f.o.continuation = good;
+  for (const [edit, error] of [
+    [r => r.reviewer = f.o.owner, /independent-review-required/],
+    [r => r.evidence = r.evidence.slice(1), /review-evidence-mismatch/],
+    [r => r.source.product.head = 'stale', /review-source-mismatch/],
+    [r => r.at = f.ledger().attempts.at(-1).endedAt, /review-stale/],
+    [r => r.hypothesis = f.ledger().attempts[0].hypothesis, /different-hypothesis-required/],
+    [r => r.change.path = 'not-the-repair.ts', /review-file-line-required/],
+  ]) { f.o.review = structuredClone(goodReview); edit(f.o.review); await assert.rejects(f.runner(f.o), error); }
+  f.o.review = goodReview; assert.equal(f.children.length, 3, 'all refusals precede resource allocation');
+  f.o.journey = async c => c.check('contact', fourthPasses);
+  const fourth = await f.runner(f.o);
+  assert.equal(fourth.repairAttempt, 4); assert.equal(fourth.cumulativeRun, 4); assert.equal(fourth.captureOrdinal, 20);
+  assert.equal(fourth.slot, 0); assert.deepEqual(fourth.continuation, good); assert.equal(fourth.teardown.worldStopped, true);
+  for (const a of original) assert.deepEqual(readFileSync(a.report), a.bytes);
+  assert.equal(f.ledger().attempts.length, 4); assert.equal(f.ledger().cycles.length, 1);
+  f.change('p5', 'fifth repair');
+  await assert.rejects(f.runner(f.o), fourthPasses ? /passing-scenario-rerun/ : /continuation-slot-mismatch/);
+  if (!fourthPasses) {
+    delete f.o.continuation; await assert.rejects(f.runner(f.o), /repair-ceiling/);
+    f.o.continuation = continuation(); f.o.review = { ...review(f.ledger().attempts, 'fifth independent diagnosis'), continuationHash: hash(JSON.stringify(f.o.continuation)) };
+    f.o.journey = async c => c.check('contact', true); const fifth = await f.runner(f.o);
+    assert.equal(fifth.repairAttempt, 5); assert.equal(fifth.captureOrdinal, 21); assert.equal(fifth.status, 'PASS');
+  }
 });
 test('two predeclared repeats per arm allow passes, but a failure cannot be sidestepped and counts all three tries', async t => {
   const f = setup(t); f.o.cycle.arms.baseline = { root: f.product, head: 'p1' };

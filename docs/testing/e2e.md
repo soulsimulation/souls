@@ -114,7 +114,7 @@ automatic per-commit reset or a way to repeat a passing scenario.
 The cycle has an explicit `id`, `fix: {root, from, to, paths, scope}`, pinned `arms: {baseline: {root, head},
 candidate: {root, head}}` and ordered `plan: [{arm, repeat}, ...]`. Declare both repeats per arm before measurement.
 Each passing slot advances to the next planned measurement. A failure pins that slot: changing repeat/sample IDs
-cannot skip it, and all tries, including boot aborts, consume its three-attempt repair ceiling. Every retry needs
+cannot skip it, and all tries, including boot aborts, consume its default three-attempt repair ceiling. Every retry needs
 a relevant committed change (`repair`, with the same change fields plus a concrete `hypothesis`). A commit alone
 does not reset counters. A completed passing plan cannot rerun without an explicitly named new corrective cycle
 and a relevant material change. Keep historical capture count and hashed original evidence in `history`; capture
@@ -125,6 +125,20 @@ account), `evidenceOnly: true`, time after the preceding attempt, both preceding
 the current source identities, a different concrete hypothesis, and `change: {path, line}` in the actual committed
 repair. Only `decision: 'TRY'` proceeds; missing, stale, self, source-mismatched or `ESCALATE` reviews stop. The
 ledger pins the implementing identity. Never remove a lock or edit a failed record to manufacture another try.
+
+An explicit owner-authorized continuation may permit one further diagnosed repair without changing that default.
+Keep the original ledger, cycle, slot, plan, failed evidence and lane owner. Pass `continuation` with `cycle`,
+`slot`, the next cumulative `repairAttempt`, the SHA256 `ledgerHash` of the unchanged ledger bytes, and
+`authorization: {issue, directive, evidence: {file, hash}}`. The issue must contain the authorization before
+execution; its retained evidence bytes are hash-checked. This is an auditable declaration, not automatic permission:
+the independent reviewer verifies the owner's direction and the bounded next test against that issue.
+The fresh `review` must bind **all** failed reports in that slot, the current material source correction, a new
+hypothesis, and `continuationHash` (SHA256 of `JSON.stringify(continuation)`). The declaration is single-use:
+the next ordinal and ledger hash change after allocation. An additional failure needs another diagnosis and
+reviewed declaration. Omit continuation on later planned slots; it cannot carry across a pass or reset counters.
+Ordinary unchanged-source, stopped/in-flight ownership, cleanup, evidence, source and timeout guards still apply.
+Imported-budget recovery has its own cap and is not overridden by this option. Never treat harness test success
+or a continuation declaration as product acceptance.
 
 Private reports retain screenshots, accessibility, console, world-log tail, explanation, source identities,
 capture/repair numbering and teardown results without overwrite. Boot abort, interruption, evidence failure and
