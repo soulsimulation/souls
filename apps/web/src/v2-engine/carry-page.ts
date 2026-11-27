@@ -15,10 +15,10 @@ export const setNativeBodyEntities=(map:ReadonlyMap<string,string>)=>{bodies=map
 export const nativeBodyEntities=()=>bodies;
 export const setCarryPage=(parts:CarriedParts|null)=>{current=parts;setCarryHeading(parts?carryHeadingAt:null);};
 /** carry-heading.ts: the heading (atan2(dz, dx), as bridge.ts reads a turn) the world has the body drawn as
- *  `entity` turned to at `at` µs while it is in an unreleased native hold, else null. The live take only: a replayed past
+ *  `entity` turned to at `at` µs while it is in an unreleased native hold, or has let go and not stepped away, else null. The live take only: a replayed past
  *  builds its chunks in the history worker, which has no carry feed, so its carriers still face their travel. */
 export function carryHeadingAt(entity:string,at:number,byBody:ReadonlyMap<string,string>=bodies,source:CarriedParts|null=current):number|null{
- if(!source)return null;const body=source.recorded.holder(at,b=>byBody.get(b)===entity),pose=body?source.recorded.pose(body,at):null;
+ if(!source)return null;const body=source.recorded.facing(at,b=>byBody.get(b)===entity),pose=body?source.recorded.pose(body,at):null;
  return pose?-2*Math.atan2(pose.q[2],pose.q[0]):null;}
 export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:CarriedParts|null=current):CarryPageFrame|null{
  if(!source)return null;const records=source.recorded,loads:Record<string,NativePose>={},bodies:Record<string,NativeCarryBody>={},observations=records.observations(at),errors:string[]=[],evidence:CarryPageFrame['evidence']={},ambiguous=new Set<string>();
