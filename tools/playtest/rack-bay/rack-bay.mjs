@@ -182,16 +182,19 @@ export async function spareFrame(god, { run, both }, seats, bodies, at = AT, log
   const placed = await god('place', 'mars:rack_upright', '--in', ground, '--at', `${x},0,${z}`, '--title', SPARE);
   log(`creator: place mars:rack_upright --title "${SPARE}" -> ${placed.ok ? 'ok' : `REFUSED ${placed.code ?? ''} ${placed.detail ?? ''}`}`);
   if (!placed.ok) throw Object.assign(new Error(`the creator's place was refused ${placed.code}`), { answer: placed });
-  let seen = [];
-  for (let i = 0; i < 40 && !seen.length; i++) {
-    await run('ada', 'look');   // a query reads the copy as it is; a look brings it current first
-    seen =((await seats.ada.cli('query', JSON.stringify([{ find: 'spare' }]))).answers ?? []).flatMap((a) => a.found ?? []).filter((f) => f.name === SPARE);
-    if (!seen.length) await new Promise((r) => setTimeout(r, 500));
+  const seenBy = { ada: [], bo: [] };
+  for (let i = 0; i < 40 && Object.values(seenBy).some((rows) => !rows.length); i++) {
+    // Each carrier names the thing from its own copy: refresh and query both before either grips it.
+    await both(['ada', 'look'], ['bo', 'look']);
+    for (const label of ['ada', 'bo']) seenBy[label] = ((await seats[label].cli('query', JSON.stringify([{ find: 'spare' }]))).answers ?? [])
+      .flatMap((a) => a.found ?? []).filter((f) => f.name === SPARE);
+    if (Object.values(seenBy).some((rows) => !rows.length)) await new Promise((r) => setTimeout(r, 500));
   }
-  if (!seen.length) {
-    const frames = ((await seats.ada.cli('query', JSON.stringify([{ find: 'rack_upright' }]))).answers ?? []).flatMap((a) => a.found ?? []);
-    throw new Error(`Ada's copy shows nothing named "${SPARE}" (its frames: ${frames.map((f) => `${f.id} "${f.name}"`).join(', ')}; placed ${JSON.stringify(placed.names ?? placed)})`);
+  for (const label of ['ada', 'bo']) if (!seenBy[label].length) {
+    const frames = ((await seats[label].cli('query', JSON.stringify([{ find: 'rack_upright' }]))).answers ?? []).flatMap((a) => a.found ?? []);
+    throw new Error(`${label}'s copy shows nothing named "${SPARE}" (its frames: ${frames.map((f) => `${f.id} "${f.name}"`).join(', ')}; placed ${JSON.stringify(placed.names ?? placed)})`);
   }
+  const seen = seenBy.ada;
   await both(['ada', 'carry', 'grip', SPARE, 'back'], ['bo', 'carry', 'grip', SPARE, 'front']);
   const { crew } = await run('ada', 'carry', 'offer', bodies.bo);
   await run('bo', 'carry', 'accept', crew);

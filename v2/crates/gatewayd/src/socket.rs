@@ -25,7 +25,7 @@ use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token, View, ViewToken};
 use crate::views;
-use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
+use crate::world_link::{FRAME_MOST, KEPT_MOST, RESTARTING, SLOW_DOWN, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
 
@@ -80,6 +80,15 @@ const MESSAGE_MOST: usize = LIMITS.frame_bytes as usize;
 const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
+/// The close of a socket that sent a message over [`MESSAGE_MOST`] (O8, #2805): 1009, Message Too Big, refused from
+/// its header's length, unread.
+pub const TOO_BIG: u16 = 1009;
+pub const MESSAGE_TOO_BIG: &str = "message.too-big";
+/// The close of a socket that sent a frame the WebSocket protocol cannot read (O8): 1002, Protocol Error.
+pub const UNREADABLE: u16 = 1002;
+pub const FRAME_UNREADABLE: &str = "frame.unreadable";
+/// [`SLOW_DOWN`]'s plain words, in the refusal's detail.
+const SLOW_DOWN_WORDS: &str = "Too many of this Soul's intents are waiting at the gateway. Once one of them is answered, send it again under a sequence after the newest you sent.";
 
 /// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
 /// entries (`entries.rs`), a creator's bulk edits (#3695, `bulk.rs`) and uploads (#3697, `uploads.rs`).
@@ -231,9 +240,30 @@ async fn next_binary(socket: &mut WebSocket) -> Option<Vec<u8>> {
         match socket.recv().await? {
             Ok(Message::Binary(b)) => return Some(b.to_vec()),
             Ok(Message::Ping(_) | Message::Pong(_)) => {}
+            Err(e) => {
+                unreadable(socket, &e).await;
+                return None;
+            }
             _ => return None,
         }
     }
+}
+
+/// A socket sent what could not be read (O8, #2805): it is closed with the reason, [`MESSAGE_TOO_BIG`] for a message
+/// over [`MESSAGE_MOST`], else [`FRAME_UNREADABLE`], if it can still take a frame. One already gone takes nothing; the
+/// send is bounded either way.
+async fn unreadable(socket: &mut WebSocket, e: &axum::Error) {
+    // tungstenite's `Error::Capacity` (axum's error shows its inner one): the message's length was over the limit.
+    let (code, reason) = if e.to_string().starts_with("Space limit exceeded") {
+        (TOO_BIG, MESSAGE_TOO_BIG)
+    } else {
+        (UNREADABLE, FRAME_UNREADABLE)
+    };
+    let close = CloseFrame {
+        code,
+        reason: reason.into(),
+    };
+    let _ = tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
 }
 
 async fn send(socket: &mut WebSocket, frame: Vec<u8>) -> bool {
@@ -446,6 +476,10 @@ async fn serve(
                         crate::mailbox::on_text(&gw, grant, attached.session, t.as_str());
                         continue;
                     }
+                    Some(Err(e)) => {
+                        unreadable(&mut socket, &e).await;
+                        break;
+                    }
                     _ => break,
                 };
                 if !crate::creator::permits(&gw,actor,authority) {
@@ -463,8 +497,10 @@ async fn serve(
                     let _ = send(&mut socket, control(token::REFUSED)).await;
                     break;
                 }
-                if let Some(answer) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
-                    gw.receipts.write(&who, Outcome::Refusal);
+                if let Some((answer, counted)) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
+                    if counted {
+                        gw.receipts.write(&who, Outcome::Refusal);
+                    }
                     ok = send_agent(&mut socket, binary(answer), &behind, &mut let_go).await;
                 }
             }
@@ -612,6 +648,10 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                         crate::mailbox::on_view_text(&gw, &view.grants, t.as_str(), reply.clone());
                         continue;
                     }
+                    Some(Err(e)) => {
+                        unreadable(&mut socket, &e).await;
+                        break;
+                    }
                     _ => break,
                 };
                 if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
@@ -718,7 +758,9 @@ async fn stopped(closing: &mut tokio::sync::watch::Receiver<bool>) {
 }
 
 /// Reads an intent from the socket signed in as `session` and hands it to the world; the gateway's own answer to send
-/// now, if it gives one not kept (always a refusal).
+/// now, if it gives one not kept (always a refusal), and whether it is a line in the receipts file. Answers to bytes
+/// that are not an intent, to a sync request and [`SLOW_DOWN`] are not (O8, #2805): a flood of them would fill the
+/// file and the disk under it at the sender's rate, and none is usage.
 fn take_intent(
     gw: &Gateway,
     actor: Actor,
@@ -727,7 +769,7 @@ fn take_intent(
     bytes: Vec<u8>,
     received: u64,
     read: &mut u64,
-) -> Option<Vec<u8>> {
+) -> Option<(Vec<u8>, bool)> {
     // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
     if let Ok(d) = decode(&bytes)
         && let Value::Map(mut m) = d.value
@@ -739,14 +781,15 @@ fn take_intent(
             .collect();
         return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
-            Sent::Restarting => Some(sync_refused(n, RESTARTING)),
+            // A sync request is not charged against KEPT_MOST (`ask` never answers `Full`).
+            Sent::Restarting | Sent::Full(_) => Some((sync_refused(n, RESTARTING), false)),
         };
     }
     let intent = match decode_intent(&bytes) {
         Ok(i) => i,
         Err(r) => {
             let reason = Name::new(r.name).unwrap_or_else(|| unreachable!("a refusal's name"));
-            return Some(own_answer(Answer::Unread { reason }));
+            return Some((own_answer(Answer::Unread { reason }), false));
         }
     };
     *read = (*read).max(intent.sequence);
@@ -757,11 +800,12 @@ fn take_intent(
             intent.actor,
             intent.sequence,
             "intent-not-granted",
-        );
+        )
+        .map(|a| (a, true));
     }
     // I2: a kind definition naming an uploaded model this world does not hold as allowed never reaches the world
     if let Some(reason) = crate::uploads::edit_refusal(gw, &intent) {
-        return refuse(gw, grant, actor, intent.sequence, reason);
+        return refuse(gw, grant, actor, intent.sequence, reason).map(|a| (a, true));
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
@@ -778,7 +822,7 @@ fn take_intent(
         gw.holding(grant, sequence, session, crate::digest(&bytes))
     };
     if let Err(reason) = turn {
-        return Some(refused(actor, sequence, reason, gw.link.now()));
+        return Some((refused(actor, sequence, reason, gw.link.now()), true));
     }
     match gw
         .link
@@ -794,7 +838,28 @@ fn take_intent(
             if own.is_some() {
                 gw.unsent(grant, sequence);
             }
-            own
+            own.map(|a| (a, true))
+        }
+        // O8 (#2805): its agent's kept intents are at their bound. Answered on this socket alone, not kept: the gauge
+        // is logged at each power of two, so a flood writes a few lines, not one each.
+        Sent::Full(slowed) => {
+            gw.unsent(grant, sequence);
+            if slowed.is_power_of_two() {
+                (gw.log)(&format!(
+                    "an agent's intents kept here reached {} KiB; {slowed} intents refused {SLOW_DOWN} so far",
+                    KEPT_MOST >> 10
+                ));
+            }
+            let answer = own_answer(Answer::Refused {
+                actor,
+                sequence,
+                reason: Name::new(SLOW_DOWN).unwrap_or_else(|| unreachable!("a fixed name")),
+                now: gw.link.now(),
+                changed: Vec::new(),
+                op: None,
+                detail: Some(SLOW_DOWN_WORDS.to_owned()),
+            });
+            Some((answer, false))
         }
     }
 }

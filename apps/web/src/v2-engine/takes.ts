@@ -135,11 +135,16 @@ function turnedAt(turns: readonly Turn[], t: number, last: { heading: number; at
   for (const r of turns) {
     if (r.at > t) { if (!to && last.at === -Infinity) from = r.from; break; }
     if (r.at < last.at) continue;
-    if (to) from = to.to;
+    if (to) from = turnFrom(to, from, r.at);
     else if (last.at === -Infinity) from = r.from;
     to = r;
   }
   if (!to) return from;
+  return turnFrom(to, from, t);
+}
+
+/** A retarget starts from the heading already drawn, including an unfinished earlier turn. */
+function turnFrom(to: Turn, from: number, t: number): number {
   const d = ((to.to - from) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
   const u = Math.min(1, (t - to.at) / 1e6 * TURN_RATE / Math.max(Math.abs(d), 1e-9));
   return from + d * u * u * (3 - 2 * u);

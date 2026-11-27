@@ -3929,7 +3929,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
-        let real = crate::answers::now();
+        // The anchor pairs the world's time with the machine's wall clock, which viewers compare with their own: the
+        // world's clock runs ahead of the machine's by a step (O10, `measures::CLOCK_AHEAD_MS`).
+        let wall = crate::answers::now();
+        let ahead = crate::measures::CLOCK_AHEAD_MS.load(std::sync::atomic::Ordering::Relaxed);
+        let real = wall.saturating_add(ahead.saturating_mul(1000));
         let world =
             mapped_now(self.canonical.tree().time(), self.clock_seed, real).or_else(|_| {
                 if self.canonical.tree().time().is_empty() {
@@ -3944,7 +3948,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             header: self.header.hash().to_bytes(),
             newest_to: self.last_to,
             anchor_world: world,
-            anchor_wall_ms: u64::try_from(real.div_euclid(1000))
+            anchor_wall_ms: u64::try_from(wall.div_euclid(1000))
                 .map_err(|_| fault("stream-clock", "negative wall time"))?,
             quiet_until: quiet,
         };
