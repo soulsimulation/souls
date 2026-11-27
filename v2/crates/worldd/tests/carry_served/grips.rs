@@ -616,7 +616,11 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
         .act(
             "eden:walk",
             ground,
-            point(Vec3::new(back.x, 0, back.z + (back.z - at.z).signum() * 900_000)),
+            point(Vec3::new(
+                back.x,
+                0,
+                back.z + (back.z - at.z).signum() * 900_000,
+            )),
         )
         .await
         .expect("the back steps back");
@@ -648,5 +652,110 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
         w.windows(2).all(|p| p[0].holds == p[1].holds),
         "the same holds throughout"
     );
+    drop(served);
+}
+
+/// #5067 (reachable carriers, acceptance 2 and 3b; the retained frame case): a crew of two takes the loose 2.4 m rack
+/// frame standing, from its places along its own z (REACH beyond its outermost grips, as `carry:lift` measures them).
+/// Its back walks 2.5 m off: the carry breaks off (`souls:carriers-apart`) and the frame is set down. Each carrier then
+/// walks to its end where the client's approach aims it (`v2/client/src/carry/carry.mjs` `gripSpot`: along the frame's
+/// long axis if it lies, else its own z, at its places), and the same crew lifts it again: admitted, not refused
+/// `carry-grip-out-of-reach` (the approach stood 2.2 m off, 1420 mm from its grip, before).
+#[tokio::test(flavor = "multi_thread")]
+async fn grips_a_frame_set_down_by_carriers_apart_is_lifted_again_from_its_approach() {
+    let d = scratch("crelift");
+    let facts = grips_world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, frame) = (im.nodes["ground"], im.nodes["loose-upright"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut souls = Vec::new();
+    for (s, t) in ids.iter().zip(&tokens) {
+        souls.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    for (j, s) in souls.iter_mut().enumerate() {
+        s.act(
+            "eden:walk",
+            ground,
+            point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)),
+        )
+        .await
+        .expect("born");
+    }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
+    let l = Load::of(&construction("rack_upright.json")).unwrap();
+    // The client's approach (`gripSpot`): along its long axis if it lies, else its own z, front at its + place.
+    let approach = |p: &replica::pose::Pose| -> Vec<Vec3> {
+        let m = p.orientation.rotate(l.middle).unwrap();
+        let mid = Vec3::new(p.position.x + m.x, 0, p.position.z + m.z);
+        let v = match l.lies_along(p.orientation).unwrap() {
+            Some(v) => v,
+            None => {
+                let z = p.orientation.rotate(Vec3::new(0, 0, M)).unwrap();
+                [z.x, z.z]
+            }
+        };
+        let n = ((i128::from(v[0]).pow(2) + i128::from(v[1]).pow(2)).isqrt() as i64).max(1);
+        let [back, front] = l.places();
+        [front, back]
+            .iter()
+            .map(|d| Vec3::new(mid.x + v[0] * d / n, 0, mid.z + v[1] * d / n))
+            .collect()
+    };
+    let at = upright_at();
+    let places = places_north(at, &l, 2);
+    let carry = crew_at(&mut souls, &dir, ground, &bodies, &[0, 1], &places).await;
+    souls[0]
+        .act("part:take", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await
+        .expect("the crew takes the frame standing");
+    word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
+    let back = places[1];
+    souls[1]
+        .send(
+            "eden:walk",
+            ground,
+            point(Vec3::new(
+                back.x,
+                0,
+                back.z + (back.z - at.z).signum() * 2_500_000,
+            )),
+        )
+        .await;
+    let _ = souls[1].answer().await;
+    word_that(&dir, carry, "set down", |h| h.phase == grips::RELEASED).await;
+    said(&served);
+    assert_eq!(
+        broke(&dir).last().map(String::as_str),
+        Some("souls:carriers-apart"),
+        "the carry broke off and the frame was set down"
+    );
+    let laid = moves_of(&dir, frame).last().cloned().expect("set down");
+    let to = approach(&laid);
+    println!(
+        "set down at ({}, {}) mm; the front's approach ({}, {}) mm, the back's ({}, {}) mm",
+        laid.position.x / 1000,
+        laid.position.z / 1000,
+        to[0].x / 1000,
+        to[0].z / 1000,
+        to[1].x / 1000,
+        to[1].z / 1000
+    );
+    for (k, p) in to.iter().enumerate() {
+        souls[k].send("eden:walk", ground, point(*p)).await;
+    }
+    for s in souls.iter_mut() {
+        s.answer().await.expect("walks to its end");
+    }
+    together(&dir, &bodies, &to, 60).await;
+    let lift = souls[0]
+        .act("carry:lift", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await;
+    said(&served);
+    println!("lifted again by the same crew: {lift:?}");
+    assert_eq!(lift.map(|_| ()), Ok(()), "admitted from its approach");
     drop(served);
 }

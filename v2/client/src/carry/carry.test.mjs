@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
+import { MOUTH_CLEAR, REACH, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
 import { newCrew, nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
@@ -73,6 +73,23 @@ test('a grip is the load\'s place from its entry; a standing part\'s 2.2 m along
   near(walk({ do: 'grip', thing: id(4), end: 'right' }), [1.2e6, 0, 5.85e6], 'beside the frame');
   assert.equal(send({ do: 'grip', thing: id(4), end: 'up' }).code, 'carry-usage');
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
+});
+
+test('#5067: a frame standing on the floor is approached where carry:lift checks its grips, not 2.2 m off', () => {
+  // sim::activity::carry::Load::check_lift on a standing load: each end within GRIP_REACH (0.7 m) of its grip, which lies
+  // along the carriers' line from the load's middle by the entry's outermost grips (±0.78 m for the 2.4 m frame).
+  const GRIP_REACH = 700_000, frame = loadOf(kinds['mars:rack_upright']);
+  const grip = frame.places.map((p, k) => p + (k === 0 ? REACH : -REACH));
+  assert.deepEqual(grip, [-780_000, 780_000]);
+  const on = { ...ctx, parentOf: (n) => (n === id(4) ? id(1) : rows.get(n)?.parent ?? null) };
+  const mid = at(id(4)).pos;
+  for (const [end, g] of [['back', grip[0]], ['front', grip[1]]]) {
+    const p = carryIntents({ do: 'grip', thing: id(4), end }, on)[0].params[1];
+    const off = Math.hypot(p[0] - mid[0], p[2] - (mid[2] + g));
+    assert.ok(off <= GRIP_REACH, `${end} ${Math.round(off / 1000)} mm from its grip`);
+  }
+  // In its stand, from clear of it as before (2.2 m along its z).
+  near(send({ do: 'grip', thing: id(4), end: 'back' })[0].params[1], [0, 0, 3.65e6], 'the standing frame\'s back, in its stand');
 });
 
 test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
