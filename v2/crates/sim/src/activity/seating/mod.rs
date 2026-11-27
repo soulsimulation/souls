@@ -340,7 +340,8 @@ impl Seating {
     }
 
     /// Takes `part` into `activity`'s slot, the crew's node set on the ground at `frame` (its position and turn, µm in
-    /// the ground's frame) and the part turned `inside` in the slot: one commit, its joints undone with it.
+    /// the ground's frame) and the part at `inside` in the slot (its position, µm, and its turn there: a part that lies
+    /// is held by its middle between its carriers, #5067): one commit, its joints undone with it.
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -351,7 +352,7 @@ impl Seating {
         activity: Id,
         part: Id,
         frame: (Vec3, Quat),
-        inside: Quat,
+        inside: (Vec3, Quat),
     ) -> R<()> {
         Self::crew(acts, activity)?;
         let a = self.audience;
@@ -407,8 +408,8 @@ impl Seating {
                 node: activity,
                 slot: Some(SLOT),
             },
-            position: Vec3::ZERO,
-            orientation: inside,
+            position: inside.0,
+            orientation: inside.1,
             support: Support::Slot,
         };
         out.push((part, a, leave(&self.header, id, part, into)));

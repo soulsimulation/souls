@@ -18,9 +18,11 @@
 //!   within its length): an end carrier at its grip, a side carrier at the grip's edge on the side it stands. The hands
 //!   are in the order they lie along the carry, from its back toward its front, so a page gives each to the hand on that
 //!   side of the body as it is drawn. A hand's target is the load's drawn pose times its point. A load that stands as
-//!   it is held (a frame taken standing) is taken along the line its carriers stand on, as the lift's own check takes
-//!   it: each carrier holds where its grip lies along that line, kept to the load's edge, at the carry's height, its
-//!   hands above and below.
+//!   it is held (a frame taken standing) is taken along the line its carriers stand on: its front and its back each
+//!   hold its edge on that line toward them (a rack frame's post, a timber bent's: the outermost member of a part
+//!   whose bounds are its own), [`STAND_HOLD`] above the carry's height, its hands [`HAND_HALF`] above and below
+//!   (#5067: the edge, not the grip's distance along the line, which lay in the air between a bent's posts; and at a
+//!   height a standing body's hands reach, not at the load's foot). A side's stays where its grip lies along the line.
 //!
 //! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs (the phase's start, or a carrier's leave),
 //! 5?: until µs, 6: [hold, ...]}`, a hold
@@ -43,6 +45,11 @@ pub const F_GRIPS: u64 = 6;
 pub const GRIPS: &str = "souls:carry-grips";
 /// How far either side of where a carrier holds its load its two hands are, along the load's long axis, µm.
 pub const HAND_HALF: i64 = 200_000;
+
+/// How far above the carry's height (its slot's) a load that stands as it is held is held, µm (#5067): its two hands
+/// 0.3 m and 0.7 m above it. A frame taken standing has its foot at the carry's height, 0.9 m above its carriers'
+/// feet, so its hands are 1.2 m and 1.6 m above the ground, either side of shoulder height.
+pub const STAND_HOLD: i64 = 500_000;
 
 /// The phases a carry's holds are in: carried, on a seating's set-in track, on its way back, let go.
 pub const CARRY: &str = "souls:carry";
@@ -108,6 +115,15 @@ pub struct Hold {
     pub grip: String,
     pub at: Vec3,
     pub hands: [Vec3; 2],
+}
+
+impl Hold {
+    /// Where the carrier holds the load: the middle of its two hands, µm in the load's own frame. A carrier's reach of
+    /// its hold is measured to here, at a take, a lift and a seating alike (#5067).
+    pub fn middle(&self) -> Vec3 {
+        let [a, b] = self.hands;
+        Vec3::new((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
+    }
 }
 
 /// A carry's holds as said: its load, its phase, since when, until when (a track's end), and each carrier's hold.
@@ -282,9 +298,9 @@ pub fn assign(
             + i128::from(a.z) * i128::from(b.z))
             / 1_000_000
     };
-    // A load that stands as it is held (a frame taken standing) is taken along the line its carriers stand on
-    // (`Load::check_lift` with no axis): each grip at its place along that line from the load's middle, kept to the
-    // load's extent there, at the carry's height (its slot's), a side's at the load's edge on the side it stands.
+    // A load that stands as it is held (a frame taken standing) is taken along the line its carriers stand on: its
+    // front and its back at its edge on that line, a side where its grip lies along it and at the load's edge on the
+    // side it stands, each [`STAND_HOLD`] above the carry's height (its slot's).
     let standing = load.lies_along(held.1)?.is_none();
     let middle_c = held
         .0
@@ -310,9 +326,15 @@ pub fn assign(
             Some(_) => middle_c.z + ext.z,
             None => middle_c.z,
         };
+        // Its front and its back at its edge on the line, toward each; a side where its grip lies along it.
+        let along = match across {
+            None if g.along < 0 => -ext.x,
+            None => ext.x,
+            Some(_) => g.along.clamp(-ext.x, ext.x),
+        };
         let c = Vec3::new(
-            middle_c.x + g.along.clamp(-ext.x, ext.x),
-            0.clamp(middle_c.y - ext.y, middle_c.y + ext.y),
+            middle_c.x + along,
+            STAND_HOLD.clamp(middle_c.y - ext.y, middle_c.y + ext.y),
             z,
         );
         conj(held.1)?
@@ -498,22 +520,140 @@ mod tests {
         let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
         assert_eq!(names(&h), ["grip_high", "grip_low"]);
         for (hold, x) in h.iter().zip([609_500, -609_500]) {
-            // At its edge toward the carrier, at the carry's height (its foot), its hands up from there.
+            // At its edge toward the carrier (its post's outer face), 0.5 m above the carry's height (its foot), its
+            // hands 0.2 m below and above that.
             assert_eq!(
                 hold.hands,
-                [Vec3::new(x, 0, 0), Vec3::new(x, HAND_HALF, 0)],
+                [Vec3::new(x, 300_000, 0), Vec3::new(x, 700_000, 0)],
                 "{}",
                 hold.grip
             );
         }
-        // Its foot held 0.9 m below the slot: its hands 0.2 m either side of the carry's height.
+        // Its foot held 0.9 m below the slot: its hands 0.2 m either side of 0.5 m above the carry's height.
         let low = (Vec3::new(0, -900_000, 0), Quat::IDENTITY);
         let h = assign(&g, &load, low, id(1), id(2), &[]).unwrap();
         let want = [
-            Vec3::new(609_500, 700_000, 0),
-            Vec3::new(609_500, 1_100_000, 0),
+            Vec3::new(609_500, 1_200_000, 0),
+            Vec3::new(609_500, 1_600_000, 0),
         ];
         assert_eq!(h[0].hands, want);
+        // A timber bent, whose grips lie 0.55 m from its middle, is held at its edge too: its post, not the air
+        // between its posts.
+        let e = entry("carpentry", "timber_bent");
+        let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+        let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
+        assert_eq!(
+            [h[0].middle(), h[1].middle()],
+            [
+                Vec3::new(900_000, 500_000, 0),
+                Vec3::new(-900_000, 500_000, 0)
+            ]
+        );
+    }
+
+    /// #5067: the lift's checks ([`Load::check_lift`], [`Load::check_sides`]) and the holds ([`assign`]) measure a
+    /// carrier's reach to the same place, for every load, lying or standing (a standing frame is lifted along the
+    /// line its carriers stand on and laid between them). Each carrier is moved off where it holds the load, to just
+    /// inside and just beyond [`GRIP_REACH`]: the checks admit it exactly when its hold, as it is said, is within reach.
+    #[test]
+    fn the_lifts_checks_and_the_holds_measure_reach_to_the_same_place() {
+        use crate::activity::carry::{Carry, GRIP_REACH};
+        let (front, back) = (id(1), id(2));
+        for (family, kind) in LOADS {
+            let e = entry(family, kind);
+            let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+            let held = load.held().unwrap();
+            // The carry's frame as the plan's: its back toward its front along +x, the load's middle at the origin.
+            let plan = |h: &Hold| {
+                let p = held.1.rotate(h.middle()).unwrap();
+                [held.0.x + p.x, held.0.z + p.z]
+            };
+            let far = |a: [i64; 2], b: [i64; 2]| {
+                (i128::from(a[0] - b[0]).pow(2) + i128::from(a[1] - b[1]).pow(2)).isqrt() as i64
+            };
+            let ends = [
+                load.hold_along(load.grips[1]),
+                load.hold_along(load.grips[0]),
+            ];
+            for d in [0, 350_000, 690_000, 710_000, 1_000_000] {
+                // Both ends as far out along the line: the load stays centred between them.
+                let (f, b) = ([ends[0] + d, 0], [ends[1] - d, 0]);
+                let h = assign(&g, &load, held, front, back, &[]).unwrap();
+                let within = far(f, plan(&h[0])) <= GRIP_REACH && far(b, plan(&h[1])) <= GRIP_REACH;
+                let check = load.check_lift(load.crew as usize, f, b, [0, 0], None);
+                assert_eq!(
+                    check.is_ok(),
+                    within,
+                    "{kind}: its ends {d} µm out: {check:?}"
+                );
+                assert!(
+                    (far(f, plan(&h[0])) - d).abs() <= 2,
+                    "{kind}: the front's hold"
+                );
+            }
+            // Its sides, each off the load's edge on the side it stands.
+            let (f, b) = ([ends[0] + 350_000, 0], [ends[1] - 350_000, 0]);
+            let (f3, b3) = (Vec3::new(f[0], 0, 0), Vec3::new(b[0], 0, 0));
+            let edge = load.held_half().unwrap().z;
+            for d in [350_000, 690_000, 710_000, 1_000_000] {
+                let at: Vec<(Id, [i64; 2])> = load
+                    .side_places()
+                    .iter()
+                    .enumerate()
+                    .map(|(k, p)| {
+                        let z = (edge + d) * p[1].signum();
+                        (id(3 + k as u64), [load.hold_along(p[0]), z])
+                    })
+                    .collect();
+                if at.is_empty() {
+                    continue;
+                }
+                let places: Vec<(Id, [i64; 2])> = at
+                    .iter()
+                    .map(|(who, p)| (*who, Carry::place_of(f3, b3, Vec3::new(p[0], 0, p[1]))))
+                    .collect();
+                let h = assign(&g, &load, held, front, back, &places).unwrap();
+                let within = at
+                    .iter()
+                    .zip(&h[2..])
+                    .all(|((_, p), hold)| far(*p, plan(hold)) <= GRIP_REACH);
+                let crew = 2 + at.len();
+                let check = load.check_sides(crew, f, b, [0, 0], None, &at);
+                assert_eq!(
+                    check.is_ok(),
+                    within,
+                    "{kind}: its sides {d} µm off: {check:?}"
+                );
+                for ((_, p), hold) in at.iter().zip(&h[2..]) {
+                    assert!(
+                        (far(*p, plan(hold)) - d).abs() <= 2,
+                        "{kind}: {}",
+                        hold.grip
+                    );
+                }
+            }
+        }
+    }
+
+    /// #5067: a frame taken standing is held at its edge along its carriers' line, so its carriers reach it from
+    /// beside its edges (its own x) and not from its faces (its own z), where its extent is its 76 mm thickness.
+    #[test]
+    fn a_standing_frame_is_within_reach_from_beside_its_edges_not_from_its_faces() {
+        use crate::activity::carry::{GRIP_REACH, REACH};
+        for (kind, half) in [("rack_upright", 609_500), ("rack_upright_6m", 609_500)] {
+            let e = entry("construction", kind);
+            let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+            // Along its x: the carry's frame is the frame's own.
+            let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
+            assert_eq!(h[0].middle().x, half, "{kind}");
+            assert!(half + REACH - h[0].middle().x <= GRIP_REACH, "{kind}");
+            // Along its z: the carry's +x is the frame's z, so the frame is held a quarter turn round in its slot.
+            let quarter = Quat::from_yaw_mdeg(90_000).unwrap();
+            let h = assign(&g, &load, (Vec3::ZERO, quarter), id(1), id(2), &[]).unwrap();
+            let along = quarter.rotate(h[0].middle()).unwrap().x;
+            assert!((along.abs() - 38_000).abs() <= 2, "{kind}: at its face");
+            assert!(2_200_000 - along > GRIP_REACH, "{kind}: 2.2 m off its face");
+        }
     }
 
     #[test]

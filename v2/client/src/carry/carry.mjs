@@ -8,7 +8,9 @@
 //                                     offered to those bodies on the open ground, or on a part to hold it where it stands
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
 //   carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walks to that end of a load (its
-//                                     grip's place, from its entry; 2.2 m off a part that stands), beside it along its
+//                                     grip's place, from its entry; a part that stands and is seated by crews (a
+//                                     frame, a bent): 0.45 m beyond the edge it is held by, along its wider
+//                                     side, where `part take` and `carry lift` both admit it), beside it along its
 //                                     own x (1.2 m), or to the n-th side carrier's place, beside a grip between its
 //                                     ends; front or back --out <m>: that far off its line, away from the middle of what
 //                                     it is seated in (an unseated part comes down at its carriers' middle: outside)
@@ -39,7 +41,14 @@ const ID = /^[0-9a-f]{32}-\d+$/;
 const M = 1_000_000;
 /** sim::activity::carry::REACH: a carrier stands this far beyond its grip, µm. */
 export const REACH = 350_000;
-/** Where a crew stands from a part that stands upright (no long axis on the plan), µm: 0.135 A3's frames. */
+/** How far beyond the edge it holds each of the two carriers of a part that stands upright (no long axis on the plan)
+ * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges on the line its
+ * carriers stand on (a rack frame's posts, a timber bent's), 1.2 m and 1.6 m above the ground, and refuses a carrier
+ * more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.45 m is within a standing body's arm's reach of both
+ * hands there, and where it can stand: 1.06 m from the middle of a 1.22 m rack frame, just clear of a frame stand's
+ * walk box (1.05 m) and 0.11 m clear of the frame's own columns in a bay (0.95 m). It was 2.2 m off its faces. */
+export const STANDING_OFF = 450_000;
+/** Where a crew stands from a thing of no entry, as from a part standing, µm. */
 export const STANDING_FROM = 2_200_000;
 /** Where a holder stands beside a part, along its own x, µm: 0.135 A3's change of crew. */
 export const BESIDE = 1_200_000;
@@ -98,7 +107,13 @@ export function loadOf(entry) {
   // its grips between its ends, from the back toward the front (a side carrier's each, at most four), and half its
   // width on the plan as it is carried: the larger of its other two sides
   const inner = along.slice(1, -1).slice(0, 4), halfWidth = Math.max(...[0, 1, 2].filter((i) => i !== axis).map((i) => b[i])) * 500;
-  return { axis, long, halfLength: b[axis] * 500, halfWidth, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
+  // standing (its length is its height): its wider side on the plan, its own x or z, where its carriers hold its edges
+  const wide = b[0] >= b[2] ? 0 : 2;
+  // where its front and its back hold it when it is taken standing: its edge on its wider side (sim's
+  // grips::assign: a frame's post, a bent's); and whether it is a part crews seat (it has joints)
+  const hold = b[wide] * 500;
+  const joins = Object.values(entry.points ?? {}).some((p) => p?.role === 'joint');
+  return { axis, long, halfLength: b[axis] * 500, halfWidth, wide, hold, joins, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
 }
 
 /** `v` turned by the quaternion `q` ([w, x, y, z], any scale), as the copy's poses hold it. */
@@ -110,8 +125,12 @@ export function turn(q, v) {
 
 /**
  * Where a carrier stands at a thing for its `end`, on the plan, µm. Front or back: on a load that lies, its place along
- * its long axis (front at the + end); on one that stands (a frame), `from` (default 2.2 m) along its own z, front at +
- * (a lift of a standing load checks its ends on that line: the 6.1 m frame's are 3.1 m out). Left or right is beside it
+ * its long axis (front at the + end); on one that stands: a part crews seat (it has joints: a rack frame, a timber
+ * bent), or anything in a stand or a bay, along its wider side on the plan (a frame's own x), front at +, STANDING_OFF
+ * beyond where it is held standing (#5067: `part:take` and `carry:lift` both admit it there; 2.2 m off its faces was
+ * refused by both); `from`, when given, is from its middle along that line. A load only lifted that stands on the
+ * floor (`floor`: the 6.1 m frame), along its own z, its places as `carry:lift` checks them (REACH beyond its outermost
+ * grips, 3.1 m). A thing of no entry: 2.2 m along its z. Left or right is beside it
  * along its own x, `from` (default 1.2 m), right at +. `side<n>` is the n-th side carrier's place
  * (`sim::activity::carry::Load::side_places`): beside its n-th grip between its ends, counted from the back, along the
  * line its front and back stand on, half its width and REACH off that line, the first on its + side, then alternating;
@@ -119,14 +138,18 @@ export function turn(q, v) {
  * back: `{ by, from }`, the spot moved `by` µm across the line, on the side away from the point `from` (µm on the plan:
  * the middle of what the thing is seated in), so a part unseated to its carriers' middle comes down outside its bay.
  */
-export function gripSpot(at, load, end, from = null, away = null) {
+export function gripSpot(at, load, end, from = null, away = null, floor = false) {
   const rot = at.rot ?? [ONE, 0, 0, 0], sign = end === 'front' || end === 'right' ? 1 : -1;
   const mid = turn(rot, load?.middle ?? [0, 0, 0]).map((c, k) => c + at.pos[k]);
   const unit = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
   const v = load ? turn(rot, load.long) : [0, 0, 0], flat = Math.hypot(v[0], v[2]);
   const lies = load && 2 * flat >= load.halfLength;
-  // The line its front and back stand on: its long axis lying; standing, its own z.
-  const line = lies ? unit(v) : unit(turn(rot, [0, 0, M]));
+  // The line its front and back stand on: its long axis lying; standing, a part crews seat (it has joints: a rack
+  // frame, a timber bent), wherever it stands, or anything standing in a stand or a bay: its wider side, to be taken as
+  // it stands (a lift from there is admitted too: it lays the part along that line); else (a load only lifted,
+  // standing on the floor) its own z.
+  const edges = load && !lies && (load.joins || !floor);
+  const line = lies ? unit(v) : unit(turn(rot, edges && load.wide === 0 ? [M, 0, 0] : [0, 0, M]));
   const side = /^side([1-4])$/.exec(end);
   if (side) {
     const k = Number(side[1]) - 1, along = load?.inner?.[k];
@@ -139,7 +162,8 @@ export function gripSpot(at, load, end, from = null, away = null) {
     const x = unit(turn(rot, [M, 0, 0])), d = (from ?? BESIDE) * sign;
     return [mid[0] + x[0] * d, mid[2] + x[1] * d];
   }
-  const d = from != null ? from * sign : lies ? load.places[end === 'front' ? 1 : 0] : STANDING_FROM * sign;
+  const d = from != null ? from * sign : edges ? (load.hold + STANDING_OFF) * sign
+    : load && (lies || floor) ? load.places[end === 'front' ? 1 : 0] : STANDING_FROM * sign;
   const p = [mid[0] + line[0] * d, mid[2] + line[1] * d];
   if (!away) return p;
   // Across the line, the side its middle lies from `away.from` (both ends the same side).
@@ -284,7 +308,9 @@ export function carryIntents(req, ctx) {
       const bay = out === null ? null : ctx.parentOf?.(req.thing), bayAt = bay && bay !== ground ? placeOf(bay) : null;
       if (out !== null && !bayAt) return no('carry-out-unseated', `${req.thing} is not seated in anything here: --out stands outside what a part is seated in`);
       const away = bayAt ? { by: out * M, from: [bayAt.pos[0], bayAt.pos[2]] } : null;
-      const load = loadOf(kinds[kindOf(req.thing)]), spot = gripSpot(at, load, req.end, from === null ? null : from * M, away);
+      // A part standing on the floor (a frame set down) is lifted where its grips are (#5067); one in a stand, from clear of it.
+      const floor = ctx.parentOf?.(req.thing) === ground;
+      const load = loadOf(kinds[kindOf(req.thing)]), spot = gripSpot(at, load, req.end, from === null ? null : from * M, away, floor);
       // A side stands at a grip between the ends: a load with fewer such grips takes fewer (sim's carry-crew-too-large).
       const inner = load?.inner?.length ?? 0;
       if (!spot) return no('carry-grip-unknown', `${req.thing} has ${inner} grip${inner === 1 ? '' : 's'} between its ends, so no ${req.end.replace('side', 'side ')}: a crew of ${2 + inner} at most carries it`);
