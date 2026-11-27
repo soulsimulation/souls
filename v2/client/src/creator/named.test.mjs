@@ -138,3 +138,11 @@ test('a turn past half a turn is written with the pose\'s sign rule: the first n
   const lighthouse = planOf({ ops: [{ op: 'turn', node: 'tower-a', at_ground: [82.6, -150], from_r: 0, r: 3.1416 }] }, world(), flat)[0];
   assert.ok(lighthouse.ops[0].orientation.find((c) => c !== 0) > 0);
 });
+
+test('an edit the world does not answer in time is never sent again: its ops are unanswered', async () => {
+  const plan = planOf(BATCH, world(), flat);
+  let sent = 0;
+  assert.equal(await sendPlan(plan, async () => { sent++; return { ok: false, code: 'edit.unanswered' }; }), 1);
+  assert.equal(sent, 1);
+  assert.deepEqual([...new Set(plan.map((e) => e.status))], ['unanswered']);
+});

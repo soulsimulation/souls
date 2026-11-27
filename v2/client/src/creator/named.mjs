@@ -7,7 +7,8 @@
 // it was (`from`) nor where it goes (`at`): moved since (`moved-since`); one already there is `already` and sends
 // nothing, so a second run sends nothing. The rest go as ordinary creator edits, at most OPS_MOST operations an edit,
 // in the file's order; the world checks each (BUILDSAFE among its rules). An edit the world refuses is sent again one
-// op at a time, so each op's outcome is its own. Each op's outcome is printed as one line.
+// op at a time, so each op's outcome is its own; one it does not answer in the daemon's time is never sent again
+// (`unanswered`: a dry run says whether it landed). Each op's outcome is printed as one line.
 //
 // The ops (metres; r in radians about +y, the thing's own origin; `from*` is where it was, the rest where it goes):
 //   move           {node, from: [x,y,z], at: [x,y,z], room?, from_r?, r?}   in the room's frame when `room` names the
@@ -222,11 +223,13 @@ export async function sendPlan(plan, ask) {
     const a = await ask({ op: 'edit', ops: edit.ops });
     edits++;
     if (a.ok) { for (const e of edit.entries) e.status = 'applied'; continue; }
+    // Not answered in the daemon's time, it may still land: never sent again; a dry run says which ops did.
+    if (a.code === 'edit.unanswered') { for (const e of edit.entries) Object.assign(e, { status: 'unanswered', detail: 'the world did not answer in time: run --dry-run to see whether it landed (already) or not (ready)' }); continue; }
     if (edit.entries.length === 1) { Object.assign(edit.entries[0], { status: 'refused', code: a.code, ...(a.detail ? { detail: a.detail } : {}) }); continue; }
     for (const e of edit.entries) {
       const one = await ask({ op: 'edit', ops: editsOf([e])[0].ops });
       edits++;
-      Object.assign(e, one.ok ? { status: 'applied' } : { status: 'refused', code: one.code, ...(one.detail ? { detail: one.detail } : {}) });
+      Object.assign(e, one.ok ? { status: 'applied' } : one.code === 'edit.unanswered' ? { status: 'unanswered', detail: 'the world did not answer in time: run --dry-run to see whether it landed' } : { status: 'refused', code: one.code, ...(one.detail ? { detail: one.detail } : {}) });
     }
   }
   return edits;
