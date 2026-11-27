@@ -131,6 +131,10 @@ pub trait Links {
     fn in_turns(&self, _link: Id) -> bool {
         false
     }
+    /// The ground the track last given for `body` lands it on, when not dry (#3225: across a shore), taken once.
+    fn lands_on(&mut self, _body: Id) -> Option<crate::gaits::Ground> {
+        None
+    }
 }
 
 /// A running skill on a body.
@@ -569,7 +573,10 @@ pub fn carry_past(
                 if links.in_turns(link)
                     || !controller.landing_taken(body, &t, LANDING_ROOM, &leaving) =>
             {
-                controller.cross(body, driver, t)
+                let lands = links.lands_on(body);
+                controller
+                    .cross(body, driver, t)
+                    .and_then(|()| lands.map_or(Ok(()), |g| controller.lands_on(body, g)))
             }
             // A shut door being opened, or a body standing where it would land (#4215): it stands and asks again.
             Ok(_) => controller.set(
@@ -1401,6 +1408,7 @@ impl Runner {
         wants: &mut Wants,
     ) -> Result<(), Refusal> {
         town.body_classes = self.classes();
+        town.water.grounds = self.controller.grounds();
         wants.classes.clone_from(&town.body_classes);
         self.reground(town);
         let at = self.now + self.tick;
@@ -1593,8 +1601,12 @@ impl Runner {
             self.ended.insert(*who, (self.now, p.clone()));
         }
         let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));
+        let town = &*town;
         let stepped = self.controller.step_on_selected(
-            move |_, size| {
+            move |_, size, ground| {
+                if ground != crate::gaits::Ground::Dry {
+                    return town.surfaces_on(size, ground);
+                }
                 surfaces[match size {
                     replica::kinds::sizes::Size::Small => 0,
                     replica::kinds::sizes::Size::Standard => 1,

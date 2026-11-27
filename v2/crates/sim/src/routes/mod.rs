@@ -46,7 +46,8 @@
 //!   there is told the link, its door and both widths. A floater routes as a walker of its class.
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), a gait's speed as cost (a route is
-//! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
+//! the shortest, not the quickest), walking a shore link (the walk's,
+//! `crate::walk::town`, #3225, reading [`Map::shore`]). Ground
 //! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
 // The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
@@ -1284,6 +1285,16 @@ impl Map {
                 .collect()
         };
         self.links.iter().filter(|l| !l.gone).map(pieces).collect()
+    }
+
+    /// Shore link `id` (a [`Kind::Wade`] or [`Kind::Swim`]): its kind, its two pieces (the drier first) and the stretch
+    /// of edge they share, both its ends (mm, the ground's frame). For the walk to cross it (#3225).
+    pub fn shore(&self, id: Id) -> Option<(Kind, [u32; 2], [i64; 2], [i64; 2])> {
+        let l = self.links.iter().find(|l| {
+            l.id == id && !l.gone && matches!(l.kind, Kind::Wade | Kind::Swim)
+        })?;
+        let [p, r] = [&l.ends[0], &l.ends[1]].map(|e| &self.portals[e[0] as usize]);
+        Some((l.kind, [p.pieces[0], r.pieces[0]], p.a, p.b))
     }
 
     /// Whether the map holds a floor's patch for `node`.
