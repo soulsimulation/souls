@@ -1,6 +1,7 @@
 //! Engine v2 O8 (#2805): a client nobody trusts, through a real socket to an in-process gateway and a stand-in world
 //! that takes intents and never answers. A message over the limit is closed by name; a flood past the agent's kept
-//! budget is refused by name and never kept, and another agent is not held by it. The bench table is
+//! budget is refused by name and never kept, and another agent is not held by it; so is a flood of sync requests past
+//! the agent's sync budget, never sent to the world. The bench table is
 //! `v2/tools/bench/hostile`.
 
 use std::collections::BTreeMap;
@@ -203,4 +204,124 @@ async fn o8_a_flood_past_the_kept_budget_is_refused_by_name_and_never_kept() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(gw.link.unanswered(), fits + 1);
+}
+
+/// A sync request (R5b), `{20: n, 21: []}`.
+fn sync_ask(n: u64) -> Vec<u8> {
+    encode(&Value::Map(
+        [(20, Value::Uint(n)), (21, Value::Array(Vec::new()))].into(),
+    ))
+    .unwrap()
+}
+
+/// A flood of sync requests (the bench's `sync` arm) against a world that answers none: past the agent's budget each is
+/// refused at once, under its own number, `agent.slow-down`, and never sent; another agent's request still goes.
+#[tokio::test]
+async fn o8_a_sync_flood_past_its_budget_is_refused_by_name_and_never_sent() {
+    let mut tokens = Tokens::default();
+    let (flood, honest) = (issue(&mut tokens, soul(1)), issue(&mut tokens, soul(2)));
+    let (gw, url) = start("sync", tokens).await;
+    let mut f = connect(&url, flood.reveal()).await;
+    let sent = 2000u64;
+    for n in 0..sent {
+        f.send(Message::Binary(sync_ask(n).into())).await.unwrap();
+    }
+    let mut slowed = 0;
+    while slowed as usize + gw.link.syncs_waiting() < sent as usize {
+        let Ok(Some(Ok(Message::Binary(b)))) =
+            tokio::time::timeout(Duration::from_secs(5), f.next()).await
+        else {
+            panic!(
+                "{slowed} refused, {} waiting, of {sent}",
+                gw.link.syncs_waiting()
+            );
+        };
+        let Value::Map(m) = decode(&b).unwrap().value else {
+            panic!("not a map");
+        };
+        assert!(
+            matches!(m.get(&20), Some(Value::Uint(_))),
+            "under its own number"
+        );
+        assert_eq!(
+            m.get(&24),
+            Some(&Value::Text(Name::new(world_link::SLOW_DOWN).unwrap()))
+        );
+        slowed += 1;
+    }
+    let waiting = gw.link.syncs_waiting();
+    assert!(
+        slowed > 0 && waiting < 300,
+        "bounded: {waiting} waiting, {slowed} refused"
+    );
+    assert_eq!(gw.link.syncs_slowed(), slowed);
+    // Another agent's request goes to the world: it is told nothing here.
+    let mut h = connect(&url, honest.reveal()).await;
+    h.send(Message::Binary(sync_ask(1).into())).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), h.next())
+            .await
+            .is_err(),
+        "the honest agent's request is sent to the world"
+    );
+    assert_eq!(gw.link.syncs_waiting(), waiting + 1);
+}
+
+/// #5195 triage: an agent whose sync requests the world never answers, its socket then replaced, is not stuck: its
+/// requests waiting here are given up at once, those in the world's line keep their places until their deadline, and
+/// then the new socket's request goes, itself given up by name (`sync.timed-out`) when the world never answers it.
+#[tokio::test]
+async fn o8_a_sync_the_world_never_answers_never_holds_the_agents_next() {
+    let mut tokens = Tokens::default();
+    let soul_token = issue(&mut tokens, soul(1));
+    let (gw, url) = start("sync-never", tokens).await;
+    let mut first = connect(&url, soul_token.reveal()).await;
+    for n in 0..5 {
+        first
+            .send(Message::Binary(sync_ask(n).into()))
+            .await
+            .unwrap();
+    }
+    let wait_for = |want: usize| {
+        let gw = gw.clone();
+        async move {
+            let by = tokio::time::Instant::now() + Duration::from_secs(5);
+            while gw.link.syncs_waiting() != want && tokio::time::Instant::now() < by {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            gw.link.syncs_waiting()
+        }
+    };
+    assert_eq!(wait_for(5).await, 5, "the world answers none");
+    // The same Soul signs in again: the three waiting here are given up; two stay in the world's line.
+    let mut second = connect(&url, soul_token.reveal()).await;
+    assert_eq!(wait_for(2).await, 2);
+    second
+        .send(Message::Binary(sync_ask(7).into()))
+        .await
+        .unwrap();
+    // The two are given up at their deadline; the new request goes then, and is given up by name at its own,
+    // counted from when the gateway took it (waiting included).
+    let deadline = Duration::from_micros(world_link::SYNC_DEADLINE);
+    let told = tokio::time::timeout(deadline * 2 + Duration::from_secs(3), async {
+        loop {
+            let Some(frame) = second.next().await else {
+                panic!("the socket ended");
+            };
+            if let Ok(Message::Binary(b)) = frame
+                && let Value::Map(m) = decode(&b).unwrap().value
+                && m.get(&20) == Some(&Value::Uint(7))
+            {
+                return m.get(&24).cloned();
+            }
+        }
+    })
+    .await
+    .expect("the new socket's request is answered");
+    assert_eq!(
+        told,
+        Some(Value::Text(Name::new(world_link::SYNC_TIMED_OUT).unwrap()))
+    );
+    assert_eq!(gw.link.syncs_waiting(), 0);
+    drop(first);
 }
