@@ -23,6 +23,7 @@
 mod account;
 mod authority;
 pub mod operator;
+pub mod removal;
 pub mod route;
 pub mod souls;
 #[cfg(test)]
