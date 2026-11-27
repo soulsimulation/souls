@@ -9005,6 +9005,151 @@ mod tests {
         );
     }
 
+    /// #5177's review: a second Undo after one that left an unset value. A god clears the arrival (an edit of the
+    /// world node), then sets a storm with Lightning (fields 65 and 69 new). Undo, Undo, Redo, Redo are each
+    /// admitted, as the page and the agent send them (`souls:edit` `{5: 1}` / `{5: 2}`), and the world node ends as
+    /// the storm left it.
+    #[test]
+    fn undo_twice_and_redo_twice_across_a_weather_edit_and_an_arrival() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let set = |field, to| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        };
+        let arrival = vec![set(replica::arrival::F_ARRIVAL, Value::Array(Vec::new()))];
+        let storm = vec![
+            set(
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            set(sky::F_RAIN, int(90)),
+            set(sky::F_WEATHER_UNTIL, int(40 * 3_600_000_000)),
+            set(
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ];
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let mut tick = 0;
+        let mut run = |i: Intent| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            tick += 2;
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&arrival)));
+        assert_eq!(kind, 2, "stale");
+        let steps = [
+            ("the arrival is cleared", parameters(&arrival)),
+            ("the storm is set", parameters(&storm)),
+            ("the storm is undone", parameters_of(&Asked::Undo)),
+            (
+                "the arrival is undone, past the storm's unset values",
+                parameters_of(&Asked::Undo),
+            ),
+            ("the arrival is redone", parameters_of(&Asked::Redo)),
+            ("the storm is redone", parameters_of(&Asked::Redo)),
+        ];
+        let mut now = now;
+        for (n, (what, p)) in steps.into_iter().enumerate() {
+            let (kind, reason, v) = run(intent(2 + n as u64, now, p));
+            assert_eq!(kind, 1, "{what}: {reason:?}");
+            now = v;
+        }
+        world.stop();
+        let mut live = initial;
+        let mut roots = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            live.apply(&part).unwrap();
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                let tree = live.tree();
+                roots.push(tree.node(tree.root()).unwrap().fields().clone());
+            }
+        }
+        let [_, stormy, .., redone] = &roots[..] else {
+            panic!("six creator parts: {}", roots.len())
+        };
+        assert_eq!(roots.len(), 6, "six creator parts");
+        let weather = |f: &BTreeMap<u64, Value>| {
+            [
+                sky::F_WEATHER,
+                sky::F_RAIN,
+                sky::F_WEATHER_UNTIL,
+                sky::F_STRIKE,
+                replica::arrival::F_ARRIVAL,
+            ]
+            .map(|k| f.get(&k).cloned())
+        };
+        assert_eq!(
+            weather(redone),
+            weather(stormy),
+            "the storm and the arrival are back"
+        );
+    }
+
     /// S10c: the clock thread's queue to the edit checker dropped (the clock ended, for any reason, `run_due`'s error
     /// among them) wakes a checker waiting for bodies with no deadline, as in lockstep: refused, never blocked.
     #[test]

@@ -105,7 +105,18 @@ pub(crate) fn node_value(tree: &Tree, id: Id) -> Option<Value> {
 
 /// A node's hash (the module's notes), or none for a node not here.
 pub fn node_hash(tree: &Tree, id: Id) -> Option<Hash> {
-    let v = node_value(tree, id)?;
+    node_hash_without(tree, id, |_, _| false)
+}
+
+/// A node's hash as [`node_hash`], with each field that `unset` names (by number and value) left out: G4's conflict
+/// check (`sim::edit::undo`) counts a field holding the value that reads as unset as absent.
+pub fn node_hash_without(tree: &Tree, id: Id, unset: impl Fn(u64, &Value) -> bool) -> Option<Hash> {
+    let mut v = node_value(tree, id)?;
+    if let Value::Map(m) = &mut v
+        && let Some(Value::Map(fields)) = m.get_mut(&6)
+    {
+        fields.retain(|k, f| !unset(*k, f));
+    }
     let purpose = match tree.node(tree.handle(id)?)?.audience() {
         Audience::Everyone => Purpose::StatePublic,
         Audience::Of(_) => Purpose::StatePrivate,
