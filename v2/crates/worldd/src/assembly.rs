@@ -290,7 +290,9 @@ impl Walk {
 fn pace(a: Vec3, b: Vec3, span: Micros) -> i64 {
     let far = (i128::from(b.x - a.x).pow(2) + i128::from(b.z - a.z).pow(2)).isqrt();
     let time = i128::from((span - WALK_EARLY).max(WALK_EARLY));
-    i64::try_from(far * 1_000_000 / time).unwrap_or(i64::MAX).max(1)
+    i64::try_from(far * 1_000_000 / time)
+        .unwrap_or(i64::MAX)
+        .max(1)
 }
 
 /// Who stands and who walks on a set-in track from `from` to `to` (the crew's node's position at each end, its turn
@@ -1145,7 +1147,10 @@ mod tests {
         let walled = |_: Id, _: Vec3, _: Vec3| false;
         let who = |w: &[Walk]| w.iter().map(|w| w.body).collect::<Vec<_>>();
         // Straight down: nobody walks.
-        assert_eq!(ways(&crew, ends, from, Vec3::ZERO, turn, &open), Ok(Vec::new()));
+        assert_eq!(
+            ways(&crew, ends, from, Vec3::ZERO, turn, &open),
+            Ok(Vec::new())
+        );
         // 0.45 m east: the sides walk beside it, the ends stand, 0.57 m from their holds at its end.
         let east = Vec3::new(450_000, 0, 0);
         let w = ways(&crew, ends, from, east, turn, &open).expect("admitted");
@@ -1162,7 +1167,10 @@ mod tests {
         assert!(r.detail.contains(&show(id(3))), "{}", r.detail);
         // The east side alone stands when it cannot walk: the part comes toward it, within its reach.
         let three = [crew[0], crew[1], crew[3]];
-        assert_eq!(ways(&three, ends, from, east, turn, &walled), Ok(Vec::new()));
+        assert_eq!(
+            ways(&three, ends, from, east, turn, &walled),
+            Ok(Vec::new())
+        );
         // 0.9 m east the ends cannot stand either (0.96 m): the whole crew walks beside it, or is refused by name.
         let far = Vec3::new(900_000, 0, 0);
         let w = ways(&crew, ends, from, far, turn, &open).expect("admitted");

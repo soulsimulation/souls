@@ -505,7 +505,11 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
     let after = stood(&dir);
     for b in &bodies {
         let (dx, dz) = (after[b].x - before[b].x, after[b].z - before[b].z);
-        println!("a carrier went {} mm east, {} mm south with the beam", dx / 1000, dz / 1000);
+        println!(
+            "a carrier went {} mm east, {} mm south with the beam",
+            dx / 1000,
+            dz / 1000
+        );
         assert!(
             (dx - 900_000).abs() <= 60_000 && dz.abs() <= 60_000,
             "walked beside the beam: ({dx}, {dz}) µm"

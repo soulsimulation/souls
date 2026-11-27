@@ -2317,7 +2317,10 @@ impl Engine {
             if c.carried(w.body) {
                 self.walk_back.push((activity, ground, w));
             } else if let Err(r) = c.carry(w.body, walk_track(ground, &w)) {
-                eprintln!("worldd: {} did not walk back beside its part: {r}", show(w.body));
+                eprintln!(
+                    "worldd: {} did not walk back beside its part: {r}",
+                    show(w.body)
+                );
             }
         }
         self.collect(None);

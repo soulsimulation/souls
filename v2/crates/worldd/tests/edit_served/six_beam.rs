@@ -264,7 +264,11 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
     for (k, a) in six.iter().enumerate() {
         let b = body_at(&w, body_of(&w, a.soul));
         let (dx, dz) = (b.x - stood[k].x, b.z - stood[k].z);
-        println!("carrier {k} went {} mm east, {} mm south", dx / 1000, dz / 1000);
+        println!(
+            "carrier {k} went {} mm east, {} mm south",
+            dx / 1000,
+            dz / 1000
+        );
         let want = if k < 2 { [0, 0] } else { went };
         assert!(
             (dx - want[0]).abs() <= 30_000 && (dz - want[1]).abs() <= 30_000,
