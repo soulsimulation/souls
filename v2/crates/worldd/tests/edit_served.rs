@@ -5912,10 +5912,10 @@ struct Site<'a> {
 }
 
 /// From a standing frame's middle to each of its two carriers, along its own x (its width), µm: beside its edges,
-/// 0.49 m from the edge each holds (#5067: a frame taken standing is held at its edges along its carriers' line, so
-/// each carrier is within reach of its hold from there, and not from 2.2 m off its faces), 0.15 m clear of the frame's
-/// own columns once it stands in a bay.
-const FRAME_FROM: i64 = 1_100_000;
+/// 0.45 m from the edge each holds (#5067: a frame taken standing is held at its edges along its carriers' line, its
+/// posts, so each carrier is within arm's reach of its hold from there, and not from 2.2 m off its faces), 0.11 m
+/// clear of the frame's own columns once it stands in a bay. The client's `carry grip <frame> front|back`.
+const FRAME_FROM: i64 = 1_060_000;
 /// From a beam's middle to each of its end carriers along it, µm: `sim::activity::carry::REACH` beyond its end grips.
 const BEAM_END: i64 = 1_097_000 + 350_000;
 /// How far off a bay's beam slot's line a beam's crew stands to put it in or take it out, on the slot's own side of
@@ -6078,11 +6078,19 @@ fn beam_way(from: Vec3, to: Vec3) -> Vec<Vec3> {
     match (side(from), side(to)) {
         (_, Some((s, bay))) if (from.x - bay).signum() != s => {
             let [w, e] = round(bay, to.z);
-            if s > 0 { vec![w, e, to] } else { vec![e, w, to] }
+            if s > 0 {
+                vec![w, e, to]
+            } else {
+                vec![e, w, to]
+            }
         }
         (Some((s, bay)), _) if (to.x - bay).signum() != s => {
             let [w, e] = round(bay, from.z);
-            if s > 0 { vec![e, w, to] } else { vec![w, e, to] }
+            if s > 0 {
+                vec![e, w, to]
+            } else {
+                vec![w, e, to]
+            }
         }
         _ => vec![to],
     }

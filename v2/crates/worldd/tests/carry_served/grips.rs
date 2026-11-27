@@ -761,7 +761,7 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
 /// #5067 (admission at the take, the initially unreachable frame): two Souls stand 2.2 m off the faces of the loose
 /// 2.4 m rack frame (where the client's approach used to send them), 2.16 m from the edge each would hold, and ask to
 /// take it: refused `part.grip-out-of-reach`, naming a carrier, before anything is written (the frame stands where it
-/// stood, no holds are said). They walk to beside its edges (its own x, 0.49 m beyond each: an ordinary walk, the
+/// stood, no holds are said). They walk to beside its edges (its own x, 0.45 m beyond each: an ordinary walk, the
 /// authoritative way there) and the same crew takes it, each hold within reach.
 #[tokio::test(flavor = "multi_thread")]
 async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_from_beside_its_edges()
@@ -807,8 +807,8 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         before,
         "the frame did not move"
     );
-    // Beside its edges: its own x, 0.49 m beyond its half width.
-    let edge = l.half_width + 490_000;
+    // Beside its edges: its own x, 0.45 m beyond its half width.
+    let edge = l.half_width + 450_000;
     let near = [spot(at, edge, false), spot(at, -edge, false)];
     for (k, p) in near.iter().enumerate() {
         souls[k].send("eden:walk", ground, point(*p)).await;

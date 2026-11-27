@@ -9,7 +9,7 @@
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
 //   carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walks to that end of a load (its
 //                                     grip's place, from its entry; a part that stands and is seated by crews (a
-//                                     frame, a bent): 0.49 m beyond where it is held standing, along its wider
+//                                     frame, a bent): 0.45 m beyond the edge it is held by, along its wider
 //                                     side, where `part take` and `carry lift` both admit it), beside it along its
 //                                     own x (1.2 m), or to the n-th side carrier's place, beside a grip between its
 //                                     ends; front or back --out <m>: that far off its line, away from the middle of what
@@ -41,13 +41,13 @@ const ID = /^[0-9a-f]{32}-\d+$/;
 const M = 1_000_000;
 /** sim::activity::carry::REACH: a carrier stands this far beyond its grip, µm. */
 export const REACH = 350_000;
-/** How far beyond where it holds a part that stands upright (no long axis on the plan) each of its two carriers
- * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part where its grips lie along
- * the line its carriers stand on, no further out than its edges (a rack frame at its edges, a timber bent 0.55 m from
- * its middle), and refuses a carrier more than 0.7 m from its hold (`part.grip-out-of-reach`). So its carriers stand
- * 0.49 m beyond that: 1.1 m from the middle of a 1.22 m rack frame, clear of a frame stand's walk box (1.05 m) and of
- * the frame's own columns in a bay (0.95 m). It was 2.2 m off its faces, 2.16 m from the hold. */
-export const STANDING_OFF = 490_000;
+/** How far beyond the edge it holds each of the two carriers of a part that stands upright (no long axis on the plan)
+ * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges on the line its
+ * carriers stand on (a rack frame's posts, a timber bent's), 1.2 m and 1.6 m above the ground, and refuses a carrier
+ * more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.45 m is within a standing body's arm's reach of both
+ * hands there, and where it can stand: 1.06 m from the middle of a 1.22 m rack frame, just clear of a frame stand's
+ * walk box (1.05 m) and 0.11 m clear of the frame's own columns in a bay (0.95 m). It was 2.2 m off its faces. */
+export const STANDING_OFF = 450_000;
 /** Where a crew stands from a thing of no entry, as from a part standing, µm. */
 export const STANDING_FROM = 2_200_000;
 /** Where a holder stands beside a part, along its own x, µm: 0.135 A3's change of crew. */
@@ -109,9 +109,9 @@ export function loadOf(entry) {
   const inner = along.slice(1, -1).slice(0, 4), halfWidth = Math.max(...[0, 1, 2].filter((i) => i !== axis).map((i) => b[i])) * 500;
   // standing (its length is its height): its wider side on the plan, its own x or z, where its carriers hold its edges
   const wide = b[0] >= b[2] ? 0 : 2;
-  // where a carrier holds it when it is taken standing: its outermost grip along the carriers' line, no further out
-  // than its edge on its wider side (sim's grips::assign); and whether it is a part crews seat (it has joints)
-  const hold = Math.min(Math.max(Math.abs(along[0]), Math.abs(along.at(-1))), b[wide] * 500);
+  // where its front and its back hold it when it is taken standing: its edge on its wider side (sim's
+  // grips::assign: a frame's post, a bent's); and whether it is a part crews seat (it has joints)
+  const hold = b[wide] * 500;
   const joins = Object.values(entry.points ?? {}).some((p) => p?.role === 'joint');
   return { axis, long, halfLength: b[axis] * 500, halfWidth, wide, hold, joins, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
 }
