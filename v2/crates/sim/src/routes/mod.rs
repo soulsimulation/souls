@@ -114,6 +114,8 @@ const SHORE_OFF: i64 = 2;
 /// The shortest stretch of edge two pieces share that is a portal or a shore, mm.
 const SHORE_MIN: i64 = 10;
 
+/// A shore link as [`Map::shore`] reads it: its kind, its two pieces (the drier first) and its edge's ends, mm.
+pub type ShoreOf = (Kind, [u32; 2], [i64; 2], [i64; 2]);
 /// A patch by its node and, on the open ground, its square.
 type PatchKey = (Id, Option<(i32, i32)>);
 /// A stretch of a square's edge a piece lies along: from, to (mm), the square, the piece.
@@ -1289,7 +1291,7 @@ impl Map {
 
     /// Shore link `id` (a [`Kind::Wade`] or [`Kind::Swim`]): its kind, its two pieces (the drier first) and the stretch
     /// of edge they share, both its ends (mm, the ground's frame). For the walk to cross it (#3225).
-    pub fn shore(&self, id: Id) -> Option<(Kind, [u32; 2], [i64; 2], [i64; 2])> {
+    pub fn shore(&self, id: Id) -> Option<ShoreOf> {
         let l = self
             .links
             .iter()
