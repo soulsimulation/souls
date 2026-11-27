@@ -58,3 +58,11 @@ test('setup publishes source-bound readiness only after screenshot completion an
     await run;
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+test('a served file whose body never arrives is a cancelled load in bounded time, never an endless wait', async () => {
+  const { readAsset } = await import('./carry-native-page.mjs');
+  const state = { loaded: {} };
+  await readAsset(state, '/assets/whole.js', { body: async () => Buffer.from('whole') });
+  await readAsset(state, '/assets/never.js', { body: () => new Promise(() => {}) }, 20);
+  assert.equal(Object.keys(state.loaded).join(), '/assets/whole.js');
+  assert.deepEqual(state.cancelledLoads, [{ path: '/assets/never.js', error: 'Error: carry-proof.asset-body-timeout' }]);
+});

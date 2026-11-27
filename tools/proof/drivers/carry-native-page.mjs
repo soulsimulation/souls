@@ -13,7 +13,7 @@ import { entityId } from '../../../apps/web/src/v2-engine/entity-id.ts';
 import { layerDraws } from '../../../apps/web/src/v2-engine/layer-draws.ts';
 import { nativeCameraMode } from './camera-native-page.mjs';
 const SCENE = { load: 'rack-beam-4', kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
-  view: 'post=0&hour=12:00&eye=5.5,4.5,27.5&at=-2.2,.8,21.8', liftMs: 2500, legs: [['-3.1,23.5', 4500], ['-0.5,23.5', 3500]] };
+  view: 'post=0&hour=12:00&eye=3.5,3.2,26.5&at=-2,.9,22.3', liftMs: 2500, legs: [['-3.1,23.5', 4500], ['-0.5,23.5', 3500]] };
 const states = new Map();
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const native = id => id.replace(/-(\d+)$/, '.$1');
@@ -118,6 +118,11 @@ async function failureExecution(state, page) {
   } catch (error) { diagnostic(state, 'failure-execution-stack-error', { error: String(error) }); }
   finally { await limited(() => cdp.send('Debugger.resume'), 500, 'failure-resume-timeout').catch(error => diagnostic(state, 'failure-resume-error', { error: String(error) })); }
 }
+/** One served file's bytes, hashed. A body that never arrives (attempt 7: a response of the navigation the driver's own
+ *  goto replaced never finished, and the wait for it used the whole journey) is a cancelled load after `ms`, which the
+ *  asset check passes only if the same path was read whole from another response. */
+export const readAsset = (state, path, response, ms = 8000) => limited(() => response.body(), ms, 'asset-body-timeout')
+  .then(bytes => { state.loaded[path] = hash(bytes); }, error => { (state.cancelledLoads ??= []).push({ path, error: String(error) }); });
 export async function installContactObserver(page, config, { record, onFailure = async () => {}, timeoutMs = 10000 } = {}) {
   record('evaluate-begin', { config, pageURL: page.url() });
   try {
@@ -139,7 +144,7 @@ export async function beforeNavigation({ page, paths, signal }) {
   const response = response => {
     const full = new URL(response.url()), path = full.pathname; if (!/\.(js|wasm)$/.test(path)) return;
     diagnostic(state, 'module-response', { url: full.href, origin: full.origin, status: response.status(), resourceType: response.request().resourceType() });
-    state.pending.push((async () => { const bytes = await response.body(); state.loaded[path] = hash(bytes); })().catch(error => (state.cancelledLoads ??= []).push({ path, error: String(error) })));
+    state.pending.push(readAsset(state, path, response));
   };
   page.on('pageerror', pageError); page.on('response', response);
   return async () => {
