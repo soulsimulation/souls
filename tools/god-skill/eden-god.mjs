@@ -3210,7 +3210,7 @@ async function keeper(worldUrl, port, { warm = false } = {}) {
     const pw = findPlaywright({ timeoutMs: warm ? 18e4 : 6e4 });
     if (!pw) throw new Error("no Playwright package found");
     phase("chrome", process.env.EDEN_GOD_PLAYWRIGHT_FROM ? { pwFrom: process.env.EDEN_GOD_PLAYWRIGHT_FROM } : {});
-    browser = await pw.chromium.launch({ channel: "chrome", headless: true, args: [...GL_ARGS, `--remote-debugging-port=${port}`] });
+    browser = await pw.chromium.launch({ channel: "chromium", headless: true, args: [...GL_ARGS, `--remote-debugging-port=${port}`] });
     const ctx = await browser.newContext({ viewport: { width: 1024, height: 640 } });
     await ctx.addInitScript(PRESERVE);
     const page = await ctx.newPage();
@@ -3471,7 +3471,7 @@ async function shootLocal({ worldUrl, eye, at, out, hour, weather: weather2, hid
         release();
         throw new Error("look.timeout: lease wait exceeded deadline");
       }
-      browser = await pw.chromium.launch({ channel: "chrome", headless: true, args: GL_ARGS }).catch((e) => {
+      browser = await pw.chromium.launch({ channel: "chromium", headless: true, args: GL_ARGS }).catch((e) => {
         throw Error(`look: cannot start Chrome (${String(e.message).split("\n")[0]}); install Google Chrome`);
       });
       if (cancelled) {

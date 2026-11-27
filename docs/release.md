@@ -214,7 +214,7 @@ Its jobs:
    nothing in the release pushes to `main` directly; the pull request merges through the queue.
 
 **Receipt.** The workflow runs no gate: one full gate per head runs through `gate.yml` or the laptop, and the V7 walk
-needs real Chrome on a GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
+needs Playwright Chromium on a hardware GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
 leave the machine. The release owner derives the publishable release receipt from them. It holds only shas, the build
 id, statuses, counts, timestamps and the sha256 of each raw receipt, and `ship-receipt.mjs` refuses to write it unless
 it passes the publication check. The ship job checks it again, and ship.sh's preflight verifies it for the exact head

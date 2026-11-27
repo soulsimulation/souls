@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// MARSLAND-FORK: same-camera screenshots of the old-world Mars fork page (/worlds/w/mars), real Chrome (GPU, Chrome lease).
+// MARSLAND-FORK: same-camera screenshots of the old-world Mars fork page (/worlds/w/mars), Chromium (GPU, Chrome lease).
 //   node tools/god-skill/scripts/mars-two/fork-shots.mjs <page-url> <out-dir> [--dpr 1] [--tag fork] [--only re] [--raw] [--settle 9000]
 // Views are given in the mars-two BUILD frame (x = E + 48, z = −N of Gene's Mimos plan; the frame of FURN's pairs.mjs and of
 // sim.mars.college's V3 via toV3) and converted to the fork's frame (V3 + [40, 0.16, −30], the campus backdrop's `at`).
@@ -82,7 +82,7 @@ for (let t = Date.now(); dayWaitMin > 0 && Date.now() - t < dayWaitMin * 60000;)
 const release = await chromeLease('marsland-fork');
 const report = { url, dpr, raw, views: {} };
 try {
-  const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  const b = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: dpr });
   if (raw) await ctx.route(/campus-owner-|\/blobs\/assets\/(70|06)\//, (route) => route.fulfill({ status: 404, body: '' }));
   const page = await ctx.newPage();

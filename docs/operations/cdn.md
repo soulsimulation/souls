@@ -144,7 +144,7 @@ is skipped. `manifest` merges only receipt-verified paths into the manifest's `w
   Chrome's `Accept-Encoding` (must stay br), identity and gzip (must arrive decoded). `--allow-warm` labels a recheck
   of an already warm object.
 - `node tools/cdn/cdn-walk.mjs <outDir> <url>... [--manifest <file>] [--wait <ms>] [--devices desktop1,phone2]`: the
-  release's runtime check. Real Chrome, desktop and phone, asset worker on. It fails when the origin answers an asset
+  release's runtime check. Playwright Chromium, desktop and phone, asset worker on. It fails when the origin answers an asset
   the manifest maps, a CDN request is not 200, a `br` object arrives without `Content-Encoding: br`, the worker
   delivered GLBs but none from the CDN, a god upload came from the origin without a Worker request first, or a
   same-origin immutable response lacks a long-lived cache policy (`origin-cache.mjs`).

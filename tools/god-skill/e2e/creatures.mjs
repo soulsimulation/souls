@@ -74,7 +74,7 @@ try {
   // ---- the viewer
   const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
   release = await chromeLease('L4-creatures-e2e');
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const page = await (await browser.newContext({ viewport: { width: 800, height: 500 } })).newPage(); page.setDefaultTimeout(600000);
   const errors = []; page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)));
   await step('open the world in the viewer (patient: the laptop is loaded)', async () => {

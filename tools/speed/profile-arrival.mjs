@@ -56,7 +56,7 @@ if (args.includes('--analyze')) { profile = JSON.parse(readFileSync(resolve(out,
 else {
 console.log('Waiting for speed Chrome lease');
 const release = await chromeLease('speed', { waitMs: 2_700_000, staleMs: Infinity });
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 try {
   const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: dpr, isMobile: !desktop, hasTouch: !desktop });
   if (!live && !args.includes('--stranger')) await ctx.addInitScript(() => { try { localStorage.setItem('sim.dev', 'admin'); } catch {} });

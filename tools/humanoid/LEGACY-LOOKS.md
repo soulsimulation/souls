@@ -55,7 +55,7 @@ node --test apps/server/src/edge-body-migrate-looks.test.ts
 node tools/humanoid/migrate-looks.browser.mjs
 ```
 
-The browser check boots fresh data with fake minds on a local port (`BODIES_PROOF_PORT`, default 5940) and real Chrome,
+The browser check boots fresh data with fake minds on a local port (`BODIES_PROOF_PORT`, default 5940) and Playwright Chromium,
 records the same residents before and after at dpr 1 and 2, then checks rollback and a second boot. Output goes to
 `BODIES_PROOF_OUT`. It uses the checkout's `mars/viewer/public` assets including the humanoid kit; a release must serve
 `/modular/humanoid/` from matching assets before applying the migration.
