@@ -8986,8 +8986,7 @@ mod tests {
             !fires.contains(&until),
             "nothing at the storm's end: {fires:?}"
         );
-        let tree = live.tree();
-        let f = tree.node(tree.root()).unwrap().fields();
+        let (f, _) = snaps.last().expect("the end");
         assert_ne!(
             f.get(&sky::F_WEATHER),
             Some(&Value::Text(Name::new("souls:storm").unwrap())),
