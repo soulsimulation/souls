@@ -55,7 +55,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
     const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
-    setHeldKinds(kinds);
+    const releaseHeldKinds = setHeldKinds(kinds);
     setBuildNodes(() => kinds.seen); // 0.133 item 6: the creator panel's Build places, moves and removes from what the stream shows
     // K1 (0.135): a carried load moves with its carry's samples; construction parts draw from their own entries
     // W2: every content kind's bounds, for a placed thing no library def draws (stream-scene.ts entryLooks)
@@ -167,7 +167,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, errorAt, parts: life.parts, startedAt, lastPartAt: life.lastPartAt, now: performance.now(), catching: !!bridge?.view.catching });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); setHeldKinds(null); };
+    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); releaseHeldKinds(); };
   }, [stream]);
   return s.current;
 }

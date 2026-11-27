@@ -1,6 +1,6 @@
 import type { HeldEntry } from '../../../mars/viewer/app/engine-view/held-entry.ts';
 import { heldMeshBounds, type HeldPicture } from '../../../mars/viewer/app/engine-view/held-projection.ts';
-import { heldKindOf, entityId } from './v2-engine/creator-kinds.ts';
+import { heldKindOf, entityId } from './v2-engine/held-kind.ts';
 import {handActuatorFrame,knockContacts,opPoint,HAND_REACH_SECONDS,LOCK_TURN_SECONDS,type HandActuatorMotion} from '../../../mars/viewer/engine/social/hand-actuator.ts';
 import {lockPose, paletteTint} from './gen-mesh/vocab-look.ts';
 import {frozenMatrixWorld} from './rendering/FrozenMatrixWorld.ts';

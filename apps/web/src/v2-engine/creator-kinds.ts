@@ -21,6 +21,8 @@ import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, ty
 import { layerDraws } from './layer-draws.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
+import { entityId, setHeldKindResolver } from './held-kind.ts';
+export { entityId, heldKindOf } from './held-kind.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
@@ -144,14 +146,6 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
 
 /** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
  *  (an imported thing), else one made from it. */
-export function entityId(node: string): string {
-  if (/^[eh]_[a-z0-9]{4,12}$/.test(node)) return node;
-  let h = 2166136261;
-  for (let i = 0; i < node.length; i++) h = Math.imul(h ^ node.charCodeAt(i), 16777619);
-  let h2 = h ^ 0x9e3779b9;
-  for (let i = node.length - 1; i >= 0; i--) h2 = Math.imul(h2 ^ node.charCodeAt(i), 16777619);
-  return `e_v${((h >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 11)}`;
-}
 
 type Drawn = NonNullable<ReturnType<typeof kindDef>>;
 const same = (a: Uint8Array | undefined, b: Uint8Array) => a === b || (!!a && a.length === b.length && a.every((x, i) => x === b[i]));
@@ -317,6 +311,4 @@ export class CreatorKinds {
 }
 
 // A callback into the live hook's existing catalogue; no duplicate registry or definition ownership.
-let heldKinds: CreatorKinds | null = null;
-export const setHeldKinds = (kinds: CreatorKinds | null) => { heldKinds = kinds; };
-export const heldKindOf = (entry: import('../../../../mars/viewer/app/engine-view/held-entry.ts').HeldEntry) => heldKinds?.held(entry) ?? null;
+export const setHeldKinds = (kinds: CreatorKinds | null) => setHeldKindResolver(kinds ? entry => kinds.held(entry) : null);
