@@ -4121,9 +4121,16 @@ type Step<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
 /// today's id, ending)` in turn on a served full Eden, from wherever the one before left it. Printed; each ending that
 /// differs from the one wanted is returned.
 fn served_steps(at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    served_steps_in(&format!("{root}/content/kinds"), at, tag, cases)
+}
+
+/// [`served_steps`], with the entries in folder `entries`.
+fn served_steps_in(entries: &str, at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
-    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    let (served, mut soul, dir, _) =
+        serve_entries(&facts, entries, at, tag, im.nodes["world"].scope());
     soul.0
         .set_read_timeout(Some(Duration::from_secs(300)))
         .unwrap();
@@ -4219,6 +4226,58 @@ fn l42_water_and_the_garden_from_outside() {
             ("e_b729d948", "turn_off", &[], "done"),
         ],
     ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// W14 follow-up (#4090, after #5231): Eden's pie pack (today's e_c698733a, at (103.2, 23.7) m in the café) borrows
+/// `eden:pie`, whose `eat_a_slice` is a set by an amount (`slices` by -1): a Soul takes it and eats a slice, on a served
+/// full Eden.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn w14_a_soul_eats_a_slice_from_edens_borrowed_pie_pack() {
+    let wrong = served_steps(
+        "96.5,25.0",
+        "w14pie",
+        &[
+            ("e_c698733a", "walk", &[], "done"),
+            ("e_c698733a", "take", &[], "done"),
+            ("e_c698733a", "eat_a_slice", &[], "done"),
+        ],
+    );
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// W14 follow-up (#4090, after #5231): a planter box (today's e_3fd122bf, at (70.8, 36.0) m) borrows `eden:planter`, a
+/// compost heap borrows `eden:compost_bin`, and the planter's `feed` moves one `compost` from the nearest heap into the
+/// box: a transfer between two borrowed things that number the field differently (the bin's 28, the planter's 34). A
+/// Soul sows the box, then feeds it, on a served full Eden. `feed` needs the box well watered, so it is served with the
+/// planter's water seeded full and not drying (watering needs a can in hand, and `feed` a free hand).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn w14_a_soul_feeds_a_borrowed_planter_box_from_a_borrowed_compost_heap() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let wet = std::env::temp_dir().join(format!("eden-w14feed-wet-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&wet);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &wet);
+    let file = wet.join("garden/planter.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let watered = text.replacen(
+        r#""value": 400000, "per_s": -15"#,
+        r#""value": 4000000, "per_s": 0"#,
+        1,
+    );
+    assert_ne!(text, watered, "the planter's water seeded");
+    std::fs::write(&file, watered).unwrap();
+    let wrong = served_steps_in(
+        wet.to_str().unwrap(),
+        "72.0,38.0",
+        "w14feed",
+        &[
+            ("e_3fd122bf", "sow", &[], "done"),
+            ("e_3fd122bf", "feed", &[], "done"),
+        ],
+    );
+    let _ = std::fs::remove_dir_all(&wet);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
