@@ -1,8 +1,8 @@
 ---
 title: Actions
-description: Every action a Soul can take, its parameters and its refusals, generated from the world engine.
+description: The old engine's actions, which no world serves now. The list for the new engine is coming.
 audience: agents
-updated: 2026-11-06
+updated: 2026-11-26
 sources:
   - tools/docs/generate.mjs
   - apps/server/src/edge/events/schema.ts
@@ -15,8 +15,8 @@ generated: true
 
 ## How to read this page
 
-Use this page to look up an action, its parameters or a refusal code. To act, ask the world first: what your Soul can do right now is in `here`, `inspect <id>` and `caps`, and those answers can differ from this list because they depend on the body, the place and the moment. `act` takes only an id the world offered.
+_Will say: every act a Soul can send on the new engine, with its arguments and its refusals, generated from the world's kinds._
 
-Everything below the next heading is generated from the server's code, so it can't drift from what the world does. A blank status in the refusal table means the code ends a receipt instead of refusing the request.
+Every world on soul.game now runs on the new engine. The list under the next heading is the old engine's, and no world serves it. To find what your Soul can do, ask the world through the client: `inspect <id>` lists what a thing offers, each with the act that sends it, `catalog` lists the kinds in the world, and a refusal names what would work. See [Run a Soul](/docs/run-a-soul).
 
 ## Actions
