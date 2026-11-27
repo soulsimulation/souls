@@ -3043,11 +3043,21 @@ fn a2_parts_rest_at_the_grounds_height() {
     }
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], (a, b): (usize, usize), pa: Vec3, pb: Vec3, what: &str| {
-        for (pa, pb) in frame_legs(stand_now(&w, hands[a].soul, hands[b].soul), (pa, pb)) {
-            hands[a].walk_to(g, pa);
-            hands[b].walk_to(g, pb);
-            let x = socket_end(&mut hands[a].s);
-            let y = socket_end(&mut hands[b].s);
+        let legs = frame_legs(stand_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
+        let led = legs.len() > 1;
+        for (pa, pb) in legs {
+            // A frame's crew is led by its front ([`heading_walk`]); the other then closes on its own place.
+            let (x, y) = if led {
+                hands[a].send("eden:walk", g, heading_walk(pa, pb));
+                let x = socket_end(&mut hands[a].s);
+                hands[b].walk_to(g, pb);
+                (x, socket_end(&mut hands[b].s))
+            } else {
+                hands[a].walk_to(g, pa);
+                hands[b].walk_to(g, pb);
+                let x = socket_end(&mut hands[a].s);
+                (x, socket_end(&mut hands[b].s))
+            };
             assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
         }
     };
@@ -3106,6 +3116,10 @@ fn a2_parts_rest_at_the_grounds_height() {
         assert_eq!(got.kind, 1, "{what}: put: {got:?}");
         let got = hands[ab.0].act("activity:leave", c, BTreeMap::new());
         assert_eq!(got.kind, 1, "{what}: one lets go: {got:?}");
+        // It steps away: it stood beside the frame's edge, where the frame would be laid.
+        hands[ab.0].walk_to(g, v3(ua.x - 4_000_000, 0, ua.z - 4_000_000));
+        let got = socket_end(&mut hands[ab.0].s);
+        assert_eq!(got.kind, 1, "{what}: and steps away: {got:?}");
         c
     };
     let on_ground = |what: &str, mid: i64| {
@@ -4035,11 +4049,21 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let g = w.ground;
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], (a, b): (usize, usize), pa: Vec3, pb: Vec3, what: &str| {
-        for (pa, pb) in frame_legs(stand_now(&w, hands[a].soul, hands[b].soul), (pa, pb)) {
-            hands[a].walk_to(g, pa);
-            hands[b].walk_to(g, pb);
-            let x = socket_end(&mut hands[a].s);
-            let y = socket_end(&mut hands[b].s);
+        let legs = frame_legs(stand_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
+        let led = legs.len() > 1;
+        for (pa, pb) in legs {
+            // A frame's crew is led by its front ([`heading_walk`]); the other then closes on its own place.
+            let (x, y) = if led {
+                hands[a].send("eden:walk", g, heading_walk(pa, pb));
+                let x = socket_end(&mut hands[a].s);
+                hands[b].walk_to(g, pb);
+                (x, socket_end(&mut hands[b].s))
+            } else {
+                hands[a].walk_to(g, pa);
+                hands[b].walk_to(g, pb);
+                let x = socket_end(&mut hands[a].s);
+                (x, socket_end(&mut hands[b].s))
+            };
             assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
         }
     };
@@ -4195,7 +4219,13 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         "Soul 2 stands clear",
     );
     let (p, q) = ends(ub, 0);
-    both(&mut hands, (2, 3), p, q, "crew B round the bay to upright_b");
+    both(
+        &mut hands,
+        (2, 3),
+        p,
+        q,
+        "crew B round the bay to upright_b",
+    );
     let mut joined = into("upright_b");
     joined.insert(4, Value::Array(vec![fa.to_value()]));
     let got = hands[2].act("part:put", crew_b, joined);
@@ -4883,11 +4913,21 @@ fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_ba
 
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], at: Vec3, what: &str| {
-        for (p, q) in frame_legs(stand_now(&w, hands[0].soul, hands[1].soul), frame_ends(at)) {
-            hands[0].walk_to(g, p);
-            hands[1].walk_to(g, q);
-            let x = socket_end(&mut hands[0].s);
-            let y = socket_end(&mut hands[1].s);
+        let legs = frame_legs(stand_now(&w, hands[0].soul, hands[1].soul), frame_ends(at));
+        let led = legs.len() > 1;
+        for (p, q) in legs {
+            // A frame's crew is led by its front ([`heading_walk`]); the other then closes on its own place.
+            let (x, y) = if led {
+                hands[0].send("eden:walk", g, heading_walk(p, q));
+                let x = socket_end(&mut hands[0].s);
+                hands[1].walk_to(g, q);
+                (x, socket_end(&mut hands[1].s))
+            } else {
+                hands[0].walk_to(g, p);
+                hands[1].walk_to(g, q);
+                let x = socket_end(&mut hands[0].s);
+                (x, socket_end(&mut hands[1].s))
+            };
             assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
         }
     };
@@ -5083,11 +5123,21 @@ fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
     );
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], at: Vec3, what: &str| {
-        for (p, q) in frame_legs(stand_now(&w, hands[0].soul, hands[1].soul), frame_ends(at)) {
-            hands[0].walk_to(g, p);
-            hands[1].walk_to(g, q);
-            let x = socket_end(&mut hands[0].s);
-            let y = socket_end(&mut hands[1].s);
+        let legs = frame_legs(stand_now(&w, hands[0].soul, hands[1].soul), frame_ends(at));
+        let led = legs.len() > 1;
+        for (p, q) in legs {
+            // A frame's crew is led by its front ([`heading_walk`]); the other then closes on its own place.
+            let (x, y) = if led {
+                hands[0].send("eden:walk", g, heading_walk(p, q));
+                let x = socket_end(&mut hands[0].s);
+                hands[1].walk_to(g, q);
+                (x, socket_end(&mut hands[1].s))
+            } else {
+                hands[0].walk_to(g, p);
+                hands[1].walk_to(g, q);
+                let x = socket_end(&mut hands[0].s);
+                (x, socket_end(&mut hands[1].s))
+            };
             assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
         }
     };
@@ -5195,11 +5245,18 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         what: &str,
     ) {
         let p = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
-        for (pa, pb) in frame_legs(stand_now(w, souls[a].soul, souls[b].soul), (pa, pb)) {
-            souls[a].send("eden:walk", g, p(pa)).await;
-            souls[b].send("eden:walk", g, p(pb)).await;
-            let x = souls[a].end().await;
-            let y = souls[b].end().await;
+        let legs = frame_legs(stand_now(w, souls[a].soul, souls[b].soul), (pa, pb));
+        let led = legs.len() > 1;
+        for (pa, pb) in legs {
+            // A frame's crew is led by its front ([`heading_walk`]); the other then closes on its own place.
+            let (x, y) = if led {
+                let x = souls[a].act("eden:walk", g, heading_walk(pa, pb)).await;
+                (x, souls[b].act("eden:walk", g, p(pb)).await)
+            } else {
+                souls[a].send("eden:walk", g, p(pa)).await;
+                souls[b].send("eden:walk", g, p(pb)).await;
+                (souls[a].end().await, souls[b].end().await)
+            };
             assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
         }
     }
@@ -5326,7 +5383,11 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     // mouths, beside where each frame's carriers stood.
     for (k, f) in [(3, fa), (2, fb)] {
         let at = body_at(&w, body_of(&w, w.souls[k]));
-        let out = if at.z < YARD_MID_Z { -FRAME_OUT } else { FRAME_OUT };
+        let out = if at.z < YARD_MID_Z {
+            -FRAME_OUT
+        } else {
+            FRAME_OUT
+        };
         let got = souls[k]
             .act("eden:walk", g, to_point(v3(at.x, 0, at.z + out)))
             .await;
@@ -5926,6 +5987,23 @@ fn frame_legs(now: Option<(Vec3, Vec3)>, to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> 
     legs
 }
 
+/// A front's walk to `front` that leads its crew, its back to stand at `back` (moving-group rule 3): the walk names the
+/// crew's heading where it goes (parameter 3, from its back toward its front), so the world keeps the back its span
+/// behind the front all the way, whenever the two would have sent their own walks. Two walks sent one after the other
+/// let a crew walking in file stretch by as far as the first walks before the second starts.
+fn heading_walk(front: Vec3, back: Vec3) -> BTreeMap<u64, Value> {
+    BTreeMap::from([
+        (
+            1,
+            Value::Array(vec![int(front.x), int(0), int(front.z)]),
+        ),
+        (
+            3,
+            Value::Array(vec![int(front.x - back.x), int(front.z - back.z)]),
+        ),
+    ])
+}
+
 /// Where Souls `a` and `b` stand now; none while either has no body yet (its first walk gives it one).
 fn stand_now(w: &Seeded, a: Id, b: Id) -> Option<(Vec3, Vec3)> {
     let (copy, _) = served_copy(w);
@@ -6010,10 +6088,18 @@ async fn walk_two(
     (pa, pb): (Vec3, Vec3),
     what: &str,
 ) {
-    for (pa, pb) in frame_legs(stand_now(s.w, a.soul, b.soul), (pa, pb)) {
-        a.send("eden:walk", s.g, to_point(pa)).await;
-        b.send("eden:walk", s.g, to_point(pb)).await;
-        let (x, y) = (a.end().await, b.end().await);
+    let legs = frame_legs(stand_now(s.w, a.soul, b.soul), (pa, pb));
+    let led = legs.len() > 1;
+    for (pa, pb) in legs {
+        // A frame's crew is led by its front ([`heading_walk`]); the other then closes on its own place.
+        let (x, y) = if led {
+            let x = a.act("eden:walk", s.g, heading_walk(pa, pb)).await;
+            (x, b.act("eden:walk", s.g, to_point(pb)).await)
+        } else {
+            a.send("eden:walk", s.g, to_point(pa)).await;
+            b.send("eden:walk", s.g, to_point(pb)).await;
+            (a.end().await, b.end().await)
+        };
         assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
     }
 }
@@ -8246,7 +8332,10 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         assert_eq!(got.kind, 1, "frame taken: {got:?}");
         let now = stand_now(&w, w.souls[0], w.souls[other]);
         for (f0, f1) in frame_legs(now, frame_ends(slot_of(bay, slots[slot]))) {
-            walk_all(&mut souls, &[(0, f0), (other, f1)], "the frame to the bay").await;
+            // Led by its front ([`heading_walk`]); the other then closes on its own place.
+            let got = souls[0].act("eden:walk", g, heading_walk(f0, f1)).await;
+            assert_eq!(got.kind, 1, "the frame to the bay, its front: {got:?}");
+            walk_all(&mut souls, &[(other, f1)], "the frame to the bay").await;
         }
         let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
