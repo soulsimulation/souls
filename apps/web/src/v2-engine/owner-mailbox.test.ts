@@ -93,6 +93,51 @@ test('the card is told whether the Soul\'s agent is connected (the gateway\'s {"
   assert.equal(((await mb.read()).link as { state?: string } | undefined)?.state, 'disconnected');
 });
 
+test('#1330: the box socket down for OUTAGE_MS → unavailable, nothing of the agent; reconnect → normal; a send in between keeps its words', async () => {
+  const { OUTAGE_MS, UNAVAILABLE_SEND } = await import('./owner-mailbox.ts');
+  let t = 1_000_000, up = true;
+  const sock = { ...fakeSocket((f) => (f.startsWith('put ') ? { sent: { id: 'm9' } } : null)), onOpen: null as ((o: boolean) => void) | null };
+  const sendText = sock.sendText;
+  sock.sendText = (x: string) => (up ? sendText(x) : false);
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT), () => t);
+  await mb.read();
+  sock.onOpen!(true);
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.equal((await mb.read()).unavailable, undefined, 'open: normal');
+  assert.equal(((await mb.read()).link as { state?: string }).state, 'connected');
+  // the gateway goes: the socket closes (1013, or just dropped) and keeps failing to reconnect
+  up = false; sock.onOpen!(false);
+  t += 1000; sock.onOpen!(false);
+  assert.equal((await mb.read()).unavailable, undefined, 'one reconnect\'s gap says nothing');
+  t += OUTAGE_MS;
+  const down = await mb.read();
+  assert.equal(down.unavailable, true, 'down for OUTAGE_MS: unavailable');
+  assert.equal(down.link, undefined, 'no word on the agent from before the outage');
+  assert.equal(down.connected, false);
+  await assert.rejects(mb.send('meet me by the well'), (e: Error) => e.message === UNAVAILABLE_SEND, 'a send says the world is unavailable');
+  assert.ok(!sock.sent.some((f) => f.includes('meet me')), 'nothing went out');
+  // the world comes back: the socket signs in again
+  up = true; sock.onOpen!(true);
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  const back = await mb.read();
+  assert.equal(back.unavailable, undefined, 'reconnect: normal');
+  assert.equal((back.link as { state?: string }).state, 'connected');
+  const sent = await mb.send('meet me by the well');
+  assert.equal(sent.latest?.text, 'meet me by the well');
+  assert.equal(sent.latest?.state, 'sent');
+});
+
+test('#1330: a first connection that fails counts as down (a page opened during an outage)', async () => {
+  let t = 5_000;
+  const sock = { ...fakeSocket(() => null), onOpen: null as ((o: boolean) => void) | null };
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT), () => t);
+  await mb.read();
+  assert.equal((await mb.read()).unavailable, undefined, 'still making its first connection');
+  sock.onOpen!(false);
+  t += (await import('./owner-mailbox.ts')).OUTAGE_MS;
+  assert.equal((await mb.read()).unavailable, true);
+});
+
 test('a mailbox that cannot be reached makes the read throw (the card shows nothing, no claim)', async () => {
   const mb = new V2OwnerMailbox(async () => { throw new Error('no view'); });
   await assert.rejects(mb.read(), /no view/);

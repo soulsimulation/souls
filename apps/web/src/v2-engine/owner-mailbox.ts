@@ -161,7 +161,13 @@ export class MailBox {
 }
 
 type Box = Pick<MailBox, 'messages' | 'agents' | 'onChange' | 'put' | 'text'>;
-type Sock = { onText: ((t: string) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
+/** `onOpen`: told true once the socket is signed in, false when it drops (#1330). */
+type Sock = { onText: ((t: string) => void) | null; onOpen?: ((open: boolean) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
+/** #1330: how long the box's socket stays down (the gateway or its world gone, or the page's network) before the card
+ *  says the world is unavailable: longer than one reconnect (1 s), so a socket that comes straight back says nothing. */
+export const OUTAGE_MS = 3000;
+/** #1330: what a send says while the box's socket is down; the words stay in the box. */
+export const UNAVAILABLE_SEND = 'The world is unavailable right now. Your message is still here: send it when the world is back.';
 
 /** One Soul's box on the gateway mailbox. */
 export class V2OwnerMailbox {
@@ -169,25 +175,38 @@ export class V2OwnerMailbox {
   private box: Box | null = null;
   private sock: Sock | null = null;
   private grant: string | null = null;
-  private readonly ready: Promise<void>;
+  /** Settles once the box is attached; rejects when it never can be (the page's v2OwnerMailbox then asks again). */
+  readonly ready: Promise<void>;
   private changed: Array<() => void> = [];
+  /** #1330: since when the box's socket has been down (null while it is open or still making its first connection); a
+   *  first connection that fails counts, so a page opened during an outage says so too. */
+  private downSince: number | null = null;
+  private readonly now: () => number;
 
-  constructor(ready: (self: V2OwnerMailbox) => Promise<void>) { this.ready = ready(this); this.ready.catch(() => {}); }
+  constructor(ready: (self: V2OwnerMailbox) => Promise<void>, now: () => number = Date.now) {
+    this.now = now; this.ready = ready(this); this.ready.catch(() => {});
+  }
 
   /** Called once the view token is held: the box, its socket and the Soul's grant. */
   attach(box: Box, sock: Sock, grant: string): void {
     this.box = box; this.sock = sock; this.grant = grant;
     box.onChange = () => { for (const f of this.changed) f(); };
     sock.onText = (t) => void box.text(t);
+    sock.onOpen = (open) => { this.downSince = open ? null : this.downSince ?? this.now(); };
     sock.start();
   }
+
+  /** #1330: whether the world is unavailable to this box: its socket has been down for `OUTAGE_MS` or more. */
+  unavailable(): boolean { return this.downSince !== null && this.now() - this.downSince >= OUTAGE_MS; }
 
   /** Whether the Soul's agent is connected now, as the gateway said; null until it did. */
   private agent(): boolean | null { return this.box!.agents.get(this.grant!) ?? null; }
 
-  /** The box as the old card reads it; throws while the mailbox cannot be reached (the card then shows nothing). */
+  /** The box as the old card reads it; throws while the mailbox cannot be reached (the card then shows nothing). While
+   *  the world is unavailable (#1330) it says so, and nothing of the agent: the last word on it is from before. */
   async read(): Promise<AgentInbox> {
     await this.ready;
+    if (this.unavailable()) return { ...inboxOf(this.box!.messages, this.sentAt, null), unavailable: true };
     return inboxOf(this.box!.messages, this.sentAt, this.agent());
   }
 
@@ -206,6 +225,7 @@ export class V2OwnerMailbox {
     });
     if (!this.sock!.sendText(frame)) box.text(JSON.stringify({ sent: { refused: 'not-connected' } }));
     await taken;
+    if (m.state === 'refused' && m.outcome === 'not-connected') throw new Error(UNAVAILABLE_SEND);
     if (m.state === 'refused') throw new Error(`Message could not be sent (${m.outcome ?? 'refused'}). Try again.`);
     if (m.state === 'sending') {
       // failed, as the old box shows a failed send: an error and no receipt; a late answer then binds to nothing
@@ -249,6 +269,7 @@ const PROTOCOL = 2;
  *  is renewed on the open socket before it expires, and the socket comes back after a drop. */
 export class BoxSocket implements Sock {
   onText: ((t: string) => void) | null = null;
+  onOpen: ((open: boolean) => void) | null = null;
   private ws: WebSocket | null = null;
   private open = false;
   private stopped = false;
@@ -277,9 +298,9 @@ export class BoxSocket implements Sock {
       if (typeof ev.data === 'string') return void this.onText?.(ev.data);
       if (step === 0) return void ((step = 1), ws.send(encode(new Map([[1, this.token]]))));
       const m = decode(new Uint8Array(ev.data as ArrayBuffer), { useMaps: true }) as Map<number, unknown>;
-      if (step === 1 && m.get(4) === 'view.started') { step = 2; this.open = true; this.renewLater(encode); }
+      if (step === 1 && m.get(4) === 'view.started') { step = 2; this.open = true; this.onOpen?.(true); this.renewLater(encode); }
     };
-    ws.onclose = () => { this.open = false; this.ws = null; if (!this.stopped) this.timer = setTimeout(() => this.start(), 1000); };
+    ws.onclose = () => { this.open = false; this.ws = null; this.onOpen?.(false); if (!this.stopped) this.timer = setTimeout(() => this.start(), 1000); };
     ws.onerror = () => ws.close();
   }
   private renewLater(encode: (v: unknown) => Uint8Array<ArrayBuffer>): void {
@@ -448,5 +469,8 @@ export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
     self.attach(new MailBox(), new BoxSocket(place.gateway, g, renew), own.grant);
   });
   boxes.set(key, mb);
+  // a box that could not start (the directory unreachable for its view token) is asked for again on the next read,
+  // never kept failed for the page's life (#1330)
+  mb.ready.catch(() => { if (boxes.get(key) === mb) boxes.delete(key); });
   return mb;
 }
