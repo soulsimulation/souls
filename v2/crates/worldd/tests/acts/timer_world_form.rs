@@ -1,0 +1,143 @@
+//! #3991: a timer a Soul's form declares runs its world form, which has no steps, on a served world, and that form's
+//! state change lands: while the world runs, and when the world stops with the timer pending and starts again from its
+//! log (a deploy, a sleeping world woken). The rack is a bell here: `ring_by_hand` walks to it and presses it, as a
+//! thaumatrope's disc is released, and `ring` rings it at once; each sets `ringing` and a timer whose world form
+//! `fade` clears it.
+use super::*;
+
+/// The rack's `ringing` field as the log replayed has it (a flag: 1 set, 0 or none clear).
+fn ringing(run: &Run) -> u64 {
+    let r = run.replay();
+    let t = r.tree();
+    match t.node(t.handle(rack()).unwrap()).unwrap().fields().get(&28) {
+        Some(Value::Uint(n)) => *n,
+        _ => 0,
+    }
+}
+
+/// The due time of the last timer the log sets.
+fn timer_due(run: &Run) -> Option<i64> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut due = None;
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            if let Body::Timers(ts) = &e.body {
+                for t in ts {
+                    if let replica::effects::TimerRec::Set { due: d, .. } = t {
+                        due = Some(*d);
+                    }
+                }
+            }
+        }
+    }
+    due
+}
+
+/// Waits up to `within` of real time for the flag to clear; how long it took.
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn faded(run: &Run, within: Duration) -> Duration {
+    let t0 = std::time::Instant::now();
+    while ringing(run) == 1 && t0.elapsed() < within {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    t0.elapsed()
+}
+
+/// The issue's shape on a running world: a walk and a press, the flag and a 2 s timer set at the press's contact,
+/// then the timer's world form with no steps clears it.
+#[test]
+fn i3991_a_timer_set_at_a_moves_contact_runs_its_world_form_on_a_served_world() {
+    let (run, mut a, _) = serve("i3991-hand");
+    let rung = a.act("test:ring_by_hand", Some(rack()), BTreeMap::new());
+    println!("#3991 ring by hand: {rung:?}");
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    assert_eq!(ringing(&run), 1, "ringing once the act is answered");
+    let took = faded(&run, Duration::from_secs(6));
+    println!("#3991 ring by hand: cleared after {took:?}");
+    assert_eq!(ringing(&run), 0, "the timer's world form cleared the flag");
+    run.stop();
+}
+
+/// The world stops a moment after the ring, its 2 s timer pending, and starts again from its log: the timer fires at
+/// its due time and its world form clears the flag. Before #3991's fix the started world never fired it, so the bell
+/// rang for good. The world counts the timer in its next due time too, so a still world never sleeps past it.
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn i3991_a_forms_timer_pending_at_a_restart_runs_its_world_form() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("i3991-ra", store.clone());
+    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    assert_eq!(ringing(&run), 1, "ringing once the act is answered");
+    let due = timer_due(&run).expect("the ring set its timer");
+    let t0 = std::time::Instant::now();
+    let mut next = run.world.quiet.read().1;
+    while next.is_none_or(|n| n > due) && t0.elapsed() < Duration::from_millis(500) {
+        std::thread::sleep(Duration::from_millis(20));
+        next = run.world.quiet.read().1;
+    }
+    println!("#3991 the world's next due {next:?}, the fade's {due}");
+    assert!(
+        next.is_some_and(|n| n <= due),
+        "the world's next due time counts the form's timer"
+    );
+    run.world.stop();
+    let (run, _, _) = serve_on("i3991-rb", store);
+    let took = faded(&run, Duration::from_secs(6));
+    println!("#3991 restart: cleared after {took:?}");
+    assert_eq!(ringing(&run), 0, "the timer fired after the restart");
+    run.stop();
+}
+
+/// Every content kind's timer names a form of its own kind that binds, steps and effects, as the timer's run binds it
+/// when it fires (#3991's check of the kinds whose timers run a world form with no steps).
+#[test]
+fn i3991_every_content_timer_names_a_form_that_binds() {
+    fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "json") {
+                out.push(p);
+            }
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let mut all = Vec::new();
+    files(&root, &mut all);
+    let mut checked = BTreeSet::new();
+    for p in all {
+        let Ok(entry) = parse(&std::fs::read_to_string(&p).unwrap()) else {
+            continue;
+        };
+        let kind = entry
+            .get("kind")
+            .and_then(Json::str)
+            .unwrap_or("?")
+            .to_owned();
+        for (_, f) in entry.get("forms").and_then(Json::obj).unwrap_or(&[]) {
+            for e in f.get("effects").and_then(Json::arr).unwrap_or(&[]) {
+                if e.get("change").and_then(Json::str) != Some("timer") {
+                    continue;
+                }
+                let form = e
+                    .get("form")
+                    .and_then(Json::str)
+                    .expect("a timer names its form");
+                let steps = skills::form_runner::bind(&entry, form);
+                let effects = skills::form_runner::bind_effects(&entry, form);
+                assert!(steps.is_ok(), "{kind} {form}: {steps:?}");
+                assert!(effects.is_ok(), "{kind} {form}: {effects:?}");
+                checked.insert(format!("{kind} {form}"));
+            }
+        }
+    }
+    println!("#3991 timer forms that bind: {checked:?}");
+    assert!(checked.len() >= 10, "the content's timer forms were found");
+}
