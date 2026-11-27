@@ -20,17 +20,16 @@ import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
 import { historyBase, setV2History, V2History } from './history.ts';
+import { streamReadUrl } from './stream-cdn.ts';
+import { arrivalMark } from '../arrival-marks.ts';
+import { claimEarlyReader, replicaUrl, takeEarlyScene, v2Stream } from './early-stream.ts';
 
-const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
-/** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
 // The inline config as the page arrived with it: the app takes (deletes) window.__simConfig at its first config read
 // (inline-config.ts), before this hook's effect reads v2Replica, v2History and v2Bodies, so it is kept at load.
-const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown } }).__simConfig;
+const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown; v2StreamOrigin?: unknown } }).__simConfig;
 
-export function v2Stream(): string | null {
-  const v = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Stream?: unknown } }).__simConfig?.v2Stream;
-  return typeof v === 'string' && STREAM.test(v) && !v.split('/').some((s) => s === '.' || s === '..') ? v : null;
-}
+/** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
+export { v2Stream };
 
 /** A Connection that never opens a socket: the page's code reads its welcome, replica and stats as it does today. */
 function quietConnection(worldId: string): Connection {
@@ -78,8 +77,12 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
      try {
-      const scene = !oldViews() ? null : await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
-      const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
+      // time to Live: the scene (asked for with the page's first phase where it could be: early-stream.ts) and the bridge's
+      // chunks at once, not one after the other
+      const modules = Promise.all([import('./bridge.ts'), import('./reader.ts')]); modules.catch(() => {});
+      const early = takeEarlyScene();
+      const scene = !oldViews() ? null : await (early ?? fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { renderSceneRef?: { rulesVersion?: string } } | null;
+      const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await modules;
       if (stopped) return;
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
@@ -95,14 +98,16 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         return undefined;
       };
       // The replica by version where the launcher names one (`v2Replica`, cutover.mjs: its files are immutable), else the plain path
-      const named = PAGE_CONFIG?.v2Replica;
-      const replica = new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
+      const replica = replicaUrl(PAGE_CONFIG?.v2Replica);
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, PAGE_CONFIG);
       if (past) setV2History(new V2History(past, () => makeHistoryReader(replica), frame, hour));
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
-      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(replica))))));
+      // #4159: the live stream from the CDN when the launcher names it (stream-cdn.ts), else from this page's origin
+      // time to Live: the reader the page's first phase started (early-stream.ts), with all it has read so far, else a new one
+      const read = streamReadUrl(stream, PAGE_CONFIG, location.search);
+      bridge.start(read, () => fromStream.watch(parts.watch(kinds.watch(world.watch((claimEarlyReader(read, replica) as unknown as Worker | null) ?? makeReader(replica))))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
@@ -122,6 +127,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (bridge) {
         const v = bridge.view;
         st.takes = v.takes;
+        if (v.takes.chunks.length) arrivalMark('stream-first-take');   // the speed probes: when the page has its first live chunk
         // what the Souls said aloud, and (R3) private turns with their words withheld: one list while neither changes
         if (v.speech !== seenSpeech || v.conversations !== seenTurns) { seenSpeech = v.speech; seenTurns = v.conversations; said = v.conversations.length ? [...v.speech, ...v.conversations] : v.speech; }
         st.ticker = v.ticker; // R3: what the Souls did (take-talk.ts)

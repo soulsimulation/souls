@@ -20,15 +20,15 @@ test('A1: age is the steady time since the copy was confirmed, and a gap says si
     { age: FRESH_MS + 1, stale: true, gap: { ms: 1, why: 'unconfirmed' } });
 });
 
-test('A2: a world confirmed current that has written nothing is asleep, not stale', () => {
+test('A2: a world confirmed current that has written nothing says how long it has been unchanged, not stale', () => {
   const still = { startedAt: 0, changedAt: 1000, cutAt: null, why: null };
   // Confirmed just now, unchanged for ASLEEP_AFTER_MS: asleep since then, and not stale.
   const a = ageOf({ ...still, confirmedAt: 1000 + ASLEEP_AFTER_MS + 4000, now: 1000 + ASLEEP_AFTER_MS + 4100 });
-  assert.deepEqual(a, { age: 100, asleep: { sinceMs: ASLEEP_AFTER_MS + 4100 } });
+  assert.deepEqual(a, { age: 100, unchangedMs: ASLEEP_AFTER_MS + 4100 });
   // Cut off, the same world is stale: the client cannot know it still sleeps.
   const b = ageOf({ ...still, confirmedAt: 2000, cutAt: 3000, why: 'not-connected', now: 40_000 });
   assert.equal(b.stale, true);
-  assert.equal(b.asleep, undefined);
+  assert.equal(b.unchangedMs, undefined);
 });
 
 test('#1960: a follow that ends behind the version a receipt named follows again, a bounded number of times', () => {

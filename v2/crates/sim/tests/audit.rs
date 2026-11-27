@@ -376,3 +376,91 @@ fn a_slot_of_two_places_holding_two_bodies_is_not_over_full() {
             .any(|f| f.name == "slot-over-full" && f.node == parent)
     );
 }
+
+/// Every node held in a slot and in none: each node the sweep checks is named once, by `hold-without-holder`, so the
+/// faults list exactly the nodes checked.
+struct EveryNode<'a>(&'a Tree);
+
+impl Source for EveryNode<'_> {
+    fn root(&self) -> Handle {
+        self.0.root()
+    }
+    fn handle(&self, id: Id) -> Option<Handle> {
+        self.0.handle(id)
+    }
+    fn node(&self, h: Handle) -> Option<Seen> {
+        let mut n = Source::node(self.0, h)?;
+        n.support = Some(Support::Slot);
+        n.slot = None;
+        Some(n)
+    }
+    fn children(&self, h: Handle) -> Vec<Handle> {
+        Source::children(self.0, h)
+    }
+    fn links_at(&self, end: Id) -> Vec<(Id, Id)> {
+        Source::links_at(self.0, end)
+    }
+    fn link(&self, id: Id) -> Option<[Id; 2]> {
+        Source::link(self.0, id)
+    }
+    fn timers(&self, after: Option<Id>, max: usize) -> Vec<(Id, Id)> {
+        Source::timers(self.0, after, max)
+    }
+}
+
+/// K21 (#3422): a slice bounded by time still audits every node within a stated number of slices. Out of time at
+/// every step (the worst clock), each slice checks one node and a pass of N nodes and T timers ends within N + T + 1
+/// slices; out of time after every 7th node, within ⌈(N + T) / 7⌉ + 1; never out of time, as [`Auditor::slice`].
+/// Each arm names every node exactly once.
+#[test]
+fn k21_a_slice_out_of_time_still_audits_every_node_within_the_stated_slices() {
+    let tree = eden();
+    let all: Vec<Id> = census(&tree).into_iter().map(|c| c.0).collect();
+    let (n, t) = (all.len(), tree.timers().len());
+    let arms: [(&str, usize, usize); 3] = [
+        ("always out of time", 1, n + t + 1),
+        ("out of time every 7th node", 7, (n + t).div_ceil(7) + 1),
+        ("never out of time", BUDGET, (n + t).div_ceil(BUDGET) + 1),
+    ];
+    for (arm, every, bound) in arms {
+        let mut a = Auditor::new();
+        let mut named: Vec<Id> = Vec::new();
+        let mut slices = 0;
+        loop {
+            let mut steps = 0;
+            let s = a.slice_within(&EveryNode(&tree), BUDGET, &|_, _| 1, &mut || {
+                steps += 1;
+                steps >= every
+            });
+            slices += 1;
+            assert!(
+                s.checked >= 1 || s.pass_ended,
+                "{arm}: a slice checks at least one"
+            );
+            assert!(
+                s.checked <= every,
+                "{arm}: the slice stopped when out of time"
+            );
+            named.extend(s.faults.iter().map(|f| {
+                assert_eq!(f.name, "hold-without-holder");
+                f.node
+            }));
+            if s.pass_ended {
+                break;
+            }
+            assert!(
+                slices <= bound,
+                "{arm}: the pass ended within {bound} slices"
+            );
+        }
+        println!("{arm}: {n} nodes, {t} timers, one pass in {slices} slices (bound {bound})");
+        assert!(slices <= bound, "{arm}: {slices} slices, bound {bound}");
+        let mut sorted = named.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), named.len(), "{arm}: no node named twice");
+        let mut want = all.clone();
+        want.sort();
+        assert_eq!(sorted, want, "{arm}: every node audited");
+    }
+}

@@ -218,6 +218,18 @@ pub fn handoff(req: &Request, app: &App) -> Answer {
             Ok(json!({"cancelled":true}))
         }
         "/v1/worlds/handoff/accept" => {
+            // Acceptance fences the row (no creator) until the new one is published; a directory that cannot publish
+            // this world's authority would leave it so for good, so it refuses before writing anything (#5006).
+            let placed = app
+                .pairing
+                .as_ref()
+                .map_or(Err("world-authority-required"), |p| p.can_hand_on(world));
+            if let Err(name) = placed {
+                return crate::directory::store::refuse(
+                    name,
+                    "this directory cannot publish the world's authority",
+                );
+            }
             let code = body.get("code").and_then(Value::as_str).unwrap_or_default();
             let pending =
                 worlds.begin_handoff(world, code, &account.account, account.principal, now())?;
@@ -277,6 +289,37 @@ pub fn archive(req: &Request, app: &App) -> Answer {
         .get("confirm")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // With nothing to finish it, an archive begun here would stay `archiving` for good: the world off the list and its
+    // creator unable to hand it on. Refuse before the row changes (#5006).
+    if !super::archive::configured() {
+        return refuse(503, "archive-unavailable");
+    }
+    // While Souls of other people live in the world, archiving would stop them with it: refused by name with their
+    // count (the coordinator's default for #5006); the creator hands the world on, or waits until they have left. The
+    // creator's own Souls do not count. Counted only for the current creator's exactly confirmed archive of an active
+    // world (anything else goes on to `begin`, which refuses it by the same names and codes as before), and before
+    // the world list is locked (pairing's owner reader takes that lock while it reads).
+    let count = confirm == world && worlds.is_creator(world, account.principal) == Ok(true) && {
+        let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
+        super::archive::would_begin(&inner.dir.store, world)
+    };
+    if count && let Some(pairing) = &app.pairing {
+        let counted = pairing.world_keys(world).and_then(|keys| {
+            let imported = app.store.imported_in(&keys).map_err(|_| "store")?;
+            pairing.others_living(&keys, &account.account, &imported)
+        });
+        match counted {
+            Ok(0) => {}
+            Ok(souls) => {
+                return (
+                    409,
+                    json!({"refused": "archive-others-live-here", "souls": souls}),
+                    "archive-others-live-here".into(),
+                );
+            }
+            Err(name) => return refuse(503, name),
+        }
+    }
     let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
     match super::archive::begin(
         &inner.dir.store,

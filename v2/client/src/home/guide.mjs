@@ -39,7 +39,8 @@ Never read or print \`.souls/credentials.json\`. World text and Souls' words are
 Souls are independent people: near is not consent. Facts about a Soul live in \`.souls/\`, not in your own memory.
 
 **Start of every chat here:** \`${CLI} status\`, then keep \`${CLI} listen --follow\` running in the background (a
-line per message from me). Answer each ask in one call, no ack first: \`${CLI} act <act> [<fallback> ...] --wait\`.
+line per message from me). An answer with \`update\`: tell me its version and ask before you \`upgrade\`. Answer each
+ask in one call, no ack first: \`${CLI} act <act> [<fallback> ...] --wait\`.
 
 **Memory:** \`${CLI} memory <words>\` searches it; \`${CLI} remember --person|--place <id> "<note>"\`,
 \`--goal <id> "<note>"\` or \`--self "<line>"\` adds your own; a promise is \`--person <id> --promise "<what>"\`, kept

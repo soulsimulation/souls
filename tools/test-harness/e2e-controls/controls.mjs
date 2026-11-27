@@ -61,6 +61,36 @@ export function verdict(slug, steps) {
   return { slug, ok: failures.length === 0 && skipped.length === 0, failures, steps };
 }
 
+/** What Follow a Soul says when the world's Explore lists no Soul. It passes, as Places does with no places: there is no
+ *  control to press. A Soul listed that does not follow still fails. */
+export const NO_SOUL_TO_FOLLOW = 'no Soul listed in Explore: nothing to follow';
+
+/** Follow a Soul: open Explore (a place clicked closes it), click its first Soul, the camera follows it. A world whose
+ *  Explore lists none (it lists only bodies a Soul drives, from the new engine's stream) gets NO_SOUL_TO_FOLLOW instead
+ *  of a 10 s wait for a row that never comes. `camera()` reads the page's camera mode. */
+export async function followSoul(page, { press, until, camera }) {
+  const search = page.locator('input.explore-search');
+  if (!await search.isVisible()) await press(page.locator('.explore-open').first());
+  const soul = page.locator('.explore-soul').first();
+  try { await soul.waitFor({ state: 'visible', timeout: 10000 }); } catch (e) {
+    if (await search.isVisible() && !await page.locator('.explore-soul').count()) return NO_SOUL_TO_FOLLOW;
+    throw e;
+  }
+  // Explore searches its locations again each time it opens. When they come, the centred dialog grows and its Soul rows
+  // move up, so a click aimed before that lands where the row was (release 0.138 on Eden: Explore stayed open, the camera
+  // free). Click once the search is done and the row has held still for 250 ms; a row that never settles is clicked anyway.
+  const searching = page.locator('.explore-modal [aria-live=polite]').first();
+  await until(async () => {
+    if (/searching/i.test(await searching.textContent({ timeout: 1000 }).catch(() => '') ?? '')) return false;
+    const a = await soul.boundingBox(); await sleep(250); const b = await soul.boundingBox();
+    return !!a && !!b && a.x === b.x && a.y === b.y;
+  }, 10000);
+  const name = (await soul.locator('b').first().textContent())?.trim();
+  await press(soul);
+  if (!await until(async () => (await camera()) === 'follow', 20000)) throw Error(`clicking ${name} did not follow (camera ${await camera()})`);
+  return `following ${name}`;
+}
+
 const arg = (argv, k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -274,15 +304,7 @@ async function walkWorld(browser, origin, slug, dir) {
     await press(places.first());
     return `${n} places; clicked the first`;
   });
-  await step('Follow a Soul', async () => {
-    if (!await page.locator('input.explore-search').isVisible()) await press(page.locator('.explore-open').first());
-    const soul = page.locator('.explore-soul').first();
-    await soul.waitFor({ state: 'visible', timeout: 10000 });
-    const name = (await soul.textContent())?.trim();
-    await press(soul);
-    if (!await until(async () => (await view()).camera === 'follow', 20000)) fail(`clicking ${name} did not follow (camera ${(await view()).camera})`);
-    return `following ${name}`;
-  });
+  await step('Follow a Soul', () => followSoul(page, { press, until, camera: async () => (await view()).camera }));
   if (!loadFailed) await escape();
   await step('New Soul', async () => {
     await press(page.locator('.bring-agent-open').first());

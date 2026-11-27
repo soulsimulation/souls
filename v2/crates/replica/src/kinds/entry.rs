@@ -17,8 +17,9 @@
 //!   covers it, and a child with none is refused (`entry-value`), as the format bounds every child.
 //!
 //! Any other meaning section (forms, areas, ...) is refused by name, `entry-section-not-read`, rather than
-//! dropped: a kind named without it would be named by less than its meaning. Sections 20 and up (looks, text, card)
-//! sit beside the meaning and are left out.
+//! dropped: a kind named without it would be named by less than its meaning. Sections 20 and up (looks, text, card,
+//! howtos, and a building kind's rooms, 24, which a place of it is given in its own edit) sit beside the meaning and
+//! are left out.
 
 use crate::rules::json::{Value, parse};
 
@@ -31,7 +32,7 @@ pub fn entry_to_kind(json: &str) -> Result<String, String> {
     let mut out: Vec<(u64, String)> = Vec::new();
     for (key, v) in e.obj().unwrap_or(&[]) {
         let section = match key.as_str() {
-            "format" | "looks" | "text" | "card" | "howtos" => continue,
+            "format" | "looks" | "text" | "card" | "howtos" | "building" => continue,
             "kind" => (1, quoted(v)?),
             "owner" => (2, quoted(v)?),
             "state" => (3, numbered_by_n(v, state_field)?),

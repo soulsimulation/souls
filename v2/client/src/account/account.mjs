@@ -221,10 +221,10 @@ export async function soulRetireWait(home, { within = 60_000, sleep = (ms) => ne
     let state;
     if (p.account) {
       const { row } = await accountSoul(home, p.grant, p.account, io);
-      state = !row ? 'retired' : row.retireAsked ? 'pending' : 'declined';
+      state = !row ? 'retired' : row.retireAsked ? 'pending' : 'kept';
     } else {
       const seat = seatOf(home, p.soul);
-      try { state = seat ? ((await post(seat.address, '/v1/pair/profile', { token: seat.token }, null, io.send)).profile?.retire_asked ? 'pending' : 'declined') : 'retired'; } catch (e) { if (e.code !== 'unknown-token') throw e; state = 'retired'; }
+      try { state = seat ? ((await post(seat.address, '/v1/pair/profile', { token: seat.token }, null, io.send)).profile?.retire_asked ? 'pending' : 'kept') : 'retired'; } catch (e) { if (e.code !== 'unknown-token') throw e; state = 'retired'; }
     }
     if (state === 'retired') {
       const creds = read(home, CREDENTIALS);
@@ -232,9 +232,14 @@ export async function soulRetireWait(home, { within = 60_000, sleep = (ms) => ne
       const c = read(home, 'config.json');
       if (p.soul) c.souls = { ...c.souls, [p.soul]: { ...c.souls?.[p.soul], retiredAt: new Date().toISOString() } };
       clear(c);
-      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone; its memory stays here' } : {}) };
+      // First day (26 Nov): its daemon stops and the folder's guide stops listing it, so nothing of it keeps running
+      // (a plain `quit` no longer finds a retired Soul) and the next chat is not told it lives here.
+      if (p.soul) await request(runtimeOf(home, p.soul).socket, { op: 'stop' }).catch(() => {});
+      try { writeGuide(home); } catch { /* the guide is a convenience; the retire is done */ }
+      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone and its client stopped; its memory stays here' } : {}) };
     }
-    if (state === 'declined') { clear(); return { ok: true, retire: 'declined', soul: p.soul ?? p.grant, retired: false, why: 'Your person did not retire it. Nothing changed.' }; }
+    // The owner's Keep on its card clears the ask (directory `/v1/account/souls/keep`).
+    if (state === 'kept') { clear(); return { ok: true, retire: 'kept', soul: p.soul ?? p.grant, retired: false, why: 'Your person kept it. Nothing changed.' }; }
     if (Date.now() > until) return { ok: true, retire: 'pending', soul: p.soul ?? p.grant, next: 'retire wait' };
     await sleep(3000);
   }
@@ -248,6 +253,7 @@ export async function soulRevoke(home, named, { as, ...io } = {}) {
   if (held) {
     await request(runtimeOf(home, id).socket, { op: 'stop' }).catch(() => {});
     delete creds.souls[id]; put(home, CREDENTIALS, creds);
+    try { writeGuide(home); } catch { /* as retire's */ }
   }
   return { ok: true, revoked: true, soul: { id: row.id, name: row.name ?? null }, account: a.alias, ...(held ? { here: 'unpaired; its memory stays here' } : {}), next: `adopt ${row.name ?? row.id}   (brings it back here)` };
 }

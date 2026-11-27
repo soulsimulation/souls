@@ -370,10 +370,13 @@ function drawRoof(b: Builder, L: BuildingLayout, o: { roofCol: string; trim: str
   const Lx = alongX ? W : D, Lz = alongX ? D : W;
   b.push(0, 0, 0, alongX ? 0 : Math.PI / 2);
   if (L.roof === 'shed') {
-    const run = Lz + 2 * ov, ang = Math.atan2(rise, run), slope = Math.hypot(run, rise);
-    b.tilt(0, top + rise / 2 + 0.07, 0, Lx + 2 * ov, 0.14, slope, -ang, 0, rc, layer);
-    // side walls fill the slope
-    for (const sx of [-1, 1]) b.outer(() => { b.tri([sx * Lx / 2, top, Lz / 2], [sx * Lx / 2, top, -Lz / 2], [sx * Lx / 2, top + rise * (Lz / run + ov / run), -Lz / 2], o.ext, 'wall'); b.tri([sx * Lx / 2, top, -Lz / 2], [sx * Lx / 2, top, Lz / 2], [sx * Lx / 2, top + rise * (Lz / run + ov / run), -Lz / 2], o.ext, 'wall'); });
+    // the roof slopes down toward +z (the front, where its eaves trim is): high over the back wall, low over the front.
+    // A pitch of -ang raised the front instead, so the side walls (high at the back) crossed the roof (Gene, 26 Nov).
+    const run = Lz + 2 * ov, ang = Math.atan2(rise, run), slope = Math.hypot(run, rise), back = rise * (Lz + ov) / run;
+    b.tilt(0, top + rise / 2 + 0.07, 0, Lx + 2 * ov, 0.14, slope, ang, 0, rc, layer);
+    // side walls fill the slope, and the back wall rises to meet the roof's high edge
+    for (const sx of [-1, 1]) b.outer(() => { b.tri([sx * Lx / 2, top, Lz / 2], [sx * Lx / 2, top, -Lz / 2], [sx * Lx / 2, top + back, -Lz / 2], o.ext, 'wall'); b.tri([sx * Lx / 2, top, -Lz / 2], [sx * Lx / 2, top, Lz / 2], [sx * Lx / 2, top + back, -Lz / 2], o.ext, 'wall'); });
+    if (!L.open) b.outer(() => { b.quad([Lx / 2, top, -Lz / 2], [-Lx / 2, top, -Lz / 2], [-Lx / 2, top + back, -Lz / 2], [Lx / 2, top + back, -Lz / 2], o.ext, 'wall'); b.quad([-Lx / 2, top, -Lz / 2], [Lx / 2, top, -Lz / 2], [Lx / 2, top + back, -Lz / 2], [-Lx / 2, top + back, -Lz / 2], o.ext, 'wall'); });
     b.box(0, top - 0.02, Lz / 2 + ov - 0.05, Lx + 2 * ov, 0.12, 0.08, o.trim);
     b.pop(); return;
   }

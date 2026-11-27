@@ -161,7 +161,13 @@ export class MailBox {
 }
 
 type Box = Pick<MailBox, 'messages' | 'agents' | 'onChange' | 'put' | 'text'>;
-type Sock = { onText: ((t: string) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
+/** `onOpen`: told true once the socket is signed in, false when it drops (#1330). */
+type Sock = { onText: ((t: string) => void) | null; onOpen?: ((open: boolean) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
+/** #1330: how long the box's socket stays down (the gateway or its world gone, or the page's network) before the card
+ *  says the world is unavailable: longer than one reconnect (1 s), so a socket that comes straight back says nothing. */
+export const OUTAGE_MS = 3000;
+/** #1330: what a send says while the box's socket is down; the words stay in the box. */
+export const UNAVAILABLE_SEND = 'The world is unavailable right now. Your message is still here: send it when the world is back.';
 
 /** One Soul's box on the gateway mailbox. */
 export class V2OwnerMailbox {
@@ -169,25 +175,38 @@ export class V2OwnerMailbox {
   private box: Box | null = null;
   private sock: Sock | null = null;
   private grant: string | null = null;
-  private readonly ready: Promise<void>;
+  /** Settles once the box is attached; rejects when it never can be (the page's v2OwnerMailbox then asks again). */
+  readonly ready: Promise<void>;
   private changed: Array<() => void> = [];
+  /** #1330: since when the box's socket has been down (null while it is open or still making its first connection); a
+   *  first connection that fails counts, so a page opened during an outage says so too. */
+  private downSince: number | null = null;
+  private readonly now: () => number;
 
-  constructor(ready: (self: V2OwnerMailbox) => Promise<void>) { this.ready = ready(this); this.ready.catch(() => {}); }
+  constructor(ready: (self: V2OwnerMailbox) => Promise<void>, now: () => number = Date.now) {
+    this.now = now; this.ready = ready(this); this.ready.catch(() => {});
+  }
 
   /** Called once the view token is held: the box, its socket and the Soul's grant. */
   attach(box: Box, sock: Sock, grant: string): void {
     this.box = box; this.sock = sock; this.grant = grant;
     box.onChange = () => { for (const f of this.changed) f(); };
     sock.onText = (t) => void box.text(t);
+    sock.onOpen = (open) => { this.downSince = open ? null : this.downSince ?? this.now(); };
     sock.start();
   }
+
+  /** #1330: whether the world is unavailable to this box: its socket has been down for `OUTAGE_MS` or more. */
+  unavailable(): boolean { return this.downSince !== null && this.now() - this.downSince >= OUTAGE_MS; }
 
   /** Whether the Soul's agent is connected now, as the gateway said; null until it did. */
   private agent(): boolean | null { return this.box!.agents.get(this.grant!) ?? null; }
 
-  /** The box as the old card reads it; throws while the mailbox cannot be reached (the card then shows nothing). */
+  /** The box as the old card reads it; throws while the mailbox cannot be reached (the card then shows nothing). While
+   *  the world is unavailable (#1330) it says so, and nothing of the agent: the last word on it is from before. */
   async read(): Promise<AgentInbox> {
     await this.ready;
+    if (this.unavailable()) return { ...inboxOf(this.box!.messages, this.sentAt, null), unavailable: true };
     return inboxOf(this.box!.messages, this.sentAt, this.agent());
   }
 
@@ -206,6 +225,7 @@ export class V2OwnerMailbox {
     });
     if (!this.sock!.sendText(frame)) box.text(JSON.stringify({ sent: { refused: 'not-connected' } }));
     await taken;
+    if (m.state === 'refused' && m.outcome === 'not-connected') throw new Error(UNAVAILABLE_SEND);
     if (m.state === 'refused') throw new Error(`Message could not be sent (${m.outcome ?? 'refused'}). Try again.`);
     if (m.state === 'sending') {
       // failed, as the old box shows a failed send: an error and no receipt; a late answer then binds to nothing
@@ -249,6 +269,7 @@ const PROTOCOL = 2;
  *  is renewed on the open socket before it expires, and the socket comes back after a drop. */
 export class BoxSocket implements Sock {
   onText: ((t: string) => void) | null = null;
+  onOpen: ((open: boolean) => void) | null = null;
   private ws: WebSocket | null = null;
   private open = false;
   private stopped = false;
@@ -277,9 +298,9 @@ export class BoxSocket implements Sock {
       if (typeof ev.data === 'string') return void this.onText?.(ev.data);
       if (step === 0) return void ((step = 1), ws.send(encode(new Map([[1, this.token]]))));
       const m = decode(new Uint8Array(ev.data as ArrayBuffer), { useMaps: true }) as Map<number, unknown>;
-      if (step === 1 && m.get(4) === 'view.started') { step = 2; this.open = true; this.renewLater(encode); }
+      if (step === 1 && m.get(4) === 'view.started') { step = 2; this.open = true; this.onOpen?.(true); this.renewLater(encode); }
     };
-    ws.onclose = () => { this.open = false; this.ws = null; if (!this.stopped) this.timer = setTimeout(() => this.start(), 1000); };
+    ws.onclose = () => { this.open = false; this.ws = null; this.onOpen?.(false); if (!this.stopped) this.timer = setTimeout(() => this.start(), 1000); };
     ws.onerror = () => ws.close();
   }
   private renewLater(encode: (v: unknown) => Uint8Array<ArrayBuffer>): void {
@@ -363,33 +384,39 @@ async function accountPost(place: MailboxPlace, path: string, body: Record<strin
     body: JSON.stringify(name ? { ...body, test_person: name } : body), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
 }
 
-/** The signed-in POST `retireByDirectory` sends: its status and JSON body (null when no one is signed in). */
+/** The signed-in POST `byDirectory` sends: its status and JSON body (null when no one is signed in). */
 export type AccountCall = (path: string, body: Record<string, unknown>) => Promise<{ status: number; body: unknown } | null>;
-/** 0.137: retires for good the person's Soul `soulId` (the page's id) on a world the new engine runs. The old route
- *  (`DELETE /v1/souls/:id`) is the old process's, which a moved world answers 409 `world.new-engine`: the directory
- *  retires it instead (route.rs `/v1/account/souls/retire`, signed in, `confirm: true`), which takes its token from
- *  the gateway and tells the world, whose body leaves by K10's one path (worldd directory.rs). Its grant is found in
- *  the person's own list; a Soul not on it is not retired. */
-export async function retireByDirectory(soulId: string, call: AccountCall, soulIdOf: (grant: string) => string): Promise<boolean> {
+/** What the owner's Soul card does through the directory on a world the new engine runs (route.rs, signed in):
+ *  `retire` it for good (`confirm: true`), `revoke` its agent (Disconnect) or `keep` it (clears its agent's ask). */
+export type DirectoryAct = 'retire' | 'revoke' | 'keep';
+/** 0.137: does `act` for the person's Soul `soulId` (the page's id) on a world the new engine runs. The old routes
+ *  (`DELETE /v1/souls/:id`, `/v1/souls/:id/revoke`) are the old process's, which a moved world answers 409
+ *  `world.new-engine`: the directory does it instead (`/v1/account/souls/<act>`). A retire takes its token from the
+ *  gateway and tells the world, whose body leaves by K10's one path (worldd directory.rs); a revoke takes only its
+ *  token; a keep clears its agent's ask, so the agent's `retire wait` hears the owner kept it. Its grant is found in
+ *  the person's own list; a Soul not on it is left alone. */
+export async function byDirectory(act: DirectoryAct, soulId: string, call: AccountCall, soulIdOf: (grant: string) => string): Promise<boolean> {
   const listed = await call('/v1/account/souls', {});
   const rows = (listed?.body as { souls?: unknown } | null)?.souls;
   const grant = Array.isArray(rows) ? rows.find((r) => r && typeof r.soul === 'string' && soulIdOf(r.soul) === soulId)?.soul as string | undefined : undefined;
   if (listed?.status !== 200 || !grant) return false;
-  const done = await call('/v1/account/souls/retire', { soul: grant, confirm: true });
+  const done = await call(`/v1/account/souls/${act}`, act === 'retire' ? { soul: grant, confirm: true } : { soul: grant });
   return done?.status === 200 && (done.body as { ok?: unknown } | null)?.ok === true;
 }
-/** `retireByDirectory` from this page, or null on an old-engine world. A retire tells the navbar's list to ask again. */
-export function v2Retire(): ((soulId: string) => Promise<boolean>) | null {
+export const retireByDirectory = (soulId: string, call: AccountCall, soulIdOf: (grant: string) => string) => byDirectory('retire', soulId, call, soulIdOf);
+/** `byDirectory(act)` from this page, or null on an old-engine world. Each tells the navbar's list to ask again. */
+export function v2Act(act: DirectoryAct): ((soulId: string) => Promise<boolean>) | null {
   const place = typeof window !== 'undefined' && PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
   if (!place) return null;
   return async (soulId) => {
     const { soulIdOf } = await import('./bridge.ts');
     const call: AccountCall = async (path, body) => { const r = await accountPost(place, path, body); return r ? { status: r.status, body: await r.json().catch(() => null) } : null; };
-    const ok = await retireByDirectory(soulId, call, soulIdOf);
+    const ok = await byDirectory(act, soulId, call, soulIdOf);
     if (ok) window.dispatchEvent(new Event(OWNED_CHANGED_EVENT));
     return ok;
   };
 }
+export const v2Retire = () => v2Act('retire');
 
 /** First day (25 Nov): the signed-in person's Souls on this v2 world, named, whether or not their body is here yet (the
  *  navbar's "your Souls"); asked again when this page approves one. Empty on an old-engine world or signed out. */
@@ -442,5 +469,8 @@ export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
     self.attach(new MailBox(), new BoxSocket(place.gateway, g, renew), own.grant);
   });
   boxes.set(key, mb);
+  // a box that could not start (the directory unreachable for its view token) is asked for again on the next read,
+  // never kept failed for the page's life (#1330)
+  mb.ready.catch(() => { if (boxes.get(key) === mb) boxes.delete(key); });
   return mb;
 }

@@ -330,11 +330,14 @@ pub fn read_zones(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The value a field of this module reads as unset (an empty list; 0 for an owner or access mark; no rows for a tint), so an undo can
-/// take back a batch that added the field: T6 has no unset, and a set to this value reads the same as none.
+/// The value a field of this module reads as unset (an empty list; 0 for an owner or access mark; no rows for a tint; no
+/// place for the world's arrival, #5006), so an undo can take back a batch that added the field: T6 has no unset, and a
+/// set to this value reads the same as none.
 pub fn neutral(field: u64) -> Option<Value> {
     match field {
-        F_DISTRICTS | F_CLAIMS | F_ZONES | crate::tint::F_TINT => Some(Value::Array(Vec::new())),
+        F_DISTRICTS | F_CLAIMS | F_ZONES | crate::tint::F_TINT | crate::arrival::F_ARRIVAL => {
+            Some(Value::Array(Vec::new()))
+        }
         crate::who_may::F_OWNER | crate::who_may::F_ACCESS => Some(Value::Uint(0)),
         _ => None,
     }

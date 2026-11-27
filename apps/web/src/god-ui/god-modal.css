@@ -90,6 +90,12 @@
 .god-modal .gm-small-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .god-modal .gm-small:disabled { opacity: .4; cursor: default; }
 .gm-more { margin-top: 20px; }
+/* #5006 row 14: the creator's edits, newest first */
+.gm-edit-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; }
+.gm-edit-list li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; padding: 7px 2px; border-bottom: 1px solid var(--gm-line); font-size: 13.5px; }
+.gm-edit-what { overflow-wrap: anywhere; }
+.gm-edit-meta { display: flex; gap: 10px; flex-shrink: 0; font-size: 12px; color: var(--gm-dim); }
+.god-modal .gm-edits-earlier { font-size: 12.5px; color: var(--gm-dim); }
 
 /* the bottom: Forsake world, quiet until wanted */
 .gm-foot { margin-top: auto; padding: 22px 0 18px; display: flex; justify-content: flex-start; }

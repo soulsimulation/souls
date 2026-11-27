@@ -7,7 +7,7 @@ import init, { historyAt } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
-import { DAY_US, dayIndexKey, headerKey, today } from './history-keys.ts';
+import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
@@ -62,52 +62,96 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
   return rec;
 }
 
-type Index = [number, string, Uint8Array][];
 let header: Promise<Uint8Array> | null = null;
-const days = new Map<number, Promise<Index | null>>();
+const days = new Map<number, { p: Promise<DayIndex | null>; at: number }>();
 const ready = init();
 
-/** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. */
-function dayIndex(base: URL, day: number): Promise<Index | null> {
-  if (!days.has(day)) days.set(day, get(new URL(dayIndexKey(day), base)).then((b) => {
+/** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. Kept while the worker
+ *  lives, but `today`'s (the day of the world's now, still being written) only five seconds (#3358): a seek reads the
+ *  bundles written since, and one just after a read ahead asks nothing again. */
+function dayIndex(base: URL, day: number, today: number): Promise<DayIndex | null> {
+  const kept = days.get(day);
+  if (kept && (day < today || Date.now() - kept.at < 5000)) return kept.p;
+  const p = get(new URL(dayIndexKey(day), base)).then((b) => {
     if (!b) return null;
     const m = decode(b, { useMaps: true }) as Map<number, unknown>;
     return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
-  }));
-  return days.get(day)!;
+  });
+  days.set(day, { p, at: Date.now() });
+  return p;
 }
-
-async function seek(base: URL, seq: number, at: number, floor?: number) {
-  header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
-  // V4's walk: the last bundle that starts at or before the moment, back through earlier days to a year. A day after
-  // today has no index yet (the origin answers 404), so neither the walk nor the next bundle's lookup asks for one;
-  // nor is a day before the world's first (`floor`, the page's), so a young world's walk asks no empty day.
-  const now = today(), lowest = Math.max(Math.floor(at / DAY_US) - 365, floor === undefined ? -Infinity : Math.floor(floor / DAY_US));
-  for (let day = Math.min(Math.floor(at / DAY_US), now); day >= lowest; day--) {
-    const ix = await dayIndex(base, day);
-    let i = ix ? ix.length - 1 : -1;
-    while (i >= 0 && ix![i][0] > at) i--;
-    if (!ix || i < 0) continue;
-    const [, k, sha] = ix[i];
-    const stored = await get(new URL(k, base));
-    if (!stored) throw new Error(`no bundle ${k}`);
-    await ready;
-    const out = decode(historyAt(await header, await inflate(stored), sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
-    const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
-    const samples: HistorySample[] = (out.get(3) as Map<number, unknown>[]).map((s) => {
-      const p = (s.get(5) as unknown[]).map(num);
-      return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
-    });
-    const later = ix[i + 1]?.[0] ?? (day < now ? (await dayIndex(base, day + 1))?.[0]?.[0] : null) ?? null;
-    const start = num(out.get(4)), length = num(out.get(5));
-    const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
-    post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
-    return;
+/** #3358: the stored bytes of the bundles read last (a bundle's key names it for good), so a bundle read ahead, or
+ *  read by the seek before, is not fetched again. A failed read is not kept. */
+const bundles = new Map<string, Promise<Uint8Array>>();
+function bundle(base: URL, key: string, load = () => get(new URL(key, base))): Promise<Uint8Array> {
+  let b = bundles.get(key);
+  if (!b) {
+    bundles.set(key, (b = load().then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
+    b.catch(() => bundles.delete(key));
+    while (bundles.size > 4) bundles.delete(bundles.keys().next().value!);
   }
-  throw new Error(`no history in the year before ${at} µs`);
+  return b;
+}
+/** #3358: read aheads (history.ts prepare) fetch what a seek they foresee will read and keep the bundle, applying
+ *  nothing, one at a time in the order asked. A seek drops those not begun (`round`); the one under way it either
+ *  wants (its bundle holds the seek's moment: the rest comes in one request) or stops after the part it is reading.
+ *  It reads in parts because a stopped fetch does not free the line: measured on soul.game, the bytes of a 1.8 MB
+ *  bundle already sent drained first and held a seek's 9 KB index 1.2 to 1.8 s. */
+const PART = 512 * 1024;
+type Under = { key: string; from: number; to: number; wanted: boolean; stopped: boolean };
+let reading: Promise<unknown> = Promise.resolve(), round = 0, under: Under | null = null;
+async function parts(url: URL, u: Under): Promise<Uint8Array> {
+  const got: Uint8Array[] = [];
+  let have = 0, total = Infinity;
+  while (have < total) {
+    if (u.stopped) throw new Error('read ahead stopped');
+    const res = await fetch(url, { headers: { Range: `bytes=${have}-${u.wanted ? '' : have + PART - 1}` } });
+    if (res.status === 200 && !have) return new Uint8Array(await res.arrayBuffer()); // no parts served: the whole
+    const size = /\/(\d+)$/.exec(res.headers.get('content-range') ?? '')?.[1], b = new Uint8Array(await res.arrayBuffer());
+    if (res.status !== 206 || !size || !b.length) throw new Error(`no bundle ${u.key}`);
+    total = Number(size); got.push(b); have += b.length;
+  }
+  const out = new Uint8Array(have);
+  got.reduce((o, b) => (out.set(b, o), o + b.length), 0);
+  return out;
+}
+function readAhead(base: URL, at: number, now: number, floor?: number) {
+  const r = round, today = Math.floor(now / DAY_US);
+  reading = reading.then(async () => {
+    const f = r === round ? await walk(at, now, floor, (day) => dayIndex(base, day, today)) : null;
+    const to = f && r === round ? await f.later() : null;
+    if (!f || r !== round) return;
+    const u: Under = (under = { key: f.key, from: at, to: to ?? Infinity, wanted: false, stopped: false });
+    await bundle(base, f.key, () => parts(new URL(f.key, base), u)).finally(() => { under = null; });
+  }).catch(() => null);
 }
 
-self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; floor?: number }>) => {
-  const { base, seq, at, floor } = e.data;
-  seek(new URL(base), seq, at, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
+async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
+  round++;
+  if (under && under.from <= at && at < under.to) under.wanted = true;
+  else if (under) under.stopped = true;
+  header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
+  // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
+  const today = Math.floor(now / DAY_US), found = await walk(at, now, floor, (day) => dayIndex(base, day, today));
+  if (!found) throw new Error(`no history in the year before ${at} µs`);
+  if (under?.key === found.key) Object.assign(under, { stopped: false, wanted: true });
+  // a read ahead stopped before the seek knew it wanted that bundle: read it again
+  const stored = await bundle(base, found.key).catch(() => bundle(base, found.key));
+  await ready;
+  const out = decode(historyAt(await header, await inflate(stored), found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
+  const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
+  const samples: HistorySample[] = (out.get(3) as Map<number, unknown>[]).map((s) => {
+    const p = (s.get(5) as unknown[]).map(num);
+    return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
+  });
+  const later = await found.later();
+  const start = num(out.get(4)), length = num(out.get(5));
+  const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
+  post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
+}
+
+self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number; ahead?: true }>) => {
+  const { base, seq, at, now, floor, ahead } = e.data;
+  if (ahead) return readAhead(new URL(base), at, now, floor);
+  seek(new URL(base), seq, at, now, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
 };

@@ -3,6 +3,7 @@
 // (tools/world-launcher/handoff.mjs, worldops.mjs; docs/god/WORLD-OWNER-API.md): offer the world to someone, archive it.
 // Co-builders (invite/remove) show only when the site turns them on (`enabled`); Gene 2026-10-16: one god per world, so
 // they are off by default and the rows stay hidden (an old co-builder still shows, so the owner can remove them). Nothing here deletes a world: archiving moves it aside, and the site admin can restore it.
+// On a world the new engine runs, V2ForsakeWorld.tsx asks the world's directory instead (v2-forsake.ts, #5006).
 import { useCallback, useEffect, useState } from 'react';
 import { BASE } from '../base-path.ts';
 import { worldKey } from '../world-path.ts';
@@ -92,3 +93,4 @@ export function ForsakeWorld({ name }: { name: string }) {
     </div>
   );
 }
+

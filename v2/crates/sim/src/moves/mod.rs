@@ -10,6 +10,11 @@
 //!   ([`Reach::tip`], B4). Beyond the move's reach it is refused `out-of-reach` with the
 //!   distance and the reach, and nothing changes. At contact the distance is asked again; beyond reach then, the move
 //!   is cancelled `out-of-reach`.
+//! - **Seen from afar** (#5063). A move that aims ([`Effector::Aim`]: a look, a point) at a thing the body sees
+//!   ([`Reach::seen`]) beyond its reach but within [`SIGHT`] is made from afar: it starts as any other, its words say
+//!   so ([`Moves::afar`]), and at contact the thing must still be seen within sight. A thing it does not see (in a
+//!   closed container, which [`Reach::aimed`] does not name; behind a wall; past [`SIGHT`]) is refused `out-of-reach`
+//!   as before, its words saying which. The body faces the thing by the turn a move toward a thing already makes.
 //! - **One timer per phase end**, in K9's due list, keyed by the move's instance. Nothing polls: a tick with moves in
 //!   progress and none at a phase boundary costs the due list's one look at its first key.
 //! - **Cancelled by a claim.** A later claim that takes the move's resources ends its driver (T9 rule 4). The move
@@ -28,6 +33,7 @@ use replica::time::Micros;
 
 use crate::controller::{Controller, Driver, Part};
 use crate::timers::{DueList, Key, Timer};
+use replica::world_model::show;
 
 type R<T> = Result<T, Refusal>;
 
@@ -41,6 +47,10 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
 fn name(s: &'static str) -> Name {
     Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
 }
+
+/// How far a body sees a thing an aimed move is made at from afar (#5063), µm: the client's sight by day outdoors
+/// (`client/src/view/sight.mjs`, `sightRange`), past which it makes out nothing.
+pub const SIGHT: i64 = 60_000_000;
 
 /// The geometry's answer to the one question a move asks: the straight distance, µm, from `body`'s effector (`limb`
 /// is the resource the move holds, for [`Effector::Held`] and [`Effector::HeldPoint`]) to the point named `point` of
@@ -66,6 +76,12 @@ pub trait Reach {
     /// toward it (#4330).
     fn aimed(&self, _body: Id, _point: &Name) -> Option<Id> {
         None
+    }
+
+    /// Whether `body` sees thing `thing` (#5063): nothing between them hides it. An aimed move at a thing it sees
+    /// beyond the move's reach, within [`SIGHT`], is made from afar. The N lane answers it; none is seen otherwise.
+    fn seen(&self, _body: Id, _thing: Id) -> bool {
+        false
     }
 }
 
@@ -97,6 +113,8 @@ struct Live {
     phase: usize,
     timer: Key,
     record: MoveRecord,
+    /// The thing a move made from afar aims at and its words ([`Moves::afar`]).
+    afar: Option<(Id, String)>,
 }
 
 /// Every move in progress, with the due list's timers that end their phases.
@@ -190,6 +208,14 @@ impl Moves {
         self.by_timer.get(&t.id).copied()
     }
 
+    /// The words of move `instance` in progress when it was made from afar (#5063): an aimed move at a thing seen
+    /// beyond its reach (`look: from afar, 30000 mm to 05:12, reach 20000 mm`).
+    pub fn afar(&self, instance: Instance) -> Option<&str> {
+        self.live
+            .get(&instance)
+            .and_then(|l| l.afar.as_ref().map(|(_, w)| w.as_str()))
+    }
+
     /// The controller driver move `instance` in progress holds its resources under.
     pub fn driver(&self, instance: Instance) -> Option<Driver> {
         self.live.get(&instance).map(|l| l.driver)
@@ -228,17 +254,41 @@ impl Moves {
                 ),
             );
         };
+        // The answer's words (#5019 follow-up): how far, in whole mm rounded up, and the reach, so an agent and a bench
+        // can tell a far target from a reach measured wrong; a move at a thing argument names that thing. A thing
+        // argument the world does not name (in a closed container, `Reach::aimed`) is not measured aloud either.
+        let mut afar = None;
         if d > mv.reach {
-            return refuse(
-                "out-of-reach",
-                format!(
-                    "{}: {d} µm to {} of {}, reach {} µm",
-                    mv.name.as_str(),
+            let (name, reach) = (mv.name.as_str(), mv.reach / 1000);
+            let mm = d.saturating_add(999) / 1000;
+            let aimed = geo.aimed(body, &mv.contact);
+            let at_arg = mv.contact.as_str() == crate::reach::AT_ARG;
+            // #5063: the thing an aimed move looks at, unless the world does not name it (in a closed container).
+            let thing = aimed.or((!at_arg).then_some(target));
+            let aims = mv.effector == Effector::Aim;
+            let seen = thing.filter(|&t| aims && d <= SIGHT && geo.seen(body, t));
+            let about = match aimed {
+                Some(t) => format!("{mm} mm to {}, reach {reach} mm", show(t)),
+                None if at_arg => format!("beyond its reach of {reach} mm"),
+                None => format!(
+                    "{mm} mm to {} of {}, reach {reach} mm",
                     mv.contact.as_str(),
-                    replica::world_model::show(target),
-                    mv.reach
+                    show(target)
                 ),
-            );
+            };
+            match seen {
+                Some(t) => afar = Some((t, format!("{name}: from afar, {about}"))),
+                // Unseen: past sight, or hidden from where the body stands (behind a wall, on another floor).
+                None if aims && thing.is_some() => {
+                    let why = if d > SIGHT {
+                        format!("sight {} mm", SIGHT / 1000)
+                    } else {
+                        "not in sight".to_owned()
+                    };
+                    return refuse("out-of-reach", format!("{name}: {about}, {why}"));
+                }
+                None => return refuse("out-of-reach", format!("{name}: {about}")),
+            }
         }
         let id = mint.mint().map_err(|e| Refusal {
             name: "id-counter-exhausted",
@@ -274,6 +324,7 @@ impl Moves {
                 phase: 0,
                 timer: (first, id),
                 record,
+                afar,
             },
         );
         Ok(n)
@@ -329,7 +380,7 @@ impl Moves {
     /// Runs a timer the due list handed back, at its due time: `None` when it is not a move's. The phase it ends
     /// gives way to the next, whose end becomes the move's one timer, or the move is done. A move whose driver a later
     /// claim ended is cancelled `claim-taken`; at contact the reach is asked again, and beyond it the move is
-    /// cancelled `out-of-reach`.
+    /// cancelled `out-of-reach`: a move made from afar, when its thing is no longer seen within [`SIGHT`].
     pub fn fire(
         &mut self,
         c: &mut Controller,
@@ -360,7 +411,12 @@ impl Moves {
                     l.record.target,
                     &l.mv.contact,
                 )
-                .is_some_and(|d| d <= l.mv.reach);
+                .is_some_and(|d| {
+                    d <= l.mv.reach
+                        || l.afar
+                            .as_ref()
+                            .is_some_and(|(t, _)| d <= SIGHT && geo.seen(body, *t))
+                });
             if !near {
                 return self
                     .end(c, n, t.due, name("out-of-reach"))

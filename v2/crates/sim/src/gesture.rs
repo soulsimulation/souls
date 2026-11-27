@@ -239,6 +239,10 @@ impl<G: Reach> Reach for Own<'_, G> {
             self.geo.distance(body, effector, limb, target, point)
         }
     }
+
+    fn seen(&self, body: Id, thing: Id) -> bool {
+        self.geo.seen(body, thing)
+    }
 }
 
 struct Said {

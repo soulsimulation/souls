@@ -11,7 +11,8 @@
 //! 3. **The scan** ([`scan`]) lists every Soul, body, link to a Soul, held seat, Soul's timer and private record in a
 //!    world's state; a template, and a world just made from one, has none. Reservations (F3) do not exist yet.
 //!
-//! Eden's template is N1's import, saved once: `cargo run -p templates --release -- <eden facts> <out>`.
+//! A template from a facts file ([`publish_facts`], `cargo run -p templates --release -- <facts> <out> --name <name>
+//! --support <seeded folder>`): N1's import, built with the entries `worldd seed` kept, as `worldd` builds it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -25,6 +26,9 @@ use replica::tree::Tree;
 use replica::world_model::{Audience, plain};
 use sim::checkpoint::fork::{EPOCH, Request, fork_with_kinds};
 use sim::checkpoint::{Blobs, Checkpoints};
+
+pub mod facts;
+pub use facts::{PublicSupport, publish_facts, support, support_entries, valid_name};
 
 pub type R<T> = Result<T, Refusal>;
 

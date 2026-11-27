@@ -14,12 +14,34 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   WATCHDOG=1 twice a second while its clock is not wedged. No word for 5 s ends it: a process frozen whole. K7's own
   watchdog inside says a stall (no tick for 0.5 s) in the journal (`watchdog: stalled`) and in `health.json`
   (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
-  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart.
+  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart. The
+  auditor's fault lines (`worldd: audit: Fault { … }`) are printed on their own thread, so a slow journal never holds
+  the clock on them; lines its queue has no room for are dropped and said (`worldd: audit: N fault lines dropped`),
+  and `health.json`'s `audit` counts passes, slices cut at 2 ms, and lines queued, printed and dropped.
 - **Exit 87, `disk-failed`.** The world's log or text store failed to write (`worldd: disk-failed: <reason>` in the
   journal), so it stopped rather than run on without a record of what happened. It restarts from its log, as after
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
   folder. A record over the size limit (`record-size`) also exits 87: read the journal line for the reason before
   blaming the disk.
+- **A full disk** (O10, #2806). The running world exits 87 at the first write the disk refuses; nothing unwritten
+  was acknowledged. Its restart waits for room before it writes anything: `worldd: disk.full: <free> bytes free under
+  the world, <need> to start; the start waits for room` (`need` is 4 MiB and the largest checkpoint's size), saying
+  progress to systemd meanwhile, so the unit never loops on it and the world is restarted once. Within half a second
+  of room coming back it says `worldd: disk.full cleared` and starts; its time owed is paid at its first ticks,
+  exactly. While it waits it does not listen: its gateway keeps intents and sends them once it does, or answers
+  one `act.timed-out` at its deadline (`world.restarting` for a sync). Free space; nothing
+  else is needed.
+- **A clock that steps** (O10, #2806). A running world reads the wall clock once and then the steady clock, so a
+  step moves nothing; the watchdog says it within a second (`worldd: clock.stepped: the machine's clock moved <ms>
+  ms while the world ran …`) and `health.json` has `"clock":{"state":"stepped","ahead_ms":<ms>}` (how far the
+  world's clock is ahead of the machine's; `steady` under a second). A restart that finds the machine's clock behind
+  its last logged tick (the clock went back while it was down) once ticked nothing until the clock came round, and
+  its watchdog ended it every 15 s (`tick-stalled`): now it says `worldd: clock.stepped: the machine's clock is <ms>
+  ms behind the last logged tick …` and goes on from that tick, ahead of the machine's clock by the step. World time
+  never goes back. The watchdog, the public stream and the sleep watch read the world's clock too, so a step never
+  makes viewers late or a world sleep with a change due. A step forward
+  while down is caught up exactly at the start, back to back (120 s took about 3 s in the test world). Nothing is
+  needed; the offset closes at the world's next sleep longer than it.
 - **A store that does not answer at the start** (R17). No read of the store ends a world's start. The claim and
   shipping, the history archive's open (its header, bundle index and public history) and the creator's record are
   read on their own threads after the world listens, each tried after 1, 2, 4 … s, then every 60 s, until the store
@@ -55,6 +77,19 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   the store, with the exact bytes they were shown; only a chain the machine did not write (no `stream-backup/`) is
   read from the store, and what it reads is kept. Do not delete `stream-backup/` on a running machine. A stop
   (SIGTERM) and a sleep give the backup up to 8 s and 3 s to catch up first.
+- **Old stream pieces left in the store** (#4954). Generations before the previous one are deleted from the store by
+  their own thread (`stream-cleanup`, its own store client), handed over at the first rollover or restart at least 10
+  minutes after they close, and deleted only once the store holds the current chain's head (a backup pass begun after
+  the last rollover has finished current), so never while `stream_backup` is behind or fenced. A refused delete is
+  tried again after its own back-off, 1, 2, 4 … s, then at least every 60 s, for ever, while the rest go on. A
+  generation's record goes after its objects and every older generation's, so a restart still finds what waits. A copy
+  whose delete was under way at a stop is in `stream-backup/deleting/`; the start queues it for the store again. The
+  journal says `worldd: the stream's clean-up was refused, viewers unaffected: <fault>; …`. `health.json` has
+  `"stream_cleanup":{"generations":n,"waiting":n,"retrying":n,"deleted":n,"refused":n}`: generations not read yet
+  (about a thousand objects each), deletes in line, those retrying, and the deletes the store answered. A `waiting`
+  that only grows means the store refuses every delete; `generations` that only grows means the backup is not
+  current. Nothing else waits on either. Before 0.139 one refused delete switched the clean-up off until the world
+  restarted.
 - **A store that stalls after the archive opens.** A running history archiver never stops on a store that does not
   answer: the write (or read) it is on is tried again after 1, 2, 4 … s, then every 60 s, until the store answers,
   and the parts that come meanwhile wait in order: up to 64 MiB of them in memory, the rest in the log on the disk,

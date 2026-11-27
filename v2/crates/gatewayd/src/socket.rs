@@ -11,7 +11,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::http::header::CACHE_CONTROL;
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::{HeaderMap, HeaderValue, Uri};
 use axum::response::Response;
 use axum::routing::{get, post};
 use replica::effects::Actor;
@@ -25,7 +25,7 @@ use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token, View, ViewToken};
 use crate::views;
-use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
+use crate::world_link::{FRAME_MOST, KEPT_MOST, RESTARTING, SLOW_DOWN, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
 
@@ -44,7 +44,8 @@ pub const VIEW_BEHIND: &str = "view.behind";
 pub const VIEW_BEHIND_MOST: Duration = Duration::from_secs(10);
 /// How often a view socket is probed, once its last probe was answered.
 const VIEW_PROBE_EVERY: Duration = Duration::from_secs(2);
-/// How long a view socket that fell behind is given to take its reason and close frame before it is dropped.
+/// How long a view socket that fell behind, or an agent's let go for a full queue (`agent.behind`, #4979), is given to
+/// take its reason and close frame before it is dropped.
 const VIEW_BEHIND_GRACE: Duration = Duration::from_secs(1);
 /// The close code of a view socket that fell behind: 1013, Try Again Later. It rejoins as any new viewer does.
 const VIEW_BEHIND_CODE: u16 = 1013;
@@ -79,6 +80,15 @@ const MESSAGE_MOST: usize = LIMITS.frame_bytes as usize;
 const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
+/// The close of a socket that sent a message over [`MESSAGE_MOST`] (O8, #2805): 1009, Message Too Big, refused from
+/// its header's length, unread.
+pub const TOO_BIG: u16 = 1009;
+pub const MESSAGE_TOO_BIG: &str = "message.too-big";
+/// The close of a socket that sent a frame the WebSocket protocol cannot read (O8): 1002, Protocol Error.
+pub const UNREADABLE: u16 = 1002;
+pub const FRAME_UNREADABLE: &str = "frame.unreadable";
+/// [`SLOW_DOWN`]'s plain words, in the refusal's detail.
+const SLOW_DOWN_WORDS: &str = "Too many of this Soul's intents are waiting at the gateway. Once one of them is answered, send it again under a sequence after the newest you sent.";
 
 /// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
 /// entries (`entries.rs`), a creator's bulk edits (#3695, `bulk.rs`) and uploads (#3697, `uploads.rs`).
@@ -104,6 +114,7 @@ pub fn router(gw: Arc<Gateway>) -> Router {
 async fn upgrade(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
+    uri: Uri,
     State(gw): State<Arc<Gateway>>,
 ) -> Response {
     // Read into a token at once: its text is never formatted (token.rs).
@@ -127,6 +138,10 @@ async fn upgrade(
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
+    // A client another took the Soul from asks only if it is free (`?free=1`): it never takes it from a live socket.
+    let free = uri
+        .query()
+        .is_some_and(|q| q.split('&').any(|p| p == crate::FREE));
     let mut res = ws
         .read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
@@ -140,6 +155,7 @@ async fn upgrade(
                 header_token,
                 (header_cursor, header_seen),
                 client,
+                free,
             )
             .await;
         });
@@ -152,6 +168,17 @@ async fn upgrade(
 fn control(name: &str) -> Vec<u8> {
     let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
     encode(&Value::Map([(4, Value::Text(name))].into())).unwrap_or_default()
+}
+
+/// The sign-in's outcome, `{4: name}`, and on a Soul's grant whose intents were sent before, `5`: the newest sequence
+/// sent for it (#4978). A client that took the Soul from another numbers its next intent after it.
+fn outcome(name: &str, newest: u64) -> Vec<u8> {
+    let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
+    let mut m: BTreeMap<u64, Value> = [(4, Value::Text(name))].into();
+    if newest > 0 {
+        m.insert(5, Value::Uint(newest));
+    }
+    encode(&Value::Map(m)).unwrap_or_default()
 }
 
 /// An answer the gateway gives itself to bytes it could not read: `{2: answer}`, with no version, not kept.
@@ -199,7 +226,11 @@ fn refuse(
     let frame = encode(&Value::Map([(1, now), (2, answer.to_value())].into())).unwrap_or_default();
     // One line in the receipts file, as for a refusal sent at once.
     gw.record(&grant.key(), Outcome::Refusal);
-    gw.deliver(grant.key(), at, frame);
+    let a = crate::Answering {
+        sequence,
+        ends: true,
+    };
+    gw.deliver(grant.key(), a, at, frame);
     None
 }
 
@@ -209,9 +240,30 @@ async fn next_binary(socket: &mut WebSocket) -> Option<Vec<u8>> {
         match socket.recv().await? {
             Ok(Message::Binary(b)) => return Some(b.to_vec()),
             Ok(Message::Ping(_) | Message::Pong(_)) => {}
+            Err(e) => {
+                unreadable(socket, &e).await;
+                return None;
+            }
             _ => return None,
         }
     }
+}
+
+/// A socket sent what could not be read (O8, #2805): it is closed with the reason, [`MESSAGE_TOO_BIG`] for a message
+/// over [`MESSAGE_MOST`], else [`FRAME_UNREADABLE`], if it can still take a frame. One already gone takes nothing; the
+/// send is bounded either way.
+async fn unreadable(socket: &mut WebSocket, e: &axum::Error) {
+    // tungstenite's `Error::Capacity` (axum's error shows its inner one): the message's length was over the limit.
+    let (code, reason) = if e.to_string().starts_with("Space limit exceeded") {
+        (TOO_BIG, MESSAGE_TOO_BIG)
+    } else {
+        (UNREADABLE, FRAME_UNREADABLE)
+    };
+    let close = CloseFrame {
+        code,
+        reason: reason.into(),
+    };
+    let _ = tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
 }
 
 async fn send(socket: &mut WebSocket, frame: Vec<u8>) -> bool {
@@ -272,6 +324,23 @@ async fn send_view(
     }
 }
 
+/// Sends on an agent's socket unless it is let go for a full queue meanwhile (#4979): then `false`, with `let_go` set.
+/// A send waiting on a slow reader is given up, so its close is not held behind the frames still queued.
+async fn send_agent(
+    socket: &mut WebSocket,
+    message: Message,
+    behind: &tokio::sync::Notify,
+    let_go: &mut bool,
+) -> bool {
+    tokio::select! {
+        sent = socket.send(message) => sent.is_ok(),
+        _ = behind.notified() => {
+            *let_go = true;
+            false
+        }
+    }
+}
+
 fn binary(frame: Vec<u8>) -> Message {
     Message::Binary(frame.into())
 }
@@ -301,6 +370,7 @@ async fn serve(
     header_token: Option<Presented>,
     header_from: ResumeFrom,
     client: Option<String>,
+    free: bool,
 ) {
     // 1. The first frame each way (T10 rule 12): the client's, then the gateway's for its world.
     let Ok(Some(first)) = tokio::time::timeout(SIGN_IN_WITHIN, next_binary(&mut socket)).await
@@ -356,19 +426,38 @@ async fn serve(
         client.as_deref(),
     ));
 
-    // 3. The outcome, and the kept frames after the cursor.
-    let mut attached = gw.attach(grant, cursor.as_ref(), seen.unwrap_or(1), who.clone());
-    let mut ok = send(&mut socket, control(attached.outcome)).await;
+    // 3. The outcome, and the kept frames after the cursor. A sign-in that asked only if the Soul is free, while a live
+    // socket holds it, is closed as `agent.held` and the holder left as it is.
+    let Some(mut attached) =
+        gw.attach_if(grant, cursor.as_ref(), seen.unwrap_or(1), who.clone(), free)
+    else {
+        let close = CloseFrame {
+            code: crate::REPLACED,
+            reason: "agent.held".into(),
+        };
+        let _ = socket.send(Message::Close(Some(close))).await;
+        return;
+    };
+    let mut ok = send(&mut socket, outcome(attached.outcome, attached.newest)).await;
     for frame in std::mem::take(&mut attached.replay) {
         ok = ok && send(&mut socket, times::finish(frame)).await;
     }
 
     // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`). Until the
-    // gateway stops: then the socket closes with 1012 (O16).
+    // gateway stops: then the socket closes with 1012 (O16). Or until it is let go for a full queue, its stream's or
+    // its view items': then it closes with 1013 `agent.behind` at once, what is still queued not sent (#4979).
     let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
     let mut closing = gw.closing.subscribe();
+    // The newest sequence of an intent read from this socket (#4978): told when another takes the grant from it.
+    let mut read = 0;
+    let behind = attached.behind.clone();
+    let mut let_go = false;
     while ok {
         tokio::select! {
+            _ = behind.notified() => {
+                let_go = true;
+                break;
+            }
             _ = stopped(&mut closing) => {
                 let close = CloseFrame { code: crate::RESTART, reason: "gateway.restarting".into() };
                 let _ = socket.send(Message::Close(Some(close))).await;
@@ -384,8 +473,12 @@ async fn serve(
                         if !crate::creator::permits(&gw,actor,authority) {
                             let _=send(&mut socket,control(token::REFUSED)).await;break;
                         }
-                        crate::mailbox::on_text(&gw, grant, t.as_str());
+                        crate::mailbox::on_text(&gw, grant, attached.session, t.as_str());
                         continue;
+                    }
+                    Some(Err(e)) => {
+                        unreadable(&mut socket, &e).await;
+                        break;
                     }
                     _ => break,
                 };
@@ -396,7 +489,7 @@ async fn serve(
                     if let Some((n, _)) = view.take() {
                         gw.views.end(n);
                     }
-                    view = Some(gw.views.subscribe(request, &views::audiences(grant)));
+                    view = Some(gw.views.subscribe(request, &views::audiences(grant), Some(behind.clone())));
                     continue;
                 }
                 // A token revoked since sign-in (W9, #2827): its next intent is refused by name, and the socket ends.
@@ -404,14 +497,16 @@ async fn serve(
                     let _ = send(&mut socket, control(token::REFUSED)).await;
                     break;
                 }
-                if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
-                    gw.receipts.write(&who, Outcome::Refusal);
-                    ok = send(&mut socket, answer).await;
+                if let Some((answer, counted)) = take_intent(&gw, actor, grant, attached.session, bytes, received, &mut read) {
+                    if counted {
+                        gw.receipts.write(&who, Outcome::Refusal);
+                    }
+                    ok = send_agent(&mut socket, binary(answer), &behind, &mut let_go).await;
                 }
             }
             Some(mail) = attached.mail.recv() => {
                 if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                ok = socket.send(Message::Text(mail.into())).await.is_ok();
+                ok = send_agent(&mut socket, Message::Text(mail.into()), &behind, &mut let_go).await;
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => {
@@ -420,11 +515,23 @@ async fn serve(
                     if let Some(t) = &trace { t.at("socket-dequeue", "ready"); }
                     let frame = times::finish(frame);
                     if let Some(t) = &trace { t.final_frame(&frame); }
-                    ok = send(&mut socket, frame).await;
+                    ok = send_agent(&mut socket, binary(frame), &behind, &mut let_go).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
-                // Another socket signed in for this grant, or this one fell too far behind.
-                None => break,
+                // Another socket signed in for this grant (a Soul's: the last device wins): it is told so, by name,
+                // and its client does not sign in again at once. Or this one fell too far behind, and it may resume.
+                None => {
+                    if gw.replaced(grant, attached.session) {
+                        // #4978: the newest intent it read from this socket; one its client sent later never reached
+                        // the world, and its client refuses it by name.
+                        let _ = socket.send(Message::Text(format!(r#"{{"replaced":{{"read":{read}}}}}"#).into())).await;
+                        let close = CloseFrame { code: crate::REPLACED, reason: crate::AGENT_REPLACED.into() };
+                        let _ = socket.send(Message::Close(Some(close))).await;
+                    } else {
+                        let_go = true;
+                    }
+                    break;
+                }
             },
             item = async {
                 match view.as_mut() {
@@ -434,10 +541,13 @@ async fn serve(
             } => match item {
                 Some(frame) => {
                     if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                    ok = send(&mut socket, frame).await;
+                    ok = send_agent(&mut socket, binary(frame), &behind, &mut let_go).await;
                 },
                 // Its view queue was full: let go, as a slow stream is.
-                None => break,
+                None => {
+                    let_go = true;
+                    break;
+                }
             },
         }
     }
@@ -445,6 +555,24 @@ async fn serve(
         gw.views.end(n);
     }
     gw.detach(grant, attached.session);
+    // #4979: its reason and close frame, if it can still take them; either way the socket is dropped. A client that
+    // fell behind on a slow link may take them only once its backlog is read: it learns by its own bound then. One
+    // replaced meanwhile by a newer sign-in is told that instead, so it does not take the Soul back at once.
+    if let_go {
+        let close = if gw.replaced(grant, attached.session) {
+            CloseFrame {
+                code: crate::REPLACED,
+                reason: "agent.replaced".into(),
+            }
+        } else {
+            CloseFrame {
+                code: crate::BEHIND,
+                reason: crate::AGENT_BEHIND.into(),
+            }
+        };
+        let _ =
+            tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
+    }
 }
 
 /// A page's view socket (V13b, #3407), signed in with a view token: it subscribes to views for the token's grants (its
@@ -520,6 +648,10 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                         crate::mailbox::on_view_text(&gw, &view.grants, t.as_str(), reply.clone());
                         continue;
                     }
+                    Some(Err(e)) => {
+                        unreadable(&mut socket, &e).await;
+                        break;
+                    }
                     _ => break,
                 };
                 if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
@@ -527,7 +659,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     if let Some((n, _)) = sub.take() {
                         gw.views.end(n);
                     }
-                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view)));
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view), None));
                     asked = Some(request);
                     continue;
                 }
@@ -549,7 +681,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     && let (Some(request), Some((n, _))) = (&asked, sub.take())
                 {
                     gw.views.end(n);
-                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh)));
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh), None));
                 }
                 view = fresh;
                 authority = fresh_authority;
@@ -625,15 +757,19 @@ async fn stopped(closing: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
-/// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept
-/// (always a refusal).
+/// Reads an intent from the socket signed in as `session` and hands it to the world; the gateway's own answer to send
+/// now, if it gives one not kept (always a refusal), and whether it is a line in the receipts file. Answers to bytes
+/// that are not an intent, to a sync request and [`SLOW_DOWN`] are not (O8, #2805): a flood of them would fill the
+/// file and the disk under it at the sender's rate, and none is usage.
 fn take_intent(
     gw: &Gateway,
     actor: Actor,
     grant: Grant,
+    session: u64,
     bytes: Vec<u8>,
     received: u64,
-) -> Option<Vec<u8>> {
+    read: &mut u64,
+) -> Option<(Vec<u8>, bool)> {
     // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
     if let Ok(d) = decode(&bytes)
         && let Value::Map(mut m) = d.value
@@ -643,18 +779,20 @@ fn take_intent(
             .into_iter()
             .filter(|(k, _)| *k == wire::IDS || *k == wire::RECORDS)
             .collect();
-        return match gw.link.ask(grant.key(), n.clone(), ask) {
+        return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
-            Sent::Restarting => Some(sync_refused(n, RESTARTING)),
+            // A sync request is not charged against KEPT_MOST (`ask` never answers `Full`).
+            Sent::Restarting | Sent::Full(_) => Some((sync_refused(n, RESTARTING), false)),
         };
     }
     let intent = match decode_intent(&bytes) {
         Ok(i) => i,
         Err(r) => {
             let reason = Name::new(r.name).unwrap_or_else(|| unreachable!("a refusal's name"));
-            return Some(own_answer(Answer::Unread { reason }));
+            return Some((own_answer(Answer::Unread { reason }), false));
         }
     };
+    *read = (*read).max(intent.sequence);
     if intent.actor != actor {
         return refuse(
             gw,
@@ -662,14 +800,30 @@ fn take_intent(
             intent.actor,
             intent.sequence,
             "intent-not-granted",
-        );
+        )
+        .map(|a| (a, true));
     }
     // I2: a kind definition naming an uploaded model this world does not hold as allowed never reaches the world
     if let Some(reason) = crate::uploads::edit_refusal(gw, &intent) {
-        return refuse(gw, grant, actor, intent.sequence, reason);
+        return refuse(gw, grant, actor, intent.sequence, reason).map(|a| (a, true));
     }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
+    // #5006: on a creator's grant, which several sockets hold, this intent's answers go to this socket; a sequence
+    // another of them sent, out or lately answered, is refused here, on this socket, and never sent. #4978: on a
+    // Soul's, one sent after another socket took the grant, or under a sequence another intent went under.
+    let turn = if crate::shared(grant) {
+        if gw.sending(grant, sequence, session) {
+            Ok(())
+        } else {
+            Err(crate::SEQUENCE_IN_USE)
+        }
+    } else {
+        gw.holding(grant, sequence, session, crate::digest(&bytes))
+    };
+    if let Err(reason) = turn {
+        return Some((refused(actor, sequence, reason, gw.link.now()), true));
+    }
     match gw
         .link
         .submit(grant.key(), actor, intent.sequence, bytes, received, left)
@@ -679,7 +833,34 @@ fn take_intent(
             gw.sent_intent(&grant.key(), sequence, verb.as_str());
             None
         }
-        Sent::Restarting => refuse(gw, grant, actor, intent.sequence, RESTARTING),
+        Sent::Restarting => {
+            let own = refuse(gw, grant, actor, sequence, RESTARTING);
+            if own.is_some() {
+                gw.unsent(grant, sequence);
+            }
+            own.map(|a| (a, true))
+        }
+        // O8 (#2805): its agent's kept intents are at their bound. Answered on this socket alone, not kept: the gauge
+        // is logged at each power of two, so a flood writes a few lines, not one each.
+        Sent::Full(slowed) => {
+            gw.unsent(grant, sequence);
+            if slowed.is_power_of_two() {
+                (gw.log)(&format!(
+                    "an agent's intents kept here reached {} KiB; {slowed} intents refused {SLOW_DOWN} so far",
+                    KEPT_MOST >> 10
+                ));
+            }
+            let answer = own_answer(Answer::Refused {
+                actor,
+                sequence,
+                reason: Name::new(SLOW_DOWN).unwrap_or_else(|| unreachable!("a fixed name")),
+                now: gw.link.now(),
+                changed: Vec::new(),
+                op: None,
+                detail: Some(SLOW_DOWN_WORDS.to_owned()),
+            });
+            Some((answer, false))
+        }
     }
 }
 

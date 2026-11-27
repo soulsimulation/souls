@@ -29,31 +29,43 @@ const K = new Uint32Array([
   0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
   0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
-export function sha256Hex(input: string | Uint8Array): string {
-  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;
-  const l = bytes.length, padded = new Uint8Array(((l + 9 + 63) >> 6) << 6);
-  padded.set(bytes); padded[l] = 0x80;
-  const dv = new DataView(padded.buffer);
-  dv.setUint32(padded.length - 4, (l * 8) >>> 0); dv.setUint32(padded.length - 8, Math.floor((l * 8) / 4294967296));
-  const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-  const W = new Uint32Array(64);
-  const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
-  for (let off = 0; off < padded.length; off += 64) {
-    for (let i = 0; i < 16; i++) W[i] = dv.getUint32(off + i * 4);
+// Phone arrival: one page builds the core library (~1,000 defs, 2.3 MB of stable JSON) by hashing every def at once.
+// The block loop keeps its state in locals and reads the bytes directly (no padded copy, DataView or destructuring per
+// block): the same digest, several times faster.
+const K32 = Int32Array.from(K), W = new Int32Array(64), tail = new Uint8Array(128), utf8 = new TextEncoder();
+function blocks(H: Int32Array, b: Uint8Array, end: number): void {
+  let h0 = H[0], h1 = H[1], h2 = H[2], h3 = H[3], h4 = H[4], h5 = H[5], h6 = H[6], h7 = H[7];
+  for (let off = 0; off < end; off += 64) {
+    for (let i = 0, j = off; i < 16; i++, j += 4) W[i] = (b[j] << 24) | (b[j + 1] << 16) | (b[j + 2] << 8) | b[j + 3];
     for (let i = 16; i < 64; i++) {
-      const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3), s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
-      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) >>> 0;
+      const x = W[i - 15], y = W[i - 2];
+      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3), s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
     }
-    let [a, b, c, d, e, f, g, h] = H;
+    let a = h0, c1 = h1, c2 = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
     for (let i = 0; i < 64; i++) {
-      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25), ch = (e & f) ^ (~e & g), t1 = (h + S1 + ch + K[i] + W[i]) >>> 0;
-      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22), maj = (a & b) ^ (a & c) ^ (b & c), t2 = (S0 + maj) >>> 0;
-      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7)), t1 = (h + S1 + ((e & f) ^ (~e & g)) + K32[i] + W[i]) | 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10)), t2 = (S0 + ((a & c1) ^ (a & c2) ^ (c1 & c2))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c2; c2 = c1; c1 = a; a = (t1 + t2) | 0;
     }
-    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
-    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+    h0 = (h0 + a) | 0; h1 = (h1 + c1) | 0; h2 = (h2 + c2) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0;
   }
-  return Array.from(H, (x) => x.toString(16).padStart(8, '0')).join('');
+  H[0] = h0; H[1] = h1; H[2] = h2; H[3] = h3; H[4] = h4; H[5] = h5; H[6] = h6; H[7] = h7;
+}
+export function sha256Hex(input: string | Uint8Array): string {
+  const bytes = typeof input === 'string' ? utf8.encode(input) : input;
+  const l = bytes.length, whole = l - (l % 64), rest = l - whole, n = rest + 9 <= 64 ? 64 : 128;
+  const H = Int32Array.of(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19);
+  blocks(H, bytes, whole);
+  // the last bytes, the 0x80 and the length in bits (64-bit big-endian) in one or two more blocks
+  tail.fill(0); tail.set(bytes.subarray(whole), 0); tail[rest] = 0x80;
+  const hi = Math.floor((l * 8) / 4294967296), lo = (l * 8) >>> 0;
+  tail[n - 8] = hi >>> 24; tail[n - 7] = hi >>> 16; tail[n - 6] = hi >>> 8; tail[n - 5] = hi;
+  tail[n - 4] = lo >>> 24; tail[n - 3] = lo >>> 16; tail[n - 2] = lo >>> 8; tail[n - 1] = lo;
+  blocks(H, tail, n);
+  let hex = '';
+  for (let i = 0; i < 8; i++) hex += (H[i] >>> 0).toString(16).padStart(8, '0');
+  return hex;
 }
 export const hashOf = (v: unknown) => sha256Hex(stableStringify(v));
 /** In-memory cache key for content (bake keys): two independent 32-bit string hashes plus the length of the stable JSON.

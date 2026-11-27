@@ -177,7 +177,7 @@ with their sign-in session or with a god token of that world. Every step is appe
 | `POST <B>/__sim/worlds/<slug>/transfer` | `{to?: accountId}` | `{code, url, expiresAt}`: a one-use handoff link, valid 7 days; replaces any earlier offer |
 | `POST <B>/__sim/worlds/<slug>/offers/cancel` | | `{cancelled}` |
 | `POST <B>/__sim/worlds/<slug>/archive` | `{confirm: "<slug>", reason?}` | The world is stopped, moved to `<data>/archive/<id>/world` and removed from the list |
-| `POST <B>/__sim/worlds/<slug>/unlisted` | `{unlisted}` | Hide or show the world on the list |
+| `POST <B>/__sim/worlds/<slug>/unlisted` | `{unlisted}` | Hide or show the world on the list. A world made with New world on the new engine: its creator, signed in, and the launcher sets it in the directory (`POST /v1/worlds/settings`), which owns its row |
 | `POST <B>/__sim/worlds/<slug>/thumbnail` | A JPEG as the raw body (`content-type: image/jpeg`): 16:9, 640–1920 px wide, at most 512 KB | `{thumbnail, thumbnailSource: "owner", sha, width, height, bytes, stripped}`; the world-list picture, set by the owner or a signed-in site owner (the audit row says `via: "site-admin"`). Metadata is stripped. Each refused image is written to the audit log with the sha of the bytes sent and, once validated, the stripped sha. Refusals carry a `fix`: 415 `thumbnail.type`, 413 `thumbnail.size`, 400 `thumbnail.dimensions` / `thumbnail.invalid`, 422 `thumbnail.moderation`, 451 `thumbnail.vetoed` (the site admin removed this image), 429 `thumbnail.rate` (6 changes per 10 minutes, `Retry-After`) |
 | `DELETE <B>/__sim/worlds/<slug>/thumbnail` | | `{thumbnail, thumbnailSource}`: back to the template's default (or none) |
 | `GET <B>/__sim/worlds/<slug>/offer?code=` | | Offer details, for the person holding the link |
@@ -186,6 +186,17 @@ with their sign-in session or with a god token of that world. Every step is appe
 Each `url` opens the world page at `#worldoffer/<code>`; nothing changes until the receiver accepts. With `to`, only
 that account can accept. In the web app these are under **Forsake world** in the god panel. Co-builder invitations
 are refused with `403 cobuilders-off`: a world has one god.
+
+On a world the new engine runs, Forsake world asks the world's directory, signed in as its world routes sign in
+(`directoryd` `worlds/list/http.rs`): `POST /v1/worlds/handoff/offer {world}` → `{code, expires}` (one use, 7 days, a new
+offer replaces the last; the link is the world page's `#worldoffer/<code>`), `/v1/worlds/handoff/cancel {world}`,
+`/v1/worlds/handoff/accept {world, code}` (the signed-in recipient becomes the creator; asking again is safe), and
+`POST /v1/worlds/archive {world, confirm}` → `{archived}` or 202 `{pending}`; while Souls of other people live in the world
+(unretired and paired for it under any of its names, or brought over for it and not yet paired, held by another account;
+the operator's test Souls do not count) archive is refused `409 archive-others-live-here` with their count
+(`souls`), and the creator hands the world on or waits until they have left. A directory that could not finish one
+refuses it before anything changes: archive with no archive initializer (`503 archive-unavailable`), acceptance with no
+world-authority map (`503 world-authority-required`) or one that does not name the world (`409 world-unplaced`).
 
 **Operator commands.** `node tools/world-launcher/op.mjs <command>` posts to `<B>/__sim/op/<command>`, accepted only
 from loopback on the launcher's machine: `create-world`, `set-claimable` (`--claimable false` makes a godless world

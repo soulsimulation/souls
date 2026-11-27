@@ -483,12 +483,24 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
         s.rules.clone(),
     );
     let lift = s.mint.mint().expect("an id");
+    // #5067: the lift's track starts where the board lies.
+    let lay = {
+        let t = &s.town.tree;
+        let at = xform_to(
+            t,
+            t.handle(s.board).expect("the board"),
+            t.handle(ground).expect("the ground"),
+        )
+        .expect("on the ground");
+        (at.pos, at.rot)
+    };
     carry
         .lift(
             &mut s.town.tree,
             0,
             lb.pose.position,
             fb.pose.position,
+            lay,
             lift,
         )
         .expect("lifted");
@@ -599,16 +611,28 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
     assert_eq!(lf.pose.frame.node, s.door.floor, "the leader is inside");
     assert_eq!(ff.pose.frame.node, s.door.floor, "the follower is inside");
     let down = s.mint.mint().expect("an id");
-    carry
+    // #5067: the set-down's track, a sample a tick, the board on the floor at its end.
+    let (t0, t1) = carry
         .set_down(
-            &mut s.town.tree,
+            &s.town.tree,
             (tick + 1) * TICK,
             s.door.floor,
             lf.pose.position,
             ff.pose.position,
+            None,
             down,
         )
         .expect("set down");
+    let mut lowered = 0;
+    for k in 1..=(t1 - t0) / TICK {
+        lowered += 1;
+        let done = carry
+            .lower(&mut s.town.tree, t0 + k * TICK, || {
+                unreachable!("its own id")
+            })
+            .expect("lowered");
+        assert_eq!(done, t0 + k * TICK >= t1);
+    }
     assert_eq!(parent(&s.town.tree, s.board), s.door.floor);
     let spans: Vec<i64> = grips
         .iter()
@@ -654,7 +678,7 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
         "A2: the board's track in the log: {samples} samples of the carry's node, {} overlap fixed geometry",
         clips.len()
     );
-    assert_eq!(samples, tick as usize + 1);
+    assert_eq!(samples, tick as usize + 1 + lowered as usize);
     assert!(clips.is_empty(), "the board overlaps at {clips:?}");
 
     if let Ok(out) = std::env::var("CARRY_TRACE") {
@@ -797,7 +821,8 @@ mod from_entry {
             }
         );
         assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
-        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four, at its four grips.
+        // 0.135 C6: the 6.1 m frame, held standing by one and carried by four to six, one at each of its six grips (a
+        // crew of six: its front, its back and four sides).
         let tall = Load::of(&entry("rack_upright_6m.json")).expect("the 6.1 m upright");
         assert_eq!(
             tall,
@@ -805,12 +830,17 @@ mod from_entry {
                 half_length: 3_048_000,
                 half_width: 609_500,
                 grips: [-2_748_000, 2_748_000],
-                inner: [Some(-916_000), Some(916_000), None, None],
+                inner: [
+                    Some(-1_649_000),
+                    Some(-550_000),
+                    Some(550_000),
+                    Some(1_649_000)
+                ],
                 crew: 4,
                 ..tall
             }
         );
-        assert_eq!(tall.most(), 4);
+        assert_eq!(tall.most(), 6);
     }
 
     /// 0.135 C4: held in the carry's slot, each load's long axis runs along the carry's +x, from the back carrier to

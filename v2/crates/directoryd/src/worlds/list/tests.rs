@@ -745,3 +745,196 @@ fn n_g8_the_creator_sets_the_welcome_visitors_are_shown() {
     w.set_welcome("mine", person(1), "").expect("cleared");
     assert_eq!(w.welcome_of("mine").expect("read"), None);
 }
+
+/// Rule 9 (26 Nov): each row's `souls` is what its world's `health.json` on this machine says, read again once
+/// [`SOULS_EVERY`] seconds have passed; a world with no file here, or no folder set, lists `souls: null`.
+#[test]
+fn the_souls_in_each_world_come_from_its_health_file() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let mut w = worlds(&store, &gets, forks);
+    w.create(&ask("k1", "busy", "Ann"), person(1), 0, 10 * DAY)
+        .expect("made");
+    w.create(&ask("k2", "never-started", "Bo"), person(2), 0, 10 * DAY)
+        .expect("made");
+    let row = |w: &Worlds<Counted<'_>>, name: &str| {
+        w.list().expect("a list")["worlds"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|r| r["name"] == name)
+            .cloned()
+            .expect("listed")
+    };
+    assert_eq!(row(&w, "busy")["souls"], Json::Null, "no folder set: none");
+    let root = std::env::temp_dir().join(format!("directoryd-souls-{}", std::process::id()));
+    let busy = row(&w, "busy");
+    let folder = folder_of(&busy).expect("a folder name");
+    // worldd's instance name, as the folder is named: `<32 hex>-<32 hex>-<counter>`, the row's lineage and zone
+    let parts: Vec<&str> = folder.split('-').collect();
+    let hex = |p: &str| p.len() == 32 && p.bytes().all(|b| b.is_ascii_hexdigit());
+    assert!(
+        parts.len() == 3
+            && hex(parts[0])
+            && hex(parts[1])
+            && !parts[2].is_empty()
+            && parts[2].bytes().all(|b| b.is_ascii_digit()),
+        "{folder}"
+    );
+    assert_eq!(parts[0], busy["lineage"].as_str().expect("a lineage"));
+    assert_eq!(
+        format!("{}:{}", parts[1], parts[2]),
+        busy["zone"].as_str().expect("a zone")
+    );
+    std::fs::create_dir_all(root.join(&folder)).expect("a world folder");
+    let health_at = |n: u64, at_s: u64| {
+        std::fs::write(
+            root.join(&folder).join("health.json"),
+            format!(
+                "{{\"at_unix_ms\":{},\"written\":3,\"souls\":{n}}}\n",
+                at_s * 1000
+            ),
+        )
+        .expect("written")
+    };
+    let health = |n: u64| health_at(n, crate::accounts::serve::now());
+    health(4);
+    w.souls_root = Some(root.clone());
+    assert_eq!(row(&w, "busy")["souls"], 4);
+    assert_eq!(
+        row(&w, "never-started")["souls"],
+        Json::Null,
+        "no file: none"
+    );
+    // Read again only once SOULS_EVERY has passed.
+    health(5);
+    let t = crate::accounts::serve::now() + 1;
+    let at = |now| w.souls_of(std::slice::from_ref(&folder), now)[&folder];
+    assert_eq!(
+        at(t),
+        Some(4),
+        "within {SOULS_EVERY} s: the count read before"
+    );
+    assert_eq!(at(t + SOULS_EVERY), Some(5));
+    // A clock gone back reads again rather than hold the old count.
+    health(6);
+    assert_eq!(at(t - 2), Some(6));
+    // A file not written for more than SOULS_FRESH seconds is a world not running here: none.
+    health_at(7, t - SOULS_FRESH - 5);
+    assert_eq!(at(t + 2 * SOULS_EVERY), None, "a stale file gives no count");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// One HTTP request to a served directory: its status and JSON answer.
+fn call(addr: &str, method: &str, path: &str, bearer: Option<&str>, body: &Json) -> (u16, Json) {
+    use std::io::{Read, Write};
+    let body = if method == "GET" {
+        String::new()
+    } else {
+        body.to_string()
+    };
+    let auth = bearer.map_or(String::new(), |b| format!("authorization: Bearer {b}\r\n"));
+    let mut s = std::net::TcpStream::connect(addr).expect("connects");
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nhost: {addr}\r\n{auth}content-length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    (
+        out[9..12].parse().unwrap(),
+        serde_json::from_str(out.split("\r\n\r\n").nth(1).unwrap()).unwrap_or_default(),
+    )
+}
+
+/// 26 Nov (my-mars-lab-2): a world made by New world (the directory's create, as the launcher asks it) is unlisted
+/// and listed again by its creator over HTTP (`POST /v1/worlds/settings`, the request the launcher's owner route
+/// passes on), and by nobody else. Unlisted, the list asked with no sign-in leaves it out (what the launcher's list
+/// follows), and its creator's own list keeps it, marked.
+#[test]
+fn a_created_world_is_unlisted_and_listed_by_its_creator_over_http() {
+    use crate::accounts::serve::{App, run};
+    let store: &'static (dyn Store + Send + Sync) = Box::leak(Box::new(Memory::default()));
+    let mut templates = BTreeMap::new();
+    templates.insert(
+        "mars-camp".to_owned(),
+        Template {
+            dir: "mars-camp".into(),
+            lineage: [0xe0; 16],
+            zone: Id::new(Scope([0xe0; 16]), 1).expect("an id"),
+        },
+    );
+    let app = Arc::new(App {
+        store: crate::accounts::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: None,
+        origin: None,
+        mailbox_key: None,
+        pairing: None,
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: Some(Worlds::new(
+            Directory::new(store, Name::new("m1").expect("a name")),
+            templates,
+            Box::new(|_| Ok(())),
+        )),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    std::thread::spawn(move || run(listener, app));
+
+    let ask = json!({"key": "click-1", "name": "my-mars-lab-2", "template": "mars-camp", "label": "My Mars Lab"});
+    let (status, made) = call(&addr, "POST", "/v1/worlds", Some("test:Ada"), &ask);
+    assert_eq!(status, 200, "{made}");
+    let public = || {
+        let (status, list) = call(&addr, "GET", "/v1/worlds", None, &Json::Null);
+        assert_eq!(status, 200, "{list}");
+        list["worlds"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter_map(|r| r["name"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let set = |who: Option<&str>, world: &str, unlisted: bool| {
+        call(
+            &addr,
+            "POST",
+            "/v1/worlds/settings",
+            who,
+            &json!({"world": world, "unlisted": unlisted}),
+        )
+    };
+    assert_eq!(public(), ["my-mars-lab-2"]);
+    // Nobody signed in, someone else, or a world that is not there: refused, and it stays listed.
+    assert_eq!(
+        set(None, "my-mars-lab-2", true),
+        (401, json!({"refused": "token-missing"}))
+    );
+    assert_eq!(
+        set(Some("test:Bea"), "my-mars-lab-2", true),
+        (403, json!({"refused": "not-the-creator"}))
+    );
+    assert_eq!(
+        set(Some("test:Ada"), "nowhere", true),
+        (404, json!({"refused": "world-missing"}))
+    );
+    assert_eq!(public(), ["my-mars-lab-2"]);
+    // Its creator: off the public list, still on her own, marked.
+    let (status, row) = set(Some("test:Ada"), "my-mars-lab-2", true);
+    assert_eq!(status, 200, "{row}");
+    assert_eq!(row["world"]["name"], "my-mars-lab-2");
+    assert_eq!(row["world"]["unlisted"], true);
+    assert!(public().is_empty(), "off the public list");
+    let (_, own) = call(&addr, "GET", "/v1/worlds", Some("test:Ada"), &Json::Null);
+    assert_eq!(own["worlds"][0]["name"], "my-mars-lab-2");
+    assert_eq!(own["worlds"][0]["unlisted"], true);
+    // And back on it.
+    assert_eq!(set(Some("test:Ada"), "my-mars-lab-2", false).0, 200);
+    assert_eq!(public(), ["my-mars-lab-2"]);
+}

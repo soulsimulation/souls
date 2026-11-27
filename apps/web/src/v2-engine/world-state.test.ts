@@ -243,3 +243,19 @@ test('a cup already on the other table in the first state the page receives is d
   apply(ws.diff(l, 0));
   assert.ok(near((l.model.entities.get('e_cup') as unknown as { p: number[] }).p, [1, 0.75, 2]), 'put back on table A');
 });
+
+test('#5006 row 13: the creator\'s strike (field 69) is the old page\'s god strike, drawn once at its tick; a stream that repeats it makes no diff', () => {
+  const ws = new WorldState(), { l, apply } = layer([]);
+  const storm = { ...SKY, 75: 'souls:storm', 76: 100, 77: 90, 78: 80, 79: 7_200_000_000 };
+  ws.receive(part([world({ ...storm, 69: [12_340, -8_000, 3_600_000_000] })]));
+  apply(ws.diff(l, 0));
+  const w = l.model.state.weather as unknown as { kind: string; strike: { x: number; z: number; tick: number } };
+  assert.equal(w.kind, 'storm');
+  assert.deepEqual(w.strike, { x: 12.34, z: -8, n: 0, tick: 3_600_000_000 / TICK_US });
+  ws.receive(part([world({ ...storm, 69: [12_340, -8_000, 3_600_000_000] })]));
+  assert.equal(ws.diff(l, 0), null, 'the same strike again: no redraw');
+  ws.receive(part([world({ ...storm, 69: [0, 0, 4_000_000_000] })]));
+  apply(ws.diff(l, 0));
+  assert.equal((l.model.state.weather as unknown as { strike: { tick: number } }).strike.tick, 4_000_000_000 / TICK_US, 'a second strike is drawn');
+  assert.equal(weatherOf({ ...SKY, 69: [1, 2] })?.strike, undefined, 'only a whole strike');
+});

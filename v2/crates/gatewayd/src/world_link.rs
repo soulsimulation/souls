@@ -26,8 +26,8 @@
 //! forever. The sync request itself is still answered [`RESTARTING`]: the client asks again once the world is up.
 //!
 //! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
-//! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
-//! away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
+//! asking actor; its answer goes back to the socket that asked, under the client's number. One asked while the world
+//! is away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
 //!
 //! **Never silence** (C8, #3396). Each kept intent has a deadline: its expiry, or [`DEADLINE`] after it was received,
 //! whichever is sooner (the world's own, `worldd::answers::Config::deadline`). Once it passes while the world is away,
@@ -36,7 +36,8 @@
 //! deadline; the gateway steps in only [`WEDGED`] after it, for a world that takes intents and never answers.
 //!
 //! **In progress** (C20, #3469). A form's act runs as long as its walk and its own steps take, from its start (a
-//! walk across the town, a long read). When its run starts (a gateway walk: when its route is planned), the world
+//! walk across the town, a long read). When its run starts (a gateway walk: when its route is planned; a sit, a lie or a
+//! rise: when its move starts), the world
 //! says so with a progress answer, T10's accepted with how long the act has left (`worldd::answers::progress`; W11,
 //! #4087: in the tick it starts, not at [`DEADLINE`]): the gateway passes it on to the actor and moves the intent's
 //! deadline to the world's, so it answers in-flight acts with progress, not `act.timed-out`. The intent stays kept
@@ -151,6 +152,18 @@ fn delivery_metadata(frame: &[u8]) -> Option<DeliveryTrace> {
 /// How many of one agent's intents may be in the world's line at a time, sent and not yet answered (S2).
 pub const TURN: usize = 4;
 
+/// The most one agent's intents kept here may hold at once, bytes (O8, #2805): each intent's own and [`KEPT_EACH`]
+/// for its place in the gateway's maps, until it is answered. About 600 small intents or 60 of the largest
+/// (`intent_limits.txt`), far above an honest agent's few at a time; a client that sends faster than its world answers
+/// is refused [`SLOW_DOWN`] at once, by name, and never kept, so it never grows the gateway's memory toward its
+/// limit, nor its deadline sweep's work. A creator's bulk edit is not charged (`bulk.rs`, its own gauge).
+pub const KEPT_MOST: usize = 256 << 10;
+/// What one kept intent's place in the gateway's maps is charged, bytes, besides its own.
+pub const KEPT_EACH: usize = 256;
+/// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`]: send it again once one of
+/// them is answered.
+pub const SLOW_DOWN: &str = "agent.slow-down";
+
 /// The key of the frame sent first on each connection to the world, `{31: []}`: this is the world's gateway, so the
 /// answers an ended connection could not take come here (worldd's `handover::ASK`).
 pub const HANDOVER: u64 = 31;
@@ -195,13 +208,20 @@ pub const TIMED_OUT: &str = "act.timed-out";
 /// Asks for the sleeping world to be woken; it must not block.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+/// A sync answer for a socket: the actor's bytes, the asking socket's session, and the frame under its number.
+type Synced = (Vec<u8>, u64, Vec<u8>);
+
 /// What became of an intent handed to the link.
 #[derive(Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)] // `Sent::Sent` reads as meant; the lint fires from a third variant on
 pub enum Sent {
     /// Sent (or kept to send again): the world answers it.
     Sent,
     /// The world is away: answer it with [`RESTARTING`].
     Restarting,
+    /// Its agent's kept intents are at [`KEPT_MOST`]: answer it with [`SLOW_DOWN`]. Not kept. With the intents so
+    /// refused since the gateway started (the gauge).
+    Full(u64),
 }
 
 #[derive(Default)]
@@ -224,6 +244,8 @@ struct Pending {
     flying: bool,
     /// Sent on more than one connection: the world may answer it on each.
     resent: bool,
+    /// What it is charged against its agent's [`KEPT_MOST`], bytes: 0 for a creator's bulk edit.
+    charge: usize,
 }
 
 #[derive(Default)]
@@ -235,8 +257,9 @@ struct State {
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
-    /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
-    syncs: BTreeMap<u64, (Vec<u8>, Value)>,
+    /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes, the asking socket's
+    /// session and the client's number.
+    syncs: BTreeMap<u64, (Vec<u8>, u64, Value)>,
     /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
     wake: Option<Wake>,
     asked: bool,
@@ -247,6 +270,9 @@ struct State {
     recent: VecDeque<(Vec<u8>, u64)>,
     /// Every kept intent answered lately, by actor's bytes and sequence, newest last ([`ANSWERED`]).
     answered: VecDeque<(Vec<u8>, u64)>,
+    /// O8: each agent's kept intents' charge, bytes ([`KEPT_MOST`]), and the intents refused [`SLOW_DOWN`] (its gauge).
+    charged: BTreeMap<Vec<u8>, usize>,
+    slowed: u64,
 }
 
 /// What an answer from the world is to the gateway.
@@ -261,6 +287,16 @@ enum Answered {
 }
 
 impl State {
+    /// A kept intent of `key`'s, charged `charge`, was taken out of [`State::pending`].
+    fn release(&mut self, key: &[u8], charge: usize) {
+        if let Some(c) = self.charged.get_mut(key) {
+            *c = c.saturating_sub(charge);
+            if *c == 0 {
+                self.charged.remove(key);
+            }
+        }
+    }
+
     fn remember(&mut self, key: Vec<u8>, sequence: u64) {
         if self.recent.len() == RECENT {
             self.recent.pop_front();
@@ -319,7 +355,8 @@ impl State {
 
 impl Link {
     /// Hands an intent to the world, keeping it until it is answered; `received` is when its socket read it (the
-    /// steady clock, [`times::stamp`]) and `left` how long its expiry was off then, µs.
+    /// steady clock, [`times::stamp`]) and `left` how long its expiry was off then, µs. It is charged against its
+    /// agent's [`KEPT_MOST`], and refused ([`Sent::Full`]) when that would go over.
     pub fn submit(
         &self,
         key: Vec<u8>,
@@ -328,6 +365,34 @@ impl Link {
         bytes: Vec<u8>,
         received: u64,
         left: i64,
+    ) -> Sent {
+        let charge = bytes.len() + KEPT_EACH;
+        self.keep(key, actor, sequence, bytes, received, left, charge)
+    }
+
+    /// As [`Link::submit`], for a creator's bulk edit: never charged, so never refused for [`KEPT_MOST`].
+    pub fn submit_bulk(
+        &self,
+        key: Vec<u8>,
+        actor: Actor,
+        sequence: u64,
+        bytes: Vec<u8>,
+        received: u64,
+        left: i64,
+    ) -> Sent {
+        self.keep(key, actor, sequence, bytes, received, left, 0)
+    }
+
+    #[allow(clippy::too_many_arguments)] // `submit`'s, and its charge
+    fn keep(
+        &self,
+        key: Vec<u8>,
+        actor: Actor,
+        sequence: u64,
+        bytes: Vec<u8>,
+        received: u64,
+        left: i64,
+        charge: usize,
     ) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let out = s.out.clone();
@@ -343,6 +408,14 @@ impl Link {
         if s.index.contains_key(&(key.clone(), sequence)) {
             // Sent again while still unanswered: it is answered once.
             return Sent::Sent;
+        }
+        let held = s.charged.get(&key).copied().unwrap_or(0);
+        if charge > 0 && held + charge > KEPT_MOST {
+            s.slowed += 1;
+            return Sent::Full(s.slowed);
+        }
+        if charge > 0 {
+            s.charged.insert(key.clone(), held + charge);
         }
         let n = s.next;
         s.next += 1;
@@ -366,6 +439,7 @@ impl Link {
                 reason,
                 flying: false,
                 resent: false,
+                charge,
             },
         );
         drop(out);
@@ -373,8 +447,9 @@ impl Link {
         Sent::Sent
     }
 
-    /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out.
-    pub fn ask(&self, key: Vec<u8>, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
+    /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out, from the
+    /// socket signed in as `session`, which alone is given its answer.
+    pub fn ask(&self, key: Vec<u8>, session: u64, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
             // Only an agent (a grant on a socket) asks here: a Soul's client syncs before it sends any intent, so a
@@ -394,7 +469,7 @@ impl Link {
         let Ok(bytes) = encode(&Value::Map(ask)) else {
             return Sent::Restarting;
         };
-        s.syncs.insert(ours, (key, n));
+        s.syncs.insert(ours, (key, session, n));
         let _ = out.send(bytes);
         Sent::Sent
     }
@@ -443,6 +518,7 @@ impl Link {
             return Answered::Unheld;
         };
         s.landed(&p.key, p.flying);
+        s.release(&p.key, p.charge);
         if p.resent {
             s.remember(id.0.clone(), id.1);
         }
@@ -487,6 +563,7 @@ impl Link {
                     q.retain(|w| *w != n);
                 }
                 s.landed(&p.key, p.flying);
+                s.release(&p.key, p.charge);
                 // The world's own answer may still come: it is not passed on a second time.
                 s.remember(p.key.clone(), p.sequence);
                 out.push((p.key, p.actor, p.sequence, p.reason));
@@ -495,9 +572,10 @@ impl Link {
         out
     }
 
-    /// A sync answer from the world (key 20): the actor it is for and the frame under the client's number, or
-    /// `Some(None)` for one answering a request not kept. `None` if the frame is not a sync answer.
-    fn sync_answered(&self, frame: &[u8]) -> Option<Option<(Vec<u8>, Vec<u8>)>> {
+    /// A sync answer from the world (key 20): the actor it is for, the asking socket's session and the frame under
+    /// the client's number, or `Some(None)` for one answering a request not kept. `None` if the frame is not a sync
+    /// answer.
+    fn sync_answered(&self, frame: &[u8]) -> Option<Option<Synced>> {
         let Value::Map(mut m) = decode(frame).ok()?.value else {
             return None;
         };
@@ -511,10 +589,10 @@ impl Link {
             .unwrap_or_else(|e| e.into_inner())
             .syncs
             .remove(&ours);
-        Some(kept.and_then(|(key, n)| {
+        Some(kept.and_then(|(key, session, n)| {
             m.insert(wire::ASK, n);
             m.remove(&wire::ACTOR);
-            Some((key, encode(&Value::Map(m)).ok()?))
+            Some((key, session, encode(&Value::Map(m)).ok()?))
         }))
     }
 
@@ -541,7 +619,7 @@ impl Link {
     }
 
     /// The world went away: the sync requests it had not answered, to answer with [`RESTARTING`].
-    fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
+    fn disconnected(&self) -> Vec<(Vec<u8>, u64, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = None;
         // A world that went to sleep with intents still unanswered here (one arrived as it went): asked awake at
@@ -631,8 +709,8 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 continue;
             }
             if let Some(answer) = gw.link.sync_answered(&frame) {
-                if let Some((key, frame)) = answer {
-                    gw.reply(&key, frame);
+                if let Some((key, session, frame)) = answer {
+                    gw.reply(&key, session, frame);
                 }
                 continue;
             }
@@ -640,7 +718,11 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             if let Some((key, sequence, cursor, left)) = read_progress(&frame) {
                 if let Some((received, handed)) = gw.link.progress(&key, sequence, left, at) {
                     let frame = times::read_from_world(frame, received, handed, at);
-                    gw.deliver(key, cursor, frame);
+                    let a = crate::Answering {
+                        sequence,
+                        ends: false,
+                    };
+                    gw.deliver(key, a, cursor, frame);
                 }
                 continue;
             }
@@ -660,7 +742,11 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                             t.at("receipt-record", "returned");
                         }
                         let frame = times::read_from_world(frame, received, handed, at);
-                        gw.deliver(key, cursor, frame);
+                        let a = crate::Answering {
+                            sequence,
+                            ends: true,
+                        };
+                        gw.deliver(key, a, cursor, frame);
                         if let Some(t) = &trace {
                             t.at("deliver", "returned");
                         }
@@ -671,8 +757,8 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 None => (gw.log)("a frame from the world was not {1: version, 2: answer}"),
             }
         }
-        for (key, n) in gw.link.disconnected() {
-            gw.reply(&key, sync_refused(n, RESTARTING));
+        for (key, session, n) in gw.link.disconnected() {
+            gw.reply(&key, session, sync_refused(n, RESTARTING));
         }
         writer.abort();
         if stopping {
@@ -688,7 +774,7 @@ pub async fn deadlines(gw: Arc<Gateway>) {
         tokio::time::sleep(SWEEP).await;
         for (key, actor, sequence, reason) in gw.link.overdue(times::stamp()) {
             let frame = crate::socket::refused(actor, sequence, reason, gw.link.now());
-            gw.tell(&key, frame);
+            gw.tell(&key, sequence, frame);
         }
     }
 }
@@ -805,5 +891,58 @@ mod delivery_tests {
         assert_eq!((receipt.sequence, refusal.sequence), (1, 1));
         assert_eq!((receipt.kind, refusal.kind), (1, 2));
         assert_eq!((receipt.version, refusal.version), (Some(7), Some(7)));
+    }
+}
+
+#[cfg(test)]
+mod kept_tests {
+    use super::*;
+    use replica::ids::{Id, Scope};
+
+    /// A Soul's actor and the bytes the link keys it by (any bytes; the gateway uses the grant's).
+    fn soul(n: u64) -> (Vec<u8>, Actor) {
+        let a = Actor::Soul(Id::new(Scope([0x52; 16]), n).unwrap());
+        (n.to_be_bytes().to_vec(), a)
+    }
+
+    /// O8 (#2805): one agent's kept intents are bounded by KEPT_MOST, refused past it without being kept, and freed by
+    /// their answers and by the deadline sweep; another agent, a repeat and a bulk edit are not held by it.
+    #[test]
+    fn o8_an_agents_kept_intents_are_bounded_and_freed() {
+        let link = Link::default();
+        let _queue = link.connected();
+        let ((key, actor), (other, other_actor)) = (soul(1), soul(2));
+        let bytes = vec![0u8; 1000];
+        let fits = (KEPT_MOST / (bytes.len() + KEPT_EACH)) as u64;
+        let submit =
+            |key: &Vec<u8>, a, seq| link.submit(key.clone(), a, seq, bytes.clone(), 0, 1_000_000);
+        for seq in 1..=fits {
+            assert_eq!(submit(&key, actor, seq), Sent::Sent);
+        }
+        assert_eq!(submit(&key, actor, fits + 1), Sent::Full(1));
+        assert_eq!(submit(&key, actor, fits + 2), Sent::Full(2));
+        assert_eq!(
+            link.unanswered() as u64,
+            fits,
+            "a refused intent is not kept"
+        );
+        // Another agent's intent, and a repeat of one kept (answered once), are taken.
+        assert_eq!(submit(&other, other_actor, 1), Sent::Sent);
+        assert_eq!(submit(&key, actor, 1), Sent::Sent);
+        // A creator's bulk edit is never charged.
+        let bulk = vec![0u8; KEPT_MOST];
+        assert_eq!(
+            link.submit_bulk(key.clone(), actor, 10_000, bulk, 0, 1_000_000),
+            Sent::Sent
+        );
+        // An answer frees its place.
+        assert!(matches!(
+            link.answered(&key, 1, &Value::Array(Vec::new())),
+            Answered::Kept(..)
+        ));
+        assert_eq!(submit(&key, actor, fits + 1), Sent::Sent);
+        // The deadline sweep frees every place it answers.
+        assert!(link.overdue(u64::MAX / 2).len() as u64 >= fits + 2);
+        assert!(link.state.lock().unwrap().charged.is_empty());
     }
 }

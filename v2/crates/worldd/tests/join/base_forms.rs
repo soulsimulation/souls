@@ -9,6 +9,8 @@
 //!   origin.
 //! - #4072 follow-up: a walk to a thing whose entry gives bounds (a 6 m bench) ends by its outline, not at its middle;
 //!   a `touch` after one is in reach; a `go_to` on a walkable thing (a mat, its entry an area) ends on it.
+//! - #5063: a `look_at` or a `point` at a thing seen beyond its 20 m reach is made from afar, its end saying so; past
+//!   sight (60 m) it is refused `out-of-reach`, its answer's words saying how far it is, the reach and the sight.
 use super::*;
 
 const HUMANOID: &str = include_str!("../../../../../content/kinds/body/humanoid.json");
@@ -53,6 +55,22 @@ fn mat() -> Id {
 fn mat_at() -> Vec3 {
     let s = first_spot();
     Vec3::new(s.x + 2_000_000, 0, s.z + 6_000_000)
+}
+/// A thing with a card 26 m east of the first birth's spot: beyond a look's and a point's 20 m, within sight.
+fn far() -> Id {
+    id(24)
+}
+fn far_at() -> Vec3 {
+    let s = first_spot();
+    Vec3::new(s.x + 26_000_000, 0, s.z)
+}
+/// A thing with a card 70 m west of the first birth's spot: past sight (60 m, #5063).
+fn past() -> Id {
+    id(25)
+}
+fn past_at() -> Vec3 {
+    let s = first_spot();
+    Vec3::new(s.x - 70_000_000, 0, s.z)
 }
 fn mat_ring() -> [Vec3; 4] {
     let (m, x, z) = (mat_at(), 1_500_000, 1_000_000);
@@ -151,6 +169,8 @@ fn base_world() -> Replica {
         ),
         create_with(4, bench(), bench_at(), entry_field("test:bench")),
         create_with(5, mat(), mat_at(), entry_field("test:mat")),
+        create_with(6, far(), far_at(), BTreeMap::new()),
+        create_with(7, past(), past_at(), BTreeMap::new()),
     ];
     let part = encode(&Value::Map(BTreeMap::from([
         (1, Value::Bytes(header(ground()).hash().to_bytes())),
@@ -368,5 +388,98 @@ fn a_walk_to_a_bounded_thing_ends_by_its_outline_and_on_a_walkable_one() {
         to_outline(at, &mat_ring())
     );
     assert_eq!(to_outline(at, &mat_ring()), 0, "on the mat: {at:?}");
+    run.stop();
+}
+
+/// #5063: a look or a point at a thing seen beyond its 20 m reach (26 m away on the open ground) is made from afar
+/// and done; its act's end, which its receipt names, says so (field 8). Past sight (70 m) it is refused `out-of-reach`,
+/// its answer's words saying how far the thing is, the reach and the sight (#5019 follow-up).
+#[test]
+fn a_look_or_point_beyond_reach_is_made_from_afar_and_past_sight_refused() {
+    let (run, mut a) = serve_base("far");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = body_of(&run, ada()).expect("born");
+    let away = flat(last_at(&run, body), far_at());
+    for (form, arg) in [("look_at", "target"), ("point", "toward")] {
+        let r = a.act(&format!("eden:{form}"), Some(body), thing(arg, far()));
+        println!("{form} at {away} µm: {r:?}");
+        let listed = r.expect("accepted and done");
+        let words: Vec<String> = run
+            .log()
+            .iter()
+            .flat_map(|p| p.effects.clone())
+            .filter(|e| listed.contains(&e.envelope.sequence))
+            .flat_map(|e| e.events.unwrap_or_default())
+            .filter(|ev| ev.name.as_str() == answers::FORM_ENDED)
+            .filter_map(|ev| match ev.fields.get(&8) {
+                Some(Value::Bytes(b)) => String::from_utf8(b.clone()).ok(),
+                _ => None,
+            })
+            .collect();
+        println!("  its end's words: {words:?}");
+        let shown = replica::world_model::show(far());
+        assert!(
+            matches!(&words[..], [w] if w.contains(": from afar, ") && w.ends_with(&format!(" mm to {shown}, reach 20000 mm"))),
+            "{form}: {words:?}"
+        );
+        a.send(&format!("eden:{form}"), Some(body), thing(arg, past()));
+        let (_, r, why) = a.answer_why();
+        println!("{form} past sight: {r:?}, {why:?}");
+        assert_eq!(r, Err("out-of-reach".to_owned()), "{form}");
+        let why = why.expect("the refusal's words");
+        let shown = replica::world_model::show(past());
+        assert!(
+            why.ends_with(&format!(" mm to {shown}, reach 20000 mm, sight 60000 mm")),
+            "{form}: {why}"
+        );
+        let mm: i64 = why
+            .split(' ')
+            .nth(1)
+            .and_then(|n| n.parse().ok())
+            .expect("how far, mm");
+        assert!(mm > 60_000, "{form}: {mm} mm");
+    }
+    // Within reach, the same look is done and its end says nothing more.
+    let near = a.act("eden:look_at", Some(body), thing("target", base()));
+    assert!(!near.expect("done").is_empty());
+    run.stop();
+}
+
+/// The body's last logged pose on the ground.
+fn last_pose(run: &Run, body: Id) -> replica::pose::Pose {
+    run.log()
+        .iter()
+        .rev()
+        .find_map(|p| match p.rest.get(&answers::BODIES) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .rev()
+                .filter_map(worldd::bodies::read_row)
+                .find(|(b, _, _)| *b == body)
+                .map(|(_, pose, _)| pose),
+            _ => None,
+        })
+        .expect("the body's row")
+}
+
+/// Trial of 25 Nov: `bow_to toward=<Soul>` bowed facing away from it. A move made toward its thing argument begins
+/// facing it: born facing east (+x), a bow toward the bench 6 m west turns the body west first.
+#[test]
+fn a_bow_toward_a_thing_is_made_facing_it() {
+    let (run, mut a) = serve_base("bow");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = body_of(&run, ada()).expect("born");
+    let r = a.act("eden:bow_to", Some(body), thing("toward", bench()));
+    println!("bow_to bench: {r:?}");
+    assert!(!r.expect("accepted and done").is_empty());
+    let p = last_pose(&run, body);
+    let ahead = p.orientation.rotate(Vec3::new(1 << 20, 0, 0)).unwrap();
+    let to = (bench_at().x - p.position.x, bench_at().z - p.position.z);
+    let len = ((i128::from(to.0).pow(2) + i128::from(to.1).pow(2)).isqrt()) as f64;
+    let dot = (i128::from(ahead.x) * i128::from(to.0) + i128::from(ahead.z) * i128::from(to.1))
+        as f64
+        / (len * f64::from(1 << 20));
+    println!("  facing {ahead:?}, toward the bench {to:?}: cos {dot:.3}");
+    assert!(dot > 0.95, "it faces the bench: cos {dot:.3}");
     run.stop();
 }

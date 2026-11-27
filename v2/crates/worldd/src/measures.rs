@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -231,6 +231,9 @@ pub struct Measures {
     next_arrival: AtomicU64,
     /// `health.json` writes so far.
     pub written: AtomicU64,
+    /// The Souls embodied in the world as the last tick left them, plus one; 0 before a tick has set it (or in a world
+    /// with no joins). `souls` in `health.json`: the number a world's card on the home page shows (26 Nov).
+    souls: AtomicU64,
 }
 
 impl Measures {
@@ -286,6 +289,12 @@ impl Measures {
         if total > BUDGET_US {
             self.over_budget.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Clock thread: the Souls embodied in the world after a tick (`None`: a world with no joins, no field).
+    pub fn souls(&self, n: Option<usize>) {
+        let v = n.map_or(0, |n| u64::try_from(n).unwrap_or(u64::MAX - 1) + 1);
+        self.souls.store(v, Ordering::Relaxed);
     }
 
     /// Answers thread: an answer's stamps complete; its parts recorded and returned as the block, `[first stamp,
@@ -352,16 +361,41 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        clock_json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
+        o.push_str(",\"audit\":");
+        AUDIT.json(&mut o);
         STREAM.json("stream", &mut o);
         BACKUP.json("stream_backup", &mut o);
+        CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
         ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         HISTORY_EXPORT.json(&mut o);
         CREATOR.json("creator", &mut o);
+        if let Some(n) = self.souls.load(Ordering::Relaxed).checked_sub(1) {
+            let _ = write!(o, ",\"souls\":{n}");
+        }
         o.push_str("}\n");
         o
+    }
+}
+
+/// How far the world's clock runs ahead of the machine's, ms (O10, #2806): set by a restart that found the machine's
+/// clock behind its last logged tick, and by the watchdog, which compares the two each second. Under a second either
+/// way is `steady`; past it, `stepped` (`clock` in `health.json`).
+pub static CLOCK_AHEAD_MS: AtomicI64 = AtomicI64::new(0);
+
+/// `,"clock":{"state":"steady"}`, or `stepped` with how far the world's clock is ahead of the machine's.
+fn clock_json(o: &mut String) {
+    let ahead = CLOCK_AHEAD_MS.load(Ordering::Relaxed);
+    if ahead.abs() < 1000 {
+        o.push_str(",\"clock\":{\"state\":\"steady\"}");
+    } else {
+        let _ = write!(
+            o,
+            ",\"clock\":{{\"state\":\"stepped\",\"ahead_ms\":{ahead}}}"
+        );
     }
 }
 
@@ -410,6 +444,71 @@ impl Stalls {
             self.now_ms.load(Ordering::Relaxed),
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
+        );
+    }
+}
+
+/// The auditor (K11) and its printer (#3422): passes ended, slices cut short by `answers::AUDIT_TIME`, and the fault
+/// lines the clock queued for the printer, printed, and dropped because the queue was full or the printer gone (the
+/// clock never waits for it). One per process, written by the clock and the printer threads.
+pub struct Audit {
+    passes: AtomicU64,
+    cut: AtomicU64,
+    sent: AtomicU64,
+    printed: AtomicU64,
+    dropped: AtomicU64,
+}
+
+/// This process's auditor.
+pub static AUDIT: Audit = Audit {
+    passes: AtomicU64::new(0),
+    cut: AtomicU64::new(0),
+    sent: AtomicU64::new(0),
+    printed: AtomicU64::new(0),
+    dropped: AtomicU64::new(0),
+};
+
+impl Audit {
+    /// Clock thread: a slice ended, cut short by time or not, with the auditor's passes so far.
+    pub fn slice(&self, cut: bool, passes: u64) {
+        self.passes.store(passes, Ordering::Relaxed);
+        if cut {
+            self.cut.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Clock thread: a line queued.
+    pub fn sent(&self) {
+        self.sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Clock thread: a line dropped.
+    pub fn dropped(&self) {
+        self.dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Printer thread: a line printed.
+    pub fn printed(&self) {
+        self.printed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Lines dropped so far.
+    pub fn drops(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// `{"passes":n,"cut_slices":n,"limit":n,"queued":n,"printed":n,"dropped":n}`: `limit` the lines the queue
+    /// holds; `queued` the lines sent and not yet printed, the one being printed included (so up to `limit` + 1).
+    pub fn json(&self, o: &mut String) {
+        let printed = self.printed.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            "{{\"passes\":{},\"cut_slices\":{},\"limit\":{},\"queued\":{},\"printed\":{printed},\"dropped\":{}}}",
+            self.passes.load(Ordering::Relaxed),
+            self.cut.load(Ordering::Relaxed),
+            crate::answers::AUDIT_LINES,
+            self.sent.load(Ordering::Relaxed).saturating_sub(printed),
+            self.drops()
         );
     }
 }
@@ -481,6 +580,60 @@ pub static STREAM: Stream = Stream(Mutex::new(String::new()));
 /// R15: the stream's recovery chain, backed up to the store behind it (`stream_backup` in `health.json`). Viewers read
 /// the stream from this machine's disk, so a store that stalls or refuses shows here, not in `stream`.
 pub static BACKUP: Stream = Stream(Mutex::new(String::new()));
+
+/// The stream's clean-up of old generations from the store (#3833, #4954; `stream_cleanup` in `health.json`): the old
+/// generations not read yet (`generations`, each standing for its objects, about a thousand), the deletes in line
+/// (`waiting`), those of them waiting to be tried again after a refusal (`retrying`), and the deletes the store
+/// answered and the refusals since the start. One per process, written by the clean-up's own thread each second,
+/// whether or not it may delete; absent until it first runs.
+pub struct Cleanup {
+    on: std::sync::atomic::AtomicBool,
+    generations: AtomicU64,
+    waiting: AtomicU64,
+    retrying: AtomicU64,
+    deleted: AtomicU64,
+    refused: AtomicU64,
+}
+
+/// This process's stream clean-up.
+pub static CLEANUP: Cleanup = Cleanup {
+    on: std::sync::atomic::AtomicBool::new(false),
+    generations: AtomicU64::new(0),
+    waiting: AtomicU64::new(0),
+    retrying: AtomicU64::new(0),
+    deleted: AtomicU64::new(0),
+    refused: AtomicU64::new(0),
+};
+
+impl Cleanup {
+    /// How the clean-up stands now.
+    pub fn set(&self, generations: u64, waiting: u64, retrying: u64, deleted: u64, refused: u64) {
+        self.generations.store(generations, Ordering::Relaxed);
+        self.waiting.store(waiting, Ordering::Relaxed);
+        self.retrying.store(retrying, Ordering::Relaxed);
+        self.deleted.store(deleted, Ordering::Relaxed);
+        self.refused.store(refused, Ordering::Relaxed);
+        self.on.store(true, Ordering::Relaxed);
+    }
+
+    /// `,"stream_cleanup":{"generations":n,"waiting":n,"retrying":n,"deleted":n,"refused":n}`, or nothing before it
+    /// runs.
+    fn json(&self, o: &mut String) {
+        if !self.on.load(Ordering::Relaxed) {
+            return;
+        }
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            ",\"stream_cleanup\":{{\"generations\":{},\"waiting\":{},\"retrying\":{},\"deleted\":{},\"refused\":{}}}",
+            l(&self.generations),
+            l(&self.waiting),
+            l(&self.retrying),
+            l(&self.deleted),
+            l(&self.refused)
+        );
+    }
+}
 
 /// R17: the start's reads of the store that the world no longer waits on (`shipping`, `archive` and `creator` in
 /// `health.json`): `degraded` with the fault, the tries so far and the wait before the next while the store does not
@@ -763,6 +916,23 @@ mod tests {
             json(),
             ",\"archive\":{\"state\":\"current\",\"queued\":2,\"queued_bytes\":25,\"in_log\":7}"
         );
+    }
+
+    /// The Souls embodied as the last tick left them are `souls` in `health.json`; never set, no field (26 Nov).
+    #[test]
+    fn the_souls_in_the_world_are_in_the_health_file() {
+        let m = Measures::default();
+        let health = |m: &Measures| m.health(steady_us());
+        assert!(!health(&m).contains("\"souls\""), "unset: no field");
+        m.souls(Some(4));
+        assert!(health(&m).ends_with(",\"souls\":4}\n"), "{}", health(&m));
+        m.souls(Some(0));
+        assert!(
+            health(&m).ends_with(",\"souls\":0}\n"),
+            "none embodied is 0, not unset"
+        );
+        m.souls(None);
+        assert!(!health(&m).contains("\"souls\""));
     }
 
     /// A key the public history mirror could not hold is counted in `health.json`, by its key; none, no field.

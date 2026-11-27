@@ -784,6 +784,33 @@ fn class_guard_and_atomic_install_preserve_each_actual_footprint() {
     );
 }
 
+/// A thing no walker meets (a loose beam: no solids) placed 24 km east of the open ground is off it, by its origin,
+/// and one placed 10 m east is not. The walkers' changed nodes do not name it, so the edit names what it places
+/// (`crate::edit::on_ground`): a creator's place in millimetres where metres were meant put a beam there unrefused.
+#[test]
+fn a_thing_with_no_solids_placed_far_off_the_open_ground_is_off_it() {
+    let mut w = world();
+    let (_, near) = w.new_box(
+        on(w.ground, Vec3::new(20 * M, 0, 20 * M), surface(w.ground)),
+        &[solid(0, 0, 500, 500, 1_000)],
+    );
+    w.setup(vec![near]);
+    let off = |w: &mut W, x: i64| {
+        let (beam, place) = w.new_box(on(w.ground, Vec3::new(x, 0, 20 * M), Support::None), &[]);
+        let p = w.part(creator(), vec![place]);
+        assert!(
+            !crate::ground::changed(&w.tree, &p).contains(&beam),
+            "no walker meets it"
+        );
+        let mut after = w.tree.frozen();
+        after.apply(&w.header, &p).expect("the place applies");
+        crate::ground::open::off_ground(&w.tree, &after, w.ground, &[beam]).expect("read")
+    };
+    let why = off(&mut w, 24_000 * M).expect("24 km east is off the ground");
+    println!("{why}");
+    assert_eq!(off(&mut w, 30 * M), None, "10 m east stays on it");
+}
+
 /// #3958: a box moved 100 km east of the open ground lies off it, by name, and the same box moved 10 m stays on it;
 /// so the edit is refused before the walkers' maps cut squares all the way out to it.
 #[test]

@@ -379,6 +379,12 @@ impl Client {
 
     /// The next answer: (its sequence, a receipt's entries or a refusal's reason).
     fn answer(&mut self) -> (u64, Result<Vec<u64>, String>) {
+        let (seq, r, _) = self.answer_why();
+        (seq, r)
+    }
+
+    /// The next answer, with a refusal's words (field 8), if it has any.
+    fn answer_why(&mut self) -> (u64, Result<Vec<u64>, String>, Option<String>) {
         // A progress answer (C20, sent as a run starts) is read past.
         let frame = loop {
             let mut len = [0u8; 4];
@@ -413,7 +419,11 @@ impl Client {
             },
             other => panic!("an answer: {other:?}"),
         };
-        (seq, r)
+        let why = match a.get(&8) {
+            Some(Value::Bytes(b)) => Some(String::from_utf8_lossy(b).into_owned()),
+            _ => None,
+        };
+        (seq, r, why)
     }
 
     fn act(
@@ -1182,9 +1192,20 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// left out (`settle_with(.., None, ..)`) the run writes the previous pin (85d9b198...), so it is the whole difference.
 /// Re-pinned by the arrival fix: a body is born facing its entry's point, not +x (same 905 records, 2,342 motion
 /// samples); with only the born facing left out the run writes the previous pin (1dff64e9...), so it is the whole
-/// difference.
+/// difference. Re-pinned by #4974: a gateway walk's place is asked in the tick the walk starts, so it is planned,
+/// answered and walking a tick sooner (904 records, 2,331 motion samples); main without that one change writes the
+/// previous pin (aafd0a80...), so it is the whole difference. Re-pinned by #5034: a walk sent to a point says how far
+/// from that point it ended (its end's field 7), not from the ground node (same 904 records, 2,331 motion samples). 41
+/// walk ends' field 7 went from 39.9 m to 48.1 m to 0 mm to 48 mm, and nothing else differs; the spot change alone
+/// leaves this history as it was, and main's three files write the previous pin (f7b20d34...).
+/// Re-pinned by the #5019 follow-up: a move refused out of reach says how far in whole mm, not µm, in its
+/// logged answer (a sit refused as it starts; same 905 records, 2,342 motion samples); the branch's first commit alone
+/// (the words) writes this pin, and its later ones (sits and rises answered as they start) leave it, so the words are
+/// the whole difference.
+/// With #4974's tick, #5034's walk-end field 7 and the whole-mm words, as merged: 904 records, 2,331 motion samples,
+/// and a hash of their own (farm run of the merge); each alone writes its own pin above.
 const PINNED_MOTION_HISTORY: &str =
-    "aafd0a803ed6f47d528f15e74f0805bb90216f418974a78a7b066b420ed8e585";
+    "58835756d480a3c5dd40069b08ba744f09551cede721ab5195496785557ab487";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

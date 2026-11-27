@@ -1,13 +1,14 @@
 // release.sh's release-head checks, the reseed it carries (0.133 R13) and its move of the directory and the origin,
 // with stand-ins for gh and the machine's programs: the merge queue's green ci run counts for ci-ok and the v2 legs, a
-// staged release runs Eden's reseed pre-check with its own world-aside and kinds, and the move restarts the directory
+// staged release runs Eden's reseed pre-check with its own kinds on a fresh store generation, and the move restarts the directory
 // and the origin once, after the worlds and the gateway, on the release's programs and units, and puts each back on its
 // previous ones when it does not answer as healthy.
 //   node --test v2/tools/ops/release/release.test.mjs
 
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -41,21 +42,23 @@ test('checks: the merge queue\'s green ci run at the head counts for ci-ok and t
   assert.match(noScrub.stdout, /release.missing-check: scrub-guard /);
 });
 
-test('a staged release carries the reseed, and its pre-check uses that release\'s world-aside and kinds', () => {
+test('a staged release carries the reseed, and its pre-check uses that release\'s kinds and a fresh store generation', () => {
   const bins = join(dir, 'bins'), page = join(dir, 'page'), pkg = join(dir, 'pkg'), out = join(dir, 'bundle');
   const data = join(dir, 'data'), etc = join(dir, 'etc'), lib = join(dir, 'lib');
   for (const d of [page, pkg, etc, lib]) mkdirSync(d, { recursive: true });
   const world = `${'c'.repeat(32)}-${'c'.repeat(32)}-0`;
-  // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; world-aside lists 3 objects.
-  exe(join(bins, 'worldd'), 'exit 0');
+  // Stand-ins: worldd answers `schemas` (stage's start check); deploy says what is pinned; both read a store generation
+  // (#4954: they carry its refusal, 'generation-bad: '), and so does the installed supervisor.
+  exe(join(bins, 'worldd'), '# generation-bad: \nexit 0');
   exe(join(bins, 'gatewayd'), 'exit 0');
   exe(join(bins, 'directoryd'), 'exit 0');
-  exe(join(bins, 'deploy'), 'echo 1220' + '0'.repeat(64));
+  exe(join(bins, 'deploy'), '# generation-bad: \necho 1220' + '0'.repeat(64));
   exe(join(bins, 'gateway-upgrade'), 'exit 0');
   exe(join(bins, 'world-aside'), 'echo "dry run: 3 objects of $1 would move; nothing changed"');
   exe(join(bins, 'assets-check'), 'exit 0');
   exe(join(bins, 'store-copy'), 'exit 0');
-  exe(join(lib, 'supervisor'), 'if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
+  exe(join(bins, 'templates'), 'exit 0');
+  exe(join(lib, 'supervisor'), 'if [ "$1" = generation ]; then echo none; exit 0; fi; if command -v sha256sum > /dev/null; then s=$(sha256sum "$2"); else s=$(shasum -a 256 "$2"); fi; echo "1220$(echo "$s" | cut -c1-64)"');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -78,9 +81,11 @@ test('a staged release carries the reseed, and its pre-check uses that release\'
   const check = run(['reseed', sha, 'check'], env);
   assert.equal(check.status, 0, check.stdout + check.stderr);
   const rel = join(data, 'releases', sha);
-  assert.match(check.stdout, new RegExp(`world-aside +the release's own, ${rel}/bin/world-aside`));
   assert.match(check.stdout, new RegExp(`kind entries +${rel}/reseed/kinds \\(\\d+ entries\\)`));
-  assert.match(check.stdout, /3 of the world's objects at their keys/);
+  // #4837: Eden's stock and its libraries go with the release, as a world folder keeps them, and the reseed seeds with them
+  assert.match(check.stdout, new RegExp(`stock +${rel}/reseed/stock/stock\\.json`));
+  for (const f of ['stock.json', 'library/books.json', 'library/garments.json']) assert.ok(existsSync(join(rel, 'reseed/stock', f)), f);
+  assert.match(check.stdout, /generation +the fresh world's objects under g\/\d{8}T\d{6}Z\/; the old world's \(at their keys\) stay where they are: none moves/);
   assert.match(check.stdout, /check only; nothing changed/);
   // a fresh reseed refuses while a reseed to this build is not undone, and names the label to resume
   const manifest = readFileSync(join(rel, 'manifest.json'), 'utf8');
@@ -114,6 +119,7 @@ test('move: the directory and the origin go on the release once, after the world
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
   exe(join(bins, 'store-copy'), 'exit 0');
+  exe(join(bins, 'templates'), 'exit 0');
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -224,6 +230,7 @@ test('a move gives each world the page\'s body catalogue before its deploy, and 
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
   exe(join(bins, 'store-copy'), 'exit 0');
+  exe(join(bins, 'templates'), 'exit 0');
   const client = join(root, 'client'), pkg = join(root, 'pkg');
   for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
   writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
@@ -328,6 +335,7 @@ test('entries: plan lists each world\'s changes and changes nothing; the move st
   exe(join(bins, 'world-aside'), 'exit 0');
   exe(join(bins, 'assets-check'), 'exit 0');
   exe(join(bins, 'store-copy'), 'exit 0');
+  exe(join(bins, 'templates'), 'exit 0');
   const client = join(root, 'client'), pkg = join(root, 'pkg');
   for (const d of ['src', 'skill', 'served']) mkdirSync(join(client, d), { recursive: true });
   writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
@@ -369,4 +377,229 @@ test('entries: plan lists each world\'s changes and changes nothing; the move st
   assert.deepEqual(read(deployed).trim().split('\n'), ['up rehearsed new', 'none rehearsed own']);
   assert.equal(read(worlds, 'up/entries/eden.humanoid.json'), 'new\n', 'the deploy took them');
   assert.equal(read(worlds, 'up/entries.before/eden.humanoid.json'), 'old\n', 'the world\'s own kept beside them');
+});
+
+test('rollback refuses a build from before #4954 for a world on a store generation, and takes back every other world', () => {
+  const m = join(dir, 'rollback'), data = join(m, 'data'), root = join(data, 'worlds'), log = join(m, 'log');
+  const [from, to, toOld] = ['f', '7', '0'].map((c) => `1220${c.repeat(64)}`);
+  const [fresh, kept] = ['c', 'd'].map((c) => `${c.repeat(32)}-${c.repeat(32)}-0`);
+  // The release that brought <from>, its deploy a stand-in that logs; <to> reads store generations, <toOld> does not.
+  exe(join(data, 'releases', sha, 'bin/deploy'), `echo "deploy $*" >> ${log}`);
+  writeFileSync(join(data, 'releases', sha, 'manifest.json'),
+    `{"commit":"${sha}","version":"0.135.1","files":[]}\n{"name":"worldd","hash":"${from}","path":"bin/worldd"}\n`);
+  exe(join(root, 'builds', to, 'worldd'), '# generation-bad: ');
+  exe(join(root, 'builds', toOld, 'worldd'), '# a build from before #4954');
+  for (const w of [fresh, kept]) mkdirSync(join(root, 'worlds', w), { recursive: true });
+  writeFileSync(join(root, 'worlds', fresh, 'generation'), '20261125T010000Z\n');
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: root, RELEASE_ETC: join(m, 'etc') };
+
+  const old = run(['rollback', toOld, from, fresh, kept], env);
+  assert.equal(old.status, 3, old.stdout + old.stderr);
+  assert.match(old.stdout, new RegExp(`refused: rollback\\.generation: ${fresh} is on store generation g/20261125T010000Z/, which 1220000000000000… cannot read`));
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${kept} ${toOld} --from ${from}`], 'only the world on no generation');
+  rmSync(log);
+  const ok = run(['rollback', to, from, fresh], env);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`deploy rollback ${fresh} ${to} --from ${from}`]);
+});
+
+test('move: a world whose rehearsal fails keeps its build and the other worlds move; the canary\'s, or any later failure, stops the move', () => {
+  const m = join(dir, 'kept'), data = join(m, 'data'), root = join(data, 'worlds'), rel = join(data, 'releases', sha);
+  const log = join(m, 'log');
+  const hash = (c) => `1220${c.repeat(64)}`;
+  mkdirSync(join(rel, 'moved'), { recursive: true });
+  writeFileSync(join(rel, 'manifest.json'), `{"commit":"${sha}","version":"0.143.1","files":[]}\n`
+    + ['worldd', 'gatewayd', 'page.tar', 'client.tar'].map((n, i) => `{"name":"${n}","hash":"${hash(String(i + 1))}","bytes":1}\n`).join(''));
+  // Stand-in deploy: as `deploy` ends (its last line), by the world's FAIL_<world> setting: a failed rehearsal, a
+  // rollback after a canary fault, or kept.
+  exe(join(rel, 'bin/deploy'), [
+    `echo "$1" >> ${log}`,
+    'case $(eval echo "\\${FAIL_$1:-}") in',
+    '  rehearsal) echo "  120466 ms  rehearsal failed: rehearsal.no-start: x"; echo "NotDeployed { why: \\"rehearsal.no-start: the build did not serve the scratch copy\\" }"; exit 1 ;;',
+    '  canary) echo "RolledBack { fault: \\"canary.unanswered\\" }"; exit 1 ;;',
+    'esac',
+    'echo Kept',
+  ].join('\n'));
+  for (const w of ['a', 'b', 'c']) mkdirSync(join(root, 'worlds', w), { recursive: true });
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: root, RELEASE_ETC: join(m, 'etc'), RELEASE_LIB: join(m, 'lib') };
+  const deployed = () => { const l = readFileSync(log, 'utf8').trim().split('\n'); rmSync(log); return l; };
+  const moved = (w) => existsSync(join(rel, 'moved', w));
+
+  // The canary's failed rehearsal stops the move: no other world is deployed.
+  const canary = run(['move', sha, 'a'], { ...env, FAIL_a: 'rehearsal' });
+  assert.equal(canary.status, 3, canary.stdout + canary.stderr);
+  assert.match(canary.stdout, /refused: release\.deploy-failed: a \(worlds after it keep their build/);
+  assert.deepEqual(deployed(), ['a']);
+
+  // b's rehearsal fails: it keeps its build and is named, c moves, and nothing after the worlds moves.
+  const kept = run(['move', sha, 'a'], { ...env, FAIL_b: 'rehearsal' });
+  assert.equal(kept.status, 3, kept.stdout + kept.stderr);
+  assert.match(kept.stdout, /move: b keeps its build: its rehearsal failed; the other worlds move/);
+  assert.match(kept.stdout, /refused: release\.deploy-failed: b kept their build \(rehearsal failed\); every other world moved$/m);
+  assert.deepEqual(deployed(), ['a', 'b', 'c']);
+  assert.deepEqual(['a', 'b', 'c', 'gateway'].map(moved), [true, false, true, false]);
+
+  // A fault after b's pin (rolled back) stops the move as before; a rerun deploys only b.
+  const fault = run(['move', sha, 'a'], { ...env, FAIL_b: 'canary' });
+  assert.equal(fault.status, 3, fault.stdout + fault.stderr);
+  assert.match(fault.stdout, /refused: release\.deploy-failed: b \(worlds after it keep their build/);
+  assert.deepEqual(deployed(), ['b']);
+});
+
+test('placement: New world on the release\'s build, the templates republished and dry-run forked first, nothing changed by a check or a failure', () => {
+  const m = join(dir, 'placement'), bins = join(m, 'bins'), page = join(m, 'page'), client = join(m, 'client'), pkg = join(m, 'pkg');
+  const out = join(m, 'bundle'), data = join(m, 'data'), etc = join(m, 'etc'), lib = join(m, 'lib'), shim = join(m, 'shim');
+  const tpl = join(lib, 'templates'), log = join(m, 'systemctl.log');
+  for (const d of [page, pkg, etc, join(client, 'src'), join(client, 'skill'), join(client, 'served')]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(page, 'index.html'), '<!doctype html>');
+  writeFileSync(join(client, 'served/build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs';\nconst out = process.argv[process.argv.indexOf('--out') + 1];\nmkdirSync(out, { recursive: true });\nwriteFileSync(out + '/eden.mjs', '// client');\n");
+  // The release's worldd: its seed pins `new` in the support's boot (entry.json from --at, truncated as worldd does), and
+  // its fork accepts only a template sealed with those pins (FAIL_FORK plants a refusal for a template by name).
+  exe(join(bins, 'worldd'), `# the release's worldd
+cmd=$1; shift; at=0,0; e=; b=
+while [ $# -gt 0 ]; do case $1 in --facts) f=$2 ;; --entries) e=$2 ;; --dir) d=$2 ;; --at) at=$2 ;; --bodies) b=$2 ;; --template) t=$2 ;; --to) to=$2 ;; esac; shift; done
+case $cmd in
+  schemas) exit 0 ;;
+  seed) mkdir -p "$d/entries"; cp "$f" "$d/facts.json"; [ -z "$e" ] || cp "$e"/* "$d/entries/"; [ -z "$b" ] || cp "$b" "$d/bodies.json"
+    node -e 'const [x, z] = process.argv[1].split(",").map(Number); process.stdout.write("[" + Math.trunc(x * 1000) + ", " + Math.trunc(z * 1000) + "]")' "$at" > "$d/entry.json"
+    echo "pins new" > "$d/boot"; echo "seeded" ;;
+  fork) case " $FAIL_FORK " in *" \${t##*/} "*) echo "worldd: fork: template-pins-mismatch: planted" >&2; exit 1 ;; esac
+    grep -q "pins new" "$t/template" || { echo "worldd: fork: template-pins-mismatch: public boot pins differ from the sealed template" >&2; exit 1; }
+    mkdir -p "$to"; echo "fork: lineage $(cat "$t/lineage") at sequence 7, 0 bodies removed" ;;
+esac`);
+  // publish-template (#5047): <out>/<name> with the support's files, sealed with its boot's pins, under a fresh lineage.
+  exe(join(bins, 'templates'), `facts=$1 o=$2; shift 2
+while [ $# -gt 0 ]; do case $1 in --name) n=$2 ;; --support) s=$2 ;; esac; shift; done
+mkdir -p "$o/$n/ckpt" "$o/$n.source"; cp -R "$s/entries" "$s/facts.json" "$s/boot" "$s/entry.json" "$o/$n/"
+for f in moves.json bodies.json; do [ ! -f "$s/$f" ] || cp "$s/$f" "$o/$n/"; done
+echo "$$" > "$o/$n/lineage"; echo "$(cat "$s/boot") lineage $$" > "$o/$n/template"`);
+  for (const b of ['gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check', 'store-copy']) exe(join(bins, b), 'exit 0');
+  const bundled = run(['bundle', out, sha, '0.143.0', bins, page, client, pkg]);
+  assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
+  const env = { RELEASE_DATA: data, WORLDS_ROOT: join(data, 'worlds'), RELEASE_ETC: etc, RELEASE_LIB: lib, RELEASE_SERVICES: 'directory',
+    RELEASE_HEALTH_S: '1', RELEASE_DIRECTORY_URL: 'http://directory.test', PATH: `${shim}:${process.env.PATH}` };
+  assert.equal(run(['stage', out], env).status, 0);
+  const pinOf = (f) => `1220${createHash('sha256').update(readFileSync(f)).digest('hex')}`;
+  const built = pinOf(join(bins, 'worldd'));
+
+  // No placement.json: this machine makes no worlds.
+  const none = run(['placement', sha, 'run'], env);
+  assert.equal(none.status, 0, none.stdout + none.stderr);
+  assert.match(none.stdout, /this machine makes no new worlds/);
+
+  // The machine as 0.142's hand fix left it: the previous worldd (pinned), ops/ and two templates it published, which
+  // the release's worldd refuses; the operator's own copy aside.
+  exe(join(lib, 'worldd'), '# the previous worldd');
+  mkdirSync(join(lib, 'ops'), { recursive: true });
+  writeFileSync(join(lib, 'ops/place-created-world.mjs'), '// the previous\n');
+  const template = (name, entry, extra = {}) => {
+    const t = join(tpl, name);
+    mkdirSync(join(t, 'entries'), { recursive: true });
+    mkdirSync(join(t, 'ckpt'));
+    writeFileSync(join(t, 'facts.json'), `{"name": "${name}"}`);
+    writeFileSync(join(t, 'entries/mars.rack_bay.json'), '{"kind": "mars:rack_bay"}');
+    writeFileSync(join(t, 'entry.json'), entry);
+    writeFileSync(join(t, 'lineage'), 'old');
+    writeFileSync(join(t, 'template'), 'pins old lineage old\n');
+    for (const [f, text] of Object.entries(extra)) writeFileSync(join(t, f), text);
+  };
+  template('eden-2026', '[0, 0]', { 'bodies.json': '{"format": "souls/bodies/1", "bodies": []}' });
+  template('mars-camp', '[12345, -6789]', { 'moves.json': '{"moves": []}' });
+  mkdirSync(join(tpl, '.aside/mars-camp.20261126'), { recursive: true });
+  const config = { format: 'souls/placement/1', build: pinOf(join(lib, 'worldd')), worldsRoot: join(data, 'worlds'), templates: tpl,
+    library: lib, placement: join(etc, 'placement-data'), portFirst: 7500, portLast: 7999 };
+  writeFileSync(join(etc, 'placement.json'), `${JSON.stringify(config)}\n`);
+  chmodSync(join(etc, 'placement.json'), 0o640);
+  // systemctl: the path unit and the directory run, souls-place.service is placing a world only while BUSY is set; it
+  // logs every other call. curl answers the directory 401, or 500 while BAD_DIRECTORY is set.
+  exe(join(shim, 'systemctl'), `case "$*" in
+  "is-active --quiet souls-place.service") [ -n "$BUSY" ] ;;
+  "is-active --quiet "*) exit 0 ;;
+  *) echo "$*" >> ${log} ;;
+esac`);
+  exe(join(shim, 'curl'), 'if [ -n "$BAD_DIRECTORY" ]; then echo 500; else echo 401; fi');
+  // Everything under the library and the settings, by path and bytes.
+  const tree = (root) => {
+    const seen = {};
+    const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) { seen[p] = 'dir'; walk(p); } else seen[p] = readFileSync(p, 'utf8');
+    } };
+    walk(root);
+    return seen;
+  };
+  const before = { ...tree(lib), ...tree(etc) };
+  const unchanged = (what) => assert.deepEqual({ ...tree(lib), ...tree(etc) }, before, `${what} changes nothing`);
+  const restarts = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
+
+  const check = run(['placement', sha, 'check'], env);
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  assert.match(check.stdout, /^placement: eden-2026 republished and dry-run forked: fork: lineage \d+ at sequence 7/m);
+  assert.match(check.stdout, /^placement: mars-camp republished and dry-run forked: fork: lineage \d+ at sequence 7/m);
+  assert.match(check.stdout, /run would rename into place: the library's worldd its ops\/ the pin \(was 1220[0-9a-f]{12}…\) eden-2026 mars-camp; check only, nothing changed/);
+  unchanged('a check');
+  assert.deepEqual(restarts(), []);
+
+  // A template the release cannot fork stops it before any rename: the previous templates, worldd, ops/ and pin stay.
+  const failed = run(['placement', sha, 'run'], { ...env, FAIL_FORK: 'mars-camp' });
+  assert.equal(failed.status, 3, failed.stdout + failed.stderr);
+  assert.match(failed.stdout, /^refused: release\.template-fork: mars-camp: worldd: fork: template-pins-mismatch: planted$/m);
+  unchanged('a failed fork');
+  assert.deepEqual(restarts(), []);
+
+  // A world still being placed: it is waited for, then nothing is renamed and the path unit runs again.
+  const busy = run(['placement', sha, 'run'], { ...env, BUSY: '1', RELEASE_PLACE_WAIT_S: '1' });
+  assert.equal(busy.status, 3, busy.stdout + busy.stderr);
+  assert.match(busy.stdout, /refused: release\.placement-busy: souls-place\.service was still placing a world after 1 s; nothing renamed/);
+  unchanged('a placement in flight');
+  assert.deepEqual(restarts(), ['stop souls-place.path', 'start souls-place.path']);
+  rmSync(log);
+
+  // A directory that does not answer on the new catalogue: all of it goes back, and it is restarted on the previous one.
+  const unhealthy = run(['placement', sha, 'run'], { ...env, BAD_DIRECTORY: '1' });
+  assert.equal(unhealthy.status, 3, unhealthy.stdout + unhealthy.stderr);
+  assert.match(unhealthy.stdout, /refused: release\.placement-directory-unhealthy: souls-directory\.service answered 500, not 401/);
+  unchanged('an unhealthy directory');
+  assert.deepEqual(restarts(), ['stop souls-place.path', 'stop souls-directory.service', 'start souls-directory.service',
+    'start souls-place.path', 'restart souls-directory.service']);
+  rmSync(log);
+
+  // A stray folder the directory would list as a template stops even a check, by name.
+  mkdirSync(join(tpl, '.mars-camp.new'));
+  writeFileSync(join(tpl, '.mars-camp.new/template'), 'pins old\n');
+  const stray = run(['placement', sha, 'check'], env);
+  assert.equal(stray.status, 3, stray.stdout + stray.stderr);
+  assert.match(stray.stdout, /refused: release\.placement-stray: .*\/\.mars-camp\.new is listed by the directory/);
+  rmSync(join(tpl, '.mars-camp.new'), { recursive: true });
+
+  const ran = run(['placement', sha, 'run'], env);
+  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  assert.match(ran.stdout, /souls-directory\.service reads the new catalogue and answers 401\nplacement: new worlds are made on 1220/);
+  assert.deepEqual(restarts(), ['stop souls-place.path', 'stop souls-directory.service', 'start souls-directory.service',
+    'start souls-place.path'], 'nothing creates during the renames; the directory starts on the new catalogue');
+  assert.equal(pinOf(join(lib, 'worldd')), built, 'the library\'s worldd is the release\'s');
+  assert.equal(readFileSync(join(lib, '.worldd.prev'), 'utf8'), '#!/bin/sh\n# the previous worldd\n');
+  assert.equal(readFileSync(join(lib, 'ops/place-created-world.mjs'), 'utf8'), readFileSync(join(here, '../place-created-world.mjs'), 'utf8'));
+  assert.equal(readFileSync(join(lib, '.ops.prev/place-created-world.mjs'), 'utf8'), '// the previous\n');
+  assert.deepEqual(JSON.parse(readFileSync(join(etc, 'placement.json'), 'utf8')), { ...config, build: built }, 'only the pin moved');
+  assert.equal(statSync(join(etc, 'placement.json')).mode & 0o777, 0o640);
+  assert.equal(JSON.parse(readFileSync(join(etc, '.placement.json.prev'), 'utf8')).build, config.build);
+  // Only the two templates beside the aside folder: nothing stray the directory would list.
+  assert.deepEqual(readdirSync(tpl).sort(), ['.aside', 'eden-2026', 'mars-camp']);
+  assert.deepEqual(readdirSync(join(tpl, '.aside')).sort(), ['eden-2026', 'mars-camp', 'mars-camp.20261126']);
+  assert.equal(existsSync(join(lib, '.templates.next')), false);
+  for (const n of ['eden-2026', 'mars-camp']) {
+    assert.match(readFileSync(join(tpl, n, 'template'), 'utf8'), /^pins new lineage \d+$/m, n);
+    assert.equal(readFileSync(join(tpl, '.aside', n, 'template'), 'utf8'), 'pins old lineage old\n', `${n}'s previous, aside`);
+  }
+  assert.equal(readFileSync(join(tpl, 'mars-camp/entry.json'), 'utf8'), '[12345, -6789]', 'the entry point exactly');
+  assert.equal(readFileSync(join(tpl, 'mars-camp/moves.json'), 'utf8'), '{"moves": []}');
+  assert.equal(readFileSync(join(tpl, 'eden-2026/bodies.json'), 'utf8'), '{"format": "souls/bodies/1", "bodies": []}');
+  assert.equal(readFileSync(join(tpl, 'eden-2026/entries/mars.rack_bay.json'), 'utf8'), '{"kind": "mars:rack_bay"}');
+
+  // Once per release: a second run changes and restarts nothing.
+  const again = run(['placement', sha, 'run'], env);
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  assert.match(again.stdout, /already done by this release/);
+  assert.equal(restarts().length, 4);
 });

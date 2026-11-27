@@ -26,6 +26,9 @@
 //!   from a Soul's hands: taking it moved it. A refusal changes nothing, neither the world nor the history.
 //! - **Builds.** A build is a label and step names on batches ([`Step`]). Rewinding to a step undoes the batches after
 //!   it, newest first, and stops at the first refusal. A step here is a name on a batch, not K5's checkpoint.
+//! - **Named.** Each effect of an undo carries the named event `souls:undone`, a redo's `souls:redone`, naming all its
+//!   changes (#5006 row 14): with the creator as actor, they are its rows in the public event index, as an edit's
+//!   `souls:placed` and the rest are ([`crate::edit::events_of`]).
 //! - **Bound.** The history keeps at most [`KEPT_MOST`] bytes of inverse effects (64 MiB, an eighth of today's 512 MB
 //!   journal cap), measured as their encoded size; the oldest batches leave first and can no longer be undone.
 
@@ -37,7 +40,9 @@ use crate::edit::safety::Who;
 use crate::edit::{Committed, Planned, commit};
 use replica::apply::Replica;
 use replica::edit::{NODES_MOST, Refused, World};
-use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
+use replica::effects::{
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Part, Rest,
+};
 use replica::encode::{Name, Value, encode};
 use replica::hash::node_hash;
 use replica::ids::{Hash, Id};
@@ -50,6 +55,15 @@ use std::sync::Arc;
 
 /// The most bytes of inverse effects a history keeps (the module's notes).
 pub const KEPT_MOST: usize = 64 << 20;
+
+/// The named events of an undo's and a redo's effects (#5006 row 14).
+pub const EV_UNDONE: &str = "souls:undone";
+pub const EV_REDONE: &str = "souls:redone";
+
+/// The named event an undo (or, with `redo`, a redo) writes on each effect.
+fn named(redo: bool) -> &'static str {
+    if redo { EV_REDONE } else { EV_UNDONE }
+}
 
 /// A build's label and a step's name on a batch.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -398,8 +412,16 @@ fn inverse(before: &Before, tree: &Tree, part: &Part) -> Result<Vec<Write>, Refu
     Ok(out)
 }
 
-/// `writes` as effects from sequence `first`: a run of writes with the same writer and audience shares one effect.
-fn effects(writes: &[Write], first: u64, at: Micros, cause: Cause, actor: Actor) -> Vec<Effect> {
+/// `writes` as effects from sequence `first`: a run of writes with the same writer and audience shares one effect,
+/// each with the named event `event` naming all its changes, when given.
+fn effects(
+    writes: &[Write],
+    first: u64,
+    at: Micros,
+    cause: Cause,
+    actor: Actor,
+    event: Option<&str>,
+) -> Vec<Effect> {
     let mut groups: Vec<(Id, Audience, Vec<ChangeRec>)> = Vec::new();
     for w in writes {
         let rec = ChangeRec {
@@ -423,8 +445,15 @@ fn effects(writes: &[Write], first: u64, at: Micros, cause: Cause, actor: Actor)
                 audience,
                 node,
             },
+            events: event.map(|name| {
+                vec![Event {
+                    name: Name::new(name).expect("a constant name"),
+                    fields: BTreeMap::new(),
+                    changes: (0..changes.len() as u64).collect(),
+                    rest: Rest::new(),
+                }]
+            }),
             body: Body::Changes(changes),
-            events: None,
             rest: Rest::new(),
         })
         .collect()
@@ -552,6 +581,7 @@ impl History {
             at,
             Cause::Effect(b.first),
             actor,
+            Some(named(redo)),
         ))
     }
 
@@ -579,7 +609,7 @@ impl History {
                 detail: "no batch to undo".to_owned(),
             });
         };
-        let (r, next) = self.reverse(b, live, world, actor, at, rule)?;
+        let (r, next) = self.reverse(b, live, world, actor, at, rule, named(false))?;
         self.done.pop_back();
         self.undone.push(next);
         self.trim();
@@ -602,7 +632,7 @@ impl History {
                 detail: "no undo to redo".to_owned(),
             });
         };
-        let (r, next) = self.reverse(u, live, world, actor, at, rule)?;
+        let (r, next) = self.reverse(u, live, world, actor, at, rule, named(true))?;
         self.undone.pop();
         self.done.push_back(next);
         self.trim();
@@ -649,7 +679,8 @@ impl History {
     }
 
     /// Writes `b`'s inverse after G1's gate, the conflict check and `rule`, giving the part and the batch it left (whose
-    /// inverse reverses it in turn). Changes nothing on a refusal.
+    /// inverse reverses it in turn), its effects named `event`. Changes nothing on a refusal.
+    #[allow(clippy::too_many_arguments)]
     fn reverse(
         &self,
         b: &Batch,
@@ -658,11 +689,12 @@ impl History {
         actor: Actor,
         at: Micros,
         rule: Rule<'_>,
+        event: &str,
     ) -> Result<(Reversed, Batch), Refused> {
         let writes = Self::admit(b, live, world, actor)?;
         let tree = live.tree();
         let cause = Cause::Effect(b.first);
-        let list = effects(&writes, live.version(), at, cause, actor);
+        let list = effects(&writes, live.version(), at, cause, actor, Some(event));
         rule(live, &list)?;
         let before = Before::of(tree, reads(tree, &writes));
         let part = write(live, &list).map_err(|r| Refused {
@@ -755,7 +787,7 @@ impl History {
             .map(|id| (id, node_hash(tree, id)))
             .collect();
         let kept = inverse.as_ref().map_or(0, |w| {
-            effects(w, 0, 0, Cause::World, Actor::World)
+            effects(w, 0, 0, Cause::World, Actor::World, None)
                 .iter()
                 .map(|e| encode(&e.to_value()).map_or(0, |b| b.len()))
                 .sum()

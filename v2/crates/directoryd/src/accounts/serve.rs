@@ -21,7 +21,8 @@
 //!   `POST /v1/mailbox/read` `{"id"}`.
 //! - Prayers (G11, #3335; [`super::prayers`]), the gateway's too, each the socket's own frame with its grant in the
 //!   `souls-soul` header, and answered `{"reply": {"n", "ok", ..}}` (`n` the request's own, `refused` a name), which
-//!   the gateway gives back to that socket: `POST /v1/mailbox/pray` `{"pray": {"n", "text"}}` (a Soul's),
+//!   the gateway gives back to that socket: `POST /v1/mailbox/pray` `{"pray": {"n", "text"}}` (a Soul's, with the
+//!   creator grant of the world the gateway fronts in a `souls-creator` header when it has one, #5006 row 15),
 //!   `POST /v1/mailbox/prayers` `{"prayers": {"n", "all"}}` (a Soul's own, or its world's for a creator) and
 //!   `POST /v1/mailbox/answer` `{"answer": {"n", "id", "text"}}` (a creator's). An answer not yet taken is an open
 //!   line `<soul> <prayer id> {"answered": {"id", "text", "answer", "at"}}`, closed by the daemon's
@@ -153,6 +154,8 @@ pub struct Request {
     pub bearer: Option<String>,
     /// The gateway's `souls-soul` header on a mailbox close: the grant of the socket it came from.
     pub soul: Option<String>,
+    /// The gateway's `souls-creator` header on a prayer (#5006 row 15): the creator grant of the world it fronts.
+    pub creator: Option<String>,
     pub body: Vec<u8>,
 }
 
@@ -163,7 +166,7 @@ fn read(stream: &TcpStream) -> Option<(Request, bool, Option<std::net::IpAddr>)>
     let mut words = line.split_whitespace();
     let method = words.next()?.to_string();
     let path = words.next()?.split('?').next()?.to_string();
-    let (mut bearer, mut soul, mut length) = (None, None, 0usize);
+    let (mut bearer, mut soul, mut creator, mut length) = (None, None, None, 0usize);
     let mut indirect = false;
     let (mut forwarded, mut forwarded_count) = (None, 0u8);
     // A picture rides in a Soul's picture and in a world's settings (its list picture, G10).
@@ -215,6 +218,8 @@ fn read(stream: &TcpStream) -> Option<(Request, bool, Option<std::net::IpAddr>)>
             bearer = value.strip_prefix("Bearer ").map(str::to_string);
         } else if name.eq_ignore_ascii_case("souls-soul") {
             soul = Some(value.to_string());
+        } else if name.eq_ignore_ascii_case("souls-creator") {
+            creator = Some(value.to_string());
         }
     }
     let mut body = vec![0; length];
@@ -225,6 +230,7 @@ fn read(stream: &TcpStream) -> Option<(Request, bool, Option<std::net::IpAddr>)>
             path,
             bearer,
             soul,
+            creator,
             body,
         },
         indirect,
@@ -519,20 +525,26 @@ fn prayer_json(p: &super::prayers::Prayer) -> Value {
            "answered_at": p.answered_at})
 }
 
-/// The worlds a creator grant is the creator of, by the list of worlds when there is one ([`super::prayers::creator_worlds`]).
+/// What a creator grant lists and answers the prayers under: the worlds it is the creator of, by the list of worlds when
+/// there is one ([`super::prayers::creator_worlds`]), and its principal, which the gateway names as its world's creator
+/// on each prayer ([`super::prayers::addressed`], #5006 row 15), while it is the creator of a world (W16: a creator who
+/// handed its world on lists none).
 fn creator_worlds_of(grant: &str, app: &App) -> Option<Vec<String>> {
-    let Some(worlds) = &app.worlds else {
-        return super::prayers::creator_worlds(grant, &[]);
-    };
-    let rows = worlds.creators().ok()?;
-    let scope = super::prayers::scope_of(grant, "creator")?;
-    let principal = format!("{scope}:{}", grant.rsplit('-').next()?);
-    Some(
-        rows.into_iter()
+    let principal = super::prayers::addressed(grant)?;
+    let mut worlds = match &app.worlds {
+        None => super::prayers::creator_worlds(grant, &[])?,
+        Some(worlds) => worlds
+            .creators()
+            .ok()?
+            .into_iter()
             .filter(|(_, owner)| owner == &principal)
             .map(|(lineage, _)| lineage)
             .collect(),
-    )
+    };
+    if app.worlds.is_none() || !worlds.is_empty() {
+        worlds.push(principal);
+    }
+    Some(worlds)
 }
 
 /// A prayer request from the gateway (G11): the socket's own frame and grant. Always a 200 whose body is the reply the
@@ -547,7 +559,7 @@ fn prayers(req: &Request, app: &App) -> (u16, Value, String) {
     let answer = match kind {
         "pray" => app
             .store
-            .pray(&grant, &text("text"), now())
+            .pray(&grant, &text("text"), now(), req.creator.as_deref())
             .map(|r| r.map(|id| json!({"id": id}))),
         "prayers" if super::prayers::scope_of(&grant, "soul").is_some() => app
             .store
@@ -1026,6 +1038,7 @@ mod w16_current_account_tests {
             path: "/v1/account/view-token".into(),
             bearer: None,
             soul: None,
+            creator: None,
             body: json!({"name":who}).to_string().into_bytes(),
         };
         assert_eq!(
@@ -1041,6 +1054,7 @@ mod w16_current_account_tests {
             path: "/v1/worlds/handoff/offer".into(),
             bearer: Some("test:first".into()),
             soul: None,
+            creator: None,
             body: json!({"world":"eden"}).to_string().into_bytes(),
         };
         let (status, code, _) = route(&offer_request, &app);
@@ -1066,9 +1080,13 @@ mod w16_current_account_tests {
         assert_eq!(pending.1["owned"], json!([{"grant":soul,"follow":null}]));
         worlds.finish_handoff(&p).unwrap();
         assert!(creator_worlds_of(&old, &app).unwrap().is_empty());
+        // the new creator's world, and its principal, under which its world's gateway keeps the prayers (#5006 row 15)
         assert_eq!(
             creator_worlds_of(&new, &app).unwrap(),
-            vec![to_hex(&name.lineage)]
+            vec![
+                to_hex(&name.lineage),
+                super::super::prayers::addressed(&new).unwrap()
+            ]
         );
         assert_eq!(
             route(&request("first"), &app).1["owned"],
@@ -1082,6 +1100,116 @@ mod w16_current_account_tests {
             app.store.grants(&a.account).unwrap().len(),
             2,
             "global grant history was not deleted"
+        );
+    }
+
+    /// #5006: on a directory that could never finish them (no archive initializer, no world authority to publish), an
+    /// archive or an acceptance is refused before the world's row changes, so the world stays listed, with its creator.
+    #[test]
+    fn forsake_a_directory_cannot_finish_is_refused_before_the_row_changes() {
+        use crate::directory::store::{Memory, Store as ObjectStore, When};
+        use crate::worlds::{create::NameRecord, list::Worlds, list::archive};
+        use replica::{
+            encode::{Name, to_hex},
+            ids::{Id, Scope},
+        };
+        assert!(
+            std::env::var_os("DIRECTORYD_PLACEMENT").is_none(),
+            "this test is of a directory with no archive initializer"
+        );
+        let memory: &'static (dyn ObjectStore + Send + Sync) =
+            Box::leak(Box::new(Memory::default()));
+        let accounts = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let a = accounts.sign_in(TEST_ISSUER, "first", 0).unwrap();
+        accounts.sign_in(TEST_ISSUER, "next", 0).unwrap();
+        let name = NameRecord {
+            name: "garden".into(),
+            lineage: [6; 16],
+            zone: Id::new(Scope([7; 16]), 0).unwrap(),
+            creator: a.principal,
+            source: [8; 16],
+        };
+        memory
+            .put(
+                &NameRecord::key("garden"),
+                &name.to_bytes().unwrap(),
+                When::Absent,
+            )
+            .unwrap();
+        memory.put(crate::worlds::list::KEY,&serde_json::to_vec(&json!({"worlds":[{"name":"garden","lineage":to_hex(&name.lineage),"zone":super::super::principal_text(name.zone),"creator":super::super::principal_text(a.principal)}]})).unwrap(),When::Absent).unwrap();
+        let app = App {
+            store: accounts,
+            verifier: None,
+            test_sign_in: true,
+            view_key: Some(ViewKey::new(&[1; 32])),
+            origin: None,
+            mailbox_key: None,
+            pairing: None,
+            log: Mutex::new(Box::new(std::io::sink())),
+            worlds: Some(Worlds::new(
+                crate::directory::Directory::new(memory, Name::new("fixture").unwrap()),
+                std::collections::BTreeMap::new(),
+                Box::new(|_| Ok(())),
+            )),
+        };
+        let post = |path: &str, who: &str, body: Value| Request {
+            method: "POST".into(),
+            path: path.into(),
+            bearer: Some(format!("test:{who}")),
+            soul: None,
+            creator: None,
+            body: body.to_string().into_bytes(),
+        };
+        let worlds = app.worlds.as_ref().unwrap();
+        let archive = post(
+            "/v1/worlds/archive",
+            "first",
+            json!({"world":"garden","confirm":"garden"}),
+        );
+        let (status, body, _) = route(&archive, &app);
+        assert_eq!(
+            (status, body),
+            (503, json!({"refused":"archive-unavailable"}))
+        );
+        assert_eq!(archive::get(&memory, "garden").unwrap().state, "active");
+        let (status, offer, _) = route(
+            &post(
+                "/v1/worlds/handoff/offer",
+                "first",
+                json!({"world":"garden"}),
+            ),
+            &app,
+        );
+        assert_eq!(status, 200, "the world is not left archiving: {offer}");
+        let accept = post(
+            "/v1/worlds/handoff/accept",
+            "next",
+            json!({"world":"garden","code":offer["code"]}),
+        );
+        let (status, body, _) = route(&accept, &app);
+        assert_eq!(
+            (status, body),
+            (503, json!({"refused":"world-authority-required"}))
+        );
+        let owner = worlds.ownership("garden").unwrap();
+        assert_eq!(
+            owner.creator,
+            Some(a.principal),
+            "no pending fence was written"
+        );
+        assert_eq!(owner.generation, 0);
+        assert_eq!(
+            route(
+                &post(
+                    "/v1/worlds/handoff/cancel",
+                    "first",
+                    json!({"world":"garden"})
+                ),
+                &app
+            )
+            .0,
+            200,
+            "the creator still holds the world"
         );
     }
 }

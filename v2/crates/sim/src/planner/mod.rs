@@ -8,7 +8,9 @@
 //! - **A tick later.** After each tick the clock hands over that tick's [`Wants`] (`sim::host::Runner::tick_planned`):
 //!   every body's mark, the walks waiting for their place, the walkers that need a new line (#3167: a new leg, pushed
 //!   off their line, at a line's end, a refused check) and whose straight way was not clear, and the world's reach
-//!   questions. The planner writes the spot tables from the marks, then answers each: a walk's place and legs
+//!   questions; and in a tick that starts walks, those walks' places with every body's mark as the tick left them
+//!   (#4974), so a walk is planned at the next tick. The planner writes the spot tables from the marks, then answers
+//!   each: a walk's place and legs
 //!   ([`Town::plan`]), a walker's line ([`Town::line`], #3167's planning call `View::search`) and a straight distance
 //!   for each reach question. The next tick reads the answers ([`Planned`]); a walker keeps its line until it needs a
 //!   new one, as on one thread.
@@ -438,7 +440,7 @@ impl Planner {
                     .and_then(|(floor, at, _)| {
                         // A ring is given on the floor itself (`node` is the floor).
                         let ring = ring.as_ref().filter(|_| floor == node);
-                        let near = |at| {
+                        let near = |at, mouths| {
                             view.stand_near_shape(
                                 floor,
                                 at,
@@ -446,14 +448,20 @@ impl Planner {
                                 reach,
                                 Some(&body),
                                 door,
+                                mouths,
                             )
                         };
-                        // An aim, like a ring, is given on the floor itself.
-                        let to = aim
-                            .filter(|_| floor == node)
-                            .and_then(near)
-                            .or_else(|| near(at))
-                            .or_else(|| (floor == crate::walk::node_of(&body)).then_some(at))?;
+                        // An aim, like a ring, is given on the floor itself. Every place clear of a passage, at the
+                        // aim or at the thing, before one at a doorway's mouth.
+                        let aim = aim.filter(|_| floor == node);
+                        let to = match aim {
+                            Some(aim) => near(aim, false)
+                                .or_else(|| near(at, false))
+                                .or_else(|| near(aim, true))
+                                .or_else(|| near(at, true)),
+                            None => near(at, true),
+                        }
+                        .or_else(|| (floor == crate::walk::node_of(&body)).then_some(at))?;
                         view.plan(&body, floor, to).ok()
                     })
                     .unwrap_or_default();

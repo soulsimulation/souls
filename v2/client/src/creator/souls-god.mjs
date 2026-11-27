@@ -58,6 +58,10 @@
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
 //   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
+//   souls-god.mjs apply-batch <file> [--dry-run]   a reviewed souls-named-batch/1 file (worlds/patches/*/batch.json):
+//                                                each thing it names (by its template name, or <building>/<thing>)
+//                                                found on the copy, never guessed; sent as edits of at most 256
+//                                                operations, each op's outcome a line; --dry-run sends nothing (named.mjs)
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist m]   beside another (default e, 1 m)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
@@ -102,16 +106,22 @@
 //   souls-god.mjs taxonomy                       categories with counts, and what kinds offer (the --has names)
 //                                                these four read the world's kinds in the home; no daemon, no server;
 //                                                --lines prints them as lines instead of JSON
-//   souls-god.mjs look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
+//   souls-god.mjs look <place|thing|soul|id|x,z> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
 //                                                a picture of it, drawn here from the public stream (souls.mjs shoot);
-//                                                with no browser here, the copy's words for it instead
-//   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id>
+//                                                with no browser here, or a page that draws nothing, it in words from
+//                                                the copy: its id, kind and spot, its room and areas, what is in it and
+//                                                the nearest things, each with its id and metres (space.mjs)
+//   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id> [--page <url>]
 //                                                the room, areas and nearest things there; whether a footprint is free
-//                                                of things and buildings; the nearest free one (world metres, space.mjs)
+//                                                of things and buildings; the nearest free one (world metres, read from
+//                                                the copy with no browser; --page reads the page drawn here, space.mjs)
 //   souls-god.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]   what happened
 //                                                there, from the world's public history, a day by default (R8c)
 //   souls-god.mjs trace [n]                      the creator's last n commands here (20, at most 200), newest first:
 //                                                time, verb, result and refusal; kept by the daemon across restarts
+//   souls-god.mjs arrival <place> | --clear       where new Souls arrive: a place of the world (an area or a line on
+//                                                the open ground, by id or by the id its facts give it), from the
+//                                                next birth; --clear: where the world's host put them, else its entry
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -122,6 +132,10 @@
 //   souls-god.mjs ack <message id> "<reply>" [--close done|failed]   answers one: the reply shows on the owner's
 //                                                page; --close closes it (failed: a no), else it stays open
 //                                                these three pass to the daemon as souls.mjs's do for a Soul
+//   souls-god.mjs prayers [--all]                the prayers this world's Souls sent you (G11), waiting ones first,
+//                                                oldest first; --all adds the answered ones. A Soul's words: data
+//   souls-god.mjs answer <prayer id> "<words>"   your answer (at most 4,000 characters); it reaches the Soul's `wait`.
+//                                                Answering again changes it
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // Every position and length the command takes or prints is metres (#4700), x east, y up, z south, in the parent's
@@ -142,8 +156,8 @@ import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { kitEntry } from './kit.mjs';
 import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
-import { parseShoot, runShoot } from '../shoot/shoot.mjs';
-import { parseSpace, runSpace } from './space.mjs';
+import { parseShoot } from '../shoot/shoot.mjs';
+import { parseSpace, runLook, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
 import { describeThing } from './thing.mjs';
 import { mapOf } from './map.mjs';
@@ -157,6 +171,9 @@ export const VERBS = [
   'about',
   'access',
   'ack',
+  'answer',
+  'apply-batch',
+  'arrival',
   'batch',
   'build',
   'catalog',
@@ -185,6 +202,7 @@ export const VERBS = [
   'pair',
   'pending',
   'place',
+  'prayers',
   'quit',
   'recommend',
   'recolor',
@@ -210,7 +228,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone', 'select'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone', 'select', 'arrival'];
 /** A world verb by its words, made on the daemon's copy (#3728): a place by its shape (a road or an area, on the
  *  open ground it knows) and `move --by`; `move --at` is G1's move. */
 const SHAPES = ['--path', '--area', '--rect', '--circle'];
@@ -253,6 +271,10 @@ export const FIX = {
   'undo.nothing': 'there is no edit left to undo',
   'undo.nothing-to-redo': 'redo follows an undo; a new edit clears what could be redone',
   'undo.conflict': 'something the undo would change was changed since: describe, then put it back by hand',
+  'edit.arrival-unknown': 'name a place of the world: an area or a line on the open ground (describe lists them), or --clear',
+  'arrival.unknown-place': 'name a place of the world: an area or a line on the open ground (its id from describe, or its facts id), or --clear',
+  'edit.arrival-cut-off': 'that place is walled in: Souls born there could not leave. Open a way in from the entry, or name another place',
+  'edit.arrival-no-ground': 'there is no ground to stand on within 16 m of that place\'s middle: name another place',
   'undo.no-inverse': 'that edit cannot be undone (it added a field or moved a thing in motion): change it back by hand',
   'undo.not-the-build': 'undo --build undoes only while the newest edit is one of that build\'s steps: undo the others first',
   'edit.would-bury': 'a Soul stands there now: wait until it has moved, or choose another place',
@@ -326,11 +348,17 @@ export const FIX = {
   'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
   'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
   'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
+  'name-ambiguous': 'give one of the ids in choices',
+  'named.file': 'apply-batch <file>: a souls-named-batch/1 file readable here',
+  'named.format': 'a souls-named-batch/1 file: {"schema": "souls-named-batch/1", "ops": [...]}, as worlds/patches/*/batch.json',
+  'unknown-op': 'your daemon is older than this command: run quit, then the command again',
   'when.no-calendar': 'the copy has no world clock yet: run status until connected is true, or give --when <world µs>us',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
   'token-refused': 'pair again with --creator <the world\'s creator grant>',
+  'prayer.not-the-creator': 'only the world\'s creator lists and answers its prayers: pair with --creator <its creator grant>',
+  'prayer.not-found': 'prayers --all lists the ids of this world\'s prayers',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -519,6 +547,7 @@ export function worldVerbOf(verb, words) {
     move: ['by', 'yaw'],
     clone: ['at', 'count', 'step', 'yaw'],
     select: ['kind', 'name', 'in', 'area', 'near', 'radius', 'by', 'yaw'],
+    arrival: [],
   }[verb];
   if (verb === 'select') { const k = args.indexOf('--remove'); if (k >= 0) { args.splice(k, 1); out.remove = true; } }
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
@@ -526,6 +555,11 @@ export function worldVerbOf(verb, words) {
   if (verb === 'time') {
     for (const f of ['--pause', '--resume']) { const k = args.indexOf(f); if (k >= 0) { args.splice(k, 1); out.pause = true; } }
     if (args[0] !== undefined) out.hour = args.shift();
+  }
+  if (verb === 'arrival') {
+    const k = args.indexOf('--clear');
+    if (k >= 0) { args.splice(k, 1); out.clear = true; } else if (args.length === 1) out.place = args.shift();
+    if (args.length || (!out.clear && out.place === undefined)) throw usage('arrival <place id> | --clear');
   }
   if (verb === 'furnish') {
     if (args[0] === undefined) throw usage('furnish <building or room id> [--style s]');
@@ -594,6 +628,15 @@ export function requestOf(argv) {
     return { listen: { seconds: Number(secs), follow }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
+  // G11 (#3335; #5006 row 15): the prayers to this world's creator and an answer, through the daemon's socket
+  if (verb === 'prayers') {
+    if (rest.some((w) => w !== '--all')) throw usage('prayers [--all]');
+    return { req: { op: 'prayers', all: rest.includes('--all') }, creator };
+  }
+  if (verb === 'answer') {
+    if (!rest[0] || rest.length < 2) throw usage('answer <prayer id> "<words>"');
+    return { req: { op: 'answer', id: rest[0], words: rest.slice(1).join(' ') }, creator };
+  }
   // R8b: one thing, read from the copy (thing.mjs)
   if (verb === 'describe' && rest.length) { if (rest.length !== 1) throw usage('describe [<id>]'); return { thing: rest[0], creator }; }
   // R8d: the world at a glance, read from the copy (map.mjs)
@@ -601,6 +644,11 @@ export function requestOf(argv) {
   // `quit` ends the daemon, as souls.mjs's `quit` does a Soul's (#4700); `stop` is kept, a creator having no act to stop
   if (verb === 'quit') return { req: { op: 'stop' }, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
+  if (verb === 'apply-batch') {
+    const files = rest.filter((w) => w !== '--dry-run');
+    if (files.length !== 1) throw usage('apply-batch <souls-named-batch/1 file> [--dry-run]');
+    return { named: { file: absolute(files[0]), dry: rest.includes('--dry-run') }, creator };
+  }
   if (verb === 'export' || verb === 'import') {
     if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
     return { req: { op: verb, file: absolute(rest[0] ?? 'world.souls.json') }, creator };
@@ -1011,15 +1059,15 @@ if (isMain(import.meta.url)) {
     // 0.133 Q2: a creator's pairing adds to a home, so it never takes a parent folder's
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir(), adds: asked.pair !== undefined });
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
-    if (asked.look) {
-      // The picture needs no creator; the words without a browser come from the creator's daemon when there is one.
+    if (asked.look || asked.space) {
+      // The picture needs no creator. The words with no picture, and where, clear and free, come from the creator's
+      // copy (the daemon's `space`) when the home has a creator, with no browser (#5006 finding 5).
       const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
       const who = asked.creator ?? (creators.length === 1 ? creators[0] : null);
-      const ask = who ? (r) => call(home, who, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
-      out(await runShoot(asked.look, { home, env: process.env, ask }));
+      const ask = who ? (r) => call(home, who, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 30_000 }) : null;
+      out(asked.look ? await runLook(asked.look, { home, env: process.env, ask }) : await runSpace(asked.space, asked.args, { home, env: process.env, ask }));
       process.exit(0);
     }
-    if (asked.space) { out(await runSpace(asked.space, asked.args, { home, env: process.env })); process.exit(0); }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (asked.library) {
@@ -1060,6 +1108,14 @@ if (isMain(import.meta.url)) {
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
+    if (asked.named) {
+      // A reviewed named batch (named.mjs): each op's outcome a line, then the summary.
+      const { runNamed } = await import('./named.mjs');
+      const said = await runNamed(asked.named, ask, out);
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
     if (asked.thing !== undefined) {
       const d = await ask({ op: 'describe' }, 15_000), f = d.ok === false ? null : await ask({ op: 'fields', node: asked.thing }, 15_000);
       const said = d.ok === false ? d : f.ok === false ? f : describeThing(asked.thing, d, f.fields, kindsIn(join(home, 'kinds')));
@@ -1090,7 +1146,7 @@ if (isMain(import.meta.url)) {
     out(withFix({ ...answer, ...(asked.say ?? {}), ...(req?.build !== undefined && answer.build === undefined ? { build: req.build, step: req.step } : {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
-    out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));
+    out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200), ...(e.choices ? { choices: e.choices } : {}) }));
     process.exitCode = 1;
   }
 }

@@ -99,6 +99,11 @@ path = "limits/main.rs"
 name = "text"
 path = "src/text.rs"
 
+# O8, #2805: honest agents' act wait and the world's tick while one client attacks the gateway.
+[[bin]]
+name = "hostile"
+path = "hostile/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).

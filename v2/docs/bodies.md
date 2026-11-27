@@ -68,7 +68,10 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    `[link, distance µm]`, and clears it with `[]`; the world shows field 42 (1) on such a link and field 43, the body
    its owning node lets in, both read with `read(link)`. The owner reads the marks as of the last tick and writes
    its grants; a walker never writes the link. **N10 and N9 (T9c #3127).** The world sets on a walker's body field
-   44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
+   44 (the shoulder turn, no body pushes it: an array of the ids of the still bodies within 1.2 m of it when the turn
+   began, staying by their own order or with no walk, which it may squeeze past at one radius and slack while they
+   stay still and are more than 3 m from its last goal, E16; every other body and every carried load keeps its whole
+   space), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
    ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
    world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
    granted spot. Ending a walk by name is the world's: it ends the run. Field 48 is the queue spot the world assigns
@@ -145,13 +148,24 @@ effector (the body, the resource it holds, or a named point of the thing held), 
 contact point by name. Fixtures: `v2/crates/replica/fixtures/moves/`. `v2/crates/sim/src/moves` runs it: the reach is
 asked of the geometry first (`out-of-reach` with the distance), the claim is a controller driver with the move set on
 each resource it holds, and each phase end is one timer in K9's due list. Nothing polls; a later claim that takes the
-move's resources cancels it at its next phase end (`claim-taken`).
+move's resources cancels it at its next phase end (`claim-taken`). worldd measures a thing where the world's tree has
+it as committed, up to the floor under it, from the point of each slot it stands in (#4120): a thing made into a slot
+or set down a tick ago is reached where it is, not where the walkers' town last saw it (the town takes only parts that
+change its ground), and a form's approach to a thing in a slot walks to the slot's point, not its holder's origin.
 
 **Aimed moves** (0.134 B1). A move that touches nothing says so with the effector `aim` (`{1: 4}`): a point, a wave, a
-nod, a bow and a look aim at their target instead of reaching it. An aimed move has no contact, and its reach is sight:
-the target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every other move touches, and its reach
-stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Distance alone is checked; a wall
-between does not block an aim, and the move does not turn the body.
+nod, a bow and a look aim at their target instead of reaching it. An aimed move has no contact, and its reach is the
+target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every other move touches, and its reach
+stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Within 20 m distance alone is
+checked; a wall between does not block an aim. Beyond it, up to `SIGHT` (60 m, the client's sight), an aim at a thing
+the body sees is made from afar (#5063): the geometry's `Reach::seen` says so (worldd: the thing stands on the floor
+the body stands on, the open ground or its own storey, found where it stands, not by what holds it in the tree), and the act's `souls:act-ended` carries its words in field 8
+(`look: from afar, 30000 mm to <id>, reach 20000 mm`), which the client gives as `from_afar` on the act's receipt (and
+`act --wait`'s answer). A thing inside a building
+seen from outside it (or the reverse), on another storey or past 60 m is refused `out-of-reach`, its words adding `not
+in sight` or `sight 60000 mm`; one in a closed container is refused without its distance or its name (#4339). On the
+open ground a building standing between the two is not checked yet. A form's move toward its thing turns the standing
+body to face it first (worldd's `face_to`), near or far; the page draws that turn and the move's pose.
 
 ## Postures and seats (B3)
 
@@ -175,7 +189,10 @@ slot) with the stance the request named. Postures are the controller's stance in
   nor blocks them, so the seat's hold never refuses it `resource-held` (#4143). Every other move that claims the legs
   (a jump, a dance, a bow) is still refused `resource-held` there: a gateway sit writes no `posture`, so a form's
   posture need alone would not stop it. A rise during a seated stretch does not cancel the stretch, which holds no
-  leg; it plays out its hand phases.
+  leg; it plays out its hand phases. A form at another thing that walks (the lamp across the room, asked from the
+  sofa) rises from the seat first (`Forms::open`), once settled in it, unless the seat's thing moves (a ride, a boat):
+  its rides are left by their own forms. A take of a thing within reach of the seat is done from the seat. A gateway
+  walk (`<ns>:walk`) asked while seated is still refused `resource-held`; the client's answer offers the rise.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
   when the sit is cancelled before contact by a later claim on its legs.
 - **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
@@ -210,7 +227,9 @@ slot) with the stance the request named. Postures are the controller's stance in
 `sit` or `rise` (`eden:sit`, as T10's fixtures) is taken like any act (I4), then committed at the next tick by what
 already moves bodies: a walk is N7's walk behind the host, sent to a point (`Runner::send`, N9), to a target's point
 (parameter 1, `[x, y, z]` µm) or a seat's stand point, at the gait parameter 2 names (`gait:walk`, `gait:jog` or
-`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks); a sit is B3's `Slots::commit`, one tick's sits together; a
+`gait:run`, `sim::gaits`' speeds, 0.135 G1; any other is refused `move.unknown-gait`; none walks), and for a lifted
+carry's front, the carry's heading at its goal (parameter 3, `[x, z]`: the crew turns with it, `moving-group.md`; read
+from no other walker); a sit is B3's `Slots::commit`, one tick's sits together; a
 rise is B3's `Slots::rise`. The checks are the moves' own, made as they start: claims, reach, the seat, the route.
 Bodies step in ticks caught up to world time. A move writes an entry when it starts and one when it ends, both caused
 by the intent, and is answered once, at its end: a receipt naming both when done, else a refusal naming how it ended
@@ -238,7 +257,7 @@ body at the thing it sits in. That point is fixed when the walk starts: a body t
 and `away_m` is measured from where it stands at the end. A walk to the world's root is refused `move.whole-world`.
 A walk to a place on the open ground (a child of the ground with an outline or a line and nothing built on it: a
 range, a sea, a lake, a wood, a square, a path) goes to its edge nearest the walker, worked out on the ground's frame
-from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself), else, where
+from wherever the walker stands: first on it there when its middle is ground the walker may stand on and reach (an area 0.6 m inside its outline, a line on itself). An area whose middle is not (a harbour round its water) is walked into by the nearest area within it whose middle is (its boardwalk), the same way, when that area lies within 20 m of the edge the walker comes to (a river's bridge 200 m along it does not). Else, where
 that cannot be stood on or the walker's part of the map does not reach it (a sea, a ridge), the first point a body may
 stand on that the walker may reach, stepping back toward the walker a metre at a time from 0.6 m outside the edge. A
 walker already within it, or with no such point nearer it, is there. It ends facing the nearest point of the place, or its middle when it stands on
