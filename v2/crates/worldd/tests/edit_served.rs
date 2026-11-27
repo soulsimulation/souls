@@ -5860,21 +5860,22 @@ const YARD_MID_Z: i64 = -24_000_000;
 /// are a standing frame's carriers' places ([`frame_ends`]: on one x line, 2.2 m apart), as when the pair carries a
 /// frame from its stand to a bay: then it steps [`FRAME_OUT`] out of the frame's plane on its outer side (the frame
 /// with it, clear of what stands beside it), walks to as far out from where it goes, and steps in.
-fn frame_legs(now: (Vec3, Vec3), to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> {
+fn frame_legs(now: Option<(Vec3, Vec3)>, to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> {
     let stance = |(p, q): (Vec3, Vec3)| {
         ((p.x - q.x).abs() - 2 * FRAME_FROM).abs() < 200_000 && (p.z - q.z).abs() < 200_000
     };
-    if !(stance(now) && stance(to)) {
+    let Some(now) = now.filter(|now| stance(*now) && stance(to)) else {
         return vec![to];
-    }
-    let out = |z: i64| z + if z < YARD_MID_Z { -FRAME_OUT } else { FRAME_OUT };
-    let (from_x, to_x) = ((now.0.x + now.1.x) / 2, (to.0.x + to.1.x) / 2);
-    let at = |x: i64, z: i64| {
-        (
-            v3(x + to.0.x - to_x, 0, z),
-            v3(x + to.1.x - to_x, 0, z),
-        )
     };
+    let out = |z: i64| {
+        z + if z < YARD_MID_Z {
+            -FRAME_OUT
+        } else {
+            FRAME_OUT
+        }
+    };
+    let (from_x, to_x) = ((now.0.x + now.1.x) / 2, (to.0.x + to.1.x) / 2);
+    let at = |x: i64, z: i64| (v3(x + to.0.x - to_x, 0, z), v3(x + to.1.x - to_x, 0, z));
     vec![
         at(from_x, out((now.0.z + now.1.z) / 2)),
         at(to_x, out(to.0.z)),
@@ -5882,9 +5883,26 @@ fn frame_legs(now: (Vec3, Vec3), to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> {
     ]
 }
 
-/// Where Souls `a` and `b` stand now.
-fn stand_now(w: &Seeded, a: Id, b: Id) -> (Vec3, Vec3) {
-    (body_at(w, body_of(w, a)), body_at(w, body_of(w, b)))
+/// Where Souls `a` and `b` stand now; none while either has no body yet (its first walk gives it one).
+fn stand_now(w: &Seeded, a: Id, b: Id) -> Option<(Vec3, Vec3)> {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let body = |soul: Id| {
+        t.links_at(soul)
+            .iter()
+            .filter(|e| t.ty(e).as_str() == "souls:body-of")
+            .find_map(|e| Some(t.link(e.link)?.1[0]))
+    };
+    let (a, b) = (body(a)?, body(b)?);
+    let mut at = BTreeMap::new();
+    for p in logged(w) {
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                at.insert(id, pose.position);
+            }
+        }
+    }
+    Some((*at.get(&a)?, *at.get(&b)?))
 }
 
 /// A standing frame's carriers, the first east of it: beside its edges, along its own x ([`FRAME_FROM`]).
