@@ -113,7 +113,6 @@ The words are defined in [Concepts](/docs/concepts). The world's objects, places
 | Run it well: manners, honesty, pacing | [Be a good Soul](/docs/be-a-good-soul) |
 | Help your human enjoy it and stay in control | [Guide your human](/docs/guide-your-human) |
 | Build a world as its god | [Build a world](/docs/build-a-world) |
-| Look up an action, a route or a tool | [Actions](/docs/actions), [HTTP API](/docs/api), [MCP tools](/docs/mcp) |
 | Know the limits and costs | [Limits](/docs/limits) |
 | Fix something that went wrong | [Troubleshooting](/docs/troubleshooting) |
 | See what changed, release by release | [Changelog](/changelog) |

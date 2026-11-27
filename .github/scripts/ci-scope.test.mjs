@@ -18,14 +18,6 @@ test('docs and plain tools changes run no job', () => {
   assert.equal(jobsFor(['docs/a.md']).scope, 'none');
 });
 
-test('the reference pages\' generator: checked when the server, packages, generator or the pages change; not for other docs', () => {
-  for (const f of ['apps/server/src/mcp.ts', 'packages/engine-mars/src/engine.ts', 'tools/docs/generate.mjs', 'tools/docs/reference/collect.mjs', 'docs/site/api.md'])
-    assert.ok(names([f]).includes('docs-reference'), f);
-  assert.deepEqual(names(['tools/docs/generate.mjs']), ['docs-reference']);
-  for (const f of ['docs/site/concepts.md', 'docs/README.md', 'apps/web/src/main.ts']) assert.ok(!names([f]).includes('docs-reference'), f);
-  assert.ok(!('paths' in jobsFor(['tools/docs/generate.mjs']).include[0]));
-});
-
 test('web changes run the typecheck/build and the web unit suite', () => {
   assert.deepEqual(names(['apps/web/src/main.ts']), ['types-web', 'web']);
 });
@@ -57,12 +49,11 @@ test('server changes run server shards and latency, not native', () => {
 });
 
 // tools/body-authoring builds the pinned shared presets the server serves (D028): the server legs, including the
-// renderer step on server-0, latency, and docs-reference, which every V5-server-full change selects since #898 because it
-// runs the reference pages' generator against the server; nothing else, and no browser smoke.
-test('body-authoring changes run every server shard, latency and docs-reference, and nothing else', () => {
+// renderer step on server-0, and latency; nothing else, and no browser smoke.
+test('body-authoring changes run every server shard and latency, and nothing else', () => {
   const files = ['tools/body-authoring/pip/robot.mjs'], server = JOBS.filter(j => j.kind === 'server').map(j => j.name);
   assert.ok(server.includes('server-0') && server.length > 1, server.join());
-  assert.deepEqual(names(files).sort(), ['docs-reference', 'latency', ...server].sort());
+  assert.deepEqual(names(files).sort(), ['latency', ...server].sort());
   assert.equal(jobsFor(files).scope, 'scoped');
   assert.equal(smokeFor(files), false);
 });
@@ -84,7 +75,7 @@ test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the sh
 
 test('routing: the short legs go to CI_LIGHT_RUNNER when set; native and latency keep their wall-time budgets hosted', () => {
   const light = JOBS.filter(j => j.light).map(j => j.name).sort();
-  assert.deepEqual(light, ['client-cli', 'docs-reference', 'kinds', 'soul-tools', 'types-web', 'web']);
+  assert.deepEqual(light, ['client-cli', 'kinds', 'soul-tools', 'types-web', 'web']);
   for (const job of JOBS) assert.deepEqual(runnerFor(job, 'souls-heavy', 'souls-light'), job.heavy ? 'souls-heavy' : job.light ? 'souls-light' : 'ubuntu-latest', job.name);
   for (const kind of ['native', 'latency']) assert.equal(runnerFor(JOBS.find(j => j.kind === kind), 'souls-heavy', 'souls-light'), 'ubuntu-latest', kind);
   assert.ok(jobsFor(['package.json']).include.some(j => j.light === true), 'the flag reaches the matrix');
@@ -330,7 +321,7 @@ test('heavy legs: pull_request, merge_group and push runs select none; the daily
     assert.equal(lightOnly(JOBS, event).include.some(j => j.heavy), false, event);
   }
   for (const event of ['schedule', 'workflow_dispatch', 'request']) assert.deepEqual(lightOnly(JOBS, event), { include: JOBS, daily: [] }, event);
-  const light = ['types-web', 'latency', 'docs-reference', 'soul-tools'];
+  const light = ['types-web', 'latency', 'soul-tools'];
   const pr = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready"]');
   assert.deepEqual(pr.matrix, light, 'the light legs the paths pick still run on the PR');
   assert.equal(pr.smoke, 'true', 'and the smoke');
@@ -443,7 +434,7 @@ test('low-risk: a diff confined to the allowlist runs soul-tools, kinds (and the
   assert.equal(smokeFor(LOW), false);
   for (const f of LOW) assert.deepEqual(names([f]).filter(n => SKIPPED.includes(n)), [], f);
   assert.deepEqual(names(['changes/a.md']), [], 'a fragment alone runs no job');
-  assert.deepEqual(names(['docs/site/api.md']), ['docs-reference'], 'the reference pages still run their generator');
+  assert.deepEqual(names(['docs/site/limits.md', 'tools/docs/lint.mjs']), [], 'no docs page or docs tool runs a job (the reference generator is retired)');
   // the soul-tools job runs the launcher test that reads content/kinds; the kinds job the entry and form-rules tests
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const tools = workflow.slice(workflow.indexOf('            soul-tools)'), workflow.indexOf('            kinds)'));

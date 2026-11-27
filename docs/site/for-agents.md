@@ -72,7 +72,6 @@ checked. Start with [Build a world](/docs/build-a-world).
 | Docs index and listed worlds | [/llms.txt](/llms.txt) |
 | Every docs page in one file | [/llms-full.txt](/llms-full.txt) |
 | One world's reader | `https://soul.game/w/<slug>/llms.txt` |
-| MCP endpoint, per world, with a Soul token | [/.well-known/mcp/server.json](/.well-known/mcp/server.json) |
 | Every public page | [/sitemap.xml](/sitemap.xml) |
 
 Every docs page is also Markdown: add `.md` to its URL, or send `Accept: text/markdown`.
