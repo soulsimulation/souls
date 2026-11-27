@@ -123,8 +123,11 @@ export async function loadBodyResources(rows: readonly CatalogueBody[], base: st
 /** The old page's body record for a v2 body-kind hash, from the catalogue; null when it has none (drawn by default). */
 export function legacyBodyOf(hash: string | undefined, catalogue: ReadonlyMap<string, CatalogueBody> | null): Record<string, unknown> | null {
   const b = hash ? catalogue?.get(hash)?.legacy?.[0] : null;
-  return b && typeof b === 'object' && !Array.isArray(b) && ((b as { family?: unknown }).family === 'humanoid' || (b as { family?: unknown }).family === 'floater')
-    ? { ...(b as Record<string, unknown>), ...(catalogue?.get(hash!)?.resources ? { nativeResources: catalogue.get(hash!)!.resources, nativeKindHash: hash } : {}) } : null;
+  if (!b || typeof b !== 'object' || Array.isArray(b) || !['humanoid','floater'].includes(String((b as {family?:unknown}).family))) return null;
+  const look = {...b} as Record<string,unknown>;
+  delete look.nativeResources; delete look.nativeKindHash; delete look.nativeBody;
+  const resources = catalogue?.get(hash!)?.resources;
+  return {...look, ...(resources ? {nativeResources:resources,nativeKindHash:hash} : {})};
 }
 
 /** V3: the old body record (BODY-v1, the old renderer's humanoid look) for a body's own look, field 33's params as

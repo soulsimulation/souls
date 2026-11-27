@@ -250,6 +250,11 @@ test('canonical body resources require the exact verified companion; defaults an
   const inline=catalogueOf({format:'souls/bodies/1',bodies:[{...row,resources:[['souls:hand-left',2,99]]}]})!;
   assert.equal(inline[0].resources,undefined,'unverified catalogue metadata cannot preempt companion verification');
   assert.equal(legacyBodyOf(hash,new Map(inline.map(r=>[r.hash,r])))?.nativeResources,undefined);
+  const nested=catalogueOf({format:'souls/bodies/1',bodies:[{...row,legacy:[{family:'humanoid',nativeResources:[['souls:hand-left',2,99]],nativeKindHash:hash,nativeBody:'unverified'}]}]})!;
+  const cleanLook=legacyBodyOf(hash,new Map(nested.map(r=>[r.hash,r])))!;
+  for(const name of ['nativeResources','nativeKindHash','nativeBody'])assert.equal(cleanLook[name],undefined,'legacy look cannot supply '+name);
+  const verifiedNested=await loadBodyResources(nested,'/',read);
+  assert.deepEqual(legacyBodyOf(hash,new Map(verifiedNested.map(r=>[r.hash,r])))?.nativeResources,[['souls:hand-left',2,7],['souls:hand-right',2,4]],'only verified companion can replace malicious legacy metadata');
   const failed=await loadBodyResources(inline,'/',(async()=>new Response('',{status:404})) as typeof fetch);
   assert.equal(legacyBodyOf(hash,new Map(failed.map(r=>[r.hash,r])))?.nativeResources,undefined,'failed companion never revives unverified inline metadata');
   const loaded = await loadBodyResources([row], '/assets/bodies/', read);
