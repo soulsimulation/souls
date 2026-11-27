@@ -232,7 +232,7 @@ const DISK_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
 /// (default 1 GiB and 5 %: under either is low), keeps it in `health.json` (`disk`), and says it once on entering
 /// (`worldd: disk.low: …`) and once on leaving (`worldd: disk.low cleared: …`). Nothing is refused: acts and ticks
 /// never read it. What is shed while low is the log's bytes a store already holds (the compactor, `sheds`); a world
-/// with no store sheds nothing, and says so. A disk whose room cannot be read is not watched.
+/// with no store sheds nothing, and says so. A disk whose room cannot be read is said once and read again each second.
 fn watch_disk(dir: PathBuf, sheds: bool) {
     let env = |k: &str, d: u64| {
         std::env::var(k)
@@ -245,9 +245,25 @@ fn watch_disk(dir: PathBuf, sheds: bool) {
     let started = std::thread::Builder::new()
         .name("disk-watch".into())
         .spawn(move || {
+            let mut unread = false;
             loop {
-                let Ok(s) = rustix::fs::statvfs(&dir) else {
-                    return;
+                let s = match rustix::fs::statvfs(&dir) {
+                    Ok(s) => {
+                        unread = false;
+                        s
+                    }
+                    Err(e) => {
+                        // Said once; the last reading stays in `health.json`, and the watch tries again.
+                        if !unread {
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "worldd: the disk watch cannot read the room under the world: {e}; it tries again"
+                            );
+                            unread = true;
+                        }
+                        std::thread::sleep(DISK_EVERY);
+                        continue;
+                    }
                 };
                 let free = s.f_bavail.saturating_mul(s.f_frsize);
                 let total = s.f_blocks.saturating_mul(s.f_frsize);

@@ -49,7 +49,7 @@ function machine() {
   put(`worlds/${W1}/health.json`, JSON.stringify({
     at_unix_ms: Date.now() - 1000, written: 9, budget_us: 50000, ticks: { count: 90, mean_us: 900, p50_us: 800, p99_us: 4200, max_us: 6000 },
     over_budget: 0, inverted_stamps: 0, queues: { arrivals: { items: 0, oldest_us: 0 }, tick: { items: 2, oldest_us: 31000 } },
-    disk: { state: 'low', free_bytes: 900 << 20, total_bytes: 20 << 30, free_pct: 4, low_bytes: 1 << 30, low_pct: 5, went_low: 1 },
+    disk: { state: 'low', free_bytes: 900 << 20, total_bytes: 20 * 2 ** 30, free_pct: 4, low_bytes: 1 << 30, low_pct: 5, went_low: 1 },
   }));
   // A Soul's words and id sit in the world's folder; none may reach the page.
   put(`worlds/${W1}/receipts/${new Date().toISOString().slice(0, 10)}.jsonl`, `${JSON.stringify({ t: Date.now(), soul: SOUL, outcome: 'receipt', said: WORDS })}\n`);
