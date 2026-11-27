@@ -3,6 +3,9 @@ import {Box3,Matrix4,Mesh,Quaternion,Ray,Vector3} from 'three';
 import type {Object3D,BufferGeometry,InstancedMesh,PerspectiveCamera} from 'three';
 import {cameraGroundSampler} from '../WorldCameraGround.ts';
 import type {SceneInfo} from '../WorldGeometry.ts';
+import {visibleViewport} from '../WorldViewport.ts';
+import type {ViewportInsets} from '../WorldViewport.ts';
+export type FollowViewport={width:number;height:number;insets?:ViewportInsets};
 import type {CameraSubject} from '../../../../packages/camera/src/observation.ts';
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
 export function publishedFollowGround(info:Pick<SceneInfo,'scene'|'shore'>|null){return !info||(info.scene?.surfaces.length??0)>256?undefined:cameraGroundSampler(info);}
@@ -94,27 +97,33 @@ export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number
 export class FollowCamera{
  private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;
  reset(eye?:Vector3,aim?:Vector3){this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(before:Vector3,after:Vector3){if(!this.initialized)return;this.eye.copy(this.aim).add(after);if(this.anchor)this.offset.copy(this.eye).sub(this.anchor);this.velocity.set(0,0,0);this.gestureUntil=this.clock+2;}
- step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null):FollowResult{
-  if(!this.initialized)this.reset(camera.position,aim);dt=Math.max(0,Math.min(.05,dt));this.clock+=dt;
+ gesture(eye:Vector3,aim:Vector3){if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport):FollowResult{
+  if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
   let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
-  if(!centre||!geometry.stats.complete){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown');}
+  if(invalidStep){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
+  if(!centre||(!geometry.stats.complete&&manual)){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
   const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y))return result('projection-unavailable');
-  if(centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
-  if(projected.z>1)return result('projection-unavailable');
+  if(!manual&&centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
+  if(!manual&&projected.z>1)return result('projection-unavailable');
   const screen:[number,number]=[projected.x,projected.y];
-  if(this.clock<this.gestureUntil){this.eye.copy(camera.position);this.aim.copy(aim);return result('user-hold',screen);}
+  const manualEye=manual?this.eye.clone():null;
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
   let reason='tracking';
+  if(geometry.stats.complete){
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
   const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next);motion={groundY,sweep,unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?'motion-obstructed':'motion-unknown';}
+  // A Follow gesture changes its orbit/zoom, not the subject's world translation.
+  // Carry eye and aim together so orientation stays exactly the user's, while the
+  // normal bounded safety sweep continues. Search/framing wait until input settles.
+  if(manualEye){this.aim.add(this.eye.clone().sub(manualEye));return result(reason==='tracking'?'user-hold':'user-hold:'+reason,screen);}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
   if(dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
@@ -122,6 +131,9 @@ export class FollowCamera{
    const alternative=query(eye),passage=geometry.segment(this.eye,eye);
    if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
   }
+  }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
+  // Unavailable obstruction geometry forbids eye movement/search, not a bounded
+  // turn toward a fresh depicted subject. Manual input still owns its whole pose.
   // Rebase from the previous drawn eye along its actual viewing ray onto the
   // subject-depth plane. Subsequent eye translation then compensates around that
   // nearby world aim instead of also demanding a second pan to follow the eye.
@@ -133,7 +145,33 @@ export class FollowCamera{
   this.aim.copy(camera.position).addScaledVector(forward,depth);
   this.aimVelocity.addScaledVector(forward,-this.aimVelocity.dot(forward)).multiplyScalar(depth/previousDepth).clampLength(0,FOLLOW_LIMITS.aimSpeed);
   const x=relative.dot(right)/(vertical*camera.aspect),y=relative.dot(up)/vertical;
-  const aimGoal=centre.clone().addScaledVector(right,-Math.max(-.14,Math.min(.14,x))*vertical*camera.aspect).addScaledVector(up,-Math.max(-.10,Math.min(.10,y))*vertical);
+  let targetX=Math.max(-.14,Math.min(.14,x)),targetY=Math.max(-.10,Math.min(.10,y));
+  if(viewport){
+   // Native rendering uses the ordinary full-canvas projection. Existing measured
+   // edge insets constrain framing, never the projection or manual orbit pivot.
+   const area=visibleViewport(viewport.width,viewport.height,viewport.insets);
+   const view=camera.view,shifted=view?.enabled&&(view.offsetX!==0||view.offsetY!==0||view.width!==view.fullWidth||view.height!==view.fullHeight);
+   if(!area||shifted)return result('framing-unavailable',screen,tested);
+   const safe={left:2*area.left/viewport.width-1,right:2*(area.left+area.width)/viewport.width-1,bottom:1-2*(area.top+area.height)/viewport.height,top:1-2*area.top/viewport.height};
+   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+   for(let i=0;i<8;i++){
+    const corner=new Vector3();
+    corner.set(i&1?bounds!.max[0]:bounds!.min[0],i&2?bounds!.max[1]:bounds!.min[1],i&4?bounds!.max[2]:bounds!.min[2]).applyQuaternion(q).add(root);
+    if(corner.clone().sub(camera.position).dot(forward)<=camera.near)return result('framing-unavailable',screen,tested);
+    corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1)return result('framing-unavailable',screen,tested);
+    minX=Math.min(minX,corner.x);maxX=Math.max(maxX,corner.x);minY=Math.min(minY,corner.y);maxY=Math.max(maxY,corner.y);
+   }
+   const choose=(current:number,low:number,high:number,centre:number,slack:number)=>{
+    if(low>high)return null;
+    const a=Math.max(low,centre-slack),b=Math.min(high,centre+slack);
+    return a<=b?Math.max(a,Math.min(b,current)):Math.max(low,Math.min(high,centre));
+   };
+   const desiredX=choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14);
+   const desiredY=choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10);
+   if(desiredX===null||desiredY===null)return result('framing-unavailable',screen,tested);
+   targetX=desiredX;targetY=desiredY;
+  }
+  const aimGoal=centre.clone().addScaledVector(right,-targetX*vertical*camera.aspect).addScaledVector(up,-targetY*vertical);
   approach(this.aim,this.aimVelocity,aimGoal,dt,FOLLOW_LIMITS.aimSpeed,FOLLOW_LIMITS.aimAcceleration,.3);
   return result(reason,screen,tested);
  }

@@ -408,7 +408,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,lifecycle:'',
-    },(before,after)=>{if(experimentalFollowOwned&&context.current.cameraMode==='follow')followController?.gesture(before,after);else followView.userInput(before,after);});
+    },(before,after)=>{if(experimentalFollowOwned&&context.current.cameraMode==='follow')followController?.gesture(camera.position,controls.target);else followView.userInput(before,after);});
     let controls=newControls();
     navigation=new WorldNavigation(renderer.domElement,camera,()=>controls.target,()=>({
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,
@@ -1047,7 +1047,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const { selected: soulId, thing: thingId, follow: following, cameraMode: viewing } = context.current;
       const followEligibilityStart=followController?performance.now():0;
       const selectedBody=soulId?s.conn.replica.souls.get(soulId)?.entityId:null;
-      const experimentalFollowing=experimentalFollow&&!!followController&&viewing==='follow'&&!!selectedBody&&records[selectedBody]?.kind==='human'&&!eyes&&!shotMode&&!shotTrack;
+      const experimentalFollowing=followController?.owns(viewing,!!selectedBody,selectedBody?records[selectedBody]?.kind:undefined,!!eyes,!!shotMode,!!shotTrack)??false;
       experimentalFollowOwned=experimentalFollowing;
       let followSetupMs=followController?performance.now()-followEligibilityStart:0;
       if(following||soulId&&!groupSelection.has(soulId))groupSelection.clear();
@@ -1216,7 +1216,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const followLookupStart=followController?performance.now():0;
       const followId=soulId?s.conn.replica.souls.get(soulId)?.entityId??null:thingId;
       const followVersion=followController?{world:String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),epoch:JSON.stringify([s.conn.welcome?.epoch,observationSeekGeneration.current,!!past.current]),revision:String(sceneKey??'draw')}:null;
-      const followInput=()=>({key:JSON.stringify([followVersion,followId,experimentalFollowing]),tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),at:performance.now(),mode:context.current.cameraMode,id:followId,camera,aim:controls.target});
+      const followInput=()=>({key:JSON.stringify([followVersion,followId,experimentalFollowing]),tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),at:performance.now(),mode:context.current.cameraMode,id:followId,camera,aim:controls.target,viewport:entityLayer.active?{width:host.clientWidth,height:host.clientHeight,insets:context.current.viewportInsets}:undefined});
       let followGround:(x:number,z:number)=>number|null=()=>null,followGroundSource='unavailable';
       if(experimentalFollow&&followController){followGroundSource=JSON.stringify({kind:'unavailable',entityLayer:entityLayer.active,history:!!past.current,expansion:!!expansion?.group.visible,selectedInfo:expansionSceneInfo===null?'null':'present',scene:expansionSceneInfo?.scene===null?'null':expansionSceneInfo?.scene===undefined?'undefined':'present',surfaces:expansionSceneInfo?.scene?.surfaces.length??null,terrain:!!expansionSceneInfo?.shore?.metadata.terrain});if(entityLayer.active){followGround=entityLayer.groundPeek;followGroundSource=past.current?'rendered-active-entity-peek:history-current-unbound':'rendered-active-entity-peek:live';}else if(!expansion?.group.visible){const selected=followController.selectedGround(expansionSceneInfo);if(selected){followGround=selected;followGroundSource='selected-rendered-publication';}}}
       const followControlInput=experimentalFollow&&followController?{...followInput(),mode:experimentalFollowing?'follow':'inactive'}:null;
