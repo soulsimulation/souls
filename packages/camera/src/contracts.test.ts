@@ -139,3 +139,9 @@ test('portrait framing uses actual usable viewport and rejects impossible insets
   }
   assert.equal(reason(validateCameraShot({ ...shot(), screenRegion: { left: 0, top: 0, right: 1.1, bottom: 1 } }, o)), 'camera.shot-malformed');
 });
+
+test('displayed time accepts finite interpolated fractional ticks without rounding', () => {
+  const o = observation();
+  for (const tick of [20.125, -0.25]) assert.notEqual(validateCameraObservation({ ...o, depicted: { tick, seconds: 1 } }).status, 'rejected');
+  for (const tick of [NaN, Infinity]) assert.equal(validateCameraObservation({ ...o, depicted: { tick, seconds: 1 } }).status, 'rejected');
+});
