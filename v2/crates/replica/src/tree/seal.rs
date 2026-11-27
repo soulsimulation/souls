@@ -300,15 +300,20 @@ impl Tree {
         if let Some(h) = self.nodes[slot as usize].state {
             return Ok(h);
         }
-        let mut hashes = Vec::new();
-        for c in self.covered(slot) {
-            hashes.push(self.state_node(c)?.to_value());
+        let covered = self.covered(slot);
+        // The children's array as `bytes_of` writes it (each hash a byte string of 34), written straight from the
+        // hashes: a node such as the ground has thousands of children, and one walking Soul rehashes it every tick.
+        let mut children = crate::encode::head(4, covered.len() as u64);
+        children.reserve(covered.len() * 36);
+        for c in covered {
+            let h = self.state_node(c)?;
+            children.extend([0x58, 34, crate::ids::SHA2_256, 32]);
+            children.extend(h.digest());
         }
         let mut sha = match self.heads.get(&slot) {
             Some(head) => head.clone(),
             None => self.head(slot)?,
         };
-        let children = bytes_of(&Value::Array(hashes))?;
         sha.update(&children);
         let h = Hash::of_taken(sha);
         self.nodes[slot as usize].state = Some(h);
