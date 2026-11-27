@@ -78,6 +78,8 @@ export { PIANO_FADE };
 /** One hand goal relative to that arm's shoulder: [forward, outward (+ away from the body midline), up] metres. */
 export type HandGoal = readonly [number, number, number];
 export type ActivityFrame = {
+  /** This frame owns a physical contact with another body, rather than merely an aimed look/gesture. */
+  pairedContact?: boolean;
   /** [left, right]; null = that arm is left to the base posture (dangling / hand on thigh). */
   handWeights?:[number,number];
   /** Piano contact plane and per-hand lift above it, from the shared audible score. */
@@ -260,16 +262,16 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     case 'listen': { const nod = Math.max(0, Math.sin(t * 0.5) - 0.9) * 4;
       f.hands = [[0.24, -0.1, down + 0.02], [0.26, -0.08, down + 0.02]]; f.look = 0.05 + 0.15 * nod; return f; }
     // together/1 paired gestures: the meeting points are on the line between the two bodies (mid = half the gap)
-    case 'handshake': { const pump = Math.sin(since * 9) * 0.035 * S(Math.min(1, since / 0.6)), k = env(0.6, 2.9);
+    case 'handshake': { f.pairedContact = true; const pump = Math.sin(since * 9) * 0.035 * S(Math.min(1, since / 0.6)), k = env(0.6, 2.9);
       f.hands = [null, [0.06 + (mid - 0.06) * k, 0.02 - (HALF + 0.02) * k, -0.62 + (1.0 - SH + 0.62) * k + pump]]; f.lean = 0.05 * k; f.look = 0.12; return f; }
-    case 'high-five': { const k = since < 0.83 ? S(since / 0.83) : 1 - S((since - 0.9) / 0.9);
+    case 'high-five': { f.pairedContact = true; const k = since < 0.83 ? S(since / 0.83) : 1 - S((since - 0.9) / 0.9);
       f.hands = [null, [0.06 + (mid - 0.1 - 0.06) * k, 0.08 - (HALF + 0.03) * k, -0.55 + (1.95 - SH + 0.55) * k]]; f.look = -0.25 * k; return f; }
-    case 'hug': { const k = env(0.9, 4.4), sway = Math.sin(since * 1.6) * 0.05 * k;
+    case 'hug': { f.pairedContact = true; const k = env(0.9, 4.4), sway = Math.sin(since * 1.6) * 0.05 * k;
       // both arms around the other's upper back: one over the shoulder, one under the arm; a little forward lean and sway
       // the hands reach past the partner's flanks to the middle of their back (gap + a torso's depth ahead)
       f.hands = [[0.08 + (mid * 2 + 0.02 - 0.08) * k, 0.1 - (HALF + 0.02) * k, -0.55 + (-0.1 + 0.55) * k], [0.08 + (mid * 2 - 0.04 - 0.08) * k, 0.1 - (HALF + 0.05) * k, -0.55 + (-0.36 + 0.55) * k]];
       f.lean = 0.1 * k; f.side = sway; f.look = -0.05; return f; }
-    case 'give': case 'take': { const k = env(0.7, 2.0), right = activity === 'give' ? 0.06 : -0.06;
+    case 'give': case 'take': { f.pairedContact = true; const k = env(0.7, 2.0), right = activity === 'give' ? 0.06 : -0.06;
       f.hands = [null, [0.1 + (mid - 0.1) * k, 0.04 - (HALF + right) * k, -0.6 + (1.05 - SH + 0.6) * k]]; f.look = 0.3 * k; return f; }
     case 'clap': { const c = Math.abs(Math.sin(t * Math.PI * 2.2)), k = S(Math.min(1, since / 0.4));
       f.hands = [[0.32 * k + 0.02, (-HALF + 0.02 + 0.07 * c) * k + 0.08 * (1 - k), -0.18 * k - 0.5 * (1 - k)], [0.32 * k + 0.02, (-HALF + 0.02 + 0.07 * c) * k + 0.08 * (1 - k), -0.2 * k - 0.5 * (1 - k)]];
