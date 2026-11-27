@@ -218,7 +218,7 @@ fn i3991_a_timer_whose_needs_no_longer_hold_is_refused_by_name_at_its_due_time()
         std::thread::sleep(Duration::from_millis(100));
     }
     let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
-    let faded = rack_events(&run, "faded");
+    let faded = rack_events(&run, "test:faded");
     println!("#3991 needs at fire: refused {refused:?}, faded {faded:?}, due {due}");
     assert_eq!(
         timer_cleared_at(&run),
@@ -358,44 +358,34 @@ fn i3991_a_timer_set_again_while_pending_fires_once_at_the_later_deadline() {
     assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
     std::thread::sleep(Duration::from_secs(1));
     let again = a.act("test:ring", Some(rack()), BTreeMap::new());
-    assert!(!again.expect("the second ring lands").is_empty(), "one receipt");
+    assert!(
+        !again.expect("the second ring lands").is_empty(),
+        "one receipt"
+    );
     let dues = timer_dues(&run);
     assert_eq!(dues.len(), 2, "each ring set a timer: {dues:?}");
     let (first, later) = (dues[0], dues[1]);
     assert!(later > first, "the second deadline is the later one");
     let t0 = std::time::Instant::now();
-    while rack_events(&run, "faded").is_empty() && t0.elapsed() < Duration::from_secs(8) {
+    while rack_events(&run, "test:faded").is_empty() && t0.elapsed() < Duration::from_secs(8) {
         std::thread::sleep(Duration::from_millis(100));
     }
     // A moment more, for a second fire that should not come.
     std::thread::sleep(Duration::from_millis(500));
-    let faded = rack_events(&run, "faded");
+    let faded = rack_events(&run, "test:faded");
     let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
     println!("#3991 set again: dues {dues:?}, faded {faded:?}, refused {refused:?}");
-    println!("#3991 set again: timer records {:?}", timer_records(&run));
-    println!("#3991 set again: ringing {}, the tree's timers {:?}, next due {:?}", ringing(&run), run.replay().tree().timers(), run.world.quiet.read());
     assert_eq!(faded.len(), 1, "the fade ran once");
     assert_eq!(faded[0].0, later, "at the later deadline");
-    assert!(refused.is_empty(), "the replaced timer never fired, so nothing was refused");
+    assert_eq!(
+        timer_cleared_at(&run),
+        Some(later),
+        "the last timer cleared is the later one"
+    );
+    assert!(
+        refused.is_empty(),
+        "the replaced timer never fired, so nothing was refused"
+    );
     assert_eq!(ringing(&run), 0, "the fade cleared the flag");
     run.stop();
-}
-
-/// The log's timer records, in order: `(world time, node, record)` (to read what a replacement wrote).
-fn timer_records(run: &Run) -> Vec<(i64, Id, replica::effects::TimerRec)> {
-    let log = run.store.0.lock().unwrap().bytes.clone();
-    let mut out = Vec::new();
-    for rec in recover(&log).unwrap().records {
-        if sim::recorder::is_input(&rec) {
-            continue;
-        }
-        for e in Part::read(&rec).unwrap().effects {
-            if let Body::Timers(ts) = &e.body {
-                for t in ts {
-                    out.push((e.envelope.at, e.envelope.node, t.clone()));
-                }
-            }
-        }
-    }
-    out
 }
