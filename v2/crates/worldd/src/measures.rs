@@ -286,6 +286,7 @@ impl Measures {
             self.last[i].store(*us, Ordering::Relaxed);
         }
         self.ticks.record(total);
+        crate::prof::total(total);
         if total > BUDGET_US {
             self.over_budget.fetch_add(1, Ordering::Relaxed);
         }

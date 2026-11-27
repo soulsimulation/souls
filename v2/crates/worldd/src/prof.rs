@@ -28,6 +28,26 @@ pub fn add(i: usize, v: u64) {
     SUM[i].fetch_add(v, Ordering::Relaxed);
     MAX[i].fetch_max(v, Ordering::Relaxed);
 }
+static TOTALS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+/// A whole tick's µs (all phases), kept for the run's exact percentiles.
+pub fn total(us: u64) {
+    if let Ok(mut v) = TOTALS.lock() {
+        v.push(u32::try_from(us).unwrap_or(u32::MAX));
+    }
+}
+fn totals_line() -> String {
+    let Ok(v) = TOTALS.lock() else { return String::new() };
+    let mut s = v.clone();
+    s.sort_unstable();
+    let q = |f: f64| s.get(((s.len() as f64 - 1.0) * f).round() as usize).copied().unwrap_or(0);
+    let over = s.iter().filter(|&&x| x > 50_000).count();
+    let mean = s.iter().map(|&x| u64::from(x)).sum::<u64>() / (s.len().max(1) as u64);
+    format!(
+        "prof-ticks: n={} mean={} p50={} p95={} p99={} max={} over={} over_pct={:.2}",
+        s.len(), mean, q(0.5), q(0.95), q(0.99), s.last().copied().unwrap_or(0), over,
+        over as f64 * 100.0 / s.len().max(1) as f64
+    )
+}
 pub fn tick() {
     add(39, 1);
     let n = SUM[39].load(Ordering::Relaxed);
@@ -46,5 +66,6 @@ pub fn tick() {
         }
         SUM[39].store(0, Ordering::Relaxed);
         eprintln!("{s}");
+        eprintln!("{}", totals_line());
     }
 }
