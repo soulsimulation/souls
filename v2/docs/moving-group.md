@@ -44,7 +44,9 @@ with one of them steering. Those six tasks build on this page and define no grou
    group whose kind states nothing is refused as `group-no-leave-rule`:
    - **close up**: the rest close up and go on (walking together);
    - **stop and set down**: the group stops, and what it moves is set down where it stands, one change of parent to
-     the node it is in, at rest (carrying, pushing);
+     the node it is in, at rest (carrying, pushing). A carry lowers its load there on a short track of its node first
+     (#5067, `sim::activity::carry::Hoist`), so the change of parent happens where the load already is; a lift is the
+     same track upward, from where the load lay;
    - **at a stop**: the leaver is let go at the next stop, which the kind states is reached within a bounded time
      (vehicles, rides). Getting on and off is a link to the ground beside it, usable while it stands still.
 

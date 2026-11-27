@@ -1194,6 +1194,54 @@ impl Activities {
         self.emit(tree, node, audience, by, event, fields, Vec::new())
     }
 
+    /// The world's word of a lift's or a set-down's track on `activity`'s node (#5067, [`carry::Hoist`]):
+    /// `souls:carry-track`, `{1: activity, 2: load, 3: phase, 4: t0, 5: t1, 6: why}`, said at the node. `phase` is
+    /// `souls:lift` (the track begins at t0 and ends at t1), `souls:lifted` (it ended: the load in its carriers'
+    /// hands), `souls:lift-cancelled` (it ended before t1, `why` naming the cause; a set-down back to where the load
+    /// lay begins at once), `souls:set-down` (a set-down's track begins, `why` naming a carry that broke off) or
+    /// `souls:released` (it ended: the load at rest, out of the crew's slot). Times are µs of world time.
+    #[allow(clippy::too_many_arguments)]
+    pub fn carry_track(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        phase: &'static str,
+        (t0, t1): (Micros, Micros),
+        why: Option<&'static str>,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        let time = |t: Micros| Value::Uint(u64::try_from(t).unwrap_or(0));
+        let mut fields = BTreeMap::from([
+            (1, activity.to_value()),
+            (2, load.to_value()),
+            (3, Value::Text(name(phase))),
+            (4, time(t0)),
+            (5, time(t1)),
+        ]);
+        if let Some(why) = why {
+            fields.insert(6, Value::Text(name(why)));
+        }
+        let node = if tree.handle(activity).is_some() {
+            activity
+        } else {
+            load
+        };
+        self.emit(
+            tree,
+            node,
+            audience,
+            by,
+            "souls:carry-track",
+            fields,
+            Vec::new(),
+        )
+    }
+
     /// The bodies of the activities started since [`Activities::begin_moves`] last ran: whom their moves reach.
     pub fn beginning(&self) -> Vec<Id> {
         self.begun
