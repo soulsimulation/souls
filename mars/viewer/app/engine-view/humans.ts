@@ -2156,7 +2156,10 @@ function measure(v: View) {
   const shMid = sh.reduce((s, q) => s.add(q), V()).multiplyScalar(1 / sh.length);
   const joints = [pivot, w(spine.abdomen), w(spine.torso), shMid];
   const hipMid = hips[0].clone().add(hips[1]).multiplyScalar(0.5);
-  const shape = standingShape(rig,()=>frontDepths(rig, hipMid.x, shMid.x, shMid.y, feet[legs[0].side > 0 ? 0 : 1], legs.flatMap((_, i) => [[hips[i], knees[i]], [knees[i], feet[i]]] as [THREE.Vector3, THREE.Vector3][])));
+  const limbSides = new Map<THREE.Object3D, number>();
+  for (const limb of legs) for (const bone of [limb.upper, limb.lower, limb.foot]) limbSides.set(bone, limb.side);
+  for (const limb of arms) for (const bone of [limb.upper, limb.lower, limb.hand, ...limb.fingers, ...limb.thumb]) limbSides.set(bone, limb.side);
+  const shape = standingShape(rig,limbSides,()=>frontDepths(rig, hipMid.x, shMid.x, shMid.y, feet[legs[0].side > 0 ? 0 : 1], legs.flatMap((_, i) => [[hips[i], knees[i]], [knees[i], feet[i]]] as [THREE.Vector3, THREE.Vector3][])));
   const front=shape.front;
   v.dims = {
     hipH,
@@ -2227,7 +2230,7 @@ const standingShapes=new WeakMap<Template,StandingShape>();
 /** The same immutable template in Idle0 has the same surface measurements for every actor. Cache numbers and vertex
  * indices only: mesh references are rebound to this actor, never retained from the actor that first measured them.
  * Attribute replacement/version changes invalidate the cache (kit shape edits and geometry updates). */
-function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
+function standingShape(rig:Rig,limbSides:ReadonlyMap<THREE.Object3D,number>,measureFront:()=>ReturnType<typeof frontDepths>){
  const meshes:THREE.SkinnedMesh[]=[];
  rig.model.traverse(o=>{if((o as THREE.SkinnedMesh).isSkinnedMesh&&!o.userData[BODY_DRAW])meshes.push(o as THREE.SkinnedMesh);});
  const attributes=(m:THREE.SkinnedMesh)=>[...Object.values(m.geometry.attributes),...Object.values(m.geometry.morphAttributes).flat()];
@@ -2244,7 +2247,7 @@ function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
    surf:{body:bind(old.body),leg:new Map([...old.leg].map(([side,r])=>[side,bind(r)])),foot:new Map([...old.foot].map(([side,r])=>[side,bind(r)])),hand:new Map([...old.hand].map(([side,r])=>[side,bind(r)]))},
   };
  }
- const front=measureFront(),surf=surfaceRefs(rig),save=(refs:VertexRefs):StoredRefs=>refs.map(r=>({mesh:meshes.indexOf(r.mesh),idx:r.idx.slice()}));
+ const front=measureFront(),surf=surfaceRefs(rig,limbSides),save=(refs:VertexRefs):StoredRefs=>refs.map(r=>({mesh:meshes.indexOf(r.mesh),idx:r.idx.slice()}));
  standingShapes.set(rig.template,{
   stamps:meshes.map(m=>{const a=attributes(m);return{geometry:m.geometry,attributes:a,versions:a.map(version)};}),
   front:{...front,foot:front.foot.map(p=>[...p] as [number,number])},
@@ -2254,7 +2257,7 @@ function standingShape(rig:Rig,measureFront:()=>ReturnType<typeof frontDepths>){
 }
 
 /** Foot and hand vertices of a rig, per side (+1 = the person's left: z < 0 with the holder at the origin facing +x). */
-function surfaceRefs(rig: Rig) {
+function surfaceRefs(rig: Rig, limbSides: ReadonlyMap<THREE.Object3D, number>) {
   const out: { leg: Map<number, VertexRefs>; foot: Map<number, VertexRefs>; hand: Map<number, VertexRefs>; body: VertexRefs } = { leg:new Map(), foot: new Map(), hand: new Map(), body: [] };
   const p = V(), idx = new THREE.Vector4(), wt = new THREE.Vector4();
   rig.holder.updateMatrixWorld(true);
@@ -2262,21 +2265,25 @@ function surfaceRefs(rig: Rig) {
     const m = o as THREE.SkinnedMesh;
     if (!m.isSkinnedMesh || !m.geometry.attributes.skinIndex || m.userData[BODY_DRAW]) return;
     const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex as THREE.BufferAttribute, sw = m.geometry.attributes.skinWeight as THREE.BufferAttribute;
-    const contacts:{i:number;part:'foot'|'hand'|'leg'}[]=[];
+    const contacts:{i:number;part:'foot'|'hand'|'leg';side?:number}[]=[];
     for (let i = 0; i < pos.count; i++) {
       idx.fromBufferAttribute(si, i);
       wt.fromBufferAttribute(sw, i);
       let k = 0;
       for (let j = 1; j < 4; j++) if (wt.getComponent(j) > wt.getComponent(k)) k = j;
-      const part = partOf(m.skeleton.bones[idx.getComponent(k)]?.name ?? '');
+      const bone = m.skeleton.bones[idx.getComponent(k)], part = partOf(bone?.name ?? '');
       // a sample of the torso, hips and head: what a body lying on the ground rests on
       if ((part === 'torso' || part === 'head') && i % 3 === 0) { let r = out.body.find((q) => q.mesh === m); if (!r) out.body.push((r = { mesh: m, idx: [] })); r.idx.push(i); }
       if (part !== 'foot' && part !== 'hand' && part !== 'leg') continue;
-      contacts.push({i,part});
+      // A crossed idle stance can put one foot's vertices across the body midline.
+      // Support follows the owning limb, including toes/fingers under its bones.
+      let owner: THREE.Object3D | null = bone ?? null;
+      while (owner && !limbSides.has(owner)) owner = owner.parent;
+      contacts.push({i,part,side:owner ? limbSides.get(owner) : undefined});
     }
     let at=0;eachSkinnedWorld([{mesh:m,idx:contacts.map(c=>c.i)}],p,p=>{
-      const {i,part}=contacts[at++];
-      const side = p.z < 0 ? 1 : -1, map = out[part];
+      const {i,part,side:ownedSide}=contacts[at++];
+      const side = ownedSide ?? (p.z < 0 ? 1 : -1), map = out[part];
       const refs = map.get(side) ?? [];
       let r = refs.find((q) => q.mesh === m);
       if (!r) refs.push((r = { mesh: m, idx: [] }));
