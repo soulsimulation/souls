@@ -7745,6 +7745,8 @@ fn edit_checker(
                         continue;
                     }
                 };
+                // Where the check's time goes, by stage (#5216): `edit_check` in `health.json`.
+                let stages = measures::EditStages::start();
                 let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                     Ok(s) => (s, false),
                     Err(s) => (s, true),
@@ -7756,6 +7758,7 @@ fn edit_checker(
                     .max(e.planned);
                 let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
+                stages.end(measures::EDIT_BASIS);
                 let Some(world) = world.as_mut() else {
                     let r = Err(Refused {
                         op: None,
@@ -7799,6 +7802,7 @@ fn edit_checker(
                             detail: "the world's record names no creator".into(),
                         }),
                     };
+                    stages.end(measures::EDIT_CHECK);
                     checked
                         .and_then(|c| {
                             let t = town.on(&copy, ground, false);
@@ -7807,15 +7811,18 @@ fn edit_checker(
                                 arrival_stands(&copy, t, from, set)?;
                             }
                             let known = t.map(|t| Known::of(t));
+                            stages.end(measures::EDIT_TOWN);
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
-                            sim::edit::plan_classes(
+                            let planned = sim::edit::plan_classes(
                                 c,
                                 &copy,
                                 ground,
                                 known.as_ref(),
                                 snapshot.classes.values().copied(),
                                 reserved.clone(),
-                            )
+                            );
+                            stages.end(measures::EDIT_PLAN);
+                            planned
                         })
                         .and_then(|mut p| {
                             let kept = p.take_map();
@@ -7823,6 +7830,7 @@ fn edit_checker(
                                 crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                             let tree = buildsafe::souls(&copy, &world.kinds);
                             let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            stages.end(measures::EDIT_PLACES);
                             let maps = source
                                 .map(|source| {
                                     buildsafe::PreparedMaps::prepare_classes(
@@ -7837,6 +7845,7 @@ fn edit_checker(
                                     )
                                 })
                                 .transpose()?;
+                            stages.end(measures::EDIT_MAPS);
                             Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
                         })
                 }))
@@ -7848,6 +7857,7 @@ fn edit_checker(
                         detail: panic_text(p.as_ref()),
                     })
                 });
+                measures::EDIT_CHECKS.checked(&stages);
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }

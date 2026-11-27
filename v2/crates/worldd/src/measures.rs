@@ -374,6 +374,7 @@ impl Measures {
         ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         HISTORY_EXPORT.json(&mut o);
         CREATOR.json("creator", &mut o);
+        EDIT_CHECKS.json(&mut o);
         if let Some(n) = self.souls.load(Ordering::Relaxed).checked_sub(1) {
             let _ = write!(o, ",\"souls\":{n}");
         }
@@ -541,6 +542,86 @@ impl Stalls {
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
         );
+    }
+}
+
+/// The edit checker's stages (#5216), in order: the bodies and the published copy it waits for (`basis`), the edit's
+/// check, the checker's town brought up to the copy, the plan with G2's guard (BUILDSAFE), the places and the Souls
+/// judged, and the walkers' maps.
+pub const EDIT_STAGES: [&str; 6] = ["basis", "check", "town", "plan", "places", "maps"];
+pub const EDIT_BASIS: usize = 0;
+pub const EDIT_CHECK: usize = 1;
+pub const EDIT_TOWN: usize = 2;
+pub const EDIT_PLAN: usize = 3;
+pub const EDIT_PLACES: usize = 4;
+pub const EDIT_MAPS: usize = 5;
+
+/// One edit's check, timed by stage on the checker's thread: each [`EditStages::end`] closes the stage named, from
+/// the end of the one before. A stage never reached (the edit was refused before it) stays 0.
+pub struct EditStages {
+    at: std::cell::Cell<u64>,
+    us: [std::cell::Cell<u64>; 6],
+}
+
+impl EditStages {
+    pub fn start() -> EditStages {
+        EditStages {
+            at: std::cell::Cell::new(steady_us()),
+            us: Default::default(),
+        }
+    }
+
+    pub fn end(&self, stage: usize) {
+        let now = steady_us();
+        self.us[stage].set(now.saturating_sub(self.at.get()));
+        self.at.set(now);
+    }
+}
+
+/// The edit checker's thread (#5216): the edits it has checked, the last one's time by stage and the longest
+/// check. One per process, written by the checker's thread and read by `health.json`'s writer (`edit_check`).
+pub struct EditChecks {
+    checked: AtomicU64,
+    last_us: [AtomicU64; 6],
+    longest_us: AtomicU64,
+}
+
+/// This process's edit checks.
+pub static EDIT_CHECKS: EditChecks = EditChecks {
+    checked: AtomicU64::new(0),
+    last_us: [const { AtomicU64::new(0) }; 6],
+    longest_us: AtomicU64::new(0),
+};
+
+impl EditChecks {
+    /// An edit's check ended, committed or refused.
+    pub fn checked(&self, stages: &EditStages) {
+        let mut total = 0;
+        for (last, us) in self.last_us.iter().zip(&stages.us) {
+            last.store(us.get(), Ordering::Relaxed);
+            total += us.get();
+        }
+        self.longest_us.fetch_max(total, Ordering::Relaxed);
+        self.checked.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `,"edit_check":{"checked":n,"longest_us":n,"last_us":{<stage>:n,...}}`.
+    pub fn json(&self, o: &mut String) {
+        let _ = write!(
+            o,
+            ",\"edit_check\":{{\"checked\":{},\"longest_us\":{},\"last_us\":{{",
+            self.checked.load(Ordering::Relaxed),
+            self.longest_us.load(Ordering::Relaxed)
+        );
+        for (i, name) in EDIT_STAGES.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "," };
+            let _ = write!(
+                o,
+                "{sep}\"{name}\":{}",
+                self.last_us[i].load(Ordering::Relaxed)
+            );
+        }
+        o.push_str("}}");
     }
 }
 
