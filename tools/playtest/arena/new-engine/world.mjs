@@ -6,7 +6,7 @@
 //   startWorld({ template, dir, port, history }) → { kind: 'v2', base, page, world, directory, gateway, dir, pid, facts }
 //   stopWorld(world) stops run.sh, which stops everything it started.
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { basename, join, resolve } from 'node:path';
@@ -18,21 +18,49 @@ const EXPORT = join(REPO_ROOT, 'v2/tools/import-eden/export/export.ts');
 /** run.sh serves its one world under this name (`/w/dev/`). */
 export const WORLD = 'dev';
 
+/** A finite startup child is registered before waiting and is cancellable as an owned process group. */
+export async function runOwnedCommand(executable, args, { cwd = REPO_ROOT, env = process.env, onSpawn, onCommand, signal, timeoutMs = 180000, name = 'startup' } = {}) {
+  signal?.throwIfAborted();
+  const owner = onCommand?.({ phase: 'start', name, executable, args });
+  const child = spawn(executable, args, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let timer, escalation, closeDeadline, abort, failed, stdout = '', stderr = '';
+  const kill = sig => { try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch {} } };
+  try {
+    onSpawn?.(child, { transient: true, processGroup: true });
+    return await new Promise((ok, no) => {
+      const stop = error => { failed ??= error; kill('SIGTERM'); escalation ??= setTimeout(() => { kill('SIGKILL'); closeDeadline = setTimeout(() => no(Error('startup.child-did-not-exit')), 2000); }, 500); };
+      abort = () => stop(signal.reason); signal?.addEventListener('abort', abort, { once: true });
+      timer = setTimeout(() => stop(Error(`startup.${name}-timeout`)), timeoutMs);
+      child.stdout.on('data', chunk => { stdout += chunk; if (stdout.length > 16 * 1024 * 1024) stop(Error('startup.output-limit')); });
+      child.stderr.on('data', chunk => { stderr += chunk; if (stderr.length > 16 * 1024 * 1024) stop(Error('startup.output-limit')); });
+      child.once('error', no);
+      child.once('close', (code, sig) => failed ? no(failed) : code === 0 && !sig ? ok(stdout) : no(Error(`startup.${name}-exit: ${code}/${sig}: ${stderr.slice(-1000)}`)));
+      if (signal?.aborted) abort();
+    });
+  } catch (error) { if (child.exitCode === null && child.signalCode === null) kill('SIGKILL'); throw error; }
+  finally { clearTimeout(timer); clearTimeout(escalation); clearTimeout(closeDeadline); signal?.removeEventListener('abort', abort); onCommand?.({ phase: 'end', owner, name, ok: child.exitCode === 0 && child.signalCode === null }); }
+}
+
 /** The template's facts, exported once into `out` (the same template gives the same bytes); `map`, a world's map
  *  (`content/worlds/<world>/map.json`), names its things' entries and kinds. → the facts' path */
-export function exportFacts(template, out, map = null) {
-  const t = resolve(REPO_ROOT, template);
+export function exportFacts(template, out, map = null, { checkout = REPO_ROOT, onCommand, timeoutMs = 180000, signal } = {}) {
+  const t = resolve(checkout, template);
   if (!existsSync(t)) throw new Error(`no template ${template}`);
   mkdirSync(resolve(out, '..'), { recursive: true });
-  execFileSync(process.execPath, [EXPORT, '--template', t, '--out', out, ...(map ? ['--map', resolve(REPO_ROOT, map)] : [])], { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
+  signal?.throwIfAborted();
+  const args = [join(checkout, 'v2/tools/import-eden/export/export.ts'), '--template', t, '--out', out, ...(map ? ['--map', resolve(checkout, map)] : [])];
+  const owner = onCommand?.({ phase: 'start', name: 'export-facts', executable: process.execPath, args });
+  try { execFileSync(process.execPath, args, { cwd: checkout, timeout: timeoutMs, stdio: ['ignore', 'ignore', 'pipe'] }); onCommand?.({ phase: 'end', owner, name: 'export-facts', ok: true }); }
+  catch (error) { onCommand?.({ phase: 'end', owner, name: 'export-facts', ok: false }); throw error; }
+  signal?.throwIfAborted();
   return out;
 }
 
 /** The world map soul.game's world of this template was imported with (`content/worlds/<world>/map.json`), or null:
  *  Eden's names its things' entries (a cafe's `cup_of_coffee`, not a nameless `cup_of_coffee_pack`, whose offers no
  *  client knows). Only Eden's for now: the other maps are not known to be how their worlds are made. */
-export function mapFor(template) {
-  return basename(String(template ?? '')) === 'eden-2026.json' ? join(REPO_ROOT, 'content/worlds/eden/map.json') : null;
+export function mapFor(template, checkout = REPO_ROOT) {
+  return basename(String(template ?? '')) === 'eden-2026.json' ? join(checkout, 'content/worlds/eden/map.json') : null;
 }
 
 const portFree = (port) => new Promise((ok) => { const s = createServer().once('error', () => ok(false)).listen(port, '127.0.0.1', () => s.close(() => ok(true))); });
@@ -57,15 +85,20 @@ export const runArgs = ({ dir, port, facts }) => ['--port', String(port), '--dir
 
 /** Starts run.sh and waits for its `ready` line. The world's folder is `dir` (run.sh's --dir, under an ignored .local/).
  *  `template` names the genesis; `facts` an already exported one; neither seeds N2's test world. */
-export async function startWorld({ template = null, facts = null, dir, port = null, readyMs = 900_000, log = null, env = {}, history = false } = {}) {
+export async function startWorld({ template = null, facts = null, dir, port = null, readyMs = 900_000, log = null, env = {}, history = false, checkout = REPO_ROOT, onSpawn, onCommand, signal } = {}) {
   if (!dir) throw new Error('startWorld: dir is required');
+  const until = Date.now() + readyMs;
+  const remaining = () => { signal?.throwIfAborted(); const ms = until - Date.now(); if (ms <= 0) throw Error('startWorld: startup timeout'); return ms; };
   dir = resolve(dir);
   mkdirSync(dir, { recursive: true });
   const seeded = existsSync(join(dir, 'world/world.json'));
-  if (!facts && template && !seeded) facts = exportFacts(template, join(dir, 'genesis.facts.json'), mapFor(template));
+  if (!facts && template && !seeded) {
+    if (onSpawn) { facts = join(dir, 'genesis.facts.json'); await runOwnedCommand(process.execPath, [join(checkout, 'v2/tools/import-eden/export/export.ts'), '--template', resolve(checkout, template), '--out', facts, ...(mapFor(template, checkout) ? ['--map', mapFor(template, checkout)] : [])], { cwd: checkout, onSpawn, onCommand, signal, timeoutMs: remaining(), name: 'export-facts' }); }
+    else facts = exportFacts(template, join(dir, 'genesis.facts.json'), mapFor(template, checkout));
+  }
   port ??= await freePorts();
   const at = addresses(port);
-  const out = openSync(log ?? join(dir, 'run.log'), 'a');
+
   // `history`: the world ships its records to a folder store beside it (`WORLDD_STORE`, O9's `folder:`), so it writes
   // its public history (`history/`: the header, bundles and indices the page plays a past moment from)
   if (history) { mkdirSync(join(dir, 'store'), { recursive: true }); env = { WORLDD_STORE: `folder:${join(dir, 'store')}`, ...env }; }
@@ -74,14 +107,20 @@ export async function startWorld({ template = null, facts = null, dir, port = nu
   let runDir = dir, link = null;
   if (dir.length > 48) { link = join('/tmp', `souls-w-${randomBytes(4).toString('hex')}`); symlinkSync(dir, link); runDir = link; }
   // run.sh in its own process group: stopWorld signals the group, so nothing it started outlives the run.
-  const child = spawn('bash', [RUN_SH, ...runArgs({ dir: runDir, port, facts })], { cwd: REPO_ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', out], detached: true });
+  remaining();
+  let child, out;
+  try { out = openSync(log ?? join(dir, 'run.log'), 'a'); child = spawn('bash', [join(checkout, 'v2/tools/dev/run.sh'), ...runArgs({ dir: runDir, port, facts })], { cwd: checkout, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', out], detached: true }); } finally { if (out !== undefined) closeSync(out); }
   if (link) child.on('exit', () => { try { unlinkSync(link); } catch { /* gone */ } });
+  let spawnError; child.once('error', e => { spawnError = e; });
+  try { onSpawn?.(child, { processGroup: true }); } catch (error) { await stopWorld({ pid: child.pid, graceMs: 1000 }); throw error; }
   let text = '';
   child.stdout.on('data', (d) => { text += d; });
   const t0 = Date.now();
   while (!/^ready /m.test(text)) {
-    if (child.exitCode != null) throw new Error(`run.sh ended (${child.exitCode}) before it was ready: ${tail(log ?? join(dir, 'run.log'))}`);
-    if (Date.now() - t0 > readyMs) { await stopWorld({ pid: child.pid }); throw new Error(`run.sh was not ready in ${readyMs / 1000} s`); }
+    if (spawnError) throw spawnError;
+    if (signal?.aborted) { await stopWorld({ pid: child.pid }); signal.throwIfAborted(); }
+    if (child.exitCode != null || child.signalCode != null) throw new Error(`run.sh ended (${child.exitCode}) before it was ready: ${tail(log ?? join(dir, 'run.log'))}`);
+    if (Date.now() >= until) { await stopWorld({ pid: child.pid }); throw new Error(`run.sh was not ready in ${readyMs / 1000} s`); }
     await sleep(200);
   }
   return { kind: 'v2', ...at, world: WORLD, dir, pid: child.pid, child, facts, template, bootMs: Date.now() - t0 };

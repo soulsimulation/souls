@@ -814,7 +814,11 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         .granted
         .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
     let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
-    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap());
+    let mut walk = Walk::new(
+        id,
+        Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        crate::bodies::WALK,
+    );
     let mut corners = BTreeSet::new();
     for t in 0..2_000i64 {
         let me = *b.runner.controller.body(id).unwrap();
@@ -1142,27 +1146,43 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
                 .unwrap(),
         )
         .unwrap();
-    let outside = {
-        let id = Id::new(Scope([0xca; 16]), 3).unwrap();
+    let on_ground = |n: u64, at: Vec3| {
+        let id = Id::new(Scope([0xca; 16]), n).unwrap();
         let frame = Frame {
             node: ground,
             slot: None,
         };
         let b = town.surfaces[&ground]
-            .place(id, frame, under, Quat::IDENTITY)
+            .place(id, frame, at, Quat::IDENTITY)
             .unwrap();
         (id, b)
     };
+    let outside = on_ground(3, under);
+    // #5063: another Soul on the open ground, 3 m farther out from the building.
+    let further = place
+        .position
+        .plus(
+            place
+                .orientation
+                .rotate(Vec3::new(
+                    i64::try_from(out).unwrap() * 1000 + 3_000_000,
+                    0,
+                    0,
+                ))
+                .unwrap(),
+        )
+        .unwrap();
+    let beside = on_ground(4, further);
     let split = town.split(1);
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: Arc::new(BTreeMap::from([below, on, outside])),
+        bodies: Arc::new(BTreeMap::from([below, on, outside, beside])),
         carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
         builds: Arc::new(
-            [below.0, on.0, outside.0]
+            [below.0, on.0, outside.0, beside.0]
                 .into_iter()
                 .map(|b| (b, Build::STANDARD))
                 .collect(),
@@ -1205,6 +1225,30 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     );
     assert!(high > reach, "4 m straight overhead: {high}");
     assert_eq!(low, 0, "1 m up, straight overhead");
+    // #5063: what a look or a point beyond its reach may be made at from afar, from the body's own floor only: a room
+    // of its storey, not one a storey up or a Soul there; from the open ground beside the building, the building but
+    // not a room inside it, behind its walls.
+    assert!(sight.seen(below.0, r0), "a room of its own storey");
+    assert!(!sight.seen(below.0, r1), "a room a storey up");
+    assert!(!sight.seen(below.0, on.0), "a Soul a storey up");
+    assert!(sight.seen(on.0, r1), "upstairs, its own storey's room");
+    assert!(
+        sight.seen(outside.0, building),
+        "the building, from the ground beside it"
+    );
+    assert!(
+        !sight.seen(outside.0, r0),
+        "a room behind the building's walls"
+    );
+    assert!(sight.seen(outside.0, beside.0), "a Soul on the open ground");
+    assert!(
+        !sight.seen(outside.0, below.0),
+        "a Soul inside, from outside"
+    );
+    assert!(
+        !sight.seen(below.0, outside.0),
+        "a Soul outside, from inside"
+    );
 }
 
 /// #4330, #4339: a move at a thing argument names that thing for viewers, unless it is in a closed container: the

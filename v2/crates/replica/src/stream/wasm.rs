@@ -146,36 +146,15 @@ impl WasmPlayer {
         }
     }
 
-    /// The motion samples of the part played last, every one in entry order (V6, #2715), as JSON:
-    /// `[[node, frame node, frame slot or null, at µs, x, y, z µm], ...]`, ids as the page keys them (`<scope hex>.<n>`).
+    /// The last part's motion samples in entry order, as JSON. The first seven columns retain their meanings:
+    /// `[[node, frame node, slot or null, at µs, x, y, z µm, [w, x, y, z]], ...]`.
+    /// The appended quaternion is the exact recorded orientation in that frame, integers with unit 2^30.
+    /// Ids use the page's `<scope hex>.<counter>` keys. No heading is inferred from position.
     pub fn samples(&self) -> String {
-        let key = |id: crate::ids::Id| {
-            format!("{}.{}", crate::encode::to_hex(&id.scope().0), id.counter())
-        };
-        let samples = match &self.0 {
+        super::sample_json::samples_json(match &self.0 {
             Copy::Legacy(p) => p.samples(),
             Copy::Public(p) => p.samples(),
-        };
-        let rows: Vec<String> = samples
-            .iter()
-            .map(|h| {
-                let p = h.pose.position;
-                format!(
-                    r#"["{}","{}",{},{},{},{},{}]"#,
-                    key(h.node),
-                    key(h.pose.frame.node),
-                    h.pose
-                        .frame
-                        .slot
-                        .map_or("null".to_owned(), |s| s.to_string()),
-                    h.at,
-                    p.x,
-                    p.y,
-                    p.z
-                )
-            })
-            .collect();
-        format!("[{}]", rows.join(","))
+        })
     }
 
     /// The event query (V1b, #3361): the named events of the part played last, as `[{1: name, 2: fields, 3: node, 4:
@@ -302,4 +281,24 @@ pub fn history_at(
         (5, int(b.length)),
     ]);
     crate::encode::encode(&Value::Map(out)).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// One validated public bundle's exact native-time node timeline. CBOR: {1: from µs, 2: initial nodes,
+/// 3: [{1: at µs, 2: replacement nodes, 3: removed ids}], 4: bundle start, 5: length, 6: to µs,
+/// 7: [records replayed, candidate node inspections, output node rows]}. Nodes have historyAt's shape.
+/// Memory is replay state plus input and requested changes. This is not mobile cost qualification.
+#[wasm_bindgen(js_name = historyTimeline)]
+pub fn history_timeline(
+    header: &[u8],
+    bundle: &[u8],
+    sha256: &[u8],
+    from: i64,
+    to: i64,
+) -> Result<Vec<u8>, JsError> {
+    let hash: [u8; 32] = sha256
+        .try_into()
+        .map_err(|_| JsError::new("a SHA-256 is 32 bytes"))?;
+    let timeline =
+        crate::history::timeline::Timeline::read(header, bundle, &hash, from, to).map_err(js)?;
+    crate::encode::encode(&timeline.to_value()).map_err(|e| JsError::new(&e.to_string()))
 }

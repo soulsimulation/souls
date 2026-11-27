@@ -619,7 +619,7 @@ struct Plan {
     /// Whether the rows made are in the state now (and the rows of the nodes gone out of it).
     added_in: bool,
     /// The nodes the delta takes out (a Soul's body retired, a thing removed), each with its old row's index and,
-    /// while the plan is in the state, that row; in index order. Never with rows made.
+    /// while the plan is in the state, that row; in index order.
     removed: Vec<(usize, Id, Value)>,
     timers: Option<Value>,
     links: Option<Value>,
@@ -633,6 +633,36 @@ impl Plan {
         i + self.added.iter().filter(|(at, _)| *at <= i).count()
             - self.removed.iter().filter(|(at, ..)| *at < i).count()
     }
+    /// Where the `k`th row made is once the rows made are in the state and the rows gone are out of it: before old
+    /// row `at`, after the rows made before it, less the rows gone before `at`.
+    fn made_at(&self, k: usize) -> usize {
+        let at = self.added[k].0;
+        at + k - self.removed.iter().filter(|(r, ..)| *r < at).count()
+    }
+    /// `enc`, the encodings of the node rows before the plan, made those of `state`, which holds the plan: the swapped
+    /// rows' new encodings, the rows gone taken out, then the rows made (T-late) put in where they are, the first
+    /// first. Each encoding is worked out before `enc` changes.
+    fn encodings_after(&self, enc: &mut Vec<Vec<u8>>, state: &Value) -> R<()> {
+        let rows = arr(field(map(state)?, 2)?)?;
+        let new: Vec<(usize, Vec<u8>)> = self
+            .rows
+            .iter()
+            .map(|(i, _)| Ok((*i, encoded(&rows[self.index_after(*i)])?)))
+            .collect::<R<_>>()?;
+        let made: Vec<(usize, Vec<u8>)> = (0..self.added.len())
+            .map(|k| Ok((self.made_at(k), encoded(&self.added[k].1)?)))
+            .collect::<R<_>>()?;
+        for (i, e) in new {
+            enc[i] = e;
+        }
+        for (at, ..) in self.removed.iter().rev() {
+            enc.remove(*at);
+        }
+        for (at, e) in made {
+            enc.insert(at, e);
+        }
+        Ok(())
+    }
     fn swap(&mut self, state: &mut Value) {
         let Value::Map(m) = state else {
             unreachable!("validated state")
@@ -641,11 +671,12 @@ impl Plan {
             std::mem::swap(v, &mut self.v1);
         }
         if let Some(Value::Array(nodes)) = m.get_mut(&2) {
-            // The rows replaced at their old indices: the rows made are taken out first, and put in after, the last
-            // first, so that each old index holds.
+            // The rows replaced at their old indices: the rows made are taken out first, and put in after, so that
+            // each old index holds. Put in, the rows gone go first, the last first, then the rows made, the first
+            // first, each where it ends ([`Plan::made_at`]); taken out, the other way round.
             if self.added_in {
-                for (k, (at, _)) in self.added.iter().enumerate().rev() {
-                    nodes.remove(at + k);
+                for k in (0..self.added.len()).rev() {
+                    nodes.remove(self.made_at(k));
                 }
                 // The rows gone back at their old indices, the first first, so that each old index holds.
                 for (at, _, row) in &mut self.removed {
@@ -656,11 +687,11 @@ impl Plan {
                 std::mem::swap(&mut nodes[*i], row);
             }
             if !self.added_in {
-                for (at, row) in self.added.iter().rev() {
-                    nodes.insert(*at, row.clone());
-                }
                 for (at, _, row) in self.removed.iter_mut().rev() {
                     *row = nodes.remove(*at);
+                }
+                for k in 0..self.added.len() {
+                    nodes.insert(self.made_at(k), self.added[k].1.clone());
                 }
             }
             self.added_in = !self.added_in;
@@ -676,16 +707,31 @@ impl Plan {
 
 /// Every node `validate` walks the frames of (live, opaque and in public flights), each with its parent, and the
 /// children of each (#4192): what a delta that moves nodes to new frames is checked against without the whole state.
+/// With them, the kinds the state's definitions name ([`defined_kinds`], #4954): a delta played in place never makes,
+/// changes or takes out a definition, so they hold while the frames are kept.
 #[derive(Default)]
 struct Frames {
     parent: BTreeMap<Id, Option<Id>>,
     children: BTreeMap<Id, BTreeSet<Id>>,
+    defined: BTreeSet<String>,
 }
 
 impl Frames {
-    fn of(state: &Value) -> R<Frames> {
+    fn of(state: &Value, zone: Id) -> R<Frames> {
         let m = map(state)?;
         let mut f = Frames::default();
+        // The root's live children that are definitions, read whole: few, as `validate` reads them.
+        let mut live = Vec::new();
+        for row in arr(field(m, 2)?)? {
+            let r = arr(row)?;
+            if r.len() == 2 && map(&r[1])?.get(&2).map(read_id).transpose()? == Some(zone) {
+                let n = NodeState::read(&r[1])?;
+                if crate::kinds::defined::is_definition(n.kind.as_str()) {
+                    live.push(n);
+                }
+            }
+        }
+        f.defined = defined_kinds(zone, live.iter());
         let mut add = |rows: &Value| -> R<()> {
             for row in arr(rows)? {
                 let r = arr(row)?;
@@ -721,7 +767,7 @@ impl Frames {
             self.children.entry(p).or_default().insert(id);
         }
     }
-    /// A node gone out of the state (it has no children: `in_place` takes out no other).
+    /// A node gone out of the state (`in_place` takes one out only with every node under it).
     fn remove(&mut self, id: Id) {
         if let Some(Some(old)) = self.parent.remove(&id)
             && let Some(c) = self.children.get_mut(&old)
@@ -784,8 +830,11 @@ impl Frames {
 /// public and owned by a live node; and rows of key 6, timers set, changed or cleared, each owned by a node of the
 /// state. A row of a node not in the state is a node made (T-late): checked as `validate` checks a node, its id in no
 /// other row, its frame walked as a moved node's. A row of key 2 with no value is a live node gone (a Soul's body
-/// retired, a thing removed): one no node, opaque or flying, has as its frame, that is not a definition, the root or of
-/// a kind the header does not pin, that owns no link and no timer left, and never in a delta that also makes nodes.
+/// retired, a thing removed, an activity ended): one that is not a definition or the root, that owns no link and no
+/// timer left, and that no node but one gone with it, opaque or flying, has as its frame (a node taken out with what
+/// is under it, the stream producer's cut of a remove). Nodes gone and nodes made can be in one delta (a crowd's
+/// activities ending and starting in one cut). Every node row's kind is pinned by
+/// the header or by a definition in the state (#4954: the group gestures a release adds are pinned so).
 /// No flight changes, so the whole-state checks read nothing that changes but these rows. Its plan; none when the delta
 /// is any other, or when it is unsure: the whole path then decides. (Before a node gone was played in place, every part
 /// that took one out cloned and checked the whole state: about 100 ms a part on Eden's 10,000 nodes, so a viewer
@@ -810,6 +859,22 @@ fn in_place(
     let mut ids = BTreeSet::new();
     let mut moved = BTreeMap::new();
     let mut removed: Vec<(usize, Id, Value)> = Vec::new();
+    // The kinds the state's definitions name (#4954: a Soul Action the release added is one), from the frames' cache,
+    // read only when a row's kind is one the header does not pin: a row of such a kind plays in place as any other.
+    let mut defined: Option<BTreeSet<String>> = None;
+    let mut kinds = |kind: &Name| -> R<BTreeSet<String>> {
+        if pinned(header, &BTreeSet::new(), kind) {
+            return Ok(BTreeSet::new());
+        }
+        if defined.is_none() {
+            let mut f = frames.borrow_mut();
+            if f.is_none() {
+                *f = Some(Frames::of(state, header.zone)?);
+            }
+            defined = f.as_ref().map(|f| f.defined.clone());
+        }
+        Ok(defined.clone().unwrap_or_default())
+    };
     for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
         let r = arr(row)?;
         if !(1..=2).contains(&r.len()) {
@@ -819,7 +884,6 @@ fn in_place(
         if !ids.insert(id) {
             return Ok(None);
         }
-        let none = BTreeSet::new();
         if r.len() == 1 {
             // A node gone: a live one, not the root, a definition or of a kind the header does not pin.
             let Ok(i) = row_position(rows, id)? else {
@@ -827,7 +891,7 @@ fn in_place(
             };
             let old = NodeState::read(&arr(&rows[i])?[1])?;
             if id == header.zone
-                || !pinned(header, &none, &old.kind)
+                || !pinned(header, &kinds(&old.kind)?, &old.kind)
                 || crate::kinds::defined::is_definition(old.kind.as_str())
             {
                 return Ok(None);
@@ -846,8 +910,9 @@ fn in_place(
             // any made before it.
             Err(at) => {
                 let new = NodeState::read(&r[1])?;
+                let defined = kinds(&new.kind)?;
                 if id == header.zone
-                    || !pinned(header, &none, &new.kind)
+                    || !pinned(header, &defined, &new.kind)
                     || crate::kinds::defined::is_definition(new.kind.as_str())
                     || added.last().is_some_and(|(_, last, _)| *last >= id)
                     || row_index(arr(field(m, 8)?)?, id)?.is_some()
@@ -859,7 +924,7 @@ fn in_place(
                 {
                     return Ok(None);
                 }
-                validate_node(header, &none, id, &new)?;
+                validate_node(header, &defined, id, &new)?;
                 moved.insert(id, new.parent);
                 added.push((at, id, Value::Array(vec![id.to_value(), r[1].clone()])));
                 continue;
@@ -869,9 +934,11 @@ fn in_place(
             NodeState::read(&arr(&rows[i])?[1])?,
             NodeState::read(&r[1])?,
         );
-        // A kind the header does not pin, or a definition, is checked against the whole state (#3697).
+        // A kind neither the header nor a definition in the state pins, or a definition, is checked against the whole
+        // state (#3697).
+        let defined = kinds(&new.kind)?;
         if id == header.zone
-            || !pinned(header, &none, &new.kind)
+            || !pinned(header, &defined, &new.kind)
             || crate::kinds::defined::is_definition(old.kind.as_str())
             || crate::kinds::defined::is_definition(new.kind.as_str())
         {
@@ -880,14 +947,11 @@ fn in_place(
         if old.parent != new.parent || old.slot != new.slot {
             moved.insert(id, new.parent);
         }
-        validate_node(header, &none, id, &new)?;
+        validate_node(header, &defined, id, &new)?;
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
     }
     let made: BTreeSet<Id> = added.iter().map(|(_, id, _)| *id).collect();
     let gone: BTreeSet<Id> = removed.iter().map(|(_, id, _)| *id).collect();
-    if !gone.is_empty() && !added.is_empty() {
-        return Ok(None);
-    }
     let live = |id: Id| -> R<bool> {
         Ok(made.contains(&id) || (!gone.contains(&id) && row_index(rows, id)?.is_some()))
     };
@@ -898,13 +962,15 @@ fn in_place(
     if !gone.is_empty() {
         let mut f = frames.borrow_mut();
         if f.is_none() {
-            *f = Some(Frames::of(state)?);
+            *f = Some(Frames::of(state, header.zone)?);
         }
         let f = f.as_ref().expect("built");
-        if gone
-            .iter()
-            .any(|id| f.children.get(id).is_some_and(|c| !c.is_empty()))
-        {
+        // A node gone with what is under it: each of its children, live, opaque or flying, is gone too.
+        if gone.iter().any(|id| {
+            f.children
+                .get(id)
+                .is_some_and(|c| c.iter().any(|c| !gone.contains(c)))
+        }) {
             return Ok(None);
         }
     }
@@ -919,7 +985,7 @@ fn in_place(
     if !moved.is_empty() {
         let mut f = frames.borrow_mut();
         if f.is_none() {
-            *f = Some(Frames::of(state)?);
+            *f = Some(Frames::of(state, header.zone)?);
         }
         if !f.as_ref().is_some_and(|f| f.allow(&moved)) {
             return Ok(None);
@@ -1092,6 +1158,119 @@ fn streamed_digest(state: &Value, enc: &[Vec<u8>], plan: Option<&Plan>) -> R<Vec
     Ok(h.finish().to_vec())
 }
 
+/// Read-only history observation state. It uses the stream reader's validated plans and row
+/// encodings, without inventing a stream part or relaxing the genuine history cursor checks.
+/// The current SHA-256 format still hashes every cached byte; unsupported deltas use whole validation.
+pub struct ProjectionReader<'a> {
+    header: &'a Header,
+    state: Value,
+    digest: Vec<u8>,
+    enc: Option<Vec<Vec<u8>>>,
+    ordered: bool,
+    frames: std::cell::RefCell<Option<Frames>>,
+    pub fast_rows: usize,
+    pub whole_rows: usize,
+}
+impl<'a> ProjectionReader<'a> {
+    pub fn new(header: &'a Header, state: Value) -> R<Self> {
+        validate(header, &state)?;
+        Ok(Self {
+            header,
+            digest: digest(&state)?,
+            ordered: Self::ordered(&state)?,
+            state,
+            enc: None,
+            frames: std::cell::RefCell::new(None),
+            fast_rows: 0,
+            whole_rows: 0,
+        })
+    }
+    // Legacy validated projections may retain unsorted array rows. Binary-search plans require
+    // sorted live/opaque ids; the whole path preserves acceptance and canonicalizes changed rows.
+    fn ordered(state: &Value) -> R<bool> {
+        for key in [2, 8] {
+            let mut previous = None;
+            for row in arr(field(map(state)?, key)?)? {
+                let id = read_id(&arr(row)?[0])?;
+                if previous.is_some_and(|p| p >= id) {
+                    return Ok(false);
+                }
+                previous = Some(id);
+            }
+        }
+        Ok(true)
+    }
+    pub fn state(&self) -> &Value {
+        &self.state
+    }
+    pub fn digest(&self) -> &[u8] {
+        &self.digest
+    }
+    /// Atomically accept an integrity-bound history row. Returns true for the cached plan path.
+    pub fn apply(&mut self, delta: &Value, before: &[u8], after: &[u8], sequence: u64) -> R<bool> {
+        if before != self.digest
+            || !matches!(map(&self.state)?.get(&1),Some(Value::Uint(v)) if *v<=sequence)
+            || !matches!(map(delta)?.get(&1),Some(Value::Uint(v)) if sequence.checked_add(1)==Some(*v))
+        {
+            return bad("history observation prior digest or sequence");
+        }
+        let plan = if self.ordered {
+            in_place(self.header, &self.state, map(delta)?, &self.frames)?
+        } else {
+            None
+        };
+        if let Some(mut plan) = plan {
+            if self.enc.is_none() {
+                self.enc = Some(
+                    arr(field(map(&self.state)?, 2)?)?
+                        .iter()
+                        .map(encoded)
+                        .collect::<R<_>>()?,
+                );
+            }
+            let actual = streamed_digest(
+                &self.state,
+                self.enc.as_deref().unwrap_or_default(),
+                Some(&plan),
+            )?;
+            if actual != after {
+                return bad("history observation result digest");
+            }
+            plan.swap(&mut self.state);
+            if let Err(e) = plan.encodings_after(self.enc.as_mut().expect("created"), &self.state) {
+                plan.swap(&mut self.state);
+                self.enc = None;
+                self.frames.replace(None);
+                return Err(e);
+            }
+            if let Some(f) = self.frames.borrow_mut().as_mut() {
+                for (id, to) in &plan.moved {
+                    f.reparent(*id, *to);
+                }
+                for (_, id, _) in &plan.removed {
+                    f.remove(*id);
+                }
+            }
+            self.digest = actual;
+            self.fast_rows += 1;
+            Ok(true)
+        } else {
+            let next = apply_observation(self.header, &self.state, delta)?;
+            let actual = digest(&next)?;
+            if actual != after {
+                return bad("history observation result digest");
+            }
+            self.ordered = Self::ordered(&next)?;
+            self.state = next;
+            self.digest = actual;
+            self.enc = None;
+            self.frames.replace(None);
+            self.whole_rows += 1;
+            Ok(false)
+        }
+    }
+}
+
 pub struct PublicPlayer {
     header: Header,
     baseline: Vec<u8>,
@@ -1153,17 +1332,22 @@ impl PublicPlayer {
     pub fn digest(&self) -> &[u8] {
         &self.digest
     }
+    /// Whether the state holds a live node row for `id`.
+    pub fn holds(&self, id: Id) -> R<bool> {
+        Ok(row_index(arr(field(map(&self.state)?, 2)?)?, id)?.is_some())
+    }
     /// The delta from the state to one at version `next` whose node rows `rows`, timers `timers` and links `links` (by
     /// id; `None`, gone) replace the live ones, those equal to the live ones left out (#3799, #4192): as [`context`]
-    /// works it out from the two whole states. A row of a node not live here is a node made (T-late) only when its id
+    /// works it out from the two whole states. A node row `None` is a node taken out: its row gone when the state holds
+    /// it, else nothing (one never public). A row of a node not live here is a node made (T-late) only when its id
     /// is in `made`, the nodes the caller's cut made, any link or timer on them among `links` and `timers` (set in the
     /// same cut: an activity offered, its node and its member link); any other is a node that comes back (out of a
     /// closed container, #3948) with rows this delta does not hold. None when it cannot be played in place (such a
-    /// row, a gone node, a frame walk `validate` would refuse, no new version); the caller then works it out whole.
+    /// row, a frame walk `validate` would refuse, no new version); the caller then works it out whole.
     pub fn row_delta(
         &self,
         next: u64,
-        mut rows: Vec<(Id, Value)>,
+        mut rows: Vec<(Id, Option<Value>)>,
         timers: Vec<(Id, Option<Value>)>,
         links: Vec<(Id, Option<Value>)>,
         made: &BTreeSet<Id>,
@@ -1175,13 +1359,16 @@ impl PublicPlayer {
         let live = arr(field(map(&self.state)?, 2)?)?;
         let mut changed = Vec::new();
         for (id, v) in rows {
-            let changes = match row_index(live, id)? {
-                Some(i) => arr(&live[i])?[1] != v,
-                None if made.contains(&id) => true,
-                None => return Ok(None),
-            };
-            if changes {
-                changed.push(Value::Array(vec![id.to_value(), v]));
+            match (row_index(live, id)?, v) {
+                (Some(i), Some(v)) if arr(&live[i])?[1] != v => {
+                    changed.push(Value::Array(vec![id.to_value(), v]));
+                }
+                (Some(_), Some(_)) | (None, None) => {}
+                (Some(_), None) => changed.push(Value::Array(vec![id.to_value()])),
+                (None, Some(v)) if made.contains(&id) => {
+                    changed.push(Value::Array(vec![id.to_value(), v]));
+                }
+                (None, Some(_)) => return Ok(None),
             }
         }
         let mut delta = BTreeMap::from([(1, Value::Uint(next))]);
@@ -1361,7 +1548,6 @@ impl PublicPlayer {
             in_place_digest,
             old_version,
             &flying,
-            check,
         );
         match (r, whole) {
             (Ok((digest, changes, part, version)), whole) => {
@@ -1373,29 +1559,8 @@ impl PublicPlayer {
                         self.frames.replace(None);
                     }
                     (None, Some(p)) => {
-                        // The swapped rows' new encodings.
-                        let rows = arr(field(map(&self.state)?, 2)?)?;
-                        let new: Vec<(usize, Vec<u8>)> = p
-                            .rows
-                            .iter()
-                            .map(|(i, _)| Ok((*i, encoded(&rows[p.index_after(*i)])?)))
-                            .collect::<R<_>>()?;
-                        // The rows made (T-late), each at its old index, put in the last first as in the state.
-                        let made: Vec<(usize, Vec<u8>)> = p
-                            .added
-                            .iter()
-                            .map(|(at, row)| Ok((*at, encoded(row)?)))
-                            .collect::<R<_>>()?;
                         if let Some(enc) = self.enc.as_mut() {
-                            for (i, e) in new {
-                                enc[i] = e;
-                            }
-                            for (at, e) in made.into_iter().rev() {
-                                enc.insert(at, e);
-                            }
-                            for (at, ..) in p.removed.iter().rev() {
-                                enc.remove(*at);
-                            }
+                            p.encodings_after(enc, &self.state)?;
                         }
                         if p.links.is_some() || !p.removed.is_empty() {
                             self.incident.replace(None);
@@ -1470,8 +1635,7 @@ impl PublicPlayer {
         in_place_digest: Option<Vec<u8>>,
         old_version: u64,
         flying: &BTreeSet<Id>,
-        effects: bool,
-    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Option<Part>, u64)> {
+    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Part, u64)> {
         let next = whole.unwrap_or(&self.state);
         let next_digest = match in_place_digest {
             Some(d) => d,
@@ -1481,12 +1645,8 @@ impl PublicPlayer {
             return bad("context result digest");
         }
         let version = uint(field(map(next)?, 1)?)?;
-        // #3822: a part played deferred is not shown, so its entries are not read: the checks on them are skipped.
-        let part = match effects {
-            true => Some(self.check_effects(sp, c, old_version, version)?),
-            false if sp.from > sp.to || version < old_version => return bad("public part range"),
-            false => None,
-        };
+        // Only the state digest is deferred: samples and events still come from a fully checked public Part.
+        let part = self.check_effects(sp, c, old_version, version)?;
         // Whole: the old state and the next, by id. In place: the same ids before and after, and the swapped rows.
         let (old_nodes, new_nodes) = match whole {
             Some(next) => (
@@ -1630,13 +1790,13 @@ impl PublicPlayer {
     fn finish(
         &mut self,
         sp: StreamPart,
-        part: Option<Part>,
+        part: Part,
         changes: BTreeMap<Id, u64>,
         record: u64,
         version: u64,
     ) -> R<Played> {
         self.changed.extend(changes);
-        let effects = part.map(|p| p.effects).unwrap_or_default();
+        let effects = part.effects;
         self.samples = effects
             .iter()
             .flat_map(|e| match &e.body {
@@ -2110,39 +2270,41 @@ mod gone_in_place_tests {
         Id::new(Scope([95; 16]), n).unwrap()
     }
 
+    /// A public body `n` standing on `parent`.
+    fn body(header: &Header, n: u64, parent: Id) -> NodeState {
+        let Value::Map(mut local) = (Pose {
+            frame: Frame {
+                node: parent,
+                slot: None,
+            },
+            position: Vec3::new(0, 0, 0),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: parent,
+                height: 0,
+            },
+        })
+        .to_value() else {
+            unreachable!()
+        };
+        local.remove(&1);
+        NodeState {
+            kind: header.kinds[0].clone(),
+            parent: Some(parent),
+            slot: None,
+            audience: Audience::Everyone,
+            fields: BTreeMap::from([(30, Value::Uint(n))]),
+            place: Some(Value::Map(local)),
+            motion: None,
+        }
+    }
+
     /// The zone with public bodies 1 and 2 beside each other, 3 inside 2, and link 6 owned by 1 (to 2).
     fn world(header: &Header) -> State {
         let mut state = State::start(header.zone, header.kinds[0].clone());
         state.next = 40;
         for (n, parent) in [(1, header.zone), (2, header.zone), (3, id(2))] {
-            let Value::Map(mut local) = (Pose {
-                frame: Frame {
-                    node: parent,
-                    slot: None,
-                },
-                position: Vec3::new(0, 0, 0),
-                orientation: Quat::IDENTITY,
-                support: Support::Surface {
-                    surface: parent,
-                    height: 0,
-                },
-            })
-            .to_value() else {
-                unreachable!()
-            };
-            local.remove(&1);
-            state.nodes.insert(
-                id(n),
-                NodeState {
-                    kind: header.kinds[0].clone(),
-                    parent: Some(parent),
-                    slot: None,
-                    audience: Audience::Everyone,
-                    fields: BTreeMap::from([(30, Value::Uint(n))]),
-                    place: Some(Value::Map(local)),
-                    motion: None,
-                },
-            );
+            state.nodes.insert(id(n), body(header, n, parent));
         }
         state.links.insert(
             id(6),
@@ -2203,6 +2365,47 @@ mod gone_in_place_tests {
         assert_eq!(s, old, "swapped back, the state before");
     }
 
+    /// #4954: a node made of a kind a definition in the state pins, not the header (a group gesture a release added),
+    /// plays in place to the whole path's state; on a state with no such definition it is left to the whole path.
+    #[test]
+    fn a_node_of_a_kind_the_state_defines_is_played_in_place() {
+        use crate::kinds::defined::{ENTRY, NAME, kind};
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let pin = Name::new(&format!("eden:wave@1220{}", "ab".repeat(32))).unwrap();
+        let mut before = world(&header);
+        let mut definition = before.nodes[&id(1)].clone();
+        definition.kind = Name::new(&kind().0).unwrap();
+        definition.fields = BTreeMap::from([
+            (NAME, Value::Text(pin.clone())),
+            (ENTRY, Value::Bytes(Vec::new())),
+        ]);
+        before.nodes.insert(id(8), definition);
+        let mut after = before.clone();
+        after.next += 1;
+        let mut made = before.nodes[&id(1)].clone();
+        made.kind = pin;
+        after.nodes.insert(id(7), made);
+        let delta = delta_of(&header, &before, &after);
+        let (old, new) = (
+            project(&header, &before).unwrap(),
+            project(&header, &after).unwrap(),
+        );
+        let mut plan = in_place(&header, &old, &delta, &std::cell::RefCell::new(None))
+            .unwrap()
+            .expect("played in place");
+        let mut s = old.clone();
+        plan.swap(&mut s);
+        assert_eq!(s, new, "the whole path's state");
+        before.nodes.remove(&id(8));
+        let bare = project(&header, &before).unwrap();
+        assert!(
+            in_place(&header, &bare, &delta, &std::cell::RefCell::new(None))
+                .unwrap()
+                .is_none(),
+            "no definition: the whole path"
+        );
+    }
+
     /// Two nodes gone: in id order they play in place to the whole path's state; with their rows reversed they are
     /// left to the whole path, which makes the same state.
     #[test]
@@ -2252,7 +2455,7 @@ mod gone_in_place_tests {
     }
 
     /// A node gone that something still needs is left to the whole path: one with a node inside it, one owning a link
-    /// left, one owning a timer left, and one gone in a delta that also makes a node.
+    /// left and one owning a timer left.
     #[test]
     fn a_node_gone_that_is_still_needed_is_left_to_the_whole_path() {
         let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
@@ -2312,23 +2515,461 @@ mod gone_in_place_tests {
             .is_none(),
             "a node owning a timer left"
         );
+    }
+
+    /// The stream producer's cut of removes beside nodes made (a crowd's gestures ending and starting in one cut): a
+    /// node gone with the node inside it, the link to it and its timer, and nodes made before, between and after the
+    /// rows gone, in one delta. It plays in place to the whole path's state, digest and row encodings, and swapped
+    /// back it is the state before. A node made inside one gone is left to the whole path.
+    #[test]
+    fn nodes_gone_with_what_is_under_them_beside_nodes_made_play_in_place() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let mut before = world(&header);
+        for (n, parent) in [(10, header.zone), (11, id(10)), (20, header.zone)] {
+            before.nodes.insert(id(n), body(&header, n, parent));
+        }
+        before.links.insert(
+            id(12),
+            LinkState {
+                ty: header.kinds[0].clone(),
+                ends: [id(1), id(11)],
+                owner: End::First,
+                audience: Audience::Everyone,
+            },
+        );
+        before.timers.insert(
+            id(13),
+            TimerState {
+                node: id(11),
+                due: 5,
+                name: header.kinds[0].clone(),
+            },
+        );
         let mut after = before.clone();
         after.next += 1;
-        after.links.clear();
-        let mut made = after.nodes[&id(2)].clone();
-        made.fields.insert(30, Value::Uint(7));
-        after.nodes.insert(id(7), made);
-        after.nodes.remove(&id(1));
-        assert!(
-            in_place(
-                &header,
-                &old,
-                &delta_of(&header, &before, &after),
-                &frames()
-            )
+        for n in [10, 11] {
+            after.nodes.remove(&id(n));
+        }
+        after.links.remove(&id(12));
+        after.timers.remove(&id(13));
+        for n in [4, 15, 30] {
+            after.nodes.insert(id(n), body(&header, n, header.zone));
+        }
+        after
+            .nodes
+            .get_mut(&id(3))
             .unwrap()
-            .is_none(),
-            "a node made beside it"
+            .fields
+            .insert(30, Value::Uint(99));
+        let delta = delta_of(&header, &before, &after);
+        let (old, new) = (
+            project(&header, &before).unwrap(),
+            project(&header, &after).unwrap(),
         );
+        let encodings = |s: &Value| -> Vec<Vec<u8>> {
+            arr(field(map(s).unwrap(), 2).unwrap())
+                .unwrap()
+                .iter()
+                .map(|r| encoded(r).unwrap())
+                .collect()
+        };
+        let frames = std::cell::RefCell::new(None);
+        let mut plan = in_place(&header, &old, &delta, &frames)
+            .unwrap()
+            .expect("played in place");
+        assert_eq!((plan.removed.len(), plan.added.len()), (2, 3));
+        let mut enc = encodings(&old);
+        assert_eq!(
+            streamed_digest(&old, &enc, Some(&plan)).unwrap(),
+            digest(&new).unwrap(),
+            "the whole path's digest"
+        );
+        let mut s = old.clone();
+        plan.swap(&mut s);
+        assert_eq!(s, new, "the whole path's state");
+        assert_eq!(
+            s,
+            apply_observation(&header, &old, &Value::Map(delta.clone())).unwrap()
+        );
+        plan.encodings_after(&mut enc, &s).unwrap();
+        assert_eq!(enc, encodings(&new), "the rows' encodings after");
+        plan.swap(&mut s);
+        assert_eq!(s, old, "swapped back, the state before");
+        // A node made inside a node gone.
+        let mut inside = delta.clone();
+        let Some(Value::Array(rows)) = inside.get_mut(&2) else {
+            unreachable!()
+        };
+        let row = Value::Array(vec![
+            id(14).to_value(),
+            body(&header, 14, id(10)).to_value(),
+        ]);
+        rows.push(row);
+        rows.sort_by_key(|r| read_id(&arr(r).unwrap()[0]).unwrap());
+        assert!(
+            in_place(&header, &old, &inside, &std::cell::RefCell::new(None))
+                .unwrap()
+                .is_none(),
+            "a node made inside one gone"
+        );
+    }
+}
+
+#[cfg(test)]
+mod deferred_effect_tests {
+    use super::*;
+    use crate::effects::{
+        Actor, Cause, ChangeRec, Effect, Envelope, Event, FIXTURE_HEADER, fixture_bytes,
+    };
+    use crate::ids::Scope;
+    use crate::pose::{Frame, Owner, Quat, Support, Vec3};
+
+    fn id(n: u64) -> Id {
+        Id::new(Scope([97; 16]), n).unwrap()
+    }
+    fn pose(root: Id, n: u64, step: u64) -> Pose {
+        let q = Quat::from_yaw_mdeg(13_000 * step as i64).unwrap().parts();
+        Pose {
+            frame: Frame {
+                node: root,
+                slot: None,
+            },
+            position: Vec3::new(n as i64 * 2_000_000, 0, step as i64 * 20_000),
+            orientation: Quat::new(q[0], q[2], 0, 0).unwrap(),
+            support: Support::Surface {
+                surface: root,
+                height: 0,
+            },
+        }
+    }
+    fn effect(
+        sequence: u64,
+        node: Id,
+        at: i64,
+        changes: Vec<Change>,
+        events: Option<Vec<Event>>,
+    ) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence,
+                at,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node,
+            },
+            body: Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: BTreeMap::new(),
+                    })
+                    .collect(),
+            ),
+            events,
+            rest: BTreeMap::new(),
+        }
+    }
+    // Construct ordinary canonical effects, apply each complete Part before making its authorized projection/context.
+    fn fixture(bodies: u64, moving: u64, count: u64) -> (Header, Vec<u8>, Vec<Vec<u8>>) {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let mut state = State::start(header.zone, header.kinds[0].clone());
+        let creates = (1..=bodies)
+            .map(|n| Change::Create {
+                node: id(n),
+                kind: header.kinds[2].clone(),
+                pose: pose(header.zone, n, 0),
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            })
+            .collect();
+        let initial = Part::of_effects(
+            header.hash().to_bytes(),
+            vec![effect(0, header.zone, 0, creates, None)],
+        )
+        .unwrap();
+        state.apply(&header, &initial).unwrap();
+        let base = baseline(&header, &state, state.next).unwrap();
+        let mut parts = Vec::new();
+        for step in 1..=count {
+            let before = project(&header, &state).unwrap();
+            let start = state.next;
+            let at = step as i64 * 500_000;
+            let effects = (1..=moving)
+                .map(|n| {
+                    let motion = HandOff {
+                        node: id(n),
+                        at,
+                        from: Owner::Mover,
+                        to: Owner::Mover,
+                        pose: pose(header.zone, n, step),
+                        linear: Vec3::new(0, 0, 40_000),
+                        angular: Vec3::new(1000, 0, 0),
+                    };
+                    let record = Value::Map(BTreeMap::from([
+                        (1, id(n).to_value()),
+                        (2, Value::Bytes(b"souls:hold_hand".to_vec())),
+                        (7, Value::Uint(500_000)),
+                        (8, Value::Array(vec![Value::Uint(700_000)])),
+                        (
+                            9,
+                            Value::Map(BTreeMap::from([
+                                (1, Value::Uint(at as u64)),
+                                (2, Value::Bytes(b"released".to_vec())),
+                            ])),
+                        ),
+                    ]));
+                    let event = Event {
+                        name: Name::new("souls:form-move").unwrap(),
+                        fields: BTreeMap::from([
+                            (1, id(bodies + 1).to_value()),
+                            (2, id(n).to_value()),
+                            (3, record),
+                        ]),
+                        changes: vec![0],
+                        rest: BTreeMap::new(),
+                    };
+                    effect(
+                        start + n - 1,
+                        id(n),
+                        at,
+                        vec![Change::Motion(motion)],
+                        Some(vec![event]),
+                    )
+                })
+                .collect();
+            let part = Part::of_effects(header.hash().to_bytes(), effects).unwrap();
+            state.apply(&header, &part).unwrap();
+            let after = project(&header, &state).unwrap();
+            let changed: Vec<_> = (1..=moving).map(|n| (id(n), start + n)).collect();
+            let ctx = context(&base, &before, &after, state.next, &[], &changed).unwrap();
+            let sp = StreamPart {
+                number: step - 1,
+                from: at - 500_000,
+                to: at,
+                first: start,
+                entries: moving,
+                part: part.stored().to_vec(),
+                hash: Some(digest(&after).unwrap()),
+                gaps: Vec::new(),
+                carried: Vec::new(),
+            };
+            let mut wire = read_map(&sp.to_bytes().unwrap(), "fixture").unwrap();
+            wire.insert(10, Value::Bytes(ctx));
+            parts.push(encoded(&Value::Map(wire)).unwrap());
+        }
+        (header, base, parts)
+    }
+
+    #[test]
+    fn deferred_parts_keep_checked_samples_and_events_across_verify_and_generation() {
+        let (header, base, parts) = fixture(3, 3, 4);
+        let mut checked = PublicPlayer::start(header.stored(), &base).unwrap();
+        let mut deferred = PublicPlayer::start(header.stored(), &base).unwrap();
+        let mut handoff = PublicPlayer::start(header.stored(), &base).unwrap();
+        for (i, part) in parts.iter().enumerate() {
+            handoff.play_deferred(part).unwrap();
+            checked.play(part).unwrap();
+            if i == 3 {
+                deferred.play(part).unwrap();
+            } else {
+                deferred.play_deferred(part).unwrap();
+            }
+            assert_eq!(
+                deferred.samples(),
+                checked.samples(),
+                "all full HandOff fields in original order, part {i}"
+            );
+            assert_eq!(
+                deferred.events(),
+                checked.events(),
+                "move records and release fields, part {i}"
+            );
+            assert_eq!(deferred.samples().len(), 3);
+            assert_eq!(deferred.events().len(), 3);
+            assert_eq!(deferred.state(), checked.state());
+            assert_eq!(deferred.digest(), checked.digest());
+            assert_eq!(deferred.record(), checked.record());
+            assert_eq!(deferred.next(), checked.next());
+            if i == 1 {
+                assert!(deferred.unverified);
+                deferred.verify().unwrap();
+                assert!(!deferred.unverified);
+            }
+        }
+        assert!(!deferred.unverified);
+        assert_eq!(deferred.hash().unwrap(), checked.hash().unwrap());
+        let generation = [19; 32];
+        let digest = deferred.digest().to_vec();
+        assert!(handoff.unverified);
+        assert_eq!(
+            handoff.cross(&generation, &[0; 32]).unwrap_err().name,
+            "stream-handoff-state"
+        );
+        assert_eq!(
+            handoff.next(),
+            4,
+            "a refused handoff does not advance the generation"
+        );
+        handoff.cross(&generation, &digest).unwrap();
+        assert!(!handoff.unverified, "cross verifies all deferred state");
+        assert_eq!(handoff.next(), 0);
+        deferred.cross(&generation, &digest).unwrap();
+        assert_eq!(deferred.next(), 0);
+        assert_eq!(
+            deferred.samples(),
+            checked.samples(),
+            "handoff invents no samples"
+        );
+        assert_eq!(deferred.events(), checked.events());
+    }
+
+    fn corrupt_part(bytes_: &[u8], which: u64) -> Vec<u8> {
+        let mut wire = read_map(bytes_, "fixture").unwrap();
+        let mut sp = StreamPart::read(bytes_).unwrap();
+        let mut raw = read_map(&sp.part, "effects").unwrap();
+        let Value::Array(effects) = raw.get_mut(&2).unwrap() else {
+            unreachable!()
+        };
+        let Value::Map(e) = &mut effects[0] else {
+            unreachable!()
+        };
+        match which {
+            0 => {
+                e.insert(
+                    5,
+                    Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id(1).to_value())])),
+                );
+            }
+            1 => {
+                e.insert(
+                    8,
+                    Value::Array(vec![Value::Map(BTreeMap::from([(1, Value::Uint(42))]))]),
+                );
+            }
+            2 => {
+                e.insert(1, Value::Uint(999_999));
+            }
+            3 => {
+                sp.entries += 1;
+                wire.insert(5, Value::Uint(sp.entries));
+            }
+            _ => unreachable!(),
+        }
+        sp.part = encoded(&Value::Map(raw)).unwrap();
+        wire.insert(6, Value::Bytes(super::super::lz::pack(&sp.part)));
+        encoded(&Value::Map(wire)).unwrap()
+    }
+
+    #[test]
+    fn deferred_refusal_rolls_back_state_cursors_and_previous_outputs() {
+        let (header, base, parts) = fixture(2, 2, 3);
+        for whole in [false, true] {
+            for which in 0..4 {
+                let mut p = PublicPlayer::start(header.stored(), &base).unwrap();
+                p.play_deferred(&parts[0]).unwrap();
+                let saved = (
+                    p.state.clone(),
+                    p.digest.clone(),
+                    p.next,
+                    p.record,
+                    p.samples.clone(),
+                    p.events.clone(),
+                    p.changed.clone(),
+                    p.unverified,
+                );
+                let mut bad = corrupt_part(&parts[1], which);
+                if whole {
+                    // A whole-state-only delta with unchanged time exercises the non-in-place transaction too.
+                    let mut wire = read_map(&bad, "fixture").unwrap();
+                    let mut c = read_map(bytes(&wire[&10]).unwrap(), "context").unwrap();
+                    let Value::Map(delta) = c.get_mut(&5).unwrap() else {
+                        unreachable!()
+                    };
+                    delta.insert(7, Value::Array(Vec::new()));
+                    wire.insert(10, Value::Bytes(encoded(&Value::Map(c)).unwrap()));
+                    bad = encoded(&Value::Map(wire)).unwrap();
+                }
+                let refused = p.play_deferred(&bad).unwrap_err();
+                if which == 0 {
+                    assert_eq!(refused.detail, "private effect");
+                }
+                assert_eq!(
+                    (
+                        p.state.clone(),
+                        p.digest.clone(),
+                        p.next,
+                        p.record,
+                        p.samples.clone(),
+                        p.events.clone(),
+                        p.changed.clone(),
+                        p.unverified
+                    ),
+                    saved
+                );
+                p.play_deferred(&parts[1]).unwrap();
+                p.play(&parts[2]).unwrap();
+                p.verify().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn deferred_digest_claim_is_still_refused_by_verify_and_handoff() {
+        let (header, base, parts) = fixture(2, 2, 1);
+        let mut wire = read_map(&parts[0], "fixture").unwrap();
+        let mut c = read_map(bytes(&wire[&10]).unwrap(), "context").unwrap();
+        c.insert(4, Value::Bytes(vec![11; 32]));
+        wire.insert(7, Value::Bytes(vec![11; 32]));
+        wire.insert(10, Value::Bytes(encoded(&Value::Map(c)).unwrap()));
+        let mut p = PublicPlayer::start(header.stored(), &base).unwrap();
+        p.play_deferred(&encoded(&Value::Map(wire)).unwrap())
+            .unwrap();
+        assert!(p.unverified, "state hashing remains deferred");
+        assert_eq!(
+            p.samples().len(),
+            2,
+            "structurally validated effects remain available"
+        );
+        assert_eq!(p.verify().unwrap_err().name, "stream-digest");
+        assert_eq!(
+            p.cross(&[19; 32], &[11; 32]).unwrap_err().name,
+            "stream-digest"
+        );
+        assert_eq!(
+            p.next(),
+            1,
+            "a failed digest never installs another generation"
+        );
+        assert!(p.unverified);
+    }
+
+    #[test]
+    fn validated_500_body_stream_keeps_all_samples_and_can_export_cost_fixture() {
+        for (name, moving) in [("even", 500), ("uneven", 10)] {
+            let (header, base, parts) = fixture(500, moving, 20);
+            let mut checked = PublicPlayer::start(header.stored(), &base).unwrap();
+            let mut deferred = PublicPlayer::start(header.stored(), &base).unwrap();
+            for part in &parts {
+                checked.play(part).unwrap();
+                deferred.play_deferred(part).unwrap();
+                assert_eq!(deferred.samples(), checked.samples());
+                assert_eq!(deferred.events(), checked.events());
+                assert_eq!(deferred.samples().len() as u64, moving);
+            }
+            deferred.verify().unwrap();
+            assert_eq!(deferred.state(), checked.state());
+            assert_eq!(deferred.digest(), checked.digest());
+            if let Some(dir) = std::env::var_os("DEFERRED_FIXTURE_OUT") {
+                let dir = std::path::PathBuf::from(dir).join(name);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("header"), header.stored()).unwrap();
+                std::fs::write(dir.join("baseline"), base).unwrap();
+                for (i, part) in parts.iter().enumerate() {
+                    std::fs::write(dir.join(format!("{i}")), part).unwrap();
+                }
+            }
+        }
     }
 }

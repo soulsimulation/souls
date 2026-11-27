@@ -84,13 +84,15 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
   }, [hourOpen]);
   // X3: a moved world's link to a moment. Opened, the page seeks that moment once and plays from there.
-  const [copied, setCopied] = useState<string | null>(null), opened = useRef(false);
+  const [copied, setCopied] = useState<string | null>(null), opened = useRef(false), readAhead = useRef(false);
   // Until it lands, the arrival card stays up and the pill says Loading…: the present is never shown first. It lifts
   // anyway when the world keeps no history, or a while after a seek that found nothing, so a link never holds the page.
   const [landing, setLanding] = useState(landingMoment !== null), [seeked, setSeeked] = useState(false);
   useEffect(() => {
     if (opened.current || !handle || state?.shownTick == null || state.loading) return;
     if (!v2History()) { opened.current = true; setLanding(false); return; }
+    // #3358: the moment's bundle is read while the stream catches up, so the seek below only applies it
+    if (landingMoment !== null && !readAhead.current) { readAhead.current = true; void v2History()!.prepare(landingMoment).catch(() => {}); }
     // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: hours back), and
     // a seek is never past the shown clock: wait until it reaches the moment, or is about now (a link names a past time)
     if (landingMoment !== null && state.shownTick < landingMoment && state.shownTick * TICK_US < Date.now() * 1000 - 120e6) return;
@@ -126,6 +128,13 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // the scrub bar's left end (the world's first moment), looked up once the time panel opens or a recording plays
   const shown = state?.shownTick != null;
   useEffect(() => { if ((hourOpen || state?.presentation === 'history') && firstTick === null && state?.shownTick != null) void v2History()?.first(state.shownTick * TICK_US).then((us) => { if (us !== null) setFirstTick(Math.floor(us / TICK_US)); }).catch(() => {}); }, [hourOpen, state?.presentation, firstTick, shown]);
+  // #3358: the panel open, what Back 1 min and From the start would read is read ahead (history.ts prepare)
+  useEffect(() => {
+    const h = v2History(), now = state?.shownTick;
+    if (!hourOpen || !h || now == null) return;
+    void h.prepare(now - 60e6 / TICK_US, now).catch(() => {});
+    void h.first(now * TICK_US).then((us) => (us === null ? undefined : h.prepare(Math.floor(us / TICK_US), now))).catch(() => {});
+  }, [hourOpen]);
   const help = useRef<HTMLDivElement>(null);
   const unavailable = !!state?.unavailableReason;
   const current = state?.shownTick != null && !state.loading && !unavailable;

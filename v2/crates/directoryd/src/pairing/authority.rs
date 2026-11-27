@@ -909,6 +909,34 @@ impl Pairing {
         self.authority_file.is_some()
     }
 
+    /// Every key the world-authority map names `world` by (its own name, its instance and its aliases), and the name
+    /// itself; the name alone with no map. A Soul's profile names its world by whichever its request used (#5006).
+    pub fn world_keys(&self, world: &str) -> Result<Vec<String>, &'static str> {
+        let mut keys: Vec<String> = match self.registry()? {
+            None => Vec::new(),
+            Some(rows) => rows
+                .into_iter()
+                .filter(|(_, a)| a.world == world)
+                .map(|(k, _)| k)
+                .collect(),
+        };
+        if !keys.iter().any(|k| k == world) {
+            keys.push(world.to_owned());
+        }
+        Ok(keys)
+    }
+
+    /// Whether a handoff of `world` can be published here: the registry names it by its own name (#5006), not an
+    /// alias or instance, as the world's row is named. Read from the registry file alone, before an acceptance writes
+    /// anything, so a directory that could never publish one refuses at once, by the registry's own reason.
+    pub fn can_hand_on(&self, world: &str) -> Result<(), &'static str> {
+        match self.registry()? {
+            None => Err("world-authority-required"),
+            Some(rows) if rows.get(world).is_some_and(|a| a.world == world) => Ok(()),
+            Some(_) => Err("world-unplaced"),
+        }
+    }
+
     /// Every world's files, from each world's owner (read before the pairing store is locked, so a slow world store
     /// holds no request). A world whose owner came from the last read is owed to the copier until the store answers.
     /// Refused by name: `world-authority-unavailable` (no owner to be had), `world-authority-mismatch`, or

@@ -26,6 +26,7 @@ import { homedir, hostname } from 'node:os';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeGuide } from '../home/guide.mjs';
+import { worldNameOf } from './address.mjs';
 import { CREDENTIALS, Refused, findHome, makeHome } from '../home/home.mjs';
 
 const SLOW_DOWN = 5;
@@ -188,10 +189,11 @@ export async function pair({ home, directory, world, gateway, device, label, sou
   const secret = randomBytes(32).toString('hex');
   const asked = await post('/v1/pair/request', {
     secret_hash: createHash('sha256').update(secret).digest('hex'),
-    // A creator (G7) names the world's creator grant its account holds; the directory never makes one. A Soul's
-    // request names the world it is paired for (W11).
+    // A creator (G7) names the world's creator grant its account holds; the directory never makes one. Each request
+    // names the world it is paired for (W11): a creator's grant is its account's, the same in every world it made, so
+    // the directory needs the world to check that world's owner at the approval (a created world, 26 Nov).
     // A new Soul's name (`--name`) goes with the request, so the owner's approval card shows it (trial of 0.137).
-    device, label, force, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', world, ...(soul ? { soul } : { new: true, ...(name ? { name } : {}) }) }),
+    device, label, force, world, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', ...(soul ? { soul } : { new: true, ...(name ? { name } : {}) }) }),
   });
   if (asked.refused) throw new Refused(asked.refused, 'the directory refused the request');
   onAsk?.({ link: asked.link, code: asked.code });
@@ -206,10 +208,10 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (typeof got.token !== 'string' || typeof got.grant !== 'string') throw new Refused('pair-answer', 'no token in the answer');
     makeHome(home); // a new home gets its .gitignore (0.133 Q2)
     const id = localId(got.grant);
-    const history = await advertisedHistory(advert ?? advertOf(directory, world));
+    const [history, worldName] = await Promise.all([advertisedHistory(advert ?? advertOf(directory, world)), worldNameOf(directory, world)]);
     const configFile = join(home, 'config.json');
     const config = readJson(configFile);
-    config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}) } };
+    config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}), ...(worldName ? { name: worldName } : {}) } };
     // The Soul's name, which its daemon's first join carries (it is born named) and `list` shows.
     if (name) config.souls = { ...config.souls, [id]: { ...config.souls?.[id], id, world, name } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');

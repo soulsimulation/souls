@@ -246,6 +246,14 @@ test('C4 A1: say and whisper send T8 words through the daemon; the world keeps t
   const to = souls(['say', '--to', `${WORLD_SCOPE}-4`, 'over here']);
   assert.equal(to.ok, true, JSON.stringify(to));
   assert.equal(to.to.id, `${WORLD_SCOPE}-4`, 'addressed to the other Soul\'s body');
+  // Trial 0.137: a Soul is named by its name (any case) wherever a command names one, as by its body's id.
+  const byName = souls(['whisper', to.to.name.toUpperCase(), 'psst']);
+  assert.equal(byName.ok, true, JSON.stringify(byName));
+  assert.equal(souls(['say', '--to', to.to.name, 'hi']).to.id, B_ID);
+  const talk = souls(['converse', 'start', to.to.name, 'got a minute?']);
+  assert.equal(talk.ok, true, JSON.stringify(talk));
+  assert.deepEqual(talk.sent.map((s) => s.verb), ['activity:offer', 'local:whisper']);
+  assert.equal(refused(['converse', 'start', 'nobody-here', 'hi']), 'converse-names-a-body');
 });
 
 test('R16: history by thing, place and Soul through the daemon, each named from the copy, under 600 bytes', async () => {

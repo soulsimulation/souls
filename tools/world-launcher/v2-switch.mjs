@@ -19,6 +19,9 @@
 //              read-only but its ReadWritePaths, so a folder under /srv, /var, /etc, /opt or /usr must be under one of
 //              them: /srv/sim-worlds-data/<stage>/<slug>-static (24 Nov: /var/lib/souls/<slug>-static was EROFS)
 //   --stage    the launcher unit's instance (`%i`) whose ReadWritePaths --static is checked against (default production)
+//   --no-unit  the launcher that reads this binding is not the unit but a harness's own process (old-page.mjs, the timed
+//              runner's clips, whose per-run folder is under /srv): the unit's sandbox is not checked, but a folder of any
+//              stage's data (/srv/sim-worlds-data/*) is still refused (v2-switch.static-in-unit-data)
 //   --bodies   a built body-assets folder (V2_BODY_ASSETS, with `bodies.json`), served at `/w/<slug>/v2/bodies/`
 //   --port     a launcher on this machine: the command then reads the world's page and says what it carries
 //
@@ -47,13 +50,19 @@ export function staticWritable(dir, stage = 'production', writable = unitWritabl
   const d = existsSync(dir) ? realpathSync(dir) : resolve(dir), under = (root) => d === root || d.startsWith(root.endsWith(sep) ? root : root + sep);
   if (['/srv', '/var', '/etc', '/opt', '/usr'].some(under) && !writable.some(under)) throw Error('v2-switch.static-not-writable', { cause: `the launcher unit can write only ${writable.join(' ')}` });
 }
+/** 27 Nov: with no unit (a harness's own launcher), the unit's sandbox says nothing about the folder, but a folder in any
+ *  stage's data (the parents of the unit's ReadWritePaths) is never a harness's to publish into. */
+export function notUnitData(dir, roots = unitWritable('%i').map((d) => dirname(d))) {
+  const d = existsSync(dir) ? realpathSync(dir) : resolve(dir);
+  if (roots.some((root) => d === root || d.startsWith(root + sep))) throw Error('v2-switch.static-in-unit-data', { cause: `a launcher that is not the unit publishes outside ${roots.join(' ')}` });
+}
 
 /** The switch (`back` false) or the way back for one world: the binding file and the routes file as they are afterwards.
  *  W1 (0.133): the binding file holds one world (Eden's, as installed) or a list (`souls/cutover-binding/2`). `slug`
  *  names the world; a world not yet bound is added (its routes, client and bodies folders default to the first bound
  *  world's; its static folder is its own), and the file stays one world's while it binds only one. With one world bound,
  *  `slug` may be left out. `--back` clears that world's flag only. */
-export function v2Switch({ binding: file, back = false, slug, oldWorld, stream, routes, client, staticDir, bodies, stage }) {
+export function v2Switch({ binding: file, back = false, slug, oldWorld, stream, routes, client, staticDir, bodies, stage, unit = true }) {
   if (!isAbsolute(file ?? '')) throw Error('v2-switch.binding-path');
   const read = readJson(file);
   const list = read ? bindingsOf(read) : [];
@@ -70,7 +79,7 @@ export function v2Switch({ binding: file, back = false, slug, oldWorld, stream, 
     cutoverFence({ binding: whole }); // the launcher's own check: refuses (cutover.binding-invalid) before anything is written
     if (!existsSync(join(binding.clientDir, 'replica.js')) || !existsSync(join(binding.clientDir, 'replica_bg.wasm'))) throw Error('v2-switch.client-missing-replica');
     if (binding.bodiesDir && !existsSync(join(binding.bodiesDir, 'bodies.json'))) throw Error('v2-switch.bodies-missing-catalogue');
-    if (binding.staticDir) { staticWritable(binding.staticDir, stage); mkdirSync(binding.staticDir, { recursive: true }); }
+    if (binding.staticDir) { if (unit) staticWritable(binding.staticDir, stage); else notUnitData(binding.staticDir); mkdirSync(binding.staticDir, { recursive: true }); }
     write = whole;
   }
   const table = readJson(binding.routesFile) ?? { schema: 'souls/world-routes/1', worlds: {} };
@@ -96,7 +105,7 @@ if (isMain(import.meta.url)) {
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   try {
     const { binding, route } = v2Switch({ binding: flag('binding') ?? (process.env.SOULS_CUTOVER_BINDING || '/etc/souls/cutover-binding.json'), back: argv.includes('--back'),
-      slug: flag('slug'), oldWorld: flag('old-world'), stream: flag('stream'), routes: flag('routes'), client: flag('client'), staticDir: flag('static'), bodies: flag('bodies'), stage: flag('stage') });
+      slug: flag('slug'), oldWorld: flag('old-world'), stream: flag('stream'), routes: flag('routes'), client: flag('client'), staticDir: flag('static'), bodies: flag('bodies'), stage: flag('stage'), unit: !argv.includes('--no-unit') });
     const out = { ok: true, world: binding.canonicalSlug, engine: route.canonical ? 'v2' : 'old', stream: route.stream ?? null };
     if (flag('port')) {
       await new Promise((y) => setTimeout(y, 1200)); // the launcher looks at the binding once a second

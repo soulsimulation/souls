@@ -140,10 +140,11 @@ export function readSeat(root, soul) {
   const worlds = readJson(file).souls?.[soul] ?? {};
   const key = Object.keys(worlds).find((k) => typeof worlds[k]?.token === 'string');
   if (!key) throw new Refused('no-token', `no token for ${soul}`);
-  const { gateway, history } = readJson(join(root, 'config.json')).worlds?.[key] ?? {};
+  const { gateway, history, name } = readJson(join(root, 'config.json')).worlds?.[key] ?? {};
   if (typeof gateway !== 'string') throw new Refused('no-gateway', `world ${key} has no gateway`);
   const token = worlds[key].token;
   const m = /^(soul|creator)-([0-9a-f]{32})-(\d+)\.[0-9a-f]{64}$/.exec(token);
   if (!m) throw new Refused('token-not-a-soul-token', `the token for ${soul} is not a Soul's or a creator's v2 token`);
-  return { world: key, gateway, grant: { actor: m[1], scope: m[2], counter: BigInt(m[3]) }, token, ...(typeof history === 'string' ? { history } : {}) };
+  return { world: key, gateway, grant: { actor: m[1], scope: m[2], counter: BigInt(m[3]) }, token, ...(typeof history === 'string' ? { history } : {}),
+    ...(typeof name === 'string' && name ? { worldName: name } : {}) };
 }

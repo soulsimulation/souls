@@ -3,6 +3,8 @@
 // (v2/docs/viewer-cache.md):
 //
 // - a part, and a bundle's header: `public, max-age=31536000, immutable, no-transform` (never changes once written);
+// - a text file (`<n>.text`, `baseline.text`: a part's words): `public, max-age=60, no-transform`, so a removal that
+//   writes it again without the removed words (W7, #2826) reaches every cache within a minute;
 // - the pointer: `public, max-age=1, no-transform`, the shortest whole number of seconds at or above half a period
 //   (max-age takes whole seconds; half of V1's 0.5 s period would round to 0, and every read would reach here);
 // - every 404, a temporary file (`*.tmp`) and any URL with a query string: `no-store`. A 404 a browser asked for as a
@@ -49,6 +51,8 @@ import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
+/** A stream's text file: written again whole when words are removed (W7, #2826), so kept a minute at most. */
+export const TEXT = 'public, max-age=60, no-transform';
 /** A world's public history object that is rewritten in place: asked again each time, a 304 while its ETag holds. */
 export const REVALIDATE = 'public, no-cache, no-transform';
 export const MISS = 'no-store';
@@ -225,7 +229,8 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
       return miss();
     }
     const again = kind === 'immutable' && rewritten(file);
-    const headers = { 'content-type': 'application/octet-stream', 'cache-control': kind === 'pointer' ? POINTER : again ? REVALIDATE : IMMUTABLE, etag };
+    const cache = kind === 'pointer' ? POINTER : again ? REVALIDATE : file.endsWith('.text') ? TEXT : IMMUTABLE;
+    const headers = { 'content-type': 'application/octet-stream', 'cache-control': cache, etag };
     let status = 200;
     if (kind === 'immutable') {
       headers['accept-ranges'] = 'bytes';

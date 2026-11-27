@@ -30,6 +30,10 @@ test('a message written in the box is put for the Soul\'s grant and its answer s
 
   sock.onText!(JSON.stringify({ mail: { id: 'm1', state: 'picked' } }));
   let inbox = await mb.read();
+  assert.equal(inbox.latest?.state, 'sent', 'first-day 27 Nov: given to its client is not read by the agent');
+  assert.equal(inbox.doing, undefined, 'not Thinking…');
+  sock.onText!(JSON.stringify({ mail: { id: 'm1', state: 'read' } }));
+  inbox = await mb.read();
   assert.equal(inbox.latest?.state, 'delivered');
   assert.deepEqual(inbox.doing, { phase: 'thinking' });
 
@@ -84,13 +88,58 @@ test('the card is told whether the Soul\'s agent is connected (the gateway\'s {"
   const before = await mb.read();
   assert.equal(before.link, undefined, 'not told yet: no claim, the card says Checking…');
   assert.equal(before.connected, false);
-  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: true } }));
   assert.deepEqual((await mb.read()).link, { state: 'connected', reason: 'listening', since: null, holder: null });
   assert.equal((await mb.read()).connected, true);
   sock.onText!(JSON.stringify({ agent: { grant: `soul-${'9'.repeat(32)}-0`, connected: false } }));
   assert.equal((await mb.read()).connected, true, 'another grant\'s word is not this Soul\'s');
   sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: false } }));
   assert.equal(((await mb.read()).link as { state?: string } | undefined)?.state, 'disconnected');
+});
+
+test('#1330: the box socket down for OUTAGE_MS → unavailable, nothing of the agent; reconnect → normal; a send in between keeps its words', async () => {
+  const { OUTAGE_MS, UNAVAILABLE_SEND } = await import('./owner-mailbox.ts');
+  let t = 1_000_000, up = true;
+  const sock = Object.assign(fakeSocket((f) => (f.startsWith('put ') ? { sent: { id: 'm9' } } : null)), { onOpen: null as ((o: boolean) => void) | null });
+  const sendText = sock.sendText;
+  sock.sendText = (x: string) => (up ? sendText(x) : false);
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT), () => t);
+  await mb.read();
+  sock.onOpen!(true);
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.equal((await mb.read()).unavailable, undefined, 'open: normal');
+  assert.equal(((await mb.read()).link as { state?: string }).state, 'connected');
+  // the gateway goes: the socket closes (1013, or just dropped) and keeps failing to reconnect
+  up = false; sock.onOpen!(false);
+  t += 1000; sock.onOpen!(false);
+  assert.equal((await mb.read()).unavailable, undefined, 'one reconnect\'s gap says nothing');
+  t += OUTAGE_MS;
+  const down = await mb.read();
+  assert.equal(down.unavailable, true, 'down for OUTAGE_MS: unavailable');
+  assert.equal(down.link, undefined, 'no word on the agent from before the outage');
+  assert.equal(down.connected, false);
+  await assert.rejects(mb.send('meet me by the well'), (e: Error) => e.message === UNAVAILABLE_SEND, 'a send says the world is unavailable');
+  assert.ok(!sock.sent.some((f) => f.includes('meet me')), 'nothing went out');
+  // the world comes back: the socket signs in again
+  up = true; sock.onOpen!(true);
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  const back = await mb.read();
+  assert.equal(back.unavailable, undefined, 'reconnect: normal');
+  assert.equal((back.link as { state?: string }).state, 'connected');
+  const sent = await mb.send('meet me by the well');
+  assert.equal(sent.latest?.text, 'meet me by the well');
+  assert.equal(sent.latest?.state, 'sent');
+});
+
+test('#1330: a first connection that fails counts as down (a page opened during an outage)', async () => {
+  let t = 5_000;
+  const sock = Object.assign(fakeSocket(() => null), { onOpen: null as ((o: boolean) => void) | null });
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT), () => t);
+  await mb.read();
+  assert.equal((await mb.read()).unavailable, undefined, 'still making its first connection');
+  sock.onOpen!(false);
+  t += (await import('./owner-mailbox.ts')).OUTAGE_MS;
+  assert.equal((await mb.read()).unavailable, true);
 });
 
 test('a mailbox that cannot be reached makes the read throw (the card shows nothing, no claim)', async () => {
@@ -132,4 +181,51 @@ test('signed in, owning nothing: the directory\'s empty answer (and an older dir
   await assert.rejects(viewToken(place, older, async () => 'dev:Ada'), (e) => e instanceof NothingOwned);
   const other = (async () => new Response(JSON.stringify({ refused: 'no-view-key' }), { status: 404 })) as unknown as typeof fetch;
   await assert.rejects(viewToken(place, other, async () => 'dev:Ada'), (e) => !(e instanceof NothingOwned) && /no-view-key/.test(String(e)));
+});
+
+test('first-day 27 Nov: a client connected with nobody reading is asleep, never listening; Thinking… only once the agent read it', async () => {
+  const sock = fakeSocket((f) => (f.startsWith('put ') ? { sent: { id: 'm7' } } : null));
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT));
+  await mb.read();
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: false } }));
+  assert.deepEqual((await mb.read()).link, { state: 'connected', reason: 'asleep', since: null, holder: null });
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.equal(((await mb.read()).link as { reason?: string }).reason, 'asleep', 'no word on a reader: not claimed');
+  await mb.send('walk Juniper over to the pond');
+  sock.onText!(JSON.stringify({ mail: { id: 'm7', state: 'picked' } }));
+  const given = await mb.read();
+  assert.equal(given.latest?.state, 'sent'); assert.equal(given.doing, undefined);
+  assert.equal(given.waitsMs, 15 * 60_000, 'the directory keeps it open 15 min');
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: true } }));
+  assert.equal(((await mb.read()).link as { reason?: string }).reason, 'listening');
+  sock.onText!(JSON.stringify({ mail: { id: 'm7', state: 'read' } }));
+  assert.deepEqual((await mb.read()).doing, { phase: 'thinking' });
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: false, listening: true } }));
+  assert.equal(((await mb.read()).link as { state?: string }).state, 'disconnected');
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true } }));
+  assert.equal(((await mb.read()).link as { reason?: string }).reason, 'asleep', 'a new sign-in has no reader until it says so');
+});
+
+test('first-day 27 Nov: read before the put\'s answer still makes it Thinking…', () => {
+  const box = new OwnerBox();
+  box.put(GRANT, 'wave');
+  box.text(JSON.stringify({ mail: { id: 'm8', state: 'read' } }));
+  box.text(JSON.stringify({ sent: { id: 'm8' } }));
+  assert.equal(box.messages[0].state, 'thinking');
+});
+
+test('first-day 27 Nov: a read message carries when it was read, also when read before the put\'s answer', () => {
+  const box = new OwnerBox();
+  box.put(GRANT, 'wave');
+  const before = Date.now();
+  box.text(JSON.stringify({ mail: { id: 'm9', state: 'read' } }));
+  box.text(JSON.stringify({ sent: { id: 'm9' } }));
+  assert.ok((box.messages[0].readAt ?? 0) >= before);
+  box.put(GRANT, 'sit');
+  box.text(JSON.stringify({ sent: { id: 'm10' } }));
+  assert.equal(box.messages[1].readAt, undefined);
+  box.text(JSON.stringify({ mail: { id: 'm10', state: 'read' } }));
+  assert.ok((box.messages[1].readAt ?? 0) >= before);
+  const inbox = inboxOf(box.messages, new Map(), true, true);
+  assert.equal(inbox.latest?.readAt, box.messages[1].readAt);
 });

@@ -1,4 +1,4 @@
-// Bounded stranger-facing calendar proof: real Chrome input and the public calendar URL, fake disposable worlds.
+// Bounded stranger-facing calendar proof: Chromium input and the public calendar URL, fake disposable worlds.
 import './gpu-chrome.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -16,7 +16,7 @@ async function until(fn, message) { for (let i = 0; i < 300; i++) { const value 
 try {
   await until(async () => { try { return (await fetch(origin + '/worlds/__sim/healthz')).ok; } catch { return false; } }, 'launcher boot timeout');
   for (const dpr of [1, 2]) {
-    const browser = await chromium.launch({ channel: 'chrome', headless: true });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true });
     try {
       const context = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await context.addInitScript(() => localStorage.setItem('sim.dev', 'calendar-probe'));

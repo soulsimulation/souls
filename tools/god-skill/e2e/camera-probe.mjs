@@ -17,7 +17,7 @@ const out = resolve(opt('out', `.lane/camera-probe/${new Date().toISOString().re
 mkdirSync(out, { recursive: true });
 const pw = findPlaywright(); if (!pw) throw new Error('no playwright');
 const release = await chromeLease('camera-probe');
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 const report = [];
 const measure = (page, tag) => page.evaluate((tag) => {
   const w = window.__soulsEntity; if (!w) return { tag, missing: true };

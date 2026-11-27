@@ -792,18 +792,26 @@ pub enum Effect {
     Set { field: u64, to: encode::Value },
     /// Field `field` of the node moved by `by` (`set ... by`, C22): refused when that leaves the kind's bounds.
     Add { field: u64, by: i64 },
-    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
-    /// above its least and the room the target has left, written as the source's and the target's sets in one part.
+    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked and what the source has
+    /// above its least (more than the room the target has left is refused, never moved in part), written as the
+    /// source's and the target's sets in one part.
     /// The field is named, not numbered: the two ends may be of kinds that number it differently, and the world finds
-    /// its number on each end's own kind (E5).
+    /// its number on each end's own kind (E5). With `into_field`, the amount lands in that other field of the node
+    /// itself (`from` and `into` both the node, #4103): a stock into a well.
     Transfer {
         field: Name,
         from: Of,
         into: Of,
+        into_field: Option<Name>,
         amount: Amount,
     },
-    /// A thing of kind `kind` made into `into`, refused when that is not free (F4).
-    Make { kind: Name, into: Place },
+    /// A thing of kind `kind` made into `into`, refused when that is not free (F4), with the fields `set` gives it
+    /// (#4104): each by name, read against the made kind's own field when the world makes it.
+    Make {
+        kind: Name,
+        into: Place,
+        set: Vec<(Name, Init)>,
+    },
     /// Thing `what` removed: one the node contains or the body holds (F4).
     Remove { what: Of },
     /// A `take` step's transfer (B4's, at its contact): `what` into a free hand of the body.
@@ -853,11 +861,22 @@ pub enum Place {
     Slot(u64),
 }
 
-/// How much a transfer asks: a whole number of the field's unit, above zero, or all the room the target has left.
+/// How much a transfer asks: a whole number of the field's unit (zero, as a count argument may ask, moves nothing),
+/// or all the room the target has left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Amount {
     Units(i64),
     Room,
+}
+
+/// A made thing's field as its `create` sets it (#4104): a flag, a whole number, or a name (one of an enum's values),
+/// as written or as a value argument gives it. The made kind is not the entry the form is bound from, so the world
+/// reads it against the made kind's own field when it makes the thing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Init {
+    Flag(bool),
+    Int(i64),
+    Name(String),
 }
 
 /// Binds form `form`'s effects with no thing arguments ([`bind_effects_with`]).
@@ -1073,14 +1092,16 @@ pub fn bind_effects_in(
 
 /// Binds form `form`'s effects, all or none, with its act's arguments `args`: first each `take` or `put` step's
 /// transfer, in step order, then the form's `effects`: `set ... to` on the node (a field by name or through a field
-/// argument; the value as [`set_to`] reads it, F14), `transfer`, `create` into the actor's hand or a slot (`into`:
-/// `"actor_hand"` or a slot's name), `remove`, and `link` and `unlink` (`from`: `"actor"`, or `"all"` to unlink) of a
+/// argument; the value as [`set_to`] reads it, F14), `transfer` (between two things, or between two fields of the
+/// node with `into_field`, #4103; its amount a whole number, `"room"` or a count argument), `create` into the actor's
+/// hand or a slot (`into`: `"actor_hand"` or a slot's name; `set`, the made thing's fields, [`Init`], #4104),
+/// `remove`, and `link` and `unlink` (`from`: `"actor"`, or `"all"` to unlink) of a
 /// link the kind declares (F15), a `timer` (a form of the node the world starts later, C24), a `set` with a `rate`
 /// ([`Effect::Timed`], C24) and a `reparent` no step carries (C24). Refused: `effect-not-built` for any other change
 /// (a `create` `here` is E4's, a link not seen by everyone T8's), `field-unknown`, `slot-unknown`, `link-unknown`,
 /// `form-unknown`, `arg-missing`, `out-of-range` and `not-allowed` for a value the field does not take,
-/// `effect-malformed` for a value that is no value at all, or an amount that is not a whole number above zero or
-/// `"room"`.
+/// `effect-malformed` for a value that is no value at all, an amount that is not a whole number (zero or more) or
+/// `"room"`, or an `into_field` whose ends are not both the node or that names the field it leaves.
 /// A `put` names its slot, or a slot argument (`{"arg": a}`). A `take` or `put` with no `what` moves the thing the
 /// form's `reparent` effect into the same place names (the actor's hand, or that slot), else the node itself; that
 /// `reparent` is the step's transfer, bound once (C12, #3427). A `reparent` no take, put, sit or lie carries is bound
@@ -1184,28 +1205,31 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                     detail: "set.by: a whole number".into(),
                 })?,
             },
-            // Between two fields of one thing is not built here.
-            ("transfer", _) if e.get("into_field").is_some() => {
-                return refuse("effect-not-built", "transfer into_field");
-            }
-            ("transfer", _) => Effect::Transfer {
-                field: a_name(text(e.get("field"), "transfer.field")?)?,
-                from: of(e.get("from"), args)?,
-                into: of(e.get("into"), args)?,
-                amount: match e.get("amount") {
-                    Some(Value::Int(n)) if *n > 0 => match i64::try_from(*n) {
-                        Ok(n) => Amount::Units(n),
-                        Err(_) => return refuse("effect-malformed", "transfer.amount: too large"),
-                    },
-                    Some(v) if v.str() == Some("room") => Amount::Room,
-                    _ => {
-                        return refuse(
-                            "effect-malformed",
-                            "transfer.amount: a whole number above zero or \"room\"",
-                        );
+            ("transfer", _) => {
+                let field = text(e.get("field"), "transfer.field")?;
+                let (from, into) = (of(e.get("from"), args)?, of(e.get("into"), args)?);
+                // Between two fields of one thing (#4103): both ends the node, and the field it lands in another.
+                let into_field = match e.get("into_field") {
+                    None => None,
+                    Some(f) => {
+                        let lands = text(Some(f), "transfer.into_field")?;
+                        if (from, into) != (Of::This, Of::This) || lands == field {
+                            return refuse(
+                                "effect-malformed",
+                                "transfer.into_field: another field of this one thing, from and into both \"this\"",
+                            );
+                        }
+                        Some(a_name(lands)?)
                     }
-                },
-            },
+                };
+                Effect::Transfer {
+                    field: a_name(field)?,
+                    from,
+                    into,
+                    into_field,
+                    amount: transfer_amount(e.get("amount"), args)?,
+                }
+            }
             ("create", _) => Effect::Make {
                 kind: a_name(text(e.get("kind"), "create.kind")?)?,
                 into: match text(e.get("into"), "create.into")? {
@@ -1213,6 +1237,7 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                     "here" => return refuse("effect-not-built", "create here"),
                     slot => Place::Slot(slot_n(entry, slot)?),
                 },
+                set: made_set(e.get("set"), args)?,
             },
             ("remove", _) => Effect::Remove {
                 what: of(e.get("what"), args)?,
@@ -1241,6 +1266,75 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
         });
     }
     Ok(out)
+}
+
+/// What a `transfer` asks (F4): a whole number (zero or more), `"room"`, or a count argument's number (`{"arg": a}`,
+/// as content's spindles and caddies ask, #4103; a caddy's blend may ask 0 of one leaf, which moves nothing);
+/// `effect-malformed` for anything else, `arg-missing` for an argument not given.
+fn transfer_amount(v: Option<&Value>, args: &Args) -> Result<Amount, Refusal> {
+    let malformed = || {
+        refuse(
+            "effect-malformed",
+            "transfer.amount: a whole number (zero or more) or \"room\"",
+        )
+    };
+    let units = |n: i128| match i64::try_from(n) {
+        Ok(n) if n >= 0 => Ok(Amount::Units(n)),
+        _ => malformed(),
+    };
+    match v {
+        Some(Value::Int(n)) => units(*n),
+        Some(v) if v.str() == Some("room") => Ok(Amount::Room),
+        Some(v) => match v.get("arg").and_then(Value::str) {
+            Some(a) => match args.get(a) {
+                Some(Arg::Int(n)) => units(i128::from(*n)),
+                Some(_) => refuse("effect-malformed", format!("argument {a} is not a count")),
+                None => refuse("arg-missing", a),
+            },
+            None => malformed(),
+        },
+        None => malformed(),
+    }
+}
+
+/// A `create`'s `set` (#4104): each made field by name, its value a flag, a whole number or a name as written, or a
+/// value argument's (a candle's shape and colour chosen at the bench). `effect-malformed` for a `set` that is not a
+/// list or a `to` that is not such a value, `step-malformed` for a `field` that is not a name, `arg-missing` for an
+/// argument not given.
+fn made_set(v: Option<&Value>, args: &Args) -> Result<Vec<(Name, Init)>, Refusal> {
+    let Some(v) = v else {
+        return Ok(Vec::new());
+    };
+    let malformed = |detail: String| Refusal {
+        name: "effect-malformed",
+        detail,
+    };
+    let list = v
+        .arr()
+        .ok_or_else(|| malformed("create.set: a list of {\"field\", \"to\"}".into()))?;
+    list.iter()
+        .map(|x| {
+            let field = a_name(text(x.get("field"), "create.set.field")?)?;
+            let to = match x.get("to") {
+                Some(Value::Bool(b)) => Init::Flag(*b),
+                Some(Value::Int(n)) => {
+                    Init::Int(i64::try_from(*n).map_err(|_| malformed(format!("create.set: {n}")))?)
+                }
+                Some(Value::Str(s)) => Init::Name(s.clone()),
+                Some(t) => match t.get("arg").and_then(Value::str) {
+                    Some(a) => match args.get(a) {
+                        Some(Arg::Name(s)) => Init::Name(s.clone()),
+                        Some(Arg::Int(n)) => Init::Int(*n),
+                        Some(_) => return Err(malformed(format!("argument {a} is not a value"))),
+                        None => return refuse("arg-missing", a),
+                    },
+                    None => return Err(malformed("create.set.to: a value".into())),
+                },
+                None => return Err(malformed("create.set.to: a value".into())),
+            };
+            Ok((field, to))
+        })
+        .collect()
 }
 
 /// A `set` with a `rate` on a timed field (C24): F5's three numbers, settled at the effect's instant and given the

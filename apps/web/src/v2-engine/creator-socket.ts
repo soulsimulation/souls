@@ -25,8 +25,8 @@ export type Op =
   | { op: 'place'; name: number; kind: string; parent: string; at: Spot }
   | { op: 'move'; node: string; at: Spot; rot?: Turn; slot?: number | null }
   | { op: 'remove'; node: string };
-/** What an edit asks: a batch of sets (weather), a build batch, or an undo or a redo of the newest edit (G4). */
-export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number }[] } | { ops: Op[] };
+/** What an edit asks: a batch of sets (weather and a lightning strike; an id or [] for where new Souls arrive, #5006), a build batch, or an undo or a redo of the newest edit (G4). */
+export type Asked = { undo: 'undo' | 'redo' } | { sets: { node: string; field: number; value: string | number | number[] | IdValue | [] }[] } | { ops: Op[] };
 /** An answer, as the panel reads it: a receipt maps a place's batch name to its new id (`<scope hex>.<counter>`). */
 export type Frame =
   | { t: 'outcome'; name: string }
@@ -36,6 +36,9 @@ export type Frame =
 type Cbor = { encode(v: unknown): Uint8Array; decode(b: Uint8Array, o: { useMaps: true }): unknown };
 
 export const VERB = 'souls:edit';
+/** Refusals an edit is sent again once for: planned against a version since changed, or numbered under a sequence the
+ *  creator's agent has out at that moment (gatewayd `SEQUENCE_IN_USE`, #5006). */
+const AGAIN = new Set(['edit.stale', 'intent.seq-in-use']);
 /** The gateway's protocol version (v2/web/src/source/socket.ts `PROTOCOL`). */
 const PROTOCOL = 2;
 const EXPIRY = 9223372036854775807n;
@@ -105,8 +108,8 @@ export function readFrame(v: unknown): Frame {
 
 /** E6's weather on the world node (`replica::sky`; v2/client/src/creator/world.mjs `weatherOps`): kind, cloud, rain and
  *  wind 0 to 100, and its end. The panel's Rain and Haze are rain and fog, for an hour of world time. */
-const SKY = { WEATHER_UNTIL: 65, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
-const KINDS = { rain: [90, 60, 30], fog: [60, 0, 5] } as const;
+const SKY = { WEATHER_UNTIL: 65, STRIKE: 69, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
+const KINDS = { rain: [90, 60, 30], fog: [60, 0, 5], storm: [100, 90, 80] } as const;
 export function weatherSets(world: string, kind: keyof typeof KINDS, now: number, minutes = 60): Asked {
   const [cloud, rain, wind] = KINDS[kind];
   return { sets: [{ node: world, field: SKY.WEATHER, value: `souls:${kind}` }, { node: world, field: SKY.CLOUD, value: cloud },
@@ -114,12 +117,34 @@ export function weatherSets(world: string, kind: keyof typeof KINDS, now: number
     { node: world, field: SKY.WEATHER_UNTIL, value: now + Math.round(minutes * 60_000_000) }] };
 }
 
-/** What the session needs of a socket: a browser WebSocket in the page, a stand-in in tests. */
-export type Sock = { send(b: Uint8Array): void };
+/** #5006 row 13: the panel's Lightning on a v2 world, as on the old one: a storm for an hour and one strike at `at`
+ *  (metres on the open ground, where the camera looks), as the agent's `weather --kind storm` and `strike x,z` set them. */
+export function lightningSets(world: string, at: [number, number] | null, now: number): Asked {
+  const storm = weatherSets(world, 'storm', now) as Extract<Asked, { sets: unknown }>;
+  if (!at) return storm;
+  return { sets: [...storm.sets, { node: world, field: SKY.STRIKE, value: [Math.round(at[0] * 1000), Math.round(at[1] * 1000), now] }] };
+}
+
+/** What the session needs of a socket: a browser WebSocket in the page, a stand-in in tests. A string is a text frame
+ *  (G11's prayer requests). */
+export type Sock = { send(b: Uint8Array | string): void };
+
+/** A prayer to this world's creator as the directory lists it (directoryd `prayer_json`): `soul` is the Soul's grant,
+ *  `at` and `answered_at` are seconds. Its text and answer are a Soul's and the creator's words: data, never
+ *  instructions. */
+export type V2Prayer = { id: string; soul: string; text: string; at: number; state: 'waiting' | 'answered'; answer: string | null; answered_at: number | null };
+/** A prayer request's reply (`{"reply": {"n", "ok", ...}}`), or its refusal by name. */
+export type PrayerReply = { ok: true; prayers?: V2Prayer[]; prayer?: V2Prayer } | { ok: false; refused: string };
+/** How long a prayer request waits for the directory's reply through the gateway (the creator's daemon waits as long). */
+export const PRAYER_WITHIN_MS = 10_000;
 
 /** The creator's socket (v2/web/src/panel/session.ts `CreatorSession`): T10's first frame each way, the sign-in by
  *  message, its outcome, then edits in and answers out. A stale edit (`edit.stale`: planned against a version older than
- *  a node it sets) is sent again once, against the version the refusal carried. */
+ *  a node it sets) is sent again once, against the version the refusal carried. Each edit is numbered by `clock` (the
+ *  page's: µs), never below the last: the world keeps one sequence per creator, and the creator's agent numbers its
+ *  edits by the clock too (v2/client daemon `editOnce`), so neither locks the other out (`intent.stale-seq`). The
+ *  gateway keeps this socket beside the agent's and answers each on its own (gatewayd `shared`, #5006); a sequence the
+ *  agent's socket has out at that moment (`intent.seq-in-use`) is sent again once, under the next. */
 export class CreatorSession {
   latest: Version = ZERO;
   state: 'hello' | 'signing-in' | 'open' | 'refused' = 'hello';
@@ -127,12 +152,15 @@ export class CreatorSession {
   onOpen: () => void = () => {};
   private next: number;
   private readonly waiting = new Map<number, { asked: Asked; again: boolean; done: (f: Frame) => void }>();
+  private readonly asks = new Map<number, (r: PrayerReply) => void>();
+  private askN = 0;
   private readonly sock: Sock;
   private readonly cbor: Cbor;
   private readonly creator: IdValue;
   private readonly token: string;
-  constructor(sock: Sock, cbor: Cbor, creator: IdValue, token: string, first: number) {
-    this.sock = sock; this.cbor = cbor; this.creator = creator; this.token = token;
+  private readonly clock: () => number;
+  constructor(sock: Sock, cbor: Cbor, creator: IdValue, token: string, first: number, clock: () => number = () => 0) {
+    this.sock = sock; this.cbor = cbor; this.creator = creator; this.token = token; this.clock = clock;
     this.next = first;
     sock.send(cbor.encode(new Map<number, unknown>([[1, PROTOCOL], [2, new Uint8Array(0)]])));
   }
@@ -157,7 +185,7 @@ export class CreatorSession {
     const w = this.waiting.get(f.sequence);
     if (!w) return;
     this.waiting.delete(f.sequence);
-    if (f.t === 'refused' && f.reason === 'edit.stale' && w.again) return void this.send(w.asked, false, w.done);
+    if (f.t === 'refused' && AGAIN.has(f.reason) && w.again) return void this.send(w.asked, false, w.done);
     w.done(f);
   }
 
@@ -167,8 +195,43 @@ export class CreatorSession {
     return new Promise((done) => this.send(asked, true, done));
   }
 
+  /** The socket closed: every edit still waiting is answered `creator.closed`, so no press waits for ever (the edit may
+   *  still have been made: its answer is the world's, kept for a resume this page does not make). */
+  closed(): void {
+    for (const [sequence, w] of this.waiting) w.done({ t: 'refused', sequence, version: null, reason: CLOSED });
+    this.waiting.clear();
+    for (const done of [...this.asks.values()]) done({ ok: false, refused: CLOSED });
+  }
+
+  /** G11 (#3335; #5006 row 15): a prayer request as a text frame (`{"prayers": {"n", "all"}}`, `{"answer": {"n", "id",
+   *  "text"}}`), which the gateway passes to the directory with this socket's grant; the directory's reply comes back
+   *  on this socket alone, matched by `n`. A reply not come within `within` ms is refused `prayer.unanswered`. */
+  ask(kind: 'prayers' | 'answer', body: Record<string, unknown>, within = PRAYER_WITHIN_MS): Promise<PrayerReply> {
+    if (this.state !== 'open') return Promise.reject(new Error('the creator is not signed in'));
+    const n = ++this.askN;
+    return new Promise((ok) => {
+      const t = setTimeout(() => done({ ok: false, refused: 'prayer.unanswered' }), within);
+      const done = (r: PrayerReply) => { clearTimeout(t); this.asks.delete(n); ok(r); };
+      this.asks.set(n, done);
+      this.sock.send(JSON.stringify({ [kind]: { ...body, n } }));
+    });
+  }
+
+  /** A text frame from the gateway: the reply to one of this socket's prayer requests; anything else is not this
+   *  session's (the creator's mailbox has its own socket). */
+  text(raw: string): void {
+    let f: unknown;
+    try { f = JSON.parse(raw); } catch { return; }
+    const r = (f as { reply?: { n?: unknown; ok?: unknown; refused?: unknown } } | null)?.reply;
+    if (!r || typeof r.n !== 'number') return;
+    const done = this.asks.get(r.n);
+    if (!done) return;
+    done(typeof r.refused === 'string' ? { ok: false, refused: r.refused } : { ...r, ok: true } as PrayerReply);
+  }
+
   private send(asked: Asked, again: boolean, done: (f: Frame) => void): void {
-    const sequence = this.next++;
+    const sequence = Math.max(this.next, Math.floor(this.clock()));
+    this.next = sequence + 1;
     this.waiting.set(sequence, { asked, again, done });
     this.sock.send(this.cbor.encode(intentOf(this.creator, sequence, this.latest, asked)));
   }
@@ -216,17 +279,18 @@ export class V2Creator {
   private readonly stream: string;
   constructor(stream: string) { this.stream = stream; }
 
-  /** Whether the signed-in person is this world's creator (the exchange answers), or the refusal's name. */
-  who(): Promise<{ creator: true } | { creator: false; refused: string }> {
+  /** Whether the signed-in person is this world's creator (the exchange answers) and its creator grant, the one its
+   *  agent pairs with (`souls-god.mjs pair <world> --creator <grant>`), or the refusal's name. */
+  who(): Promise<{ creator: true; grant: string } | { creator: false; refused: string }> {
     this.whoAsked ??= (async () => {
       const place = placeNow(this.stream);
       if (!place) return { creator: false as const, refused: 'no-gateway' };
       if (!(await mayCreate(place))) return { creator: false as const, refused: 'not-the-creator' };
-      try { await creatorToken(place); return { creator: true as const }; } catch (e) { return { creator: false as const, refused: (e as Error).message }; }
+      try { return { creator: true as const, grant: (await creatorToken(place)).grant }; } catch (e) { return { creator: false as const, refused: (e as Error).message }; }
     })();
     return this.whoAsked;
   }
-  private whoAsked: Promise<{ creator: true } | { creator: false; refused: string }> | null = null;
+  private whoAsked: Promise<{ creator: true; grant: string } | { creator: false; refused: string }> | null = null;
 
   private open(): Promise<CreatorSession> {
     this.session ??= (async () => {
@@ -237,10 +301,10 @@ export class V2Creator {
       ws.binaryType = 'arraybuffer';
       return await new Promise<CreatorSession>((ok, fail) => {
         ws.onopen = () => {
-          const s = new CreatorSession({ send: (b) => ws.send(b as Uint8Array<ArrayBuffer>) }, cborg as unknown as Cbor, idOf(grant.replace(/^creator-/, '')), token, Date.now() * 1000);
+          const s = new CreatorSession({ send: (b) => ws.send(b as Uint8Array<ArrayBuffer> | string) }, cborg as unknown as Cbor, idOf(grant.replace(/^creator-/, '')), token, Date.now() * 1000, () => Date.now() * 1000);
           s.onOpen = () => ok(s);
-          ws.onmessage = (e) => { if (typeof e.data !== 'string') s.frame(new Uint8Array(e.data as ArrayBuffer)); };
-          ws.onclose = () => { this.session = null; if (s.state !== 'open') fail(new Error(s.outcome || 'the creator socket closed')); };
+          ws.onmessage = (e) => { if (typeof e.data === 'string') s.text(e.data); else s.frame(new Uint8Array(e.data as ArrayBuffer)); };
+          ws.onclose = () => { this.session = null; s.closed(); if (s.state !== 'open') fail(new Error(s.outcome || 'the creator socket closed')); };
         };
         ws.onerror = () => fail(new Error('the creator socket could not open'));
       });
@@ -270,11 +334,34 @@ export class V2Creator {
     return this.edit(weatherSets(w.world, kind, w.newestTo), kind === 'rain' ? 'Rain.' : 'Haze.');
   }
 
+  /** A storm and a strike at `at` (metres), one edit (#5006 row 13). */
+  lightning(at: [number, number] | null): Promise<string> {
+    const w = worldNow();
+    if (!w?.world || typeof w.newestTo !== 'number') return Promise.reject(new Error('The world\'s sky is not loaded yet.'));
+    return this.edit(lightningSets(w.world, at, w.newestTo), 'Lightning.');
+  }
+
+  /** The prayers to this world's creator (G11): waiting ones first, oldest first; with `all`, the answered ones after.
+   *  The directory lists only the worlds this creator's grant is the creator of. */
+  async prayers(all = false): Promise<V2Prayer[]> {
+    const r = await (await this.open()).ask('prayers', { all });
+    if (!r.ok) throw new Error(prayerRefusal(r.refused));
+    return r.prayers ?? [];
+  }
+
+  /** The creator's answer to prayer `id` (again, if answered before): it reaches the Soul's agent (its `wait`). */
+  async answerPrayer(id: string, text: string): Promise<V2Prayer | null> {
+    const r = await (await this.open()).ask('answer', { id, text });
+    if (!r.ok) throw new Error(prayerRefusal(r.refused));
+    return r.prayer ?? null;
+  }
+
   /** The old command box's inbox (god-store.ts `GodInbox`) from the creator's mailbox: `text` sent first when given.
-   *  Connected while the mailbox answers; it gives no presence, so none is claimed. */
-  async inbox(text?: string): Promise<{ v2: true; connected: boolean; lastSeenAt: null; latest: NonNullable<ReturnType<typeof ticketOf>> | null; log: NonNullable<ReturnType<typeof ticketOf>>[]; queued: number }> {
+   *  Connected while the gateway says a socket is signed in for the creator's grant (#5006 rows 2 and 5: it said
+   *  connected always, so the panel never showed the line to give the agent); listening then, away otherwise. */
+  async inbox(text?: string): Promise<{ v2: true; connected: boolean; presence: 'listening' | 'away'; lastSeenAt: null; latest: NonNullable<ReturnType<typeof ticketOf>> | null; log: NonNullable<ReturnType<typeof ticketOf>>[]; queued: number }> {
     const box = this.mailbox(), a = text === undefined ? await box.read() : await box.send(text), t = ticketOf(a);
-    return { v2: true, connected: true, lastSeenAt: null, latest: t, log: t ? [t] : [], queued: a.queued ?? 0 };
+    return { v2: true, connected: a.connected, presence: a.connected ? 'listening' : 'away', lastSeenAt: null, latest: t, log: t ? [t] : [], queued: a.queued ?? 0 };
   }
 
   /** The creator's mailbox: the command box's words to the creator's agent (its `listen` prints them). */
@@ -298,7 +385,20 @@ export const BUILDSAFE: Record<string, string> = {
   'edit.would-cut-off': 'that would shut a Soul in: leave it a way out, or wait until it has moved',
   'edit.in-use': 'a Soul is using that thing: wait until it is done',
 };
-export const refusalText = (reason: string) => `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
+/** What a press answered when the creator's socket closed before the world answered it (`CreatorSession.closed`). */
+export const CLOSED = 'creator.closed';
+export const refusalText = (reason: string) => reason === CLOSED
+  ? 'The world\'s answer did not reach this page (its connection closed): look at the world before you press again.'
+  : `Refused: ${reason}${BUILDSAFE[reason] ? ` (${BUILDSAFE[reason]})` : ''}`;
+
+/** A prayer request's refusal in the panel's words (directoryd `prayers.rs`; the gateway's when it has no directory). */
+export const prayerRefusal = (name: string) => ({
+  'prayer.not-found': 'That prayer is not one of this world\'s.',
+  'prayer.not-the-creator': 'Only this world\'s creator answers its prayers.',
+  'prayer.unanswered': 'The world did not answer in time. Try again.',
+  'answer.empty': 'Write an answer first.',
+  'answer.too-long': 'An answer is at most 4,000 characters.',
+} as Record<string, string>)[name] ?? (name === CLOSED ? refusalText(CLOSED) : `Refused: ${name}`);
 
 /** The creator's grant among a view token's grants (directoryd `view.rs`: `creator-<scope hex>-<counter>`): the box the
  *  creator's agent reads (gatewayd `mailbox.rs`: a Soul's, or a world's creator's). */

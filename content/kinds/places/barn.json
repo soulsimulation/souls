@@ -123,7 +123,126 @@
       ]
     }
   },
+  "building": {
+    "def": "core-barn@3",
+    "solids": [
+      [-2700, -6890, 2300, 110, 0, 0, 4200, 1, 0],
+      [2700, -6890, 2300, 110, 0, 0, 4200, 1, 0],
+      [0, -6890, 400, 110, 0, 0, 1700, 1, 0],
+      [0, -6890, 400, 110, 0, 2500, 4200, 1, 0],
+      [-3350, 6890, 1650, 110, 0, 0, 4200, 1, 0],
+      [3350, 6890, 1650, 110, 0, 0, 4200, 1, 0],
+      [0, 6890, 1700, 110, 0, 3500, 4200, 1, 0],
+      [-4890, -3645, 3245, 110, 270000, 0, 4200, 1, 0],
+      [-4890, 3645, 3245, 110, 270000, 0, 4200, 1, 0],
+      [-4890, 0, 400, 110, 270000, 0, 1700, 1, 0],
+      [-4890, 0, 400, 110, 270000, 2500, 4200, 1, 0],
+      [4890, -3645, 3245, 110, 270000, 0, 4200, 1, 0],
+      [4890, 3645, 3245, 110, 270000, 0, 4200, 1, 0],
+      [4890, 0, 400, 110, 270000, 0, 1700, 1, 0],
+      [4890, 0, 400, 110, 270000, 2500, 4200, 1, 0]
+    ],
+    "slots": [
+      {"n": 2, "id": "ground", "kind": "floor", "at": [0, 100, 0], "yaw": 0, "capacity": 256},
+      {"n": 3, "id": "front", "kind": "stand", "at": [0, 0, 8090], "yaw": 179977, "capacity": 8},
+      {"n": 4, "id": "wall-n-1", "kind": "wall", "at": [-2500, 1700, -7020], "yaw": 180023, "capacity": 1},
+      {"n": 5, "id": "wall-s-1", "kind": "wall", "at": [-2500, 1700, 7020], "yaw": 0, "capacity": 1},
+      {"n": 6, "id": "wall-w-1", "kind": "wall", "at": [-5020, 1700, -3445], "yaw": 269988, "capacity": 1},
+      {"n": 7, "id": "wall-e-1", "kind": "wall", "at": [5020, 1700, -3445], "yaw": 90012, "capacity": 1},
+      {"n": 8, "id": "opening-front-door", "kind": "wall", "at": [0, 100, 7020], "yaw": 0, "capacity": 1},
+      {"n": 9, "id": "opening-window-1", "kind": "wall", "at": [0, 1700, -7020], "yaw": 180023, "capacity": 1},
+      {"n": 10, "id": "opening-window-2", "kind": "wall", "at": [-5020, 1700, 0], "yaw": 269988, "capacity": 1},
+      {"n": 11, "id": "opening-window-3", "kind": "wall", "at": [5020, 1700, 0], "yaw": 90012, "capacity": 1},
+      {"n": 12, "id": "facade-f0-n-1", "kind": "wall", "at": [-1150, 2100, -7020], "yaw": 180023, "capacity": 1},
+      {"n": 13, "id": "facade-f0-s-1", "kind": "wall", "at": [-2400, 2100, 7020], "yaw": 0, "capacity": 1},
+      {"n": 14, "id": "facade-f0-w-1", "kind": "wall", "at": [-5020, 2100, 1150], "yaw": 269988, "capacity": 1},
+      {"n": 15, "id": "facade-f0-e-1", "kind": "wall", "at": [5020, 2100, 1150], "yaw": 90012, "capacity": 1},
+      {"n": 16, "id": "gable-n", "kind": "wall", "at": [0, 8395, -7020], "yaw": 180023, "capacity": 1},
+      {"n": 17, "id": "gable-s", "kind": "wall", "at": [0, 8395, 7020], "yaw": 0, "capacity": 1},
+      {"n": 18, "id": "ridge", "kind": "roof", "at": [0, 8869, 0], "yaw": 90012, "capacity": 1}
+    ],
+    "floors": [{"level": 0, "y": 100, "polygon": [[-4780, -6780], [4780, -6780], [4780, 6780], [-4780, 6780]], "tag": "barn"}],
+    "rooms": [
+      {
+        "id": "barn",
+        "name": "room_barn",
+        "floor": 0,
+        "pose": [0, 100, 0, 0],
+        "height": 4020,
+        "polygon": [[-4780, -6780], [4780, -6780], [4780, 6780], [-4780, 6780]]
+      }
+    ],
+    "openings": [
+      {
+        "id": "front-door",
+        "kind": "door",
+        "at": [0, 6890],
+        "yaw": 0,
+        "width": 3400,
+        "height": 3400,
+        "level": 0,
+        "from": "barn",
+        "to": "outside",
+        "exterior": true,
+        "state": "open",
+        "inRoom": [0, 0, 6890, 0]
+      },
+      {
+        "id": "window-1",
+        "kind": "window",
+        "at": [0, -6890],
+        "yaw": 180023,
+        "width": 800,
+        "height": 800,
+        "sill": 1600,
+        "level": 0,
+        "from": "barn",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [0, 0, -6890, 180023]
+      },
+      {
+        "id": "window-2",
+        "kind": "window",
+        "at": [-4890, 0],
+        "yaw": 269988,
+        "width": 800,
+        "height": 800,
+        "sill": 1600,
+        "level": 0,
+        "from": "barn",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [-4890, 0, 0, 269988]
+      },
+      {
+        "id": "window-3",
+        "kind": "window",
+        "at": [4890, 0],
+        "yaw": 90012,
+        "width": 800,
+        "height": 800,
+        "sill": 1600,
+        "level": 0,
+        "from": "barn",
+        "fromWall": true,
+        "exterior": true,
+        "inRoom": [4890, 0, 0, 90012]
+      }
+    ],
+    "doors": [
+      {
+        "opening": "front-door",
+        "def": "core-door@2",
+        "pose": [0, 0, 6890, 0],
+        "solids": [[-1008, 0, 36, 60, 0, 39, 2899, 0, 0], [1008, 0, 36, 60, 0, 39, 2899, 0, 0]],
+        "params": "{\"sx\":1.8,\"sy\":1.3,\"frame\":\"#f2ead8\",\"leaf\":\"#3f6b5c\",\"trim\":\"#36594d\",\"glass\":\"#bcd9e0\",\"brass\":\"#b8913f\",\"sz\":1,\"vary\":0,\"condition\":\"new\",\"variant\":\"panel\"}",
+        "open": true
+      }
+    ]
+  },
   "text": {
+    "room_barn": "Barn",
     "card": "A timber barn with a wide door.",
     "building": "building",
     "hay_barn": "hay barn",

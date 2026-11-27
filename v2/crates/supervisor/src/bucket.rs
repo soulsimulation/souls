@@ -44,6 +44,83 @@ impl<S: Store> Store for Under<S> {
     }
 }
 
+/// A world's store as its store generation places it (#4954, [`crate::generation`]): every key the world owns
+/// ([`crate::World::owns`]: its record, checkpoints, log parts, stream recovery and history) is read, written, listed
+/// and deleted under `g/<label>/`; every other key (the directory's names, rows and Souls) as it is. With no label it
+/// is the store as it is. A list is placed when its prefix is one of the world's own (as every list the world, the
+/// launcher and `deploy` make is); any other passes through.
+#[derive(Clone)]
+pub struct Generation<S> {
+    pub store: S,
+    world: Option<crate::World>,
+    prefix: String,
+}
+
+impl<S> Generation<S> {
+    pub fn new(store: S, world: crate::World, label: Option<&str>) -> Generation<S> {
+        Generation {
+            store,
+            world: Some(world),
+            prefix: label.map_or_else(String::new, |l| format!("g/{l}/")),
+        }
+    }
+}
+
+/// The store as it is: no world, no generation.
+impl<S> From<S> for Generation<S> {
+    fn from(store: S) -> Generation<S> {
+        Generation {
+            store,
+            world: None,
+            prefix: String::new(),
+        }
+    }
+}
+
+impl<S> Generation<S> {
+    fn at<'a>(&self, key: &'a str) -> std::borrow::Cow<'a, str> {
+        if !self.prefix.is_empty() && self.world.is_some_and(|w| w.owns(key)) {
+            std::borrow::Cow::Owned(format!("{}{key}", self.prefix))
+        } else {
+            std::borrow::Cow::Borrowed(key)
+        }
+    }
+}
+
+impl<S: Store> Store for Generation<S> {
+    fn get(&self, key: &str) -> R<Option<Object>> {
+        self.store.get(&self.at(key))
+    }
+
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+        self.store.put(&self.at(key), bytes, when)
+    }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        let at = self.at(prefix);
+        let keys = self.store.list(&at)?;
+        if at.len() == prefix.len() {
+            return Ok(keys);
+        }
+        Ok(keys
+            .into_iter()
+            .filter_map(|k| k.strip_prefix(&self.prefix).map(str::to_owned))
+            .collect())
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        self.store.delete(&self.at(key))
+    }
+
+    fn head(&self, key: &str) -> R<Option<(u64, String)>> {
+        self.store.head(&self.at(key))
+    }
+
+    fn copy(&self, from: &str, to: &str) -> R<String> {
+        self.store.copy(&self.at(from), &self.at(to))
+    }
+}
+
 /// How long a read made [`patiently`] waits before each try after the first: four tries, about 14 s of waiting, or
 /// about 34 s in all when each try runs to the S3 client's 5 s timeout.
 pub const WAITS: [std::time::Duration; 3] = [

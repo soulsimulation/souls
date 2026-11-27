@@ -8,7 +8,7 @@ tools give no verdict and never change, migrate or retire a world.
 ## Run
 
 Requirements: installed dependencies, a built `apps/web/dist`, the Mars web asset overlay in `.lane/mars-web`,
-Node ≥ 22.18, real Chrome on a hardware GPU, Python 3 with Pillow, and at least 15 GB of free disk.
+Node ≥ 22.18, Playwright Chromium on a hardware GPU, Python 3 with Pillow, and at least 15 GB of free disk.
 
 ```sh
 node tools/parity/run.mjs --world mars|littlemartians --out <new-scratch-dir> [--views a,b] [--capture-only]

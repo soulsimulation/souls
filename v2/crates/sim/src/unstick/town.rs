@@ -34,4 +34,15 @@ impl Unstick for Town {
         let s = self.surfaces.get(&node)?;
         exits::nearest(s.pieces(), at).map(|(_, p)| p)
     }
+
+    /// A point in a triangle of the ground (found through its cells) is its own nearest point, as `exits::nearest`
+    /// finds it after reading every triangle of the surface; only a point that is not asks that way. A crowd's step
+    /// asides ask this for each spot they try.
+    fn legal(&self, node: Id, at: Vec3) -> bool {
+        let Some(s) = self.surfaces.get(&node) else {
+            return false;
+        };
+        s.holds([at.x, at.z])
+            || exits::nearest(s.pieces(), at).is_some_and(|(_, q)| super::len(q, at) == 0)
+    }
 }

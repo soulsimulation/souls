@@ -15,7 +15,7 @@ const cam=()=>{const e=window.__soulsEntity;if(!e)return null;const p=e.camera.p
 const moved=(a,b,k)=>!!(a&&b)&&a[k].some((v,i)=>Math.abs(v-b[k][i])>0.01);
 let release=null,worldUrl=null,fixture=null;
 try{fixture=arg('--web')?await startV7ClerkFixture({origin,out,web:arg('--web'),marsWeb:arg('--mars-web')}):null;release=await chromeLease('rec-new-world');
-try{for(const dpr of [1,2]){const browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+try{for(const dpr of [1,2]){const browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
  try{const ctx=await browser.newContext({viewport:{width:W,height:H},deviceScaleFactor:dpr});if(fixture)await fixture.prepareContext(ctx);else await ctx.addInitScript(()=>{try{localStorage.setItem('sim.dev','rec-gaia');}catch{}});
   const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e).slice(0,200)));page.on('response',r=>{if(r.status()>=400)errors.push(r.status()+' '+new URL(r.url()).pathname);});const run={dpr};
   if(!worldUrl){await page.goto(origin+'/worlds/',{waitUntil:'domcontentloaded'});if(fixture)await page.locator('[data-signed-in="1"]').waitFor({state:'visible',timeout:20000});await page.locator('[data-new-world]').first().click();

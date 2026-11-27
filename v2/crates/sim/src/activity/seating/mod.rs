@@ -2,10 +2,10 @@
 //! part's joints made, and starts from one with its joints undone. No code here names a kind; which parts stand and
 //! which join is B18's reading of the kinds (`crate::structure`).
 //!
-//! - **The crew is a joint activity** (B5) of two members, its node the carry's frame (B9): the part rides the node's
-//!   slot [`SLOT`], a frame standing with a carrier at each column, a beam level with a carrier at each end. Every
-//!   step below asks for exactly [`CREW`] members of a started activity (`crew.size`, `crew.not-started`), so no part
-//!   moves without its crew.
+//! - **The crew is a joint activity** (B5) of two members or more, its node the carry's frame (B9): the part rides the
+//!   node's slot [`SLOT`], a frame standing with a carrier at each column, a beam level with a carrier at each end; a
+//!   crew's sides (0.135 C5, the members after its first two) walk beside it. Every step below asks for at least
+//!   [`CREW`] members of a started activity (`crew.size`, `crew.not-started`), so no part moves without its crew.
 //! - **Taking** ([`Seating::take`]): from wherever the part is (a stand's slot, the ground, a bay's slot) into the
 //!   crew node's slot, in one commit: each joint at the part undone (written by the node that owns the link), the
 //!   crew's node set on the ground where the carry starts (moved off the part when the crew held it), and the part's
@@ -72,7 +72,8 @@ fn minted(mint: &mut Minter) -> R<Id> {
     })
 }
 
-/// A crew's size: two carriers, one at each column of a frame or each end of a beam.
+/// A crew's least size: two carriers, one at each column of a frame or each end of a beam. The carry's kind bounds the
+/// most (a crew carrying with its sides, 0.135 C5).
 pub const CREW: usize = 2;
 
 /// Where a part goes, and what it joins there.
@@ -211,20 +212,21 @@ impl Seating {
         Ok(())
     }
 
-    /// The crew of `activity`: exactly [`CREW`] members of a started activity.
+    /// The crew of `activity`: at least [`CREW`] members of a started activity.
     fn crew(acts: &Activities, activity: Id) -> R<()> {
         let n = acts.members(activity).map_or(0, <[_]>::len);
-        if n != CREW {
+        if n < CREW {
             return refuse(
                 "crew.size",
                 format!(
-                    "{} has {n} members; a part is moved by {CREW}",
+                    "{} has {n} members; a part is moved by {CREW} or more",
                     show(activity)
                 ),
             );
         }
         if !acts.started(activity) {
-            return refuse("crew.not-started", show(activity));
+            let why = acts.unstarted_why(activity).unwrap_or_default();
+            return refuse("crew.not-started", format!("{}: {why}", show(activity)));
         }
         Ok(())
     }
@@ -280,11 +282,11 @@ impl Seating {
         reach: i64,
     ) -> R<()> {
         let n = acts.members(activity).map_or(0, <[_]>::len);
-        if n != CREW {
+        if n < CREW {
             return refuse(
                 "crew.size",
                 format!(
-                    "{} has {n} members; a part is moved by {CREW}",
+                    "{} has {n} members; a part is moved by {CREW} or more",
                     show(activity)
                 ),
             );

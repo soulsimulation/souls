@@ -14,7 +14,7 @@ assert(base && out); mkdirSync(out, { recursive: true });
 const { chromium } = createRequire(`${ROOT}/mars/viewer/package.json`)('@playwright/test');
 const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../god-skill/lib/chrome-lease.mjs');
 const release = await chromeLease('n3-time', { waitMs: 45 * 60000 });
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 try {
   for (const dpr of dprs) {
     const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr })).newPage();

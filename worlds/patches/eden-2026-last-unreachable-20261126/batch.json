@@ -1,0 +1,81 @@
+{
+ "schema": "souls-named-batch/1",
+ "world": "eden-2026",
+ "note": "The last Eden things on building floors no walk reached after #5018, other than windows. The vineyard villa tower stood with its one door uphill, its floor 0.25 m under the ground at the threshold (a step is 0.22 m), so no walk entered it: turned a quarter turn in place, its door opens east, downhill, where the ground lies 0.04 m above its floor, and its door thing moves to that doorway. eden-house-2-kitchen's counter stood on the foot of its stair, so no walk went upstairs: it moves to the opposite (south) wall of the same room, turned to face in. The commons deck stood 0.24 m above the ground, above a step, with no stair: its height becomes 0.2 m (ground cover, walked as the open ground) and the podium on it comes down with it. A node is named by its name in the template, or <building>/<thing> inside a building. Points of a move with a room are in the room's frame, otherwise the world's, in metres; r is in radians about the thing's own origin. worlds/templates/eden-2026.json carries the same change.",
+ "counts": {
+  "turn": 1,
+  "move": 3,
+  "set-param": 1
+ },
+ "ops": [
+  {
+   "op": "turn",
+   "node": "region-vineyard-villa-tower",
+   "def": "core/tower@3",
+   "at_ground": [
+    82.6,
+    -150
+   ],
+   "from_r": 0,
+   "r": 1.5708
+  },
+  {
+   "op": "move",
+   "node": "region-vineyard-villa-tower-door-1",
+   "def": "core/door@2",
+   "from": [
+    82.6,
+    9.81,
+    -147.61
+   ],
+   "at": [
+    84.99,
+    9.81,
+    -150
+   ],
+   "from_r": 0,
+   "r": 1.5708
+  },
+  {
+   "op": "move",
+   "node": "eden-house-2-kitchen/eden-house-2-counter",
+   "def": "core/counter@1",
+   "room": "kitchen",
+   "from": [
+    -2.3,
+    0,
+    -0.97
+   ],
+   "at": [
+    -2.3,
+    0,
+    0.97
+   ],
+   "from_r": 0,
+   "r": 3.1416
+  },
+  {
+   "op": "set-param",
+   "node": "commons-deck",
+   "def": "core/deck@1",
+   "param": "height",
+   "from": 0.24,
+   "to": 0.2
+  },
+  {
+   "op": "move",
+   "node": "commons-podium",
+   "def": "core/podium@1",
+   "from": [
+    9,
+    0.24,
+    -2
+   ],
+   "at": [
+    9,
+    0.2,
+    -2
+   ]
+  }
+ ]
+}

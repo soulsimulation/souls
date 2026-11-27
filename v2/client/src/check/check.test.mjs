@@ -26,7 +26,7 @@ test('A3: a copy refuses only while current: under the bound and with no gap', (
   assert.equal(isCurrent({ age: CURRENT_MS }), true);
   assert.equal(isCurrent({ age: CURRENT_MS + 1 }), false);
   assert.equal(isCurrent({ age: 10, stale: true, gap: { ms: 0, why: 'not-connected' } }), false);
-  assert.equal(isCurrent({ age: 10, asleep: { sinceMs: 30_000 } }), true);
+  assert.equal(isCurrent({ age: 10, unchangedMs: 30_000 }), true);
 });
 
 test('A3: at send time a current no drops its candidate; unknown, yes and a copy not current never do', () => {

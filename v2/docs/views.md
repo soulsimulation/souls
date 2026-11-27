@@ -58,7 +58,10 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
    read is another matter: the gateway lets a view socket go once it falls more than 10 s behind its stream
    (`VIEW_BEHIND_MOST`, told `{4: "view.behind"}` and closed 1013, #4078). It measures this with a WebSocket ping
    every 2 s that the client answers only once it has read everything sent before it, so a backlog held in kernel
-   buffers counts; a send that waits 10 s counts too. The viewer rejoins as any new one does, from a new grant.
+   buffers counts; a send that waits 10 s counts too. The viewer rejoins as any new one does, from a new grant. An
+   agent's socket whose queue fills (64 frames of its stream or of its view items) is closed 1013 `agent.behind` at
+   once, what is still queued not sent first (#4979); its client signs in again and resumes from its cursor. On a
+   slow link the close frame still waits behind what the kernel holds, so there the client learns by its own bound.
 8. **Words reach a view by reference.** The log holds a reference, never words (T8). Delivery to an audience entitled
    to them may put the words beside the reference, from the text store (K16), for references not on the redaction
    list. That changes no record of the view and is not one of its inputs.

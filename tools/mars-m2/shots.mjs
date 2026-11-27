@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Same-camera stills of a local world in real Chrome (shared lease, Metal GPU), dpr 1 and 2 (lane M, 2026-10-17).
+// Same-camera stills of a local world in Chromium (shared lease, Metal GPU), dpr 1 and 2 (lane M, 2026-10-17).
 // Views: JSON list of {name, eye:[x,y,z], at:[x,y,z], hour?:"HH:MM", hideRoofs?:1, frame?:{parent:{p,r}}}. When `frame`
 // is given, eye/at are in that parent's local frame (e.g. a building's) and are turned into world coordinates here.
 //   node tools/mars-m2/shots.mjs --base <world URL> --views <json> --out <dir> [--dpr 1,2] [--tag x] [--size 1280x800]
@@ -22,7 +22,7 @@ const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../god-
 const release = await chromeLease('n3-mars-lm', { waitMs: 45 * 60000 });
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   for (const dpr of dprs) {
     const c = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: dpr });
     await c.addInitScript(() => localStorage.setItem('sim.dev', 'admin'));

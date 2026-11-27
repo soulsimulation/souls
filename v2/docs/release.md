@@ -49,14 +49,15 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    `skill.md`, `instructions.md`, the daemon's library and `soul-client.json`, as `client.tar`), the directory
    (`directoryd`), the viewers' origin (its files as the install places them, `install.sh origin`, as `origin.tar`) and
    their two unit files (`souls-directory.service`, `souls-origin.service`, as `units.tar`), with the tools that move
-   them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
-   (`1220` and 64 hex), as O1 names a build, and each served file by name, version, hash and length (`served`). The
-   bundle is the run's artifact.
+   them (`deploy`, `gateway-upgrade`), `publish-template` and the placement scripts (`ops/`, New world below).
+   `manifest.json` names each artifact by its hash: the SHA-256 multihash (`1220` and 64 hex), as O1 names a build,
+   and each served file by name, version, hash and length (`served`). The bundle is the run's artifact.
 3. **Stage.** The bundle goes to the machine over ssh; each artifact lands at `$WORLDS_ROOT/builds/<hash>/<name>`
    (`/var/lib/souls/worlds`) only if its bytes hash to the manifest's, and `worldd schemas` must run there first (a
    binary built against a newer system library than the machine's does not start: `release.will-not-start`). The
    release's record (manifest, tools, `release.sh`) is `/var/lib/souls/releases/<sha>/`, with `world-aside` among its
-   tools and, under `reseed/`, Eden's reseed, its undo and the kinds at the commit. It prints the staged files'
+   tools and, under `reseed/`, Eden's reseed, its undo, the kinds at the commit and Eden's stock with its libraries
+   (`reseed/stock`: `stock.json`, `library/`; the reseed seeds with them, #4837). It prints the staged files'
    hashes against the manifest's. A dry run stops here: builds by hash are inert until a pin names one.
    - **Reseed (input `reseed`).** When this build cannot read Eden's store (`header-mismatch`), `reseed=fresh` starts
      Eden fresh on it before the move ([cutover.md](cutover.md#a-fresh-eden-on-a-new-build-0132)): `release.sh reseed
@@ -83,7 +84,10 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    Then `mailbox check`: one owner's message, for a grant no Soul holds (nothing reads it; it expires unread), sent
    through each world's gateway with a view token minted from the install's view key, must be accepted; any refusal
    (`no-mailbox`, `not-taken`, unreachable) stops the release with `release.mailbox-unreachable`.
-   A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
+   A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. The one exception
+   is a world other than the canary whose rehearsal failed (`NotDeployed { why: "rehearsal.…" }`: never pinned or
+   restarted): it keeps its build, is named, and the other worlds move; the move then stops with
+   `release.deploy-failed: <worlds> kept their build` before the gateway, and a rerun deploys only those. Each world's probe
    enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
    so a release never drives a user's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
@@ -110,9 +114,33 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    state may no longer fit is refused by name and nothing of that world is staged: a state field gone or retyped, an
    enum value gone, an int's range narrowed, a slot gone, renumbered or admitting less, a role gone, another owner, a
    world that would not build or would leave a pinned revision with no definition (`entries.<name>`). A fork keeps its
-   entries (its boot pins them); an entry only the release has is not added (the world's header does not pin it: a
-   reseed adds it); an entry only the world has is kept. A later `rollback-v2.yml` moves code only: the release's
+   entries (its boot pins them), so a world made from a template gets no new Soul Action yet; an entry only the world
+   has is kept. An entry only the release has is added to every other world (#4954), so a new Soul Action reaches it
+   with the release, no reseed: `entries plan` lists each as `add <kind>`, and the world's next start defines its
+   kinds in the world's history at its first tick (`kinds defined: ...`, each a `souls:kind` node naming the pin; the
+   entry stays in the world's entries), as a creator's kinds are, since the header a world's log names never changes;
+   its log before them replays unchanged. A kind the header pins by another revision is not one of these: it is paired
+   as before or stays unmade. The library's names are every world's: a world's own entry of the same name in its own
+   namespace overrides one, which is then not added. A later `rollback-v2.yml` moves code only: the release's
    entries stay, the world's earlier ones are in `entries.before` for a hand put-back while the world is stopped.
+   **New world** (`release.sh placement`, #5047, #5051): the placement initializer forks a template of the catalogue
+   (`/usr/local/lib/souls/templates`) with the library's `worldd`, which must hash to `/etc/souls/placement.json`'s
+   `build`, and `worldd` forks only a template published on its own build. So after the move, each template there (a
+   folder with a `template` file: `eden-2026`, `mars-camp`) is seeded again from what it carries (facts, entries,
+   moves, entry point, body catalogue) by the release's `worldd`, published by its `publish-template` and dry-run
+   forked by its `worldd`, all in `.templates.next` beside the catalogue, never in it (the directory lists every folder
+   in it holding a `template` file; a dot-named one is refused, `release.placement-stray`). A dry run stops there and
+   changes nothing. A real release then renames into place, back to back: the release's `worldd` and `ops/` in the
+   library (the previous kept as `.worldd.prev`, `.ops.prev`), the pin (`.placement.json.prev`) and each template (the
+   previous under `templates/.aside/<name>`); a file is renamed over the live one, so it is never missing. Nothing
+   creates meanwhile: `souls-place.path` is stopped and a placement in flight waited for (`release.placement-busy`
+   after 300 s; a path unit systemd failed for its start limit is reset and started again with it), and the directory, which reads the catalogue (each template's name, lineage and zone) only at its
+   start and would take a create under the old lineage, is down from just before the renames until just after, when
+   that catalogue changed (a republished template has a fresh lineage). It must then answer `401` as above; if it does
+   not, or a rename fails, every rename goes back (`release.placement-directory-unhealthy`, `-swap`). Any failure
+   before the renames (`release.template-seed`, `-publish`, `-fork`) fails the job and leaves the previous templates,
+   `worldd` and pin. Done once per release (`moved/placement`). `rollback-v2.yml` moves worlds only: the library, the
+   pin and the templates stay on the release, the previous ones beside them for a hand put-back.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already

@@ -1,0 +1,176 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:pallet_crates",
+ "owner": "thing",
+ "state": {
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "grip_1": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    75,
+    -600
+   ]
+  },
+  "grip_2": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    75,
+    600
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1000,
+   1100,
+   1200
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {
+    "wood": "#b08a5a",
+    "crate": "#c9a26b",
+    "band": "#5b4630"
+   },
+   "tags": [
+    "load",
+    "pallet",
+    "crates"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      70,
+      0
+     ],
+     "size": [
+      1000,
+      140,
+      1200
+     ],
+     "tint": "wood"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -245,
+      365,
+      -295
+     ],
+     "size": [
+      470,
+      450,
+      570
+     ],
+     "tint": "crate"
+    },
+    {
+     "kind": "box",
+     "at": [
+      245,
+      365,
+      -295
+     ],
+     "size": [
+      470,
+      450,
+      570
+     ],
+     "tint": "crate"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -245,
+      365,
+      295
+     ],
+     "size": [
+      470,
+      450,
+      570
+     ],
+     "tint": "crate"
+    },
+    {
+     "kind": "box",
+     "at": [
+      245,
+      365,
+      295
+     ],
+     "size": [
+      470,
+      450,
+      570
+     ],
+     "tint": "crate"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      820,
+      -295
+     ],
+     "size": [
+      940,
+      450,
+      570
+     ],
+     "tint": "crate"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      820,
+      295
+     ],
+     "size": [
+      940,
+      450,
+      570
+     ],
+     "tint": "band"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A pallet of crates: two carry it, one at each end.",
+  "construction": "construction",
+  "pallet": "pallet",
+  "crates": "crates"
+ },
+ "card": {
+  "text": "card",
+  "category": "construction",
+  "synonyms": [
+   "pallet",
+   "crates"
+  ]
+ }
+}

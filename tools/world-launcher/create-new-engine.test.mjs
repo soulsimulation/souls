@@ -19,11 +19,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** A launcher with a binding and a stand-in directory. `dir` options: `starting` world-starting answers per key before
  *  it is placed, `expireMs` how long a token is accepted after its first use, `route` false: placed without its route
- *  (the test writes it), `fail` a queue of failures for the next asks ('drop' no answer, 'store' store-unreachable). */
+ *  (the test writes it), `fail` a queue of failures for the next asks ('drop' no answer, 'store' store-unreachable),
+ *  `gateway` the gatewayd its route names. */
 async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   const dir = mkdtempSync(new URL('w1-create-', scratch)), data = join(dir, 'data'), file = join(dir, 'binding.json'), routes = join(dir, 'routes.json');
   const client = join(dir, 'client'), bodies = join(dir, 'bodies'), web = join(dir, 'web');
   for (const d of [data, client, bodies, web]) mkdirSync(d, { recursive: true });
+  // the new engine's published templates: a folder per template holding its manifest; `source` and `.aside` are not ones
+  const published = join(dir, 'templates');
+  for (const id of ['mars-camp', 'eden-2026', 'hello-hamlet']) { mkdirSync(join(published, id), { recursive: true }); writeFileSync(join(published, id, 'template'), 'manifest'); }
+  for (const d of ['source', '.aside/eden-2026']) mkdirSync(join(published, d), { recursive: true });
   const described = (name, text) => { const bytes = Buffer.from(text); writeFileSync(join(client, name), bytes); return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
   const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
   writeFileSync(join(client, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
@@ -34,15 +39,27 @@ async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   v2Switch({ binding: file, slug: 'eden', stream: '/s/eden/', routes, client, staticDir: join(dir, 'static-eden'), bodies });
   const writeRoute = (slug) => {
     const table = JSON.parse(readFileSync(routes, 'utf8'));
-    table.worlds[slug] = { gateway: 'http://127.0.0.1:1', stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, canonical: true };
+    table.worlds[slug] = { gateway: opts.gateway ?? 'http://127.0.0.1:1', stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, canonical: true };
     writeFileSync(routes, JSON.stringify(table));
   };
 
-  const stub = { asks: [], rows: new Map(), expired: 0, firstSeen: new Map(), startingLeft: new Map(), fail: [...(opts.fail ?? [])] };
+  const stub = { asks: [], settings: [], rows: new Map(), expired: 0, firstSeen: new Map(), startingLeft: new Map(), fail: [...(opts.fail ?? [])] };
   const directory = createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const answer = (status, body) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
-    if (req.method === 'GET' && req.url === '/v1/worlds') return answer(200, { worlds: [...stub.rows.values()], templates: ['hello-hamlet'] });
+    // the public list (asked with no sign-in) leaves an unlisted world out, as directoryd's list_for(None) does
+    if (req.method === 'GET' && req.url === '/v1/worlds') return answer(200, { worlds: [...stub.rows.values()].filter((r) => r.unlisted !== true), templates: ['hello-hamlet'] });
+    if (req.method === 'POST' && req.url === '/v1/worlds/settings') {
+      // a world's switches, by its creator alone (http.rs settings)
+      const ask = JSON.parse(Buffer.concat(chunks).toString('utf8')), token = /^Bearer (test:\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+      stub.settings.push({ ...ask, token });
+      if (!token) return answer(401, { refused: 'token-missing' });
+      const row = stub.rows.get(ask.world);
+      if (!row) return answer(404, { refused: 'world-missing' });
+      if (row.creator !== `principal-of-${token.slice(5).split('.')[0]}`) return answer(403, { refused: 'not-the-creator' });
+      if (typeof ask.unlisted === 'boolean') row.unlisted = ask.unlisted;
+      return answer(200, { world: row });
+    }
     if (req.method !== 'POST' || req.url !== '/v1/worlds') return answer(404, { refused: 'not-found' });
     const ask = JSON.parse(Buffer.concat(chunks).toString('utf8')), token = /^Bearer (test:\S+)$/.exec(req.headers.authorization ?? '')?.[1];
     stub.asks.push({ ...ask, token });
@@ -67,7 +84,7 @@ async function fixture(t, { dir: opts = {}, launcher: extra = {} } = {}) {
   const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, started = [];
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {}, cutoverBindingFile: file, webDir: web,
-    v2DirectoryUrl: `http://127.0.0.1:${D}`, v2Create: true, v2CreatePollMs: 20, v2CreateBudgetMs: 2000, ...extra,
+    v2DirectoryUrl: `http://127.0.0.1:${D}`, v2TemplatesDir: published, v2Create: true, v2CreatePollMs: 20, v2CreateBudgetMs: 2000, ...extra,
     command: (w) => { started.push(w.slug); throw new Error('no old world may start'); } });
   t.after(async () => { await launcher.close(); directory.close(); rmSync(dir, { recursive: true, force: true }); });
   const create = async (body, authorization) => {
@@ -210,9 +227,110 @@ test('W1: on by default where a cutover binding is in place (Gene\'s yes, 24 Nov
   assert.equal(out.status, 202, JSON.stringify(out.body));
 });
 
+test('27 Nov: New world offers the new engine\'s published templates, by plain titles, in worlds.json and templates.json', async t => {
+  const { base } = await fixture(t);
+  const want = [['eden-2026', 'Eden village'], ['hello-hamlet', 'Hello hamlet'], ['mars-camp', 'Mars camp']];
+  for (const path of ['/__sim/worlds.json', '/__sim/templates.json']) {
+    const { templates } = await (await fetch(`${base}${path}`)).json();
+    assert.deepEqual(templates.map(t => [t.id, t.name]), want, `${path}: only folders with a manifest, never the old genesis files or the empty plain`);
+    assert.ok(templates.every(t => t.engine === 'new' && typeof t.description === 'string' && !('file' in t)), path);
+    assert.ok(templates.find(t => t.id === 'eden-2026').description.length > 0);
+  }
+});
+
+test('27 Nov: where New world stays on the old engine, the old genesis templates are offered', async t => {
+  const { base } = await fixture(t, { launcher: { v2Create: false } });
+  const ids = (await (await fetch(`${base}/__sim/templates.json`)).json()).templates.map(t => t.id);
+  assert.equal(ids[0], 'empty'); assert.ok(ids.includes('hello-hamlet')); assert.ok(!ids.includes('eden-2026'), 'hidden genesis files stay hidden');
+});
+
 test('W1: with the flag off, New world is not sent to the directory', async t => {
   const { stub, create } = await fixture(t, { launcher: { v2Create: false } });
   const out = await create({ name: 'Old Way', template: 'empty' }, 'Bearer dev:ada');
   assert.equal(stub.asks.length, 0);
   assert.notEqual(out.body.engine, 'new'); assert.equal(out.body.code, 'boot-failed', 'the old create ran (its world command is refused here)');
+});
+
+test('26 Nov: a created world answers its agents: the bootstrap the client pairs from, its gateway\'s paths and its socket', async t => {
+  // the world's gatewayd: answers each agent path it is sent, and takes the socket
+  const seen = [];
+  const gateway = createServer((req, res) => {
+    const chunks = []; req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { seen.push([req.method, req.url, req.headers.authorization ?? null, Buffer.concat(chunks).toString('utf8')]); res.writeHead(200, { 'content-type': 'application/json' }).end('{"from":"gatewayd"}'); });
+  });
+  gateway.on('upgrade', (req, socket) => { seen.push(['UPGRADE', req.url]); socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n'); });
+  const G = await testPort(1); await new Promise(r => gateway.listen(G, '127.0.0.1', r));
+  t.after(() => gateway.close());
+  const { base, create } = await fixture(t, { dir: { gateway: `http://127.0.0.1:${G}` } });
+  const first = await create({ name: 'Mars Lab', template: 'hello-hamlet' }, 'Bearer dev:ada');
+  const made = await create({ name: 'Mars Lab', template: 'hello-hamlet', key: first.body.key, slug: first.body.slug }, 'Bearer dev:ada');
+  assert.equal(made.status, 201, JSON.stringify(made.body));
+  const slug = made.body.slug, at = `${base}/w/${slug}`;
+
+  // the bootstrap, as the v2 origin gives a moved world's (v2/tools/origin/world-routes.mjs), from its route
+  const boot = await fetch(`${at}/v1/bootstrap`);
+  assert.equal(boot.status, 200);
+  assert.deepEqual(await boot.json(), { world: slug, stream: `/s/w/${slug}/views/1/`, history: `/s/w/${slug}/history/`, directory: '/', gateway: `/w/${slug}/v2/ws`, creatorToken: `/w/${slug}/v2/creator-token` });
+  // (its world, directory and gateway are what the client's pairAddress checks before any pairing: on the 404 before,
+  // every `pair <url>` stopped with `pair-world-routing`)
+  assert.equal((await fetch(`${at}/v1/bootstrap`, { method: 'POST' })).status, 405, 'read-only');
+
+  // a creator's token and the entries go to the world's gatewayd, at its own /v2/ paths, body and bearer unchanged
+  const token = await fetch(`${at}/v2/creator-token`, { method: 'POST', headers: { authorization: 'Bearer creator-x', 'content-type': 'application/json' }, body: '{"ask":1}' });
+  assert.deepEqual([token.status, await token.json()], [200, { from: 'gatewayd' }]);
+  assert.equal((await fetch(`${at}/v2/entries`, { headers: { authorization: 'Bearer soul-x' } })).status, 200);
+  assert.deepEqual(seen, [['POST', '/v2/creator-token', 'Bearer creator-x', '{"ask":1}'], ['GET', '/v2/entries', 'Bearer soul-x', '']]);
+
+  // its socket reaches the gatewayd's /v2/ws (a replaced agent's `?free=1` too)
+  const { connect } = await import('node:net');
+  const upgrade = (path) => new Promise((resolve) => {
+    const s = connect(Number(new URL(base).port), '127.0.0.1', () => s.write(`GET ${path} HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16).toString('base64')}\r\n\r\n`));
+    let got = ''; s.on('data', (d) => { got += d; }); s.on('close', () => resolve(got)); s.on('error', () => resolve(got));
+  });
+  assert.match(await upgrade(`/w/${slug}/v2/ws`), /^HTTP\/1\.1 101/);
+  assert.match(await upgrade(`/w/${slug}/v2/ws?free=1`), /^HTTP\/1\.1 101/);
+  assert.deepEqual(seen.slice(2), [['UPGRADE', '/v2/ws'], ['UPGRADE', '/v2/ws?free=1']]);
+
+  // a world with no route is still not served, and its socket is refused as before
+  const none = await fetch(`${base}/w/nowhere/v1/bootstrap`);
+  assert.deepEqual([none.status, (await none.json()).code], [404, 'world.not-served']);
+  assert.match(await upgrade('/w/nowhere/v2/ws'), /^HTTP\/1\.1 404/);
+});
+
+test('26 Nov: a created world\'s creator unlists and lists it as an old world\'s owner does, in the directory, and the list follows', async t => {
+  // live (my-mars-lab-2): POST /__sim/worlds/<slug>/unlisted was the fence's 409 world.new-engine, and the world stayed listed
+  const { base, stub, create } = await fixture(t);
+  const first = await create({ name: 'Mars Lab', template: 'hello-hamlet' }, 'Bearer dev:ada');
+  const made = await create({ name: 'Mars Lab', template: 'hello-hamlet', key: first.body.key, slug: first.body.slug }, 'Bearer dev:ada');
+  assert.equal(made.status, 201, JSON.stringify(made.body));
+  const slug = made.body.slug;
+  const unlist = async (unlisted, authorization) => {
+    const r = await fetch(`${base}/__sim/worlds/${slug}/unlisted`, { method: 'POST', headers: { 'content-type': 'application/json', ...(authorization ? { authorization } : {}) }, body: JSON.stringify({ unlisted }) });
+    return { status: r.status, body: await r.json() };
+  };
+  const listed = async () => (await (await fetch(`${base}/__sim/worlds.json`)).json()).worlds.find(w => w.slug === slug);
+  assert.equal((await listed())?.name, 'Mars Lab');
+
+  // signed out, or someone else: refused, and it stays listed
+  assert.deepEqual([(await unlist(true)).status, stub.settings.length], [401, 0], 'signed out: the directory is not asked');
+  const other = await unlist(true, 'Bearer dev:bo');
+  assert.deepEqual([other.status, other.body.code, other.body.refused], [403, 'forbidden', 'not-the-creator']);
+  assert.equal((await unlist('yes', 'Bearer dev:ada')).status, 400, 'unlisted: true or false');
+  assert.equal((await listed())?.name, 'Mars Lab', 'still listed');
+
+  // its creator: the directory sets the row, asked with her own sign-in; off the list at once, its page still served
+  const off = await unlist(true, 'Bearer dev:ada');
+  assert.deepEqual([off.status, off.body], [200, { ok: true, slug, unlisted: true }]);
+  assert.deepEqual(stub.settings.at(-1), { world: slug, unlisted: true, token: 'test:ada' });
+  assert.equal(await listed(), undefined, 'off the list');
+  const page = await fetch(`${base}/w/${slug}/`, { headers: { accept: 'text/html' } });
+  assert.equal(page.status, 200); assert.match(page.headers.get('x-robots-tag') ?? '', /noindex/, 'served, not indexed');
+  assert.equal(JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await page.text())[1]).worldName, 'Mars Lab', 'under the name the directory last gave');
+  // and stays off once the launcher's copy is asked again (the directory's public list leaves it out)
+  assert.equal((await (await fetch(`${base}/__sim/worlds/${slug}`)).json()).world?.unlisted, true);
+
+  // listed again by its creator
+  const on = await unlist(false, 'Bearer dev:ada');
+  assert.deepEqual([on.status, on.body.unlisted], [200, false]);
+  assert.equal((await listed())?.name, 'Mars Lab', 'back on the list');
 });

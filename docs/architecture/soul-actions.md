@@ -676,8 +676,10 @@ Fixes found in review and deferred to after the repository migration:
   and a note silenced once is never revived. A singer accompanying the piano follows the same window. The absolute
   score clock is not shifted. When a pianist stops before the end is known, notes scheduled ahead that have not begun
   are cancelled, and notes already ringing decay naturally.
-- **Social facing in general.** Groups and conversations should face each other, and a Soul using an object should face
-  it; today Souls often keep the heading they arrived with.
+- **Social facing in general.** On the new engine, two Souls who begin a conversation face each other, a group with
+  nowhere to stand faces its middle as it begins and as each joins, and a group member left where it stands faces the
+  middle its places are round (#423); a walk to a thing or a Soul ends facing it (#4786). Members given places face as
+  their places say, and a seated Soul keeps its seat's facing.
 
 Other known limits:
 

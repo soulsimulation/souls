@@ -1,10 +1,10 @@
 // A touch's intents (0.134 T1) and its offer note: what `together` sends, and what the other Soul's `wait` shows.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { offerNote } from '../converse/converse.mjs';
+import { offerNote, offerPlace } from '../converse/converse.mjs';
 import { giveIntents } from '../give/give.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { activitiesIn, activityNamed, touchOf, togetherIntents } from './together.mjs';
+import { activitiesIn, activityNamed, kindsListed, touchOf, togetherIntents } from './together.mjs';
 
 const id = (n) => `${'ab'.repeat(16)}-${n}`;
 const pin = (k) => `${k}_activity@1220${'0f'.repeat(32)}`;
@@ -63,7 +63,8 @@ test('a dance is offered to up to seven at once, by its word or the one word it 
   assert.equal(togetherIntents({ do: 'offer', touch: 'dance', to: [3, 4, 5, 6, 7, 8, 9, 10].map(id) }, ctx).code, 'together-usage');
   assert.equal(togetherIntents({ do: 'offer', touch: 'hug', to: [id(3), id(4)] }, ctx).code, 'together-usage');
   assert.equal(activityNamed(activitiesIn(served), 'harvest')?.word, 'harvest-together');
-  assert.equal(activityNamed(activitiesIn(served), 'jumping'), null, 'only the word it starts with');
+  assert.equal(activityNamed(activitiesIn(served), 'jumping')?.word, 'group-jumping-jacks', 'a whole word it holds');
+  assert.equal(activityNamed(activitiesIn(served), 'jump'), null, 'never part of a word');
 });
 
 test('any activity the world serves is offered by its word, the offerer in the role it names; one played at a thing at the nearest', () => {
@@ -94,4 +95,43 @@ test('together leave ends this Soul\'s part in an activity, by its id or its wor
   const { req } = requestOf(['together', 'leave', id(9)]);
   assert.deepEqual(giveIntents(req, ctx), [{ verb: 'activity:leave', target: id(9) }]);
   assert.equal(togetherIntents({ do: 'leave' }, ctx).code, 'together-names-an-offer');
+});
+
+// Trial of 25 Nov: `together offer yoga | jumping-jacks | chorus | applause | story-circle` named nothing, though the
+// world serves `group-yoga`, `group-jumping-jacks`, `group-chorus`, `round-of-applause`, `oral-story-circle`.
+test('together offer takes an activity by the one word it holds whole; a word two hold names neither', () => {
+  const more = { format: 'souls-activities/1', activities: [...served.activities,
+    one('eden:group_yoga', { asks: 7, offerer: 'eden:starter' }), one('eden:group_chorus', { asks: 7, offerer: 'eden:starter' }),
+    one('eden:round_of_applause', { asks: 7 }), one('eden:oral_story_circle', { asks: 7, offerer: 'eden:teller' }),
+    one('eden:stargaze_together', { asks: 7, offerer: 'eden:starter' }), one('eden:bow_to_each_other'),
+    one('eden:wave_to_each_other'), one('eden:wave_together', { asks: 7 })] };
+  const list = activitiesIn(more);
+  for (const [word, kind] of [['yoga', 'eden:group_yoga'], ['jumping-jacks', 'eden:group_jumping_jacks'], ['jumping_jacks', 'eden:group_jumping_jacks'],
+    ['chorus', 'eden:group_chorus'], ['applause', 'eden:round_of_applause'], ['story-circle', 'eden:oral_story_circle'],
+    ['stargaze', 'eden:stargaze_together'], ['bow', 'eden:bow_to_each_other'], ['dance', 'eden:dance_together'], ['hug', 'eden:hug']]) {
+    assert.equal(activityNamed(list, word)?.kind, kind, word);
+  }
+  assert.equal(activityNamed(list, 'wave'), null, 'wave-to-each-other or wave-together: neither');
+  assert.equal(activityNamed(list, 'together'), null, 'a word many hold names none');
+  assert.deepEqual(togetherIntents({ do: 'offer', touch: 'yoga', to: [id(3), id(4)] }, { ...ctx, served: more }),
+    [{ verb: 'activity:offer', target: id(1), params: { 1: pin('eden:group_yoga'), 2: 'eden:starter', 3: [id(3), id(4)] } }]);
+});
+
+test('together kinds lists every activity the world serves, with how the ones it does not offer are played', () => {
+  const rows = kindsListed(served);
+  assert.deepEqual(rows.map((r) => r.word), served.activities.map((a) => a.word).sort());
+  assert.match(rows.find((r) => r.word === 'carry').how, /carry offer/);
+  assert.match(rows.find((r) => r.word === 'chess-table').how, /find chess table/);
+  assert.deepEqual(rows.find((r) => r.word === 'hug'), { word: 'hug', card: 'A eden:hug.', asks: 1, near: 'within 0.6 m', where: 'anywhere' });
+});
+
+// Trial of 25 Nov: `converse start` from a bench put the conversation under the bench, refused `child-not-admitted`.
+test('an offer goes on the open ground, never under the seat this Soul sits on', () => {
+  const me = id(2), ground = id(1), bench = id(7);
+  const rows = new Map([[ground, { id: ground, kind: 'eden:ground@1220aa' }], [bench, { id: bench, kind: 'eden:bench@1220bb', parent: ground }],
+    [id(8), { id: id(8), kind: 'souls:body', soul: me, parent: bench }]]);
+  assert.equal(offerPlace(rows, me), ground);
+  rows.delete(ground);
+  assert.equal(offerPlace(rows, me), bench, 'with no ground in the copy, where it stands');
+  assert.equal(offerPlace(new Map(), me), null);
 });

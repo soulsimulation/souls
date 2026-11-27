@@ -116,7 +116,8 @@ ignores the same. The modelled store refuses the stale writer.
     - **The answers** leave only after both. The tick's parts reach the views and the follower once its words are
       on the disk. A failed sync of either file is final (`sim::log` rule 6): nothing more is answered, and a world
       process ends with `disk-failed` (exit 87, `answers::EXIT_DISK_FAILED`), so its unit starts it again from its
-      log rather than leave a world that ticks and answers nothing.
+      log rather than leave a world that ticks and answers nothing. A start whose disk has no room waits for it,
+      `disk.full`, rather than exit at its first write and be restarted into the same full disk (O10, #2806).
     - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
       are all on the disk.
 
@@ -124,6 +125,16 @@ ignores the same. The modelled store refuses the stale writer.
     `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
     the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
     every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
+
+15. **What a sync waits for is the disk's, measured (#4973).** Answers wait for both syncs (rule 14), so another
+    process's writes on the same disk can hold them. On the shared build machine's root disk (a consumer NVMe drive
+    without power-loss protection, 85 % full), 600 MB written by another process and written back by the kernel 30 s
+    later held 20 syncs a second of 2 KiB each for seconds whatever the way of syncing: an append and `fdatasync`
+    4.5 s, a write into room already written and synced (no journal commit) 3.7 s, `O_DSYNC` 3.7 s,
+    `O_DIRECT | O_DSYNC` (one FUA write, no cache flush) 2.3 s, against 14 to 37 ms without it. On the machine's other
+    disk (SATA, with power-loss protection) the same four kept under 120 ms, the 600 MB written on that disk included.
+    The stall is the disk's queue, not the log's way of syncing; a world's folder belongs on a disk with power-loss
+    protection, or on one of its own. `v2/tools/bench/stage2a/rung.sh` with `INJECT=<MB>` measures it on answers.
 
 ## What would quietly break this
 

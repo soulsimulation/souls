@@ -192,7 +192,7 @@ export function blendFrames(prev: ActivityFrame | null, cur: ActivityFrame | nul
     else if (cg) { hands[i] = cg; w[i] = cw * k; }
     else if (pg) { hands[i] = pg; w[i] = pw * (1 - k); }
   }
-  const out: ActivityFrame = { ...near, hands: hands[0] || hands[1] ? hands : null, handW: w, rootHands: undefined, lying: lying ? { ...lying, raise: mix(prev?.lying?.raise, cur?.lying?.raise) } : null,
+  const out: ActivityFrame = { ...near, pairedContact: !!(prev?.pairedContact || cur?.pairedContact), hands: hands[0] || hands[1] ? hands : null, handW: w, rootHands: undefined, lying: lying ? { ...lying, raise: mix(prev?.lying?.raise, cur?.lying?.raise) } : null,
     feetOut: mix(prev?.feetOut, cur?.feetOut), hop: mix(prev?.hop, cur?.hop), lean: mix(prev?.lean, cur?.lean), side: mix(prev?.side, cur?.side), look: mix(prev?.look, cur?.look) };
   if (prev?.mouth !== undefined || cur?.mouth !== undefined) out.mouth = mix(prev?.mouth, cur?.mouth);
   return out;

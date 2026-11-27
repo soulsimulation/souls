@@ -5,7 +5,7 @@
 //   node apps/web/scripts/initial-assets.mjs <origin> [--worlds eden,mars,littlemartians] [--out <file>]
 //
 // <origin> serves the old worlds at /w/<key> (production https://sim.eden.art, or a local candidate server). Read
-// only: it opens each world signed out in real Chrome (cold cache), records the asset GETs made until the arrival
+// only: it opens each world signed out in Chromium (cold cache), records the asset GETs made until the arrival
 // card is done, then measures each file's decoded size with a plain GET. New worlds need no manifest: their snapshot
 // carries assetBytes from the server's asset index.
 import { writeFileSync } from 'node:fs';
@@ -27,7 +27,7 @@ const { chromeLease } = await import(resolve(root, 'tools/god-skill/lib/chrome-l
 const manifest = { contract: 'initial-assets/1', origin, at: new Date().toISOString(), worlds: {} };
 const release = await chromeLease('initial-assets');
 try {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   for (const key of worlds) {
     const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 } });
     const page = await ctx.newPage(); const urls = new Set();
