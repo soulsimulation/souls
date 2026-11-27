@@ -53,11 +53,13 @@
 //! - page → gateway → page, the owner's box (W10, #2802), on a view socket: text frames, apart from the stream too.
 //!   `put <grant>\n<words>` puts a message for one of the view token's grants (`mailbox::on_view_text`), answered
 //!   `{"sent": {"id"}}` or `{"sent": {"refused"}}`; then, to every view socket whose token holds that grant and to no
-//!   other, `{"mail": {"id", "state": "picked"}}` when it is given to the agent's socket, `{"doing": {"seq", "verb",
+//!   other, `{"mail": {"id", "state": "picked"}}` when it is given to the agent's socket, `{"mail": {"id", "state":
+//!   "read"}}` when the agent's client says the agent read it (`{"read": {"id"}}`), `{"doing": {"seq", "verb",
 //!   "phase", "outcome"}}` for each intent the agent sends while it is open (the phase is the answer's own: `sent`,
 //!   `accepted`, `receipt`, `refused`, `resolved`), and the agent's own `{"close": …}` once the directory took it.
-//!   Whether each grant's agent is connected (a socket signed in for it), first when the view socket starts watching
-//!   and then on each change: `{"agent": {"grant", "connected"}}`.
+//!   Whether each grant's agent is connected (a socket signed in for it) and listening (its client said a reader of
+//!   its messages is open, `{"listening": true|false}`), first when the view socket starts watching and then on each
+//!   change: `{"agent": {"grant", "connected", "listening"}}`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
@@ -199,6 +201,9 @@ struct Held {
     who: Option<Arc<Who>>,
     /// The ids of the owner's messages given to the grant's sockets (each socket's own are in [`Live::mailed`]).
     mailed: BTreeSet<String>,
+    /// Whether the grant's agent said a reader of its messages is open now (`{"listening": …}`, first-day 27 Nov): its
+    /// client being connected does not say that anyone reads what the client is given.
+    listening: bool,
     /// W10: the grant's intents sent while a message given to it is open, by sequence, and their verbs. Only acts
     /// begun after the pickup are told to the owner, so an older act never reads as the answer.
     doing: BTreeMap<u64, String>,
@@ -386,6 +391,7 @@ impl Gateway {
         if !shared(grant) {
             held.sessions.clear();
             held.mailed.clear();
+            held.listening = false;
         }
         held.sessions.insert(
             session,
@@ -397,7 +403,7 @@ impl Gateway {
             },
         );
         held.who = Some(who);
-        self.tell_watchers(&grant.key(), mailbox::agent(grant, true));
+        self.tell_watchers(&grant.key(), mailbox::agent(grant, true, held.listening));
         let newest = if shared(grant) { 0 } else { held.newest };
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
@@ -436,7 +442,8 @@ impl Gateway {
         if let Some(held) = hub.grants.get_mut(&grant.key()) {
             held.sessions.remove(&session);
             if held.sessions.is_empty() {
-                self.tell_watchers(&grant.key(), mailbox::agent(grant, false));
+                held.listening = false;
+                self.tell_watchers(&grant.key(), mailbox::agent(grant, false, false));
             }
         }
     }
@@ -565,7 +572,7 @@ impl Gateway {
     pub fn watch(&self, grants: &[Grant]) -> (u64, mpsc::Sender<String>, mpsc::Receiver<String>) {
         let (tx, rx) = mpsc::channel(OUTBOUND);
         for g in grants.iter().take(OUTBOUND / 2) {
-            let _ = tx.try_send(mailbox::agent(*g, self.connected(*g) == Some(true)));
+            let _ = tx.try_send(self.presence(*g));
         }
         let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
         let n = w.keys().next_back().map_or(1, |n| n + 1);
@@ -578,12 +585,7 @@ impl Gateway {
     pub fn rewatch(&self, n: u64, grants: &[Grant]) {
         let now: Vec<(Vec<u8>, String)> = grants
             .iter()
-            .map(|g| {
-                (
-                    g.key(),
-                    mailbox::agent(*g, self.connected(*g) == Some(true)),
-                )
-            })
+            .map(|g| (g.key(), self.presence(*g)))
             .collect();
         let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((keys, tx)) = w.get_mut(&n) {
@@ -593,6 +595,40 @@ impl Gateway {
                 }
             }
             *keys = now.into_iter().map(|(k, _)| k).collect();
+        }
+    }
+
+    /// The owner's box's presence frame for `grant` as it is now: whether its agent is connected, and listening.
+    fn presence(&self, grant: Grant) -> String {
+        let connected = self.connected(grant) == Some(true);
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let listening = hub.grants.get(&grant.key()).is_some_and(|h| h.listening);
+        mailbox::agent(grant, connected, connected && listening)
+    }
+
+    /// The socket signed in for `grant` as `session` says whether a reader of its messages is open now; a change is
+    /// told to the view sockets that watch the grant. Nothing from a socket no longer signed in.
+    pub fn set_listening(&self, grant: Grant, session: u64, on: bool) {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(held) = hub.grants.get_mut(&grant.key())
+            && held.sessions.contains_key(&session)
+            && held.listening != on
+        {
+            held.listening = on;
+            self.tell_watchers(&grant.key(), mailbox::agent(grant, true, on));
+        }
+    }
+
+    /// The agent of `grant` read message `id` (its client handed it to the agent's turn): told to the view sockets
+    /// that watch the grant as `{"mail": {"id", "state": "read"}}`, while the message is one given to it and open.
+    pub fn read_mail(&self, grant: Grant, id: &str) {
+        let key = grant.key();
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if mailbox::id_like(id) && hub.grants.get(&key).is_some_and(|h| h.mailed.contains(id)) {
+            self.tell_watchers(
+                &key,
+                format!(r#"{{"mail":{{"id":"{id}","state":"read"}}}}"#),
+            );
         }
     }
 
@@ -891,7 +927,10 @@ mod tests {
             [b"page-20".to_vec()],
             "resumed from its cursor"
         );
-        assert_eq!(watching.try_recv().unwrap(), mailbox::agent(creator, true));
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(creator, true, false)
+        );
         gw.detach(creator, agent.session);
         drop(agent);
         assert!(watching.try_recv().is_err(), "the page is back");
@@ -899,7 +938,10 @@ mod tests {
         gw.deliver(creator.key(), ends(23), at(4), b"page-23".to_vec());
         assert_eq!(got(&mut back), [b"page-23".to_vec()]);
         gw.detach(creator, back.session);
-        assert_eq!(watching.try_recv().unwrap(), mailbox::agent(creator, false));
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(creator, false, false)
+        );
     }
 
     #[test]
@@ -1052,5 +1094,96 @@ mod tests {
         gw.post_text(&creator.key(), agent.session, "agent-reply".to_owned());
         assert_eq!(agent.mail.try_recv().unwrap(), "agent-reply");
         assert!(page.mail.try_recv().is_err());
+    }
+
+    /// First-day 27 Nov: a connected client is not an agent reading its messages. The owner's box is told whether
+    /// the client said a reader is open, and when the agent read a message, not only that the client was given it.
+    #[test]
+    fn the_owners_box_is_told_whether_the_agent_listens_and_what_it_read() {
+        let gw = gateway();
+        let soul = grant("soul");
+        let (_, _, mut watching) = gw.watch(&[soul]);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, false, false)
+        );
+        let first = sign_in(&gw, soul);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, true, false),
+            "connected, and nobody reads yet"
+        );
+        gw.set_listening(soul, first.session, true);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, true, true)
+        );
+        gw.set_listening(soul, first.session, true);
+        assert!(watching.try_recv().is_err(), "no change, nothing said");
+        let (n, _, mut late) = gw.watch(&[soul]);
+        assert_eq!(
+            late.try_recv().unwrap(),
+            mailbox::agent(soul, true, true),
+            "as it is now"
+        );
+        gw.unwatch(n);
+
+        // a message given to the client is picked; read only when the client says the agent read it
+        let open = vec![(
+            soul.key(),
+            "m_1".to_owned(),
+            r#"{"mail":{"id":"m_1"}}"#.to_owned(),
+        )];
+        gw.read_mail(soul, "m_1");
+        assert!(watching.try_recv().is_err(), "not given yet: nothing");
+        gw.post_mail(open);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            r#"{"mail":{"id":"m_1","state":"picked"}}"#
+        );
+        gw.read_mail(soul, "m_2");
+        gw.read_mail(soul, "m\"1");
+        assert!(
+            watching.try_recv().is_err(),
+            "another id, or not an id: nothing"
+        );
+        gw.read_mail(soul, "m_1");
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            r#"{"mail":{"id":"m_1","state":"read"}}"#
+        );
+
+        // the reader closes; a new device takes the Soul and starts with nobody reading
+        gw.set_listening(soul, first.session, false);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, true, false)
+        );
+        gw.set_listening(soul, first.session, true);
+        watching.try_recv().unwrap();
+        let second = sign_in(&gw, soul);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, true, false)
+        );
+        gw.set_listening(soul, first.session, true);
+        assert!(
+            watching.try_recv().is_err(),
+            "the replaced socket says nothing"
+        );
+        gw.set_listening(soul, second.session, true);
+        watching.try_recv().unwrap();
+        gw.detach(soul, second.session);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, false, false)
+        );
+        let back = sign_in(&gw, soul);
+        assert_eq!(
+            watching.try_recv().unwrap(),
+            mailbox::agent(soul, true, false),
+            "a reader is not carried over a new sign-in"
+        );
+        drop(back);
     }
 }

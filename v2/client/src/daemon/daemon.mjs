@@ -303,6 +303,34 @@ const serving = new Map(); // sequence → the message its act serves
 const replyOf = new Map(); // C15: a message's reply, sent with its close
 const closedMail = new Map(); // Q1: messages this daemon closed (id → state), so a later `--for` or `ack` on one is told, not refused
 const closes = []; // closes not yet sent, for the next sign-in
+// First-day 27 Nov: the owner's card says "listening" only while a reader (`listen`, `wait`) is open here, and
+// "Thinking…" only once the model's turn has a message, not when this daemon was given it. Told to the gateway as
+// `{"listening": true|false}` and `{"read": {"id"}}`; it tells the owner's page.
+const LISTEN_GAP_MS = 5000; // `listen --follow` asks again at once: a gap shorter than this is still listening
+let listeners = 0, listeningSaid = false, listenOff = null;
+const handedMail = new Set(); // ids a reader handed out: read once the model's turn sends a command
+const readMail = new Set(); // ids told read
+function sayListening() {
+  const on = listeners > 0;
+  if (on === listeningSaid || !ws || !signedIn) return;
+  listeningSaid = on;
+  ws.send(JSON.stringify({ listening: on }));
+}
+function readerOpened() { listeners++; clearTimeout(listenOff); listenOff = null; sayListening(); }
+function readerClosed() {
+  listeners = Math.max(listeners - 1, 0);
+  clearTimeout(listenOff);
+  listenOff = setTimeout(() => { listenOff = null; sayListening(); }, LISTEN_GAP_MS);
+  listenOff.unref?.();
+}
+function markRead(ids) {
+  for (const id of ids) {
+    handedMail.delete(id);
+    if (!mail.has(id) || readMail.has(id) || !ws || !signedIn) continue;
+    readMail.add(id);
+    ws.send(JSON.stringify({ read: { id } }));
+  }
+}
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
 // Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
@@ -500,8 +528,9 @@ async function sendBulk(bytes, sequence) {
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
-  if (!signedIn) signedInAt = Date.now();
+  if (!signedIn) { signedInAt = Date.now(); listeningSaid = false; } // a new sign-in starts with nobody reading
   signedIn = true;
+  sayListening();
   // #4977: a `wait` under way is told the connection is back, and how long it was gone.
   if (lostAt !== null) {
     const gap = Date.now() - lostAt;
@@ -645,6 +674,8 @@ function closeMail(id, state, outcome) {
   const reply = replyOf.get(id);
   const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
+  handedMail.delete(id);
+  readMail.delete(id);
   replyOf.delete(id);
   closedMail.set(id, state);
   if (closedMail.size > 200) closedMail.delete(closedMail.keys().next().value);
@@ -1820,7 +1851,10 @@ async function answer(req, conn = null) {
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) {
+    wakes.confirm(); lastCommand = Date.now();
+    markRead([...handedMail, ...[req.id, req.for].filter((x) => typeof x === 'string')]);
+  }
   if (!PASSIVE.has(req.op)) takeBack();
   switch (req.op) {
     case 'pending': {
@@ -1838,6 +1872,7 @@ async function answer(req, conn = null) {
       const got = events.splice(0), served = new Set(serving.values());
       heardSince.length = 0;
       const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
+      markRead(open.map((m) => m.id));
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
         ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" --close done|failed' } : {}) },
@@ -1920,15 +1955,19 @@ async function answer(req, conn = null) {
       // A reader whose socket closed takes nothing: what came stays for the next reader (an owner's message, a wake).
       const gone = () => conn?.destroyed === true;
       let handed = gone() ? [] : wakes.deliver(Date.now());
-      while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
-        const free = wakes.nextFree(Date.now());
-        const left = Math.min(until, free ?? until) - Date.now();
-        await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        handed = gone() ? [] : wakes.deliver(Date.now());
-      }
+      readerOpened();
+      try {
+        while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
+          const free = wakes.nextFree(Date.now());
+          const left = Math.min(until, free ?? until) - Date.now();
+          await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+          handed = gone() ? [] : wakes.deliver(Date.now());
+        }
+      } finally { readerClosed(); }
       if (gone()) return { ok: false, code: 'reader-gone' };
       if (handed.length) saveWakes();
       const got = events.splice(0);
+      for (const e of got) if (e.kind === 'mail') handedMail.add(e.id);
       const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
       heardSince.length = 0; // shown here, so not again in the next brief
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
@@ -1947,11 +1986,15 @@ async function answer(req, conn = null) {
       // R5: the wakes the owner's rules queued are handed here too, as `wait` hands them, within the budget.
       const gone = () => conn?.destroyed === true;
       let handed = gone() ? [] : wakes.deliver(Date.now());
-      while (got.length === 0 && handed.length === 0 && !gone() && Date.now() < until) {
-        await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        got = fresh(since);
-        handed = gone() ? [] : wakes.deliver(Date.now());
-      }
+      readerOpened();
+      try {
+        while (got.length === 0 && handed.length === 0 && !gone() && Date.now() < until) {
+          await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+          got = fresh(since);
+          handed = gone() ? [] : wakes.deliver(Date.now());
+        }
+      } finally { readerClosed(); }
+      for (const m of got) handedMail.add(m.id);
       if (handed.length) saveWakes();
       return { ok: true, cursor: eventN, daemon: process.pid, mail: got, ...(handed.length ? { wakes: handed } : {}), ...(got.length || handed.length ? {} : { timedOut: true }) };
     }
