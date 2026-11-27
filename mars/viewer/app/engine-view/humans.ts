@@ -387,7 +387,7 @@ export type Reach = (entity: string, from: THREE.Vector3, out: THREE.Vector3) =>
 const BLEND = DT / 0.2; // Walk↔Idle crossfade: a stopped walker is standing within 0.2 s (§3)
 const POSE_BLEND = DT / 0.4; // sit / warm / postures in and out over 0.4 s
 /** How far a native carry's arms extend (fraction of their length), and how much less the body is planned for. */
-const CARRY_EXTENSION = 0.88, CARRY_PLAN_MARGIN = 0.03;
+const CARRY_EXTENSION = 0.88, CARRY_PLAN_MARGIN = 0.08;
 const WALK_EPS = 0.08; // m/s: Walk plays iff ground speed ≥ this (engine locomotion/walk.ts WALK_MIN, MOVEMENT.md §3)
 const SEAT_DEFAULT = 0.45; // m, when the seat fixture is unknown (take replay)
 const SEAT_MATCH = 0.8; // m, body point to nearest seat point (covers the sit-down / stand-up approach line)
@@ -850,9 +850,12 @@ export class HumanViews {
     // A latch below the hips keeps its small bend (`knees`).
     const style = styleFor(v.activity, walking), standing = style === 'knees' && !!v.handActuator && ts.length > 0 && ts.every((t) => t.up >= d.hipH);
     // entry 43: taking or putting a handle-held thing (a kettle) leans like the vessel stages: 'hips' flickered its hips 4 cm
-    // A native carry's arms stop at CARRY_EXTENSION of their length: plan the body for that reach, less a margin. Planned
-    // for the usual 0.92, the shoulders stopped where the far hand of a held beam fell up to 4 cm short of its contact.
-    const pz = solvePosture(d, ts, v.transfer && v.transfer.endTick === undefined && v.activity === 'reach' && !walking ? 'lean' : standing ? 'stand' : style, v.carryWeight !== undefined && hands && (hands.left || hands.right) ? CARRY_EXTENSION - CARRY_PLAN_MARGIN : undefined);
+    // A native carry's arms stop at CARRY_EXTENSION of their length: plan the body for that reach, less a margin for the
+    // gait's sway. Planned for the usual 0.92, the shoulders stopped where the far hand of a held beam fell up to 4 cm
+    // short of its contact. A walking carrier is planned as a standing one: the walk's own limits (8 cm, 25 degrees)
+    // left that hand up to 8 cm short, and the hands stay on the load before the gait keeps its shape.
+    const carried = v.carryWeight !== undefined && !!hands && !!(hands.left || hands.right);
+    const pz = solvePosture(d, ts, v.transfer && v.transfer.endTick === undefined && v.activity === 'reach' && !walking ? 'lean' : standing ? 'stand' : carried && walking ? styleFor(v.activity, false) : style, carried ? CARRY_EXTENSION - CARRY_PLAN_MARGIN : undefined);
     // A low latch may need a small bend as well as a hand reach. Ease the whole
     // solved posture on the same timeline so the torso cannot pop in/out.
     if(v.handActuator){const k=handActuatorFrame(v.handActuator,(v.handActuatorTime??0)-v.handActuator.startTick*DT).weight;for(const key of ['drop','bend','rise','kneel'] as const)pz[key]*=k;}
