@@ -294,7 +294,7 @@ jobs:
               bash tools/test-harness/web-suite.sh
               ;;
             launcher)
-              # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts).
+              # V3-launcher-unit; each test file takes a free block of ports (tools/lib/test-port.ts).
               # restic for backup-restic.test.mjs, the same pinned release binary the gate's image installs
               # (modal_suite.py); without it that test skips (#1463: a skip is not proof). x86_64 only; elsewhere it skips
               # and the release gate runs the step on Modal.

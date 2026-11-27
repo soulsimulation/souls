@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { openLauncher, withHeap } from './launcher.mjs';
 import { worldHeapMb, DEFAULT_WORLD_HEAP_MB, BIG_WORLD_HEAP_MB } from './registry.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(4);
 
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;

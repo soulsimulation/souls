@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { openLauncher } from './launcher.mjs';
 import { directorySouls, v2SoulId } from './my-souls.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 /** A world store with one dev-owned Soul (the table shape the read uses; my-souls.test.mjs has the full one). */
 function store(file, worldId, id, owner, name) {

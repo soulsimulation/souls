@@ -39,12 +39,12 @@ const report = { origin, steps: [], failures: [] };
 const check = (name, ok, detail = {}) => { report.steps.push(windowCheck(name, ok, detail)); if (!ok) report.failures.push(name); console.log(`${ok ? '✔' : '✖'} ${name} ${JSON.stringify(detail).slice(0, 400)}`); return !!ok; };
 
 // ---------- the launcher in Clerk mode (synthetic issuer)
-const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../../apps/server/test/clerk-fixture.ts');
+const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../lib/clerk-fixture.ts');
 const keys = await clerkKeys(origin);
 const dir = mkdtempSync(join(tmpdir(), 'approve-window-'));
 writeFileSync(join(dir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
 writeFileSync(join(dir, 'clerk.env'), [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${origin}`,
-  `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${resolve(root, 'apps/server/test/clerk-jwks-preload.mjs')}`, ''].join('\n'));
+  `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${resolve(root, 'tools/lib/clerk-jwks-preload.mjs')}`, ''].join('\n'));
 const dataDir = join(out, 'data');
 const launcher = spawn(process.execPath, ['tools/world-launcher/launcher.mjs', '--port', String(port), '--range', range, '--data', dataDir, '--base', BASE,
   '--web', resolve(args.web), '--auth-env', join(dir, 'clerk.env'), '--public-origin', origin], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });

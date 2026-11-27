@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { openLauncher } from './launcher.mjs';
 import { defaultCommand } from './children.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const PORT = Number(process.env.OP_TEST_PORT ?? await testPort(6)), RANGE = [PORT + 1, PORT + 5];
 const dir = mkdtempSync(join(tmpdir(), 'launcher-op-test-'));

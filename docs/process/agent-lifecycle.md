@@ -89,7 +89,7 @@ and package tests, typecheck and the web build, the `apps/web` unit suite (`V4-w
 tests (`V3-launcher-unit`) and the `tools/client-eval` tests (`V3-client-cli`). Pushes to
 `main` and manual runs run every job, which is the evidence the merge train needs for non-strict landing. The browser
 walks and the full gate stay with the release. Server and launcher test files take free ports from
-`apps/server/test/test-port.ts`, so they can run beside other jobs and local processes on one host. Server discovery includes every nested `.test.ts` under
+`tools/lib/test-port.ts`, so they can run beside other jobs and local processes on one host. Server discovery includes every nested `.test.ts` under
 `apps/server/src`; two deterministic shards plus the dedicated latency job cover that inventory exactly once.
 The `proof-check` bot keeps one comment
 up to date with the tier, the CI run at the head, and its advice on the journal entry; `proof-ok` itself fails only
