@@ -39,6 +39,39 @@ export function completed(answer, label) {
   return answer;
 }
 
+/** `together kinds` supplies the selected card and invited capacity, never an invented activity pin. */
+export function partyDance(catalog, invited) {
+  assert.equal(catalog.ok, true, 'activity discovery must succeed');
+  const dance = catalog.activities?.find((row) => row.word === 'dance-together');
+  assert(dance && typeof dance.card === 'string' && /\bbeat\b/i.test(dance.card), 'the public dance card must name its shared beat');
+  assert(Number.isInteger(dance.asks) && dance.asks >= invited, 'the public dance capacity must admit the invited guests');
+  assert.equal(dance.where, 'anywhere', 'this rehearsal uses an activity with no thing');
+  assert(!dance.how, 'the dance must support ordinary offer and accept');
+  return dance;
+}
+
+/** `look` teaches the exact activity id through its ordinary leave command. `inspect` then teaches roles/members. */
+export function partyActivityId(look, word) {
+  assert.equal(look.ok, true, 'membership look must succeed');
+  const lines = (look.in ?? []).filter((line) => line.includes(word));
+  assert.equal(lines.length, 1, 'look must name exactly one selected dance');
+  const id = /(?:leave:|take it back:) together leave (\S+)$/.exec(lines[0])?.[1];
+  assert(id, 'look must teach the activity id in its leave command');
+  return id;
+}
+
+export function partyMembers(answer, { id, word, bodies }) {
+  assert.equal(answer.ok, true, 'activity inspect must succeed');
+  assert.equal(answer.id, id, 'inspect must read the exact offered activity');
+  assert.equal(answer.activity, word, 'inspect must name the selected dance');
+  assert.equal(answer.started, true, 'the accepted dance must have started');
+  assert(Array.isArray(answer.members), 'inspect must list public members and roles');
+  assert.deepEqual(answer.members.map((m) => m.body).sort(), [...bodies].sort(), 'the dance must retain exactly the expected members');
+  assert(answer.members.every((m) => typeof m.role === 'string' && m.role.length), 'each member must have a public role');
+  assert.equal(answer.leave, `together leave ${id}`, 'inspect must teach the real leave command');
+  return answer;
+}
+
 /** One member leaving must not end the other members' dance. The camera records this entire sequence. */
 export async function performParty({ seats, jukebox, mode = 'jukebox', record = () => {}, pause = sleep }) {
   assert.equal(seats.length, 5, 'the rehearsal uses five independent Souls');
@@ -52,7 +85,8 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   const act = async (seat, form, target, ...args) => completed(await command(seat, 'act', `${form}:${target}`, ...args, '--wait'), form);
   const body = async (seat, form) => completed(await command(seat, 'act', form, '--wait'), form);
   const walk = (seat, target) => act(seat, 'walk', target);
-  const leave = async (seat) => completed(await command(seat, 'together', 'leave', 'dance-together'), 'leave dance');
+  let activityId;
+  const leave = async (seat) => completed(await command(seat, 'together', 'leave', activityId), 'leave dance');
   async function spoken(speaker, listener, words, gesture) {
     const sent = await command(speaker, 'say', words, '--to', listener.body, '--gesture', gesture);
     assert.equal(sent.ok, true, 'the spoken greeting is admitted');
@@ -72,6 +106,18 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
       assert(Date.now() < until, 'the other Soul must actually hear the words'); await pause(100);
     }
   }
+  const discovery = [];
+  for (const seat of seats) {
+    const help = await command(seat, 'help');
+    for (const op of ['look', 'inspect', 'together', 'say', 'events', 'receipt']) assert(help.commands?.includes(op), `help must list ${op}`);
+    const look = await command(seat, 'look');
+    assert.equal(look.ok, true, 'arrival look must succeed');
+    assert(!(look.in ?? []).length, 'the party needs every member free before any greeting or offer');
+    const dance = partyDance(await command(seat, 'together', 'kinds'), guests.length);
+    if (discovery.length) assert.deepEqual(dance, discovery[0].dance, 'all participants must discover the same served dance');
+    discovery.push({ person: seat.label, dance });
+  }
+  const danceWord = discovery[0].dance.word;
   await spoken(operator, guests[0], 'Welcome! Would you like to dance?', 'wave');
   await spoken(guests[0], operator, 'Yes, let us dance together!', 'nod');
   if (mode === 'jukebox') {
@@ -84,12 +130,29 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   }
   for (const seat of seats) {
     const before = await command(seat, 'look');
+    assert.equal(before.ok, true, 'pre-offer look must succeed');
     assert(!(before.in ?? []).length, 'the party needs every member free before its offer');
   }
-  completed(await command(operator, 'together', 'offer', 'dance-together', ...guests.map((seat) => seat.body)), 'offer dance');
-  for (const guest of guests) completed(await command(guest, 'together', 'accept', 'dance-together'), 'accept dance');
+  completed(await command(operator, 'together', 'offer', danceWord, ...guests.map((seat) => seat.body)), 'offer dance');
+  activityId = partyActivityId(await command(operator, 'look'), danceWord);
+  const invitations = [];
+  for (const guest of guests) {
+    let invitation;
+    for (const until = Date.now() + 15000; !invitation;) {
+      const events = await command(guest, 'events');
+      assert(!events.events?.some((e) => e.kind === 'together' && e.touch === danceWord && (e.activity === activityId || e.offer === activityId) && ['declined', 'expired', 'ended'].includes(e.what)), 'the invited dance became unavailable');
+      invitation = events.events?.find((e) => e.kind === 'together' && e.what === 'offered' && e.touch === danceWord && e.from_id === operator.body && e.offer === activityId);
+      if (!invitation) { assert(Date.now() < until, 'each guest must observe its actual invitation'); await pause(100); }
+    }
+    assert(typeof invitation.offer === 'string', 'the invitation must name its offer id');
+    assert.equal(invitation.offer, activityId, 'every guest must accept the same invitation');
+    completed(await command(guest, 'together', 'accept', invitation.offer), 'accept dance');
+    invitations.push({ person: guest.label, offer: invitation.offer });
+  }
   const together = await command(operator, 'look');
-  assert((together.in ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the dance starts through its real offer');
+  assert.equal(partyActivityId(together, danceWord), activityId, 'the host must join the offered activity');
+  const membership = [];
+  for (const seat of seats) membership.push({ person: seat.label, ...partyMembers(await command(seat, 'inspect', activityId), { id: activityId, word: danceWord, bodies: seats.map((s) => s.body) }) });
   // Allow the last member to finish its ordinary approach before showing several shared cycles.
   await pause(12000);
   const leaving = guests.at(-1);
@@ -97,8 +160,15 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   // A leave releases a move at its phase boundary. Keep that visible rather than cutting to the next action.
   await pause(850);
   await body(leaving, 'wave');
-  const remaining = await command(operator, 'look');
-  assert((remaining.in ?? []).some((line) => line.includes('dance-together') && line.includes('started')), 'the other four keep dancing after one leaves');
+  const departed = await command(leaving, 'look');
+  assert.equal(departed.ok, true, 'departure look must succeed');
+  assert(!(departed.in ?? []).some((line) => line.includes(danceWord)), 'the departing guest must actually leave');
+  const continued = [];
+  for (const seat of seats.filter((s) => s !== leaving)) {
+    const remaining = await command(seat, 'look');
+    assert.equal(partyActivityId(remaining, danceWord), activityId, 'the other four keep dancing after one leaves');
+    continued.push({ person: seat.label, ...partyMembers(await command(seat, 'inspect', activityId), { id: activityId, word: danceWord, bodies: seats.filter((s) => s !== leaving).map((s) => s.body) }) });
+  }
   await pause(2500);
   for (const guest of guests.slice(0, -1)) await leave(guest);
   await leave(operator);
@@ -110,8 +180,8 @@ export async function performParty({ seats, jukebox, mode = 'jukebox', record = 
   }
   await body(operator, 'nod');
   const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
-  assert(final.every((look) => !(look.in ?? []).some((line) => line.includes('dance-together'))), 'all members leave the dance');
-  return { people: seats.length, jukebox: mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false };
+  assert(final.every((look) => look.ok === true && !(look.in ?? []).some((line) => line.includes(danceWord))), 'all members leave the dance');
+  return { people: seats.length, jukebox: mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false, independentCollaborationProved: false, discovery, invitations, membership, continued, finalMembership: final.map((look, i) => ({ person: seats[i].label, in: look.in ?? [] })) };
 }
 
 async function pairServedSeat({ world, page, directory, index, record, register }) {
