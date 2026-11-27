@@ -171,3 +171,18 @@ test('rotated decimal coplanar interior accounts for normal and distance conditi
     assert.equal(p.segment(q(p, at, at)).status, 'unknown');
     assert.equal(p.clearance(q(p, at, at, 1e-6)).status, 'unknown');
 });
+test('tiny offset geometry refuses amplified long-span normal uncertainty', () => {
+    const p = build(scene([{ ...panel(), vertices: [[999999, 999999, 999999], [999999.0001, 999999.0002, 999999.0003], [999999.0003, 999999.0001, 999999.0002]], triangles: [[0, 1, 2]] }]));
+    // The midpoint is the convex average of the three vertices; the segment goes through it.
+    const center: Vec3 = [999999.0001, 999999.000075, 999999.000125];
+    const from: Vec3 = [center[0] - .5, center[1] - .5, center[2] - .5], to: Vec3 = [center[0] + .5, center[1] + .5, center[2] + .5];
+    assert.equal(p.segment(q(p, from, to)).status, 'unknown');
+    assert.equal(p.clearance(q(p, from, to, 1e-6)).status, 'unknown');
+});
+test('nearly coplanar crossing refuses unstable intersection parameter', () => {
+    const p = build(scene([panel()]));
+    const from: Vec3 = [-1, 1, -1e-12], to: Vec3 = [1, 1, 1e-12];
+    // Analytic midpoint [0,1,0] is inside the panel; long displacement over a tiny plane gap is uncertain.
+    assert.equal(p.segment(q(p, from, to)).status, 'unknown');
+    assert.equal(p.clearance(q(p, from, to, 0)).status, 'unknown');
+});

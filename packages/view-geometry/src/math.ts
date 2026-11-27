@@ -56,8 +56,9 @@ function edgeDistance(a: Vec3, b: Vec3, v: Float64Array, i: number, j: number): 
 // Condition the complete distance calculation before using any of its plane/endpoint/edge minima.
 // Coordinate subtraction and cross-product errors are amplified by inverse squared angular condition
 // in the projections/closest-pair solves. Reserve a quarter of the provider's 1e-7m boundary band;
-// 64 roundoffs cover the scalar path. This is a refusal guard, not exact arithmetic certification.
-function distanceConditioned(a: Vec3, b: Vec3, v: Float64Array, o: number, nx: number, ny: number, nz: number): boolean {
+// A safety multiple of coordinate roundoff is propagated through length/angular ratios; this
+// remains a conservative refusal policy, not a claim of exact floating-point distance.
+function distanceErrorEnvelope(a: Vec3, b: Vec3, v: Float64Array, o: number, nx: number, ny: number, nz: number): number {
     let scale = 0, longest2 = 0;
     for (let k = 0; k < 3; k++)
         scale = Math.max(scale, Math.abs(a[k]), Math.abs(b[k]));
@@ -68,31 +69,45 @@ function distanceConditioned(a: Vec3, b: Vec3, v: Float64Array, o: number, nx: n
         longest2 = Math.max(longest2, (v[j] - v[i]) ** 2 + (v[j + 1] - v[i + 1]) ** 2 + (v[j + 2] - v[i + 2]) ** 2);
     }
     const area = Math.hypot(nx, ny, nz), condition = area / longest2, roundoff = 64 * Number.EPSILON * scale;
-    if (roundoff / (condition * condition) > 2.5e-8)
-        return false;
+    const edgeLength = Math.sqrt(longest2), span = Math.max(Math.hypot(a[0] - v[o], a[1] - v[o + 1], a[2] - v[o + 2]), Math.hypot(b[0] - v[o], b[1] - v[o + 1], b[2] - v[o + 2]), edgeLength);
+    // Normal direction error from small edges at a large offset also grows over a long query span.
+    let error = roundoff * (1 + span / edgeLength) / (condition * condition);
+    if (error > 2.5e-8)
+        return NaN;
     const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], d2 = dx * dx + dy * dy + dz * dz;
     if (d2 === 0)
-        return true;
+        return error;
     for (let k = 0; k < 3; k++) {
         const i = o + k * 3, j = o + (k + 1) % 3 * 3, ex = v[j] - v[i], ey = v[j + 1] - v[i + 1], ez = v[j + 2] - v[i + 2];
         const cx = dy * ez - dz * ey, cy = dz * ex - dx * ez, cz = dx * ey - dy * ex, c2 = cx * cx + cy * cy + cz * cz, e2 = ex * ex + ey * ey + ez * ez;
         if (c2 === 0) {
             // Axis-zero products establish exact parallelism; cancelling nonzero products do not.
             if (dy * ez !== 0 || dz * ey !== 0 || dz * ex !== 0 || dx * ez !== 0 || dx * ey !== 0 || dy * ex !== 0)
-                return false;
+                return NaN;
         }
-        else if (roundoff * d2 * e2 / c2 > 2.5e-8)
-            return false;
+        else {
+            error = Math.max(error, roundoff * (1 + Math.sqrt(d2 / e2) + Math.sqrt(e2 / d2)) * d2 * e2 / c2);
+            if (error > 2.5e-8)
+                return NaN;
+        }
     }
-    return true;
+    return error;
 }
 /** Capsule/triangle distance: plane piercing, endpoints, and three edge pairs. */
 export function segmentTriangle(a: Vec3, b: Vec3, v: Float64Array, o: number): number {
     const ux = v[o + 3] - v[o], uy = v[o + 4] - v[o + 1], uz = v[o + 5] - v[o + 2], wx = v[o + 6] - v[o], wy = v[o + 7] - v[o + 1], wz = v[o + 8] - v[o + 2], nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
-    if (!distanceConditioned(a, b, v, o, nx, ny, nz))
+    const error = distanceErrorEnvelope(a, b, v, o, nx, ny, nz);
+    if (!Number.isFinite(error))
         return NaN;
     const da = nx * (a[0] - v[o]) + ny * (a[1] - v[o + 1]) + nz * (a[2] - v[o + 2]), db = nx * (b[0] - v[o]) + ny * (b[1] - v[o + 1]) + nz * (b[2] - v[o + 2]);
     if (da !== db && da * db <= 0) {
+        const normalLength = Math.hypot(nx, ny, nz), gap = (Math.abs(da) + Math.abs(db)) / normalLength;
+        // For opposite signs the denominator is a sum, but near-coplanar t can still be sensitive.
+        // If endpoint distance intervals touch zero or propagated t error moves the intersection
+        // beyond the reserved boundary band, neither crossing nor its fallback can certify clear.
+        if (Math.min(Math.abs(da), Math.abs(db)) / normalLength <= error || gap <= 2 * error ||
+            2 * error / (gap - 2 * error) * Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) > 2.5e-8)
+            return NaN;
         const t = da / (da - db), x = a[0] + t * (b[0] - a[0]), y = a[1] + t * (b[1] - a[1]), z = a[2] + t * (b[2] - a[2]);
         const side = (i: number, j: number) => { const ex = v[j] - v[i], ey = v[j + 1] - v[i + 1], ez = v[j + 2] - v[i + 2], px = x - v[i], py = y - v[i + 1], pz = z - v[i + 2]; return (ey * pz - ez * py) * nx + (ez * px - ex * pz) * ny + (ex * py - ey * px) * nz; };
         const s0 = side(o, o + 3), s1 = side(o + 3, o + 6), s2 = side(o + 6, o), band = (nx * nx + ny * ny + nz * nz) * 1e-12;
