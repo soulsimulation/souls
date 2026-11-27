@@ -142,7 +142,8 @@
 //   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in
 //   (#4980). One whose frames still arrive while a sync's answer is late is behind, not gone: it stays, says
 //   `gap.why` `behind`, and its acts go on it (#4979: on a link slower than the world's speech, reconnecting only fell
-//   behind again). One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
+//   behind again). Frames heard only in the 2 s after the sync was asked were already on their way and are no such
+//   sign: a network that stalls then is let go 10 s after the last of them, not found slow. One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
 //   once, and answers say `gap.why` `behind` until its copy is current again (#4979). A `wait` under way is told when
 //   a signed-in socket is lost (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is
 //   current (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by
@@ -410,6 +411,9 @@ let laggingAt = null; // when the socket, frames still arriving, was found behin
 // SLOW_QUIET with nothing received (#4979), not SYNC_WITHIN (#4980's bound on a link that kept up).
 let slowLink = false;
 const SLOW_QUIET = 60_000;
+// A frame heard within this of a sync's ask was on its way before the answer could have come, as on any link: it shows
+// the socket was alive when it asked, not that frames still arrive ahead of a late answer.
+const IN_FLIGHT = 2_000;
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
@@ -722,17 +726,23 @@ function startSync(sock, kind) {
  * The sync's next answer is due within SYNC_WITHIN of the last frame the socket received, not of the ask (#4979): a
  * socket whose frames keep arriving is alive, only behind (a link slower than what the world sends, the speech it
  * hears included, which is never dropped), and says so (`gap.why` `behind`) instead of reconnecting in a loop, where
- * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980).
+ * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980), frames
+ * heard just after the ask (IN_FLIGHT) included: those were on their way already.
  */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
+  const askedAt = performance.now();
   const due = () => {
     if (!syncing) return;
     // On a link found slow a single frame can take longer than SYNC_WITHIN to arrive whole (a sync's records at 512
     // B/s), so silence counts only past SLOW_QUIET there; a new socket on it would only start that backlog again.
     const quiet = performance.now() - sock.heardAt, bound = slowLink ? SLOW_QUIET : SYNC_WITHIN;
     if (quiet >= bound) { sock.giveUp('sync: no answer; reconnecting'); return; }
-    if (laggingAt === null) {
+    // A link is found behind by a frame heard well after the ask, its answer still to come: the answer waits behind
+    // other frames. One heard only just after the ask (IN_FLIGHT) is no such sign: a network that stalled then was
+    // found slow by it, and the dead socket kept for SLOW_QUIET with acts written into it (#4980, a daemon test's
+    // failures in CI). Not found behind, the socket is looked at again once it has been silent for SYNC_WITHIN.
+    if (laggingAt === null && (slowLink || sock.heardAt - askedAt >= IN_FLIGHT)) {
       laggingAt = performance.now();
       slowLink = true;
       cutAt ??= laggingAt;
