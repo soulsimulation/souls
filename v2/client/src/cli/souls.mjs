@@ -16,7 +16,9 @@
 //                                             the owner, and returns; the pairing finishes in the background (W2),
 //                                             and once approved the Soul joins the world by itself, named
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
-//                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; a
+//                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb;
+//                                             sit:<kind> (sit:bench, sit:chair) takes the nearest free one of that kind
+//                                             where the Soul is, or is refused place.none-free naming what is free; a
 //                                             word alone (rise, dance) is the body's act or the one act here by it
 //                                             (several or none are refused, named); ids or <name>=<id> after an act
 //                                             are its thing arguments (C10); a walk's

@@ -356,7 +356,8 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
 /// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
 /// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those. `reflex`, when
 /// true, marks it as sent by the client on its own standing consent, not by its agent (field 12, #3764). `replaces`, an
-/// earlier sequence of the same Soul, is field 10: what a `souls:cancel` ends (#3705).
+/// earlier sequence of the same Soul, is field 10: what a `souls:cancel` ends (#3705). A target `<kind>@<node id>` is
+/// I5's free-slot selector instead of a node: any free slot of that kind in that node, nearest (a sit by kind, #3178).
 #[wasm_bindgen(js_name = wireIntent)]
 // JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
@@ -388,9 +389,23 @@ pub fn wire_intent(
             }
         })
     };
+    // #3178: `<kind>@<node id>`, any free slot of that kind in that node, nearest the body.
+    let aimed = |t: &str| -> Result<Option<Target>, JsError> {
+        let Some((kind, at)) = t.split_once('@') else {
+            return node(t);
+        };
+        let kind = Name::new(kind)
+            .filter(|k| k.as_str().contains(':'))
+            .ok_or_else(|| JsError::new("target-kind-not-a-name"))?;
+        let Some(Target::Node(room)) = node(at)? else {
+            return Err(JsError::new("target-not-an-id"));
+        };
+        let rule = crate::selector::Rule::Nearest;
+        Ok(Some(crate::selector::Selector::FreeSlot { kind, node: room, rule }.target()))
+    };
     let mut targets = target
         .split(' ')
-        .map(node)
+        .map(aimed)
         .collect::<Result<Vec<_>, _>>()?
         .into_iter();
     let target = targets.next().flatten();
