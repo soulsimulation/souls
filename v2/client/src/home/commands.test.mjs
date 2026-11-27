@@ -243,6 +243,8 @@ test('A3 carried adopt: W2 asks for an owned grant, never new; connected refusal
     if (req.method === 'GET' && req.url === '/w/eden/views/world.json') return res.end('{"history":"history/"}');
     // The pairing's entries fetch (#3760) reaches this stand-in for the gateway too: it serves none.
     if (req.method === 'GET' && req.url.endsWith('/v2/entries')) { res.statusCode = 404; return res.end('{"refused":"entries-not-served"}'); }
+    // The pairing's world name lookup (`/w/<world>/v1/config`) and any other read: this stand-in has none.
+    if (req.method === 'GET') { res.statusCode = 404; return res.end('{}'); }
     let raw = ''; for await (const bytes of req) raw += bytes;
     const body = JSON.parse(raw); requests.push({ path: req.url, body });
     if (req.url.endsWith('/request')) {
