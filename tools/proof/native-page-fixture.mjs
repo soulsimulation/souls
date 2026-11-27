@@ -51,27 +51,39 @@ export function nativePagePorts(port) {
   for (const p of ports) checkPort(p);
   return ports;
 }
-export async function startNativePageFixture({ checkout, data, log, port, artifacts, sealedInputs, signal, onSpawn, timeoutMs = 180000 }) {
+export async function startNativePageFixture({ checkout, data, log, port, artifacts, sealedInputs, recordingArtifacts, costMeasurement, signal, onSpawn, timeoutMs = 180000 }) {
   const until = Date.now() + timeoutMs; signal?.throwIfAborted();
   for (const p of nativePagePorts(port).slice(0, 8)) if (!await portFree(p)) fail('occupied-port');
   const root = resolve(checkout), m = verifyNativePageArtifacts(root, artifacts), children = [];
   const sealedPublic = sealedInputs ? verifySealedPublicInputs(sealedInputs) : null;
-  if (sealedPublic && sealedPublic.sourceHead !== m.sourceHead) fail('sealed-source');
+  const recordingRoot = recordingArtifacts ? resolve(recordingArtifacts.checkout) : root;
+  const recordingPin = recordingArtifacts?.artifacts ?? artifacts;
+  const recording = recordingArtifacts ? verifyNativePageArtifacts(recordingRoot, recordingPin) : m;
+  if (recordingArtifacts && !sealedPublic) fail('recording-without-seal');
+  if (sealedPublic && sealedPublic.sourceHead !== recording.sourceHead) fail('sealed-source');
   if (sealedPublic) {
-    if (sealedPublic.assets.artifactHash !== artifacts.hash || sealedPublic.validator?.js !== m.trees['v2/target/wasm-load/pkg']['replica.js'] || sealedPublic.validator?.wasm !== m.trees['v2/target/wasm-load/pkg']['replica_bg.wasm']) fail('sealed-artifact');
+    if (sealedPublic.assets.artifactHash !== recordingPin.hash || sealedPublic.validator?.js !== recording.trees['v2/target/wasm-load/pkg']['replica.js'] || sealedPublic.validator?.wasm !== recording.trees['v2/target/wasm-load/pkg']['replica_bg.wasm']) fail('sealed-artifact');
+    if (sealedPublic.validator.js !== m.trees['v2/target/wasm-load/pkg']['replica.js'] || sealedPublic.validator.wasm !== m.trees['v2/target/wasm-load/pkg']['replica_bg.wasm']) fail('playback-reader-mismatch');
     for (const path of ['apps/web/dist', 'v2/web/dist', 'mars/viewer/dist/client']) {
-      const tree = sealedPublic.assets.trees.find(t => t.root === join(root, path));
-      if (!tree || JSON.stringify(Object.entries(tree.files).sort()) !== JSON.stringify(Object.entries(m.trees[path]).sort())) fail('sealed-assets');
+      const tree = sealedPublic.assets.trees.find(t => t.root === join(recordingRoot, path));
+      if (!tree || JSON.stringify(Object.entries(tree.files).sort()) !== JSON.stringify(Object.entries(recording.trees[path]).sort())) fail('sealed-assets');
     }
   }
+  if (costMeasurement && (!sealedPublic || typeof costMeasurement.observer !== 'boolean' || !Number.isSafeInteger(costMeasurement.targetTick * 50000) || costMeasurement.targetTick < 0 || (costMeasurement.witnesses && (!Array.isArray(costMeasurement.witnesses) || costMeasurement.witnesses.length > 8 || costMeasurement.witnesses.some(n => !Number.isSafeInteger(n) || n < 1))))) fail('cost-declaration');
   if (Date.now() >= until) fail('startup-timeout');
   const commandRecords = []; let ordinal = 0;
   const onCommand = event => { const id = ++ordinal; const record = { ...event, id }; commandRecords.push(record); writeFileSync(join(data, '..', `command-native-${id}.json`), JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }); return id; };
-  writeFileSync(join(data, '..', 'native-page-provenance.json'), JSON.stringify({ artifactPin: artifacts, ...m }, null, 2), { flag: 'wx', mode: 0o600 });
+  writeFileSync(join(data, '..', 'native-page-provenance.json'), JSON.stringify({ artifactPin: artifacts, ...m, ...(sealedPublic ? { recording: { sourceHead: recording.sourceHead, artifactPin: recordingPin, sealedInputs }, playback: { sourceHead: m.sourceHead, artifactPin: artifacts } } : {}) }, null, 2), { flag: 'wx', mode: 0o600 });
   const runtime = await startOldPage({ checkout: root, template: m.template, dir: data, port, bin: join(root, 'v2/target/release'),
     marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, sealedPublic, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });
-  return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: { kind: 'native-page', async joinActor(label='camera-subject') {
+  const viewer = new URL(runtime.page);
+  if (costMeasurement) {
+    viewer.searchParams.set('camera-observation-cost', '1'); if (costMeasurement.observer) viewer.searchParams.set('camera-observe', '1');
+    if (costMeasurement.witnesses?.length) viewer.searchParams.set('camera-cost-witness', costMeasurement.witnesses.join(','));
+    viewer.hash = 't=' + String(costMeasurement.targetTick * 50000);
+  }
+  return { child: children[0], children, base: runtime.base, viewer: viewer.href, dataDir: resolve(data), recipe: { kind: 'native-page', costMeasurement, async joinActor(label='camera-subject') {
     if (sealedPublic) fail('sealed-actor-mutation');
     signal?.throwIfAborted();
     const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:'Camera Subject',pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
@@ -80,7 +92,7 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
     await waitActorReady(daemon,{signal,timeoutMs:15000});
     const joined=await seat.join({ms:15000});if(!joined.body)throw Error('native-actor-join-failed');
     return {body:joined.body,cli:(...words)=>seat.cli(...words)};
-  }, verify: () => { const product = verifyNativePageArtifacts(root, artifacts); if (sealedInputs) verifySealedPublicInputs(sealedInputs); return product; } } };
+  }, verify: () => { const product = verifyNativePageArtifacts(root, artifacts); if (sealedInputs) verifySealedPublicInputs(sealedInputs); if (recordingArtifacts) verifyNativePageArtifacts(recordingRoot, recordingPin); return product; } } };
 }
 
 /** Readiness ownership is separate from process teardown, which remains with the attempt owner. */

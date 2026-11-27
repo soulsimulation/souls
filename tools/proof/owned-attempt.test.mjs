@@ -6,11 +6,17 @@ import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { createTestRunner, runOwnedAttempt } from './owned-attempt.mjs';
+import { createTestRunner, runOwnedAttempt, attemptRole } from './owned-attempt.mjs';
 import { verifyAccountArtifacts } from './v2-account-fixture.mjs';
 import { createHash } from 'node:crypto';
 
 const parent = resolve('.local/proof-owned-attempt-tests'); mkdirSync(parent, { recursive: true });
+test('measurement role bounds and ordinary90second defaults remain separate',()=>{
+ assert.deepEqual(attemptRole({}),{role:'journey',journeyMs:90000,prepareMs:30000,videoSeconds:90});
+ const m={durationMs:600000,warmupMs:300000,sampleMs:180000,setupTimeoutMs:180000},o={role:'measurement',world:{kind:'native-page'},measurement:m};assert.equal(attemptRole(o).videoSeconds,600);assert.equal(attemptRole(o).prepareMs,180000);
+ for(const bad of[{...m,durationMs:600001},{...m,warmupMs:-1},{...m,sampleMs:400000},{...m,setupTimeoutMs:180001}])assert.throws(()=>attemptRole({...o,measurement:bad}),/bounds/);
+ assert.throws(()=>attemptRole({...o,role:'journey'}),/role-required/);assert.throws(()=>attemptRole({...o,journeyTimeoutMs:600001}),/mismatch/);
+});
 function setup(t, overrides = {}) {
   const root = mkdtempSync(join(parent, 'lifecycle-')), product = join(root, 'product'); mkdirSync(product);
   writeFileSync(join(product, 'fix.ts'), 'export const repaired = true;\n');
@@ -33,6 +39,13 @@ function setup(t, overrides = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return { root, product, runner, o, change, children, browsers, ledger, identity, now: () => ++clock };
 }
+test('measurement role keeps failure accounting, cancellation and cleanup with pinned declared limits',async t=>{
+ const f=setup(t);f.o.world.kind='native-page';const base=f.o;const options={...base,role:'measurement',measurement:{durationMs:100,warmupMs:0,sampleMs:1,setupTimeoutMs:100}};
+ // This injected fake retains native lifecycle shape; no process/listener/browser is launched.
+ const runner=createTestRunner({source:f.identity,changed:()=>['fix.ts'],portFree:async()=>true,now:f.now,boot:async o=>{const children=Array.from({length:3},()=>Object.assign(new EventEmitter(),{exitCode:null,signalCode:null}));for(const c of children)o.onSpawn(c);return{child:children[0],children,base:`https://example.com:${o.port}/w/unit`,viewer:`https://example.com:${o.port}/w/unit`,dataDir:o.data,recipe:{verify(){}}};},browser:async(o,p,base)=>({page:{on(){},goto:async()=>{},url:()=>base,screenshot:async()=>Buffer.from('PNG'),locator:()=>({ariaSnapshot:async()=>'- canvas'})},close:async()=>{}}),stop:async c=>{c.exitCode=0;}});
+ const controller=new AbortController();options.signal=controller.signal;options.journey=async()=>{controller.abort(Error('measurement-interrupted'));await new Promise(()=>{});};const r=await runner(options);assert.equal(r.status,'INTERRUPTED');assert.equal(r.videoClass,'measurement-original');assert.equal(r.measurement.durationMs,100);assert.equal(r.teardown.worldStopped,true);assert.equal(r.teardown.browserClosed,true);
+ const changed={...options,measurement:{...options.measurement,sampleMs:2}};await assert.rejects(runner(changed),/measurement-plan-changed/);
+});
 test('fresh success owns directories and teardown; passing scenario cannot be rerun by a commit', async t => {
   const f = setup(t); const r = await f.runner(f.o);
   assert.equal(r.status, 'PASS'); assert.equal(r.qualified, false); assert.equal(r.injected, true);
