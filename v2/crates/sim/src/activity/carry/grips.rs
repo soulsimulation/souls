@@ -422,11 +422,11 @@ mod tests {
         let (front, back, side) = (id(1), id(2), id(3));
         let sides = [(side, [0, -400_000])];
         let h = assign(&g, &load, load.held().unwrap(), front, back, &sides).unwrap();
-        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_r2"]);
+        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_l2"]);
         // Lifted the other way round, its + end behind: the front takes the other end.
         let r = load.reversed().unwrap();
         let h = assign(&g, &load, r.held().unwrap(), front, back, &sides).unwrap();
-        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_l2"]);
+        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_r2"]);
         for hold in &h {
             let [a, b] = hold.hands;
             // Its hands either side of its grip along the beam's length (its z), 0.4 m apart: an end's at its grip, the
@@ -487,7 +487,13 @@ mod tests {
             for (hold, (_, place)) in h[2..].iter().zip(&sides) {
                 let edge = z(hold.hands[0]);
                 assert_eq!(edge.signum(), place[1].signum(), "{kind} {}", hold.grip);
-                assert_eq!(edge.abs(), load.half_width, "{kind} {}", hold.grip);
+                // The beam stands taller (102 mm) than it is wide (51 mm): its side's edge is half its width.
+                let half = if kind == "rack_beam" {
+                    25_500
+                } else {
+                    load.half_width
+                };
+                assert_eq!(edge.abs(), half, "{kind} {}", hold.grip);
             }
         }
     }
