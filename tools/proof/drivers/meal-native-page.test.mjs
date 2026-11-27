@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { mealWorldPage, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
+import { mealWorldPage, mealNodeIdentity, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
 
 class PublicWorker extends EventTarget {
   message(data) { this.dispatchEvent(new MessageEvent('message', { data })); }
@@ -24,6 +24,25 @@ function frame(soup = 2, activity = 'sit') {
       entries: [{ ...bowl(soup), state: { soup } }] } } },
   } };
 }
+
+test('native CLI and Worker IDs are reconciled exactly, preserving the original spelling without guessed aliases', async () => inPage(async page => {
+  const scope = '0123456789abcdef0123456789abcdef', bowlID = mealNodeIdentity(`${scope}-3`), holder = mealNodeIdentity(`${scope}-12`);
+  assert.deepEqual(bowlID, { original: `${scope}-3`, cli: `${scope}-3`, worker: `${scope}.3` });
+  assert.equal(mealNodeIdentity(`${scope}.12`).cli, holder.cli);
+  assert.equal(mealNodeIdentity(`${scope}-18446744073709551615`).worker, `${scope}.18446744073709551615`);
+  for (const bad of ['bowl', `${scope}-03`, `${scope}.1.2`, `${scope}-18446744073709551616`, `${scope.toUpperCase()}-3`, `${scope}-3 trailing`]) assert.throws(() => mealNodeIdentity(bad), /ID format unknown/);
+  const identities = { bowl: bowlID, bodies: [holder] };
+  mealBrowserInstall({ bowl: bowlID.worker, bodies: [holder.worker], identities });
+  const worker = new page.Worker(), native = { ...bowl(2), id: bowlID.worker, parent: holder.worker };
+  const input = { t: 'snapshot', s: { nodes: [native, { ...body(), id: holder.worker }] } };
+  let unchanged; worker.addEventListener('message', event => { unchanged = event.data; }); worker.message(input);
+  assert.equal(unchanged, input); assert.equal(input.s.nodes[0].id, bowlID.worker);
+  const drawn = frame(); drawn.entities['visible-diner'].state.heldEntries.entries = [{ ...native, state: { soup: 2 } }];
+  page.__soulsEntity = { gameFrame: () => drawn };
+  assert(mealCheckpoint({ ...expected, bowl: bowlID.worker, holder: holder.worker }));
+  assert.equal(mealCheckpoint({ ...expected, bowl: bowlID.cli, holder: holder.cli }), null, 'browser reads never guess an unconverted alias');
+  assert.deepEqual(mealBrowserStop().identities, identities);
+}));
 
 test('passive public observation forwards original messages and keeps lossless bounded native records', async () => inPage(async page => {
   const original = page.Worker;

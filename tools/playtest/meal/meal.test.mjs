@@ -82,7 +82,7 @@ test('the meal table preserves canonical physical surface metadata without addin
 
 // Public reply fixtures, deliberately independent of the client implementation. Act aliases make it observable
 // that the workflow uses inspected offers rather than reconstructing form:<id> from authored fixture entries.
-function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchingOffer = false, expiredOffer = false } = {}) {
+function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchingOffer = false, expiredOffer = false, canAfter, ladleRefused = false, wrongLadleQuantity = false } = {}) {
   const calls = [], state = { cooked: false, soup: 0, bowl: 0, parent: 'pot', water: 5000, running: false };
   const ids = { 'soup-pot': 'pot', 'meal-bowl': 'bowl', 'wash-sink': 'sink', 'meal-table': 'table', 'diner-chair': 'chair' };
   const offer = (id, name, params, who = 'anyone') => ({ name, act: `${name}-public:${id}`, who, ...(params ? { params } : {}) });
@@ -101,7 +101,7 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
     if (command === 'look') return { ok: true, nearby: Object.entries(ids).map(([name, id]) => ({ name, id })) };
     if (command === 'find') return { ok: true, found: [{ name: word, id: ids[word] }] };
     if (command === 'inspect') return inspect(word);
-    if (command === 'can') return state.cooked ? { ok: true, can: 'yes', current: true } : { ok: true, can: 'no', reason: 'field_differs', field: 'cooked', current: true };
+    if (command === 'can') return state.cooked ? canAfter ?? { ok: true, can: 'yes', current: true } : { ok: true, can: 'no', reason: 'field_differs', field: 'cooked', current: true };
     if (command === 'give') {
       if (word === 'accept') { assert.equal(words[2], 'bowl-offer'); state.parent = 'diner-body'; return { ok: true, phase: 'done' }; }
       return { ok: true, phase: 'done' };
@@ -119,7 +119,10 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
     if (command === 'act') {
       const form = word.split(':')[0];
       if (form === 'cook-public') { state.cooked = true; state.soup = 6; }
-      if (form === 'ladle-public') { state.soup -= 2; state.bowl += 2; }
+      if (form === 'ladle-public') {
+        if (ladleRefused) return { ok: false, phase: 'refused', reason: 'no_free_hand' };
+        state.soup -= 2; state.bowl += wrongLadleQuantity ? 1 : 2;
+      }
       if (form === 'take-public') state.parent = 'server-body';
       if (form === 'bite-public') { state.bowl--; if (lostHolder) state.parent = 'unrelated-body'; }
       if (form === 'turn_on-public') state.running = true;
@@ -152,6 +155,34 @@ test('missing public bowl arguments stop discovery before anyone cooks', async (
   const fixture = publicMeal({ missingBowlParameter: true });
   await assert.rejects(meal({ seats: fixture.seats, report: { complete: false, steps: [] } }), /public thing parameter bowl/);
   assert(!fixture.calls.some((c) => c.words[0] === 'act'));
+});
+
+test('unknown hands remain unknown; only the authoritative ladle and both quantities prove recovery', async () => {
+  const canAfter = { ok: true, can: 'unknown', why: 'not-seen:no_free_hand', current: true };
+  const fixture = publicMeal({ canAfter }), report = { complete: false, steps: [] };
+  await meal({ seats: fixture.seats, report, endpoint: 'empty-bowl-risen' });
+  assert.deepEqual(report.recovery.after, canAfter);
+  assert.equal(report.recovery.authoritative.ladled.phase, 'done');
+  assert.equal(report.recovery.authoritative.pot.state.soup, 4);
+  assert.equal(report.recovery.authoritative.bowl.state.soup, 2);
+});
+
+test('a definite refusal or a different unknown never sends the ladle', async () => {
+  for (const canAfter of [{ ok: true, can: 'no', reason: 'no_free_hand', current: true }, { ok: true, can: 'unknown', why: 'not-in-copy' }]) {
+    const fixture = publicMeal({ canAfter }), report = { complete: false, steps: [] };
+    await assert.rejects(meal({ seats: fixture.seats, report }), /ladle has not recovered/);
+    assert(!fixture.calls.some(c => c.words[0] === 'act' && c.words[1] === 'ladle-public:pot'));
+    assert.equal(report.recovery, undefined);
+  }
+});
+
+test('native ladle refusal or incorrect quantity cannot establish recovery', async () => {
+  for (const options of [{ ladleRefused: true }, { wrongLadleQuantity: true }]) {
+    const fixture = publicMeal({ ...options, canAfter: { ok: true, can: 'unknown', why: 'not-seen:no_free_hand' } }), report = { complete: false, steps: [] };
+    await assert.rejects(meal({ seats: fixture.seats, report }));
+    assert.equal(report.recovery, undefined); assert.equal(report.complete, false);
+    assert(!fixture.calls.some(c => c.words.includes('take-public:bowl')));
+  }
 });
 
 test('a bowl that leaves its holder during eating stops before washing or claiming completion', async () => {

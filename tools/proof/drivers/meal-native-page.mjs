@@ -10,6 +10,13 @@ import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat }
 const states = new Map();
 const save = (paths, name, value) => writeFileSync(join(paths.dir, name), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
 
+/** CLI and public stream spelling of the same native ID; never manufacture an alias for an unknown format. */
+export function mealNodeIdentity(original) {
+  const match = typeof original === 'string' && /^([a-f0-9]{32})[-.](0|[1-9][0-9]*)$/.exec(original);
+  assert(match && BigInt(match[2]) <= 0xffffffffffffffffn, 'meal native ID format unknown');
+  return { original, cli: `${match[1]}-${match[2]}`, worker: `${match[1]}.${match[2]}` };
+}
+
 /** Existing public world discovery, scoped to this boot template; no private fixture IDs. */
 export async function mealWorldPage({ base, signal }) {
   const response = await fetch(new URL('/__sim/worlds.json', base), { signal });
@@ -36,10 +43,10 @@ export async function prepare({ base, paths, recipe, signal }) {
 }
 
 /** Serialized into the page: passively listen to public messages; never intercept or rewrite their data. */
-export function mealBrowserInstall({ bowl, bodies, limit = 361 }) {
+export function mealBrowserInstall({ bowl, bodies, identities, limit = 361 }) {
   if (window.__mealPayloadObserver) throw Error('meal observer already installed');
   const original = window.Worker, known = new Set([bowl, ...bodies]);
-  const observer = { original, listeners: [], workers: [], messages: [], failures: [], limit, stopped: false };
+  const observer = { original, listeners: [], workers: [], messages: [], failures: [], identities, limit, stopped: false };
   const copy = value => JSON.parse(JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? { big: String(v) }
     : v instanceof Map ? Object.fromEntries(v) : v instanceof Uint8Array ? Array.from(v) : v));
   class ObservedWorker extends original {
@@ -114,7 +121,7 @@ export function mealBrowserStop() {
     for (const [worker, listener] of observer.listeners) worker.removeEventListener('message', listener);
     if (window.Worker !== observer.wrapped) throw Error('meal observer ownership changed');
     window.Worker = observer.original;
-    return observer.result = { messages: observer.messages, failures: observer.failures, limit: observer.limit,
+    return observer.result = { messages: observer.messages, failures: observer.failures, identities: observer.identities, limit: observer.limit,
       qualification: 'Passive public messages, not an attachment or final-draw contact measurement.' };
   } catch (error) { observer.error = error; throw error; }
 }
@@ -139,7 +146,8 @@ export function mealFinalization(page, paths, state) {
 
 export async function beforeNavigation({ paths, page }) {
   const state = states.get(paths.dir); assert(state, 'meal preparation missing');
-  await page.addInitScript(mealBrowserInstall, { bowl: state.bowl, bodies: state.seats.map(s => s.body) });
+  const identities = { bowl: mealNodeIdentity(state.bowl), bodies: state.seats.map(s => mealNodeIdentity(s.body)) };
+  await page.addInitScript(mealBrowserInstall, { bowl: identities.bowl.worker, bodies: identities.bodies.map(i => i.worker), identities });
   state.installed = true;
   mealFinalization(page, paths, state);
   return async () => { try { if (!page.isClosed()) await state.finalize(); } finally { state.persist(); states.delete(paths.dir); } };
@@ -148,7 +156,7 @@ export async function beforeNavigation({ paths, page }) {
 export default async function ({ page, paths, check, expectHttp, signal }) {
   const state = states.get(paths.dir); assert(state, 'meal preparation missing');
   expectHttp('/safety.md', 404, 'The old-page fixture does not route this optional standalone client document.');
-  const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=7,4,9&at=0,1,1.5';
+  const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=9,6,1.5&at=0,0.8,1.5';
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.querySelector('.viewer-history[data-viewer-ready="true"]') && !document.querySelector('.viewer-arrival'), null, { timeout: 30000 });
   const snapshot = async label => writeFileSync(join(paths.dir, `meal-accessibility-${label}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
@@ -157,8 +165,10 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   const observe = async row => {
     signal.throwIfAborted();
     const seat = state.seats.find(s => s.label === row.role);
-    const handle = await page.waitForFunction(mealCheckpoint, { bowl: state.bowl, holder: row.holder, soul: seat.soul, soup: row.soup, phase: row.phase }, { timeout: 5000 });
+    const identities = { bowl: mealNodeIdentity(state.bowl), holder: mealNodeIdentity(row.holder) };
+    const handle = await page.waitForFunction(mealCheckpoint, { bowl: identities.bowl.worker, holder: identities.holder.worker, soul: seat.soul, soup: row.soup, phase: row.phase }, { timeout: 5000 });
     const checkpoint = await handle.jsonValue(); await handle.dispose();
+    checkpoint.identities = identities;
     const prior = state.checkpoints.at(-1);
     assert(!prior || checkpoint.depicted.tick > prior.depicted.tick, 'meal depicted clock must advance between phases');
     state.checkpoints.push(checkpoint);

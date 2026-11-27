@@ -198,11 +198,13 @@ export async function meal({ seats, report, log = () => {}, observe = async () =
   for (const [field, expected] of Object.entries({ soup: 6, vegetables: 0, water: 0, fuel: 0, cooked: true })) requireField(cooked, field, expected, 'cooked pot');
   await use(cook, 'leave the serving point', 'meal-table', 'walk');
   const recovered = await record(server, 'ladle available after cooking', 'can', ...words(server, 'soup-pot', 'ladle', { bowl: ids['meal-bowl'] }));
-  if (recovered.can !== 'yes') throw new Error('cooked soup: ladle has not recovered');
-  report.recovery = { before: tooSoon, after: recovered, action: words(cook, 'soup-pot', 'cook') };
-  await use(server, 'ladle two units (four-second wait)', 'soup-pot', 'ladle', { bowl: ids['meal-bowl'] });
-  requireField(await inspect(server, 'soup-pot'), 'soup', 4, 'served pot');
-  requireField(await inspect(server, 'meal-bowl'), 'soup', 2, 'filled bowl');
+  // The ordinary client cannot inspect hands locally. Unknown is not a refusal or proof of recovery.
+  if (recovered.ok !== true || !(recovered.can === 'yes' || recovered.can === 'unknown' && recovered.why === 'not-seen:no_free_hand')) throw new Error('cooked soup: ladle has not recovered');
+  const ladled = await use(server, 'ladle two units (four-second wait)', 'soup-pot', 'ladle', { bowl: ids['meal-bowl'] });
+  const servedPot = await inspect(server, 'soup-pot'), filledBowl = await inspect(server, 'meal-bowl');
+  requireField(servedPot, 'soup', 4, 'served pot'); requireField(filledBowl, 'soup', 2, 'filled bowl');
+  report.recovery = { before: tooSoon, after: recovered, action: words(cook, 'soup-pot', 'cook'),
+    authoritative: { ladled, pot: servedPot, bowl: filledBowl } };
   await use(server, 'approach bowl', 'meal-bowl', 'walk');
   await use(server, 'take filled bowl', 'meal-bowl', 'take');
   const serverBody = (await record(server, 'body before offering', 'status')).body;
