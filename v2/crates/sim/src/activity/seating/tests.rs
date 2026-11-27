@@ -697,7 +697,7 @@ impl W {
             act,
             part,
             (lift, turn),
-            inside,
+            (Vec3::ZERO, inside),
         ))?;
         let end = v(
             target.at.x - SET_IN * (target.at.x - from.x).signum(),

@@ -3088,7 +3088,7 @@ fn a2_parts_rest_at_the_grounds_height() {
     let ends = frame_ends;
     // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` lets go.
     let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
-        let (p, q) = ends(where_is(&w, fa).2);
+        let (p, q) = frame_ends_of(&w, fa);
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
         assert_eq!(
@@ -5903,6 +5903,28 @@ fn stand_now(w: &Seeded, a: Id, b: Id) -> Option<(Vec3, Vec3)> {
         }
     }
     Some((*at.get(&a)?, *at.get(&b)?))
+}
+
+/// Rack frame `frame`'s two carriers where it is now: beside its edges when it stands ([`frame_ends`]); when it lies (a
+/// lone holder laid it flat), at its two ends along its length, `sim::activity::carry::REACH` beyond its grips
+/// (0.78 m either side of its middle), where a take holds it by its middle.
+fn frame_ends_of(w: &Seeded, frame: Id) -> (Vec3, Vec3) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let x =
+        sim::ground::scene::xform_to(t, t.handle(frame).unwrap(), t.handle(w.ground).unwrap())
+            .unwrap();
+    let up = x.rot.rotate(Vec3::new(0, 1_219_000, 0)).unwrap();
+    if up.y.abs() >= 600_000 {
+        return frame_ends(x.pos);
+    }
+    let far = ((up.x as f64).hypot(up.z as f64)).max(1.0);
+    let out = |v: i64| (v as f64 * 1_130_000.0 / far) as i64;
+    let mid = v3(x.pos.x + up.x, 0, x.pos.z + up.z);
+    (
+        v3(mid.x + out(up.x), 0, mid.z + out(up.z)),
+        v3(mid.x - out(up.x), 0, mid.z - out(up.z)),
+    )
 }
 
 /// A standing frame's carriers, the first east of it: beside its edges, along its own x ([`FRAME_FROM`]).

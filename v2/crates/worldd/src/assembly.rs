@@ -9,7 +9,8 @@
 //!   ones).
 //! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers and each carrier
 //!   within reach of the hold the carry's rule gives it ([`Crew`], below), goes into the crew's slot in one commit
-//!   (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
+//!   (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had; one that lies is
+//!   held by its middle between its carriers, one that stands by its foot.
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
 //! - **Put** ([`Assembly::put`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
 //!   `reach.too-high`, B18's `support.none`), by `connectors-do-not-mate` for a join the kinds' connectors do not
@@ -503,14 +504,33 @@ impl Assembly {
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
+        // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
+        // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
+        // One that stands, or whose origin is over its middle already (a beam), is held where its origin is.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let slot = match crew {
+            Some(c) if c.load.lies_along(at.rot)?.is_some() => {
+                let m = inside.rotate(c.load.middle).map_err(pose)?;
+                Vec3::new(-m.x, 0, -m.z)
+            }
+            _ => Vec3::ZERO,
+        };
         // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
         // between its front and its back, the part in its slot turned as it is).
         if let Some(crew) = crew {
-            out_of_reach(&crew.carriers((Vec3::ZERO, inside))?, (frame, turn))?;
+            out_of_reach(&crew.carriers((slot, inside))?, (frame, turn))?;
         }
         self.aim(tree, activity, ground)?;
-        self.seating
-            .take(tree, acts, mint, now, activity, part, (frame, turn), inside)?;
+        self.seating.take(
+            tree,
+            acts,
+            mint,
+            now,
+            activity,
+            part,
+            (frame, turn),
+            (slot, inside),
+        )?;
         self.drain(by, activity, Step::Taken);
         self.held.insert(activity, part);
         Ok((frame, turn))
