@@ -165,7 +165,7 @@ export class FollowCamera{
   // consume a whole candidate fan before the safety sweep has run.
   if(!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
-   const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,passageRadius);
+   const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,Math.max(radius,passageRadius));
    if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
   }
   }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
