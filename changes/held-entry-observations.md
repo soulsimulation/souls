@@ -1,5 +1,5 @@
 ---
-type: internal
+type: fix
 pr: 5236
 ---
-Replay preserves held-object identity, changing contents and recorded consume timing for future depiction.
+Souls with declared hand resources hold their actual objects with changing contents; unknown body mappings keep their existing depiction.

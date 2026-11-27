@@ -112,7 +112,7 @@ function shapeLook(entry: Json): { make: Json; palette: Record<string, string>; 
  *  new def and the things placed from the old one keep theirs. Its look, in order: an uploaded model, its kit parts
  *  (`geometry.parts`), its own shape (`looks.shape`, with the state its `when`s and looks table read: `fields`), else its
  *  bounds as one box, named `…-box`, so a look that arrives later for the same kind is a new def. */
-export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField> } | null {
+export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField>; points?: Record<string, { role: string; at: [number, number, number] }> } | null {
   let entry: Json | null;
   try { entry = obj(JSON.parse(new TextDecoder().decode(bytes))); } catch { return null; }
   if (!entry || entry.format !== 'souls-entry/1') return null;
@@ -138,7 +138,8 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
   const { budget: _b, ...hashable } = def;
   const fields = own ? Object.fromEntries(pictured(entry.state)) : undefined;
   return { def: { ...def, budget: { tris: 0, bytes: 0, textures: 0 }, hash: hashOf(hashable), ref: `${named}@1`, by: 'v2', born: 0 }, model: upload ? upload[1] : null,
-    ...(fields && Object.keys(fields).length ? { fields } : {}) };
+    ...(fields && Object.keys(fields).length ? { fields } : {}),
+    points: Object.fromEntries(Object.entries(obj(entry.points) ?? {}).flatMap(([name, value]) => { const p = obj(value); return p && typeof p.role === 'string' && point(p.at_mm) ? [[name, { role: p.role, at: p.at_mm.map(mm) as [number, number, number] }]] : []; })) };
 }
 
 /** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
@@ -222,6 +223,21 @@ export class CreatorKinds {
     }
   }
 
+  /** An exact recorded revision, using the same loaded definition and state conversion as scenery. */
+  held(entry: import('../../../../mars/viewer/app/engine-view/held-entry.ts').HeldEntry) {
+    if (!entry.kind.includes('@') || ![...this.definers.values()].includes(entry.kind)) return null;
+    const d = this.defs.get(entry.kind) ?? this.shapes.get(entry.kind);
+    if (!d || d.def.ref.endsWith('-box@1')) return null;
+    const grips = Object.values(d.points ?? {}).filter(p => p.role === 'grip');
+    if (grips.length !== 1) return null;
+    // Recorded JSON preserves big/timed values losslessly, but this look converter has no recorded clock/decoder.
+    // Refuse that representation rather than silently showing default contents.
+    if (entry.fields && Object.values(entry.fields).some(value => value === null || typeof value === 'object' || typeof value === 'number' && !Number.isSafeInteger(value))) return null;
+    const tint = tintState(entry.tint?.map(([name, colour]) => [name, colour]));
+    const state: Record<string, boolean | number | string> = { ...(d.fields ? lookState(entry.fields as Fields | undefined, d.fields) : entry.state ?? {}), ...(tint !== undefined ? {tint} : {}) };
+    return { def: d.def, grip: grips[0].at, points: d.points ?? {}, state };
+  }
+
   /** Whether a node the stream still holds has this origin (a thing removed and placed again under it: the layer's still). */
   private holds(o: string): boolean { for (const n of this.nodes.values()) if (n.origin === o) return true; return false; }
 
@@ -299,3 +315,8 @@ export class CreatorKinds {
     return { type: 'edge', kind: 'world-diff', seq: Math.max(seq, after ?? seq) + 1, at, by: 'engine', diff: { upserts, removes, defs, tiles: [] } };
   }
 }
+
+// A callback into the live hook's existing catalogue; no duplicate registry or definition ownership.
+let heldKinds: CreatorKinds | null = null;
+export const setHeldKinds = (kinds: CreatorKinds | null) => { heldKinds = kinds; };
+export const heldKindOf = (entry: import('../../../../mars/viewer/app/engine-view/held-entry.ts').HeldEntry) => heldKinds?.held(entry) ?? null;

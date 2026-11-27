@@ -239,3 +239,20 @@ test('declared sit and lie take precedence over kind names and preserve recorded
     assert.deepEqual(resting.p, [2, 0, 0], 'recorded coordinates take precedence over entry defaults');
   }
 });
+
+test('canonical body resources require the exact verified companion; defaults and digest mismatches stay unknown', async () => {
+  const { createHash } = await import('node:crypto');
+  const { loadBodyResources, legacyBodyOf, bodyResources } = await import('./take-bodies.ts');
+  const raw = JSON.stringify({kind:'body:declared', kindHash:'ab'.repeat(32), resources:[['souls:hand-left',2,7],['souls:hand-right',2,4]]});
+  const hash = 'ab'.repeat(32), entryHash = createHash('sha256').update(raw).digest('hex');
+  const row = { hash, entry:'declared.json', entryHash, legacy:[{family:'humanoid'}] };
+  const read = (async () => new Response(raw)) as typeof fetch;
+  const loaded = await loadBodyResources([row], '/assets/bodies/', read);
+  assert.deepEqual(loaded[0].resources,[['souls:hand-left',2,7],['souls:hand-right',2,4]]);
+  const catalog = new Map(loaded.map(r => [r.hash,r]));
+  assert.equal(legacyBodyOf(undefined,catalog),null,'native default is not a catalogue kind');
+  assert.equal(legacyBodyOf('cd'.repeat(32),catalog),null,'no crossrevision lookup');
+  assert.deepEqual(legacyBodyOf(hash,catalog)?.nativeResources,loaded[0].resources);
+  assert.equal((await loadBodyResources([{...row,entryHash:'00'.repeat(32)}], '/', read))[0].resources,undefined);
+  assert.equal(bodyResources([['souls:hand-left',2,7],['souls:hand-right',2,7]]),undefined,'ambiguous slot');
+});

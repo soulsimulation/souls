@@ -1,3 +1,6 @@
+import type { HeldEntry } from '../../../mars/viewer/app/engine-view/held-entry.ts';
+import { heldMeshBounds, type HeldPicture } from '../../../mars/viewer/app/engine-view/held-projection.ts';
+import { heldKindOf, entityId } from './v2-engine/creator-kinds.ts';
 import {handActuatorFrame,knockContacts,opPoint,HAND_REACH_SECONDS,LOCK_TURN_SECONDS,type HandActuatorMotion} from '../../../mars/viewer/engine/social/hand-actuator.ts';
 import {lockPose, paletteTint} from './gen-mesh/vocab-look.ts';
 import {frozenMatrixWorld} from './rendering/FrozenMatrixWorld.ts';
@@ -1743,6 +1746,24 @@ export class WorldEntityLayer {
     { const pour = this.pours.get(id); if (pour) { pour.removeFromParent(); (pour.material as THREE.Material).dispose(); this.pours.delete(id); } }
     { const st = this.steamers.get(id); if (st) { st.pts.removeFromParent(); (st.pts.material as THREE.Material).dispose(); st.lamp?.removeFromParent(); this.steamers.delete(id); } } this.keptIn.delete(id);
   }
+  /** The same canonical mesh factory as scenery, detached from world entities while native-held. */
+  heldPicture(entry: HeldEntry): HeldPicture | null {
+    if (!this.model) return null;
+    const resolved = heldKindOf(entry); if (!resolved) return null;
+    // The stream world layer removes hand children; never draw a second copy during that handoff.
+    if (this.drawn.has(entityId(entry.id)) || entry.origin && this.drawn.has(entry.origin)) return null;
+    const entity = { id: entry.id, def: resolved.def.ref, in: { parent: 'world' }, state: resolved.state,
+      ...(entry.params ? { params: entry.params } : {}) } as Entity;
+    const object = this.build(entity, resolved.def); if (!object) return null;
+    this.retainGeometry(object);
+    const box = heldMeshBounds(object);
+    if (box.isEmpty()) { disposeObject(object); this.releaseGeometry(object); return null; }
+    let disposed = false;
+    return { object, grip: resolved.grip, bounds: {min:box.min.toArray(),max:box.max.toArray()}, dispose: () => {
+      if (disposed) return; disposed = true; object.removeFromParent(); disposeObject(object); this.releaseGeometry(object);
+    } };
+  }
+
   /** One Object3D for an entity, from its def's mesh half (gen-mesh registry). Null when it has no picture (landforms, prefab roots, bodies). */
   private build(e: Entity, def: StoredDef): THREE.Object3D | null {
     const m = this.model!;

@@ -546,7 +546,7 @@ export class V2Bridge {
       const own = n.body ? null : lookBodyOf(n.look);
       const look = legacyBodyOf(n.body, this.catalogue) ?? own, entity = n.body || own ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
       out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, ...(t.turns ? { turns: t.turns } : {}), held: t.held, said: t.said, gestures: t.gestures,
-        ...(t.heldEntries ? { heldEntries: t.heldEntries } : {}), ...(t.consumes ? { consumes: t.consumes } : {}), ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
+        ...(t.heldEntries ? { heldEntries: t.heldEntries } : {}), ...(t.consumes ? { consumes: t.consumes } : {}), ...(look ? { look: { ...look, ...(look.nativeResources ? { nativeBody: id } : {}) } } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
   }

@@ -938,7 +938,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         try {
           if(people instanceof WorldLightPeople&&peopleKit){scene.remove(people.group);people.dispose();people=null;applied=null;}  // the renderer has loaded: the same take, drawn
           if (!people) {
-            people = peopleKit ? new peopleKit.TakePeople(take, { scene: base ?? undefined,nativeBoat,commonsContrast:geometry.hasAuthoredCommons,humanPresets:humanPresets&&geometry.hasAuthoredCommons }) : new WorldLightPeople(take);
+            people = peopleKit ? new peopleKit.TakePeople(take, { heldPicture:entry=>entityLayer?.heldPicture(entry)??null, scene: base ?? undefined,nativeBoat,commonsContrast:geometry.hasAuthoredCommons,humanPresets:humanPresets&&geometry.hasAuthoredCommons }) : new WorldLightPeople(take);
             people.setTemplates(templates);
             people.setBodyTemplates(bodyModels.templates);
             scene.add(people.group);

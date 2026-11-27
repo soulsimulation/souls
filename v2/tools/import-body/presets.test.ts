@@ -22,6 +22,9 @@ test('all released presets have measured admitted classes, exact resources and i
     assert.deepEqual(body.legacy, [legacyBody(body.preset)], 'released BODY-v1 fields stay exact');
     const entry = JSON.parse(files.get(body.entry)!.toString('utf8')), kind = files.get(body.entry.replace(/\.json$/, '.diag'))!;
     assert.equal(createHash('sha256').update(kind).digest('hex'), body.hash);
+    assert.equal(entry.kindHash, body.hash, 'companion metadata belongs to this exact native kind');
+    assert(Array.isArray(entry.resources));
+    for (const [name, cls, slot] of entry.resources) assert(kind.toString('utf8').includes(`{1: ${JSON.stringify(name)}, 2: ${cls}${slot === undefined ? '' : `, 3: ${slot}`}}`), 'resource tuple comes from the same admitted native kind');
     assert.ok(body.height > 0 && body.hover >= 0 && body.size in radii);
     const radius = /4: \{1: "radius", 2: "int", 3: (\d+)/.exec(kind.toString('utf8'));
     assert.ok(radius); assert.ok(Number(radius[1]) <= radii[body.size]);

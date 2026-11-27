@@ -91,13 +91,40 @@ export function entityWithLook(base: string, look: string): string {
 
 /** One body of the v2 catalogue (`souls/bodies/1`, v2/tools/import-body/presets.ts Entry): its hash and the old page's
  *  record of the same body (`legacy[0]`, a BODY-v1 RenderBody). */
-export type CatalogueBody = { hash: string; legacy?: unknown[] };
+export type BodyResource = readonly [string, number, number?];
+export type CatalogueBody = { hash: string; legacy?: unknown[]; entry?: string; entryHash?: string; resources?: readonly BodyResource[] };
+
+/** Read only hash-verified companion metadata. Missing/ambiguous slots stay unknown. */
+export function bodyResources(value: unknown): readonly BodyResource[] | undefined {
+  if (!Array.isArray(value) || !value.length || value.some(r => !Array.isArray(r) || r.length < 2 || r.length > 3
+    || typeof r[0] !== 'string' || !Number.isSafeInteger(r[1]) || r[2] !== undefined && (!Number.isSafeInteger(r[2]) || r[2] < 1))) return undefined;
+  if (new Set(value.map(r => r[0])).size !== value.length) return undefined;
+  const slots = value.filter(r => r[1] === 2 && r[2] !== undefined).map(r => r[2]);
+  if (new Set(slots).size !== slots.length) return undefined;
+  return value.map(r => Object.freeze([...r]) as BodyResource);
+}
+
+/** Existing catalogue entryHash binds model JSON and its additive resource metadata to this exact body kind. */
+export async function loadBodyResources(rows: readonly CatalogueBody[], base: string, read: typeof fetch = fetch): Promise<CatalogueBody[]> {
+  return Promise.all(rows.map(async row => {
+    if (!row.entry || !/^[a-z][a-z0-9_]*\.json$/.test(row.entry) || !/^[a-f0-9]{64}$/.test(row.entryHash ?? '')) return {...row, resources: undefined};
+    try {
+      const response = await read(base + row.entry); if (!response.ok) return {...row, resources: undefined};
+      const bytes = await response.arrayBuffer();
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('');
+      if (hash !== row.entryHash) return {...row, resources: undefined};
+      const json = JSON.parse(new TextDecoder().decode(bytes));
+      if (json.kindHash !== row.hash) return {...row, resources: undefined};
+      return {...row, resources: bodyResources(json.resources)};
+    } catch { return {...row, resources: undefined}; }
+  }));
+}
 
 /** The old page's body record for a v2 body-kind hash, from the catalogue; null when it has none (drawn by default). */
 export function legacyBodyOf(hash: string | undefined, catalogue: ReadonlyMap<string, CatalogueBody> | null): Record<string, unknown> | null {
   const b = hash ? catalogue?.get(hash)?.legacy?.[0] : null;
   return b && typeof b === 'object' && !Array.isArray(b) && ((b as { family?: unknown }).family === 'humanoid' || (b as { family?: unknown }).family === 'floater')
-    ? (b as Record<string, unknown>) : null;
+    ? { ...(b as Record<string, unknown>), ...(catalogue?.get(hash!)?.resources ? { nativeResources: catalogue.get(hash!)!.resources, nativeKindHash: hash } : {}) } : null;
 }
 
 /** V3: the old body record (BODY-v1, the old renderer's humanoid look) for a body's own look, field 33's params as
