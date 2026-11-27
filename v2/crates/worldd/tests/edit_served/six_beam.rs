@@ -217,6 +217,15 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
     )
     .await;
     walk_all(&s, six, &places(slot, &l, 6, end), "six step into place").await;
+    // Where each stands from the slot's line as the put is asked (across it, along it), mm.
+    for (k, a) in six.iter().enumerate() {
+        let b = body_at(&w, body_of(&w, a.soul));
+        println!(
+            "carrier {k}: {} mm across the slot's line, {} mm along it",
+            (b.x - slot.x) / 1000,
+            (b.z - slot.z) / 1000
+        );
+    }
     let got = put_part(&mut *six[0], c, into_slot(bay, hl)).await;
     println!("six seat the beam in beam_high_l: {got:?}");
     assert_eq!(got.kind, 1, "seated");
