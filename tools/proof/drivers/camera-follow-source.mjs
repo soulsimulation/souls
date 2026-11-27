@@ -12,6 +12,7 @@ export function routeCoverage(rows){
  for(let i=1;i<points.length;i++){const d=points[i].map((v,j)=>v-points[i-1][j]),length=Math.hypot(...d);distance+=length;if(length<.03)stopped++;if(length>.2){if(previous){const dot=d.reduce((n,v,j)=>n+v*previous[j],0)/(length*Math.hypot(...previous));turn=Math.max(turn,Math.acos(Math.min(1,Math.max(-1,dot)))*180/Math.PI);}previous=d;}}
  return{distanceM:distance,largestTurnDegrees:turn,stationarySamples:stopped,samples:rows.length,scope:'1Hz actual depicted translation only; obstruction and readability require original pixel review'};
 }
+export function compositionPresent(r){return [['eye',3],['target',3],['cameraWorld',16],['projection',16]].every(([key,n])=>Array.isArray(r?.[key])&&r[key].length===n&&r[key].every(Number.isFinite));}
 export async function prepare({recipe,paths,signal}){
  const actor=await recipe.joinActor(),targets={};
  for(const name of new Set(ROUTE.map(s=>s.target))){signal.throwIfAborted();const answer=await actor.cli('find',name,'--limit','50');writeFileSync(join(paths.dir,`follow-find-${name}.json`),JSON.stringify(answer,null,2));const matches=(answer.found??[]).filter(r=>r.name===name&&!r.kind?.startsWith('souls:body'));if(matches.length!==1)throw Error('follow-route-target-ambiguous:'+name);targets[name]=matches[0].id;}
@@ -31,7 +32,7 @@ export async function readFollow(page,bodyIds){return page.evaluate(ids=>{const 
 export default async function({page,paths,fixture,signal,check}){
  let n=0;const save=(file,value)=>writeFileSync(join(paths.dir,file),JSON.stringify(value,null,2)+'\n',{flag:'wx'}),snapshot=async label=>save(`follow-ui-${String(++n).padStart(3,'0')}-${label}.json`,{accessibility:await page.locator('body').ariaSnapshot()});
  const ids=depictedBodyIds(fixture.actor.body);await chooseFollow(page,snapshot);await page.waitForTimeout(1000);await resetFollow(page,snapshot);
- const before=await readFollow(page,ids);check('follow-source-present',!!before.subject&&before.mode==='follow');
+ const before=await readFollow(page,ids);check('follow-source-present',!!before.subject&&before.mode==='follow');check('follow-start-composition-retained',compositionPresent(before));
  const rows=[],commands=[],start=performance.now();let index=0,sequence=null,ready=0;
  while(performance.now()-start<60000){signal.throwIfAborted();const elapsed=(performance.now()-start)/1000;
   if(index<ROUTE.length&&elapsed>=ready){if(sequence!==null){const result=await fixture.actor.cli('receipt',String(sequence));commands.push({elapsed,kind:'receipt',result});const state=receiptState(result);if(state==='refused'){save('follow-route-commands.json',commands);throw Error('follow-route-refused');}if(state==='done'){ready=elapsed+ROUTE[index].holdSeconds;index++;sequence=null;}}
@@ -43,6 +44,6 @@ export default async function({page,paths,fixture,signal,check}){
  check('follow-route-actual-translation',coverage.distanceM>10);check('follow-route-mode-retained',rows.every(r=>r.mode==='follow'&&r.subject));
  await openCostTime(page,snapshot);const panel=page.getByRole('dialog',{name:'Time',exact:true});await snapshot('pause');await panel.getByRole('button',{name:'Pause',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-presentation')==='history');
- const slider=page.getByRole('slider',{name:'Every moment since the world began',exact:true});await snapshot('history-seek');await slider.press('ArrowLeft');await page.waitForTimeout(250);await page.keyboard.press('Escape');await resetFollow(page,snapshot);
- const retained=await readFollow(page,ids);save('follow-history-retention.json',retained);check('follow-before-history-retained',retained.mode==='follow'&&retained.presentation==='history'&&!!retained.subject);await page.screenshot({path:join(paths.dir,'follow-history-reset.png')});
+ const slider=page.getByRole('slider',{name:'Every moment since the world began',exact:true});await snapshot('history-seek');await slider.press('ArrowLeft');const seekTarget=Number(await slider.inputValue());await page.waitForFunction(t=>{const v=document.querySelector('.viewer-history'),p=document.querySelector('[data-time-panel]');return Number(v?.getAttribute('data-viewer-tick'))===t&&p&&!p.textContent.includes('loading that moment');},seekTarget,{timeout:10000});await page.keyboard.press('Escape');await resetFollow(page,snapshot);
+ const retained=await readFollow(page,ids);save('follow-history-retention.json',retained);check('follow-before-history-retained',retained.mode==='follow'&&retained.presentation==='history'&&retained.tick===seekTarget&&!!retained.subject&&compositionPresent(retained));await page.screenshot({path:join(paths.dir,'follow-history-reset.png')});
 }
