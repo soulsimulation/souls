@@ -1578,6 +1578,9 @@ pub struct Acts {
     toward: BTreeMap<Id, Id>,
     /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
     timers: BTreeMap<Id, (Id, Name)>,
+    /// Each timer's run still going, by the timer's id: the timer and its form, so entries of the run the world
+    /// refuses to write are named on its thing ([`Acts::timer_unwritten`]).
+    timer_runs: BTreeMap<Id, (Timer, String)>,
     /// Each form a timer started in the last tick, by the timer's id: its run, or its refusal by name (C24). Emptied at
     /// each tick's start (#3991), so it holds one tick's timers however long the world runs; a refusal is also written
     /// to the log as a [`TIMER_REFUSED`] entry on the timer's thing, where Souls and the page read it.
@@ -2219,6 +2222,7 @@ impl Acts {
             toward: BTreeMap::new(),
             timers: BTreeMap::new(),
             fired: Vec::new(),
+            timer_runs: BTreeMap::new(),
             watch: Watch::new(),
             made_way: BTreeSet::new(),
             beside: BTreeMap::new(),
@@ -3146,6 +3150,12 @@ impl Acts {
         let Some((node, form)) = self.timers.remove(&t.id) else {
             return;
         };
+        // A timer the tree no longer holds went with its thing (a removal drops its timers) or was never written: it
+        // has nothing to clear and no thing to write on, and an entry on a node gone would sink the tick's other world
+        // entries with it.
+        if !tree.timers().contains_key(&t.id) || tree.handle(node).is_none() {
+            return;
+        }
         self.forms.out.push(Effect {
             envelope: replica::effects::Envelope {
                 sequence: 0,
@@ -3202,6 +3212,7 @@ impl Acts {
         match &asked {
             Ok(Asked::Started(run) | Asked::Running(run)) => {
                 self.runs.insert(*run, t.id);
+                self.timer_runs.insert(t.id, (t.clone(), name.to_owned()));
             }
             Ok(_) => {}
             Err(e) => self.forms.out.push(timer_refused(t, node, name, e)),
@@ -3270,9 +3281,20 @@ impl Acts {
             .filter_map(|e| {
                 let why = self.blocked.remove(&e.body);
                 let why = why.filter(|_| e.how.as_str() == BLOCKED).or(e.why);
-                Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
+                let id = self.runs.remove(&e.run)?;
+                self.timer_runs.remove(&id);
+                Some((id, e.how.as_str().to_owned(), why))
             })
             .collect()
+    }
+
+    /// A timer's run whose entries the world refused to write at `at` (#3991): the [`TIMER_REFUSED`] entry naming why,
+    /// on its thing, when `id` is a timer's run still going; none for any other.
+    pub fn timer_unwritten(&self, id: Id, e: &Refusal, at: Micros) -> Option<Effect> {
+        let (t, form) = self.timer_runs.get(&id)?;
+        let mut entry = timer_refused(t, t.node, form, e);
+        entry.envelope.at = at;
+        Some(entry)
     }
 }
 

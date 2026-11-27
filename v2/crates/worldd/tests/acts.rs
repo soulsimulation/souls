@@ -353,6 +353,8 @@ fn entries() -> Json {
         "ring": { "who": "anyone", "starts": "act", "steps": [],
           "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
             { "change": "timer", "form": "fade", "after_us": 2000000, "event": "will_fade" }] },
+        "scrap": { "who": "anyone", "starts": "act", "steps": [],
+          "effects": [{ "change": "remove", "what": "this", "event": "scrapped" }] },
         "hush": { "who": "anyone", "starts": "act", "steps": [],
           "effects": [{ "change": "set", "field": "ringing", "to": false, "event": "hushed" }] },
         "fade": { "who": "world", "starts": "timer", "steps": [],

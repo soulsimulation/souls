@@ -4881,6 +4881,13 @@ impl Clock {
                     continue;
                 };
                 eprintln!("worldd: a form's entries were not written: {r}");
+                // A timer's run has no intent to answer (#3991): its refusal is written on its thing, by name.
+                let at = group.first().map_or(now, |e| e.envelope.at);
+                if let Some(e) = of.and_then(|id| self.forms.timer_unwritten(id, &r, at))
+                    && let Err(e) = self.commit_forms(vec![e])
+                {
+                    eprintln!("worldd: a refused timer's entry was not written: {e}");
+                }
                 // A run that ended with them still ends (0.133 F1b): its end, which unlinks its reservation, goes in a
                 // part of its own and names the refusal, so a refused effect never leaves its thing reserved.
                 let (ends, group) = refused_ends(group, r.name, self.replica.tree());

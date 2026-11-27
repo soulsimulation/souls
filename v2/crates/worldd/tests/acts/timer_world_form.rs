@@ -284,3 +284,39 @@ fn i3991_a_world_with_no_bodies_woken_late_fires_its_forms_timer_at_its_due_time
     assert_eq!(quiet.1, None, "nothing due: the world may sleep");
     run.stop();
 }
+
+/// #3991 review: the bell is rung and then scrapped before its fade is due. The removal takes the bell's timer from
+/// the tree, so when the forms' due list reaches it the world writes nothing on the bell that is gone: before, its
+/// clear was written on a missing node, refused, and sank that tick's other world entries with it.
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn i3991_a_timer_whose_thing_was_removed_writes_nothing() {
+    let (run, mut a, _) = serve("i3991-scrap");
+    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    let due = timer_due(&run).expect("the ring set its timer");
+    let scrapped = a.act("test:scrap", Some(rack()), BTreeMap::new());
+    assert!(
+        !scrapped.expect("the scrap lands").is_empty(),
+        "one receipt"
+    );
+    assert!(
+        run.replay().tree().handle(rack()).is_none(),
+        "the bell is gone"
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
+    let quiet = run.world.quiet.read();
+    println!(
+        "#3991 scrapped: cleared {:?}, refused {refused:?}, quiet {quiet:?}, due {due}",
+        timer_cleared_at(&run)
+    );
+    assert_eq!(timer_cleared_at(&run), None, "no clear on a thing gone");
+    assert!(refused.is_empty(), "no refusal on a thing gone");
+    assert!(
+        quiet.1.is_none_or(|n| n > due),
+        "the timer is off the due list"
+    );
+    run.stop();
+}
