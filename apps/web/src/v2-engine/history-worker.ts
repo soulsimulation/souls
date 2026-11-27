@@ -7,7 +7,7 @@ import init, { historyAt } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
-import { DAY_US, dayIndexKey, headerKey, today } from './history-keys.ts';
+import { dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
@@ -62,13 +62,12 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
   return rec;
 }
 
-type Index = [number, string, Uint8Array][];
 let header: Promise<Uint8Array> | null = null;
-const days = new Map<number, Promise<Index | null>>();
+const days = new Map<number, Promise<DayIndex | null>>();
 const ready = init();
 
 /** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. */
-function dayIndex(base: URL, day: number): Promise<Index | null> {
+function dayIndex(base: URL, day: number): Promise<DayIndex | null> {
   if (!days.has(day)) days.set(day, get(new URL(dayIndexKey(day), base)).then((b) => {
     if (!b) return null;
     const m = decode(b, { useMaps: true }) as Map<number, unknown>;
@@ -77,37 +76,27 @@ function dayIndex(base: URL, day: number): Promise<Index | null> {
   return days.get(day)!;
 }
 
-async function seek(base: URL, seq: number, at: number, floor?: number) {
+async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
-  // V4's walk: the last bundle that starts at or before the moment, back through earlier days to a year. A day after
-  // today has no index yet (the origin answers 404), so neither the walk nor the next bundle's lookup asks for one;
-  // nor is a day before the world's first (`floor`, the page's), so a young world's walk asks no empty day.
-  const now = today(), lowest = Math.max(Math.floor(at / DAY_US) - 365, floor === undefined ? -Infinity : Math.floor(floor / DAY_US));
-  for (let day = Math.min(Math.floor(at / DAY_US), now); day >= lowest; day--) {
-    const ix = await dayIndex(base, day);
-    let i = ix ? ix.length - 1 : -1;
-    while (i >= 0 && ix![i][0] > at) i--;
-    if (!ix || i < 0) continue;
-    const [, k, sha] = ix[i];
-    const stored = await get(new URL(k, base));
-    if (!stored) throw new Error(`no bundle ${k}`);
-    await ready;
-    const out = decode(historyAt(await header, await inflate(stored), sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
-    const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
-    const samples: HistorySample[] = (out.get(3) as Map<number, unknown>[]).map((s) => {
-      const p = (s.get(5) as unknown[]).map(num);
-      return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
-    });
-    const later = ix[i + 1]?.[0] ?? (day < now ? (await dayIndex(base, day + 1))?.[0]?.[0] : null) ?? null;
-    const start = num(out.get(4)), length = num(out.get(5));
-    const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
-    post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
-    return;
-  }
-  throw new Error(`no history in the year before ${at} µs`);
+  // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
+  const found = await walk(at, now, floor, (day) => dayIndex(base, day));
+  if (!found) throw new Error(`no history in the year before ${at} µs`);
+  const stored = await get(new URL(found.key, base));
+  if (!stored) throw new Error(`no bundle ${found.key}`);
+  await ready;
+  const out = decode(historyAt(await header, await inflate(stored), found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
+  const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
+  const samples: HistorySample[] = (out.get(3) as Map<number, unknown>[]).map((s) => {
+    const p = (s.get(5) as unknown[]).map(num);
+    return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
+  });
+  const later = await found.later();
+  const start = num(out.get(4)), length = num(out.get(5));
+  const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
+  post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
 }
 
-self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; floor?: number }>) => {
-  const { base, seq, at, floor } = e.data;
-  seek(new URL(base), seq, at, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
+self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number }>) => {
+  const { base, seq, at, now, floor } = e.data;
+  seek(new URL(base), seq, at, now, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
 };

@@ -34,7 +34,8 @@ export class V2History {
 
   /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
   private floor: number | undefined;
-  private seek(at: number): Promise<Seeked> {
+  /** The moment `at` (µs), with the world's time `now` (µs): no seek asks for a day after now's. */
+  private seek(at: number, now: number): Promise<Seeked> {
     if (!this.worker) {
       this.worker = this.make();
       this.worker.onmessage = (e: MessageEvent<HistoryMsg>) => {
@@ -46,14 +47,17 @@ export class V2History {
     const seq = ++this.seq;
     return new Promise((ok, no) => {
       this.waiting.set(seq, (r) => (r instanceof Error ? no(r) : ok(r)));
-      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at, floor: this.floor });
+      this.worker!.postMessage({ base: new URL(this.base, location.href).href, seq, at, now, floor: this.floor });
     });
   }
 
-  /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them. */
-  async chunks(from: number, to: number, limit: number, signal?: AbortSignal): Promise<RecordedChunk[]> {
+  /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them.
+   *  `nowTick` is the world's tick now, as the page has it (its live head); unknown, the window's end, which is then
+   *  taken to be no later than now. It is the world's own clock, which for a world made through New world began at 0. */
+  async chunks(from: number, to: number, limit: number, signal?: AbortSignal, nowTick?: number | null): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
+    const now = (nowTick ?? to) * TICK_US;
     let at = from * TICK_US, first = true, next: number | null = null;
     // K3: a window before the world's first moment starts there, and no seek walks back through the empty days before
     // it (a young world: each would be a 404). Not known (no public events yet): no day before the asked one's.
@@ -65,7 +69,7 @@ export class V2History {
     while (at < endUs + STEP_US && got.size < limit) {
       if (signal?.aborted) throw new Error('aborted');
       // K3: a window that begins before the world's first moment (a link to its first minute) is read from that moment
-      const s = await this.seek(at).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f); });
+      const s = await this.seek(at, now).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f, now); });
       // the bundle's time, and the quiet after it until the next bundle: a world with no records writes no bundle, so
       // past the newest one (no next yet) the world is as that bundle left it, and a minute ago is played from there
       const until = Math.min(s.next ?? Infinity, endUs + 2 * STEP_US);
@@ -84,7 +88,7 @@ export class V2History {
     // long from the next bundle is played instead, so a replay goes on across the gap
     if (!got.size && next !== null && next > endUs && !signal?.aborted) {
       const from2 = Math.floor(next / TICK_US);
-      return this.chunks(from2, from2 + (to - from), limit, signal);
+      return this.chunks(from2, from2 + (to - from), limit, signal, nowTick ?? to);
     }
     return [...got.values()].sort((a, b) => a.fromTick - b.fromTick).slice(0, limit);
   }

@@ -2,7 +2,8 @@
 // (v2/crates/worldd/src/serve.rs `Again::mirror`, v2/docs/archive.md "The objects"; v2/client/src/history/history.mjs
 // names the same). The store's own keys are kept under the folder, so V4's event counts, whose store keys begin
 // `history/everyone/`, are served at `<world>/history/history/everyone/...`: that doubled `history/` is the origin's
-// real layout (checked on soul.game), not a slip. Imported by the page and its history worker alike, so nothing else here.
+// real layout (checked on soul.game), not a slip. Imported by the page and its history worker alike, so nothing else here
+// but the keys and the walk that picks them.
 
 export const DAY_US = 86_400_000_000;
 const pad = (n: number, w: number) => String(n).padStart(w, '0');
@@ -14,5 +15,25 @@ export const dayIndexKey = (day: number) => `bundles/${pad(day, 8)}/index`;
 /** V4's counts of a world year (365 world days), a slot a day. */
 export const yearCountsKey = (year: number) => `history/everyone/counts/year/${pad(year, 4)}`;
 
-/** The world day of now (world time is wall time): no index is asked of a day after it, since none is written yet. */
-export const today = () => Math.floor((Date.now() * 1000) / DAY_US);
+/** A day's bundle index, `[[start µs, key, SHA-256], ...]`. */
+export type DayIndex = [number, string, Uint8Array][];
+
+/** V4's walk, the worker's seek: the last bundle that starts at or before `at`, back through earlier days to a year, and
+ *  where the bundle after it starts (`later`, null when none is written yet). `nowUs` is the world's time now, as the
+ *  page has it: no index is asked of a day after its day, since none is written yet; nor of a day before `floor`'s (the
+ *  world's first moment), so a young world's walk asks no empty day. World time is the world's own, from its start
+ *  (v2/docs/time.md rule 1), never the wall's: a world made through New world is in its day 0 whatever the date (only an
+ *  imported world's clock reads as the wall's), so the wall's day is one its export will not reach for years. */
+export async function walk(at: number, nowUs: number, floor: number | undefined, dayIndex: (day: number) => Promise<DayIndex | null>):
+  Promise<{ day: number; key: string; sha: Uint8Array; later: () => Promise<number | null> } | null> {
+  const now = Math.floor(nowUs / DAY_US), lowest = Math.max(Math.floor(at / DAY_US) - 365, floor === undefined ? -Infinity : Math.floor(floor / DAY_US));
+  for (let day = Math.min(Math.floor(at / DAY_US), now); day >= lowest; day--) {
+    const ix = await dayIndex(day);
+    let i = ix ? ix.length - 1 : -1;
+    while (i >= 0 && ix![i][0] > at) i--;
+    if (!ix || i < 0) continue;
+    const [, key, sha] = ix[i];
+    return { day, key, sha, later: async () => ix[i + 1]?.[0] ?? (day < now ? (await dayIndex(day + 1))?.[0]?.[0] : null) ?? null };
+  }
+  return null;
+}
