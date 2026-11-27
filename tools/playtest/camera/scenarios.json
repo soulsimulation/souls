@@ -230,7 +230,8 @@
       ],
       "secondsPerCell": 180,
       "repeats": 2,
-      "rule": "Each Cartesian cell is separate; desktop uses rotated fixed viewport, physical mobile uses actual orientation. Unavailable cells are unknown; schedule additional device cells explicitly before dispatch."
+      "rule": "Each Cartesian cell is separate; desktop uses rotated fixed viewport, physical mobile uses actual orientation. Unavailable cells are unknown; schedule additional device cells explicitly before dispatch.",
+      "totalRecordingMinutes": 672
     },
     {
       "id": "broadcast",
@@ -375,7 +376,8 @@
       ],
       "secondsPerCell": 180,
       "repeats": 2,
-      "rule": "Run selected frozen cells within amended dispatch bounds; unrun cells remain unknown. After holdout tuning, repeat confirmation on reserve, never the consumed holdout."
+      "rule": "Run selected frozen cells within amended dispatch bounds; unrun cells remain unknown. After holdout tuning, repeat confirmation on reserve, never the consumed holdout.",
+      "totalRecordingMinutes": 336
     }
   ],
   "mixedSession": {
