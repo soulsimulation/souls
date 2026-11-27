@@ -159,7 +159,7 @@ function slowReader(p) {
   const tls = base.protocol === 'https:';
   const s = (tls ? tlsConnect : connect)({ port: Number(base.port || (tls ? 443 : 80)), host: base.hostname, servername: tls ? base.hostname : undefined }, () => {
     s.pause();
-    const extra = Object.entries(cfg.headers ?? {}).map(([k, v]) => `${k}: ${v}\r\n`).join('');
+    const extra = Object.entries(cfg.headers ?? {}).filter(([k]) => !/^(host|connection)$/i.test(k)).map(([k, v]) => `${k}: ${v}\r\n`).join('');
     const ask = (path) => `GET ${path} HTTP/1.1\r\nHost: ${base.host}\r\n${extra}Connection: keep-alive\r\n\r\n`;
     s.write(ask(url.pathname) + ask(new URL('pointer', streamUrl()).pathname));
   });

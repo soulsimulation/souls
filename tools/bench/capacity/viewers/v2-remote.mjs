@@ -29,19 +29,22 @@ const START_AT = Number(opt('start-at', Date.now())), TAKE_MS = 10_000;
 if (!BASE || !STREAM || !PKG || !(N >= 0) || !['even', 'uneven'].includes(ARM) || !['browser', 'bare'].includes(HEADERS)) throw new Error('--base, --stream, --pkg, --viewers, --arm even|uneven and --headers browser|bare');
 const page = `https://${new URL(BASE).hostname.replace(/^stream\./, '')}`;
 const CHROME = '142';
+// in a desktop Chrome's HTTP/1.1 order and casing (Node would put Host last and send the names as written)
 const headers = HEADERS === 'bare' ? { 'accept-encoding': ENC } : {
+  Host: new URL(BASE).host,
+  Connection: 'keep-alive',
+  'sec-ch-ua-platform': '"macOS"',
+  'User-Agent': `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME}.0.0.0 Safari/537.36`,
   'sec-ch-ua': `"Chromium";v="${CHROME}", "Google Chrome";v="${CHROME}", "Not_A Brand";v="99"`,
   'sec-ch-ua-mobile': '?0',
-  'sec-ch-ua-platform': '"macOS"',
-  'user-agent': `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME}.0.0.0 Safari/537.36`,
-  accept: '*/*',
-  origin: page,
-  'sec-fetch-site': 'same-site',
-  'sec-fetch-mode': 'cors',
-  'sec-fetch-dest': 'empty',
-  referer: `${page}/`,
-  'accept-encoding': ENC,
-  'accept-language': 'en-US,en;q=0.9',
+  Accept: '*/*',
+  Origin: page,
+  'Sec-Fetch-Site': 'same-site',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Dest': 'empty',
+  Referer: `${page}/`,
+  'Accept-Encoding': ENC,
+  'Accept-Language': 'en-US,en;q=0.9',
 };
 const READERS = new URL('./v2-readers.mjs', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
