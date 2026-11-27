@@ -101,7 +101,7 @@ export class FollowCamera{
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
   let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
   if(invalidStep){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
-  if(!centre||!geometry.stats.complete){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
+  if(!centre||(!geometry.stats.complete&&manual)){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
@@ -114,6 +114,7 @@ export class FollowCamera{
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
   let reason='tracking';
+  if(geometry.stats.complete){
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
   const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next);motion={groundY,sweep,unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?'motion-obstructed':'motion-unknown';}
   // A Follow gesture changes its orbit/zoom, not the subject's world translation.
@@ -127,6 +128,9 @@ export class FollowCamera{
    const alternative=query(eye),passage=geometry.segment(this.eye,eye);
    if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
   }
+  }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
+  // Unavailable obstruction geometry forbids eye movement/search, not a bounded
+  // turn toward a fresh depicted subject. Manual input still owns its whole pose.
   // Rebase from the previous drawn eye along its actual viewing ray onto the
   // subject-depth plane. Subsequent eye translation then compensates around that
   // nearby world aim instead of also demanding a second pan to follow the eye.
