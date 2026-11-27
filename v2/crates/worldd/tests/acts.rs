@@ -2201,7 +2201,7 @@ fn ticked_after(run: &Run, kept: usize) -> bool {
     let log = run.store.0.lock().unwrap().bytes.clone();
     recover(&log).unwrap().records.iter().skip(kept).any(|rec| {
         !sim::recorder::is_input(rec)
-            && Part::read(rec).is_ok_and(|p| p.rest.get(&answers::TICK).is_some())
+            && Part::read(rec).is_ok_and(|p| p.rest.contains_key(&answers::TICK))
     })
 }
 
