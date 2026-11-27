@@ -510,7 +510,8 @@ fn a_records_key_this_build_does_not_read_is_refused_at_restore() {
     for (h, b) in &whole.nodes {
         records.insert(h.to_bytes(), b.clone());
     }
-    let read = |records: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>, a: &[(replica::world_model::Audience, Vec<u8>)]| {
+    let read = |records: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+                a: &[(replica::world_model::Audience, Vec<u8>)]| {
         Tree::unseal(a, &mut |h| {
             records.get(h).cloned().ok_or(Refusal {
                 name: "checkpoint-missing",

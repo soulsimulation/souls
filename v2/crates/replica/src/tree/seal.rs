@@ -1116,7 +1116,10 @@ fn node_in(v: Value, links: &mut BTreeMap<Id, LinkIn>) -> R<NodeIn> {
     if let Some(k) = m.keys().next() {
         return refuse(
             "checkpoint-record",
-            format!("{} holds key {k}, which this build does not read", show(n.id)),
+            format!(
+                "{} holds key {k}, which this build does not read",
+                show(n.id)
+            ),
         );
     }
     Ok(n)
