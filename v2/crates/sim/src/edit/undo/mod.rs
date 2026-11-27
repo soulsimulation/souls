@@ -7,8 +7,8 @@
 //!   generic layer alone: what the batch created is removed (a link it made, unlinked), what it removed is created
 //!   again with the same ids, kinds, poses, audiences, fields and links, and what it moved or set is moved or set back.
 //!   A change with no generic inverse (a field the batch added, since T6 has no unset, unless its reader has a value
-//!   that reads as unset, `replica::edit::claims::neutral`; a node in motion; a body that is not changes; an unlink)
-//!   makes that batch's undo refused `undo.no-inverse`.
+//!   that reads as unset, `replica::edit::claims::neutral` and on the world's root `replica::sky::unset_on_world`; a
+//!   node in motion; a body that is not changes; an unlink) makes that batch's undo refused `undo.no-inverse`.
 //! - **Things, never a game (B10, #4239).** An activity node in what a batch removed (a game under its board) is
 //!   left out of the before-values, with its membership links and its members' role links on the node it was under:
 //!   undoing the board's removal brings back the board, its fields and its seats, and no activity or role link. The
@@ -23,7 +23,9 @@
 //!   [`replica::edit::NODES_MOST`] changed nodes) and the caller's rule: G2's guard and judge (#2761) where wired. It is
 //!   refused `undo.conflict` when a node it touches changed since the batch it reverses: the node's content hash differs
 //!   from the one the batch left, or something was put inside a thing the undo would remove. So no undo takes a thing
-//!   from a Soul's hands: taking it moved it. A refusal changes nothing, neither the world nor the history.
+//!   from a Soul's hands: taking it moved it. A refusal changes nothing, neither the world nor the history. The hash
+//!   counts a field holding the value that reads as unset (the values above) as absent ([`settled`]), so an unset
+//!   value an undo left where the field was absent before is never a later change: undo, undo again, redo, redo.
 //! - **Builds.** A build is a label and step names on batches ([`Step`]). Rewinding to a step undoes the batches after
 //!   it, newest first, and stops at the first refusal. A step here is a name on a batch, not K5's checkpoint.
 //! - **Named.** Each effect of an undo carries the named event `souls:undone`, a redo's `souls:redone`, naming all its
@@ -44,7 +46,7 @@ use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Part, Rest,
 };
 use replica::encode::{Name, Value, encode};
-use replica::hash::node_hash;
+use replica::hash::node_hash_without;
 use replica::ids::{Hash, Id};
 use replica::pose::{Frame, Pose};
 use replica::time::Micros;
@@ -226,6 +228,21 @@ fn subtree(tree: &Tree, id: Id) -> Vec<Id> {
     out
 }
 
+/// A node's content hash for the conflict check: [`node_hash_without`] the fields holding the value that reads as
+/// unset (`replica::edit::claims::neutral`, and on the world's root `replica::sky::unset_on_world`), so such a field
+/// and its absence are the same state.
+fn settled(tree: &Tree, id: Id) -> Option<Hash> {
+    // The world's root is the node with no parent, as `inverse` takes it.
+    let root = tree
+        .handle(id)
+        .and_then(|h| tree.node(h))
+        .is_some_and(|n| n.parent().is_none());
+    node_hash_without(tree, id, |k, v| {
+        replica::edit::claims::neutral(k).as_ref() == Some(v)
+            || (root && replica::sky::unset_on_world(k).as_ref() == Some(v))
+    })
+}
+
 fn no_inverse<T>(detail: impl Into<String>) -> Result<T, Refused> {
     Err(Refused {
         op: None,
@@ -379,8 +396,14 @@ fn inverse(before: &Before, tree: &Tree, part: &Part) -> Result<Vec<Write>, Refu
         }
         for k in n.fields().keys().filter(|k| !w.fields.contains_key(k)) {
             // A field the batch added is set back to the value that reads as unset, where its reader has one (a
-            // claim list, a plan); any other has no inverse, since T6 has no unset.
-            let Some(to) = replica::edit::claims::neutral(*k) else {
+            // claim list, a plan; on the world's root, a creator's weather end or strike); any other has no inverse,
+            // since T6 has no unset.
+            let world = || {
+                n.parent()
+                    .is_none()
+                    .then(|| replica::sky::unset_on_world(*k))
+            };
+            let Some(to) = replica::edit::claims::neutral(*k).or_else(|| world().flatten()) else {
                 return no_inverse(format!("{id:?} field {k} was added, and T6 has no unset"));
             };
             out.push(Write {
@@ -737,7 +760,7 @@ impl History {
         let tree = live.tree();
         for (id, was) in &b.after {
             let Some(was) = was else { continue };
-            if node_hash(tree, *id).as_ref() != Some(was) {
+            if settled(tree, *id).as_ref() != Some(was) {
                 return conflict(format!("{id:?} changed since batch {}", b.first));
             }
         }
@@ -784,7 +807,7 @@ impl History {
         }
         let after = touched
             .into_iter()
-            .map(|id| (id, node_hash(tree, id)))
+            .map(|id| (id, settled(tree, id)))
             .collect();
         let kept = inverse.as_ref().map_or(0, |w| {
             effects(w, 0, 0, Cause::World, Actor::World, None)

@@ -40,11 +40,12 @@
   function row(w, notMetered) {
     const r = w.restarts, t = w.tick;
     const restarts = r ? `${r.in_5_min} starts in 5 min, ${r.failures} failures${r.last_exit ? `, last exit ${esc(r.last_exit)}` : ''}${r.next_try ? `, next try ${when(r.next_try)}` : ''}` : '—';
+    const disk = w.disk ? `${esc(w.disk.state)}, ${(w.disk.free_bytes / 2 ** 30).toFixed(1)} GiB free (${esc(w.disk.free_pct)} %)` : '—';
     const tick = t ? `lag ${t.lag_ms} ms, p99 ${t.p99_ms} / ${t.budget_ms} ms, ${t.over_budget} over budget, written ${t.health_age_s} s ago` : '—';
     return `<section class="world"><div class="head"><span class="name">${esc(w.world)}</span>` +
       `<span class="state ${esc(w.state)}">${esc(w.awake)} · ${esc(w.state)}</span></div><dl>` +
       `<dt>Where</dt><dd>${esc(w.where ?? '—')}${w.wake_at ? `, wakes ${when(w.wake_at)}` : ''}</dd>` +
-      `<dt>Ticks</dt><dd>${tick}</dd><dt>Restarts</dt><dd>${restarts}</dd>` +
+      `<dt>Ticks</dt><dd>${tick}</dd><dt>Restarts</dt><dd>${restarts}</dd><dt>Disk</dt><dd>${disk}</dd>` +
       `<dt>Watcher</dt><dd>${w.watcher == null ? nm(notMetered.watcher) : esc(when(w.watcher))}</dd>` +
       `<dt>Cost</dt><dd>${w.cost == null ? nm(notMetered.cost) : esc(w.cost)}</dd></dl></section>`;
   }

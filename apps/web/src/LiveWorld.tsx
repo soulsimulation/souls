@@ -37,7 +37,7 @@ import {worldCameraRenderRoots} from './WorldCameraRenderRoots.ts';
 import {SoulFlight} from './WorldSoulFlight.ts';import {WorldRtsCamera,EDEN_TERRAIN_EXTENT,forwardWheel} from './WorldRtsCamera.ts';import {FramePacer} from './frame-pacing.ts';
 import {createWorldAtmosphere} from './WorldAtmosphere.ts';
 import {SpectatorSpeechLayer,speechFromTalk,speechFromEdge,channelChip,type SpectatorSpeech,type EdgeSpectatorMessage} from './WorldSpectatorSpeech.ts';
-import {WorldFadingLayer,parseFadeOverride,fadingFromEdge,beamedOut,type FadingState} from './WorldFading.ts';
+import {WorldFadingLayer,parseFadeOverride,fadingFromEdge,beamedOut,leavingBeams,type FadingState} from './WorldFading.ts';
 import {renderEyes,renderOverhead,renderMap} from './WorldSnapshots.ts';
 import {conversationAttention,WorldIdleLife,type IdleSoul} from './WorldIdleLife.ts';
 import {WorldBodyPoses,bodyLabel} from './WorldBodyState.ts';
@@ -505,7 +505,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const games=new WorldGames();scene.add(games.group);
     const platformDraw=new WorldPlatforms();scene.add(platformDraw.group);
     const placeActivity=new WorldPlaceActivity();scene.add(placeActivity.group);
-    const fading=new WorldFadingLayer();scene.add(fading.group);let fadedOut=new Set<string>();const fadeOverride=parseFadeOverride(location.search),fadeSince=new Map<string,number>();
+    const fading=new WorldFadingLayer();scene.add(fading.group);let fadedOut=new Set<string>();
+    // #5068 item 7: the new engine's retire beam, by entity id (leavingBeams), drawn beside the old edge feed's fading states
+    const leaving=new Map<string,FadingState>();let edgeFading:ReadonlyMap<string,FadingState>=new Map();const fadeOverride=parseFadeOverride(location.search),fadeSince=new Map<string,number>();
     // Balloon ride: Core's ride state (edge frames) or a native carrier; ?ride=Alice,Bob previews a flight locally.
     const balloonRide=new WorldBalloonRide();scene.add(balloonRide.group);const rideCarsDrawn=new WorldRideCars();scene.add(rideCarsDrawn.group);const rideOverride=parseRideOverride(location.search),rideStart=performance.now();
     const atmosphere=(adopted?.atmosphere as ReturnType<typeof createWorldAtmosphere>|undefined)??createWorldAtmosphere(scene);
@@ -1100,7 +1102,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const posOf=(soulId:string)=>{const id=s.conn.replica.souls.get(soulId)?.entityId,p=id?at.entities[id]?.p:null;return p?[p[0],p[1],p[2]] as const:null;};
         speeches=past.current?[]:edgeFeed.length?speechFromEdge(edgeFeed,posOf).filter(sp=>now-sp.at<20000):recent.map(t=>speechFromTalk(t,posOf(t.from)));
         attentionTargets=new Map([...s.conn.replica.souls.keys()].map(id=>[id,conversationAttention(id,speeches,now)]));
-        if(edgeFeed.length&&!fadeOverride.size){const wallToPerf=performance.now()-now,states=fadingFromEdge(edgeFeed,a=>a+wallToPerf);fading.setStates(states);fadedOut=past.current?new Set():beamedOut(states,performance.now());}
+        if(edgeFeed.length&&!fadeOverride.size){const wallToPerf=performance.now()-now,states=fadingFromEdge(edgeFeed,a=>a+wallToPerf);edgeFading=states;fading.setStates(new Map([...states,...leaving]));fadedOut=past.current?new Set():beamedOut(states,performance.now());}
         const nameOf=(id:string)=>s.conn.replica.souls.get(id)?.name??'someone',latest=new Map<string,SpectatorSpeech>();
         for(const sp of speeches)if(now-sp.at<8000&&(!latest.get(sp.speaker)||latest.get(sp.speaker)!.at<sp.at))latest.set(sp.speaker,sp);
         cardSpeakers=new Set(latest.keys());
@@ -1218,11 +1220,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         for(const soul of s.conn.replica.souls.values()){const v=fadeOverride.get(soul.name.toLowerCase());if(!v)continue;if(!fadeSince.has(soul.id))fadeSince.set(soul.id,now);
           states.set(soul.id,v==='beam'?{idleMinutes:60,beamedAt:fadeSince.get(soul.id)}:v==='reclaim'?{idleMinutes:0,reclaimedAt:fadeSince.get(soul.id)}:{idleMinutes:Number(v)||0});}
         fading.setStates(states);}
+      else if(!past.current&&leavingBeams(at.entities,leaving,performance.now()))fading.setStates(new Map([...edgeFading,...leaving]));
       balloonRide.pose(id=>people?.bodyObject(id)??null);
-      fading.update(performance.now(),atmosphereSeconds,soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId,p=id?at.entities[id]?.p:null;return p?new THREE.Vector3(p[0],p[1],p[2]):null;},
+      fading.update(performance.now(),atmosphereSeconds,soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId??(leaving.has(soulId)?soulId:undefined),p=id?at.entities[id]?.p:null;return p?new THREE.Vector3(p[0],p[1],p[2]):null;},
         // travel keeps the departed Soul's entity (idle fades remove it), so every way a body is drawn must be hidden:
         // a humanoid, a rigid floater (creatures) or the simple stand-in figure
-        soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId;return id?people?.bodyObject(id)??floaters.object(id)??standIns.getObjectByName(id)??null:null;});
+        soulId=>{const id=s.conn.replica.souls.get(soulId)?.entityId??(leaving.has(soulId)?soulId:undefined);return id?people?.bodyObject(id)??floaters.object(id)??standIns.getObjectByName(id)??null:null;});
       // Idle life: breathing, weight shifts, head turns, speaking nods (render-time only).
       idleSouls.length=0;if(!past.current){const nowMs=Date.now();for(const soul of s.conn.replica.souls.values()){const e=at.entities[soul.entityId];if(!e)continue;
         const offscreen=viewerLive&&!bodyViewer.frustum.intersectsSphere(idleSphere.set(idleSphere.center.set(e.p[0],e.p[1]+.9,e.p[2]),1.3));  // PERF-PASSES: no idle offsets for a body outside the view

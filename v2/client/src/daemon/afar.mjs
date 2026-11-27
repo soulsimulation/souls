@@ -21,3 +21,13 @@ export function afarOf(ev, mine) {
 export function afarFor(ended, after, before) {
   return ended.findLast((a) => a.sequence > after && a.sequence < before)?.words ?? null;
 }
+
+/** #5152 follow-up: the words of a sit by kind of `mine` bound from the open ground, from an act-end event: the seat
+ *  taken, the place on the ground that holds it, and how far it was, both by id (worldd's `Clock::seat_by_kind`, e.g.
+ *  `eden:chair cd:120 in cd:150, 14.2 m away`); null for any other event. `receipt` gives them as `sat_in`, each id
+ *  named as the copy names it (`readableDetail`: a place by its title, as `look` does). */
+export function satInOf(ev, mine) {
+  if (ev?.name !== ACT_ENDED_ENTRY || !mine.includes(ev.fields?.[1]) || ev.fields?.[8] == null) return null;
+  const words = textOf(ev.fields[8]);
+  return words && / in .+, \d+\.\d m away$/.test(words) && !words.includes('from afar') ? words : null;
+}

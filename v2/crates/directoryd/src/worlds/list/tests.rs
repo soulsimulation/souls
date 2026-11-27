@@ -148,6 +148,119 @@ fn a4_two_clicks_make_one_world() {
     assert_eq!(forks.load(Ordering::SeqCst), 1);
 }
 
+/// Registers `n` imported worlds (`imp-<i>`) founded by `creator`, made at `made`, as the operator's
+/// `register-world` does.
+fn import(store: &Memory, creator: Id, n: u8, made: u64) {
+    for i in 1..=n {
+        let name = format!("imp-{i}");
+        register::register(
+            store,
+            &register::Imported {
+                name: &name,
+                label: "Bo",
+                lineage: [0x40 + i; 16],
+                zone: Id::new(Scope([0x40 + i; 16]), 1).expect("an id"),
+                creator,
+                now: made,
+            },
+        )
+        .expect("registered");
+    }
+}
+
+#[test]
+fn a5_imported_worlds_count_toward_no_limit() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let made = 1_000_000u64;
+    // Six imported worlds, the last a minute ago, founded by a first-day account: more than every limit.
+    import(&store, person(2), 6, made + 60);
+    let w = worlds(&store, &gets, forks);
+    assert_eq!(
+        w.list().expect("a list")["worlds"].as_array().map(Vec::len),
+        Some(6)
+    );
+    w.create(&ask("a", "new-1", "Bo"), person(2), made, made + 120)
+        .expect("imported worlds count toward no limit");
+    // Worlds made through New world still count: the hour, then the first day, then five.
+    let e = w
+        .create(&ask("b", "new-2", "Bo"), person(2), made, made + 180)
+        .expect_err("an hour");
+    assert_eq!(e.name, "world-limit-hourly");
+    w.create(&ask("c", "new-2", "Bo"), person(2), made, made + 3800)
+        .expect("after the hour");
+    let e = w
+        .create(&ask("d", "new-3", "Bo"), person(2), made, made + 8000)
+        .expect_err("the first day");
+    assert_eq!(e.name, "world-limit-new-account");
+    for i in 3..=5 {
+        w.create(
+            &ask(&format!("o{i}"), &format!("new-{i}"), "Bo"),
+            person(2),
+            made,
+            made + DAY + i,
+        )
+        .expect("an older account");
+    }
+    let e = w
+        .create(&ask("o6", "new-6", "Bo"), person(2), made, made + 2 * DAY)
+        .expect_err("five made");
+    assert_eq!(e.name, "world-limit");
+}
+
+#[test]
+fn a5_a_site_owner_has_no_limits_and_a_newcomer_keeps_them() {
+    assert_eq!(
+        site_owners(" acct_site, ,acct_other ,"),
+        ["acct_other".to_owned(), "acct_site".to_owned()].into()
+    );
+    assert!(site_owners("").is_empty());
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let made = 1_000_000u64;
+    import(&store, person(2), 6, made);
+    let mut w = worlds(&store, &gets, forks);
+    w.site_owners = site_owners("acct_site");
+    // A site owner in their account's first minutes: seven worlds, a minute apart, past all three limits.
+    for i in 1..=7u64 {
+        w.create_for(
+            &ask(&format!("s{i}"), &format!("site-{i}"), "Bo"),
+            person(2),
+            "acct_site",
+            made,
+            made + 60 * i,
+        )
+        .expect("a site owner has no limits");
+    }
+    // A newcomer, with site owners configured: all three limits, exactly as before.
+    let nb = |k: &str, name: &str, at: u64| {
+        w.create_for(&ask(k, name, "Cy"), person(3), "acct_new", made, made + at)
+    };
+    nb("a", "cy-1", 60).expect("first");
+    assert_eq!(
+        nb("b", "cy-2", 120).expect_err("an hour").name,
+        "world-limit-hourly"
+    );
+    nb("c", "cy-2", 3700).expect("after the hour");
+    assert_eq!(
+        nb("d", "cy-3", 8000).expect_err("the first day").name,
+        "world-limit-new-account"
+    );
+    for i in 3..=5 {
+        nb(&format!("o{i}"), &format!("cy-{i}"), DAY + i).expect("an older account");
+    }
+    assert_eq!(
+        nb("o6", "cy-6", 2 * DAY).expect_err("five").name,
+        "world-limit"
+    );
+}
+
 #[test]
 fn a5_a_limit_names_itself_and_when_to_retry() {
     let (store, gets, forks) = (

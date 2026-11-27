@@ -211,7 +211,7 @@ mod tests {
         let gw = Gateway::new(Tokens::default(), vec![], Arc::new(|_| {}));
         let grant = Grant::parse(&format!("soul-{}-0", "03".repeat(16))).unwrap();
         let other = Grant::parse(&format!("soul-{}-0", "04".repeat(16))).unwrap();
-        let said = |c: bool| crate::mailbox::agent(grant, c);
+        let said = |c: bool| crate::mailbox::agent(grant, c, false);
         let (_, _, mut box_rx) = gw.watch(&[grant]);
         let (_, _, mut theirs) = gw.watch(&[other]);
         assert_eq!(box_rx.try_recv().unwrap(), said(false), "at once, as it is");

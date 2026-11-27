@@ -161,7 +161,10 @@ so nothing else puts it in the directory's list. `register-world` writes its nam
 the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
 and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
 with the map naming it: a map entry the directory cannot find in its own list has no owner to check, so its pairings
-are refused (`world-authority-missing`) until it is registered.
+are refused (`world-authority-missing`) until it is registered. `place-world.sh` gives a world whose `world.json` names
+a creator its creator's flags (`--creator --directory --creator-authority-required`); its creator's sign-in works once
+the directory has written the creator marker into the world's tokens file, after it is registered. A world whose
+creator no account holds: `give-world.mjs` (docs/operations.md).
 
 A slow or stalled store never stops the directory or refuses an approval. Each request waits at most 2 s for a
 world's owner record, then uses the owner last read (after a restart, the one in that world's tokens file) and says so
@@ -338,6 +341,8 @@ Configure these names in the origin's existing `origin.env` (the origin service 
   default directory listener; adjust it if that listener changes. No path, credentials, query or fragment is allowed.
 - `SIM_SITE_OWNERS`: explicit comma-separated canonical account ids. `CATALOG_GENE_OWNER_ID` remains the
   compatibility fallback only when `SIM_SITE_OWNERS` is empty. Neither setting grants a world-owner fallback.
+  The directory reads `SIM_SITE_OWNERS` too (no fallback), as a line in `/etc/souls/directory.args`: New world's
+  per-account limits do not apply to these accounts. Imported worlds count toward no account's limits.
 - `SOULS_DATA`: the existing data location; its `owner-overview.json` is the existing collector's snapshot.
 
 The directory must use the same production provider and allowed application origins. The origin forwards only the

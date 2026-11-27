@@ -3202,6 +3202,24 @@
         },
         {
           "op": "place",
+          "def": "mars-rack-beam@1",
+          "name": "rack-beam-3",
+          "p": [
+            -3.4,
+            20
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-rack-beam@1",
+          "name": "rack-beam-4",
+          "p": [
+            -3.1,
+            20
+          ]
+        },
+        {
+          "op": "place",
           "def": "mars-rack-bay@1",
           "name": "rack-bay",
           "p": [

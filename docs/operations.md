@@ -177,6 +177,18 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   and healthz raises the host code `disk` at once. It is off when absent (development machines, hosted CI);
   `install.sh` writes `--disk-min-free-mb 4096` into a new production file, and on a host whose file already exists the
   operator adds it to `SIM_WORLDS_ARGS` once (it takes effect at the next restart).
+- **Low disk on the new engine (`disk.low`, #2806).** Each `worldd` reads the free space under its world each second.
+  Under `WORLDD_DISK_LOW_BYTES` (default 1 GiB) or `WORLDD_DISK_LOW_PCT` (default 5 %) free, set in
+  `/etc/souls/directory.env` (read at the world's start; a value that does not parse is the default), it says `worldd:
+  disk.low: <free> bytes free under the world …` once in the journal (`journalctl -u worldd@<world>`), and
+  `health.json` and the owner's health page (`/ops/health`) show `disk: low`; it says `disk.low cleared` once free
+  space is back past both by a tenth. Nothing is refused: acts, ticks and viewers go on. What it sheds by itself: with
+  a store, the log's bytes the store already holds are given back once 1 MiB has passed every reader (normally 64
+  MiB). Nothing else is shed: world history, checkpoints and anything not yet in the store stay. **What to do:** read
+  `df -h /var/lib/souls` and `du -sh /var/lib/souls/worlds/worlds/*` for what fills the disk; remove what is not
+  Souls' or not needed (old builds, old lane folders, logs), or grow the disk. Never delete a world's `log`,
+  `checkpoints` or stream folders by hand. If the disk fills anyway, the world ends once and waits as `disk.full`
+  until there is room ([a world restarting](../v2/docs/runbook/world-restarting.md)).
 
 ## Soul API ceilings
 
@@ -267,6 +279,13 @@ SHA-256 and falls back to the origin on any failure. God uploads go through a pu
 
 Signed-in actions use Clerk. The launcher reads only the public Clerk settings from the stage's auth env file and all
 worlds of a stage share one account registry. See [auth](operations/auth.md).
+
+A world no account owns (its creator principal held by no account, as the 25 Nov 2026 wipe left every imported world)
+cannot be handed off from the page. As root on the production host, `node /usr/local/lib/souls/ops/give-world.mjs <world>
+<account id> check`, then `run`, gives its creator to that account and installs its gateway's creator flags, with
+backups; it refuses a principal another account holds (that account hands the world off from its page) and an account
+whose own principal creates another world. `place-world.sh` writes those flags for any world whose `world.json` names a
+creator, and no release step rewrites a gateway's file.
 
 ## Analytics
 

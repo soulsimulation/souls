@@ -38,7 +38,11 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    the clock, one sit at a time: the thing of that kind in the room whose free seat is nearest the body, skipping a
    seat another run is on its way to, then that seat's own sit runs as a sit naming it would. None free is refused
    `place.none-free`, its detail the next step: the nearest free seat of another kind there, or to wait; a room
-   with no seat of that kind at all is refused `place.none-of-kind`.
+   with no seat of that kind at all is refused `place.none-of-kind`. Aimed from the open ground, a seat in a place on
+   it (a room or a place, the innermost holding the seat) is named by its id, which the client reads as its title as
+   `look` names places (the log holds no words), and how far it is: the seat taken, in its act's end
+   (`souls:act-ended` field 8; the client's receipt `sat_in`); none free, the nearest seat of the kind the Soul may
+   use, in the refusal's detail.
    Resources are T9's claims (`{1: 1 all, 2 one or 3 named, 2: class or name}`). Parameters are the form's arguments;
    none may be a time or a condition, the one exception being a move's next beat (rule 9).
 4. **An intent's kind is its verb.** A form's verb (`namespace:form`) is a checked act. The engine's own verbs are

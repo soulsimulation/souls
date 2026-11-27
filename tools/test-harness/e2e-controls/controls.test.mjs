@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ALLOW, NO_SOUL_TO_FOLLOW, SKIPPED_AFTER_LOAD, badResponse, brief, followSoul, siteProbes, verdict } from './controls.mjs';
+import { ALLOW, NO_SOUL_TO_FOLLOW, SKIPPED_AFTER_LOAD, badResponse, brief, dayOfTick, followSoul, settleMisses, siteProbes, verdict, walkBackMiss } from './controls.mjs';
 
 test('the allow-list is empty: every same-origin 4xx/5xx fails', () => {
   assert.deepEqual(ALLOW, []);
@@ -96,4 +96,43 @@ test('release.yml: publish needs the controls job, which runs after the engine m
   assert.match(y, /needs\.controls\.result == 'success'/);
   assert.match(y, /controls:\n    needs: \[preflight, ship, v2-move\]/);
   assert.match(y, /node tools\/test-harness\/e2e-controls\/controls\.mjs/);
+});
+
+// #5144's walk-back: a world still for days has no index for them, and the page's walk asks each on its way back.
+const BASE = '/s/w/x/history/';
+const ix = (day) => `${BASE}bundles/${String(day).padStart(8, '0')}/index`;
+const held = (...days) => days.map((d) => ({ path: ix(d), line: `404 GET ${ix(d)}` }));
+const reads = (o) => new Map([[BASE, new Map(Object.entries(o).map(([d, s]) => [Number(d), s]))]]);
+const noEvents = async () => false;
+
+test('a world still for several days: the walk-back misses before the first found day pass', async () => {
+  // Back 1 min on day 20790: 20790, 20789 and 20788 have no index (still), 20787 has one (its last bundle)
+  const r = reads({ 20790: 404, 20789: 404, 20788: 404, 20787: 200 });
+  assert.deepEqual(await settleMisses(held(20790, 20789, 20788), r, { nowDay: 20790, eventful: noEvents }), []);
+  // a later step reads only today's again (the worker keeps the days before): still a miss over the same still days
+  assert.deepEqual(await settleMisses(held(20790), r, { nowDay: 20790, eventful: noEvents }), []);
+  // a created world, in its own day 3 after two still days (world time from its start, v2/docs/time.md rule 1)
+  assert.deepEqual(await settleMisses(held(3, 2), reads({ 3: 404, 2: 404, 1: 200 }), { nowDay: 3, eventful: noEvents }), []);
+  assert.equal(walkBackMiss(20789, reads({ 20790: 404, 20789: 404, 20788: 404, 20787: 200 }).get(BASE)), true);
+});
+
+test('a real day\'s index missing still fails', async () => {
+  const r = reads({ 20790: 404, 20789: 404, 20788: 404, 20787: 200 });
+  // 20789 had public events: it wrote bundles, so its index is real and missing
+  const busy = async (base, day) => base === BASE && day === 20789;
+  assert.deepEqual(await settleMisses(held(20790, 20789, 20788), r, { nowDay: 20790, eventful: busy }),
+    [`404 GET ${ix(20789)} (a day with public events: its index is missing)`]);
+  assert.equal(walkBackMiss(20789, r.get(BASE), { eventful: true }), false);
+  // the walk found no index at all: it ran past the world's first day
+  assert.deepEqual(await settleMisses(held(2, 1, 0), reads({ 2: 404, 1: 404, 0: 404 }), { eventful: noEvents }), held(2, 1, 0).map((h) => h.line));
+  // a day after the world's own today (#5140: a created world in day 0 asked for day 1)
+  assert.deepEqual(await settleMisses(held(1), reads({ 0: 200, 1: 404 }), { nowDay: 0, eventful: noEvents }), [`404 GET ${ix(1)}`]);
+  // a day between the found day and the miss never read: not the walk
+  assert.deepEqual(await settleMisses(held(5), reads({ 5: 404, 3: 200 }), { nowDay: 5, eventful: noEvents }), [`404 GET ${ix(5)}`]);
+});
+
+test('a tick is 50 ms of world time', () => {
+  assert.equal(dayOfTick(0), 0);
+  assert.equal(dayOfTick(86_400 * 20 - 1), 0);
+  assert.equal(dayOfTick(86_400 * 20), 1);
 });
