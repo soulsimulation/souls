@@ -7,6 +7,9 @@
 //! - A2: a set-down by a Soul that does not hold the thing, a second set-down of a thing already down, a repeated
 //!   intent, an `on` with no surface and an intent expired before its commit are each refused by name and leave the
 //!   thing where it was; a two-handed crate fills both hands while held and frees both when set down.
+//! - #4120: a take right after a make reaches the made thing at its slot's point, and a take right after a set-down
+//!   reaches the thing where it was put: reach reads the world's tree as committed, not the town's, which no take,
+//!   make or plain set-down reaches.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -71,11 +74,13 @@ const RACK: &str = "test:rack";
 const PAIR: &str = "test:pair";
 /// A two-handed thing (B4 section 18: `hands` 2).
 const CRATE: &str = "test:crate";
+/// A bench whose `make` makes a vessel into its slot, 2.5 m from its origin (#4120).
+const BENCH: &str = "test:bench";
 /// K10's body kind, as a birth writes it.
 const BODY: &str = "souls:body";
 
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, VESSEL, RACK, PAIR, BODY, CRATE]
+    [PLACE, VESSEL, RACK, PAIR, BODY, CRATE, BENCH]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -166,6 +171,9 @@ fn chair() -> Id {
 fn crate_() -> Id {
     id(6)
 }
+fn bench() -> Id {
+    id(7)
+}
 
 /// The world's entry on the open ground, west of the square, µm: the first birth stands 1 m east of it (K10's ring).
 fn entry() -> Vec3 {
@@ -219,6 +227,7 @@ fn ours() -> BTreeMap<String, Kind> {
             (fullname(RACK), k("thing", &[], &[1], None)),
             (fullname(PAIR), k("activity", &[], &[], None)),
             (fullname(CRATE), k("thing", &[], &[], Some(2))),
+            (fullname(BENCH), k("thing", &[], &[1], None)),
         ])
     }
 }
@@ -281,7 +290,27 @@ fn entries() -> Json {
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (CRATE.into(), crate_),
+        (BENCH.into(), bench_entry()),
     ])
+}
+
+/// The bench's entry (#4120): its one slot 2.5 m west of its origin, 900 mm up; its `make` makes a vessel there.
+fn bench_entry() -> Json {
+    parse(
+        &r#"{ "format": "souls-entry/1", "kind": "test:bench", "owner": "thing",
+      "slots": { "out": { "admits": "thing", "at_mm": [-2500, 900, 0] } },
+      "forms": { "make": { "who": "anyone", "steps": [],
+        "effects": [{ "change": "create", "kind": "VESSEL", "into": "out", "event": "made" }] } } }"#
+            .replace("VESSEL", &fullname(VESSEL)),
+    )
+    .unwrap()
+}
+
+/// Where the bench stands: 2.5 m east and 600 mm north of the first birth's spot, so its slot's point is 600 mm north
+/// of that spot, within a press's reach of a body standing there, and its origin is not.
+fn bench_at() -> Vec3 {
+    let s = first_spot();
+    Vec3::new(s.x + 2_500_000, 0, s.z - 600_000)
 }
 
 fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
@@ -342,7 +371,7 @@ fn create_with(
 }
 
 /// The world as built: a vessel 300 mm east of the first birth's spot, a rack 400 mm south of it, a boxed crate 700 mm
-/// west. No body.
+/// west, a bench whose slot is 600 mm north of it ([`bench_at`]). No body.
 fn world() -> Replica {
     // N2's test world as imported (its open ground and buildings), so the edit checker's town has ground to plan on;
     // its header pins the imported kinds and this test's.
@@ -366,6 +395,18 @@ fn world() -> Replica {
             // press's reach of the first.
             Vec3::new(s.x - 700_000, 0, s.z),
             crate_box(),
+        ),
+        // Its slot's point in its field 13, as a world gives a placed thing of its entry.
+        create_with(
+            next + 3,
+            bench(),
+            BENCH,
+            g,
+            bench_at(),
+            BTreeMap::from([(
+                sim::ground::scene::F_SLOTS,
+                replica::kinds::defined::slots_of(&bench_entry()).expect("the bench's slot"),
+            )]),
         ),
     ]);
     let part = encode(&Value::Map(BTreeMap::from([
@@ -835,5 +876,62 @@ fn a_crate_set_down_across_a_route_is_walked_round() {
         (end.x - (c.x + 3_000_000)).abs() < 500_000,
         "Bo got across: {end:?}"
     );
+    run.stop();
+}
+
+/// The thing in the bench's slot.
+fn made_on_bench(r: &Replica) -> Option<Id> {
+    let t = r.tree();
+    t.children(t.handle(bench())?)?
+        .iter()
+        .filter_map(|&c| t.node(c))
+        .find(|n| n.slot() == Some(1))
+        .map(|n| n.id())
+}
+
+/// #4120: a take right after a make reaches the made thing where it is, at its slot's point 600 mm from the body, not
+/// at the bench's origin 2.5 m away: the made thing is in the world's tree the tick after, never in the town's.
+#[test]
+fn i4120_a_take_right_after_a_make_reaches_the_thing_at_its_slot() {
+    let (run, mut a, _b) = serve("i4120m");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let made = a.act("test:make", Some(bench()), BTreeMap::new());
+    println!("#4120 make: {made:?}");
+    made.expect("the make lands");
+    let made = made_on_bench(&run.replay()).expect("a thing in the bench's slot");
+    let taken = a.act("test:take", Some(made), BTreeMap::new());
+    println!("#4120 take right after the make: {taken:?}");
+    taken.expect("taken from the slot, in reach");
+    assert_eq!(at(&run.replay(), made).0, Some(body), "held by the body");
+    run.stop();
+}
+
+/// #4120: a take right after a set-down reaches the thing where it was put, not where the world started it 1.7 m away
+/// (the town's tree, built at start, which no take or set-down of a thing walkers do not go round reaches).
+#[test]
+fn i4120_a_take_right_after_a_set_down_reaches_the_thing_where_it_was_put() {
+    let (run, mut a, _b) = serve("i4120s");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    a.act("test:take", Some(vessel()), BTreeMap::new())
+        .expect("the take lands");
+    let s = first_spot();
+    walk_to(&mut a, s.x + 2_000_000, s.z);
+    a.act(SET_DOWN, Some(vessel()), word("here"))
+        .expect("set down");
+    let (parent, _, put) = at(&run.replay(), vessel());
+    assert_eq!(parent, Some(ground()), "on the open ground");
+    let from_start = ((put.x - (s.x + 300_000)).pow(2) + (put.z - s.z).pow(2)).isqrt();
+    let from_body = ((put.x - (s.x + 2_000_000)).pow(2) + (put.z - s.z).pow(2)).isqrt();
+    println!("#4120 set down {from_body} um from the body, {from_start} um from where it started");
+    assert!(
+        from_start > 1_000_000,
+        "put down away from where it started: {from_start} um"
+    );
+    let again = a.act("test:take", Some(vessel()), BTreeMap::new());
+    println!("#4120 take right after the set-down: {again:?}");
+    again.expect("taken where it was put");
+    assert_eq!(at(&run.replay(), vessel()).0, Some(body), "held again");
     run.stop();
 }
