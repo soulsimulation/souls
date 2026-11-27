@@ -1149,7 +1149,17 @@ export class HumanViews {
       : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
     // posture-transition.ts: over a change of posture a face-down plank tilts up from (down to) the feet; after getting up
     // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
-    const pn = lib.posture, own = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !lib.sleep && lib.rise === undefined && !letGo && !fluteRelease && !gestureBack && !pianoRelease && !waveActive;
+    const pn = lib.posture;
+    // A gesture owns its arm fade, not the free body's recorded floor-to-standing transition.
+    const floorChange = v.postureChange;
+    const floorAnchor = !!floorChange && posturePhaseEnds(floorChange,v.base,v.activity).some(end=>end<=floorChange.age&&floorChange.age-end<ACT_BLEND);
+    const floorKinds = [postureKind(floorChange?.from??v.activity,floorChange?.fromBase),postureKind(v.activity,v.base)];
+    const freeContactBody = freeBody && !nativeHandOwner && !v.formPress?.length && w < .01
+      && a.sitW === 0 && b.sitW === 0 && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible
+      && !v.shore && !v.waterTransition?.origins.some(origin=>origin.pose!==null) && !v.transfer && !v.watering && !v.cup && !v.letGo && !v.instrument;
+    const floorTransition = !!floorChange && (!!pn || floorAnchor) && floorKinds.some(kind=>kind==='back'||kind==='front')
+      && floorKinds.every(kind=>['stand','back','front'].includes(kind)) && freeContactBody;
+    const own = floorTransition || freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !lib.sleep && lib.rise === undefined && !letGo && !fluteRelease && !gestureBack && !pianoRelease && !waveActive;
     const blendFrom = own && !pn && v.since !== undefined && v.since < ACT_BLEND && v.prevAct !== undefined && v.prevAct !== v.activity && !OWN_FADE.has(v.prevAct) && !OWN_FADE.has(v.activity) && !(recordedPress && (v.activity === 'operate' || v.prevAct === 'operate'))
       && postureKind(v.prevAct, v.prevBase) === postureKind(v.activity, v.base) ? v.prevAct : null;
     let act: ActivityFrame | null = !own ? act0
@@ -1341,11 +1351,16 @@ export class HumanViews {
     const carryW = carried ? smooth(Math.min(1, carryAge / CARRY_EASE)) : 0;
     const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
-    const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && (['idle', 'walk', 'run', 'jog'].includes(v.activity) || recordedPress && v.activity === 'operate');
+    // A free standing overlay shares ordinary idle's foot policy. Floor layout and
+    // airborne frames keep their own contacts until the standing settle takes over.
+    const freeStandingContacts = freeContactBody && postureKind(v.activity,v.base)==='stand' && !GAIT_ACTS.has(v.activity)
+      && !water && !waterFrom && !lib.water && !gait && !posed && !runFallback && !gripping && !hasHands && !warmW
+      && !act?.hop && !act?.feetOut && !act?.lying && !pn?.flat && !pn?.tilt && lib.rise===undefined && !clipBody;
+    const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && (freeStandingContacts || ['idle', 'walk', 'run', 'jog'].includes(v.activity) || recordedPress && v.activity === 'operate');
     const freeFootFit = !water && !waterFrom && !lib.water && freeBody && sitW <= 0 && !gait && !posed && !runFallback && !gripping && !hasHands
       && !lib.posture && !lib.still && !act?.lying && !act?.ride && !act?.pairedContact && !v.handHold && !v.rps && !v.propWanted;
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
-    if (!(v.formPress || footFit || freeFootFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame)) return;
+    if (!(v.formPress || footFit || freeFootFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame || floorTransition || freeStandingContacts)) return;
     for (const s of v.saved) { s.p.copy(s.o.position); s.q.copy(s.o.quaternion); }
     v.layered = true;
     _fwd.set(Math.cos(yaw), 0, Math.sin(yaw)); // engine yaw 0 faces +x; holder.rotation.y = -yaw
@@ -1745,7 +1760,7 @@ export class HumanViews {
     const phase = pc ? posturePhaseEnds(pc,v.base,v.activity).filter(end=>end<=pc.age&&pc.age-end<ACT_BLEND).at(-1) : undefined;
     const walkingOrigin=!!pc&&GAIT_ACTS.has(pc.from)&&!!pc.fromWalk&&freeFloor&&pc.age<ACT_BLEND;
     // A known floor-phase endpoint is safe to sample even when its original entry came from locomotion.
-    const noOwner = (POSTURE_ORIGINS.has(pc?.from ?? v.activity)||walkingOrigin||phase!==undefined&&freeFloor) && (POSTURE_ORIGINS.has(v.activity)||floorToMove) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove || freeFloor);
+    const noOwner = (floorTransition || (POSTURE_ORIGINS.has(pc?.from ?? v.activity)||walkingOrigin||phase!==undefined&&freeFloor) && (POSTURE_ORIGINS.has(v.activity)||floorToMove)) && freeBody && !engineHands && !gripping && !v.handHold && !v.rps && !v.partner && !v.propWanted && !v.prop?.obj.visible && !v.shore && !waterFrom && sitW === 0 && (w < .01 || floorToMove || freeFloor);
     if (pc && pc.age >= 0 && (pc.age < ACT_BLEND || phase !== undefined) && noOwner && ['stand','back','front'].includes(postureKind(pc.from,pc.fromBase)) && ['stand','back','front'].includes(postureKind(v.activity,v.base))) {
       this.blendPostureOrigin(v, pc, tSec, alpha, reach, sourcePose, phase ?? 0);
     } else if (!noOwner) v.postureOrigins?.clear();
@@ -2618,12 +2633,12 @@ function frontLegs(v: View, h: THREE.Object3D, floor: number, weight: number) {
 function fitFreeGround(v: View, h: THREE.Object3D, floor: number) {
   for (let pass = 0; pass < 3; pass++) {
     h.updateMatrixWorld(true);
-    const feet = v.legs.map(leg=>({p:leg.foot.getWorldPosition(V()),q:leg.foot.getWorldQuaternion(new THREE.Quaternion())}));
+    const feet = v.legs.map(leg=>({p:leg.foot.getWorldPosition(V()),q:leg.foot.getWorldQuaternion(new THREE.Quaternion()),pole:leg.lower.getWorldPosition(V()).sub(leg.upper.getWorldPosition(V()))}));
     const legLow=Math.min(...v.legs.map(leg=>lowestY(v.surf.leg?.get(leg.side))));
     if(v.spine&&Number.isFinite(legLow)&&legLow<floor+.002){
       place(v.spine.body,v.spine.body.getWorldPosition(V()).addScaledVector(UP,floor+.002-legLow));
       h.updateMatrixWorld(true);
-      v.legs.forEach((leg,i)=>legTo(leg,v.ankle[i],feet[i].p,V().copy(UP).addScaledVector(_right,-leg.side*.15),.999,feet[i].q));
+      v.legs.forEach((leg,i)=>legTo(leg,v.ankle[i],feet[i].p,feet[i].pole,.999,feet[i].q));
     }
     v.legs.forEach((leg, i) => {
       const at = leg.foot.getWorldPosition(V()), support = Math.max(floor, groundUnder(at.x, at.z, floor));
@@ -2631,7 +2646,8 @@ function fitFreeGround(v: View, h: THREE.Object3D, floor: number) {
       const low = Math.min(footLow, legLow);
       if (low >= support + .002 || !Number.isFinite(low)) return;
       const q = leg.foot.getWorldQuaternion(new THREE.Quaternion());
-      legTo(leg, v.ankle[i], at.setY(at.y + support + .002 - low), V().copy(UP).addScaledVector(_right, -leg.side * .15), .999, q);
+      const pole = leg.lower.getWorldPosition(V()).sub(leg.upper.getWorldPosition(V()));
+      legTo(leg, v.ankle[i], at.setY(at.y + support + .002 - low), pole, .999, q);
     });
     h.updateMatrixWorld(true);
     v.arms.forEach(arm => {
@@ -2639,7 +2655,8 @@ function fitFreeGround(v: View, h: THREE.Object3D, floor: number) {
       const low = lowestY(v.surf.hand.get(arm.side));
       if (low >= support + .002 || !Number.isFinite(low)) return;
       const q = arm.hand.getWorldQuaternion(new THREE.Quaternion());
-      armTo(arm, at.setY(at.y + support + .002 - low), 1, BODY_MODEL.maxExtension, h, V().copy(_right).multiplyScalar(-arm.side * .5).add(UP));
+      const pole = arm.lower.getWorldPosition(V()).sub(arm.upper.getWorldPosition(V()));
+      armTo(arm, at.setY(at.y + support + .002 - low), 1, BODY_MODEL.maxExtension, h, pole);
       setWorldQuat(arm.hand, q);
     });
   }
@@ -2828,7 +2845,8 @@ function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number)
     if (fullSkinWeight === undefined) {
       const lift = groundFootLift(holder.position.y, lowestY(v.surf.foot.get(leg.side)), humanGroundSampler()?.(ankle.x, ankle.z));
       if (lift < .001) continue;
-      legTo(leg, v.ankle[i], ankle.setY(ankle.y + lift), V().copy(_fwd).addScaledVector(UP,.1), .999, leg.foot.getWorldQuaternion(new THREE.Quaternion()));
+      const pole = leg.lower.getWorldPosition(V()).sub(leg.upper.getWorldPosition(V()));
+      legTo(leg, v.ankle[i], ankle.setY(ankle.y + lift), pole, .999, leg.foot.getWorldQuaternion(new THREE.Quaternion()));
       continue;
     }
     const originY = ankle.y, original = [leg.upper,leg.lower,leg.foot].map(b=>({p:b.position.clone(),q:b.quaternion.clone()}));

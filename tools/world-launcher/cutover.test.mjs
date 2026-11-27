@@ -7,7 +7,7 @@ import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence, searchPlaces, snapshotPlaces, withV2Stream } from './cutover.mjs';
 import { newEngineClock } from './page-meta.mjs';
 import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
 mkdirSync(scratch, { recursive: true });

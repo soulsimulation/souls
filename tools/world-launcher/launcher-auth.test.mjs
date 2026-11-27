@@ -8,8 +8,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(10);
 
 const PORT = P0 + 9, RANGE = [P0, P0 + 8], ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -17,7 +17,7 @@ const PUBLIC_ORIGIN = 'https://satellite.example.test', PRIMARY = 'https://prima
 const satellite = { domain: 'satellite.example.test', signInUrl: PRIMARY + '/sign-in' };
 const dir = mkdtempSync(join(tmpdir(), 'launcher-auth-test-'));
 const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
-const preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
+const preload = new URL('../../tools/lib/clerk-jwks-preload.mjs', import.meta.url).pathname;
 let L, sign;
 const api = (p, o = {}) => fetch(`${ORIGIN}${p}`, o);
 const bearer = (t) => (t ? { authorization: `Bearer ${t}` } : {});

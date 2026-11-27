@@ -368,6 +368,7 @@ impl Measures {
         o.push_str(",\"audit\":");
         AUDIT.json(&mut o);
         STREAM.json("stream", &mut o);
+        let _ = write!(o, ",\"stream_queue\":{{{}}}", STREAM_QUEUE.fields());
         BACKUP.json("stream_backup", &mut o);
         CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
@@ -798,6 +799,11 @@ pub struct Backlog(Mutex<(u64, u64, u64)>);
 
 /// This process's archiver's backlog.
 pub static ARCHIVE_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
+
+/// This process's public stream's backlog (`stream_queue` in `health.json`: `queued`, `queued_bytes` and `in_log`,
+/// #2803): the records waiting in its channel and their bytes (at most its window), and the records past them left in
+/// the log for it to read. `in_log` that stays above 0 is a stream behind the world.
+pub static STREAM_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
 
 impl Backlog {
     /// The backlog as it stands now.

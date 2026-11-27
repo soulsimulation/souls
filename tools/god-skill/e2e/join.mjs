@@ -62,12 +62,12 @@ const until = async (what, fn, ms = 60_000, every = 500) => { const end = Date.n
 // ---------- sign-in: Clerk (synthetic issuer, as tools/world-launcher/launcher-auth.test.mjs) or dev names
 let sign = null; const launchArgs = [];
 if (MODE === 'clerk') {
-  const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../../apps/server/test/clerk-fixture.ts');
+  const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../lib/clerk-fixture.ts');
   const keys = await clerkKeys(origin); sign = keys.sign;
   const dir = mkdtempSync(join(tmpdir(), 'join-clerk-'));
   writeFileSync(join(dir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
   writeFileSync(join(dir, 'clerk.env'), [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${origin}`,
-    `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${resolve(root, 'apps/server/test/clerk-jwks-preload.mjs')}`, ''].join('\n'));
+    `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${resolve(root, 'tools/lib/clerk-jwks-preload.mjs')}`, ''].join('\n'));
   launchArgs.push('--auth-env', join(dir, 'clerk.env'), '--public-origin', origin);
 }
 /** A person's bearer: a fresh Clerk session token (they expire in 60 s), or their dev name. */

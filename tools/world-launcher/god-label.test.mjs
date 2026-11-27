@@ -6,9 +6,9 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
+import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
 import { tmpdir } from 'node:os';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(4);
 
 test('the god label is display text: a second account sees a visitor view, cannot take the world, and cannot wear the label', { timeout: 240_000 }, async () => {
@@ -18,7 +18,7 @@ test('the god label is display text: a second account sees a visitor view, canno
   mkdirSync(templatesDir);
   const origin = `http://127.0.0.1:${P0}`, keys = await clerkKeys(origin);
   writeFileSync(join(dir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
-  const envFile = join(dir, 'fixture.env'), preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
+  const envFile = join(dir, 'fixture.env'), preload = new URL('../../tools/lib/clerk-jwks-preload.mjs', import.meta.url).pathname;
   writeFileSync(envFile, [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${origin}`,
     `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${preload}`, ''].join('\n'));
   const launcher = await openLauncher({ port: P0, range: [P0 + 1, P0 + 3], dataDir, templatesDir, authEnvFile: envFile, publicOrigin: origin, eager: 0, newAccountCreateLimit: 3, newAccountWorldLimit: 3, log: () => {} });
