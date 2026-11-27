@@ -3108,6 +3108,11 @@ fn a2_parts_rest_at_the_grounds_height() {
         assert_eq!(got.kind, 1, "{what}: taken: {got:?}");
         let (p, q) = ends(ua);
         both(hands, ab, p, q, what);
+        println!(
+            "{what}: its crew stands at {:?}, its node at {:?}; the slot at {ua:?}",
+            stand_now(&w, hands[ab.0].soul, hands[ab.1].soul),
+            where_is(&w, c).2
+        );
         let got = hands[ab.0].act(
             "part:put",
             c,
@@ -5467,6 +5472,17 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     .await;
     let hold_b = crew(&mut souls, (0, 1), fb).await;
     leave(&mut souls, 1, hold_b, "Soul 1 holds frame B").await;
+    // The holders step 1 m out past their frames' ends again, clear of the bay's mouths and of where each frame's
+    // carriers will stand to take it out.
+    for (k, f) in [(2, fa), (0, fb)] {
+        let at = body_at(&w, body_of(&w, w.souls[k]));
+        let out = if at.z < YARD_MID_Z { -FRAME_OUT } else { FRAME_OUT };
+        let got = souls[k]
+            .act("eden:walk", g, to_point(v3(at.x, 0, at.z + out)))
+            .await;
+        assert_eq!(got.kind, 1, "a holder steps out: {got:?}");
+        assert_eq!(crews_on(&w, f).0, 1, "and still holds its frame");
+    }
     // Crew D (Souls 2, 4) takes the beams out, the right one first, and lays each where it lay.
     let crew_d = crew(&mut souls, (1, 3), g).await;
     for (k, slot) in [(1, "beam_low_r"), (0, "beam_low_l")] {
