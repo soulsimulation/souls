@@ -4114,13 +4114,14 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let (ua, ub) = (slot_at("upright_a"), slot_at("upright_b"));
     let (p, q) = ends(ua, 0);
     both(&mut hands, (0, 1), p, q, "frame A to the bay");
-    let (p, q) = ends(ua, -800_000);
+    // 0.4 m short: from there each of crew B's carriers still reaches its hold where the frame would go (#5067).
+    let (p, q) = ends(ua, -400_000);
     both(
         &mut hands,
         (2, 3),
         p,
         q,
-        "frame B to the bay, 0.8 m short of upright_a",
+        "frame B to the bay, 0.4 m short of upright_a",
     );
     // Both crews ask for upright_a; crew A's track is the shorter, so frame A is in when crew B's ends.
     hands[0].send("part:put", crew_a, into("upright_a"));
@@ -4160,7 +4161,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     );
     assert_eq!(parent, Some(g), "frame B set down where its set-in started");
     // Crew B takes it up again; from there upright_b is too far to put it in.
-    let (p, q) = ends(laid, 0);
+    let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "crew B back to frame B");
     let got = hands[2].act("part:take", crew_b, part(fb));
     assert_eq!(got.kind, 1, "frame B taken up again: {got:?}");
@@ -4193,10 +4194,8 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         v3(ua.x + 3_000_000, 0, ua.z - 2_000_000),
         "Soul 2 stands clear",
     );
-    let (p, q) = ends(ub, -800_000);
-    both(&mut hands, (2, 3), p, q, "crew B along z");
     let (p, q) = ends(ub, 0);
-    both(&mut hands, (2, 3), p, q, "crew B on to upright_b");
+    both(&mut hands, (2, 3), p, q, "crew B round the bay to upright_b");
     let mut joined = into("upright_b");
     joined.insert(4, Value::Array(vec![fa.to_value()]));
     let got = hands[2].act("part:put", crew_b, joined);
@@ -4289,7 +4288,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     });
     assert_eq!(got.kind, 1, "the wall taken away: {got:?}");
     // Crew B again (Souls 3, 4) takes it up and puts it back; Soul 3 lets go, Soul 4 holds it.
-    let (p, q) = ends(laid, 0);
+    let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
@@ -4355,7 +4354,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         (0..=120_000).contains(&middle),
         "on the ground, not in it: its middle {middle} µm up"
     );
-    let (p, q) = ends(down, 0);
+    let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
@@ -5323,6 +5322,17 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     )
     .await;
     println!("the change of crew: frame A, held in its slot, is held by Soul 4 in Soul 2's place");
+    // The holders step 1 m out past their frames' ends, still holding them: the beams' crew stands at the bay's
+    // mouths, beside where each frame's carriers stood.
+    for (k, f) in [(3, fa), (2, fb)] {
+        let at = body_at(&w, body_of(&w, w.souls[k]));
+        let out = if at.z < YARD_MID_Z { -FRAME_OUT } else { FRAME_OUT };
+        let got = souls[k]
+            .act("eden:walk", g, to_point(v3(at.x, 0, at.z + out)))
+            .await;
+        assert_eq!(got.kind, 1, "a holder steps out: {got:?}");
+        assert_eq!(crews_on(&w, f).0, 1, "and still holds its frame");
+    }
     // Beams by crew C (Souls 1, 2), each joined to both frames.
     let crew_c = crew(&mut souls, (0, 1), g).await;
     for (beam, slot) in [(beams[0], "beam_low_l"), (beams[1], "beam_low_r")] {
@@ -5853,18 +5863,22 @@ const BEAM_LINE: i64 = 572_000;
 /// they step in with it, µm: its carriers stand in line with its width, so beside a stand's other frame or a bay's
 /// other parts the one behind cannot walk round and keep the frame square.
 const FRAME_OUT: i64 = 1_000_000;
+/// How far west of a bay a frame's crew walks round it from one of its ends to the other, µm.
+const FRAME_ROUND: i64 = 3_500_000;
 /// The middle line of the test worlds' stands and bays, z µm (`testworld::YARD_Z`): a frame's outer side is away from it.
 const YARD_MID_Z: i64 = -24_000_000;
 
 /// The stances a pair walks through from where its two stand (`now`) to `to`, in order. Straight there, unless both
 /// are a standing frame's carriers' places ([`frame_ends`]: on one x line, 2.2 m apart), as when the pair carries a
 /// frame from its stand to a bay: then it steps [`FRAME_OUT`] out of the frame's plane on its outer side (the frame
-/// with it, clear of what stands beside it), walks to as far out from where it goes, and steps in.
+/// with it, clear of what stands beside it), walks to as far out from where it goes (round the bay when that is its
+/// other end), and steps in. A pair 2.2 m apart on another line (a frame laid flat, held at its two ends) turns
+/// onto the frame's line 3 m out first.
 fn frame_legs(now: Option<(Vec3, Vec3)>, to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> {
     let stance = |(p, q): (Vec3, Vec3)| {
         ((p.x - q.x).abs() - 2 * FRAME_FROM).abs() < 200_000 && (p.z - q.z).abs() < 200_000
     };
-    let Some(now) = now.filter(|now| stance(*now) && stance(to)) else {
+    let Some(now) = now.filter(|_| stance(to)) else {
         return vec![to];
     };
     let out = |z: i64| {
@@ -5876,11 +5890,40 @@ fn frame_legs(now: Option<(Vec3, Vec3)>, to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> 
     };
     let (from_x, to_x) = ((now.0.x + now.1.x) / 2, (to.0.x + to.1.x) / 2);
     let at = |x: i64, z: i64| (v3(x + to.0.x - to_x, 0, z), v3(x + to.1.x - to_x, 0, z));
-    vec![
-        at(from_x, out((now.0.z + now.1.z) / 2)),
-        at(to_x, out(to.0.z)),
-        to,
-    ]
+    let to_z = out(to.0.z);
+    if !stance(now) {
+        // A frame laid flat, its two carriers at its ends along it: carried 3 m out from where it goes and turned onto
+        // the slot's line there, a sixth of a turn at a time (the two stay as far apart all the way), then stepped in.
+        let (dx, dz) = ((now.0.x - now.1.x) as f64, (now.0.z - now.1.z) as f64);
+        let half = dx.hypot(dz) / 2.0;
+        if (2.0 * half - 2.0 * FRAME_FROM as f64).abs() > 300_000.0 {
+            return vec![to];
+        }
+        let (cx, cz) = (to_x as f64, out(out(to_z)) as f64);
+        let a0 = dz.atan2(dx);
+        let n = (a0.abs() / std::f64::consts::FRAC_PI_6).ceil().max(1.0) as i64;
+        let mut legs: Vec<(Vec3, Vec3)> = (0..=n)
+            .map(|k| {
+                let a = a0 * (n - k) as f64 / n as f64;
+                let (ox, oz) = ((half * a.cos()) as i64, (half * a.sin()) as i64);
+                (
+                    v3(cx as i64 + ox, 0, cz as i64 + oz),
+                    v3(cx as i64 - ox, 0, cz as i64 - oz),
+                )
+            })
+            .collect();
+        legs.extend([at(to_x, to_z), to]);
+        return legs;
+    }
+    let from_z = out((now.0.z + now.1.z) / 2);
+    let mut legs = vec![at(from_x, from_z)];
+    // From one end of a bay to its other: round the bay by its west, never through it.
+    if (from_z < YARD_MID_Z) != (to_z < YARD_MID_Z) && (from_x - to_x).abs() < 3_000_000 {
+        legs.push(at(from_x - FRAME_ROUND, from_z));
+        legs.push(at(from_x - FRAME_ROUND, to_z));
+    }
+    legs.extend([at(to_x, to_z), to]);
+    legs
 }
 
 /// Where Souls `a` and `b` stand now; none while either has no body yet (its first walk gives it one).
@@ -5911,9 +5954,8 @@ fn stand_now(w: &Seeded, a: Id, b: Id) -> Option<(Vec3, Vec3)> {
 fn frame_ends_of(w: &Seeded, frame: Id) -> (Vec3, Vec3) {
     let (copy, _) = served_copy(w);
     let t = copy.tree();
-    let x =
-        sim::ground::scene::xform_to(t, t.handle(frame).unwrap(), t.handle(w.ground).unwrap())
-            .unwrap();
+    let x = sim::ground::scene::xform_to(t, t.handle(frame).unwrap(), t.handle(w.ground).unwrap())
+        .unwrap();
     let up = x.rot.rotate(Vec3::new(0, 1_219_000, 0)).unwrap();
     if up.y.abs() >= 600_000 {
         return frame_ends(x.pos);
