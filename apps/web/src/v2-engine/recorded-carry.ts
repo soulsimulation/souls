@@ -106,6 +106,12 @@ export class RecordedCarry{
  phaseHistory(crew:string,time:number){return(this.grips.get(crew)??[]).filter(r=>r.at<=time).map(r=>r.value);}
  /** The first body `is` accepts that is in an unreleased, unexpired hold at `time`: the world keeps it turned to its hold. */
  holder(time:number,is:(body:string)=>boolean):string|null{for(const h of this.grips.values()){const g=at(h,time);if(!g||g.phase==='souls:released'||g.untilUs!==undefined&&time>=g.untilUs)continue;for(const hold of g.holds)if(is(hold.body))return hold.body;}return null;}
+ /** `holder`, or a body that let go and still stands where it did: until it steps away the world's turn is its facing
+  *  (drawn by its last step instead, the front carrier of a set-down load spun round as it let go). */
+ facing(time:number,is:(body:string)=>boolean):string|null{const held=this.holder(time,is);if(held)return held;
+  for(const h of this.grips.values())for(const r of h){if(r.at>time)break;for(const hold of r.value.holds){if(!is(hold.body))continue;
+   const release=this.releaseBefore(hold.body,time),then=release?this.pose(hold.body,release.sinceUs):null,now=then?this.pose(hold.body,time):null;
+   return then&&now&&Math.hypot(now.p[0]-then.p[0],now.p[2]-then.p[2])<.02?hold.body:null;}}return null;}
  /** Owner barriers use public intervals, not the previous rendered frame or mutable adapter flags. */
  ownedBetween(body:string,from:number,to:number){for(const h of this.grips.values())for(let i=0;i<h.length;i++){const g=h[i].value;if(!g.holds.some(hold=>hold.body===body))continue;const end=g.phase==='souls:released'?g.sinceUs+300000:Math.min(h[i+1]?.at??Infinity,g.untilUs??Infinity)+300000;if(g.sinceUs-300000<=to&&end>=from)return true;}return false;}
  /** A member removed from field 6 releases its previous hands at that exact public boundary. This is depiction only;
