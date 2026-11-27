@@ -189,8 +189,26 @@ fn minted(mint: &mut Minter) -> R<Id> {
     })
 }
 
-/// The change that makes activity node `id` of `kind` under `place`, holding `node`.
-fn create(id: Id, kind: &Name, place: Id, audience: Audience, node: &Node) -> Change {
+/// The change that makes activity node `id` of `kind` under `place`, holding `node`. A kind whose rules give it slots
+/// (a carry's, where its load rides) makes a moving group's frame: its node says where it holds each slot's rider
+/// ([`replica::activity::F_RIDES`]) from the effect that makes it, so a reader has the point before a lift puts a
+/// load there.
+fn create(
+    rules: &Rules,
+    id: Id,
+    kind: &Name,
+    place: Id,
+    audience: Audience,
+    node: &Node,
+) -> Change {
+    let mut fields = node.fields();
+    let rides = rules
+        .kinds
+        .get(kind.as_str())
+        .and_then(|k| replica::activity::rides(k.slots.keys().copied()));
+    if let Some(v) = rides {
+        fields.insert(replica::activity::F_RIDES, v);
+    }
     Change::Create {
         node: id,
         kind: kind.clone(),
@@ -207,7 +225,7 @@ fn create(id: Id, kind: &Name, place: Id, audience: Audience, node: &Node) -> Ch
             },
         },
         audience,
-        fields: node.fields(),
+        fields,
     }
 }
 
@@ -746,7 +764,7 @@ impl Activities {
             members: Vec::new(),
         };
         let id = minted(mint)?;
-        let create = create(id, kind, place, audience, &node);
+        let create = create(&self.rules, id, kind, place, audience, &node);
         self.write(
             tree,
             place,
