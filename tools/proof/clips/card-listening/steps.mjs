@@ -43,12 +43,6 @@ export default async function steps(page, { mark, panel }) {
   await page.waitForTimeout(4000);
   mark('a listener open');
   await page.waitForTimeout(4000);
-  await j.cli('quit');
-  await listening;
-  await page.waitForTimeout(4000);
-  mark('client stopped');
-  await say('Are you there?');
-  await page.waitForTimeout(5000);
-  mark('sent while not connected');
-  await page.waitForTimeout(4000);
+  // not stopped on camera: a disconnected card shows the start prompt, which names the page's host (privacy guard)
+  void listening;
 }
