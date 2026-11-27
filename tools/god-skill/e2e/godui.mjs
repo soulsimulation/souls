@@ -57,7 +57,7 @@ try {
     const claim = await fetch(`${base}/v1/god/claim`, { method: 'POST', headers: { authorization: 'Bearer dev:gene', 'content-type': 'application/json' }, body: '{}' });
     if (!claim.ok) throw new Error('claim ' + claim.status);
     const release = await chromeLease('godui-e2e');
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const owner = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await owner.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });
@@ -138,7 +138,7 @@ try {
   // the old world: /w/eden keeps e8's header (no bolt), even for a signed-in person
   const eden = await boot('eden', port + 3);
   const release = await chromeLease('godui-e2e');
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   try {
     const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: 1 });
     await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

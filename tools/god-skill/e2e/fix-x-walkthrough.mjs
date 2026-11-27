@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lane X walkthrough: a person on the /worlds launcher in Clerk mode, real Chrome (lease), real input.
+// Lane X walkthrough: a person on the /worlds launcher in Clerk mode, Chromium (lease), real input.
 // Clerk in the browser: a test-only stand-in for clerk-js (window.Clerk, defined before the app loads, so the real
 // ClerkProvider/useAuth run unchanged) whose session tokens are minted by the synthetic issuer the launcher's worlds
 // verify (fix-x-clerk-keys.mjs). Sign-in is a real click in a modal; the signed-in user lives in this origin's
@@ -54,7 +54,7 @@ const STUB = `(() => {
 })();`;
 
 const release = await chromeLease('fix-x-walkthrough');
-const browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
 let pairing = null;
 try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });

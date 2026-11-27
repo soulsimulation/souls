@@ -4,7 +4,7 @@
 // catalog, turns the ground to the pale `playa` palette, places an elliptical tyre ring (tire-ring/1), creosote scrub
 // (desert-scrub/1, denser to the south-east), tyre tracks, and a loose tyre and bush by the arrival. The Soul walks
 // from the arrival across the ring (in over the tyres, out the far side: decor, no colliders) past the scrub to a flag.
-// The viewer is real Chrome (GPU, Chrome lease): Ana inside the ring, looked at, and the ring from the air.
+// The viewer is Chromium (GPU, Chrome lease): Ana inside the ring, looked at, and the ring from the air.
 //
 //   node tools/god-skill/e2e/marsland-near.mjs [--port 5962] [--keep] [--dpr 1,2]
 //
@@ -149,7 +149,7 @@ try {
   if (chromium) for (const dpr of dprs) {
     const release = await chromeLease('marsland-near-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

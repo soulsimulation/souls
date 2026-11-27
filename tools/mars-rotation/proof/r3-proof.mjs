@@ -44,7 +44,7 @@ async function shoot(tag, bearing) {
     const { chromium } = createRequire(`${ROOT}/mars/viewer/package.json`)('@playwright/test');
     const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../../god-skill/lib/chrome-lease.mjs');
     release = await chromeLease('r3c-mars', { waitMs: 45 * 60000 });
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   }
   for (const dpr of [1, 2]) {
     const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });

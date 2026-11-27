@@ -7,7 +7,7 @@
 //   Souls ANA and BEN walk into a sample of them and use a slot: sit at the café table, on the sofa at home, in a pew,
 //   at a school desk, in the theatre stalls, on a hospital bed's edge; Ana buys a coffee at the café counter (wallets
 //   move); Ben opens a police cell door;
-//   the VIEWER (real Chrome, GPU) draws each building outside and in (cutaway per floor) at dpr 1 and 2.
+//   the VIEWER (Chromium, GPU) draws each building outside and in (cutaway per floor) at dpr 1 and 2.
 //
 //   node tools/god-skill/e2e/vocab-w3.mjs [--port 5750] [--keep] [--dpr 1,2] [--no-viewer] [--no-souls] [--only cafe,house]
 //
@@ -220,7 +220,7 @@ try {
   if (chromium && !args['no-viewer']) for (const dpr of dprs) {
     const release = await chromeLease('vocab-w3-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

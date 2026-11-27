@@ -51,7 +51,7 @@ async function visit(page, cdp, path, label) {
 const release = await chromeLease('blobs-inventory');
 const report = { origin, mbps, at: new Date().toISOString(), pages: [] };
 try {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   try {
     for (const path of pages) {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 } }); const page = await ctx.newPage();

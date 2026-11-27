@@ -37,12 +37,12 @@ const out = {
   glb: { files: Object.keys(snap.assetBytes ?? {}).length, bytes: glb },
   catalog: { lines: cat.buf.length, json: catJson.buf.length, linesGzip: gzipSync(cat.buf).length, etag: cat.headers.get('etag') },
 };
-// the viewer in real Chrome: GLB bytes fetched in the first 20 s, lazy (default) vs ?assets=eager (as before)
+// the viewer in Chromium: GLB bytes fetched in the first 20 s, lazy (default) vs ?assets=eager (as before)
 if (!args['no-viewer']) {
   let chromium = null; try { chromium = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test').chromium; } catch { }
   const release = chromium ? await chromeLease('vocab-payload').catch(() => null) : null;
   if (release) {
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       out.viewer = {};
       for (const [mode, q] of [['eager', '&assets=eager'], ['lazy', '']]) {

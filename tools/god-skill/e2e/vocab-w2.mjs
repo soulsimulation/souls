@@ -4,7 +4,7 @@
 //   G0 everyday words find the new types first; G1 the categories list them; G2 every type places by name (rows, variants,
 //   a lake with boats and swans, paths: canal, drainage channel, boardwalk, stream; areas: wetland, reservoir);
 //   G3 states (car door open, helicopter and plane started, crane on, fountain off, bell rung, speaker playing);
-//   VIEWER (real Chrome, GPU): V1 draws everything, V2 a size-framed close-up of every type and variant,
+//   VIEWER (Chromium, GPU): V1 draws everything, V2 a size-framed close-up of every type and variant,
 //   S1 the sound layer: after a click the fountain, campfire, stream and songbird are heard near them and not far away;
 //   switching the fountain off silences it; a speaker plays only while playing.
 //
@@ -119,7 +119,7 @@ try {
   if (chromium && !args['no-viewer']) for (const dpr of dprs) {
     const release = await chromeLease('vocab-w2-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

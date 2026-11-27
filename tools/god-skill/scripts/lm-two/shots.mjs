@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Stills of a littlemartians-two world (lane LM): real Chrome on the GPU (Metal), under the machine-wide Chrome lease.
+// Stills of a littlemartians-two world (lane LM): Chromium on the GPU (Metal), under the machine-wide Chrome lease.
 //   node tools/god-skill/scripts/lm-two/shots.mjs <world base url> <out dir> [--dpr 1|2] [--only name,name]
 // Views are fixed eye/at pairs chosen to sit beside lm/map's proof renders (team/proofs/littlemartians-map/19, 21)
 // and the Arium tour stills.
@@ -30,7 +30,7 @@ export const VIEWS = [
 const chromium = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test').chromium;
 mkdirSync(outDir, { recursive: true });
 const release = await chromeLease('lane-lm-two shots');
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
   await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); });

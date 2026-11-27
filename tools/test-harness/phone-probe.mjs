@@ -118,7 +118,7 @@ const q = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) =
 const summarize = (frames, ms) => { const iv = frames.slice(1).map((t, i) => t - frames[i]); return { fps: +(iv.length * 1000 / Math.max(1, frames.at(-1) - frames[0])).toFixed(1), p50: q(iv, 0.5), p95: q(iv, 0.95), max: iv.length ? +Math.max(...iv).toFixed(0) : null, over50: iv.filter((x) => x > 50).length, over100: iv.filter((x) => x > 100).length, ms }; };
 
 const release = await chromeLease('phones-probe');
-const browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--enable-precise-memory-info', '--explicitly-allowed-ports=6000'] });
+const browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--enable-precise-memory-info', '--explicitly-allowed-ports=6000'] });
 const results = [];
 try {
   for (const [ui, url] of urls.entries()) {

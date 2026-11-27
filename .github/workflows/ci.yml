@@ -113,6 +113,7 @@ jobs:
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
           .github/scripts/guards.test.mjs
+          tools/test-harness/browser-channel.test.mjs
           .github/scripts/merge-train.test.mjs
           .github/scripts/restack.test.mjs
           .github/scripts/install-hooks.test.mjs
