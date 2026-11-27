@@ -31,7 +31,7 @@ export function assertContinuationAuthority({continuationAuthority,ledgerFile,ow
  need(Array.isArray(a.relocations),'continuation-relocations');
  for(const r of a.relocations){
   const kind=r.kind??'product';
-  need(['product','tool'].includes(kind)&&r.from?.root&&r.from?.head&&same(r.to,current[kind])&&same(source?.(r.from.root),r.from),'continuation-old-source');
+  need(['product','tool','driver'].includes(kind)&&r.from?.root&&r.from?.head&&same(r.to,current[kind])&&same(source?.(r.from.root),r.from),'continuation-old-source');
   need(r.sourceFiles?.length,'continuation-old-source-files');
   for(const e of r.sourceFiles){
    const at=resolve(r.from.root,e.path),rel=relative(resolve(r.from.root),at);

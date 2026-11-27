@@ -114,6 +114,20 @@ test('relocation permission verifies the frozen old root and source bytes instea
  writeFileSync(oldFile,'tampered');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-source-files/);
 });
 
+test('driver relocation retains its frozen origin and rejects a different target, old head or old source bytes',t=>{
+ const f=fixture(t);f.save();const from={root:f.root,head:'driver-before'},current={driver:{root:join(f.root,'driver-after'),head:'driver-fixed'}};
+ const oldFile=join(f.root,'driver.mjs');writeFileSync(oldFile,'frozen driver');const cycle={id:'same-concern',plan:f.h.plan};
+ const file=join(f.root,'authority.json'),a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,cycle,current,
+  ledger:{file:f.o.ledgerFile,hash:digest(readFileSync(f.o.ledgerFile))},importedBudget:null,slot:{arm:'baseline',repeat:1,maxTotalAttempts:5},frozenEvidence:f.h.evidence,
+  relocations:[{kind:'driver',from,to:{...current.driver},sourceFiles:[{path:'driver.mjs',hash:digest(readFileSync(oldFile))}]}]};
+ const pin=()=>{writeFileSync(file,JSON.stringify(a));return{file,hash:digest(readFileSync(file))};};
+ const o={continuationAuthority:pin(),ledgerFile:f.o.ledgerFile,owner:f.h.owner,cycle,current,arm:'baseline',repeat:1,source:()=>from};
+ assert.equal(assertContinuationAuthority(o).relocations[0].kind,'driver');
+ a.relocations[0].to.head='another-revision';o.continuationAuthority=pin();assert.throws(()=>assertContinuationAuthority(o),/continuation-old-source/);
+ a.relocations[0].to={...current.driver};o.continuationAuthority=pin();o.source=()=>({...from,head:'changed'});assert.throws(()=>assertContinuationAuthority(o),/continuation-old-source/);
+ o.source=()=>from;writeFileSync(oldFile,'changed driver');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-source-files/);
+});
+
 test('ledger relocation requires identical frozen bytes and refuses old stopped, in-flight or locked ownership',t=>{
  const f=fixture(t);f.save();const fromFile=join(f.root,'frozen-ledger.json'),file=join(f.root,'authority.json');
  const a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,
