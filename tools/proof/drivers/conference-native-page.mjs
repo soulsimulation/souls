@@ -293,6 +293,8 @@ export async function proveConferenceCreator({ creator, record = () => {}, signa
   assert.equal(kinds.length, 1, 'conference creator family revision must be unambiguous');
   assert.equal(grounds.length, 1, 'conference creator ground must be unambiguous');
   const kind = kinds[0], ground = grounds[0].id;
+  const kindName = /^(eden:conference_question)@[^@]+$/.exec(kind)?.[1];
+  assert(kindName, 'conference creator catalogue must expose a qualified kind revision');
   // Declared once: flat, unused ground outside the demonstration area. Never retry a refused placement elsewhere.
   const place = await cli('place', kind, '--in', String(ground), '--at', '12,0,12');
   assert(Number.isSafeInteger(place.sequence) && place.sequence > 0, 'conference creator terminal edit sequence missing');
@@ -300,11 +302,13 @@ export async function proveConferenceCreator({ creator, record = () => {}, signa
   const id = place.names['1']; assert(typeof id === 'string' && id, 'conference creator returned no placed identity');
   const readback = await cli('describe', id);
   assert.equal(readback.id, id, 'conference creator readback changed the returned identity');
-  assert.equal(readback.kind, kind, 'conference creator readback changed the selected kind revision');
+  // Ordinary describe <id> exposes the plain name; the qualified catalogue and
+  // accepted place request retain the selected revision separately.
+  assert.equal(readback.kind, kindName, 'conference creator readback changed the selected kind name');
   assert.equal(String(readback.in?.[0]?.id), String(ground), 'conference creator readback is in another parent');
   assert.deepEqual(readback.at, [12, 0, 12], 'conference creator readback differs from the declared placement');
-  return { kind, id, parent: ground, at: readback.at, sequence: place.sequence,
-    qualification: 'ordinary describe/place/readback receipt; boot furniture supplies the clip, post-boot drawing is not claimed' };
+  return { kind, readbackKind: readback.kind, readbackRevision: 'unproved: public describe exposes no revision', id, parent: ground, at: readback.at, sequence: place.sequence,
+    qualification: 'ordinary describe/place/readback receipt; selected revision evidenced by catalogue and accepted place, not independently exposed by node readback; boot furniture supplies the clip, post-boot drawing is not claimed' };
 }
 
 export async function prepare({ base, paths, recipe, signal }) {

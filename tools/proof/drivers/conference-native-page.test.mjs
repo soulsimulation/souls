@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
 import { drawnLoad, bodyGeometry } from '../../playtest/carry-contact/oracle.mjs';
+import { describeThing } from '../../../v2/client/src/creator/thing.mjs';
 const THREE = createRequire(new URL('../../../mars/viewer/package.json', import.meta.url))('three');
 const clearanceTools = options => conferenceClearanceTools({ vector: () => new THREE.Vector3(), drawnLoad, bodyGeometry, ...options });
 function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
@@ -234,26 +235,51 @@ test('group cleanup rejects a departed actor still seated or a group never seen 
 });
 
 
-function creatorReplies({ names = { 1: 'returned-id' }, readID = 'returned-id', readKind = 'eden:conference_question@pin', placeOK = true } = {}) {
+function creatorReplies({ names = { 1: 'returned-id' }, readID = 'returned-id', readKind = 'eden:conference_question', readParent = 'actual-ground', readAt = [12, 0, 12], kinds = { 'eden:conference_question@pin': {} }, readback, placeOK = true } = {}) {
   const calls = [];
   return { calls, label: 'Creator', cli: async (...words) => {
     calls.push(words);
     if (words[0] === 'place') return placeOK ? { ok: true, sequence: 23, names } : { ok: false, code: 'edit.overlap' };
-    if (words.length > 1) return { ok: true, id: readID, kind: readKind, in: [{ id: 'actual-ground' }], at: [12, 0, 12] };
-    return { ok: true, kinds: { 'eden:conference_question@pin': {} }, nodes: [{ id: 'actual-ground', kind: 'eden:ground' }] };
+    if (words.length > 1) return readback ?? { ok: true, id: readID, kind: readKind, in: [{ id: readParent }], at: readAt };
+    return { ok: true, kinds, nodes: [{ id: 'actual-ground', kind: 'eden:ground' }] };
   } };
 }
 
 test('creator proof uses the actual discovered kind/ground and returned place identity for readback', async () => {
   const creator = creatorReplies(), result = await proveConferenceCreator({ creator });
   assert.equal(result.id, 'returned-id'); assert.equal(result.sequence, 23);
+  assert.equal(result.kind, 'eden:conference_question@pin'); assert.equal(result.readbackKind, 'eden:conference_question');
+  assert.match(result.readbackRevision, /unproved.*no revision/);
   assert.deepEqual(creator.calls, [['describe'], ['place', 'eden:conference_question@pin', '--in', 'actual-ground', '--at', '12,0,12'], ['describe', 'returned-id']]);
 });
 
 for (const [options, reason] of [[{ names: {} }, /named thing/], [{ readID: 'unrelated-id' }, /returned identity/],
-  [{ readKind: 'eden:bench' }, /selected kind/], [{ placeOK: false }, /edit.overlap/]]) {
+  [{ readKind: 'eden:bench' }, /selected kind/], [{ readKind: 'eden:conference_question_extra' }, /selected kind/],
+  [{ readKind: 'eden:conference_question@different-revision' }, /selected kind/], [{ readParent: 'another-ground' }, /another parent/],
+  [{ readAt: [11, 0, 12] }, /declared placement/], [{ placeOK: false }, /edit.overlap/]]) {
   test(`creator proof rejects ${reason.source} without another placement`, async () => {
     const creator = creatorReplies(options); await assert.rejects(proveConferenceCreator({ creator }), reason);
     assert.equal(creator.calls.filter(words => words[0] === 'place').length, 1);
+  });
+}
+
+test('creator proof accepts the ordinary describeThing projection without inventing a readback revision', async () => {
+  const kinds = { 'eden:conference_question@pin': { admits: ['thing'] } };
+  const readback = describeThing('returned-id', { kinds, nodes: [
+    { id: 'actual-ground', kind: 'eden:ground', parent: null },
+    { id: 'returned-id', kind: 'eden:conference_question', parent: 'actual-ground', at: [12000, 0, 12000] },
+  ] }, {});
+  readback.at = readback.at.map(n => n / 1000); // The ordinary creator CLI prints millimetres as metres.
+  assert.equal(Object.hasOwn(readback, 'revision'), false);
+  const result = await proveConferenceCreator({ creator: creatorReplies({ kinds, readback }) });
+  assert.equal(result.kind, 'eden:conference_question@pin'); assert.equal(result.readbackKind, readback.kind);
+  assert.match(result.readbackRevision, /unproved/);
+});
+
+for (const kinds of [{ 'eden:conference_question@pin': {}, 'eden:conference_question@other': {} }, { 'eden:conference_question': {} }]) {
+  test('creator proof refuses ambiguous or unqualified catalogue kinds before placement', async () => {
+    const creator = creatorReplies({ kinds });
+    await assert.rejects(proveConferenceCreator({ creator }), /unambiguous|qualified kind revision/);
+    assert.equal(creator.calls.filter(words => words[0] === 'place').length, 0);
   });
 }
