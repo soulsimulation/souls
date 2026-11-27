@@ -486,24 +486,54 @@ fn apart(f: Vec3, k: Vec3) -> i64 {
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
 }
 
-/// Turns `a` and `b`, each standing on the same floor, to face each other: the facing of its legs, set by a driver
-/// of them as a walk's end sets it (`Bodies::turn_to`). One seated, on another floor, within
-/// [`sim::controller::FACE_NEAR`] of the other or whose legs something else drives (a walk, a follow, settled on the
-/// ground: [`crate::bodies::turn_free`]) keeps its facing.
-fn face_each_other(c: &mut Controller, a: Id, b: Id) {
-    let at = |c: &Controller, x: Id| {
-        c.body(x)
-            .filter(|m| m.pose.frame.slot.is_none())
-            .map(|m| (sim::index::place_of(m).0, m.pose.position))
-    };
-    let (Some((na, pa)), Some((nb, pb))) = (at(c, a), at(c, b)) else {
-        return;
-    };
-    if na != nb {
-        return;
-    }
-    for (body, from, to) in [(a, pa, pb), (b, pb, pa)] {
-        if let Some(facing) = sim::controller::facing_toward(from, to) {
+/// Turns each body of `turn` that stands to face the middle of `members` (#423): `middle` when the world set it (an
+/// activity with places: the node its members stand on and the point there), else the middle of where its members
+/// are in its own frame: itself, each standing on its floor, and each seated at the thing it sits in (on the level).
+/// With two members that middle lies the way the other is, so two face each other. Its facing input, set by a driver
+/// of its legs as a walk's end sets it (`Bodies::turn_to`). A seated body keeps its seat's facing; one with no other
+/// member to face, within [`sim::controller::FACE_NEAR`] of the middle, or whose legs something else drives (a walk,
+/// a follow, settled on the ground: [`crate::bodies::turn_free`]) keeps its facing.
+fn face_middle(
+    c: &mut Controller,
+    tree: &Tree,
+    turn: &[Id],
+    members: &[Id],
+    middle: Option<(Id, Vec3)>,
+) {
+    for &body in turn {
+        let Some(m) = c.body(body).filter(|m| m.pose.frame.slot.is_none()) else {
+            continue;
+        };
+        let (node, at, frame) = (
+            sim::index::place_of(m).0,
+            m.pose.position,
+            m.pose.frame.node,
+        );
+        let to = match middle {
+            Some((n, p)) => (n == node).then_some(p),
+            None => {
+                let pts: Vec<Vec3> = members
+                    .iter()
+                    .filter_map(|&o| {
+                        let b = c.body(o)?;
+                        if b.pose.frame.slot.is_some() {
+                            replica::select::origin_in(tree, b.pose.frame.node, frame).ok()
+                        } else {
+                            (sim::index::place_of(b).0 == node).then_some(b.pose.position)
+                        }
+                    })
+                    .collect();
+                let n = i128::try_from(pts.len()).unwrap_or(1);
+                let sum = pts.iter().fold((0i128, 0i128), |s, p| {
+                    (s.0 + i128::from(p.x), s.1 + i128::from(p.z))
+                });
+                (pts.len() > 1).then(|| {
+                    let mean = |v: i128| i64::try_from(v / n).unwrap_or(0);
+                    Vec3::new(mean(sum.0), at.y, mean(sum.1))
+                })
+            }
+        };
+        if let Some(facing) = to.and_then(|to| sim::controller::facing_toward(at, to)) {
             crate::bodies::turn_free(c, body, facing);
         }
     }
@@ -649,17 +679,22 @@ impl Engine {
         self
     }
 
+    /// Members turn to face their activity's middle (#423, [`sim::activity::Activities::turns`]): two who begin a
+    /// conversation (or any activity with no places) face each other, a group faces its middle as it begins and as
+    /// another joins it, and a member of one with places left where it stands faces the middle its places are round.
+    fn face_middles(&mut self, tree: &Tree, c: &mut Controller) {
+        for t in self.activities.turns() {
+            face_middle(c, tree, &t.bodies, &t.members, t.middle);
+        }
+    }
+
     /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
     /// is left out, and the member plays its role without it.
     fn begin_moves(&mut self, tree: &mut Tree, c: &mut Controller, now: Micros) {
+        self.face_middles(tree, c);
         let bodies = self.activities.beginning();
         if bodies.is_empty() {
             return;
-        }
-        // Two who begin a conversation (or any activity of two with no places) turn to face each other, each standing
-        // on one floor, as a walk's end turns a body to what it came to (trial of 25 Nov).
-        for [a, b] in self.activities.facing_pairs() {
-            face_each_other(c, a, b);
         }
         let feet = Feet::of(c, tree, &self.entries, bodies);
         for (body, r) in self.activities.begin_moves(
@@ -3123,6 +3158,8 @@ impl Engine {
     /// Members that have taken their places (0.135 G3), by (activity, body): an activity's moves begin once all
     /// have, at `now` on a copy of `live`. Its entries wait in [`Engine::out`].
     pub fn placed(&mut self, live: &Tree, c: &mut Controller, done: &[(Id, Id)], now: Micros) {
+        // #423: one left where it stands turns to its activity's middle now.
+        self.face_middles(live, c);
         if done.is_empty() {
             return;
         }

@@ -256,6 +256,17 @@ pub const THING_GONE: &str = "souls:thing-gone";
 /// Why: it did not start before it expired, and no offer or pair waits on it (or its offer did not survive a restart).
 pub const EXPIRED: &str = "souls:activity-expired";
 
+/// Who turns to face its activity's middle (#423, [`Activities::turns`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Turn {
+    /// The bodies that turn.
+    pub bodies: Vec<Id>,
+    /// Every member of the activity: whose middle they face.
+    pub members: Vec<Id>,
+    /// The middle when the world set it (an activity with places): the node its members stand on and the point there.
+    pub middle: Option<(Id, Vec3)>,
+}
+
 /// A body that left while in a move: it is let go when the timer fires or the move ends first.
 struct Leaving {
     body: Id,
@@ -298,6 +309,11 @@ pub struct Activities {
     stands: BTreeMap<Id, BTreeMap<Id, usize>>,
     /// The member leading each hold that walks hand in hand (0.135 R1), by activity.
     leaders: BTreeMap<Id, Id>,
+    /// Activities started, or another joined after they started (a group's later accept), since [`Activities::turns`]
+    /// last ran, and members of placed activities left where they stand ([`Activities::pending_places`]), by
+    /// (activity, body): who turns to face its activity's middle (#423). Each is read once.
+    to_face: Vec<Id>,
+    unplaced: Vec<(Id, Id)>,
 }
 
 impl Activities {
@@ -323,6 +339,8 @@ impl Activities {
             frames: BTreeMap::new(),
             stands: BTreeMap::new(),
             leaders: BTreeMap::new(),
+            to_face: Vec::new(),
+            unplaced: Vec::new(),
         }
     }
 
@@ -949,6 +967,7 @@ impl Activities {
             l.drivers = drivers;
         }
         self.begun.push(activity);
+        self.to_face.push(activity);
         self.mark_places(activity, None);
         Ok(())
     }
@@ -1252,23 +1271,50 @@ impl Activities {
             .collect()
     }
 
-    /// The two members of each activity of two started since [`Activities::begin_moves`] last ran whose roles say
-    /// nowhere to stand (a conversation, a follow, a touch with no places): the world turns each to face the other as
-    /// it begins (trial of 25 Nov: two Souls talking faced different ways). Members given places face as their stands
-    /// say (0.135 G3).
-    pub fn facing_pairs(&self) -> Vec<[Id; 2]> {
-        self.begun
-            .iter()
-            .filter_map(|a| self.live.get(a))
-            .filter(|l| {
-                let kind = &self.kinds[&l.kind];
-                kind.follows.is_none() && kind.roles.iter().all(|r| r.stands.is_empty())
-            })
-            .filter_map(|l| match l.node.members.as_slice() {
-                [a, b] => Some([a.body, b.body]),
-                _ => None,
-            })
-            .collect()
+    /// Who turns to face its activity's middle (#423), read once. The members of an activity whose
+    /// roles say nowhere to stand (a conversation; a follow and a crew apart) turn as it begins, and again whenever
+    /// another joins it (a group's later accept), so two face each other (trial of 25 Nov: two Souls talking faced
+    /// different ways) and a group of three or more faces its middle. A member of an activity with places that is left
+    /// where it stands ([`Activities::pending_places`]) faces the activity's middle. Members given places face as their
+    /// stands say (0.135 G3), and a crew's carriers as their carry says.
+    pub fn turns(&mut self) -> Vec<Turn> {
+        let to_face = std::mem::take(&mut self.to_face);
+        let unplaced = std::mem::take(&mut self.unplaced);
+        let bodies = |l: &Live| -> Vec<Id> { l.node.members.iter().map(|m| m.body).collect() };
+        let mut seen = BTreeSet::new();
+        let mut out = Vec::new();
+        for a in &to_face {
+            let Some(l) = self.live.get(a).filter(|_| seen.insert(*a)) else {
+                continue;
+            };
+            let kind = &self.kinds[&l.kind];
+            if kind.follows.is_none()
+                && offer::several(kind).is_none()
+                && kind.roles.iter().all(|r| r.stands.is_empty())
+                && l.node.members.len() > 1
+            {
+                out.push(Turn {
+                    bodies: bodies(l),
+                    members: bodies(l),
+                    middle: None,
+                });
+            }
+        }
+        for (a, body) in unplaced {
+            if let Some(l) = self
+                .live
+                .get(&a)
+                .filter(|l| offer::several(&self.kinds[&l.kind]).is_none())
+            {
+                let middle = self.frames.get(&a).copied().flatten();
+                out.push(Turn {
+                    bodies: vec![body],
+                    members: bodies(l),
+                    middle: middle.map(|(n, f)| (n, f.origin)),
+                });
+            }
+        }
+        out
     }
 
     /// The started activities whose moves go on the beat (0.134 T3).
@@ -1595,6 +1641,7 @@ impl Activities {
         }
         for (a, b) in none {
             self.placed(a, b);
+            self.unplaced.push((a, b));
         }
         out
     }
