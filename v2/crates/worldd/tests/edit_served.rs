@@ -3046,7 +3046,7 @@ fn a2_parts_rest_at_the_grounds_height() {
     }
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], (a, b): (usize, usize), pa: Vec3, pb: Vec3, what: &str| {
-        let legs = frame_legs(stand_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
+        let legs = frame_legs(crew_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
         let led = legs.len() > 1;
         for (pa, pb) in legs {
             // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
@@ -3109,9 +3109,25 @@ fn a2_parts_rest_at_the_grounds_height() {
     let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
         let (p, q) = frame_ends_of(&w, fa);
         both(hands, ab, p, q, what);
+        let lying = rest_of(&w, fa, 1_219).2;
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
         assert_eq!(got.kind, 1, "{what}: taken: {got:?}");
+        if lying {
+            // Taken lying where it was laid: carried 3 m out past the bay's end and laid there first, then taken
+            // again. A take leaves a part on the walkers' ground where it lay (only a part come to rest moves there),
+            // and a frame laid at its slot lies where its carriers stand to seat it.
+            let out = v3(ua.x, 0, ua.z - 3_000_000);
+            let now = stand_now(&w, hands[ab.0].soul, hands[ab.1].soul).expect("the crew stands");
+            let (p, q) = moved_to(now, out);
+            both(hands, ab, p, q, what);
+            let got = hands[ab.0].act("part:put", c, laid_at(g, out));
+            assert_eq!(got.kind, 1, "{what}: laid 3 m out: {got:?}");
+            let (p, q) = frame_ends_of(&w, fa);
+            both(hands, ab, p, q, what);
+            let got = hands[ab.0].act("part:take", c, part(fa));
+            assert_eq!(got.kind, 1, "{what}: taken again: {got:?}");
+        }
         let (p, q) = ends(ua);
         both(hands, ab, p, q, what);
         println!(
@@ -4060,7 +4076,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let g = w.ground;
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], (a, b): (usize, usize), pa: Vec3, pb: Vec3, what: &str| {
-        let legs = frame_legs(stand_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
+        let legs = frame_legs(crew_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
         let led = legs.len() > 1;
         for (pa, pb) in legs {
             // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
@@ -4335,12 +4351,28 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     // Crew B again (Souls 3, 4) takes it up and puts it back; Soul 3 lets go, Soul 4 holds it.
     let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
+    let lying = rest_of(&w, fb, 1_219).2;
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
         hands[2].act("part:take", crew_b, part(fb)).kind,
         1,
         "frame B taken up"
     );
+    if lying {
+        // Taken lying where it was laid, at its slot: carried 3 m out and laid there first, then taken again. A take
+        // leaves a part on the walkers' ground where it lay (only a part come to rest moves there), and a frame laid
+        // at its slot lies where its carriers stand to seat it.
+        let out = v3(ub.x, 0, ub.z + 3_000_000);
+        let now = stand_now(&w, hands[2].soul, hands[3].soul).expect("the crew stands");
+        let (p, q) = moved_to(now, out);
+        both(&mut hands, (2, 3), p, q, "frame B carried out");
+        let got = hands[2].act("part:put", crew_b, laid_at(g, out));
+        assert_eq!(got.kind, 1, "frame B laid 3 m out: {got:?}");
+        let (p, q) = frame_ends_of(&w, fb);
+        both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B again");
+        let got = hands[2].act("part:take", crew_b, part(fb));
+        assert_eq!(got.kind, 1, "frame B taken up again: {got:?}");
+    }
     let (p, q) = ends(ub, 0);
     both(&mut hands, (2, 3), p, q, "frame B back to upright_b");
     let got = hands[2].act("part:put", crew_b, into("upright_b"));
@@ -4349,6 +4381,12 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         leave(&mut hands, 2, crew_b).kind,
         1,
         "Soul 3 lets go of frame B"
+    );
+    one(
+        &mut hands,
+        2,
+        v3(ub.x - 4_000_000, 0, ub.z + 4_000_000),
+        "Soul 3 steps away from where frame B would be laid",
     );
     // Soul 4, frame B's last holder, leaves the world: frame B is set down as its retire's first step (laid beside
     // the bay, or where it stands when there is no room), never left hanging; a crew puts it back.
@@ -4401,12 +4439,28 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     );
     let (p, q) = frame_ends_of(&w, fb);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
+    let lying = rest_of(&w, fb, 1_219).2;
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
         hands[2].act("part:take", crew_b, part(fb)).kind,
         1,
         "frame B taken up"
     );
+    if lying {
+        // Taken lying where it was laid, at its slot: carried 3 m out and laid there first, then taken again. A take
+        // leaves a part on the walkers' ground where it lay (only a part come to rest moves there), and a frame laid
+        // at its slot lies where its carriers stand to seat it.
+        let out = v3(ub.x, 0, ub.z + 3_000_000);
+        let now = stand_now(&w, hands[2].soul, hands[3].soul).expect("the crew stands");
+        let (p, q) = moved_to(now, out);
+        both(&mut hands, (2, 3), p, q, "frame B carried out");
+        let got = hands[2].act("part:put", crew_b, laid_at(g, out));
+        assert_eq!(got.kind, 1, "frame B laid 3 m out: {got:?}");
+        let (p, q) = frame_ends_of(&w, fb);
+        both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B again");
+        let got = hands[2].act("part:take", crew_b, part(fb));
+        assert_eq!(got.kind, 1, "frame B taken up again: {got:?}");
+    }
     let (p, q) = ends(ub, 0);
     both(&mut hands, (2, 3), p, q, "frame B back to upright_b");
     let got = hands[2].act("part:put", crew_b, into("upright_b"));
@@ -4931,7 +4985,7 @@ fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_ba
 
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], at: Vec3, what: &str| {
-        let legs = frame_legs(stand_now(&w, hands[0].soul, hands[1].soul), frame_ends(at));
+        let legs = frame_legs(crew_now(&w, hands[0].soul, hands[1].soul), frame_ends(at));
         let led = legs.len() > 1;
         for (p, q) in legs {
             // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
@@ -5147,7 +5201,7 @@ fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
     );
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     let both = |hands: &mut [Hand], at: Vec3, what: &str| {
-        let legs = frame_legs(stand_now(&w, hands[0].soul, hands[1].soul), frame_ends(at));
+        let legs = frame_legs(crew_now(&w, hands[0].soul, hands[1].soul), frame_ends(at));
         let led = legs.len() > 1;
         for (p, q) in legs {
             // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
@@ -5275,7 +5329,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         what: &str,
     ) {
         let p = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
-        let legs = frame_legs(stand_now(w, souls[a].soul, souls[b].soul), (pa, pb));
+        let legs = frame_legs(crew_now(w, souls[a].soul, souls[b].soul), (pa, pb));
         let led = legs.len() > 1;
         for (pa, pb) in legs {
             // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
@@ -6081,6 +6135,42 @@ fn settled(w: &Seeded, soul: Id, at: Vec3, what: &str) {
     }
 }
 
+/// A pair's places with their middle moved to `to`, each as it stands from the other.
+fn moved_to((p, q): (Vec3, Vec3), to: Vec3) -> (Vec3, Vec3) {
+    let (dx, dz) = (to.x - (p.x + q.x) / 2, to.z - (p.z + q.z) / 2);
+    (v3(p.x + dx, 0, p.z + dz), v3(q.x + dx, 0, q.z + dz))
+}
+
+/// `part:put` parameters: on the ground `g` at `at`.
+fn laid_at(g: Id, at: Vec3) -> BTreeMap<u64, Value> {
+    BTreeMap::from([
+        (1, g.to_value()),
+        (3, Value::Array(vec![int(at.x), int(0), int(at.z)])),
+    ])
+}
+
+/// Where Souls `a` and `b` stand now, when they carry a part between them: a crew's node on the open ground with a
+/// part riding it, within 0.5 m of their middle. None for a pair that carries nothing (its front's walk leads nobody).
+fn crew_now(w: &Seeded, a: Id, b: Id) -> Option<(Vec3, Vec3)> {
+    let (p, q) = stand_now(w, a, b)?;
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let g = t.handle(w.ground)?;
+    let carried = t.children(g)?.iter().any(|h| {
+        let Some(n) = t.node(*h) else { return false };
+        let riding = t.children(*h).is_some_and(|c| !c.is_empty());
+        let near = n.place().is_some_and(|at| {
+            let (dx, dz) = (
+                at.position.x - (p.x + q.x) / 2,
+                at.position.z - (p.z + q.z) / 2,
+            );
+            dx.abs() < 500_000 && dz.abs() < 500_000
+        });
+        n.kind().as_str().starts_with("mars:carry_activity@") && riding && near
+    });
+    carried.then_some((p, q))
+}
+
 /// Where Souls `a` and `b` stand now; none while either has no body yet (its first walk gives it one).
 fn stand_now(w: &Seeded, a: Id, b: Id) -> Option<(Vec3, Vec3)> {
     let (copy, _) = served_copy(w);
@@ -6205,11 +6295,11 @@ async fn walk_two(
     (pa, pb): (Vec3, Vec3),
     what: &str,
 ) {
-    let legs = frame_legs(stand_now(s.w, a.soul, b.soul), (pa, pb));
+    let legs = frame_legs(crew_now(s.w, a.soul, b.soul), (pa, pb));
     let led = legs.len() > 1;
     for (pa, pb) in legs {
         // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
-            // walk then closes on it.
+        // walk then closes on it.
         if led {
             let x = a.act("eden:walk", s.g, heading_walk(pa, pb)).await;
             assert_eq!(x.kind, 1, "{what}: {x:?}");
@@ -8453,7 +8543,7 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         let c = crew(&mut souls, &[0, other]).await;
         let got = souls[0].act("part:take", c, part(frame)).await;
         assert_eq!(got.kind, 1, "frame taken: {got:?}");
-        let now = stand_now(&w, w.souls[0], w.souls[other]);
+        let now = crew_now(&w, w.souls[0], w.souls[other]);
         for (f0, f1) in frame_legs(now, frame_ends(slot_of(bay, slots[slot]))) {
             // Led by its front ([`heading_walk`]); the world keeps the other in its place.
             let got = souls[0].act("eden:walk", g, heading_walk(f0, f1)).await;
