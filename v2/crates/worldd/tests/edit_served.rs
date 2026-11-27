@@ -243,7 +243,10 @@ fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
         let tx = tx.clone();
         std::thread::spawn(move || {
             for l in BufReader::new(pipe).lines().map_while(Result::ok) {
-                if l.starts_with("worldd: k18d-edit-stage ") {
+                // `SERVED_ECHO=1` shows everything the served world prints (with `--nocapture`), to read a failure.
+                if l.starts_with("worldd: k18d-edit-stage ")
+                    || std::env::var_os("SERVED_ECHO").is_some()
+                {
                     eprintln!("{l}");
                 }
                 let _ = tx.send(l);
