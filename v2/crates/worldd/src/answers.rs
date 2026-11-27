@@ -4703,18 +4703,20 @@ impl Clock {
             return Ok(((t, form.to_owned()), words));
         }
         // The next step: the nearest free seat of any kind there, else to wait (only where a seat of the kind is).
-        let other = b.seat_by_kind(*node, None, body, &fits, &taken).map(|(t, _)| {
-            let of = tree
-                .handle(t)
-                .and_then(|h| tree.node(h))
-                .map_or(String::new(), |n| {
-                    replica::world_model::plain(n.kind().as_str()).to_owned()
-                });
-            format!(
-                "the nearest free place to sit there is {} ({of}): sit on it",
-                replica::world_model::show(t)
-            )
-        });
+        let other = b
+            .seat_by_kind(*node, None, body, &fits, &taken)
+            .map(|(t, _)| {
+                let of = tree
+                    .handle(t)
+                    .and_then(|h| tree.node(h))
+                    .map_or(String::new(), |n| {
+                        replica::world_model::plain(n.kind().as_str()).to_owned()
+                    });
+                format!(
+                    "the nearest free place to sit there is {} ({of}): sit on it",
+                    replica::world_model::show(t)
+                )
+            });
         if !b.has_kind(*node, kind) {
             return refused(
                 "place.none-of-kind",

@@ -760,7 +760,11 @@ impl Bodies {
             let Some(s) = self.slots.free_unless(c, body, t, &|s| taken(t, s)) else {
                 continue;
             };
-            let Some(gap) = self.slots.place_in(t, s).and_then(|p| self.seat_gap(from, p)) else {
+            let Some(gap) = self
+                .slots
+                .place_in(t, s)
+                .and_then(|p| self.seat_gap(from, p))
+            else {
                 continue;
             };
             let key = (gap, t);

@@ -358,7 +358,8 @@ fn hall_part(header: &Header, next: u64, ground: Id, titled: bool) -> Part {
         import_eden::F_NAME,
         Value::Bytes(replica::ids::sha256(BANDSTAND.as_bytes()).to_vec()),
     )]);
-    let place = titled.then(|| create_with(next, bandstand(), &pinned(PLACE), ground, Vec3::ZERO, title));
+    let place =
+        titled.then(|| create_with(next, bandstand(), &pinned(PLACE), ground, Vec3::ZERO, title));
     let first = next + u64::from(titled);
     let seats = chairs()
         .into_iter()
@@ -695,11 +696,12 @@ fn i5152_from_the_open_ground_a_sit_by_kind_names_the_place_of_the_seats() {
     let words = ended_words(&log);
     println!("#5152: {seated} seated, ends {words:?}, refused {refused:?}");
     assert_eq!(seated, 12, "every chair filled");
-    let sat: Vec<&String> = words
-        .iter()
-        .filter(|w| w.starts_with(CHAIR))
-        .collect();
-    assert_eq!(sat.len(), 12, "each seated act's end names its place: {words:?}");
+    let sat: Vec<&String> = words.iter().filter(|w| w.starts_with(CHAIR)).collect();
+    assert_eq!(
+        sat.len(),
+        12,
+        "each seated act's end names its place: {words:?}"
+    );
     for w in sat {
         assert!(
             w.contains(&format!("in {BANDSTAND}, ")) && w.ends_with(" m away"),
@@ -731,8 +733,20 @@ fn i5152_a_seat_on_another_floor_is_measured_from_the_open_ground() {
             (
                 2,
                 Value::Array(vec![
-                    create(next, bandstand(), &pinned(PLACE), ground, at1().plus(east).unwrap()),
-                    create(next + 1, chair, &pinned(CHAIR), bandstand(), Vec3::new(0, 0, -2_000_000)),
+                    create(
+                        next,
+                        bandstand(),
+                        &pinned(PLACE),
+                        ground,
+                        at1().plus(east).unwrap(),
+                    ),
+                    create(
+                        next + 1,
+                        chair,
+                        &pinned(CHAIR),
+                        bandstand(),
+                        Vec3::new(0, 0, -2_000_000),
+                    ),
                 ]),
             ),
         ])))
@@ -754,8 +768,15 @@ fn i5152_a_seat_on_another_floor_is_measured_from_the_open_ground() {
     let mut b = Bodies::with_planner(town, planner, 50_000).unwrap();
     b.add_body(humanoid(), placed).unwrap();
     // Its seat stood at 500 mm in front of the slot, in the bandstand's frame.
-    b.add_place(seat(chair, Vec3::new(0, 0, -2_000_000), 470_000, 0, 500_000, bandstand()))
-        .unwrap();
+    b.add_place(seat(
+        chair,
+        Vec3::new(0, 0, -2_000_000),
+        470_000,
+        0,
+        500_000,
+        bandstand(),
+    ))
+    .unwrap();
     let (t, gap) = b.nearest_of_kind(ground, CHAIR, w1()).expect("the chair");
     assert_eq!(t, chair);
     // 10 m east and 1.5 m north of the body: its stand point, moved into the ground's frame.
