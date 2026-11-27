@@ -30,6 +30,15 @@
 //!    still asks no world anything. A world with no such file here (on another machine, never started, or the
 //!    variable unset), or one written more than [`SOULS_FRESH`] seconds ago (not running here now), lists
 //!    `souls: null`. The home page's card shows it.
+//! 10. **A create ends** (27 Nov). A create the placement has not finished within [`PLACE_WITHIN`] of its `made` is
+//!     asked of the placement once more ([`Start::probe`]): placed, its row is ready; not placed, it ends, its row
+//!     taken off the list and its name record removed, and its click is answered `create-failed`. Every create checks
+//!     the others ([`Worlds::end_stale_creates`]), and so does the directory at its start, so no unplaced name is held
+//!     for good. A placement not known (its status unreadable or unparseable, or written in the last ten minutes)
+//!     keeps the create, and so does a row any ready row shares a name and lineage with. The name record goes only after
+//!     the row itself was removed and a second probe still finds no placement. The probe reads this machine's placement
+//!     folder: rule 10 assumes the one directory, on the machine that places (today's production). A directory on
+//!     another machine over a shared store ends other machines' unplaced creates.
 
 pub mod archive;
 pub mod handoff;
@@ -106,6 +115,10 @@ pub fn list_picture(file: &[u8]) -> Result<String, String> {
     b.push_str(&"=".repeat((4 - b.len() % 4) % 4));
     Ok(format!("data:image/{};base64,{b}", checked.format.name()))
 }
+
+/// How long, in seconds from its `made`, a create may stay unplaced (rule 10). Past it, a create the placement never
+/// finished ends: the same click is refused `create-failed`, the row leaves the list and the name is free again.
+pub const PLACE_WITHIN: u64 = 15 * 60;
 
 /// Per-account limits (rule 4), as settings.
 #[derive(Clone, Copy, Debug)]
@@ -192,6 +205,9 @@ pub struct Start<'a> {
     pub claim: Option<&'a Claim>,
     /// Stable, creator-bound durable request identity.
     pub request: &'a str,
+    /// Only ask whether this world was placed (Ok) or not (`world-starting`); nothing is started. Any other refusal is
+    /// not known. A probe names no request: it is matched by name and lineage.
+    pub probe: bool,
 }
 
 pub type Starter = Box<dyn Fn(&Start) -> R<()> + Send + Sync>;
@@ -330,6 +346,149 @@ impl<S: Store> Worlds<S> {
         Ok(out)
     }
 
+    /// Rule 10 for every unplaced create past [`PLACE_WITHIN`] at `now` (seconds): the creates it ended.
+    pub fn end_stale_creates(&self, now: u64) -> R<usize> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.end_stale(&mut inner, now)
+    }
+
+    fn end_stale(&self, inner: &mut Inner<S>, now: u64) -> R<usize> {
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        let mut ended = 0;
+        for row in &rows {
+            if self.end_if_stale(inner, row, now)? {
+                ended += 1;
+            }
+        }
+        Ok(ended)
+    }
+
+    /// Rule 10 for a click asked again: whether its create ended before (past [`PLACE_WITHIN`], unready, and no row of
+    /// its name and lineage left on the list), so the click never makes its world again.
+    fn ended(&self, inner: &Inner<S>, row: &Json, now: u64) -> R<bool> {
+        let made = row.get("made").and_then(Json::as_u64);
+        if row.get("ready") != Some(&Json::Bool(false))
+            || made.is_none_or(|m| now < m.saturating_add(PLACE_WITHIN))
+        {
+            return Ok(false);
+        }
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        if rows
+            .iter()
+            .any(|r| r.get("name") == row.get("name") && r.get("lineage") == row.get("lineage"))
+        {
+            return Ok(false);
+        }
+        // A name record of this lineage still there (a stop between the row's removal and the record's): the click
+        // goes on, lists the row again, and a later ask ends it whole.
+        let Some(name) = row.get("name").and_then(Json::as_str) else {
+            return Ok(true);
+        };
+        Ok(match inner.dir.store.get(&NameRecord::key(name))? {
+            None => true,
+            Some(o) => NameRecord::read(&o.bytes).map_or(true, |n| {
+                Some(to_hex(&n.lineage).as_str()) != row.get("lineage").and_then(Json::as_str)
+            }),
+        })
+    }
+
+    /// Rule 10 for one row: whether its create ended now. A row that is ready, has no `ready: false`, is within
+    /// [`PLACE_WITHIN`] or whose placement is not known stays; one the placement did place is marked ready.
+    fn end_if_stale(&self, inner: &mut Inner<S>, row: &Json, now: u64) -> R<bool> {
+        let made = row.get("made").and_then(Json::as_u64);
+        if row.get("ready") != Some(&Json::Bool(false))
+            || made.is_none_or(|m| now < m.saturating_add(PLACE_WITHIN))
+        {
+            return Ok(false);
+        }
+        let text = |k| row.get(k).and_then(Json::as_str);
+        let (Some(name), Some(lineage_text), Some(creator_text)) =
+            (text("name"), text("lineage"), text("creator"))
+        else {
+            return Ok(false);
+        };
+        let lineage: Option<[u8; 16]> = from_hex(lineage_text).ok().and_then(|b| b.try_into().ok());
+        let (Some(lineage), Some(creator)) =
+            (lineage, crate::accounts::principal_from_text(creator_text))
+        else {
+            return Ok(false);
+        };
+        let template = text("template")
+            .and_then(|t| self.templates.get(t))
+            .map(|t| t.dir.clone())
+            .unwrap_or_default();
+        let ours = |r: &Json| {
+            r.get("name").and_then(Json::as_str) == Some(name)
+                && r.get("lineage").and_then(Json::as_str) == Some(lineage_text)
+        };
+        let same = |r: &Json| ours(r) && r.get("ready") == Some(&Json::Bool(false));
+        let probe = || match (self.starter)(&Start {
+            name,
+            template: &template,
+            lineage,
+            creator,
+            claim: None,
+            request: "",
+            probe: true,
+        }) {
+            Ok(()) => Some(true),
+            Err(e) if e.name == "world-starting" => Some(false),
+            Err(_) => None,
+        };
+        let Some(placed) = probe() else {
+            return Ok(false);
+        };
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        if !rows.iter().any(same) {
+            // No unready row of this world (another create's, ready, or gone already): nothing ends here, and the
+            // name record is never touched (it may name a listed, ready world).
+            return Ok(false);
+        }
+        let ((etag, rows), removed) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            if placed {
+                for r in rows.iter_mut().filter(|r| same(r)) {
+                    r["ready"] = json!(true);
+                }
+                return Ok(Vec::new());
+            }
+            // Only while no row of this world is ready: then the unready one alone goes.
+            if rows.iter().any(|r| ours(r) && !same(r)) {
+                return Ok(Vec::new());
+            }
+            let removed: Vec<Json> = rows.iter().filter(|r| same(r)).cloned().collect();
+            rows.retain(|r| !same(r));
+            Ok(removed)
+        })?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((etag, rows));
+        if placed || removed.is_empty() {
+            return Ok(false);
+        }
+        // The row went first, then the placement is asked again: a placement writes its status before it re-reads the
+        // row (place-created-world.mjs), so one of the two sees the other. A status that appeared meanwhile puts the
+        // row back and keeps the name; the placement, seeing the row back, goes on.
+        if probe() != Some(false) {
+            let (etag, rows) = read_rows(&inner.dir.store)?;
+            let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+                if !rows
+                    .iter()
+                    .any(|r| r.get("name").and_then(Json::as_str) == Some(name))
+                {
+                    rows.extend(removed.iter().cloned());
+                }
+                Ok(())
+            })?;
+            *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+            return Ok(false);
+        }
+        // Matched on name and lineage alone: a pending world handed off has a new row creator, never a new founder.
+        if let Some(o) = inner.dir.store.get(&NameRecord::key(name))?
+            && NameRecord::read(&o.bytes).is_ok_and(|n| n.lineage == lineage)
+        {
+            inner.dir.store.delete(&NameRecord::key(name))?;
+        }
+        Ok(true)
+    }
+
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
     /// templates a world may be made from.
     pub fn list(&self) -> R<Json> {
@@ -449,10 +608,23 @@ impl<S: Store> Worlds<S> {
                         "this click already names a different world request",
                     );
                 }
+                if self.end_if_stale(inner, &value["row"], now)?
+                    || self.ended(inner, &value["row"], now)?
+                {
+                    return refuse(
+                        "create-failed",
+                        format!(
+                            "{} was not placed within {} minutes; the name is free again",
+                            ask.name,
+                            PLACE_WITHIN / 60
+                        ),
+                    );
+                }
                 value
             }
             None => {
                 crate::worlds::create::check_name(&ask.name)?;
+                self.end_stale(inner, now)?;
                 let (_, rows) = read_rows(&inner.dir.store)?;
                 let made: Vec<u64> = rows
                     .iter()
@@ -573,6 +745,7 @@ impl<S: Store> Worlds<S> {
             creator,
             claim: claim.as_ref(),
             request: &request,
+            probe: false,
         })?;
         row["ready"] = json!(true);
         let (etag, rows) = read_rows(&inner.dir.store)?;
@@ -768,6 +941,12 @@ fn write_rows<S: Store, T>(
 /// --through <creator> --scope <lineage>`.
 pub fn worldd_starter(worldd: PathBuf, worlds: PathBuf) -> Starter {
     Box::new(move |s: &Start| {
+        if s.probe {
+            return refuse(
+                "start-failed",
+                "this starter cannot say whether a world was placed",
+            );
+        }
         let out = std::process::Command::new(&worldd)
             .arg("fork")
             .arg("--from")
@@ -836,6 +1015,17 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
             placement::starter(var("DIRECTORYD_PLACEMENT", "placement")),
         );
         worlds.souls_root = std::env::var_os(SOULS_ROOT_ENV).map(PathBuf::from);
+        // Rule 10 at the start: a create left unplaced by an earlier run ends now, not at the next create.
+        match worlds.end_stale_creates(crate::accounts::serve::now()) {
+            Ok(0) => {}
+            Ok(n) => eprintln!(
+                "directoryd: worlds: {n} unplaced create(s) ended (create-failed), their names free"
+            ),
+            Err(e) => eprintln!(
+                "directoryd: worlds: unplaced creates not checked: {}",
+                e.name
+            ),
+        }
         worlds.site_owners = site_owners(&std::env::var(SITE_OWNERS_ENV).unwrap_or_default());
         Ok(worlds)
     };
