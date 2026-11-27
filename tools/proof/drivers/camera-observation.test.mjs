@@ -4,7 +4,7 @@ test('alignment requires actual present subject, finite depicted tick and matchi
 });
 
 test('native node identifiers are mapped through the actual bridge/default-look entity convention',()=>{
- const ids=depictedBodyIds('abc-0');assert.equal(ids[0],'v2_abc_0');assert.ok(ids[1].startsWith('v2_abc_0'));assert.equal(ids.includes('abc-0'),false);
+ const scope='0'.repeat(32),ids=depictedBodyIds(scope+'-0');assert.equal(ids[0],'v2_'+scope+'_0');assert.ok(ids[1].startsWith('v2_'+scope+'_0'));assert.equal(ids.includes(scope+'-0'),false);
 });
 
 test('failed phase evidence is written before the throwing alignment assertion',async()=>{
@@ -100,4 +100,16 @@ test('day-index envelope requires native format1 and integer day matching index 
  const row=[0,indexKey,Buffer.alloc(32,1)],base=indexResponse([row]),responseWith=entries=>({...base,bytes:Buffer.from(encode(new Map(entries)))});
  assert.equal(capturedIndexBindings([base],decode).size,1);
  for(const entries of [[[2,0],[3,[row]]],[[1,1],[3,[row]]],[[1,2],[2,0],[3,[row]]],[[1,1],[2,0.5],[3,[row]]],[[1,1],[2,'0'],[3,[row]]],[[1,1],[2,1],[3,[row]]],[[1,1],[2,0]]])assert.throws(()=>capturedIndexBindings([responseWith(entries)],decode),/recorded-index-malformed/);
+});
+
+import {nativeActorId} from './camera-observation.mjs';
+import {entityOf} from '../../../apps/web/src/v2-engine/bridge.ts';
+import {defaultLookOf,entityWithLook} from '../../../apps/web/src/v2-engine/take-bodies.ts';
+test('zero/nonzero CLI counters normalize only at actor boundary and default look matches native product mapping',()=>{
+ const scope='0'.repeat(32);
+ for(const counter of [0,1]){const cli=scope+'-'+counter,native=scope+'.'+counter,base=entityOf(native);assert.equal(nativeActorId(cli),native);assert.deepEqual(depictedBodyIds(cli),[base,entityWithLook(base,defaultLookOf(native))]);}
+ assert.notEqual(defaultLookOf(scope+'-1'),defaultLookOf(scope+'.1'),'nonzero fixture discriminates raw CLI look from native look');
+});
+test('malformed and arbitrary rendered/native identifiers cannot enter CLI actor normalization',()=>{
+ const scope='0'.repeat(32);for(const value of [null,1,'abc-0',scope+'.0','v2_'+scope+'_0',scope+'-01',scope+'--1',scope+'-1.5',scope+'-9007199254740992',scope.toUpperCase().replace('0','A')+'-0'])assert.throws(()=>nativeActorId(value),/actor-cli-id-invalid/);
 });

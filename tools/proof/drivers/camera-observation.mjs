@@ -27,7 +27,7 @@ export function collectResponses(page,dir,base,{cleanupMs=6000}={}) {
  state.flush=async({cleanup=false}={})=>{while(state.pending.size)await Promise.all([...state.pending]);if(!cleanup&&(state.stopped||state.closed))throw Error('history-response-collection-closed');};
  state.stop=async()=>{state.stopped=true;page.off('response',response);let timer,timedOut=false;await Promise.race([state.flush({cleanup:true}),new Promise(resolve=>{timer=setTimeout(()=>{timedOut=true;resolve();},cleanupMs);})]);clearTimeout(timer);state.closed=true;
   const responses=state.responses.map(({bytes,...r})=>r);writeFileSync(join(dir,'public-responses.json'),JSON.stringify({responses,pendingAtClose:state.pending.size,timedOut},null,2),{flag:'wx'});
-  const files=readdirSync(dir).filter(f=>/^(phase-.*\.json|.*\.png|public-response-.*\.bin|public-responses\.json|observation-facts\.json|recorded-(?:target|public-oracle)\.json|accessibility-before-.*\.yml)$/.test(f)).sort().map(file=>({file,sha256:hash(readFileSync(join(dir,file)))}));
+  const files=readdirSync(dir).filter(f=>/^(phase-.*\.json|.*\.png|public-response-.*\.bin|public-responses\.json|actor-identity\.json|observation-facts\.json|recorded-(?:target|public-oracle)\.json|accessibility-before-.*\.yml)$/.test(f)).sort().map(file=>({file,sha256:hash(readFileSync(join(dir,file)))}));
   writeFileSync(join(dir,'phase-manifest.json'),JSON.stringify({files},null,2),{flag:'wx'});if(timedOut)throw Error('history-response-cleanup-timeout');
  };
  return state;
@@ -93,8 +93,14 @@ export function agreeRecordedPoses(candidates,initial,toleranceM=0.001) {
  if(!candidates.length||!Array.isArray(initial)||initial.length!==3||!initial.every(Number.isFinite))return false;
  return candidates.every(c=>Array.isArray(c.positionM)&&c.positionM.length===3&&c.positionM.every((v,i)=>Number.isFinite(v)&&Math.abs(v-initial[i])<=toleranceM));
 }
+/** The CLI emits a 16-byte lowercase scope and a counter below2^53; history uses a dot. */
+export function nativeActorId(cliId) {
+ const match=typeof cliId==='string'?/^([0-9a-f]{32})-(0|[1-9][0-9]*)$/.exec(cliId):null;
+ if(!match||!Number.isSafeInteger(Number(match[2])))throw Error('camera-observation-actor-cli-id-invalid');
+ return `${match[1]}.${match[2]}`;
+}
 export async function publicTarget(state,target,body,initial) {
- await state.flush();if(state.stopped||state.closed)throw Error('history-response-collection-closed');const responses=completeRecordedResponses(state.responses),header=[...responses].find(([url])=>new URL(url).pathname.endsWith('/header'))?.[1];
+ await state.flush();if(state.stopped||state.closed)throw Error('history-response-collection-closed');const nativeBody=nativeActorId(body),responses=completeRecordedResponses(state.responses),header=[...responses].find(([url])=>new URL(url).pathname.endsWith('/header'))?.[1];
  if(!header)throw Error('recorded-public-header-not-retained');
  const {decode}=await import(new URL('../../../apps/web/node_modules/cborg/cborg.js',import.meta.url));
  const replica=await import(new URL('../../../v2/target/wasm-load/pkg/replica.js',import.meta.url));replica.initSync({module:readFileSync(new URL('../../../v2/target/wasm-load/pkg/replica_bg.wasm',import.meta.url))});
@@ -103,15 +109,15 @@ export async function publicTarget(state,target,body,initial) {
   const binding=bindings.get(url);if(!binding)throw Error('recorded-index-binding-missing');
   let rawSha256;const result=decodeRecordedBundle(bytes,binding.digest,(raw,digest)=>{rawSha256=digest.toString('hex');return decode(replica.historyAt(header,raw,digest,BigInt(Math.round(target*50000)),false),{useMaps:true});});
   const at=target*50000;if(at<Number(result.get(4))||at>Number(result.get(4))+Number(result.get(5)))continue;
-  const nodes=new Map(result.get(2).map(n=>[key(n.get(1)),n])),node=nodes.get(body);if(!node)throw Error('recorded-target-body-absent-in-eligible-revision');
+  const nodes=new Map(result.get(2).map(n=>[key(n.get(1)),n])),node=nodes.get(nativeBody);if(!node)throw Error('recorded-target-body-absent-in-eligible-revision');
   // The owned fixture's root body has a world parent. Decline nested oracle rather than invent a transform.
   let parentId=key(node.get(3));const seen=new Set();while(parentId){if(seen.has(parentId))throw Error('recorded-target-parent-cycle');seen.add(parentId);const parent=nodes.get(parentId);if(!parent)throw Error('recorded-target-parent-missing');const pose=parent.get(7);if(pose&&((pose.get(2)??[]).some(v=>Number(v)!==0)||(pose.get(3)??[1073741824,0,0,0]).some((v,i)=>Number(v)!==(i===0?1073741824:0))))throw Error('recorded-target-nonidentity-parent');parentId=key(parent.get(3));}
   candidates.push({bundleUrl:url,bundleSha256:hash(bytes),rawSha256,indexResponses:binding.indexResponses,positionM:node.get(7).get(2).map(v=>Number(v)/1e6)});
  }
  if(!agreeRecordedPoses(candidates,initial))throw Error('recorded-target-revisions-ambiguous-or-not-prewalk');
- return {targetTick:target,candidates,positionM:initial,toleranceM:0.001,basis:'All eligible actual captured public revisions agree with the older stationary pre-walk frame within1mm; native historyAt at integer20Hz target. Specifically consumed revision is not identified. Strict draw alignment remains1e-9.'};
+ return {targetTick:target,identity:{cliBody:body,nativeBody},candidates,positionM:initial,toleranceM:0.001,basis:'All eligible actual captured public revisions agree with the older stationary pre-walk frame within1mm; native historyAt at integer20Hz target. Specifically consumed revision is not identified. Strict draw alignment remains1e-9.'};
 }
-export function depictedBodyIds(body) {const base=entityOf(body);return [base,entityWithLook(base,defaultLookOf(body))];}
+export function depictedBodyIds(body) {const native=nativeActorId(body),base=entityOf(native);return [base,entityWithLook(base,defaultLookOf(native))];}
 export function recordAlignment(value,phase,body,file,check) {
  writeFileSync(file,JSON.stringify(value,null,2),{flag:'wx'});check(`${phase}-draw-matrix-alignment`,alignmentValid(value,body));
 }
@@ -122,6 +128,7 @@ export function alignmentValid(readout,body) {
 }
 export default async function({page,paths,check,fixture,signal}) {
  const responseState=documents.get(page);const html=await responseState?.documents[0];check('actual-native-document',typeof html==='string'&&!!suppliedNativeStream(html));writeFileSync(join(paths.dir,'native-document.html'),html,{flag:'wx'});
+ const identity={cliBody:fixture.actor.body,nativeBody:nativeActorId(fixture.actor.body)};writeFileSync(join(paths.dir,'actor-identity.json'),JSON.stringify(identity,null,2),{flag:'wx'});
  const candidates=depictedBodyIds(fixture.actor.body);
  try {await page.waitForFunction(ids=>{const r=window.__cameraObservation;return r?.frame?.status==='observed'&&r.frame.value.subjects.some(s=>ids.includes(s.id)&&s.state==='present')&&!document.querySelector('.viewer-arrival')},candidates,{timeout:30000});}
  catch(error){writeFileSync(join(paths.dir,'failed-observation.json'),JSON.stringify(await page.evaluate(()=>({url:location.href,readout:window.__cameraObservation})),null,2),{flag:'wx'});throw error;}
