@@ -20,29 +20,37 @@ const MAX_FILE = 64 * 1024 * 1024, MAX_FILES = 2000;
 /** The set id of a list of `{ name, sha256 }`. */
 export const setOf = (files) => createHash('sha256').update([...files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map((f) => `${f.name} ${f.sha256}\n`).join('')).digest('hex').slice(0, 32);
 
-/** `<webDir>/assets` as `{ schema, set, files: [{ name, bytes, sha256 }] }` sorted by name, or null when it is missing,
- *  empty or cannot be copied whole. */
-export function listAppFiles(webDir) {
+/** `<webDir>/assets` as `{ schema, set, files: [{ name, bytes, sha256 }] }` sorted by name, or `{ problem }`: why it
+ *  has no set (missing, empty, or the first entry that cannot be copied by name). */
+export function scanAppFiles(webDir) {
   const dir = join(webDir, 'assets');
-  let entries; try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  let entries; try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return { problem: 'the web build has no assets folder' }; }
   const files = [];
   for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     if (e.isFile() && COPY.test(e.name) && APP_FILE.test(e.name.replace(COPY, ''))) continue;   // the release's precompressed copy of a listed file
-    if (!e.isFile() || !APP_FILE.test(e.name)) return null;
+    if (!e.isFile() || !APP_FILE.test(e.name)) return { problem: `assets/${e.name.slice(0, 80)} is not a file with a content hash in its name` };
     const body = readFileSync(join(dir, e.name));
-    if (body.length > MAX_FILE || files.length >= MAX_FILES) return null;
+    if (body.length > MAX_FILE || files.length >= MAX_FILES) return { problem: `assets/${e.name.slice(0, 80)}: too large, or too many files` };
     files.push({ name: e.name, bytes: body.length, sha256: createHash('sha256').update(body).digest('hex') });
   }
-  return files.length ? { schema: APP_FILES, set: setOf(files), files } : null;
+  return files.length ? { schema: APP_FILES, set: setOf(files), files } : { problem: 'the web build\'s assets folder is empty' };
 }
+/** `scanAppFiles(webDir)`, or null when the folder has no set. */
+export function listAppFiles(webDir) { const scan = scanAppFiles(webDir); return scan.problem ? null : scan; }
 
-/** `listAppFiles(webDir)`, read again only when the folder changes (a release is a new folder; a rebuild in place rewrites it). */
+/** `listAppFiles(webDir)`, read again only when the folder changes (a release is a new folder; a rebuild in place
+ *  rewrites it). `.problem()` says why the folder read last has no set (null when it has one). */
 export function appFiles(webDir) {
-  let key = null, held = null;
-  return () => {
-    let st; try { st = statSync(join(webDir, 'assets')); } catch { key = null; return (held = null); }
+  let key = null, held = null, problem = null;
+  const read = () => {
+    let st; try { st = statSync(join(webDir, 'assets')); } catch { key = null; problem = 'the web build has no assets folder'; return (held = null); }
     const now = `${st.ino}:${st.mtimeMs}`;
-    if (now !== key) { key = now; try { held = listAppFiles(webDir); } catch { held = null; } }
+    if (now !== key) {
+      key = now;
+      let scan; try { scan = scanAppFiles(webDir); } catch (e) { scan = { problem: `cannot be read (${e?.code ?? 'error'})` }; }
+      problem = scan.problem ?? null; held = scan.problem ? null : scan;
+    }
     return held;
   };
+  return Object.assign(read, { problem: () => (read(), problem) });
 }

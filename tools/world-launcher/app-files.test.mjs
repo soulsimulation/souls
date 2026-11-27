@@ -92,6 +92,7 @@ test('the launcher lists its build at /__sim/app-files.json, and names the CDN t
   assert.equal((await config2()).appCdn, 'https://cdn.soul.game/assets/app/');
   // a build with a file that cannot be copied: no list, no marker asked for, the origin's files
   writeFileSync(join(webDir, 'assets', 'config.json'), '{}'); utimesSync(join(webDir, 'assets'), new Date(), new Date(Date.now() + 5000));
-  assert.equal((await fetch(`http://127.0.0.1:${P2}/__sim/app-files.json`)).status, 404);
+  const none = await fetch(`http://127.0.0.1:${P2}/__sim/app-files.json`);
+  assert.equal(none.status, 404); assert.match((await none.json()).message, /assets\/config\.json is not a file with a content hash in its name/, 'it says which file is in the way');
   assert.equal((await config2()).appCdn, undefined);
 });

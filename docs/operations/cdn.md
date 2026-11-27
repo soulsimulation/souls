@@ -14,6 +14,9 @@ links still answer, and nothing writes to it any more.
 | `assets/br/<sha[0:2]>/<sha>.<ext>` | The file stored as quality-11 brotli with `Content-Encoding: br` |
 | `assets/w/<world>/<sha>.<ext>` | A world-scoped copy, mapped only on that world's own page |
 | `w/<slug>/assets/<sha>.<ext>` | A god upload, written only by the uploads Worker |
+| `assets/replica/<version>/replica.js`, `…/replica_bg.wasm` | The new engine's replica as the launcher serves it, by its version ([first load](#a-new-viewers-first-load)) |
+| `assets/app/<name>-<hash>.<ext>` | A file of a web build's `assets/` folder, under its own built name |
+| `assets/app/sets/<set>.json` | The marker of one web build: every file of it is stored. Written last |
 
 `<sha>` is the SHA-256 of the decoded file. Objects are written once (`If-None-Match: *`) with
 `Cache-Control: public, max-age=31536000, immutable` and are never overwritten. A changed file is a new key.
@@ -30,8 +33,8 @@ their holders: the CDN is a transport, not a licence. The records that admit a f
 | `served-blobs.json` | The `/blobs/assets/<sha>` files the client names (a test fails when a literal in `apps/web/src` has no record) |
 | `world-scoped.json` | Per-world files, with their world, served URL and authorisation, used only under `assets/w/<world>/` |
 
-Vite bundles stay on the origin: they ship with every release and a second host adds connection setup on the boot
-path. Compressible objects (GLB, bin, HDR, EXR) are stored precompressed when brotli saves at least 3%; Cloudflare
+A release's own script and style files, and the replica, are copied after the release, from the live origin
+([first load](#a-new-viewers-first-load)); the page uses the copies once the launcher has seen them. Compressible objects (GLB, bin, HDR, EXR) are stored precompressed when brotli saves at least 3%; Cloudflare
 decodes a stored br body for a client that does not accept br. Never set `Cache-Control: no-transform` on them.
 
 ## Repository media
@@ -289,6 +292,76 @@ The rerun: `REMOTE_PKG=<the world's replica package> modal run tools/bench/capac
 **Rollback:** `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs eden off` (pages loaded
 after it read `soul.game/s/` again; an open page reads the CDN until it reloads). If the CDN itself is wrong, also set
 the record to DNS only. The site file can stay.
+
+## A new viewer's first load
+
+The `soul.game` record is DNS only, so whatever the page asks `soul.game` for comes from the host, once per new
+viewer. On 27 Nov 2026 one cold load of `https://soul.game/w/eden/` (Playwright Chromium, empty profile, 30 s) asked
+the host for 78 files and 2.49 MB: the page's scripts and styles (46 files, 1.33 MB), the replica (0.69 MB), the
+world's snapshot (0.32 MB), three data files (0.12 MB) and small API reads. The stream and the models already came
+from edges. A join wave of 4,000 would have moved 10 GB from the host.
+
+Two of those are immutable and the same for everyone, so they are copied to the asset CDN and loaded from there:
+
+| What | On the CDN | How the page comes to load it there |
+|---|---|---|
+| The replica (`replica.js` and the `replica_bg.wasm` beside it) | `assets/replica/<version>/`, the launcher's own version (16 hex of sha256 over both files) | The launcher adds `v2ReplicaCdn` to the page's config. index.html's head script checks it is this CDN's address for the version `v2Replica` names, fetches it and leaves `<cdn address>#<origin path>` for the stream worker, which loads the CDN's copy, or the origin's when that does not load |
+| The web build's own files (everything in its `assets/` folder: scripts, styles, data, images, sounds) | `assets/app/<name>`, and `assets/app/sets/<set>.json` once all of one build's files are stored | The launcher adds `appCdn` to the page's config. index.html's loader asks for both phases' files there by name. The built code names its files by where it was loaded from, so everything they load follows. A worker cannot be started from another origin, so the loader starts each from a same-origin blob that imports the worker's file from the CDN |
+
+What stays on the host per new viewer: the page itself (no-cache, kept 2 s by the launcher), `main-*.css` (the page
+links it before any script runs), the world's snapshot and small API reads, and `bodies.json`. Measured in a real
+browser on a build of this change, with the CDN's copy of the build's files answered from the same build: 20 files and
+0.36 MB from the host, 0.32 MB of it the snapshot.
+
+**The page is never sent to a copy that is not there.** The world's cutover binding names the CDN (`firstLoadOrigin`),
+and the launcher then looks there itself, once a minute until it finds them: a `HEAD` of both replica files of its
+version, and of the marker of its own build's file set (`tools/world-launcher/app-files.mjs`: the set id is a hash
+over every file name and sha256 in its `assets/` folder). Only then does it name the copy to pages. After a release,
+until the mirror below has run, pages load the host's files exactly as before. A build whose `assets/` folder holds
+anything that cannot be copied by name (a subfolder, a file without a content hash) has no set and stays on the host.
+
+**The page still arrives when the CDN does not answer.** An entry script that does not load from the CDN reloads the
+page once with `?appcdn=0`, which loads the host's files; the stream worker loads the host's replica when the CDN's
+does not load. A visitor can add `?appcdn=0` or `?replicacdn=0` to ask for the host's copies.
+
+| Part | Where |
+|---|---|
+| Copies the replica and the build's files from the live origin to the CDN, verified | `tools/cdn/mirror-first-load.mjs` |
+| Lists the build's files and their set id at `/__sim/app-files.json` | `tools/world-launcher/app-files.mjs`, `launcher.mjs` |
+| Looks for the copies and writes `v2ReplicaCdn` and `appCdn` into a routed world's page | `tools/world-launcher/cutover.mjs` (`edgeLook`, `v2Fields`), switched by `stream-cdn-switch.mjs --first-load` |
+| The replica: the head script's decision, the worker's fallback | `apps/web/src/v2-engine/replica-cdn.ts`, `snapshot-prefetch.ts`, `v2-engine/replica-served.ts` |
+| The build's files: the loader's choice, its `Worker` wrapper and its reload | `apps/web/src/app-cdn.ts`, `phased-entry.ts`; `builtUrl` in `apps/web/vite.config.ts` |
+| The gauge: what one cold load asks each host for | `tools/cdn/first-load.mjs` |
+
+**Steps.** No Cloudflare setting changes: `cdn.soul.game` already keeps what the bucket serves, and the bucket's CORS
+rule already lets `https://soul.game` read it.
+
+1. Release owner, once, on the production host, after a release that carries this is live:
+   `sudo node /srv/sim-worlds/production/tools/world-launcher/stream-cdn-switch.mjs --first-load eden on`
+   (`off` turns it back; pages loaded after that load the host's files). Worlds with no old twin follow the first
+   binding's setting.
+2. Release owner, after every release, from a checkout with the R2 credentials (see Publishing):
+
+   ```sh
+   EDEN_ASSETS_CREDENTIALS=<file> node tools/cdn/mirror-first-load.mjs https://soul.game/w/eden/ --apply --out <new>/first-load-receipt.json
+   ```
+
+   It reads the page, the replica and the listed files from the live origin (about 160 requests, once), stores what
+   the CDN does not have yet (a file whose name did not change since the last release is found, not stored again),
+   writes the marker last, and reads every copy back through `cdn.soul.game` as a browser on `soul.game` gets it.
+   Without `--apply` it only reads the origin and prints the plan; `--check` reads the CDN's copies without
+   credentials. Within a minute the launcher names the copies to new pages.
+3. Check with one cold load: `node tools/cdn/first-load.mjs <outDir> https://soul.game/w/eden/`. `byClass` should
+   show no `replica` and one `bundles` file (the style sheet) on `soul.game`, and `totals.host.bytes` near 0.36 MB.
+
+**Not on the CDN, and why.** The page (it carries the world's live config). `main-*.css` (0.014 MB; the page's first
+paint waits for it, and it is linked before the loader runs). The world's snapshot (0.32 MB, the largest thing left):
+it is an API answer of the old world's views, public but not immutable, and needs the `soul.game` record or a second
+proxied name to be kept at an edge ([the site behind the CDN](#the-site-behind-the-cdn)). The home page's own code:
+its config is not written by the cutover binding, so it loads from the host.
+
+Tests: `node --test tools/cdn/mirror-first-load.test.mjs tools/cdn/first-load.test.mjs tools/world-launcher/app-files.test.mjs
+tools/world-launcher/cutover.test.mjs apps/web/src/v2-engine/replica-cdn.test.ts apps/web/src/phased-entry.test.ts`.
 
 ## The site behind the CDN
 

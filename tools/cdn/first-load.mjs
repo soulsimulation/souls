@@ -94,9 +94,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const navigationStatus = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).then((r) => r?.status() ?? null).catch((e) => { errors.push('goto ' + e.message.slice(0, 120)); return null; });
     await page.waitForTimeout(WAIT);
     await Promise.race([Promise.allSettled(pending), new Promise((r) => setTimeout(r, 5000))]);
-    await page.screenshot({ path: `${out}/${label}.png` }).catch(() => {});
+    // the picture of what was measured; a busy machine can take long to draw it, and the numbers do not wait for it
+    const screenshot = await page.screenshot({ path: `${out}/${label}.png`, timeout: 90_000 }).then(() => `${label}.png`, () => null);
     rows.sort((a, b) => a.t - b.t);
-    const summary = { url, label, at: new Date().toISOString(), waitMs: WAIT, navigationStatus, originHosts, requests: rows.length, failed: failed.length, errors, ...summarize(rows, { originHosts }) };
+    const summary = { url, label, at: new Date().toISOString(), waitMs: WAIT, navigationStatus, originHosts, requests: rows.length, failed: failed.length, errors, screenshot, ...summarize(rows, { originHosts }) };
     writeFileSync(`${out}/${label}.json`, JSON.stringify({ summary, rows, failed }, null, 1));
     console.log(JSON.stringify(summary, null, 1));
   } finally { await browser.close(); }

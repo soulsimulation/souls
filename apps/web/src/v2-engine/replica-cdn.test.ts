@@ -76,6 +76,6 @@ test('the worker loads the origin copy when the CDN copy does not load (its modu
 test('no origin copy after the #, or one that is not a replica path: a replica that does not load still fails', async () => {
   for (const [tag, address] of [['none', 'file:///nonexistent-replica-4986.js'], ['other', 'file:///nonexistent-replica-4986.js#//elsewhere.example/replica.js'], ['dots', 'file:///nonexistent-replica-4986.js#/w/../replica.js'], ['api', 'file:///nonexistent-replica-4986.js#/w/eden/v1/config']]) {
     const { init } = await worker(tag, address);
-    await assert.rejects(init, undefined, tag);
+    await assert.rejects(init, Error, tag);
   }
 });

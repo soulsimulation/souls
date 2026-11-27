@@ -1863,7 +1863,7 @@ export async function openLauncher(cfg = {}) {
       // #2515 (E3): the public world list is the same for everyone; without a token the CDN may keep it briefly
       if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson(), req.headers.authorization ? {} : EDGE_BRIEF); return; }
       // #4986: the web build's own files, for the mirror to the asset CDN: names and hashes of public, immutable files
-      if (path === '/__sim/app-files.json' && req.method === 'GET') { const list = webFiles(); json(res, list ? 200 : 404, list ?? { ok: false, code: 'app-files.none', message: 'This web build has no set of files that can be copied whole.' }); return; }
+      if (path === '/__sim/app-files.json' && req.method === 'GET') { const list = webFiles(); json(res, list ? 200 : 404, list ?? { ok: false, code: 'app-files.none', message: `This web build has no set of files that can be copied whole: ${webFiles.problem()}.` }); return; }
       if (path === '/__sim/my-souls.json' && req.method === 'GET') {
         const souls = await mySouls(req.headers.authorization);
         if (!souls) { json(res, 401, { ok: false, code: 'signin-required', message: 'sign in to see your Souls' }, { vary: 'authorization' }); return; }
