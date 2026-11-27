@@ -350,8 +350,13 @@ export function conferenceBrowserStop() {
     observer.stopRender();
     if (observer.prototype.show !== observer.show) throw Error('conference people observer ownership changed');
     observer.prototype.show = observer.original;
+    const measurementSummary = observer.samples.reduce((summary, sample) => {
+      const ms = sample.measurementMs;
+      if (!Number.isFinite(ms) || ms < 0) { summary.missing++; return summary; }
+      summary.count++; summary.totalMs += ms; summary.maxMs = Math.max(summary.maxMs ?? 0, ms); return summary;
+    }, { count: 0, totalMs: 0, maxMs: null, missing: 0, basis: 'retained successful samples; failed callbacks are not timed' });
     return observer.stopResult = { cadenceMs: 250, sampleLimit: observer.sampleLimit, meshStride: 1,
-      samples: observer.samples, failures: observer.failures,
+      samples: observer.samples, failures: observer.failures, measurementSummary,
       lecternEntry: observer.lecternEntry, measurementLimits: observer.measurementLimits, qualification: observer.qualification };
   } catch (error) { observer.stopError = error; throw error; }
 }
@@ -478,7 +483,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       samples.push({ stage: 'after-world-render', units: 'm', at, frame: stamp.frame, tick: frame.tick, dt: frame.dt,
         currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected, renderTarget: null,
         lectern: { entity: lectern.entity, source: lectern.source, root: lectern.root, triangles: lectern.triangles,
-          parts: lectern.parts.map(({mesh,slot,shell,matrix})=>({mesh,slot,shell,matrix})) }, bodies });
+          parts: lectern.parts.map(({mesh,slot,shell,matrix})=>({mesh,slot,shell,matrix})) }, bodies, measurementMs: performance.now() - at });
     }, error => { if (failures.length < 30) failures.push(String(error)); });
     window.__conferenceDrawObserver = { samples, failures, sampleLimit, stopRender, prototype, show, original,
       measurementLimits: geometry.limits,

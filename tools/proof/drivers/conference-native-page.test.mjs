@@ -160,11 +160,14 @@ test('render-observer collection is idempotent and a collection error cannot dis
 test('the exact serialized browser stop restores hooks once and caches both result and ownership error', () => {
   const previous = globalThis.window; let stops = 0;
   const show = () => {}, original = () => {}, prototype = { show };
-  const fixture = () => ({ samples: [{ frame: 1 }, { frame: 2 }], failures: [], sampleLimit: 361,
+  const fixture = () => ({ samples: [{ frame: 1, measurementMs: 1.25 }, { frame: 2, measurementMs: 3 }], failures: [], sampleLimit: 361,
     stopRender() { stops++; }, prototype, show, original, qualification: 'test' });
   try {
     globalThis.window = { __conferenceDrawObserver: fixture() };
     const first = conferenceBrowserStop();
+    assert.deepEqual(first.measurementSummary, { count: 2, totalMs: 4.25, maxMs: 3, missing: 0,
+      basis: 'retained successful samples; failed callbacks are not timed' });
+    assert.deepEqual(first.samples.map(s => s.measurementMs), [1.25, 3], 'individual sample overhead remains available');
     assert.equal(conferenceBrowserStop(), first); assert.equal(prototype.show, original); assert.equal(stops, 1);
     prototype.show = () => {};
     globalThis.window.__conferenceDrawObserver = fixture();
