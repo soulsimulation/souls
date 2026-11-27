@@ -1976,7 +1976,7 @@ fn e16_a_walker_ringed_in_by_souls_staying_squeezes_out() {
 fn assert_walked(run: &Run, who: Id, stood: &[Vec3]) {
     const TICK: i128 = 50_000;
     let speed = i128::from(skills::walk::SPEED);
-    let every = i128::from(worldd::bodies::KEYFRAME_US).div_ceil(TICK) * TICK;
+    let every = (i128::from(worldd::bodies::KEYFRAME_US) + TICK - 1) / TICK * TICK;
     let near = |q: Vec3, p: Vec3, s: Vec3| {
         // The distance from `s` to the segment from `q` to `p`, on the plan.
         let (ax, az) = (i128::from(p.x - q.x), i128::from(p.z - q.z));
