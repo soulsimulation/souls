@@ -113,3 +113,24 @@ test('only independently known absent/released phases are inactive; their load c
 
 
 test('release completion accepts only independently upcoming new ownership, not a stale old marker',()=>{const s=nativeSample();s.nativeContacts=null;s.contactState={at:10e6,crew:'n-crew',field:'valid',grips:{crew:'n-crew',load:'n-load',phase:'souls:released',sinceUs:9e6,holds:[]}};s.bodies[0].nativeCarryOwned=true;s.bodies[0].nativeCarryIdentity={crew:'next-crew',load:'next-load',sinceUs:10100000,preparing:true};s.nativeUpcoming=[{crew:'next-crew',load:'next-load',sinceUs:10100000,holds:[{body:'n-body'}]}];assert.equal(gradeInactive(s,{now:110}).ok,true);s.bodies[0].nativeCarryIdentity.sinceUs=9e6;assert.equal(gradeInactive(s,{now:110}).ok,false);s.bodies[0].nativeCarryIdentity.sinceUs=10100000;s.nativeUpcoming=[];assert.equal(gradeInactive(s,{now:110}).ok,false);});
+
+test('actual module import and synchronous observer hooks emit ordered installation boundaries and preserve methods', async () => {
+  const { contactTools } = await import('./oracle.mjs');
+  const prior = { window: globalThis.window, document: globalThis.document, location: globalThis.location, debug: console.debug };
+  const rows = [], render = function () { return 7; }, renderer = { render, getRenderTarget: () => null };
+  globalThis.window = { __soulsEntity: { scene: {}, camera: {}, renderer } };
+  globalThis.document = { baseURI: 'https://example.test/world/' }; globalThis.location = { href: 'https://example.test/world/' };
+  console.debug = text => { assert(text.startsWith('carry-install-stage ')); rows.push(JSON.parse(text.slice(20))); };
+  const kitURL = 'data:text/javascript,export class TakePeople{show(a){return this.value+a}palmOf(){}bodyObject(){}}';
+  try {
+    assert.deepEqual(await contactTools({ kitURL }), { installed: true });
+    assert.deepEqual(rows.map(r => r.stage), ['factory-enter', 'import-begin', 'import-complete', 'show-hook-begin', 'show-hook-complete', 'render-hook-begin', 'render-hook-complete', 'install-return']);
+    assert.equal(rows[0].resolvedURL, kitURL);
+    const { TakePeople } = await import(kitURL), person = new TakePeople(); person.value = 5;
+    assert.equal(person.show(3), 8); assert.equal(window.__carryContactObserver.active, false);
+    window.__carryContactObserver.stop(); assert.equal(renderer.render, render);
+    delete window.__carryContactObserver; rows.length = 0;
+    await assert.rejects(contactTools({ kitURL: 'data:text/javascript,throw new Error("fixture import failure")' }), /fixture import failure/);
+    assert.deepEqual(rows.map(r => r.stage), ['factory-enter', 'import-begin', 'install-error']);
+  } finally { globalThis.window = prior.window; globalThis.document = prior.document; globalThis.location = prior.location; console.debug = prior.debug; }
+});

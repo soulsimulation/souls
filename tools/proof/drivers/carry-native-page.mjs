@@ -1,7 +1,7 @@
 // One actual native two-carrier lifecycle. Resources belong to runOwnedAttempt; controls are ordinary UI/CLI input.
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAIR, pairArgs, lastJson, seatOf, seatEnv } from '../../playtest/arena/new-engine/seat.mjs';
 import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
@@ -86,11 +86,45 @@ async function offer(state) {
   state.load = (query.answers ?? []).flatMap(a => a.found ?? []).find(n => n.kind.split('@')[0] === 'mars:pallet_crates');
   if (!state.load) throw Error('carry-proof.load');
 }
-export function beforeNavigation({ page, paths, signal }) {
+const diagnostic = (state, stage, detail = {}) => {
+  appendFileSync(join(state.paths.dir, 'carry-install-diagnostic.jsonl'), JSON.stringify({ stage, at: new Date().toISOString(), ...detail }) + '\n', { mode: 0o600 });
+};
+const limited = (work, ms, name) => { let timer; return Promise.race([Promise.resolve().then(work), new Promise((_, no) => { timer = setTimeout(() => no(Error('carry-proof.' + name)), ms); })]).finally(() => clearTimeout(timer)); };
+async function failureExecution(state, page) {
+  const cdp = state.cdp;
+  if (!cdp) return;
+  try {
+    const value = await limited(() => cdp.send('Runtime.evaluate', { expression: 'JSON.stringify({url:location.href,ready:document.readyState,install:window.__carryInstallState,observer:!!window.__carryContactObserver,frame:window.__soulsEntity?.renderer?.info?.render?.frame})', returnByValue: true, timeout: 500 }), 750, 'failure-state-timeout');
+    diagnostic(state, 'failure-runtime-state', { value });
+  } catch (error) { diagnostic(state, 'failure-runtime-state-error', { error: String(error) }); }
+  try {
+    const paused = new Promise(ok => cdp.once('Debugger.paused', e => ok(e.callFrames.map(f => ({ name: f.functionName, url: f.url, location: f.location })))));
+    await limited(() => cdp.send('Debugger.pause'), 500, 'failure-pause-timeout');
+    diagnostic(state, 'failure-execution-stack', { frames: await limited(() => paused, 500, 'failure-stack-timeout') });
+  } catch (error) { diagnostic(state, 'failure-execution-stack-error', { error: String(error) }); }
+  finally { await limited(() => cdp.send('Debugger.resume'), 500, 'failure-resume-timeout').catch(error => diagnostic(state, 'failure-resume-error', { error: String(error) })); }
+}
+export async function installContactObserver(page, config, { record, onFailure = async () => {}, timeoutMs = 10000 } = {}) {
+  record('evaluate-begin', { config, pageURL: page.url() });
+  try {
+    const result = await limited(() => page.evaluate(contactTools, config), timeoutMs, 'observer-install-timeout');
+    record('evaluate-return', { result });
+    if (result?.installed !== true) throw Error('carry-proof.observer-not-installed');
+    return result;
+  } catch (error) { record('evaluate-error', { error: String(error) }); await onFailure(); throw error; }
+}
+export async function beforeNavigation({ page, paths, signal }) {
   const state = states.get(paths.dir); if (!state) throw Error('carry-proof.preparation');
   const pageError = error => state.pageErrors.push(String(error.stack ?? error));
+  const consoleStage = message => { const text = message.text(); if (text.startsWith('carry-install-stage ')) diagnostic(state, 'page-stage', { value: JSON.parse(text.slice(20)) }); };
+  page.on('console', consoleStage);
+  state.cdp = await page.context().newCDPSession(page);
+  state.cdp.on('Debugger.scriptParsed', e => { if (e.url && (state.scriptCount = (state.scriptCount ?? 0) + 1) <= 500) diagnostic(state, 'script-parsed', { url: e.url, executionContextId: e.executionContextId, isModule: e.isModule }); });
+  await state.cdp.send('Debugger.enable');
+  diagnostic(state, 'diagnostic-ready');
   const response = response => {
-    const path = new URL(response.url()).pathname; if (!/\.(js|wasm)$/.test(path)) return;
+    const full = new URL(response.url()), path = full.pathname; if (!/\.(js|wasm)$/.test(path)) return;
+    diagnostic(state, 'module-response', { url: full.href, origin: full.origin, status: response.status(), resourceType: response.request().resourceType() });
     state.pending.push((async () => { const bytes = await response.body(); state.loaded[path] = hash(bytes); })().catch(error => (state.cancelledLoads ??= []).push({ path, error: String(error) })));
   };
   page.on('pageerror', pageError); page.on('response', response);
@@ -102,7 +136,7 @@ export function beforeNavigation({ page, paths, signal }) {
         save(state, 'carry-observer.json', observer);
       }
       save(state, 'carry-loaded.json', state.loaded); save(state, 'carry-page-errors.json', state.pageErrors);
-    } finally { page.off('pageerror', pageError); page.off('response', response); states.delete(paths.dir); }
+    } finally { page.off('pageerror', pageError); page.off('response', response); page.off('console', consoleStage); await state.cdp?.detach().catch(() => {}); states.delete(paths.dir); }
   };
 }
 export function wholeRunFailure(observer, pageErrors) {
@@ -160,7 +194,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   const manifest = await verifyAssets(state, check);
   check('desktop-input', scene.viewport.touch === 0 && scene.viewport.width === 1440 && scene.viewport.height === 1000);
   const kitURL = Object.keys(state.loaded).find(path => /\/people-kit-[^/]+\.js$/.test(path)); check('production-kit-loaded', !!kitURL);
-  await page.evaluate(contactTools, { kitURL, binding, entry, source: manifest.sourceHead });
+  await installContactObserver(page, { kitURL, binding, entry, source: manifest.sourceHead }, { record: (stage, detail) => diagnostic(state, stage, detail), onFailure: () => failureExecution(state, page) });
   save(state, 'carry-binding.json', binding); save(state, 'carry-scene.json', scene);
   await setupGate(state, page, signal);
   check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));

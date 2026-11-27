@@ -181,14 +181,26 @@ function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
   const tools = { CONTACT_LIMIT_M, drawnLoad, drawnGrips, observeRender, gradeContact, gradeInactive, gradeLoadClock, retainResult, bodyGeometry };
   if (!config) return tools;
   return (async () => {
+    // Diagnostic receipts observe installation only; no pose, clock or renderer call is injected.
+    const stage = (name, detail = {}) => {
+      const row = { stage: name, at: performance.now(), documentURL: location.href, ...detail };
+      window.__carryInstallState = row;
+      console.debug('carry-install-stage ' + JSON.stringify(row));
+    };
+    stage('factory-enter', { kitURL: config.kitURL, resolvedURL: new URL(config.kitURL, document.baseURI).href });
+    try {
     const world = window.__soulsEntity;
     if (!world?.scene || !world?.camera || !world?.renderer || window.__carryContactObserver) fail('world unavailable or observer already installed');
+    stage('import-begin');
     const kit = await import(config.kitURL), prototype = kit.TakePeople?.prototype;
+    stage('import-complete', { exports: Object.keys(kit) });
     if (!prototype?.show || !prototype?.palmOf || !prototype?.bodyObject) fail('production people interface unavailable');
     let people;
     const originalShow = prototype.show;
     function show(...args) { const result = originalShow.apply(this, args); people = this; return result; }
+    stage('show-hook-begin');
     prototype.show = show;
+    stage('show-hook-complete');
     const nativeMatrix=(evidence,time)=>{
       if(evidence?.source!=='native-records'||!evidence.frames?.length)fail('native pose evidence unavailable');
       const result=world.camera.matrix.clone().identity();
@@ -204,6 +216,7 @@ function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
     };
     let previousExpected=null;
     const observer = window.__carryContactObserver = { active: false, samples: [], failures: [], dropped: 0, source: config.source, previousFrame: -1, total: 0, counts: {}, maxima: {}, failedWitnesses: [] };
+    stage('render-hook-begin');
     const stopRender = observeRender(world.renderer, world, stamp => {
       const now = performance.now();
       if (!observer.active) return;
@@ -261,13 +274,16 @@ function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
       observer.previousFrame = stamp.frame;
       retainResult(observer, sample, result);
     }, error => { observer.total++; observer.counts['failed-measurement'] = (observer.counts['failed-measurement'] ?? 0) + 1; if (observer.failures.length < 30) observer.failures.push({ at: performance.now(), message: String(error) }); });
+    stage('render-hook-complete');
     observer.stop = () => {
       stopRender();
       if (prototype.show === show) prototype.show = originalShow; else fail('people observer ownership changed');
       observer.active = false;
       return { stopped: true };
     };
+    stage('install-return');
     return { installed: true };
+    } catch (error) { stage('install-error', { message: String(error), stack: String(error?.stack ?? '') }); throw error; }
   })();
 
 }
