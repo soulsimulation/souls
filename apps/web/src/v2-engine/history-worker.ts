@@ -30,8 +30,8 @@ const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 const text = new TextDecoder();
 
-async function get(url: URL): Promise<Uint8Array | null> {
-  const res = await fetch(url);
+async function get(url: URL, signal?: AbortSignal): Promise<Uint8Array | null> {
+  const res = await fetch(url, { signal });
   return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
 }
 
@@ -63,38 +63,58 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
 }
 
 let header: Promise<Uint8Array> | null = null;
-const days = new Map<number, Promise<DayIndex | null>>();
+const days = new Map<number, { p: Promise<DayIndex | null>; at: number }>();
 const ready = init();
 
-/** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. */
-const readIndex = (base: URL, day: number): Promise<DayIndex | null> => get(new URL(dayIndexKey(day), base)).then((b) => {
-  if (!b) return null;
-  const m = decode(b, { useMaps: true }) as Map<number, unknown>;
-  return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
-});
-/** The same, kept while the worker lives. */
-function dayIndex(base: URL, day: number): Promise<DayIndex | null> {
-  if (!days.has(day)) days.set(day, readIndex(base, day));
-  return days.get(day)!;
+/** A day's bundle index, `[[start µs, key, SHA-256], ...]`, or null when the day has none. Kept while the worker
+ *  lives, but `today`'s (the day of the world's now, still being written) only five seconds (#3358): a seek reads the
+ *  bundles written since, and one just after a read ahead asks nothing again. */
+function dayIndex(base: URL, day: number, today: number): Promise<DayIndex | null> {
+  const kept = days.get(day);
+  if (kept && (day < today || Date.now() - kept.at < 5000)) return kept.p;
+  const p = get(new URL(dayIndexKey(day), base)).then((b) => {
+    if (!b) return null;
+    const m = decode(b, { useMaps: true }) as Map<number, unknown>;
+    return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
+  });
+  days.set(day, { p, at: Date.now() });
+  return p;
 }
 /** #3358: the stored bytes of the bundles read last (a bundle's key names it for good), so a bundle read ahead, or
- *  read by the seek before, is not fetched again. A failed read is not kept. */
+ *  read by the seek before, is not fetched again. A failed or stopped read is not kept. */
 const bundles = new Map<string, Promise<Uint8Array>>();
-let reading: Promise<unknown> = Promise.resolve();
-function bundle(base: URL, key: string): Promise<Uint8Array> {
+function bundle(base: URL, key: string, signal?: AbortSignal): Promise<Uint8Array> {
   let b = bundles.get(key);
   if (!b) {
-    bundles.set(key, (b = get(new URL(key, base)).then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
+    bundles.set(key, (b = get(new URL(key, base), signal).then((x) => x ?? Promise.reject(new Error(`no bundle ${key}`)))));
     b.catch(() => bundles.delete(key));
     while (bundles.size > 4) bundles.delete(bundles.keys().next().value!);
   }
   return b;
 }
+/** #3358: read aheads (history.ts prepare) fetch what a seek they foresee will read and keep the bundle, applying
+ *  nothing, one at a time in the order asked (the first is the likelier). A seek drops those not begun (`round`) and
+ *  stops the one under way when its bundle does not hold the seek's moment, so a guess never slows the seek chosen. */
+let reading: Promise<unknown> = Promise.resolve(), round = 0;
+let under: { from: number; to: number; stop: AbortController } | null = null;
+function readAhead(base: URL, at: number, now: number, floor?: number) {
+  const r = round, today = Math.floor(now / DAY_US);
+  reading = reading.then(async () => {
+    const f = r === round ? await walk(at, now, floor, (day) => dayIndex(base, day, today)) : null;
+    const to = f && r === round ? await f.later() : null;
+    if (!f || r !== round) return;
+    const stop = new AbortController();
+    under = { from: at, to: to ?? Infinity, stop };
+    await bundle(base, f.key, stop.signal).finally(() => { under = null; });
+  }).catch(() => null);
+}
 
 async function seek(base: URL, seq: number, at: number, now: number, floor?: number) {
+  round++;
+  if (under && !(under.from <= at && at < under.to)) under.stop.abort();
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
   // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
-  const found = await walk(at, now, floor, (day) => dayIndex(base, day));
+  const today = Math.floor(now / DAY_US), found = await walk(at, now, floor, (day) => dayIndex(base, day, today));
   if (!found) throw new Error(`no history in the year before ${at} µs`);
   const stored = await bundle(base, found.key);
   await ready;
@@ -112,13 +132,6 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
 
 self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number; ahead?: true }>) => {
   const { base, seq, at, now, floor, ahead } = e.data;
-  // #3358: a read ahead (history.ts prepare) fetches what that seek will read and keeps the bundle, applying nothing,
-  // one at a time in the order asked (the first is the likelier seek); today's index is not kept, so the seek still
-  // reads the bundles written since
-  if (ahead) {
-    const url = new URL(base), today = Math.floor(now / DAY_US);
-    reading = reading.then(() => walk(at, now, floor, (day) => (day < today ? dayIndex(url, day) : readIndex(url, day)))).then((f) => f && bundle(url, f.key)).catch(() => null);
-    return;
-  }
+  if (ahead) return readAhead(new URL(base), at, now, floor);
   seek(new URL(base), seq, at, now, floor).catch((err) => post({ t: 'error', seq, message: String(err?.message ?? err) }));
 };
