@@ -1169,7 +1169,7 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
             println!("{now} µs: pending {:?}", r.tree().timers().values().next());
         }
         ended.extend(acts.ended());
-        fired.extend(acts.fired.drain(..));
+        fired.append(&mut acts.fired);
     }
     println!("timer entries: {timers:?}\nfired: {fired:?}\nended: {ended:?}");
     assert_eq!(timers.len(), 2, "set, then cleared as it fired");
