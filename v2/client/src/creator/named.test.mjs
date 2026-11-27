@@ -151,3 +151,40 @@ test('an edit the world does not answer in time is never sent again: its ops are
   assert.equal(sent, 1);
   assert.deepEqual([...new Set(plan.map((e) => e.status))], ['unanswered']);
 });
+
+test('a copy whose ground came without its tiles takes them from the terrain file, at the ground\'s tile size', async () => {
+  const { liftOf } = await import('./named.mjs');
+  const h = Buffer.alloc(9 * 4);
+  [1000, 1500, 2000, 2000, 2500, 3000, 3000, 3500, 4000].forEach((v, i) => h.writeInt32LE(v, i * 4));
+  const tiles = [[0, 0, { hex: h.toString('hex') }, { hex: '00000000' }]];
+  const bare = { nodes: [{ id: id(1), fields: { 1: hex('ground'), 24: 64000 } }] };
+  assert.equal(await liftOf(bare), null); // no tiles, no file: no heights, as before (move-to-ground is bad-op)
+  assert.equal((await liftOf(bare, { tileSize: 64000, tiles }))(32_000_000, 32_000_000), 2_500_000);
+  await assert.rejects(liftOf(bare, { tileSize: 32000, tiles }), { code: 'named.terrain' });
+  // a copy holding its own tiles reads them, never the file's
+  const own = { nodes: [{ id: id(1), fields: { 24: 64000, 25: tiles } }] };
+  assert.equal((await liftOf(own, { tileSize: 64000, tiles: [] }))(0, 0), 1_000_000);
+  // the open ground is still the ground without its tiles: a roof planter goes to it
+  const w = world();
+  delete w.nodes[1].fields[25];
+  assert.equal(indexOf(w).ground.id, id(1));
+  assert.equal(planOf(BATCH, w, flat)[3].ops[1].in, id(1));
+});
+
+test('a deck whose def keeps no params (an older revision) has its floors moved alone, then is already', () => {
+  const w = world();
+  delete w.nodes.find((x) => x.id === id(14)).fields[19];
+  const [deck, podium] = planOf({ ops: BATCH.ops.slice(4) }, w, flat);
+  assert.equal(deck.status, 'ready');
+  assert.match(deck.detail, /keeps no params: its floors only/);
+  assert.deepEqual(deck.ops.map((o) => [o.op, o.in ?? o.node]), [['place', id(1)], ['remove', id(15)]]);
+  assert.deepEqual([podium.status, podium.with], ['ready', 0]);
+  // raised above a step, its floor's walked surface moves
+  const higher = planOf({ ops: [{ op: 'set-param', node: 'deck', param: 'height', from: 0.24, to: 0.3 }] }, w, flat)[0];
+  assert.deepEqual(higher.ops, [{ op: 'set', node: id(15), field: 14, value: [[300, ring]] }]);
+  // after it: the floor (ground cover) gone, the podium on the ground
+  const after = { ...w, nodes: w.nodes.filter((x) => x.id !== id(15)).map((x) => (x.id === id(16) ? { ...x, parent: id(1), pose: on(1, [9000000, 200000, -2000000]) } : x)) };
+  assert.deepEqual(planOf({ ops: BATCH.ops.slice(4) }, after, flat).map((e) => e.status), ['already', 'already']);
+  // a param the def does not keep, other than a height, is still a bad op
+  assert.equal(planOf({ ops: [{ op: 'set-param', node: 'deck', param: 'rails', from: false, to: true }] }, w, flat)[0].status, 'bad-op');
+});

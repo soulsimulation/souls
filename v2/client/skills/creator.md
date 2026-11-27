@@ -183,6 +183,8 @@ the root, which `describe` shows), and from then on you place it like any other 
   of at most 256 operations, and the world checks each. It prints one line per op (`ready`, `applied`, `already`,
   `refused` with the code, `unresolved`, `ambiguous`, `moved-since`, ...), then the counts. Run `--dry-run` first;
   a second run finds every op `already` and sends nothing. A thing moved off a roof to the ground gets a new id.
+  If your copy's open ground came without its terrain tiles, a move to the ground is `bad-op`: give the tiles with
+  `--terrain <file>` (`{"tileSize", "tiles"}`, the rows of the ground's field 25), read only for such a copy.
 
 ## Furnishing
 
