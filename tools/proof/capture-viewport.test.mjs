@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { captureDeficit, checkCapturePixels } from './capture-viewport.mjs';
+import { captureDeficit, checkCapturePixels, waitCapturePresentation } from './capture-viewport.mjs';
 test('correction is measured from actual capture dimensions rather than a fixed browser decoration offset', () => {
   assert.deepEqual(captureDeficit({ width: 640, height: 360 }, { deviceWidth: 640, deviceHeight: 273 }), { width: 0, height: 87 });
   assert.deepEqual(captureDeficit({ width: 390, height: 844 }, { deviceWidth: 370, deviceHeight: 800 }), { width: 20, height: 44 });
@@ -18,4 +18,12 @@ test('encoded qualification rejects cropping, upscaling dimensions and gray righ
     const padded = Buffer.from(bytes); padded.set([128, 128, 128], (y * 64 + x) * 3);
     assert.throws(() => checkCapturePixels(padded, size, size), /edge-pixels-mismatch/);
   }
+});
+
+test('presentation waits remain bounded when rendering stalls or the owner aborts', async () => {
+  const stalled = { evaluate: () => new Promise(() => {}) };
+  await assert.rejects(waitCapturePresentation(stalled, { timeoutMs: 20 }), /presentation-timeout/);
+  const controller = new AbortController();
+  const wait = waitCapturePresentation(stalled, { signal: controller.signal, timeoutMs: 5000 });
+  controller.abort(Error('owned-interruption')); await assert.rejects(wait, /owned-interruption/);
 });

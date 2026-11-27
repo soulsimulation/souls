@@ -22,6 +22,20 @@ export function inspectCaptureFrame(file, size, seconds = null) {
   const pixels = execFileSync('ffmpeg', ['-v', 'error', ...(seconds === null ? [] : ['-ss', String(seconds)]), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], { timeout: 5000, maxBuffer: 32 * 1024 * 1024 });
   checkCapturePixels(pixels, actual, size); return { seconds, width: actual.width, height: actual.height, edges: 'pass' };
 }
+export async function waitCapturePresentation(page, { signal, timeoutMs = 5000 } = {}) {
+  let timer, abort;
+  try {
+    signal?.throwIfAborted();
+    await Promise.race([
+      page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error('proof.capture-presentation-timeout')), timeoutMs);
+        abort = () => reject(signal.reason); signal?.addEventListener('abort', abort, { once: true });
+      }),
+    ]);
+    signal?.throwIfAborted();
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
+}
 async function rawFrame(cdp, page, signal, timeoutMs) {
   let timer, abort, handler;
   try {
@@ -53,6 +67,7 @@ export async function prepareCaptureViewport(page, { size, directory, signal, ti
   try {
     await page.setContent('<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#162536;color:white}i{position:fixed;width:18px;height:18px}.tl{left:0;top:0;background:#f00}.tr{right:0;top:0;background:#0f0}.bl{left:0;bottom:0;background:#00f}.br{right:0;bottom:0;background:#ff0}p{margin:24px;font:18px sans-serif}b{position:fixed;left:45%;top:45%;width:20px;height:20px;background:white;animation:move .7s infinite alternate linear}@keyframes move{to{transform:translateX(30px)}}</style><i class=tl></i><i class=tr></i><i class=bl></i><i class=br></i><p>Full viewport capture calibration</p><b></b>');
     geometry(await css());
+    await waitCapturePresentation(page, { signal, timeoutMs });
     let frame = await rawFrame(cdp, page, signal, timeoutMs);
     writeFileSync(join(directory, 'raw-before.jpg'), Buffer.from(frame.data, 'base64'), { flag: 'wx' });
     evidence.frames.push({ phase: 'before', metadata: frame.metadata });
@@ -62,6 +77,7 @@ export async function prepareCaptureViewport(page, { size, directory, signal, ti
       evidence.correction = { deficit, bounds: window.bounds };
       await cdp.send('Browser.setWindowBounds', { windowId: window.windowId, bounds: { width: window.bounds.width + deficit.width, height: window.bounds.height + deficit.height } });
       geometry(await css());
+      await waitCapturePresentation(page, { signal, timeoutMs });
       frame = await rawFrame(cdp, page, signal, timeoutMs); evidence.corrected = true;
       evidence.frames.push({ phase: 'after', metadata: frame.metadata });
     }

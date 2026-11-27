@@ -469,3 +469,20 @@ test('native customer-page partial startup closes registered services before a b
   assert.equal(report.status, 'BOOT_ABORT'); assert.equal(report.browserStarted, false);
   assert.equal(report.teardown.children.length, 2); assert.ok(report.teardown.children.every(c => c.exited)); assert.equal(report.qualified, false);
 });
+
+test('browser ownership and observation count survive calibration rejection, including failed close', async t => {
+  for (const closeFails of [false, true]) {
+    let closeCalls = 0;
+    const f = setup(t, { browser: async o => {
+      o.onOpened({ close: async () => { closeCalls++; if (closeFails) throw Error('context-close-failed'); } });
+      throw Error('capture-calibration-failed');
+    } });
+    const report = await f.runner(f.o);
+    assert.equal(report.status, closeFails ? 'CLEANUP_FAIL' : 'BOOT_ABORT');
+    assert.equal(report.browserObservationStarted, true); assert.equal(report.browserStarted, false);
+    assert.equal(report.captureOrdinal, 1); assert.equal(f.ledger().captures, 1); assert.equal(closeCalls, 1);
+    assert.equal(report.teardown.browserClosed, closeFails ? undefined : true);
+    assert.equal(report.teardown.worldStopped, true); assert.equal(report.qualified, false);
+    if (closeFails) assert.match(report.teardown.browserError, /context-close-failed/);
+  }
+});

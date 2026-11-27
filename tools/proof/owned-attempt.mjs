@@ -125,14 +125,16 @@ async function openBrowser(o, paths, base) {
     viewport: o.viewport ?? { width: 1920, height: 1080 }, deviceScaleFactor: 1,
     ...(o.world.kind === 'native-page' ? {} : { recordVideo: { dir: paths.video, size: o.viewport ?? { width: 1920, height: 1080 } } }),
     env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: resolve(o.browserCache) } });
-  const page = context.pages()[0] ?? await context.newPage();
-  if (o.world.kind !== 'native-page') return { page, close: () => context.close(), base };
-  try {
-    const capture = await prepareCaptureViewport(page, { size: o.viewport ?? { width: 1920, height: 1080 }, directory: join(paths.dir, 'capture'), signal: o.signal });
-    await page.screencast.start({ path: join(paths.video, 'native-page.webm'), size: o.viewport ?? { width: 1920, height: 1080 } });
-    const provenance = { executableHash: digest(readFileSync(o.browserExecutable)), browser: context.browser()?.version() ?? null, playwright: createRequire(join(o.playwrightRoot ?? o.sourceRoot, 'mars/viewer/package.json'))('@playwright/test/package.json').version, viewport: o.viewport, capture };
-    return { page, provenance, base, close: async () => { try { await page.screencast.stop(); } finally { await context.close(); } } };
-  } catch (error) { await context.close(); throw error; }
+  let recording = false;
+  const owned = { base, close: async () => { try { if (recording) await owned.page.screencast.stop(); } finally { await context.close(); } } };
+  // Transfer ownership as soon as Chromium exists, before page creation or capture calibration can fail.
+  o.onOpened?.(owned);
+  owned.page = context.pages()[0] ?? await context.newPage();
+  if (o.world.kind !== 'native-page') return owned;
+  const capture = await prepareCaptureViewport(owned.page, { size: o.viewport ?? { width: 1920, height: 1080 }, directory: join(paths.dir, 'capture'), signal: o.signal });
+  await owned.page.screencast.start({ path: join(paths.video, 'native-page.webm'), size: o.viewport ?? { width: 1920, height: 1080 } }); recording = true;
+  owned.provenance = { executableHash: digest(readFileSync(o.browserExecutable)), browser: context.browser()?.version() ?? null, playwright: createRequire(join(o.playwrightRoot ?? o.sourceRoot, 'mars/viewer/package.json'))('@playwright/test/package.json').version, viewport: o.viewport, capture };
+  return owned;
 }
 
 const production = { source, changed: (root, from, to) => git(root, 'diff', '--name-only', from, to).split('\n'),
@@ -261,7 +263,12 @@ async function run(o, d) {
     controller.signal.throwIfAborted();
     requireThat(healthy(), 'owned-world-exited');
     let launchSettled = false, lateBrowser;
-    const opening = Promise.resolve().then(() => d.browser({ ...o, signal: controller.signal }, paths, world.base));
+    const markObservation = () => {
+      if (!report.browserObservationStarted) { report.browserObservationStarted = true; state.captures++; report.captureOrdinal = state.historicalCaptures + state.captures; }
+    };
+    const opening = Promise.resolve().then(() => d.browser({ ...o, signal: controller.signal, onOpened(context) {
+      browser = context; markObservation();
+    } }, paths, world.base));
     opening.then(value => { launchSettled = true; lateBrowser = value; }, () => { launchSettled = true; });
     try { browser = await bounded(() => opening, controller.signal, (o.phaseTimeoutMs ?? 30000) + 1000, 'browser-open', timeout); }
     catch (error) {
@@ -278,7 +285,7 @@ async function run(o, d) {
       }
       throw error;
     }
-    report.browserStarted = true; state.captures++; report.captureOrdinal = state.historicalCaptures + state.captures;
+    report.browserStarted = true; markObservation();
     report.browserProvenance = browser.provenance ?? null;
     const page = browser.page;
     page.on('console', m => report.console.push({ kind: m.type(), text: m.text(), location: m.location?.() ?? null }));
