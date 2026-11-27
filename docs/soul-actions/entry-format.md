@@ -81,6 +81,20 @@ Every kind of thing states both. `motion.how` is one closed list, shared with En
 `pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
 by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+Raised and lowered (#5067, `sim::activity::carry::raise`): a part whose entry names a point `foot` at its origin (role
+`contact`) and whose height is its longest side is tilted up about that foot by a crew of two, from lying to standing,
+and laid down again (`part:raise`, `part:lower`); `state.raise_crew`'s default is how many it takes (two when it says
+none). The Soul who asks is the lifter and stands beside the part's top end; the other, the footer, stands beside its base
+on the other side, each 0.42 m beyond a post. The world walks the lifter beside the part at 0.4 m/s and the part turns
+as far as the lifter has come, at most 0.9 degrees a tick: the foot never moves on the plan. Raised, the part stands on
+its foot with its crew holding it; a crew too small, a carrier more than 0.7 m from its hold, a part not lying (or not
+standing) and a lifter with no ground to walk on are refused by name (`raise.crew-too-small`, `part.grip-out-of-reach`,
+`raise.not-lying`, `raise.not-standing`, `raise.way-blocked`). The stream: the take's commit (the crew's node set at the
+foot, the part in its slot); `souls:carry-track` `souls:raise` or `souls:lower`; `souls:carry-grips` in that phase; one
+motion sample of the crew's node a tick, its position the foot, its turn about the base line; then `souls:raised`, the
+part's leave to the ground standing with the crew's node under it and `souls:carry-grips` `souls:held`, or
+`souls:lowered`, the part's leave to the ground lying and `souls:carry-grips` `souls:released`.
+
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
 hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else

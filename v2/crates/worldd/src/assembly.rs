@@ -675,6 +675,129 @@ impl Assembly {
         })
     }
 
+    /// The take of `part:raise` and `part:lower` (#5067): `part`, lying or standing on `ground`, into crew `activity`'s
+    /// slot with the crew's node set where the part is, turned as it is, so the part rides it unturned at its origin
+    /// (its foot) and nothing moves. Written on `tree` and waiting in [`Assembly::ready`] as a take. Returns where the
+    /// part is on `ground`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn pivot(
+        &mut self,
+        tree: &mut Tree,
+        acts: &Activities,
+        mint: &mut Minter,
+        now: Micros,
+        by: (Id, Id),
+        activity: Id,
+        part: Id,
+        ground: Id,
+    ) -> R<(Vec3, Quat)> {
+        if self.held.contains_key(&activity) {
+            return Err(refusal("part.held", show(activity)));
+        }
+        let s = &self.seating.structure;
+        if !s.is_crew(kind_of(tree, activity)?.as_str()) {
+            return Err(refusal("part.not-a-crew", show(activity)));
+        }
+        if !s.is_part(kind_of(tree, part)?.as_str()) {
+            return Err(refusal("part.not-a-part", show(part)));
+        }
+        let (ph, gh) = match (tree.handle(part), tree.handle(ground)) {
+            (Some(p), Some(g)) => (p, g),
+            _ => return Err(refusal("part-missing", show(part))),
+        };
+        let owner = |id: Id| {
+            kind_of(tree, id).ok().and_then(|k| {
+                self.seating
+                    .rules
+                    .kinds
+                    .get(k.as_str())
+                    .map(|d| d.owner.clone())
+            })
+        };
+        // Another crew of two or more on the part holds it: theirs to raise or lower.
+        if let Some(other) = tree
+            .children(ph)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .map(|n| n.id())
+            .find(|c| {
+                *c != activity
+                    && owner(*c).as_deref() == Some("activity")
+                    && acts.members(*c).map_or(0, <[_]>::len) >= 2
+            })
+        {
+            return Err(refusal("part.held-by-another", show(other)));
+        }
+        let at = xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
+        self.aim(tree, activity, ground)?;
+        self.seating.take(
+            tree,
+            acts,
+            mint,
+            now,
+            activity,
+            part,
+            (at.pos, at.rot),
+            (Vec3::ZERO, Quat::IDENTITY),
+        )?;
+        self.drain(by, activity, Step::Taken);
+        self.held.insert(activity, part);
+        Ok((at.pos, at.rot))
+    }
+
+    /// The end of a raise or a lowering (#5067): crew `activity`'s `part` out of its slot onto `ground` at `at` (its
+    /// position and turn there), its crew holding it on (`hold`: a part stood up, their node under it) or their node at
+    /// rest (one laid down). No track: the part is there already. Checked as a seating is (`site.occupied` when a body
+    /// stands where it would be), then written on `tree` and waiting in [`Assembly::ready`] as a seating.
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle(
+        &mut self,
+        tree: &mut Tree,
+        acts: &Activities,
+        mint: &mut Minter,
+        now: Micros,
+        by: (Id, Id),
+        activity: Id,
+        part: Id,
+        ground: Id,
+        at: (Vec3, Quat),
+        hold: bool,
+        reach: i64,
+    ) -> R<()> {
+        let target = Target {
+            to: Frame {
+                node: ground,
+                slot: None,
+            },
+            place: at.0,
+            turn: at.1,
+            at: at.0,
+            joins: Vec::new(),
+            hold,
+        };
+        self.aim(tree, activity, ground)?;
+        let done = self
+            .seating
+            .check(
+                tree,
+                acts,
+                &mut mint.clone(),
+                activity,
+                part,
+                &target,
+                reach,
+                &[],
+            )
+            .and_then(|()| self.seating.put(tree, acts, mint, now, activity, part, &target));
+        if let Err(r) = done {
+            self.seating.parts.clear();
+            return Err(r);
+        }
+        self.drain(by, activity, Step::Seated);
+        Ok(())
+    }
+
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
     /// part to `to`'s slot `slot` (or to `point` in `to`'s frame), joined to `joins` (by default, a bearing part to the
     /// bay's standing parts, a resting part to its bearing ones). `carriers`: everyone holding the part, each within

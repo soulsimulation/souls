@@ -59,6 +59,8 @@ use sim::moves::{Moves, Reach};
 use sim::slots::Slots;
 use sim::timers::DueList;
 
+mod raise;
+
 type R<T> = Result<T, Refusal>;
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -104,13 +106,20 @@ pub enum Verb {
     Take,
     Unseat,
     Put,
+    /// A crew tilts a lying part up about its foot until it stands, held, or lays a standing one down (#5067,
+    /// [`raise`]).
+    Raise,
+    Lower,
 }
 
 impl Verb {
     /// Whether the act is answered once its entries are committed through the walkers' maps, not at once (a take or
     /// a seating, 0.135 A2).
     pub fn deferred(self) -> bool {
-        matches!(self, Verb::Take | Verb::Unseat | Verb::Put)
+        matches!(
+            self,
+            Verb::Take | Verb::Unseat | Verb::Put | Verb::Raise | Verb::Lower
+        )
     }
 
     /// The engine act a verb names, if it names one.
@@ -131,6 +140,8 @@ impl Verb {
             "part:take" => Verb::Take,
             "part:unseat" => Verb::Unseat,
             "part:put" => Verb::Put,
+            "part:raise" => Verb::Raise,
+            "part:lower" => Verb::Lower,
             _ => return None,
         })
     }
@@ -189,6 +200,10 @@ pub struct Engine {
     loads: BTreeMap<String, Load>,
     /// Each load's grips by its entry's point names, by plain kind (#5067, [`grips::grips_of`]).
     grips: BTreeMap<String, Vec<Grip>>,
+    /// The parts that are raised about a foot, by plain kind (#5067, `sim::activity::carry::raise::Spec`), and each
+    /// crew's part on its way up or down ([`raise`]).
+    raise_specs: BTreeMap<String, sim::activity::carry::raise::Spec>,
+    raising: BTreeMap<Id, raise::Raising>,
     /// Each crew's side carriers and their places while its part is on a seating's track (#5067): its carry, taken up
     /// again when the part comes back, keeps them.
     set_sides: BTreeMap<Id, Vec<(Id, [i64; 2])>>,
@@ -694,6 +709,12 @@ impl Engine {
     pub fn with_loads(mut self, entries: &Json) -> Engine {
         self.entries = entries.clone();
         for (_, e) in entries.obj().unwrap_or(&[]) {
+            if let (Some(kind), Some(spec)) = (
+                e.get("kind").and_then(Json::str),
+                sim::activity::carry::raise::Spec::of(e),
+            ) {
+                self.raise_specs.insert(kind.to_owned(), spec);
+            }
             if let (Some(kind), Ok(load)) = (e.get("kind").and_then(Json::str), Load::of(e)) {
                 self.loads.insert(kind.to_owned(), load);
                 if let Ok(g) = grips::grips_of(e) {
@@ -728,6 +749,8 @@ impl Engine {
             steered: BTreeSet::new(),
 
             asm: None,
+            raise_specs: BTreeMap::new(),
+            raising: BTreeMap::new(),
             taking: BTreeMap::new(),
             joining: None,
             library: crate::moves::library().unwrap_or_else(|r| {
@@ -1183,6 +1206,9 @@ impl Engine {
                 }
             }
             Verb::Steer | Verb::Land | Verb::Stop => {}
+            Verb::Raise | Verb::Lower => {
+                return self.raise_act(&mut tree, c, slots, town, a, now);
+            }
             Verb::Take | Verb::Unseat | Verb::Put => {
                 // A lone holder of a seated part lays it down beside its bay (0.135 A2): it cannot carry it alone, and
                 // B18 would keep it holding the part for good.
@@ -1684,6 +1710,16 @@ impl Engine {
             .is_some_and(|m| m.iter().any(|m| m.body == body))
         {
             return Ok(());
+        }
+        // #5067: a part on its way up or down hangs on both its carriers: the leave waits until it stands or lies.
+        if self.raising.contains_key(&activity) {
+            return Err(refusal(
+                "raise.under-way",
+                format!(
+                    "{} is turning its part up or down; next: leave once it stands or lies (a few seconds)",
+                    show(activity)
+                ),
+            ));
         }
         let Some(mut carry) = self.carries.remove(&activity) else {
             // #5067: a crew holding its part with no carry (a seated frame it holds, or a part on a seating's track,
@@ -2401,6 +2437,11 @@ impl Engine {
                     show(w.body)
                 );
             }
+        }
+        // #5067: each part on its way up or down turns as far as its lifter has walked.
+        if !self.raising.is_empty() {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.raise_tick(tr, c, town, now);
         }
         // #5067: while it holds a load, each carrier faces its hold: through the lift, the walk, every stop, the set-in
         // and the way back. Where the crew's node is: its last sample, or where its seating's track has it now.
@@ -3503,6 +3544,11 @@ impl Engine {
         now: Micros,
         live: &Tree,
     ) {
+        // #5067: a raise's or a lowering's own commits.
+        if self.raising.contains_key(&r.activity) {
+            self.raise_written(r, written, now, live);
+            return;
+        }
         let taking = self.taking.remove(&r.activity);
         if let Some(asm) = self.asm.as_mut() {
             asm.written(r.activity, r.step, written);

@@ -402,3 +402,23 @@ test('an offer names the crew this Soul fronts, when another Soul offered one at
   const unsure = async () => ({ crews: crews.map((c) => ({ ...c, with: [] })) });
   assert.equal((await newCrew(unsure, [], { tries: 2, sleep: async () => {} })).crew, null, 'two new crews, neither shown as this Soul\'s: no guess');
 });
+
+test('#5067: part raise and part lower send their intents; carry grip top|foot stands the raise crew beside the part', async () => {
+  const { raiseSpot, RAISE_SIDE } = await import('./carry.mjs');
+  const entry = { geometry: { bounds_mm: [1219, 2438, 76] }, points: { foot: { role: 'contact', at_mm: [0, 0, 0] } } };
+  const H = Math.SQRT1_2 * 2 ** 30;
+  // lying: its own y along world +z (a quarter turn about x), its foot at (5, -3) m
+  const lying = { pos: [5e6, 38_000, -3e6], rot: [H, H, 0, 0] };
+  const top = raiseSpot(lying, entry, 'top'), foot = raiseSpot(lying, entry, 'foot');
+  near(top, [5e6 + 609_500 + RAISE_SIDE, -3e6 + 2_438_000], 'the lifter beside the top end');
+  near(foot, [5e6 - 609_500 - RAISE_SIDE, -3e6], 'the footer beside the base, on the other side');
+  // standing: either side of its base
+  near(raiseSpot({ pos: [5e6, 0, -3e6] }, entry, 'top'), [5e6 + 609_500 + RAISE_SIDE, -3e6], 'standing: beside its base');
+  assert.equal(raiseSpot(lying, { geometry: { bounds_mm: [51, 102, 2743] } }, 'top'), null, 'a kind with no foot is not raised');
+  const c = { ns: 'eden', ground: id(1), kinds: {}, me: id(6), placeOf: () => null, kindOf: () => undefined, crewMiddle: () => [1e6, 2e6] };
+  assert.deepEqual(carryIntents({ kind: 'part', do: 'raise', crew: id(8), part: id(4) }, c), [{ verb: 'part:raise', target: id(8), params: { 1: id(4) } }]);
+  assert.deepEqual(carryIntents({ kind: 'part', do: 'lower', crew: id(8) }, c), [{ verb: 'part:lower', target: id(8), params: {} }]);
+  assert.deepEqual(carryIntents({ kind: 'part', do: 'lower', crew: id(8), part: '3,2' }, c), [{ verb: 'part:lower', target: id(8), params: { 3: [2e6, 0, 0] } }]);
+  assert.equal(carryIntents({ kind: 'part', do: 'raise', crew: id(8) }, c).code, 'part-usage');
+});
+

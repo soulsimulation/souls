@@ -11,12 +11,25 @@
    "audience": {
     "rule": "everyone"
    }
+  },
+  "raise_crew": {
+   "n": 30,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
   }
  },
  "points": {
   "stand_front": {
    "role": "stand",
    "at_mm": [0, 0, 500]
+  },
+  "foot": {
+   "role": "contact",
+   "at_mm": [0, 0, 0]
   },
   "grip_low": {
    "role": "grip",

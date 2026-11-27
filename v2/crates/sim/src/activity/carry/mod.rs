@@ -87,6 +87,7 @@
 //! open ground, whose frame holds the building).
 
 pub mod grips;
+pub mod raise;
 #[cfg(test)]
 mod tests;
 pub mod turn;
@@ -1618,6 +1619,40 @@ impl Carry {
             floor,
         });
         Ok((at, t1))
+    }
+
+    /// One sample of the carry's node at `p` turned `q` on its ground (#5067: a raise's track, [`raise`]), written as a
+    /// step's is. Its track's last sample is this one.
+    pub fn turn_to(&mut self, tree: &mut Tree, at: Micros, p: Vec3, q: Quat) -> R<()> {
+        let e = (
+            self.activity,
+            self.audience,
+            EffectBody::Changes(vec![ChangeRec {
+                change: sample(self.activity, at, self.ground, p, q),
+                rest: Rest::new(),
+            }]),
+        );
+        self.write(tree, at, vec![e])?;
+        match self.track.last_mut() {
+            Some(last) => *last = (at, p, q),
+            None => self.track.push((at, p, q)),
+        }
+        Ok(())
+    }
+
+    /// Puts the board at rest on `node` at `position` turned `orientation` (in its frame) at once, under the transfer id
+    /// `transfer` (#5067: a part a lowering has laid down, already there): one change of parent, nothing moves.
+    pub fn rest_at(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        position: Vec3,
+        orientation: Quat,
+        transfer: Id,
+    ) -> R<()> {
+        let entries = self.put_entries(tree, node, position, orientation, transfer)?;
+        self.write(tree, at, entries)
     }
 
     /// Where its carriers were at its last sample, `(front, back)` on the open ground's plan, µm: its span apart along
