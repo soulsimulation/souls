@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { silentPartyTemplate } from '../../playtest/party/rehearse.mjs';
-import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyCaptureMs } from './party-native-page.mjs';
+import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyCaptureMs, partyStageWaitMs } from './party-native-page.mjs';
 
 const souls = ['s0','s1','s2','s3','s4'];
 const sample = (n, activities) => ({ at:n*250, tick:n*5, frame:n, currentCanvas:true,
@@ -43,6 +43,19 @@ test('receipts cannot substitute for advancing five-person final draws',()=>{
   assert.throws(()=>partyStage([sample(1,dance),missing],[e],e),/whole-group/);
   assert.throws(()=>partyStage([sample(1,dance),sample(2,[...dance.slice(0,4),'walk'])],[e],e),/all five/);
   assert.equal(partyStage([sample(1,dance),sample(2,dance)],[e],e).lastTick,10);
+});
+
+test('dance readiness waits for the delayed fifth approach and two actual all-dance tails',()=>{
+  const e=event('dance-ready',{souls});
+  assert.equal(partyStageWaitMs(e.stage),12000);
+  for(const stage of ['greeting-done','reply-done','dance-sustained','departure-done','party-clean'])
+    assert.equal(partyStageWaitMs(stage),2500);
+  const rows=[sample(1,dance.map((a,i)=>i===4?'walk':a)),sample(36,[...dance.slice(0,4),'walk'])];
+  assert.throws(()=>partyStage(rows,[e],e),/all five/);
+  rows.push(sample(37,dance));
+  assert.throws(()=>partyStage(rows,[e],e),/all five/);
+  rows.push(sample(38,dance));
+  assert.equal(partyStage(rows,[e],e).lastTick,190);
 });
 
 test('sustained dance, independent departure/next wave and all-left rest must actually appear',()=>{

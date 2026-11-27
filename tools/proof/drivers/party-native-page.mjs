@@ -9,6 +9,7 @@ import { conferenceClearanceTools } from './conference-native-page.mjs';
 import { nativeCameraMode } from './camera-native-page.mjs';
 
 export const partyCaptureMs = 90000; // The owning attempt must also set its journey ceiling to this value.
+export const partyStageWaitMs = stage => stage === 'dance-ready' ? 12000 : 2500;
 const states = new Map(), names = ['Cedar', 'Maple', 'Willow', 'Birch', 'Aspen'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const save = (paths, name, data) => writeFileSync(join(paths.dir, name), JSON.stringify(data, null, 2), { flag: 'wx', mode: 0o600 });
@@ -199,7 +200,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       const status = await page.evaluate(() => ({ count: window.__partyDrawObserver.samples.length }));
       const event = { stage, at: Date.now(), sampleIndex: Math.max(0, status.count - 1), soul: details.seat?.soul, souls: details.seats?.map(s => s.soul), activityId: details.activityId };
       state.stages.push(event); if (immediate.has(stage)) return;
-      for (const until = Date.now() + 2500;;) {
+      for (const until = Date.now() + partyStageWaitMs(stage);;) {
         signal.throwIfAborted(); assert(Date.now() - began < partyCaptureMs, 'party hard90s journey exceeded');
         const draw = await page.evaluate(() => ({ samples: window.__partyDrawObserver.samples, failures: window.__partyDrawObserver.failures }));
         assert.equal(draw.failures.length, 0, 'party actual draw observation failed');
