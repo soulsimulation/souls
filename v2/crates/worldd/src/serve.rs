@@ -2799,13 +2799,16 @@ struct LogReader {
     at: Option<sim::log::At>,
 }
 
+/// What takes a record and its number: the public stream's writer.
+type Push<'a> = dyn FnMut(u64, &[u8]) -> Result<(), Refusal> + 'a;
+
 /// One batch of the records left in the log for the public stream ([`Handover`], [`STREAM_WINDOW`]), handed to `push`
 /// in order; whether any were left. The stream calls it when its channel is empty. A batch that reads nothing and
 /// does not move on, with records still left, is refused by name (`log-read`): every record left is on the disk.
 fn stream_from_log(
     handover: &Handover,
     log: &mut LogReader,
-    push: &mut dyn FnMut(u64, &[u8]) -> Result<(), Refusal>,
+    push: &mut Push<'_>,
 ) -> Result<bool, Refusal> {
     let Some((from, _, end)) = handover.left() else {
         return Ok(false);
