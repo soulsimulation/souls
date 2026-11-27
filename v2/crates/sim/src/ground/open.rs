@@ -420,8 +420,7 @@ impl Index {
             let window = grow(window.ok_or("no square")?, SELECT + 2 * self.widest);
             let mut scene = Scene {
                 open: true,
-                terrain: Terrain::within(after, self.ground, window)
-                    .map_err(|_| "the terrain")?,
+                terrain: Terrain::within(after, self.ground, window).map_err(|_| "the terrain")?,
                 ..Scene::default()
             };
             for &c in after.children(gh).ok_or("no ground")? {

@@ -99,11 +99,7 @@ async fn i5216_a_decks_floor_removed_is_checked_on_its_own_squares_not_the_whole
             node: Ref::Node(im.nodes["fixture-deck/floor-0"]),
         },
     ];
-    let (got, _) = send(
-        &mut ws,
-        edit_batch_intent(&w, creator, 2, got.version, ops),
-    )
-    .await;
+    let (got, _) = send(&mut ws, edit_batch_intent(&w, creator, 2, got.version, ops)).await;
     assert_eq!(got.kind, 1, "the edit commits: {got:?}");
     let e = edit_check(&w, 2);
     println!("#5216 the deck's floor removed: edit_check {}", e.to_json());
@@ -193,7 +189,6 @@ async fn i5216_edits_past_the_checkers_line_are_refused_by_name_and_the_next_com
     assert_eq!(got.kind, 1, "the next edit commits: {got:?}");
 }
 
-
 /// The checker's gauge (`edit_check` in the world's `health.json`) once it has checked `n` edits: the last edit's
 /// stages, µs, by name, and its other numbers.
 fn edit_check(w: &Seeded, n: i128) -> json::Value {
@@ -272,8 +267,10 @@ fn slow_ops(im: &import_eden::Import, ground: Id, which: &str) -> Vec<Op> {
 }
 
 /// A measurement (#5216 A1): the edit's time by stage on Eden as the facts file gives it (`EDEN_FACTS`; run with
-/// `--release`), beside 20 walkers, with a small edit before and after it for comparison. `SLOW_EDIT_OPS` picks the
-/// operations (`tower`, `counter`, `deck`, comma separated; all when unset).
+/// `--release`, the world's folder on a disk no other job writes, e.g. `TMPDIR=/dev/shm`, or the answer's time is
+/// that disk's sync), beside `SLOW_EDIT_WALKERS` walkers (20 when unset), with three small edits before and after it
+/// for comparison. `SLOW_EDIT_OPS` picks the operations (`tower`, `counter`, `deck`, comma separated; all when unset).
+/// The edit's work is held too: its ground is cut alone.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "a measurement: needs the exported Eden facts file (EDEN_FACTS)"]
 async fn i5216_the_27_nov_edit_on_eden_by_stage() {
@@ -296,7 +293,14 @@ async fn i5216_the_27_nov_edit_on_eden_by_stage() {
         .and_then(|n| n.parse().ok())
         .unwrap_or(20);
     for (k, &body) in w.souls.iter().enumerate().take(walkers) {
-        walk(&mut souls, &w, body, 1, (x0 + 2 * k as i64) * M, (z0 + 8) * M);
+        walk(
+            &mut souls,
+            &w,
+            body,
+            1,
+            (x0 + 2 * k as i64) * M,
+            (z0 + 8) * M,
+        );
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
     let said = |what: &str, got: &Got, took: Duration, e: &json::Value| {
@@ -327,10 +331,11 @@ async fn i5216_the_27_nov_edit_on_eden_by_stage() {
     n += 1;
     let e = edit_check(&w, n);
     said(&format!("the edit ({which})"), &got, took, &e);
-    // Held by its work, whatever the machine: Eden's open ground is thousands of squares.
-    if got.kind == 1 {
-        cut_alone(&e, 64);
-    }
+    // Held by its work, whatever the machine. Measured: 61 squares and 5 buildings for the four operations (12 for
+    // the tower, 4 for the deck, the rest about the counter's house and the doorways beside it), of an open ground
+    // of up to 4,096 squares (256 terrain tiles of 64 m); before #5216, the whole.
+    assert_eq!(got.kind, 1, "the edit commits: {got:?}");
+    cut_alone(&e, 128);
     version = got.version;
     for k in 0..3 {
         let (x, z) = ((x0 + 44 + 2 * k) * M, (z0 + 2) * M);
@@ -343,8 +348,4 @@ async fn i5216_the_27_nov_edit_on_eden_by_stage() {
         said("a wall after", &got, took, &edit_check(&w, n));
         version = got.version;
     }
-    println!(
-        "#5216 health: {}",
-        std::fs::read_to_string(w.dir.join("health.json")).unwrap()
-    );
 }

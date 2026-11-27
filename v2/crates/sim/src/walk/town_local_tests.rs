@@ -939,7 +939,10 @@ fn a_deck_whose_one_floor_is_removed_is_cut_alone_and_equals_the_whole() {
     assert!(!whole, "a wall beside it is rebuilt locally ({why:?})");
     let mut w = whole_of(&t);
     let d = differences(&mut t, &mut w, 300);
-    assert!(d.is_empty(), "after the wall, the town equals the whole: {d:?}");
+    assert!(
+        d.is_empty(),
+        "after the wall, the town equals the whole: {d:?}"
+    );
 }
 
 /// #5216: two changes far apart in one part (a creator's batch) are each cut about themselves, and the squares
