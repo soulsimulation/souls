@@ -942,6 +942,55 @@
    "template": "worlds/templates/mars-camp.json (its shade yard), not mars-two",
    "kind": "mars:shade_cloth",
    "forms": "own"
+  },
+  {
+   "def": "mars-frame-12ft@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:rack_upright_12ft",
+   "forms": "own"
+  },
+  {
+   "def": "mars-deck-beam@1",
+   "placed": 4,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:deck_beam",
+   "forms": "own"
+  },
+  {
+   "def": "mars-two-by-four@1",
+   "placed": 5,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:two_by_four",
+   "forms": "own"
+  },
+  {
+   "def": "mars-plywood-sheet@1",
+   "placed": 2,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:plywood_sheet",
+   "forms": "own"
+  },
+  {
+   "def": "mars-deck-bay@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:deck_bay",
+   "forms": "own"
+  },
+  {
+   "def": "mars-stair-flight@1",
+   "placed": 1,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:stair_flight",
+   "forms": "own"
+  },
+  {
+   "def": "mars-stair-tread@1",
+   "placed": 10,
+   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
+   "kind": "mars:stair_tread",
+   "forms": "own"
   }
  ]
 }

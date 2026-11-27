@@ -4423,6 +4423,989 @@
           ]
         }
       ]
+    },
+    {
+      "note": "the deck yard (racks T2): the scripted build's piles (mars/viewer/engine/scenarios/build-bay.ts) west of the plywood stack: two 12 ft frames and four 9 ft beams, five 2x4 joists and two plywood sheets, the site of one deck bay and a stair flight with its treads beside it (content/kinds/construction; content/worlds/mars/map.json names each copy's kind)",
+      "group": "deck",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-frame-12ft",
+            "version": 1,
+            "description": "A 12 ft pallet-rack frame (two blue columns); two people carry it, one holds it up.",
+            "tags": [
+              "build",
+              "rack",
+              "upright",
+              "deck",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.572,
+                      1.829,
+                      0.0
+                    ],
+                    "size": [
+                      0.076,
+                      3.658,
+                      0.076
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.572,
+                      1.829,
+                      0.0
+                    ],
+                    "size": [
+                      0.076,
+                      3.658,
+                      0.076
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.319,
+                      0.0
+                    ],
+                    "size": [
+                      1.144,
+                      0.038,
+                      0.038
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      1.829,
+                      0.0
+                    ],
+                    "size": [
+                      1.144,
+                      0.038,
+                      0.038
+                    ],
+                    "tint": "steel"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      3.339,
+                      0.0
+                    ],
+                    "size": [
+                      1.144,
+                      0.038,
+                      0.038
+                    ],
+                    "tint": "steel"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "size": {
+              "box": [
+                1.219,
+                3.658,
+                0.076
+              ]
+            },
+            "layer": "solid",
+            "params": {
+              "steel": {
+                "type": "color",
+                "default": "#3f6fa8",
+                "doc": "steel colour"
+              }
+            },
+            "palette": {
+              "steel": "#3f6fa8"
+            }
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-deck-beam",
+            "version": 1,
+            "description": "A 9 ft pallet-rack beam for the deck bay; two people carry it.",
+            "tags": [
+              "build",
+              "rack",
+              "beam",
+              "deck",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.051,
+                      0.0
+                    ],
+                    "size": [
+                      0.051,
+                      0.102,
+                      2.623
+                    ],
+                    "tint": "beam"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.051,
+                      -1.341
+                    ],
+                    "size": [
+                      0.051,
+                      0.102,
+                      0.06
+                    ],
+                    "tint": "clip"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.051,
+                      1.341
+                    ],
+                    "size": [
+                      0.051,
+                      0.102,
+                      0.06
+                    ],
+                    "tint": "clip"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "size": {
+              "box": [
+                0.051,
+                0.102,
+                2.743
+              ]
+            },
+            "layer": "solid",
+            "params": {
+              "beam": {
+                "type": "color",
+                "default": "#e0782a",
+                "doc": "beam colour"
+              },
+              "clip": {
+                "type": "color",
+                "default": "#3b3d40",
+                "doc": "clip colour"
+              }
+            },
+            "palette": {
+              "beam": "#e0782a",
+              "clip": "#3b3d40"
+            }
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-two-by-four",
+            "version": 1,
+            "description": "A 6 ft 2x4 joist; two people carry it.",
+            "tags": [
+              "build",
+              "timber",
+              "joist",
+              "deck",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.044,
+                      0.0
+                    ],
+                    "size": [
+                      1.829,
+                      0.089,
+                      0.038
+                    ],
+                    "tint": "timber"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "size": {
+              "box": [
+                1.829,
+                0.089,
+                0.05
+              ]
+            },
+            "layer": "solid",
+            "params": {
+              "timber": {
+                "type": "color",
+                "default": "#c9a36b",
+                "doc": "timber colour"
+              }
+            },
+            "palette": {
+              "timber": "#c9a36b"
+            }
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-plywood-sheet",
+            "version": 1,
+            "description": "A 4x6 ft sheet of 3/4 in plywood; two to four people carry it flat.",
+            "tags": [
+              "build",
+              "plywood",
+              "sheet",
+              "deck",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.009,
+                      0.0
+                    ],
+                    "size": [
+                      1.829,
+                      0.019,
+                      1.219
+                    ],
+                    "tint": "ply"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "size": {
+              "box": [
+                1.829,
+                0.05,
+                1.219
+              ]
+            },
+            "layer": "solid",
+            "params": {
+              "ply": {
+                "type": "color",
+                "default": "#d8b98a",
+                "doc": "ply colour"
+              }
+            },
+            "palette": {
+              "ply": "#d8b98a"
+            }
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-deck-bay",
+            "version": 1,
+            "description": "The site of a deck bay: two 12 ft frames, beams at 0.5 and 1.8 m, five joists and two sheets on top.",
+            "tags": [
+              "build",
+              "rack",
+              "bay",
+              "deck",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "none"
+            },
+            "size": {
+              "box": [
+                1.219,
+                3.658,
+                2.972
+              ]
+            },
+            "layer": "decor",
+            "slots": [
+              {
+                "id": "upright_a",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  0.0,
+                  -1.448
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "upright_b",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  0.0,
+                  1.448
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_low_l",
+                "kind": "socket",
+                "p": [
+                  -0.572,
+                  0.5,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_low_r",
+                "kind": "socket",
+                "p": [
+                  0.572,
+                  0.5,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_high_l",
+                "kind": "socket",
+                "p": [
+                  -0.572,
+                  1.8,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "beam_high_r",
+                "kind": "socket",
+                "p": [
+                  0.572,
+                  1.8,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "j1",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.902,
+                  -1.172
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "j2",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.902,
+                  -0.572
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "j3",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.902,
+                  -0.002
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "j4",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.902,
+                  0.578
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "j5",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.902,
+                  1.178
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "s1",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.991,
+                  -0.612
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "s2",
+                "kind": "socket",
+                "p": [
+                  0.0,
+                  1.991,
+                  0.607
+                ],
+                "yaw": 0,
+                "capacity": 1
+              }
+            ]
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-stair-flight",
+            "version": 1,
+            "description": "A ten-tread stair flight up to the deck (2x12 stringers, 1.98 m rise).",
+            "tags": [
+              "build",
+              "stair",
+              "deck",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.99,
+                      -0.431
+                    ],
+                    "size": [
+                      2.5,
+                      0.06,
+                      0.038
+                    ],
+                    "tint": "timber"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.99,
+                      0.431
+                    ],
+                    "size": [
+                      2.5,
+                      0.06,
+                      0.038
+                    ],
+                    "tint": "timber"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "size": {
+              "box": [
+                2.5,
+                1.98,
+                0.9
+              ]
+            },
+            "layer": "solid",
+            "params": {
+              "timber": {
+                "type": "color",
+                "default": "#b8905a",
+                "doc": "timber colour"
+              }
+            },
+            "palette": {
+              "timber": "#b8905a"
+            },
+            "slots": [
+              {
+                "id": "tread_1",
+                "kind": "socket",
+                "p": [
+                  -1.125,
+                  0.18,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_2",
+                "kind": "socket",
+                "p": [
+                  -0.875,
+                  0.36,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_3",
+                "kind": "socket",
+                "p": [
+                  -0.625,
+                  0.54,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_4",
+                "kind": "socket",
+                "p": [
+                  -0.375,
+                  0.72,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_5",
+                "kind": "socket",
+                "p": [
+                  -0.125,
+                  0.9,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_6",
+                "kind": "socket",
+                "p": [
+                  0.125,
+                  1.08,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_7",
+                "kind": "socket",
+                "p": [
+                  0.375,
+                  1.26,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_8",
+                "kind": "socket",
+                "p": [
+                  0.625,
+                  1.44,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_9",
+                "kind": "socket",
+                "p": [
+                  0.875,
+                  1.62,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              },
+              {
+                "id": "tread_10",
+                "kind": "socket",
+                "p": [
+                  1.125,
+                  1.8,
+                  0.0
+                ],
+                "yaw": 0,
+                "capacity": 1
+              }
+            ]
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "mars-stair-tread",
+            "version": 1,
+            "description": "A 0.9 m 2x10 stair tread.",
+            "tags": [
+              "build",
+              "timber",
+              "tread",
+              "stair",
+              "mars"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.0,
+                      0.019,
+                      0.0
+                    ],
+                    "size": [
+                      0.9,
+                      0.038,
+                      0.235
+                    ],
+                    "tint": "timber"
+                  }
+                ],
+                "round": 0.01
+              }
+            },
+            "size": {
+              "box": [
+                0.9,
+                0.05,
+                0.235
+              ]
+            },
+            "layer": "solid",
+            "params": {
+              "timber": {
+                "type": "color",
+                "default": "#c9a36b",
+                "doc": "timber colour"
+              }
+            },
+            "palette": {
+              "timber": "#c9a36b"
+            }
+          }
+        },
+        {
+          "op": "place",
+          "def": "mars-frame-12ft@1",
+          "name": "deck-frame-1",
+          "p": [
+            -30.0,
+            19.0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-frame-12ft@1",
+          "name": "deck-frame-2",
+          "p": [
+            -30.0,
+            21.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-deck-beam@1",
+          "name": "deck-beam-1",
+          "p": [
+            -28.0,
+            20.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-deck-beam@1",
+          "name": "deck-beam-2",
+          "p": [
+            -27.65,
+            20.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-deck-beam@1",
+          "name": "deck-beam-3",
+          "p": [
+            -27.3,
+            20.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-deck-beam@1",
+          "name": "deck-beam-4",
+          "p": [
+            -26.95,
+            20.5
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-two-by-four@1",
+          "name": "two-by-four-1",
+          "p": [
+            -28.0,
+            27.2
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-two-by-four@1",
+          "name": "two-by-four-2",
+          "p": [
+            -27.8,
+            27.2
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-two-by-four@1",
+          "name": "two-by-four-3",
+          "p": [
+            -27.6,
+            27.2
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-two-by-four@1",
+          "name": "two-by-four-4",
+          "p": [
+            -27.4,
+            27.2
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-two-by-four@1",
+          "name": "two-by-four-5",
+          "p": [
+            -27.2,
+            27.2
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-plywood-sheet@1",
+          "name": "plywood-sheet-1",
+          "p": [
+            -30.5,
+            27.0
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-plywood-sheet@1",
+          "name": "plywood-sheet-2",
+          "p": [
+            -30.5,
+            28.6
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-deck-bay@1",
+          "name": "deck-bay",
+          "p": [
+            -24.0,
+            23.372
+          ]
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-flight@1",
+          "name": "stair-flight",
+          "p": [
+            -20.5,
+            22.75
+          ],
+          "r": 3.141592653589793
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-1",
+          "p": [
+            -22.0,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-2",
+          "p": [
+            -22.25,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-3",
+          "p": [
+            -22.5,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-4",
+          "p": [
+            -22.75,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-5",
+          "p": [
+            -23.0,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-6",
+          "p": [
+            -23.25,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-7",
+          "p": [
+            -23.5,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-8",
+          "p": [
+            -23.75,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-9",
+          "p": [
+            -24.0,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        },
+        {
+          "op": "place",
+          "def": "mars-stair-tread@1",
+          "name": "stair-tread-10",
+          "p": [
+            -24.25,
+            25.3
+          ],
+          "r": 1.5707963267948966
+        }
+      ]
     }
   ]
 }
