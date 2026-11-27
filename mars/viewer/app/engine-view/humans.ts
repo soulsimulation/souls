@@ -2661,9 +2661,11 @@ function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number)
       continue;
     }
     const originY = ankle.y, original = [leg.upper,leg.lower,leg.foot].map(b=>({p:b.position.clone(),q:b.quaternion.clone()}));
+    const authoredOffset = ankle.clone().sub(leg.lower.localToWorld(v.ankle[i].clone()));
     const pole = leg.lower.getWorldPosition(V()).sub(leg.upper.getWorldPosition(V()).add(ankle).multiplyScalar(.5));
     if (pole.lengthSq() < 1e-8) pole.copy(_fwd).addScaledVector(UP,.1);
     const rotation = leg.foot.getWorldQuaternion(new THREE.Quaternion());
+    let corrected = false;
     // Skin blends between shin and foot bones, so one ankle correction does not
     // necessarily lift the complete surface by the same amount. Recheck the real
     // skin with the same fixed-length IK, keeping the original 8 cm total bound.
@@ -2672,15 +2674,18 @@ function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number)
       const lift = Math.min(.08 - (ankle.y - originY), groundFootLift(holder.position.y, low, humanGroundSampler()?.(ankle.x, ankle.z)));
       if (lift < .0001) break;
       legTo(leg, v.ankle[i], ankle.setY(ankle.y + lift), pole, .999, rotation);
+      corrected = true;
       holder.updateMatrixWorld(true);
       leg.foot.getWorldPosition(ankle);
     }
-    if (fullSkinWeight < 1) {
+    if (corrected && fullSkinWeight < 1) {
       [leg.upper,leg.lower,leg.foot].forEach((bone,index)=>{
         bone.position.lerp(original[index].p,1-fullSkinWeight);
         bone.quaternion.slerp(original[index].q,1-fullSkinWeight);
       });
       holder.updateMatrixWorld(true);
+      // Foot is a Root sibling. Fade its authored offset with support, not across a different endpoint path.
+      place(leg.foot,leg.lower.localToWorld(v.ankle[i].clone()).addScaledVector(authoredOffset,1-fullSkinWeight));
     }
   }
 }

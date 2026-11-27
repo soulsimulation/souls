@@ -4,18 +4,22 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {templateFromGltf} from './people.ts';
+import {createRig, libAction, templateFromGltf} from './people.ts';
+import {CHARACTER_WIRE} from './character-wire.ts';
+import {clipTime, libraryPick, pickClip} from './clip-library.ts';
+import {ankleLocal, legsOf} from './rig.ts';
 import {HumanViews, setHumanGround, type SampledHuman} from './humans.ts';
 import {activityFrame} from './activity-poses.ts';
 import {blendFrames} from './posture-transition.ts';
 
-// Real production skin and animation, not an ankle diagnostic or a replacement clip.
+// Production meshes and each rig's actual CHARACTER_WIRE clip pack, not ankle-only diagnostics.
 const rigDir = process.env.HUMAN_RIG_DIR ?? fileURLToPath(new URL('../../public/modular/environment/', import.meta.url));
 async function template(name: string) {
   const loader = new GLTFLoader();
   loader.register(() => ({name:'gesture-test-material', loadMaterial:async()=>new THREE.MeshStandardMaterial()}));
   const read = async (file:string) => {const b=await readFile(rigDir+'/'+file);return loader.parseAsync(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),'');};
-  const mesh=await read(`animated-${name}.mesh.glb`), clips=await read('clips-ual.glb');
+  const wire=CHARACTER_WIRE[name as keyof typeof CHARACTER_WIRE];assert(wire);
+  const mesh=await read(wire.mesh), clips=await read(wire.clips);
   mesh.animations=clips.animations;
   return templateFromGltf(name,mesh);
 }
@@ -165,4 +169,54 @@ test('free support remains continuous through the authored gesture cycle and air
     assert(boundaries>0,'the authored kneeling clip must actually enter/leave the support classifier');
     const first=draw(.7);draw(1.3,'jump');assert(distance(first,draw(.7))<1e-5,'airborne release does not leave support state behind');
   } finally {views.clear();setHumanGround(null);}
+});
+
+
+test('fractional support adds no attachment error to the authored foot-to-shin offset',async t=>{
+  const source=await template('woman'),rest=createRig(source),authored=createRig(source);
+  rest.idle.setEffectiveWeight(1);rest.idle.time=0;rest.mixer.update(0);rest.holder.updateMatrixWorld(true);
+  const ankles=legsOf(rest).map(leg=>ankleLocal(leg).clone());
+  const pick=libraryPick({activity:'pick-up',base:'idle',seated:false,ground:false,speaking:false,speed:0})!;
+  const action=libAction(authored,pickClip(pick,'gesture-support-continuity'))!;
+  authored.mixer.stopAllAction();action.play();action.setEffectiveWeight(1);
+  const views=new HumanViews();views.setTemplates([source]);setHumanGround(()=>0);
+  const id='gesture-support-continuity';let partial=0,corrected=0,maxAuthored=0,maxError=0;
+  const boundary=.22631553014119465,ages=[boundary-1e-5,boundary+1e-5,...Array.from({length:91},(_,step)=>step/60)];
+  try {
+    for(const [sample,age]of ages.entries()) {
+      action.time=Math.min(action.getClip().duration-1e-7,clipTime(pick,action.getClip().duration,20+age,id,age));
+      authored.mixer.update(0);authored.holder.updateMatrixWorld(true);
+      const baseline=legsOf(authored),dims=views.bones()[id]?.dims;
+      views.setFrame([{id,p:[0,0,0],yaw:0,walk:0,walkDist:0,activity:'pick-up',baseActivity:'idle',activityAge:age}],20+age);views.render(1);
+      const holder=views.bodyObject(id)!,measured=dims??views.bones()[id].dims!;
+      const smooth=(x:number)=>{x=Math.max(0,Math.min(1,x));return x*x*(3-2*x);};
+      const weight=Math.min(...baseline.flatMap(leg=>[smooth((leg.upper.getWorldPosition(new THREE.Vector3()).y/measured.hipH-.6)/.2),smooth((leg.lower.getWorldPosition(new THREE.Vector3()).y/measured.shin-.25)/.5)]));
+      if(sample>=2&&(weight<=0||weight>=1))continue;
+      if(weight>0&&weight<1)partial++;
+      for(const [index,leg]of baseline.entries()) {
+        const offset=leg.foot.getWorldPosition(new THREE.Vector3()).sub(leg.lower.localToWorld(ankles[index].clone()));
+        const side=index===0?'L':'R',lower=holder.getObjectByName('LowerLeg'+side)!,foot=holder.getObjectByName('Foot'+side)!;
+        const upper=holder.getObjectByName('UpperLeg'+side)!;
+        const moved=upper.getWorldQuaternion(new THREE.Quaternion()).normalize().angleTo(leg.upper.getWorldQuaternion(new THREE.Quaternion()).normalize())>1e-5
+          ||lower.getWorldQuaternion(new THREE.Quaternion()).normalize().angleTo(leg.lower.getWorldQuaternion(new THREE.Quaternion()).normalize())>1e-5;
+        maxAuthored=Math.max(maxAuthored,offset.length());
+        if(sample<2||!moved) {
+          for(const [drawn,raw]of [[upper,leg.upper],[lower,leg.lower],[foot,leg.foot]]) {
+            assert(drawn.getWorldPosition(new THREE.Vector3()).distanceTo(raw.getWorldPosition(new THREE.Vector3()))<1e-5,'a no-op fit preserves the authored endpoint at '+age+' '+side);
+            assert(drawn.getWorldQuaternion(new THREE.Quaternion()).normalize().angleTo(raw.getWorldQuaternion(new THREE.Quaternion()).normalize())<1e-5,'a no-op fit preserves authored orientation');
+          }
+        } else {
+          corrected++;
+          const expected=lower.localToWorld(ankles[index].clone()).addScaledVector(offset,1-weight);
+          const error=expected.distanceTo(foot.getWorldPosition(new THREE.Vector3()));
+          maxError=Math.max(maxError,error);
+          assert(error<1e-5,'corrected support preserves authored attachment offset: age '+age+' '+side+' error '+error);
+        }
+      }
+      assert.deepEqual(holder.position.toArray(),[0,0,0],'support never relocates the authoritative root');
+    }
+    assert(partial>0,'the actual authored trajectory must cross fractional support');
+    assert(corrected>0,'the trajectory must include an actual corrected fractional leg');
+    t.diagnostic(JSON.stringify({partial,corrected,maxAuthored,maxError}));
+  } finally {views.clear();rest.mixer.stopAllAction();authored.mixer.stopAllAction();setHumanGround(null);}
 });
