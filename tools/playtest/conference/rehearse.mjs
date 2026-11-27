@@ -73,9 +73,7 @@ export async function discoverConference({ seat, lecture, question, record = () 
   return { activities: 3, lectern: lectern.offers, question: stand.offers };
 }
 
-export async function performConference({ seats, lecture, benches, question, record = () => {} }) {
-  assert.equal(seats.length, 5, 'one speaker and four listeners');
-  const [presenter, next] = seats;
+function conferenceCommands(record) {
   const command = async (seat, ...words) => {
     const answer = await seat.cli(...words);
     record({ person: seat.label, words, answer });
@@ -89,21 +87,52 @@ export async function performConference({ seats, lecture, benches, question, rec
     for (const other of others) completed(await command(other, 'together', 'accept', activity), `accept ${activity}`);
   };
   const leave = async (seat, activity) => completed(await command(seat, 'together', 'leave', activity), `leave ${activity}`);
-  async function assemble(speaker, listeners) {
-    // Forms take their places first. Offering first binds the same links, so taking a place then can refuse link-full.
-    await act(speaker, 'take_the_lectern', lecture, 'place=lectern');
-    for (let index = 0; index < listeners.length; index++) {
-      await act(listeners[index], 'attend', lecture, `seat=${benches[Math.floor(index / 2)]}/${index % 2 ? 'right' : 'left'}`);
-    }
-    await offer(speaker, 'hall-lecture', listeners);
+  return { command, act, body, parent, offer, leave };
+}
+
+export async function assembleConference({ seats, lecture, benches, record = () => {} }) {
+  assert.equal(seats.length, 5, 'one speaker and four listeners');
+  const [speaker, ...listeners] = seats, { act, offer } = conferenceCommands(record);
+  // Forms take their places first. Offering first binds the same links, so taking a place then can refuse link-full.
+  await act(speaker, 'take_the_lectern', lecture, 'place=lectern');
+  for (let index = 0; index < listeners.length; index++) {
+    await act(listeners[index], 'attend', lecture, `seat=${benches[Math.floor(index / 2)]}/${index % 2 ? 'right' : 'left'}`);
   }
-  async function explain(speaker) {
-    assert.equal(await parent(speaker), lecture, 'speaker is at the lectern');
-    await body(speaker, 'tell_story');
-    assert.equal(await parent(speaker), lecture, 'story gesture preserves the lectern');
-    await body(speaker, 'point', `toward=${question}`);
-    assert.equal(await parent(speaker), lecture, 'aimed point preserves the lectern');
+  await offer(speaker, 'hall-lecture', listeners);
+}
+
+export async function explainConference({ speaker, lecture, question, record = () => {}, storyRepeats = 1, interruptStory = false }) {
+  assert(Number.isSafeInteger(storyRepeats) && storyRepeats >= 1 && storyRepeats <= 4, 'one to four ordinary story actions per presentation');
+  const { command, body, parent } = conferenceCommands(record);
+  assert.equal(await parent(speaker), lecture, 'speaker is at the lectern');
+  // Each native action remains four seconds; repeated ordinary actions expose the global-clock phrase cycle.
+  for (let repeat = 0; repeat < storyRepeats; repeat++) await body(speaker, 'tell_story');
+  assert.equal(await parent(speaker), lecture, 'story gesture preserves the lectern');
+  let interrupted;
+  if (interruptStory) {
+    interrupted = await command(speaker, 'act', 'tell_story');
+    assert(interrupted.ok === true && interrupted.sequence !== undefined, 'ordinary story starts before interruption');
+    await sleep(1000); // Deliberate real-speed demonstration time, never a readiness assertion.
   }
+  await body(speaker, 'point', `toward=${question}`);
+  assert.equal(await parent(speaker), lecture, 'aimed point preserves the lectern');
+  if (interrupted) {
+    const receipt = await command(speaker, 'receipt', String(interrupted.sequence));
+    const end = receipt.receipt?.answers?.at(-1);
+    assert(end?.answer === 'refused' && end.reason, 'the interrupted story ends with a named native refusal');
+    await body(speaker, 'clap', 'for=1');
+    assert.equal(await parent(speaker), lecture, 'next gesture preserves the lectern');
+  }
+  return { interrupted: Boolean(interrupted), storyActions: storyRepeats };
+}
+
+export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false }) {
+  assert.equal(seats.length, 5, 'one speaker and four listeners');
+  const [presenter, next] = seats;
+  let interruptedStories = 0;
+  const { command, act, body, parent, offer, leave } = conferenceCommands(record);
+  const assemble = (speaker, listeners) => assembleConference({ seats: [speaker, ...listeners], lecture, benches, record });
+  const explain = async speaker => { const result = await explainConference({ speaker, lecture, question, record, storyRepeats, interruptStory }); interruptedStories += Number(result.interrupted); };
   async function closeLecture(speaker, listeners) {
     // Successful permission-checked step_down also proves the speaker link survived the gestures.
     await act(speaker, 'step_down', lecture);
@@ -145,7 +174,7 @@ export async function performConference({ seats, lecture, benches, question, rec
   await sleep(3500);
   // Every participant leaves; no background activity is kept running after the demonstration.
   for (const seat of [...listeners, next]) await leave(seat, 'round-of-applause');
-  return { people: seats.length, presentations: 2, question: 'posted-answered-withdrawn', handover: true };
+  return { people: seats.length, presentations: 2, question: 'posted-answered-withdrawn', handover: true, interruptedStories };
 }
 
 /** Fresh homes run the exact client downloaded from the served world, including its normal pairing flow. */
