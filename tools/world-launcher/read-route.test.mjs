@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { readWorkersOf } from './registry.mjs';
 import { requestClass } from './flood.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(10);
 
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;

@@ -18,7 +18,7 @@ export async function init(origins) {
   writeFileSync(`${dir}/jwks.json`, JSON.stringify({ keys: [jwk] }));
   writeFileSync(`${dir}/private.json`, JSON.stringify(await exportJWK(privateKey)));
   writeFileSync(`${dir}/clerk.env`, [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${origins.join(',')}`,
-    `SIM_TEST_JWKS_FILE=${dir}/jwks.json`, `NODE_OPTIONS=--import=${root}/apps/server/test/clerk-jwks-preload.mjs`, ''].join('\n'));
+    `SIM_TEST_JWKS_FILE=${dir}/jwks.json`, `NODE_OPTIONS=--import=${root}/tools/lib/clerk-jwks-preload.mjs`, ''].join('\n'));
 }
 export async function sign(sub, azp) {
   const key = await importJWK(JSON.parse(readFileSync(`${dir}/private.json`, 'utf8')), 'RS256');

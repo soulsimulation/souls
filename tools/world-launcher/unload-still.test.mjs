@@ -7,7 +7,7 @@ import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { advanceClock, launcherSettings, openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const BASE = await testPort(8);
 const dir = mkdtempSync(join(tmpdir(), 'unload-still-'));

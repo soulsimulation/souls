@@ -13,7 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { appendFileSync } from 'node:fs';
 import { THUMB, intakeThumbnail, thumbnailRate } from './thumbnail.mjs';
 import { setUploadClassifier } from './moderation/classifier.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(8);
 
 const PORT = P0, RANGE = [P0 + 1, P0 + 4], ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -180,12 +180,12 @@ test('the rate limit answers 429 with Retry-After and a fix', async () => {
 });
 
 test('Clerk sign-in: the owner’s verified session sets it, another account’s is refused, a dev token is nobody', { timeout: 120_000 }, async () => {
-  const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../apps/server/test/clerk-fixture.ts');
+  const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../lib/clerk-fixture.ts');
   const { verifiedCreator } = await import('./creator-auth.mjs');
   const CPORT = P0 + 5, corigin = `http://127.0.0.1:${CPORT}`, cdir = join(dir, 'clerk'); mkdirSync(cdir);
   const keys = await clerkKeys(corigin);
   writeFileSync(join(cdir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
-  const envFile = join(cdir, 'fixture.env'), preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
+  const envFile = join(cdir, 'fixture.env'), preload = new URL('../../tools/lib/clerk-jwks-preload.mjs', import.meta.url).pathname;
   writeFileSync(envFile, [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${corigin}`, `SIM_TEST_JWKS_FILE=${join(cdir, 'jwks.json')}`, `NODE_OPTIONS=--import=${preload}`, ''].join('\n'));
   const ccommand = (w, port, o) => { const c = defaultCommand(w, port, { ...o, publicOrigin: corigin }); return { cmd: process.execPath, args: [born], env: { ...c.env, DATA_DIR: w.dataDir } }; };
   const C = await openLauncher({ port: CPORT, range: [P0 + 6, P0 + 7], dataDir: join(cdir, 'data'), webDir, templatesDir, authEnvFile: envFile, publicOrigin: corigin, command: ccommand, eager: 0, log: () => {} });
