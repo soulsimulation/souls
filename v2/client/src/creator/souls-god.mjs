@@ -345,6 +345,9 @@ export const FIX = {
   'zone.unknown': 'layers lists the zones',
   'secret.off': 'secret places are off, as on soul.game today: every place is on every Soul\'s map',
   'which-creator': 'name one with --creator',
+  'no-creator': 'pair first, with the line from God Mode\'s Connect your agent: souls-god.mjs pair <world url> --creator <grant>',
+  'pairing-waiting': 'the world\'s owner approves the card on the world page, or opens the pairing\'s link; then run status again',
+  'pairing-ended': 'pair again with the line from God Mode\'s Connect your agent',
   'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
   'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
   'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
@@ -948,15 +951,53 @@ async function pairing(home, url, grant, { within = 15_000 } = {}) {
   const log = join(home, 'pairing.log');
   writeFileSync(log, '', { mode: 0o600 });
   const out = openSync(log, 'a');
-  spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls-god.mjs', '--creator', grant], {
+  const child = spawn(process.execPath, [PAIR, '--directory', directory, '--world', world, '--gateway', gateway, '--label', 'souls-god.mjs', '--creator', grant], {
     detached: true, stdio: ['ignore', out, out], env: { PATH: process.env.PATH ?? '', SOULS_HOME: home },
-  }).unref();
+  });
+  writeFileSync(join(home, 'pairing.pid'), String(child.pid), { mode: 0o600 });
+  child.unref();
   for (const until = Date.now() + within; Date.now() < until;) {
     const first = readFileSync(log, 'utf8').split('\n').find((l) => l.startsWith('{'));
     if (first) return { ...JSON.parse(first), then: 'describe, once the world\'s owner has approved' };
     await new Promise((r) => setTimeout(r, 50));
   }
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
+}
+
+const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+
+/**
+ * The pairing this home is still waiting on, from the detached pair.mjs's lines (`pairing.log`) and its process
+ * (`pairing.pid`): `{state: 'waiting', code}` while it has asked and has no answer, `{state: 'ended', ...}` when it
+ * was refused or stopped with no answer, or null (no pairing, or it is done).
+ */
+export function pairingOf(home, alive = isAlive) {
+  let lines;
+  try { lines = readFileSync(join(home, 'pairing.log'), 'utf8').split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)); } catch { return null; }
+  const last = lines.at(-1);
+  if (!last || last.soul) return null;
+  if (last.ok === false) return { state: 'ended', refused: last.code };
+  let pid;
+  try { pid = Number(readFileSync(join(home, 'pairing.pid'), 'utf8')); } catch { /* an older pairing: taken as running */ }
+  return pid && !alive(pid) ? { state: 'ended' } : { state: 'waiting', code: last.code };
+}
+
+/**
+ * #5024 finding 1: the home holds no creator until the detached pairing's next poll collects the token (the directory
+ * answers polls every 5 s), so a `status` sent the moment the owner approved found none and was refused `which-creator`
+ * ("name one with --creator"). While a pairing is waiting, a command waits for it for at most `within` ms: the
+ * creator, once its token is kept; otherwise an answer that says what is happening. Null when no pairing is waiting.
+ */
+export async function afterPairing(home, { within = 20_000, step = 100, alive = isAlive } = {}) {
+  for (const until = Date.now() + within; ;) {
+    const ids = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
+    if (ids.length === 1) return { creator: ids[0] };
+    const p = pairingOf(home, alive);
+    if (!p) return null;
+    if (p.state === 'ended') return { ok: false, code: 'pairing-ended', detail: p.refused ? `the pairing was refused (${p.refused})` : 'the pairing stopped with no answer' };
+    if (Date.now() >= until) return { ok: false, code: 'pairing-waiting', detail: `the pairing${p.code ? ` (code ${p.code})` : ''} is waiting for the world's owner to approve it` };
+    await new Promise((r) => setTimeout(r, step));
+  }
 }
 
 
@@ -1069,14 +1110,20 @@ if (isMain(import.meta.url)) {
       process.exit(0);
     }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
-    const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
+    let creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (asked.library) {
       const said = libraryAnswer(asked.library, asked.args, libraryOf(home, creator && worldsOf(home, creator)[0]));
       if (typeof said === 'string') process.stdout.write(said + '\n'); else out(withFix(said));
       if (said?.ok === false) process.exitCode = 1;
       process.exit();
     }
-    if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
+    if (!creator && creators.length === 0) {
+      const p = await afterPairing(home);
+      if (p?.ok === false) { out(withFix(p)); process.exit(1); }
+      creator = p?.creator;
+    }
+    if (!creator && creators.length === 0) throw Object.assign(new Error('no creator is paired in this folder yet'), { code: 'no-creator' });
+    if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ')}`), { code: 'which-creator' });
     if (asked.directory) {
       const said = await askDirectory(home, creator, asked.directory, asked.body);
       out(withFix(said));
