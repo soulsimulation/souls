@@ -186,16 +186,55 @@ export async function performConference({ seats, lecture, benches, question, rec
   await observe('question-start', { seat: next });
   await act(next, 'post_question', question, 'words=How do the parts fit together?');
   await observe('question-posted', { seat: next });
+  const readQuestion = async () => {
+    const answer = await command(next, 'inspect', question);
+    assert(answer.ok && answer.id === question && answer.kind?.split('@')[0] === 'eden:conference_question',
+      'ordinary question readback identifies the original stand');
+    assert(answer.state && typeof answer.state === 'object', 'ordinary question state is available');
+    return answer.state;
+  };
+  const flag = (value, wanted) => value === wanted || value === Number(wanted);
+  const original = await readQuestion();
+  // inspect exposes a text field's reference identity, not the sentence itself (client/check/state.mjs).
+  assert(typeof original.words === 'string' && original.words.length && flag(original.pending, true) && flag(original.answered, false),
+    'the first question has a pending, unanswered text identity');
   const occupied = await command(next, 'can', `post_question:${question}`, 'words=Another question');
-  assert.equal(occupied.can, 'no', 'an author cannot replace a pending question silently');
-  assert.equal(occupied.reason, 'already_linked', 'the refusal names the occupied question link');
-  assert.equal(occupied.says, 'question_pending', 'the refusal identifies the authored pending-question guidance');
-  await observe('question-refused', { seat: next, answer: occupied });
+  assert.equal(occupied.ok, true, 'ordinary can read succeeds');
+  assert(['yes', 'no', 'unknown'].includes(occupied.can), 'ordinary can exposes its actual verdict');
+  let refused = occupied;
+  if (occupied.can === 'no' && occupied.current === true) {
+    assert.equal(occupied.reason, 'already_linked', 'the local refusal names the occupied question link');
+  } else {
+    // The current client cannot locally establish link admission. Unknown (or yes) must reach the world.
+    refused = await command(next, 'act', `post_question:${question}`, 'words=Another question', '--wait');
+    const terminal = refused.receipt?.answers?.at(-1);
+    assert(refused.ok === false && refused.phase === 'refused' && terminal?.answer === 'refused',
+      'duplicate question needs a terminal native refusal');
+    assert(refused.sequence !== undefined && refused.receipt.sequence === refused.sequence,
+      'duplicate refusal identifies the submitted command');
+    assert.equal(terminal.reason, 'already_linked', 'the native refusal names the occupied question link');
+    assert.equal(refused.reason, terminal.reason, 'ordinary terminal answer retains its native reason');
+  }
+  const unchanged = await readQuestion();
+  for (const field of ['words', 'pending', 'answered']) assert.deepEqual(unchanged[field], original[field],
+    `duplicate refusal preserves the original question ${field}`);
+  await observe('question-refused', { seat: next, answer: refused });
   await body(presenter, 'tell_story');
   await act(next, 'mark_answered', question);
+  const answered = await readQuestion();
+  assert(answered.words === original.words && flag(answered.pending, true) && flag(answered.answered, true),
+    'only the author marks the original pending question answered');
   await act(next, 'withdraw_question', question);
-  assert.equal((await command(next, 'can', `post_question:${question}`, 'words=Another question')).can, 'yes',
-    'withdrawing makes the question stand usable again');
+  const cleared = await readQuestion();
+  assert(cleared.words === null && flag(cleared.pending, false) && flag(cleared.answered, false),
+    'author withdrawal clears the question');
+  await act(next, 'post_question', question, 'words=Another question');
+  const recovered = await readQuestion();
+  assert(typeof recovered.words === 'string' && recovered.words.length && recovered.words !== original.words &&
+    flag(recovered.pending, true) && flag(recovered.answered, false), 'successful new post proves recovery');
+  await act(next, 'withdraw_question', question);
+  const empty = await readQuestion();
+  assert(empty.words === null && flag(empty.pending, false) && flag(empty.answered, false), 'recovery leaves the stand free');
   await observe('question-recovered', { seat: next });
   await closeLecture(presenter, seats.slice(1));
   await observe('introduction-start', { seat: presenter, guest: next });
@@ -224,7 +263,7 @@ export async function performConference({ seats, lecture, benches, question, rec
       'conference activities must end after all participants leave');
   }
   await observe('conference-clean', { seats });
-  return { people: seats.length, presentations: 2, question: 'posted-answered-withdrawn', handover: true, interruptedStories };
+  return { people: seats.length, presentations: 2, question: 'posted-refused-answered-withdrawn-reposted-withdrawn', handover: true, interruptedStories };
 }
 
 /** Fresh homes run the exact client downloaded from the served world, including its normal pairing flow. */
