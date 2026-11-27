@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPLICA_CDN, replicaAtCdn, replicaOrigin } from './replica-cdn.ts';
 
+// a new instance of the worker's replica module per test (its address arrives once per instance)
+const fresh = (tag: string) => import(`./replica-served.ts?${tag}`) as Promise<typeof import('./replica-served.ts')>;
 const V = '3e17c6aab67e0b66', ORIGIN = `/w/eden/v2/replica/${V}/replica.js`, CDN = `${REPLICA_CDN}/assets/replica/${V}/replica.js`;
 
 test('the CDN copy of the named version, and nothing else', () => {
@@ -44,7 +46,7 @@ test('replicaUrl: the CDN copy for the config it was loaded with, the origin cop
 test('the worker loads the origin copy when the CDN copy does not load', async () => {
   const listeners: ((e: unknown) => void)[] = [];
   (globalThis as unknown as { addEventListener: unknown }).addEventListener = (type: string, f: (e: unknown) => void) => { if (type === 'message') listeners.push(f); };
-  const m = await import('./replica-served.ts?fallback');
+  const m = await fresh('fallback');
   mkdirSync(new URL('../../../../.local/', import.meta.url), { recursive: true });
   const dir = mkdtempSync(join(new URL('../../../../.local/', import.meta.url).pathname, 'replica-cdn-'));
   writeFileSync(join(dir, 'replica.js'), 'export default async function init() {} export class StreamPlayer {} export const readPointer = () => "origin";\n');
@@ -57,7 +59,7 @@ test('the worker loads the origin copy when the CDN copy does not load', async (
 test('with no origin copy posted, a replica that does not load still fails', async () => {
   const listeners: ((e: unknown) => void)[] = [];
   (globalThis as unknown as { addEventListener: unknown }).addEventListener = (type: string, f: (e: unknown) => void) => { if (type === 'message') listeners.push(f); };
-  const m = await import('./replica-served.ts?none');
+  const m = await fresh('none');
   const init = m.default();
   for (const f of listeners) f({ data: { replica: 'file:///nonexistent-replica-4986.js' }, stopImmediatePropagation: () => {} });
   await assert.rejects(init);
