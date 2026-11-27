@@ -3269,6 +3269,16 @@ fn walk_by_form(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Wa
     let track = track(&dir);
     let end = track.last().map(|t| (t.2, t.3));
     println!("{tag}: {verb} at {today} from ({at}): {done:?} after {secs:.1} s, at the end {end:?}");
+    // Its path, a point each 2 m (and each change of node).
+    let mut last: Option<(Id, f64, f64)> = None;
+    let mut path = Vec::new();
+    for &(tick, node, x, z) in &track {
+        if last.is_none_or(|(n, lx, lz)| n != node || (x - lx).hypot(z - lz) >= 2.0) {
+            path.push(format!("{tick}:({x:.1},{z:.1})"));
+            last = Some((node, x, z));
+        }
+    }
+    println!("  {tag} path: {}", path.join(" "));
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     Walked { done, secs, track }
