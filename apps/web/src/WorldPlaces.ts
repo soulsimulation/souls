@@ -53,3 +53,15 @@ export const INTERIOR_PLACES_FOR_TOUR=Object.freeze(Object.entries(INTERIOR_PLAC
 
 export const curatedExploreLocations=Object.freeze([...WORLD_PLACES,...INTERIOR_PLACES_FOR_TOUR,...REGION_PLACES_FOR_TOUR]);
 export const CURATED_WORLD_LOCATIONS=Object.freeze(curatedExploreLocations.flatMap(place=>{const view=worldPlaceView(place.id);return view?[{id:place.id,label:place.label,p:view.p,target:view.target,radius:Math.max(2,Math.hypot(view.p[0]-view.target[0],view.p[1]-view.target[1],view.p[2]-view.target[2])*.3)}]:[]}));
+
+/** A world's Explore names the whole-world view after the world it is in ("All of Eden 2026" beside the heading
+ *  "Explore Eden 2026"), not after the scenery it was authored for. Any other list, and a world with no name, passes
+ *  unchanged (the same array: Explore's list keeps its identity). One answer is kept, so a page that asks at every
+ *  render makes one list. */
+let named:{from:readonly{id:string;label:string}[];name:string;to:readonly{id:string;label:string}[]}|null=null;
+export function placesNamedFor<T extends{id:string;label:string}>(locations:readonly T[],worldName:string|null|undefined):readonly T[]{
+ const name=worldName?.trim(),whole=WORLD_PLACE_VIEWS.overview.label;
+ if(!name||`All of ${name}`===whole||!locations.some(l=>l.id==='overview'&&l.label===whole))return locations;
+ if(named?.from!==locations||named.name!==name)named={from:locations,name,to:Object.freeze(locations.map(l=>l.id==='overview'&&l.label===whole?Object.freeze({...l,label:`All of ${name}`}):l))};
+ return named.to as readonly T[];
+}

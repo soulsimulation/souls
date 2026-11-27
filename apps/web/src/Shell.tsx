@@ -8,6 +8,7 @@ import {MySouls,useMySouls} from './MySouls.tsx';
 import {readHeldSouls,shownOwnedSouls,writeHeldSouls,type HeldSouls} from './owned-souls-hold.ts';
 import {edenReleaseWorlds,edenExperienceEnabled} from './eden-release.ts';
 import {EdenTour,type EdenTourPlace} from './EdenTour.tsx';
+import {placesNamedFor} from './WorldPlaces.ts';
 import {ClassroomPresentation} from './ClassroomPresentation.tsx';
 import {classroomProjection,classroomScreenEntityId} from './classroom-projection.ts';
 import {WorldSpeechOverlay} from './WorldSpeechOverlay.tsx';
@@ -221,7 +222,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   const tourHandle=viewerHandle;
   const exploreSeen=useRef(false),exploreOn=exploreAvailable(exploreSeen.current,viewerState);exploreSeen.current=exploreOn;  // V1: a viewer blip no longer unmounts Explore
   const explorePage=viewerHandle?.locationPage?.()??null;
-  const exploreLocations=arrivalOver()?viewerHandle?.locations?.()??[]:[];  // P7b: the first scan of the world's views (~0.12 s on a 4x phone) waits for the card
+  const exploreLocations=arrivalOver()?placesNamedFor(viewerHandle?.locations?.()??[],worldName):[];  // P7b: the first scan of the world's views (~0.12 s on a 4x phone) waits for the card
   const exploreName=worldName;
   const soulBodies=bodiesFromEvents(sim.edge??[]);
   const localClassroomPresentation=classroomProjection(edenExpansion,sim.conn.welcome?.worldId,Object.hasOwn(r.entities,classroomScreenEntityId),viewerState?.presentation==='live'&&!viewerState.loading&&!viewerState.unavailableReason,lessonIndex,cfg.worldId);
