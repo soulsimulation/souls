@@ -42,9 +42,10 @@ export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:C
  const preparing=records.preparing(at);
  for(const{grips:g,holds}of preparing){const pose=records.pose(g.load,at);if(!pose){errors.push('prepare-load-frame:'+g.load);continue;}const n=records.nodeAt(g.load,at);if(!n){errors.push('prepare-load-node:'+g.load);continue;}
   loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=pose;evidence[g.load]=records.evidence(g.load,at);
-  const u=Math.max(0,Math.min(1,1-(g.sinceUs-at)/300000)),weight=u*u*(3-2*u);
-  for(const h of holds){const entity=byBody.get(h.body);if(!entity||bodies[entity]||ambiguous.has(entity))continue;const order=records.anatomical(g,h.body);if(!order){errors.push('prepare-carrier-frame:'+h.body);continue;}const points=h.handsUm.map(p=>worldPoint(pose,p));
-   bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,hands:{left:points[order[0]],right:points[order[1]]},order,weight,preparing:true};
+  for(const h of holds){const entity=byBody.get(h.body),existing=entity?bodies[entity]:null;if(!entity||existing&&existing.phase!=='souls:released'||ambiguous.has(entity))continue;const order=records.anatomical(g,h.body);if(!order){errors.push('prepare-carrier-frame:'+h.body);continue;}const points=h.handsUm.map(p=>worldPoint(pose,p)),release=records.releaseBefore(h.body,at),prior=release&&release.sinceUs+300000>g.sinceUs-300000?release:null,start=Math.max(g.sinceUs-300000,prior?.sinceUs??-Infinity),u=Math.max(0,Math.min(1,(at-start)/(g.sinceUs-start))),blend=u*u*(3-2*u);
+   const hands:CarryHands={left:points[order[0]],right:points[order[1]]};let weight=blend;
+   if(prior){const oldPose=records.pose(prior.load,at),oldOrder=records.anatomical(prior,h.body),old=prior.holds[0];if(!oldPose||!oldOrder){errors.push('prepare-release-frame:'+h.body);continue;}const oldPoints=old.handsUm.map(p=>worldPoint(oldPose,p)),releaseWeight=Math.max(0,1-(at-prior.sinceUs)/300000);weight=releaseWeight+(1-releaseWeight)*blend;for(const[side,i]of[['left',0],['right',1]]as const)hands[side]=oldPoints[oldOrder[i]].map((n,k)=>n+(hands[side][k]-n)*blend)as[number,number,number];}
+   bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,hands,order,weight,preparing:true};
   }
  }
  const contactStates=records.contactStates(at);return{at,loads,bodies,observations,preparations:preparing.map(p=>p.grips),contactStates,phaseHistory:Object.fromEntries(contactStates.map(o=>[o.crew,records.phaseHistory(o.crew,at)])),evidence,errors};

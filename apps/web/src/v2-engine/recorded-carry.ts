@@ -95,6 +95,8 @@ export class RecordedCarry{
   const prior=at(h,time),holds=next.value.holds.filter(hold=>!prior||prior.phase==='souls:released'||prior.load!==next.value.load||!prior.holds.some(p=>p.body===hold.body&&p.grip===hold.grip&&JSON.stringify(p.handsUm)===JSON.stringify(hold.handsUm)));
   if(holds.length)out.push({grips:next.value,holds});}return out;
  }
+ /** Last recorded loss of this body's assignment, including removal from a continuing crew. */
+ releaseBefore(body:string,time:number){let result:CarryGrips|null=null;for(const h of this.grips.values()){for(let i=0;i<h.length&&h[i].at<=time;i++){const r=h[i],holds=r.value.holds.filter(p=>p.body===body);let g:CarryGrips|null=null;if(r.value.phase==='souls:released'&&holds.length)g={...r.value,holds};else if(!holds.length&&i>0){const old=h[i-1].value,removed=old.holds.filter(p=>p.body===body);if(removed.length)g={...old,phase:'souls:released',sinceUs:r.at,untilUs:undefined,holds:removed};}if(g&&(!result||g.sinceUs>result.sinceUs))result=g;}}return result;}
  contactStates(time:number){
   const ids=new Set([...this.grips.keys(),...this.members.keys()]);return[...ids].map(crew=>{const node=this.record(crew,time),grips=at(this.grips.get(crew),time)??null,members=at(this.members.get(crew),time)??null;
    return{crew,at:time,field:node?.carryField??(grips?'valid' as const:'unknown' as const),grips,members};});
