@@ -51,6 +51,7 @@ export function nativePagePorts(port) {
   for (const p of ports) checkPort(p);
   return ports;
 }
+export const nativeActorName = label => label === 'camera-subject' ? 'Camera Subject' : label;
 export function nativeCostSeed(seed){if(seed!==undefined&&(!Number.isSafeInteger(seed)||seed<0||seed>0xffffffff))fail('cost-seed');return seed;}
 export async function startNativePageFixture({ checkout, data, log, port, artifacts, sealedInputs, recordingArtifacts, costMeasurement, sourceRecording, signal, onSpawn, timeoutMs = 180000 }) {
   const until = Date.now() + timeoutMs; signal?.throwIfAborted();
@@ -88,7 +89,7 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   return { child: children[0], children, base: runtime.base, viewer: viewer.href, dataDir: resolve(data), recipe: { kind: 'native-page', costMeasurement, sourceRecording, source:{root:join(runtime.world.dir,'world'),world:runtime.slug,pkg:join(root,'v2/target/wasm-load/pkg'),sourceHead:m.sourceHead,artifactPin:artifacts}, async joinActor(label='camera-subject') {
     if (sealedPublic) fail('sealed-actor-mutation');
     signal?.throwIfAborted();
-    const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:'Camera Subject',pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
+    const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:nativeActorName(label),pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
     signal?.throwIfAborted();const fd=openSync(log,'a',0o600);let daemon;
     try { daemon=spawn(process.execPath,[join(root,'v2/client/src/daemon/daemon.mjs'),'--home',seat.home,'--soul',seat.soul,'--pkg',join(root,'v2/target/wasm-load/pkg'),'--ready-fd','3'],{cwd:seat.folder,env:{PATH:process.env.PATH,BRAIN_MODE:'fake'},detached:true,stdio:['ignore',fd,fd,'pipe']});onSpawn(daemon,{processGroup:true}); } finally {closeSync(fd);}
     await waitActorReady(daemon,{signal,timeoutMs:15000});
