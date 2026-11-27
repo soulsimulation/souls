@@ -4,7 +4,7 @@ import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,rmSync,existsSync} from
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {createTestRunner} from './owned-attempt.mjs';
-import {assertImportedAttemptBudget} from './imported-attempt-budget.mjs';
+import {assertImportedAttemptBudget,assertContinuationAuthority} from './imported-attempt-budget.mjs';
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function fixture(t){
  const parent=resolve('.e2e/670');mkdirSync(parent,{recursive:true});const root=mkdtempSync(join(parent,'budget-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
@@ -53,7 +53,7 @@ test('the lifecycle rechecks imported counts under its exclusive lock; stale pre
  f.attempt('baseline',1,'INTERRUPTED');let boots=0;
  const runner=createTestRunner({source:root=>({root,head:'committed'}),boot:async()=>{boots++;throw Error('must not boot');}});
  const options={owner:f.h.owner,sourceRoot:f.root,toolRoot:f.root,ledger:f.o.ledgerFile,
-  arm:'baseline',repeat:1,cycle:{id:'replacement',plan:f.h.plan},history:{count:2,evidence:f.h.evidence},
+  arm:'baseline',repeat:1,world:{port:19044,slug:'budget-fixture'},cycle:{id:'replacement',plan:f.h.plan},history:{count:2,evidence:f.h.evidence},
   importedBudget:{historyFile:f.o.historyFile,historyHash:f.o.historyHash}};
  await assert.rejects(runner(options),/import-budget-third-review-required/);
  assert.equal(boots,0);assert.equal(existsSync(options.ledger+'.lock'),false);
@@ -78,4 +78,49 @@ test('an imported ledger pins required budget enforcement across later calls',as
  options.importedBudget={...pinned,historyHash:'changed'};
  await assert.rejects(runner(options),/imported-budget-required-and-pinned/);assert.equal(boots,1);
  options.importedBudget=pinned;await assert.rejects(runner(options),/import-budget-third-review-required/);assert.equal(boots,1);
+});
+
+test('a pinned continuation counts all earlier failures and requires the latest two reviews for a fourth try',t=>{
+ const f=fixture(t);f.o.owner=f.h.owner;f.attempt('baseline',1,'FAIL');f.attempt('baseline',1,'BOOT_ABORT');
+ assert.throws(()=>assertImportedAttemptBudget(f.o),/ceiling/);
+ f.o.cycle={id:'same-concern',plan:f.h.plan};
+ f.o.current=Object.fromEntries(Object.entries(f.o.currentHeads).map(([k,head])=>[k,{root:join(f.root,k),head}]));
+ const file=join(f.root,'continuation.json'),a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,cycle:f.o.cycle,current:structuredClone(f.o.current),
+  ledger:{file:f.o.ledgerFile,hash:digest(readFileSync(f.o.ledgerFile))},importedBudget:{historyFile:f.o.historyFile,historyHash:f.o.historyHash},slot:{arm:'baseline',repeat:1,maxTotalAttempts:4},frozenEvidence:f.h.evidence,relocations:[]};
+ const pin=()=>{writeFileSync(file,JSON.stringify(a));f.o.continuationAuthority={file,hash:digest(readFileSync(file))};};pin();
+ const hashes=f.state.attempts.map(x=>x.reportHash);
+ f.o.thirdReview={evidenceOnly:true,reviewer:'independent-reviewer',decision:'TRY',at:new Date().toISOString(),currentHeads:f.o.currentHeads,evidenceHashes:[f.h.slots[0].attemptEvidence[0].hash,...hashes],hypothesis:'new observed correction',change:{path:'driver.mjs',line:7}};
+ assert.throws(()=>assertImportedAttemptBudget(f.o),/third-review-binding/);
+ f.o.thirdReview.evidenceHashes=hashes;
+ const before=readFileSync(f.o.ledgerFile),result=assertImportedAttemptBudget(f.o);
+ assert.equal(result.nextTotalAttempt,4);assert.equal(result.remaining,1);assert.equal(result.priorAttempts,1);assert.equal(result.newAttempts,2);
+ assert.deepEqual(readFileSync(f.o.ledgerFile),before,'advisory authority never rewrites history');
+ a.current.product.head='wrong';pin();assert.throws(()=>assertImportedAttemptBudget(f.o),/continuation-source-or-plan/);a.current=f.o.current=Object.fromEntries(Object.entries(f.o.currentHeads).map(([k,head])=>[k,{root:join(f.root,k),head}]));pin();
+ a.ledger.hash='changed';pin();assert.throws(()=>assertImportedAttemptBudget(f.o),/continuation-ledger/);a.ledger.hash=digest(before);pin();
+ f.state.cycles=[{inFlight:'unfinished'}];f.save();assert.throws(()=>assertImportedAttemptBudget(f.o),/in-flight/);
+});
+
+test('relocation permission verifies the frozen old root and source bytes instead of dropping their identity',t=>{
+ const f=fixture(t);f.save();const from={root:f.root,head:'old'},current={product:{root:join(f.root,'relocated'),head:'new'}};
+ const oldFile=join(f.root,'source.ts');writeFileSync(oldFile,'frozen source');const cycle={id:'retained',plan:f.h.plan};
+ const file=join(f.root,'authority.json'),a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,cycle,current,
+  ledger:{file:f.o.ledgerFile,hash:digest(readFileSync(f.o.ledgerFile))},importedBudget:null,slot:{arm:'baseline',repeat:1,maxTotalAttempts:4},frozenEvidence:f.h.evidence,
+  relocations:[{from,to:current.product,sourceFiles:[{path:'source.ts',hash:digest(readFileSync(oldFile))}]}]};
+ const pin=()=>{writeFileSync(file,JSON.stringify(a));return{file,hash:digest(readFileSync(file))};};
+ const o={continuationAuthority:pin(),ledgerFile:f.o.ledgerFile,owner:f.h.owner,cycle,current,arm:'baseline',repeat:1,source:()=>from};
+ assert.equal(assertContinuationAuthority(o).slot.maxTotalAttempts,4);
+ o.source=()=>({...from,head:'changed'});assert.throws(()=>assertContinuationAuthority(o),/continuation-old-source/);o.source=()=>from;
+ writeFileSync(oldFile,'tampered');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-source-files/);
+});
+
+test('ledger relocation requires identical frozen bytes and refuses old stopped, in-flight or locked ownership',t=>{
+ const f=fixture(t);f.save();const fromFile=join(f.root,'frozen-ledger.json'),file=join(f.root,'authority.json');
+ const a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,
+  cycle:{id:'retained',plan:f.h.plan},current:{},importedBudget:null,slot:{arm:'baseline',repeat:1,maxTotalAttempts:4},frozenEvidence:f.h.evidence,relocations:[]};
+ const pin=()=>{const bytes=readFileSync(f.o.ledgerFile),hash=digest(bytes);writeFileSync(fromFile,bytes);a.ledger={file:f.o.ledgerFile,hash};a.ledgerRelocation={fromFile,hash,toFile:f.o.ledgerFile};writeFileSync(file,JSON.stringify(a));return{file,hash:digest(readFileSync(file))};};
+ const o={ledgerFile:f.o.ledgerFile,owner:f.h.owner,cycle:a.cycle,current:a.current,arm:'baseline',repeat:1};
+ o.continuationAuthority=pin();assert.equal(assertContinuationAuthority(o).ledgerRelocation.hash,a.ledger.hash);
+ writeFileSync(fromFile,'{}');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-ledger/);
+ for(const ownership of [{stopped:'cleanup failed'},{inFlight:'unfinalized'}]){f.state.cycles=[ownership];f.save();o.continuationAuthority=pin();assert.throws(()=>assertContinuationAuthority(o),/continuation-old-ledger-ownership/);}
+ f.state.cycles=[];f.save();o.continuationAuthority=pin();mkdirSync(fromFile+'.lock');assert.throws(()=>assertContinuationAuthority(o),/continuation-old-ledger/);
 });
