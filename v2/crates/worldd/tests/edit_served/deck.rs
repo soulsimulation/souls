@@ -382,7 +382,7 @@ fn deck_two_carry_a_plywood_sheet_and_a_crew_seats_a_two_by_four_across_two_seat
         if got.kind != 1 {
             refusals.push(("sheet into s1, default joins".into(), got.reason.clone()));
         }
-        if where_is(&w, sheet2).1.is_none() {
+        if where_is(&w, sheet2).0 == Some(pair) {
             let mut on_joist = into("s1");
             on_joist.insert(4, Value::Array(vec![joist.to_value()]));
             let got = hands[1].act("part:put", pair, on_joist);
