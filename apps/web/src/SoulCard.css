@@ -29,6 +29,7 @@
 .soul-status[data-status] i{box-sizing:border-box;width:9px;height:9px}
 .soul-status[data-status=connected] i,.soul-status[data-status=awake] i{background:#2e9d4f}
 .soul-status[data-status=pairing] i{background:#d6a700}
+.soul-status[data-status=unavailable] i{background:#c0563b}
 .soul-status[data-status=disconnected] i,.soul-status[data-status=approved-waiting] i,.soul-status[data-status=checking] i,.soul-status[data-status=zombie] i,.soul-status[data-status=asleep] i{background:transparent;border:1.5px solid var(--dim)}
 .soul-place{color:var(--dim)}
 .human-world .soul-card .soul-link{display:inline-flex;align-items:center;gap:7px;min-height:0;padding:2px 4px;margin:-2px -4px;border:0;border-radius:8px;background:transparent;color:var(--fg);font:650 13px/1.3 system-ui,sans-serif;cursor:pointer}
