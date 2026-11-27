@@ -16,3 +16,15 @@ test('both palms stay on a rising beam\'s two contacts from the ground to carry 
    ctx.diagnostic(JSON.stringify({model,far,worstM:+worst.toFixed(4),atHeightM:+at.toFixed(2)}));
    assert(worst<=.01,`${model}, far hand ${far}: a palm ${worst.toFixed(4)} m from its contact with the beam at ${at.toFixed(2)} m`);}
   v.clear();}}finally{setHumanGround(null);}});
+test('a walking carrier keeps both palms on the beam at carry height, the load ahead of it or behind',async ctx=>{
+ setHumanGround(()=>0);try{for(const model of ['woman','casual']as const){const t=await template(model),v=new HumanViews();v.setTemplates([t]);v.setBodyTemplates(new Map([[model,t]]));
+  // the body faces +x (its hold) and walks at 1.4 m/s: toward the load (the back carrier) or away from it (the front)
+  for(const dir of [1,-1]){let worst=0,time=200,x=0;
+   for(let k=0;k<180;k++){time+=1/60;x+=dir*1.4/60;const hands={left:[x+.15,.9,0]as[number,number,number],right:[x+.55,.9,0]as[number,number,number]};
+    v.setFrame([{id:'walker'+dir,bodyModel:model,p:[x,0,0],yaw:0,walk:1,walkDist:Math.abs(x),speed:1.4,activity:'walk',restAge:0,hands,carryWeight:1}],time);v.render(1);
+    if(k<30)continue; // the stand-to-walk blend
+    for(const side of ['left','right']as const){const p=new THREE.Vector3();assert(v.palmOf('walker'+dir,side,p));worst=Math.max(worst,p.distanceTo(new THREE.Vector3(...hands[side])));}}
+   ctx.diagnostic(JSON.stringify({model,dir,worstM:+worst.toFixed(4)}));
+   assert(worst<=.02,`${model}, walking ${dir>0?'toward':'away from'} its hold: a palm ${worst.toFixed(4)} m from its contact`);}
+  v.clear();}}finally{setHumanGround(null);}});
+
