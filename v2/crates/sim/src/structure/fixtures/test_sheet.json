@@ -41,7 +41,7 @@
    "at_mm": [
     0,
     0,
-    -500
+    -900
    ],
    "yaw_mdeg": 0
   },
@@ -52,14 +52,14 @@
    "at_mm": [
     0,
     0,
-    500
+    900
    ],
    "yaw_mdeg": 0
   },
   "grip_back": {
    "role": "grip",
    "at_mm": [
-    -900,
+    -950,
     9,
     0
    ]
@@ -67,7 +67,7 @@
   "grip_front": {
    "role": "grip",
    "at_mm": [
-    900,
+    950,
     9,
     0
    ]
@@ -75,9 +75,9 @@
  },
  "geometry": {
   "bounds_mm": [
-   1900,
+   2000,
    18,
-   1200
+   1900
   ]
  },
  "motion": {
@@ -87,7 +87,7 @@
   "ever": true
  },
  "text": {
-  "card": "A test sheet, 1.9 m by 1.2 m: two carry it and lay it on two joists."
+  "card": "A test sheet, 2 m by 1.9 m: two carry it and lay it on two joists."
  },
  "card": {
   "text": "card"
