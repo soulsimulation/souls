@@ -33,12 +33,16 @@ const SLICE_MS = 8;
 
 // the event itself, not its data: its data is read (structured-clone deserialised, a whole world's nodes in a snapshot)
 // only when it is delivered, so nothing is spent on it while the page's first phase draws its poster
-type Got = { event: MessageEvent } | { error: string };
+type Got = { event: MessageEvent; message?: MessageEvent } | { error: string };
 type WorkerLike = Pick<Worker, 'postMessage' | 'terminate' | 'addEventListener'>;
 
 /** A reader worker started before its bridge: to the bridge and its watchers it is the Worker (their `message`
  *  listeners, `onmessage`, `onerror`, `postMessage`, `terminate`). Until the bridge asks it for the same stream, what the
- *  worker posts is held; then it is delivered in order, a slice a task, and what comes after it passes straight on. */
+ *  worker posts is held; then it is delivered in order, a slice a task, and what comes after it passes straight on.
+ *  Phone arrival: a held message reaches its listeners one per task, in order, then `onmessage`. The world's snapshot
+ *  costs each watcher hundreds of ms on a 4x phone (the core library, the stream's scene, the world's state), and in one
+ *  task they made the page's longest (1.7 s); a watcher still has every message in order, and each message before the
+ *  next. */
 export class EarlyReader extends EventTarget {
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: ErrorEvent) => void) | null = null;
@@ -46,6 +50,10 @@ export class EarlyReader extends EventTarget {
   readonly replica: string;
   private readonly worker: WorkerLike;
   private held: Got[] = [];
+  /** The `message` listeners, in the order they were added: a held message is handed to each in turn. */
+  private readonly listeners: EventListenerOrEventListenerObject[] = [];
+  /** How many of the first held message's listeners (then `onmessage`) have had it. */
+  private handed = 0;
   private started = false;
   private replaying = false;
   private stopped = false;
@@ -64,6 +72,15 @@ export class EarlyReader extends EventTarget {
     this.worker.postMessage(m);
   }
   terminate(): void { this.stopped = true; this.held = []; this.worker.terminate(); }
+  addEventListener(type: string, fn: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
+    super.addEventListener(type, fn, options);
+    if (type === 'message' && fn && !this.listeners.includes(fn)) this.listeners.push(fn);
+  }
+  removeEventListener(type: string, fn: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void {
+    super.removeEventListener(type, fn, options);
+    const i = type === 'message' && fn ? this.listeners.indexOf(fn) : -1;
+    if (i >= 0) { this.listeners.splice(i, 1); if (i < this.handed) this.handed--; }
+  }
   private got(x: Got) {
     if (this.stopped) return;
     if (this.started && !this.replaying) this.deliver(x); else this.held.push(x);
@@ -72,11 +89,23 @@ export class EarlyReader extends EventTarget {
     this.replaying = true; arrivalMark('stream-claimed');
     const step = () => {
       const until = performance.now() + SLICE_MS;
-      while (this.held.length && !this.stopped) { this.deliver(this.held.shift()!); if (performance.now() >= until) break; }
+      while (this.held.length && !this.stopped) { this.handOne(); if (performance.now() >= until) break; }
       if (this.held.length && !this.stopped) { setTimeout(step, 0); return; }
       this.replaying = false; arrivalMark('stream-replayed');
     };
     setTimeout(step, 0);
+  }
+  /** The first held message to its next listener, or to `onmessage` after the last (then it is done); an error whole. */
+  private handOne() {
+    const x = this.held[0]!;
+    if ('error' in x) { this.held.shift(); this.deliver(x); return; }
+    const e = x.message ??= new MessageEvent('message', { data: x.event.data });
+    const fn = this.listeners[this.handed++];
+    try {
+      if (fn) { if (typeof fn === 'function') fn.call(this, e); else fn.handleEvent(e); return; }
+      this.held.shift(); this.handed = 0;
+      this.onmessage?.(e);
+    } catch (error) { report(error); }   // as a worker's listener's would be: reported, and the next one still has it
   }
   private deliver(x: Got) {
     try {

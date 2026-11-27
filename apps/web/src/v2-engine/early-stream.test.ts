@@ -46,6 +46,22 @@ test('what the worker posted before the bridge started is delivered first, in or
   assert.deepEqual(worker.posted.at(-1), { other: 1 }, 'any other message goes to the worker');
 });
 
+test('a held message reaches its listeners one per task, then onmessage; each has every message, in order', async () => {
+  const worker = new FakeWorker(), reader = new EarlyReader(worker, STREAM, 'r');
+  worker.say({ n: 1 }); worker.say({ n: 2 });
+  const order: string[] = [];
+  const busy = () => { const until = performance.now() + 10; while (performance.now() < until); };   // longer than a slice
+  const n = (e: Event) => ((e as MessageEvent).data as { n: number }).n;
+  // the snapshot costs a watcher hundreds of ms on a phone: a frame the page asked for meanwhile is drawn before the next
+  reader.addEventListener('message', (e) => { order.push(`world ${n(e)}`); busy(); if (n(e) === 1) setTimeout(() => order.push('a frame'), 0); });
+  reader.addEventListener('message', (e) => { order.push(`parts ${n(e)}`); busy(); });
+  reader.onmessage = (e) => order.push(`bridge ${n(e)}`);
+  reader.postMessage({ stream: STREAM });
+  for (let i = 0; i < 50 && !order.includes('bridge 2'); i++) await tick();
+  assert.deepEqual(order, ['world 1', 'a frame', 'parts 1', 'bridge 1', 'world 2', 'parts 2', 'bridge 2']);
+  assert.equal(reader.pending, 0);
+});
+
 test('a worker error held before the start reaches the bridge\'s onerror; a throwing listener stops nothing', async () => {
   const worker = new FakeWorker(), reader = new EarlyReader(worker, STREAM, 'r');
   worker.dispatchEvent(Object.assign(new Event('error'), { message: 'boom' }));
