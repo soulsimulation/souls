@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { editsOf, planOf, quatOfYaw, resolveName, indexOf, sendPlan } from './named.mjs';
+import { editsOf, originOnGround, planOf, quatOfYaw, resolveName, indexOf, sendPlan } from './named.mjs';
 
 const S = 'ab'.repeat(16), id = (n) => `${S}-${n}`;
 const hex = (t) => ({ hex: Buffer.from(t).toString('hex') });
@@ -75,6 +75,10 @@ test('each op becomes the creator\'s operations, in the parent\'s frame, support
   assert.deepEqual(planter.ops[1].atUm, [125990000, 0, 5820000]);
   assert.deepEqual(planter.ops[1].fields[4], named('home-6-roof-planter'));
   assert.deepEqual(planter.ops[1].fields[12], [[0, 0, 300, 300, 0, 0, 500, 0, 0]]);
+  // a new origin: the page draws by origin, and the removed thing's would take the new one away with it
+  assert.deepEqual(planter.ops[1].fields[1], hex(originOnGround('e_home-6-roof-planter')));
+  assert.match(originOnGround('e_616eeedf'), /^e_[0-9a-f]{8}$/);
+  assert.notEqual(originOnGround('e_616eeedf'), 'e_616eeedf');
   // the deck's params; its floor, now a step high, is ground cover: it goes, and the podium on it stands on the open
   // ground, placed where the file's later move puts it (a point in the world's frame)
   assert.equal(Buffer.from(deck.ops[0].value.hex, 'hex').toString(), '{"height":0.2,"rails":false}');
