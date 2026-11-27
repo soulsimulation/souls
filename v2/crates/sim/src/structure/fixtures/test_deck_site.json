@@ -86,11 +86,23 @@
     2038,
     0
    ]
+  },
+  "flight": {
+   "admits": "thing",
+   "kinds": [
+    "mars:test_flight"
+   ],
+   "most": 1,
+   "at_mm": [
+    3500,
+    0,
+    0
+   ]
   }
  },
  "geometry": {
   "bounds_mm": [
-   2000,
+   7200,
    2060,
    3100
   ]

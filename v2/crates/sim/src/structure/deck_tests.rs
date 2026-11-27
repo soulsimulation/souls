@@ -13,6 +13,7 @@ use super::shade_tests::{FLOOR, WALKER, World, accepted, n, pose, refused, shade
 const JOIST: &str = include_str!("fixtures/test_joist.json");
 const SHEET: &str = include_str!("fixtures/test_sheet.json");
 const SITE: &str = include_str!("fixtures/test_deck_site.json");
+const FLIGHT: &str = include_str!("fixtures/test_flight.json");
 
 /// The sheet's entry as another kind `kind`, resting on `most` parts of kind `on`.
 fn like_the_sheet(kind: &str, on: &str, most: u64) -> String {
@@ -32,6 +33,7 @@ fn deck() -> World {
             ("mars:test_joist", JOIST),
             ("mars:test_sheet", SHEET),
             ("mars:test_deck_site", SITE),
+            ("mars:test_flight", FLIGHT),
             ("mars:test_mat", &mat),
             ("mars:test_ring_a", &ring_a),
             ("mars:test_ring_b", &ring_b),

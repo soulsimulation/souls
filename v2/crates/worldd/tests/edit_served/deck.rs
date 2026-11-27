@@ -2,6 +2,7 @@
 //! shade's bents and rails; the joists, the sheet and their site are test kinds
 //! (`v2/crates/sim/src/structure/fixtures/`): a joist names the rail in its joining link, the sheet names the joist.
 use super::*;
+use replica::world_model::show;
 
 /// The test deck kinds' folder.
 fn fixtures() -> PathBuf {
@@ -11,6 +12,9 @@ fn fixtures() -> PathBuf {
 /// N2's test world with a deck's parts at its build site: the site marked at the site's centre, its two bents
 /// standing loose on their slots' places, its two rails lying 0.5 m outside theirs, and each joist and the sheet lying
 /// on the ground under its own slot, so each crew takes a part and puts it from where it stands, no load carried.
+/// The sheet holds a floor of its own, its top (racks T9: a thing's `floors`, as a building's or a boat's). A stair
+/// flight stands 0.5 m beside its slot: 5 m of run from its foot up to the sheet's edge at the sheet's height, its
+/// landing too small to stand on, as a roof stair's is.
 /// The folder of entries: the construction kinds (the carry), the carpentry kinds, the test deck kinds and the body.
 /// Returns the facts and the site's slot numbers, by name.
 pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
@@ -72,6 +76,7 @@ pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
         ("testworld-timber-rail@1", "mars:timber_rail"),
         ("testworld-test-joist@1", "mars:test_joist"),
         ("testworld-test-sheet@1", "mars:test_sheet"),
+        ("testworld-test-flight@1", "mars:test_flight"),
     ];
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     let things = [
@@ -83,7 +88,23 @@ pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
         ("joist-back", 3, [x, 0, z - 900, 0]),
         ("joist-front", 3, [x, 0, z + 900, 0]),
         ("sheet", 4, [x, 0, z, 0]),
+        ("flight", 5, [x + 3_500, 0, z + 500, 0]),
     ];
+    let quad = |x0: i64, x1: i64, z0: i64, z1: i64| {
+        json::Value::Arr(vec![
+            ints(&[x0, z0]),
+            ints(&[x1, z0]),
+            ints(&[x1, z1]),
+            ints(&[x0, z1]),
+        ])
+    };
+    let floor = |y: i64, polygon: json::Value| {
+        json::Value::Arr(vec![json::Value::Obj(vec![
+            ("level".into(), num(1)),
+            ("y".into(), num(y)),
+            ("polygon".into(), polygon),
+        ])])
+    };
     for (k, v) in top.iter_mut() {
         match (k.as_str(), v) {
             ("kinds", json::Value::Arr(a)) => {
@@ -112,6 +133,31 @@ pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
                         ("scale_ppm".into(), num(1_000_000)),
                         ("name".into(), json::Value::s(id)),
                     ];
+                    if r == 4 {
+                        // The sheet's top, 18 mm up, in its own frame.
+                        t.push(("floors".into(), floor(18, quad(-1_000, 1_000, -950, 950))));
+                    }
+                    if r == 5 {
+                        // The flight: its landing beyond its top, and its stair from the ground up to it.
+                        t.push((
+                            "floors".into(),
+                            floor(DECK_TOP, quad(-3_000, -2_500, -550, 550)),
+                        ));
+                        let stair = json::Value::Obj(vec![
+                            ("id".into(), json::Value::s("deck-flight")),
+                            ("kind".into(), json::Value::s("stairs")),
+                            ("from".into(), num(0)),
+                            ("to".into(), num(1)),
+                            (
+                                "path".into(),
+                                json::Value::Arr(vec![ints(&[2_500, 0]), ints(&[-2_500, 0])]),
+                            ),
+                            ("width".into(), num(1_100)),
+                            ("y0".into(), num(0)),
+                            ("y1".into(), num(DECK_TOP)),
+                        ]);
+                        t.push(("stairs".into(), json::Value::Arr(vec![stair])));
+                    }
                     if r == 0 {
                         let rows = slots
                             .iter()
@@ -135,6 +181,9 @@ pub(super) fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
     (f.to_json(), numbers)
 }
 
+/// The seated sheet's top above the ground, mm: its slot's height and its own 18 mm.
+const DECK_TOP: i64 = 2_056;
+
 /// The deck's world served, its Souls each on its own connection, and what its steps name.
 pub(super) struct Deck {
     pub w: Seeded,
@@ -147,6 +196,9 @@ pub(super) struct Deck {
     pub rails: [Id; 2],
     pub joists: [Id; 2],
     pub sheet: Id,
+    pub flight: Id,
+    /// The floor the sheet holds: its top.
+    pub deck: Id,
 }
 
 impl Deck {
@@ -181,6 +233,8 @@ impl Deck {
             rails: [im.nodes["timber-rail-1"], im.nodes["timber-rail-2"]],
             joists: [im.nodes["joist-back"], im.nodes["joist-front"]],
             sheet: im.nodes["sheet"],
+            flight: im.nodes["flight"],
+            deck: im.nodes["sheet/floor-1"],
             w,
             _s: s,
             hands,
@@ -392,7 +446,7 @@ fn deck_joists_on_rails_take_a_sheet_and_a_joist_under_it_stays_until_the_sheet_
     );
     let got = k.unseat(2, under, jb);
     refused_as(&got, "support.none", "the back joist out from under the sheet");
-    let named = replica::world_model::show(sheet);
+    let named = show(sheet);
     assert!(
         got.detail.contains(&named) && got.detail.contains("would rest on"),
         "the refusal names the sheet {named}: {got:?}"
@@ -419,4 +473,120 @@ fn deck_joists_on_rails_take_a_sheet_and_a_joist_under_it_stays_until_the_sheet_
         "the joist rides its crew"
     );
     assert_eq!(joints_at(&k.w, jb), 0, "its joints undone");
+}
+
+/// Where body `body` last was, as the log's body rows have it: the node it stands on and its place there.
+fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
+    let mut at = None;
+    for p in logged(w) {
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == body {
+                    at = Some((pose.frame.node, pose.position));
+                }
+            }
+        }
+    }
+    at.expect("a body row")
+}
+
+/// Racks T9 and T10's engine half, in a served world by Souls' intents, each on its own connection:
+///
+/// - the frame, the joists and the sheet are seated; the sheet holds a floor of its own, so seated it is a floor 2 m
+///   up, and the ground under it is still walked (its carriers stand there);
+/// - two take the stair flight and set it in its slot, its top hooked onto a rail;
+/// - a fifth Soul walks from the open ground up the flight onto the deck and across it: its body rows end on the
+///   sheet's floor, at the sheet's top;
+/// - a crew unseating the sheet under it is refused `part.stood-on`, naming the body; a crew unseating a joist under
+///   the sheet is refused `support.none`; the body is where it was;
+/// - the Soul walks down again, and the sheet comes off.
+#[test]
+fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_under_it_leaves() {
+    let mut k = Deck::serve("deck-floor", 5);
+    k.frame();
+    let g = k.w.ground;
+    let (sheet, flight, deck) = (k.sheet, k.flight, k.deck);
+    let [jb, jf] = k.joists;
+    let rails = k.rails;
+    for (j, slot, dz) in [(jb, "joist_back", -900), (jf, "joist_front", 900)] {
+        let c = k.crew_at((2, 3), (1_250, dz), "Souls 3 and 4 to a joist's ends");
+        done(k.take(2, c, j), "a joist taken");
+        done(k.put(2, c, slot, None), slot);
+        done(k.leave(2, c), "Soul 3 leaves");
+        done(k.leave(3, c), "Soul 4 leaves");
+    }
+    let c = k.crew_at((0, 1), SHEET_ENDS, "Souls 1 and 2 to the sheet's ends");
+    done(k.take(0, c, sheet), "Souls 1 and 2 take the sheet");
+    done(
+        k.put(0, c, "sheet", Some(&[jb, jf])),
+        "the sheet on both joists",
+    );
+    done(k.leave(0, c), "Soul 1 leaves");
+    done(k.leave(1, c), "Soul 2 leaves");
+
+    // The flight: Souls 1 and 2 at its ends (each 350 mm beyond its grip), set in its slot 0.5 m aside, hooked onto
+    // the right rail.
+    k.walk(
+        &[(0, Deck::at(6_750, 500)), (1, Deck::at(250, 500))],
+        "Souls 1 and 2 to the flight's ends",
+    );
+    let c = k.crew(0, &[1]);
+    done(k.take(0, c, flight), "Souls 1 and 2 take the flight");
+    done(
+        k.put(0, c, "flight", Some(&[rails[1]])),
+        "the flight set, hooked onto the right rail",
+    );
+    assert_eq!(where_is(&k.w, flight).0, Some(k.site), "the flight seated");
+    done(k.leave(0, c), "Soul 1 leaves");
+    done(k.leave(1, c), "Soul 2 leaves");
+    k.walk(
+        &[(0, Deck::at(6_000, -3_000)), (1, Deck::at(5_000, -3_000))],
+        "Souls 1 and 2 step away",
+    );
+
+    // Soul 5 walks up onto the deck, to a place in the sheet's own frame, then across it.
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let up = |k: &mut Deck, node: Id, p: Vec3, what: &str| {
+        let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
+        k.hands[4].send("eden:walk", node, to);
+        let got = socket_end(&mut k.hands[4].s);
+        println!("{what}: {got:?}");
+        assert_eq!(got.kind, 1, "{what}");
+        let at = body_on(&k.w, walker);
+        println!("{what}: the body on {} at {:?}", show(at.0), at.1);
+        at
+    };
+    let (on, at) = up(&mut k, deck, v3(-400_000, 18_000, 0), "Soul 5 up onto the deck");
+    assert_eq!(on, deck, "the body stands on the sheet's floor");
+    assert_eq!(at.y, 18_000, "at the sheet's top");
+    assert!((at.x + 400_000).abs() < 300_000 && at.z.abs() < 300_000);
+    let (on, at) = up(&mut k, deck, v3(400_000, 18_000, 200_000), "Soul 5 across the deck");
+    assert_eq!((on, at.y), (deck, 18_000), "still on the deck");
+    assert!((at.x - 400_000).abs() < 300_000, "across it: {at:?}");
+
+    // Nothing under it leaves.
+    let under = k.crew_at((2, 3), SHEET_ENDS, "Souls 3 and 4 under the sheet's ends");
+    let got = k.unseat(2, under, sheet);
+    refused_as(&got, "part.stood-on", "the sheet out from under Soul 5");
+    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
+    assert_eq!(where_is(&k.w, sheet).0, Some(k.site), "the sheet stays");
+    done(k.leave(2, under), "Soul 3 leaves");
+    done(k.leave(3, under), "Soul 4 leaves");
+    let under = k.crew_at(
+        (2, 3),
+        (1_250, -900),
+        "Souls 3 and 4 under the back joist's ends",
+    );
+    let got = k.unseat(2, under, jb);
+    refused_as(&got, "support.none", "a joist out from under the deck");
+    assert_eq!(body_on(&k.w, walker).0, deck, "the body where it was");
+    done(k.leave(2, under), "Soul 3 leaves");
+    done(k.leave(3, under), "Soul 4 leaves");
+
+    // Down again, and the sheet comes off.
+    let (on, at) = up(&mut k, g, Deck::at(6_000, 3_000), "Soul 5 down to the ground");
+    assert_eq!((on, at.y), (g, 0), "on the open ground");
+    let c = k.crew_at((2, 3), SHEET_ENDS, "Souls 3 and 4 under the sheet's ends");
+    done(k.unseat(2, c, sheet), "the sheet off, nobody on it");
+    assert_eq!(where_is(&k.w, sheet).0, Some(c), "the sheet rides its crew");
 }
