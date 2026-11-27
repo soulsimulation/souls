@@ -242,6 +242,56 @@ fn i3991_a_timer_whose_needs_no_longer_hold_is_refused_by_name_at_its_due_time()
     run.stop();
 }
 
+/// #3991, the replacement half of its second line: the bell is rung again while its first fade is pending. The
+/// second ring's timer replaces the first (C24: a form's timer clears the pending ones of its name on its thing, and
+/// the forms' due list lets the cleared one go), so the bell fades once, at the second ring's deadline: nothing fires
+/// and nothing is refused at the first's.
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn i3991_a_timer_set_again_while_pending_fires_once_at_the_later_deadline() {
+    let (run, mut a, _) = serve("i3991-again");
+    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    let first = timer_due(&run).expect("the ring set its timer");
+    assert_eq!(timer_cleared_at(&run), None, "no timer cleared yet");
+    std::thread::sleep(Duration::from_millis(700));
+    let again = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(
+        !again.expect("the second ring lands").is_empty(),
+        "one receipt"
+    );
+    let second = timer_due(&run).expect("the second ring set its timer");
+    let replaced = timer_cleared_at(&run);
+    println!("#3991 rung again: deadlines {first} then {second}, the first cleared at {replaced:?}");
+    assert!(second > first, "a later deadline");
+    assert!(
+        replaced.is_some_and(|at| at < first),
+        "the pending timer is cleared when the second is set, before it was due"
+    );
+    let took = faded(&run, Duration::from_secs(6));
+    let faded = rack_events(&run, "faded");
+    let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
+    println!("#3991 rung again: cleared after {took:?}; faded {faded:?}, refused {refused:?}");
+    assert_eq!(ringing(&run), 0, "the bell faded");
+    assert_eq!(faded.len(), 1, "exactly once");
+    assert!(
+        faded[0].0 >= second,
+        "at the second ring's deadline, not the first's"
+    );
+    assert_eq!(
+        timer_cleared_at(&run),
+        Some(second),
+        "the one timer fired at its due time"
+    );
+    assert!(refused.is_empty(), "nothing was refused at the first's");
+    assert!(
+        run.replay().tree().timers().is_empty(),
+        "no timer is left pending"
+    );
+    run.stop();
+}
+
 /// #3991 (3): a world goes away with its form's timer pending (asleep, its alarm at the timer's due time) and is
 /// started again from its log, with no bodies, after the due time has passed. It catches up exactly: the timer fires
 /// at its own due time, not at the wake, and then nothing is due, so the world may sleep again. Before, a world with
