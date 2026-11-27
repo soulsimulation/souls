@@ -89,15 +89,23 @@ async fn i5216_a_decks_floor_removed_is_checked_on_its_own_squares_not_the_whole
     s.line("listening ", 60);
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
+    // A wall far along the row first: its receipt has the world's version, which the edit is planned against.
+    let far = wall(&w, (x0 + 40) * M, (z0 + 2) * M);
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, far)).await;
+    assert_eq!(got.kind, 1, "a wall commits: {got:?}");
     let ops = vec![
         wall(&w, (x0 + 5) * M, (z0 + 4) * M),
         Op::Remove {
             node: Ref::Node(im.nodes["fixture-deck/floor-0"]),
         },
     ];
-    let (got, _) = send(&mut ws, edit_batch_intent(&w, creator, 1, 0, ops)).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_batch_intent(&w, creator, 2, got.version, ops),
+    )
+    .await;
     assert_eq!(got.kind, 1, "the edit commits: {got:?}");
-    let e = edit_check(&w, 1);
+    let e = edit_check(&w, 2);
     println!("#5216 the deck's floor removed: edit_check {}", e.to_json());
     // The deck is 3 m by 2 m: with a body's clearance it lies on one square of 16 m, or up to four at a corner.
     cut_alone(&e, 4);
@@ -109,14 +117,15 @@ async fn i5216_a_decks_floor_removed_is_checked_on_its_own_squares_not_the_whole
     );
     // The town the checker keeps took it: the next edit beside it is cut alone too.
     let beside = wall(&w, (x0 + 9) * M, (z0 + 4) * M);
-    let (got, _) = send(&mut ws, edit_intent(&w, creator, 2, got.version, beside)).await;
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 3, got.version, beside)).await;
     assert_eq!(got.kind, 1, "a wall beside it commits: {got:?}");
-    cut_alone(&edit_check(&w, 2), 4);
+    cut_alone(&edit_check(&w, 3), 4);
 }
 
-/// #5216 A3: the checker's thread takes at most 8 edits at once. 40 edits sent in one write: the first 8 are checked,
-/// and one sent while 8 wait is refused `edit.checker-busy` at once (never `act.timed-out` after 10 s); the gauge
-/// counts them, and once the line is empty the next edit commits.
+/// #5216 A3: the checker's thread takes at most 8 edits at once. 40 edits sent in one write: the first 8 are checked
+/// (the first commits; the others, planned against the version before it, are refused `edit.stale` as any edit
+/// planned on an older world is), and one sent while 8 wait is refused `edit.checker-busy` at once (never
+/// `act.timed-out` after 10 s); the gauge counts them, and once the line is empty the next edit commits.
 #[tokio::test(flavor = "multi_thread")]
 async fn i5216_edits_past_the_checkers_line_are_refused_by_name_and_the_next_commits() {
     let text = testworld::generate(1, 0).unwrap().text;
