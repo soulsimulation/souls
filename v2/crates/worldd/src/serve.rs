@@ -3557,7 +3557,7 @@ fn serve(args: &[String]) -> R<()> {
     let read_newest = || {
         let d = dir.join("checkpoints");
         std::thread::spawn(move || match d.is_dir() {
-            true => sim::checkpoint::restore(&d),
+            true => answers::restore(&d),
             false => Ok(None),
         })
     };
@@ -3643,7 +3643,7 @@ fn serve(args: &[String]) -> R<()> {
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
     let started = if let Some(header) = stored_header {
-        let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
+        let restored = answers::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
         if restored.root.version.lineage != header.lineage

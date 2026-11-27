@@ -560,6 +560,231 @@ fn a_records_key_this_build_does_not_read_is_refused_at_restore() {
     assert!(e.detail.contains("key 11"), "{}", e.detail);
 }
 
+/// A record of a checkpoint, decoded.
+type Rec = std::collections::BTreeMap<u64, replica::encode::Value>;
+
+/// Which record of a checkpoint a change is offered: an audience's, a node's, or a node's big field's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum What {
+    Audience,
+    Node,
+    Big,
+}
+
+/// The record `hash` names, written again after `change` has seen it, the records it names written again first, so
+/// that every hash still names its record's bytes. Returns its new hash.
+fn rewrite(
+    records: &mut std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+    hash: &[u8],
+    what: What,
+    change: &mut dyn FnMut(What, &mut Rec),
+) -> Vec<u8> {
+    use replica::encode::{Value, decode, encode};
+    use replica::ids::Purpose;
+    let Value::Map(mut m) = decode(&records[hash]).unwrap().value else {
+        unreachable!("a record is a map")
+    };
+    let below = if what == What::Audience { 2 } else { 10 };
+    if what != What::Big
+        && let Some(Value::Array(named)) = m.get_mut(&below)
+    {
+        for h in named {
+            let Value::Bytes(h) = h else {
+                unreachable!("a hash")
+            };
+            *h = rewrite(records, &h.clone(), What::Node, change);
+        }
+    }
+    if what == What::Node
+        && let Some(Value::Array(bigs)) = m.get_mut(&0)
+    {
+        for big in bigs {
+            let Value::Array(big) = big else {
+                unreachable!("[field, hash]")
+            };
+            let Value::Bytes(h) = &mut big[1] else {
+                unreachable!("a hash")
+            };
+            *h = rewrite(records, &h.clone(), What::Big, change);
+        }
+    }
+    // Its label is its audience's, as sealed.
+    let audience = if what == What::Audience { 1 } else { 5 };
+    let purpose = match m.get(&audience) {
+        Some(Value::Map(a)) if a.get(&1) == Some(&Value::Uint(1)) => Purpose::StatePublic,
+        _ => Purpose::StatePrivate,
+    };
+    change(what, &mut m);
+    let bytes = encode(&Value::Map(m)).unwrap();
+    let hash = Hash::of(purpose, &bytes).to_bytes();
+    records.insert(hash.clone(), bytes);
+    hash
+}
+
+/// `tree` sealed whole and read back as a checkpoint is, each record first offered to `change`.
+fn read_back(tree: &Tree, change: &mut dyn FnMut(What, &mut Rec)) -> Result<Tree, Refusal> {
+    let whole = tree.seal_whole().unwrap();
+    let mut records: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = whole
+        .nodes
+        .iter()
+        .map(|(h, b)| (h.to_bytes(), b.clone()))
+        .collect();
+    let mut audiences = Vec::new();
+    for (a, h, b) in &whole.audiences {
+        records.insert(h.to_bytes(), b.clone());
+        let h = rewrite(&mut records, &h.to_bytes(), What::Audience, change);
+        audiences.push((*a, h));
+    }
+    Tree::unseal(&audiences, &mut |h| {
+        records.get(h).cloned().ok_or(Refusal {
+            name: "checkpoint-missing",
+            detail: String::new(),
+        })
+    })
+}
+
+/// The first `[id, record]` pair of the list at `k`, its record changed; false when the list holds none.
+fn entry(m: &mut Rec, k: u64, change: impl FnOnce(&mut Rec)) -> bool {
+    use replica::encode::Value;
+    let Some(Value::Array(pairs)) = m.get_mut(&k) else {
+        return false;
+    };
+    let Some(Value::Array(pair)) = pairs.first_mut() else {
+        return false;
+    };
+    let Some(Value::Map(r)) = pair.get_mut(1) else {
+        return false;
+    };
+    change(r);
+    true
+}
+
+/// `tree`'s checkpoint with one record changed by `change` (which says whether it changed the record it was offered;
+/// the first it changes is the only one) is refused `checkpoint-record`, with `says` in what it says.
+fn refused(tree: &Tree, says: &str, mut change: impl FnMut(What, &mut Rec) -> bool) {
+    let mut changed = 0;
+    let read = read_back(tree, &mut |what, m| {
+        if changed == 0 && change(what, m) {
+            changed += 1;
+        }
+    });
+    assert_eq!(changed, 1, "{says}: the tree holds such a record");
+    let e = read
+        .err()
+        .unwrap_or_else(|| panic!("{says}: the record was read in part"));
+    assert_eq!(e.name, "checkpoint-record", "{says}: {}", e.detail);
+    assert!(e.detail.contains(says), "{says}: {}", e.detail);
+}
+
+/// A part's first entry alone.
+fn first_of(name: &str) -> Part {
+    use replica::encode::{Value, encode};
+    let Value::Map(mut p) = part(name).to_value() else {
+        unreachable!("a part is a map")
+    };
+    let Some(Value::Array(effects)) = p.get_mut(&2) else {
+        unreachable!("a part's entries")
+    };
+    effects.truncate(1);
+    Part::read(&encode(&Value::Map(p)).unwrap()).unwrap()
+}
+
+/// #5211's rule for a node's record, for every other record a checkpoint is read from (its reviewer's follow-up): an
+/// audience's record, a link (owned, loose or carried), a timer, a flight and its nodes, an audience, and a big
+/// field's record. With a key this build does not read, each is refused by name at restore; none is read in part.
+/// As sealed, each reads back to the same state.
+#[test]
+fn every_checkpoint_record_with_a_key_this_build_does_not_read_is_refused_at_restore() {
+    use replica::encode::Value;
+    let h = header();
+    let one = Value::Uint(1);
+    let with = |more: Part| {
+        let mut t = base(&h);
+        t.apply(&h, &more).unwrap();
+        t
+    };
+    // A private link whose owner is public (loose, in a private audience's record); a pending timer; the key in
+    // flight to another zone; and a room with a field big enough for a record of its own.
+    let linked = with(part("5-link"));
+    let timed = with(part("10-timer"));
+    let flying = with(first_of("11-away"));
+    let big = with(set_on(0, 1, 25, Value::Bytes(vec![7; replica::tree::BIG_FIELD])));
+    for (name, tree) in [
+        ("5-link", &linked),
+        ("10-timer", &timed),
+        ("11-away", &flying),
+        ("a big field", &big),
+    ] {
+        let back = read_back(tree, &mut |_, _| {})
+            .unwrap_or_else(|e| panic!("{name}: as sealed, it reads back: {e}"));
+        assert_eq!(back.to_state(), tree.to_state(), "{name}");
+    }
+    let public = |m: &Rec| matches!(m.get(&1), Some(Value::Map(a)) if a.get(&1) == Some(&one));
+    let key = |m: &mut Rec, k: u64| {
+        m.insert(k, Value::Uint(1));
+    };
+
+    refused(&linked, "an audience's record holds key 9", |what, m| {
+        what == What::Audience && public(m) && m.insert(9, one.clone()).is_none()
+    });
+    // A private audience's record holds no next id, arrivals or time (6 to 8).
+    refused(&linked, "an audience's record holds key 6", |what, m| {
+        what == What::Audience && !public(m) && m.insert(6, one.clone()).is_none()
+    });
+    refused(&linked, "a link holds key 5", |what, m| {
+        what == What::Audience && entry(m, 3, |l| key(l, 5))
+    });
+    refused(&linked, "a link's owning end is 0 or 1", |what, m| {
+        what == What::Audience
+            && entry(m, 3, |l| {
+                l.insert(3, Value::Uint(2));
+            })
+    });
+    refused(&linked, "an audience holds key 3", |what, m| {
+        what == What::Audience
+            && entry(m, 3, |l| {
+                let Some(Value::Map(a)) = l.get_mut(&4) else {
+                    unreachable!("a link's audience")
+                };
+                key(a, 3);
+            })
+    });
+    refused(&linked, "a link holds key 5", |what, m| {
+        what == What::Node && entry(m, 9, |l| key(l, 5))
+    });
+    refused(&timed, "a timer holds key 4", |what, m| {
+        what == What::Audience && entry(m, 4, |t| key(t, 4))
+    });
+    refused(&flying, "a flight holds key 7", |what, m| {
+        what == What::Audience && entry(m, 5, |f| key(f, 7))
+    });
+    refused(&flying, "holds key 11", |what, m| {
+        what == What::Audience
+            && entry(m, 5, |f| {
+                let Some(Value::Array(nodes)) = f.get_mut(&5) else {
+                    unreachable!("a flight's nodes")
+                };
+                let Some(Value::Map(n)) = nodes.first_mut() else {
+                    unreachable!("a flight's root")
+                };
+                key(n, 11);
+            })
+    });
+    refused(&big, "a big field's record holds key 7", |what, m| {
+        what == What::Big && m.insert(7, one.clone()).is_none()
+    });
+    refused(
+        &big,
+        "a big field's record, among its fields, holds key 26",
+        |what, m| match m.get_mut(&6) {
+            Some(Value::Map(fields)) if what == What::Big => {
+                fields.insert(26, one.clone()).is_none()
+            }
+            _ => false,
+        },
+    );
+}
+
 /// A made-up world for the let go: a tree of records by hash (`{1: tag, 10: [children]}`), every version kept, and the
 /// tags of leaves served withheld (empty bytes).
 #[derive(Default)]
