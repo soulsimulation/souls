@@ -51,7 +51,8 @@ export function nativePagePorts(port) {
   for (const p of ports) checkPort(p);
   return ports;
 }
-export async function startNativePageFixture({ checkout, data, log, port, artifacts, sealedInputs, recordingArtifacts, costMeasurement, signal, onSpawn, timeoutMs = 180000 }) {
+export function nativeCostSeed(seed){if(seed!==undefined&&(!Number.isSafeInteger(seed)||seed<0||seed>0xffffffff))fail('cost-seed');return seed;}
+export async function startNativePageFixture({ checkout, data, log, port, artifacts, sealedInputs, recordingArtifacts, costMeasurement, sourceRecording, signal, onSpawn, timeoutMs = 180000 }) {
   const until = Date.now() + timeoutMs; signal?.throwIfAborted();
   for (const p of nativePagePorts(port).slice(0, 8)) if (!await portFree(p)) fail('occupied-port');
   const root = resolve(checkout), m = verifyNativePageArtifacts(root, artifacts), children = [];
@@ -80,10 +81,11 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   const viewer = new URL(runtime.page);
   if (costMeasurement) {
     viewer.searchParams.set('camera-observation-cost', '1'); if (costMeasurement.observer) viewer.searchParams.set('camera-observe', '1');
+    if(costMeasurement.seed!==undefined)viewer.searchParams.set('camera-cost-seed',String(nativeCostSeed(costMeasurement.seed)));
     if (costMeasurement.witnesses?.length) viewer.searchParams.set('camera-cost-witness', costMeasurement.witnesses.join(','));
     viewer.hash = 't=' + String(costMeasurement.targetTick * 50000);
   }
-  return { child: children[0], children, base: runtime.base, viewer: viewer.href, dataDir: resolve(data), recipe: { kind: 'native-page', costMeasurement, async joinActor(label='camera-subject') {
+  return { child: children[0], children, base: runtime.base, viewer: viewer.href, dataDir: resolve(data), recipe: { kind: 'native-page', costMeasurement, sourceRecording, source:{root:join(runtime.world.dir,'world'),world:runtime.slug,pkg:join(root,'v2/target/wasm-load/pkg'),sourceHead:m.sourceHead,artifactPin:artifacts}, async joinActor(label='camera-subject') {
     if (sealedPublic) fail('sealed-actor-mutation');
     signal?.throwIfAborted();
     const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:'Camera Subject',pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
