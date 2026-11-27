@@ -1255,6 +1255,29 @@ impl Engine {
                             ));
                         }
                     }
+                    // #5067: every carrier, where it stands, for its reach of the hold the carry's rule gives it.
+                    let stood = |body: Id, feet: Vec3| crate::assembly::Stood {
+                        body,
+                        feet,
+                        reach: slots.reach_of(body),
+                    };
+                    let beside = members[2..]
+                        .iter()
+                        .map(|m| stands(c, m.body).map(|(_, at)| stood(m.body, at)))
+                        .collect::<R<Vec<_>>>()?;
+                    let kind = tree
+                        .handle(part)
+                        .and_then(|h| tree.node(h))
+                        .map(|n| plain(n.kind().as_str()).to_owned());
+                    let crew = kind.as_deref().and_then(|kind| {
+                        Some(crate::assembly::Crew {
+                            grips: self.grips.get(kind)?,
+                            load: self.loads.get(kind)?,
+                            front: stood(front, f),
+                            back: stood(back, k),
+                            sides: &beside,
+                        })
+                    });
                     let (at, turn) = asm.take(
                         &mut tree,
                         &self.activities,
@@ -1267,14 +1290,13 @@ impl Engine {
                         ground,
                         a.verb == Verb::Unseat,
                         slots.reach_of(front).min(slots.reach_of(back)),
+                        crew.as_ref(),
                     )?;
                     // A crew's sides (0.135 C5) carry beside the part from where they stand at the take.
-                    let sides = members[2..]
+                    let sides = beside
                         .iter()
-                        .map(|m| {
-                            stands(c, m.body).map(|(_, at)| (m.body, Carry::place_of(f, k, at)))
-                        })
-                        .collect::<R<Vec<_>>>()?;
+                        .map(|s| (s.body, Carry::place_of(f, k, s.feet)))
+                        .collect::<Vec<_>>();
                     self.taking
                         .insert(activity, (ground, at, turn, apart(f, k), sides));
                 }
@@ -1400,6 +1422,28 @@ impl Engine {
                     let on_plan: Vec<(Id, [i64; 2])> =
                         sides.iter().map(|(b, at)| (*b, xz(*at))).collect();
                     load.check_sides(crew, xz(f), xz(k), xz(middle), axis, &on_plan)?;
+                    // #5067: and each carrier within reach of the hold it will be said to have, the load lifted between
+                    // its front and its back: the lift admits no carrier a seating would then find out of reach.
+                    if let Some(grips) = self.grips.get(plain(node.kind().as_str())) {
+                        let stood = |body: Id, feet: Vec3| crate::assembly::Stood {
+                            body,
+                            feet,
+                            reach: slots.reach_of(body),
+                        };
+                        let beside: Vec<_> = sides.iter().map(|(b, at)| stood(*b, *at)).collect();
+                        let lifted = crate::assembly::Crew {
+                            grips,
+                            load: &load,
+                            front: stood(front, f),
+                            back: stood(back, k),
+                            sides: &beside,
+                        };
+                        crate::assembly::out_of_reach(
+                            &lifted.carriers(load.held()?)?,
+                            Carry::pose(f, k)?,
+                        )
+                        .map_err(|r| refusal("carry-grip-out-of-reach", r.detail))?;
+                    }
                     // 0.135 R2, off the clock: the way to a destination is swept, and when the straight way clips one
                     // that turns the load is searched, on the way thread; the lift waits for it, nothing written, and
                     // runs again when it comes back. A way asked for other inputs (a carrier moved since, the ground
