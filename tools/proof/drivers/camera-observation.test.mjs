@@ -79,7 +79,7 @@ test('direct native/display comparison rejects opposite sides of prewalk within1
 
 import {capturedIndexBindings} from './camera-observation.mjs';
 import {encode,decode} from '../../../apps/web/node_modules/cborg/cborg.js';
-const indexResponse=rows=>({url:'https://example.test/world/history/bundles/00000000/index',status:200,headers:{},bytes:Buffer.from(encode(new Map([[3,rows]])))});
+const indexResponse=rows=>({url:'https://example.test/world/history/bundles/00000000/index',status:200,headers:{},bytes:Buffer.from(encode(new Map([[1,1],[2,0],[3,rows]])))});
 const indexKey=new TextEncoder().encode('bundles/00000000/opaque-public-key');
 test('opaque non-hash public key uses actual captured index SHA and exact history-root resolution',()=>{
  const raw=Buffer.from('public payload'),digest=createHash('sha256').update(raw).digest(),r=indexResponse([[0,indexKey,digest]]),bindings=capturedIndexBindings([r],decode),url='https://example.test/world/history/bundles/00000000/opaque-public-key';
@@ -94,4 +94,10 @@ test('missing, conflicting, malformed and incomplete actual index bindings fail 
  assert.throws(()=>capturedIndexBindings([{...indexResponse([row]),status:503}],decode),/incomplete-or-failed/);
  assert.throws(()=>capturedIndexBindings([{...indexResponse([row]),status:206,headers:{'content-range':'bytes 0-2/100'}}],decode),/incomplete-or-failed/);
  assert.throws(()=>capturedIndexBindings([indexResponse([[0,new TextEncoder().encode('https://elsewhere.test/bundle'),digest]])],decode),/key-invalid/);
+});
+
+test('day-index envelope requires native format1 and integer day matching index URL',()=>{
+ const row=[0,indexKey,Buffer.alloc(32,1)],base=indexResponse([row]),responseWith=entries=>({...base,bytes:Buffer.from(encode(new Map(entries)))});
+ assert.equal(capturedIndexBindings([base],decode).size,1);
+ for(const entries of [[[2,0],[3,[row]]],[[1,1],[3,[row]]],[[1,2],[2,0],[3,[row]]],[[1,1],[2,0.5],[3,[row]]],[[1,1],[2,'0'],[3,[row]]],[[1,1],[2,1],[3,[row]]],[[1,1],[2,0]]])assert.throws(()=>capturedIndexBindings([responseWith(entries)],decode),/recorded-index-malformed/);
 });

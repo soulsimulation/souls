@@ -67,10 +67,11 @@ export function completeRecordedResponses(responses) {
 /** Production day-index rows bind public keys relative to the history root, not to URL filenames. */
 export function capturedIndexBindings(responses,decode) {
  const bindings=new Map(),text=new TextDecoder('utf-8',{fatal:true});
- for(const r of responses){const index=new URL(r.url);if(!/\/bundles\/\d{8}\/index$/.test(index.pathname))continue;
+ for(const r of responses){const index=new URL(r.url),indexDay=/\/bundles\/(\d{8})\/index$/.exec(index.pathname);if(!indexDay)continue;
   if(r.error||!r.bytes||r.status<200||r.status>=300)throw Error('recorded-index-incomplete-or-failed');
   if(r.status===206){const m=/^bytes 0-(\d+)\/(\d+)$/.exec(r.headers['content-range']??'');if(!m||Number(m[1])+1!==Number(m[2])||r.bytes.length!==Number(m[2]))throw Error('recorded-index-incomplete-or-failed');}
-  const document=decode(r.bytes,{useMaps:true}),rows=document instanceof Map?document.get(3):null;if(!Array.isArray(rows))throw Error('recorded-index-malformed');
+  const document=decode(r.bytes,{useMaps:true}),rows=document instanceof Map?document.get(3):null,day=document instanceof Map?document.get(2):null;
+  if(!(document instanceof Map)||document.get(1)!==1||!['number','bigint'].includes(typeof day)||!Number.isSafeInteger(Number(day))||Number(day)!==Number(indexDay[1])||!Array.isArray(rows))throw Error('recorded-index-malformed');
   const base=new URL(index.href);base.pathname=index.pathname.slice(0,index.pathname.lastIndexOf('/bundles/')+1);base.search='';base.hash='';
   let previous=-1;
   for(const row of rows){if(!Array.isArray(row)||row.length!==3||!['number','bigint'].includes(typeof row[0])||!Number.isSafeInteger(Number(row[0]))||Number(row[0])<0||Number(row[0])<=previous||!(row[1] instanceof Uint8Array)||!row[1].length||!(row[2] instanceof Uint8Array)||row[2].length!==32)throw Error('recorded-index-malformed');previous=Number(row[0]);
