@@ -15,12 +15,35 @@ fn bad<T>(detail: &str) -> R<T> {
         detail: detail.into(),
     })
 }
+/// Legacy snapshots historically omit an audience; absence means the public view. An explicit
+/// audience must say everyone, before the legacy decoder supplies its public default.
+fn public_rows(rows: Option<&Value>) -> R<()> {
+    let Some(Value::Array(rows)) = rows else {
+        return bad("public rows");
+    };
+    for row in rows {
+        let Value::Array(row) = row else {
+            return bad("public row");
+        };
+        let [_, Value::Map(node)] = row.as_slice() else {
+            return bad("public row fields");
+        };
+        match node.get(&4) {
+            None => {}
+            Some(Value::Map(a)) if a.get(&1) == Some(&Value::Uint(1)) => {}
+            _ => return bad("nonpublic legacy row"),
+        }
+    }
+    Ok(())
+}
 #[derive(Debug, Default)]
 /// Output-adapter counters, excluding inherited replay/validation/hash work.
 pub struct Stats {
     pub records: usize,
     pub inspected_nodes: usize,
     pub emitted_nodes: usize,
+    pub fast_rows: usize,
+    pub whole_rows: usize,
 }
 #[derive(Debug)]
 pub struct Transition {
@@ -57,8 +80,10 @@ impl Index {
     }
     fn subtree(&self, id: Id, out: &mut BTreeSet<Id>) {
         let mut pending = vec![id];
+        let mut seen = BTreeSet::new();
         while let Some(id) = pending.pop() {
-            if out.insert(id) {
+            if seen.insert(id) {
+                out.insert(id);
                 pending.extend(self.children.get(&id).into_iter().flatten().copied());
             }
         }
@@ -156,47 +181,59 @@ impl Timeline {
             stats: Stats::default(),
         };
         if let Some(observation) = &bundle.observation {
-            seek::walk_observation(&bundle, &header, observation, |time, projection, delta| {
-                if let Some(delta) = delta {
-                    out.stats.records += 1;
-                    let Value::Map(delta) = delta else {
-                        return bad("delta map");
-                    };
-                    let mut nodes = BTreeMap::new();
-                    let mut removed = vec![];
-                    if let Some(Value::Array(rows)) = delta.get(&2) {
-                        for row in rows {
-                            let Value::Array(row) = row else {
-                                return bad("node row");
-                            };
-                            let id = read_id(&row[0])?;
-                            out.stats.inspected_nodes += 1;
-                            if row.len() == 1 {
-                                removed.push(id);
-                            } else {
-                                nodes.insert(id, NodeState::read(&row[1])?);
+            let (fast, whole) = seek::walk_observation(
+                &bundle,
+                &header,
+                observation,
+                |time, projection, delta| {
+                    if let Some(delta) = delta {
+                        out.stats.records += 1;
+                        let Value::Map(delta) = delta else {
+                            return bad("delta map");
+                        };
+                        let mut nodes = BTreeMap::new();
+                        let mut removed = vec![];
+                        if let Some(Value::Array(rows)) = delta.get(&2) {
+                            for row in rows {
+                                let Value::Array(row) = row else {
+                                    return bad("node row");
+                                };
+                                let id = read_id(&row[0])?;
+                                out.stats.inspected_nodes += 1;
+                                if row.len() == 1 {
+                                    removed.push(id);
+                                } else {
+                                    nodes.insert(id, NodeState::read(&row[1])?);
+                                }
                             }
                         }
-                    }
-                    out.accept(time, nodes, removed);
-                } else {
-                    let Value::Map(projection) = projection else {
-                        return bad("projection map");
-                    };
-                    let Some(Value::Array(rows)) = projection.get(&2) else {
-                        return bad("initial nodes");
-                    };
-                    for row in rows {
-                        let Value::Array(row) = row else {
-                            return bad("initial row");
+                        out.accept(time, nodes, removed);
+                    } else {
+                        let Value::Map(projection) = projection else {
+                            return bad("projection map");
                         };
-                        out.initial
-                            .insert(read_id(&row[0])?, NodeState::read(&row[1])?);
+                        let Some(Value::Array(rows)) = projection.get(&2) else {
+                            return bad("initial nodes");
+                        };
+                        for row in rows {
+                            let Value::Array(row) = row else {
+                                return bad("initial row");
+                            };
+                            out.initial
+                                .insert(read_id(&row[0])?, NodeState::read(&row[1])?);
+                        }
                     }
-                }
-                Ok(())
-            })?;
+                    Ok(())
+                },
+            )?;
+            out.stats.fast_rows = fast;
+            out.stats.whole_rows = whole;
         } else {
+            let Value::Map(snapshot) = &bundle.snapshot else {
+                return bad("snapshot map");
+            };
+            public_rows(snapshot.get(&1))?;
+            public_rows(snapshot.get(&2))?;
             let state = seek::snapshot_state(&bundle.snapshot)?;
             if state.root != header.zone {
                 return bad("snapshot root");
@@ -207,6 +244,10 @@ impl Timeline {
             let mut last = bundle.start;
             seek::walk_legacy(&bundle, &header, i64::MAX, |state, e, carried, after| {
                 if !after {
+                    if let Some(context) = carried {
+                        public_rows(context.get(&2))?;
+                        public_rows(context.get(&3))?;
+                    }
                     if e.envelope.at < last
                         || e.envelope.at
                             >= bundle

@@ -206,8 +206,8 @@ pub(crate) fn walk_observation(
     header: &crate::effects::Header,
     observation: &Value,
     mut visit: impl FnMut(i64, &Value, Option<&Value>) -> R<()>,
-) -> R<()> {
-    use crate::stream::public::{apply_observation, digest, validate_projection};
+) -> R<(usize, usize)> {
+    use crate::stream::public::ProjectionReader;
     let Value::Map(m) = observation else {
         return bad("observation is a map");
     };
@@ -218,11 +218,11 @@ pub(crate) fn walk_observation(
         return bad("observation format or header");
     }
 
-    let mut projection = m.get(&3).cloned().ok_or_else(|| Refusal {
+    let projection = m.get(&3).cloned().ok_or_else(|| Refusal {
         name: "history-bad",
         detail: "missing public baseline".into(),
     })?;
-    validate_projection(header, &projection)?;
+    let mut reader = ProjectionReader::new(header, projection)?;
     let Some(Value::Array(cursor)) = m.get(&4) else {
         return bad("observation baseline cursor");
     };
@@ -236,7 +236,7 @@ pub(crate) fn walk_observation(
     if !matches!(m.get(&8),Some(Value::Bytes(hash)) if hash.len()==32) {
         return bad("original archive base digest");
     }
-    visit(bundle.start, &projection, None)?;
+    visit(bundle.start, reader.state(), None)?;
     let mut previous_at = bundle.start;
     for row in rows {
         let Value::Array(row) = row else {
@@ -277,28 +277,15 @@ pub(crate) fn walk_observation(
                         name: "history-bad",
                         detail: "window overflow".into(),
                     })?
-            || *before != digest(&projection)?
+            || before.as_slice() != reader.digest()
         {
             return bad("observation order or prior digest");
         }
-        let next = apply_observation(header, &projection, delta)?;
-        let Value::Map(next_map) = &next else {
-            unreachable!("validated public projection");
-        };
-        let Value::Map(prior_map) = &projection else {
-            unreachable!("validated public projection");
-        };
-        if !matches!(prior_map.get(&1),Some(Value::Uint(version)) if *version <= *sequence)
-            || *after != digest(&next)?
-            || !matches!(next_map.get(&1),Some(Value::Uint(version)) if sequence.checked_add(1)==Some(*version))
-        {
-            return bad("observation result or sequence");
-        }
-        projection = next;
+        reader.apply(delta, before, after, *sequence)?;
         (record, offset, previous_at) = (*r, *o, time);
-        visit(time, &projection, Some(delta))?;
+        visit(time, reader.state(), Some(delta))?;
     }
-    if m.get(&6) != Some(&Value::Bytes(digest(&projection)?))
+    if m.get(&6) != Some(&Value::Bytes(reader.digest().to_vec()))
         || m.get(&7)
             != Some(&Value::Array(vec![
                 Value::Uint(record),
@@ -307,7 +294,7 @@ pub(crate) fn walk_observation(
     {
         return bad("observation terminal differs");
     }
-    Ok(())
+    Ok((reader.fast_rows, reader.whole_rows))
 }
 
 /// Existing history callers consume the live authorized nodes/links, while the reader retains carry context.

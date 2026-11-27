@@ -266,9 +266,11 @@ fn rejects_corruption_and_malformed_input() {
     }
 }
 #[test]
+// This test measures a read-only API; the engine itself receives no clock.
+#[allow(clippy::disallowed_methods)]
 fn output_work_and_batch_bytes_grow_with_changes_not_nodes_times_changes() {
     let h = header();
-    for (nodes, events) in [(8, 32), (64, 256), (256, 1024)] {
+    for (nodes, events) in [(8, 32), (64, 256), (256, 1024), (1024, 256)] {
         let mut s = State::start(h.zone, h.kinds[0].clone());
         let births = (0..nodes).map(|i| create(&h, id(&h, i), h.zone)).collect();
         s.apply_entry(&h, &effect(0, 0, h.zone, births)).unwrap();
@@ -300,12 +302,14 @@ fn output_work_and_batch_bytes_grow_with_changes_not_nodes_times_changes() {
                 assert_eq!(t.stats.inspected_nodes, events as usize);
                 assert_eq!(t.stats.emitted_nodes, (nodes + 1 + events) as usize);
                 println!(
-                    "cost observed={observed} nodes={nodes} events={events} repeat={repeat} elapsed_us={} inherited_seek_us={inherited_us} input_bytes={} output_bytes={} inspected={} emitted={}",
+                    "cost observed={observed} nodes={nodes} events={events} repeat={repeat} elapsed_us={} inherited_seek_us={inherited_us} input_bytes={} output_bytes={} inspected={} emitted={} fast={} whole={}",
                     elapsed.as_micros(),
                     b.bytes().len(),
                     encoded.len(),
                     t.stats.inspected_nodes,
-                    t.stats.emitted_nodes
+                    t.stats.emitted_nodes,
+                    t.stats.fast_rows,
+                    t.stats.whole_rows
                 );
             }
         }
@@ -433,5 +437,433 @@ fn writes_owned_binding_fixture() {
             encode(&read(&h, &b, 0).to_value()).unwrap(),
         )
         .unwrap();
+    }
+}
+
+#[test]
+fn projection_reader_matches_whole_checks_and_rolls_back_refusals() {
+    use replica::stream::public::{ProjectionReader, apply_observation};
+    let h = header();
+    let a = id(&h, 1);
+    let transfer = id(&h, 9);
+    let mut s = State::start(h.zone, h.kinds[0].clone());
+    let mut leave = effect(3, 4, a, vec![]);
+    leave.body = Body::Transfer(TransferRec::Leave {
+        transfer,
+        node: a,
+        lineage: h.zone.scope(),
+        zone: h.zone,
+        pose: pose(h.zone, 0),
+    });
+    let mut arrive = effect(4, 5, h.zone, vec![]);
+    arrive.body = Body::Transfer(TransferRec::Arrive {
+        transfer,
+        carried: vec![],
+    });
+    let effects = vec![
+        effect(0, 1, h.zone, vec![create(&h, a, h.zone)]),
+        effect(1, 2, a, vec![set(a, 1)]),
+        effect(
+            2,
+            3,
+            a,
+            vec![Change::Reparent {
+                node: a,
+                from: pose(h.zone, 0).frame,
+                pose: pose(h.zone, 4),
+            }],
+        ),
+        leave,
+        arrive,
+        effect(5, 6, a, vec![set(a, 2)]),
+        effect(6, 7, a, vec![Change::Remove { node: a }]),
+    ];
+    let mut prior = project(&h, &s).unwrap();
+    let mut reader = ProjectionReader::new(&h, prior.clone()).unwrap();
+    let mut paths = vec![];
+    for e in effects {
+        s.next = e.envelope.sequence;
+        s.apply_entry(&h, &e).unwrap();
+        let next = project(&h, &s).unwrap();
+        let delta = observation_delta(&h, &prior, &next).unwrap();
+        let before = digest(&prior).unwrap();
+        let after = digest(&next).unwrap();
+        assert_eq!(apply_observation(&h, &prior, &delta).unwrap(), next);
+        for (b, a, seq) in [
+            (&[9; 32][..], after.as_slice(), e.envelope.sequence),
+            (before.as_slice(), &[9; 32][..], e.envelope.sequence),
+            (before.as_slice(), after.as_slice(), u64::MAX),
+        ] {
+            assert!(reader.apply(&delta, b, a, seq).is_err());
+            assert_eq!(reader.state(), &prior);
+            assert_eq!(reader.digest(), before);
+        }
+        paths.push(
+            reader
+                .apply(&delta, &before, &after, e.envelope.sequence)
+                .unwrap(),
+        );
+        assert_eq!(reader.state(), &next);
+        assert_eq!(reader.digest(), after);
+        prior = next;
+    }
+    assert_eq!(paths, vec![true, true, true, false, false, true, true]);
+    assert_eq!(reader.fast_rows, 5);
+    assert_eq!(reader.whole_rows, 2);
+    // A private replacement and a duplicate row must be refused by both independent validation paths.
+    let mut s = State::start(h.zone, h.kinds[0].clone());
+    s.apply_entry(&h, &effect(0, 0, h.zone, vec![create(&h, a, h.zone)]))
+        .unwrap();
+    let prior = project(&h, &s).unwrap();
+    s.apply_entry(&h, &effect(1, 1, a, vec![set(a, 1)]))
+        .unwrap();
+    let next = project(&h, &s).unwrap();
+    let delta = observation_delta(&h, &prior, &next).unwrap();
+    for private in [false, true] {
+        let Value::Map(mut d) = delta.clone() else {
+            unreachable!()
+        };
+        let Value::Array(rows) = d.get_mut(&2).unwrap() else {
+            unreachable!()
+        };
+        if private {
+            let Value::Array(r) = &mut rows[0] else {
+                unreachable!()
+            };
+            let Value::Map(n) = &mut r[1] else {
+                unreachable!()
+            };
+            n.insert(
+                4,
+                Value::Map(BTreeMap::from([
+                    (1, Value::Uint(2)),
+                    (2, id(&h, 99).to_value()),
+                ])),
+            );
+        } else {
+            rows.push(rows[0].clone());
+        }
+        let malformed = Value::Map(d);
+        assert!(apply_observation(&h, &prior, &malformed).is_err());
+        let mut reader = ProjectionReader::new(&h, prior.clone()).unwrap();
+        assert!(
+            reader
+                .apply(
+                    &malformed,
+                    &digest(&prior).unwrap(),
+                    &digest(&next).unwrap(),
+                    1
+                )
+                .is_err()
+        );
+        assert_eq!(reader.state(), &prior);
+    }
+}
+
+#[test]
+fn earlier_touch_cannot_hide_descendant_removals() {
+    let h = header();
+    let a = id(&h, 1);
+    let b = id(&h, 2);
+    let mut state = State::start(h.zone, h.kinds[0].clone());
+    state
+        .apply_entry(
+            &h,
+            &effect(0, 0, h.zone, vec![create(&h, a, h.zone), create(&h, b, a)]),
+        )
+        .unwrap();
+    let changes = vec![
+        set(a, 9),
+        Change::Reparent {
+            node: a,
+            from: pose(h.zone, 0).frame,
+            pose: pose(h.zone, 4),
+        },
+        Change::Motion(HandOff {
+            node: a,
+            at: 1,
+            from: Owner::Mover,
+            to: Owner::Mover,
+            pose: pose(h.zone, 4),
+            linear: Vec3::ZERO,
+            angular: Vec3::ZERO,
+        }),
+    ];
+    for first in changes {
+        for observed in [false, true] {
+            let bdl = bundle(
+                &h,
+                &state,
+                &[effect(
+                    1,
+                    1,
+                    a,
+                    vec![first.clone(), Change::Remove { node: a }],
+                )],
+                observed,
+            );
+            let t = read(&h, &bdl, 0);
+            assert_eq!(t.initial.len(), 3);
+            assert_eq!(t.transitions.len(), 1);
+            assert_eq!(t.transitions[0].removed, vec![a, b]);
+            assert!(t.transitions[0].nodes.is_empty());
+            let mut expected = t.initial;
+            for id in &t.transitions[0].removed {
+                expected.remove(id);
+            }
+            assert_eq!(expected.keys().copied().collect::<Vec<_>>(), vec![h.zone]);
+        }
+    }
+}
+
+#[test]
+fn legacy_explicit_private_snapshot_and_carried_rows_are_refused() {
+    let h = header();
+    let state = State::start(h.zone, h.kinds[0].clone());
+    let private = Value::Map(BTreeMap::from([
+        (1, Value::Uint(2)),
+        (2, id(&h, 99).to_value()),
+    ]));
+    let Value::Map(mut snapshot) = public_snapshot(&state, &Redactions::default()) else {
+        unreachable!()
+    };
+    let Value::Array(rows) = snapshot.get_mut(&1).unwrap() else {
+        unreachable!()
+    };
+    let Value::Array(row) = &mut rows[0] else {
+        unreachable!()
+    };
+    let Value::Map(node) = &mut row[1] else {
+        unreachable!()
+    };
+    node.insert(4, private.clone());
+    let b = Bundle::new(
+        h.hash().to_bytes(),
+        0,
+        60_000_000,
+        Value::Map(snapshot.clone()),
+        Value::Map(BTreeMap::from([(8, Value::Array(vec![]))])),
+    )
+    .unwrap();
+    assert!(Timeline::read(h.stored(), b.bytes(), &b.hash(), 0, 2).is_err());
+    let Value::Array(rows) = snapshot.get_mut(&1).unwrap() else {
+        unreachable!()
+    };
+    let Value::Array(row) = &mut rows[0] else {
+        unreachable!()
+    };
+    let Value::Map(node) = &mut row[1] else {
+        unreachable!()
+    };
+    node.remove(&4);
+    let b = Bundle::new(
+        h.hash().to_bytes(),
+        0,
+        60_000_000,
+        Value::Map(snapshot),
+        Value::Map(BTreeMap::from([(8, Value::Array(vec![]))])),
+    )
+    .unwrap();
+    assert_eq!(read(&h, &b, 0).initial.len(), 1);
+    for link in [false, true] {
+        let mut context = BTreeMap::from([(2, Value::Array(vec![])), (3, Value::Array(vec![]))]);
+        let row = Value::Array(vec![
+            id(&h, 1).to_value(),
+            Value::Map(BTreeMap::from([
+                (1, Value::Text(h.kinds[0].clone())),
+                (4, private.clone()),
+            ])),
+        ]);
+        context.insert(if link { 3 } else { 2 }, Value::Array(vec![row]));
+        let b = Bundle::new(
+            h.hash().to_bytes(),
+            0,
+            60_000_000,
+            public_snapshot(&state, &Redactions::default()),
+            Value::Map(BTreeMap::from([(
+                8,
+                Value::Array(vec![
+                    Value::Map(BTreeMap::from([(0, Value::Map(context))])),
+                    effect(0, 1, h.zone, vec![set(h.zone, 1)]).to_value(),
+                ]),
+            )])),
+        )
+        .unwrap();
+        assert_eq!(
+            Timeline::read(h.stored(), b.bytes(), &b.hash(), 0, 2)
+                .unwrap_err()
+                .detail,
+            "nonpublic legacy row"
+        );
+    }
+}
+#[test]
+fn actual_transfer_return_restores_exact_subtree() {
+    let h = header();
+    let a = id(&h, 1);
+    let child = id(&h, 2);
+    let transfer = id(&h, 9);
+    let mut s = State::start(h.zone, h.kinds[0].clone());
+    s.apply_entry(
+        &h,
+        &effect(
+            0,
+            0,
+            h.zone,
+            vec![create(&h, a, h.zone), create(&h, child, a)],
+        ),
+    )
+    .unwrap();
+    let original = s.nodes.clone();
+    let mut leave = effect(1, 1, a, vec![]);
+    leave.body = Body::Transfer(TransferRec::Leave {
+        transfer,
+        node: a,
+        lineage: h.zone.scope(),
+        zone: h.zone,
+        pose: pose(h.zone, 0),
+    });
+    let mut returned = effect(2, 2, h.zone, vec![]);
+    returned.body = Body::Transfer(TransferRec::Return {
+        transfer,
+        reason: h.kinds[0].clone(),
+    });
+    for observed in [false, true] {
+        let b = bundle(&h, &s, &[leave.clone(), returned.clone()], observed);
+        let t = read(&h, &b, 0);
+        assert_eq!(t.transitions[0].removed, vec![a, child]);
+        assert_eq!(t.transitions[1].nodes.len(), 2);
+        let mut actual = t.initial;
+        for transition in t.transitions {
+            for id in transition.removed {
+                actual.remove(&id);
+            }
+            actual.extend(transition.nodes);
+        }
+        assert_eq!(actual, original);
+    }
+}
+
+#[test]
+// Measure pure reader work only; no runtime clock enters replay.
+#[allow(clippy::disallowed_methods)]
+fn fallback_cost_and_return_to_cached_rows() {
+    use replica::stream::public::{ProjectionReader, apply_observation};
+    let h = header();
+    let a = id(&h, 1);
+    let transfer = id(&h, 9000);
+    let mut state = State::start(h.zone, h.kinds[0].clone());
+    state
+        .apply_entry(
+            &h,
+            &effect(
+                0,
+                0,
+                h.zone,
+                (1..=256).map(|i| create(&h, id(&h, i), h.zone)).collect(),
+            ),
+        )
+        .unwrap();
+    let mut leave = effect(2, 2, a, vec![]);
+    leave.body = Body::Transfer(TransferRec::Leave {
+        transfer,
+        node: a,
+        lineage: h.zone.scope(),
+        zone: h.zone,
+        pose: pose(h.zone, 0),
+    });
+    let mut arrive = effect(3, 3, h.zone, vec![]);
+    arrive.body = Body::Transfer(TransferRec::Arrive {
+        transfer,
+        carried: vec![],
+    });
+    let baseline = project(&h, &state).unwrap();
+    let mut prior = baseline.clone();
+    let mut rows = vec![];
+    for e in [
+        effect(1, 1, a, vec![set(a, 1)]),
+        leave,
+        arrive,
+        effect(4, 4, a, vec![set(a, 2)]),
+        effect(5, 5, a, vec![set(a, 3)]),
+    ] {
+        state.apply_entry(&h, &e).unwrap();
+        let next = project(&h, &state).unwrap();
+        rows.push((
+            e.envelope.sequence,
+            observation_delta(&h, &prior, &next).unwrap(),
+            digest(&prior).unwrap(),
+            digest(&next).unwrap(),
+        ));
+        prior = next;
+    }
+    for repeat in 0..2 {
+        let mut reader = ProjectionReader::new(&h, baseline.clone()).unwrap();
+        let mut old = baseline.clone();
+        for (seq, delta, before, after) in &rows {
+            let started = Instant::now();
+            let fast = reader.apply(delta, before, after, *seq).unwrap();
+            let candidate_us = started.elapsed().as_micros();
+            let started = Instant::now();
+            assert_eq!(digest(&old).unwrap(), *before);
+            old = apply_observation(&h, &old, delta).unwrap();
+            assert_eq!(digest(&old).unwrap(), *after);
+            let whole_us = started.elapsed().as_micros();
+            assert_eq!(reader.state(), &old);
+            println!(
+                "fallback repeat={repeat} sequence={seq} fast={fast} candidate_us={candidate_us} whole_us={whole_us}"
+            );
+        }
+        assert_eq!((reader.fast_rows, reader.whole_rows), (3, 2));
+    }
+}
+
+#[test]
+fn validated_unsorted_baseline_uses_whole_then_cached_path() {
+    use replica::stream::public::{ProjectionReader, apply_observation};
+    let h = header();
+    let a = id(&h, 1);
+    let b = id(&h, 2);
+    let mut state = State::start(h.zone, h.kinds[0].clone());
+    state
+        .apply_entry(
+            &h,
+            &effect(
+                0,
+                0,
+                h.zone,
+                vec![create(&h, a, h.zone), create(&h, b, h.zone)],
+            ),
+        )
+        .unwrap();
+    let mut prior = project(&h, &state).unwrap();
+    let Value::Map(m) = &mut prior else {
+        unreachable!()
+    };
+    let Value::Array(rows) = m.get_mut(&2).unwrap() else {
+        unreachable!()
+    };
+    rows.reverse();
+    let mut reader = ProjectionReader::new(&h, prior.clone()).unwrap();
+    for seq in [1, 2] {
+        state
+            .apply_entry(&h, &effect(seq, seq as i64, a, vec![set(a, seq)]))
+            .unwrap();
+        let next = project(&h, &state).unwrap();
+        let delta = observation_delta(&h, &prior, &next).unwrap();
+        assert_eq!(apply_observation(&h, &prior, &delta).unwrap(), next);
+        assert_eq!(
+            reader
+                .apply(
+                    &delta,
+                    &digest(&prior).unwrap(),
+                    &digest(&next).unwrap(),
+                    seq
+                )
+                .unwrap(),
+            seq == 2
+        );
+        assert_eq!(reader.state(), &next);
+        prior = next;
     }
 }
