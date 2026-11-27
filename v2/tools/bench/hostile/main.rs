@@ -206,10 +206,8 @@ async fn honest(
     let mut sent: BTreeMap<u64, Instant> = BTreeMap::new();
     let mut waits = Vec::new();
     let mut seq = 0u64;
-    let mut tick = tokio::time::interval_at(
-        tokio::time::Instant::now() + offset,
-        Duration::from_secs(1),
-    );
+    let mut tick =
+        tokio::time::interval_at(tokio::time::Instant::now() + offset, Duration::from_secs(1));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut drain: Option<Instant> = None;
     let mut closed = false;
@@ -250,8 +248,7 @@ async fn honest(
     if closed {
         h.closed.fetch_add(1, Ordering::Relaxed);
     }
-    h.unanswered
-        .fetch_add(sent.len() as u64, Ordering::Relaxed);
+    h.unanswered.fetch_add(sent.len() as u64, Ordering::Relaxed);
     h.waits_us
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -298,7 +295,14 @@ async fn signed_in(url: &str, token: &str) -> Option<(Socket, String)> {
 }
 
 /// The attack, in this process: for `seconds`, then its tally on one line to `out`.
-async fn attack(arm: &str, url: String, token: String, pairs: Vec<(Id, Id)>, seconds: u64, out: PathBuf) {
+async fn attack(
+    arm: &str,
+    url: String,
+    token: String,
+    pairs: Vec<(Id, Id)>,
+    seconds: u64,
+    out: PathBuf,
+) {
     let t: Tally = Arc::default();
     let end = Instant::now() + Duration::from_secs(seconds);
     let me = *pairs.last().unwrap_or_else(|| fail("no pairs"));
@@ -340,7 +344,8 @@ async fn attack(arm: &str, url: String, token: String, pairs: Vec<(Id, Id)>, sec
                     break;
                 }
             }
-            let _ = tokio::time::timeout(Duration::from_secs(2), tx.send(Message::Close(None))).await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(2), tx.send(Message::Close(None))).await;
             let _ = tokio::time::timeout(Duration::from_secs(30), reader).await;
         }
         "oversized" => {
@@ -507,7 +512,10 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let gpid = g.id();
 
     let h = Arc::new(Honest::default());
-    let (go, stop) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (go, stop) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
     let mut agents = Vec::new();
     for i in 0..a.honest {
         // Offset by index, so the acts spread over each second.
@@ -532,7 +540,14 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
     let out = dir.join("hostile.txt");
     let mut hostile = (arm != "none").then(|| {
         Command::new(std::env::current_exe().unwrap_or_else(|_| fail("this binary")))
-            .args(["attack", arm, &url, &tokens[a.honest], &n.to_string(), &a.seconds.to_string()])
+            .args([
+                "attack",
+                arm,
+                &url,
+                &tokens[a.honest],
+                &n.to_string(),
+                &a.seconds.to_string(),
+            ])
             .arg(&out)
             .stdout(Stdio::null())
             .spawn()
@@ -545,7 +560,9 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
         let (rss_max, sampling) = (rss_max.clone(), sampling.clone());
         tokio::spawn(async move {
             while sampling.load(Ordering::Relaxed) {
-                let r = tokio::task::spawn_blocking(move || rss_kib(gpid)).await.unwrap_or(0);
+                let r = tokio::task::spawn_blocking(move || rss_kib(gpid))
+                    .await
+                    .unwrap_or(0);
                 rss_max.fetch_max(r, Ordering::Relaxed);
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
@@ -604,11 +621,21 @@ async fn main() {
             fail("usage: hostile attack <arm> <url> <token> <bodies> <seconds> <out>")
         };
         let pairs = toggles::World::build(1, n, 0).pairs;
-        attack(arm, url.clone(), token.clone(), pairs, seconds, PathBuf::from(out)).await;
+        attack(
+            arm,
+            url.clone(),
+            token.clone(),
+            pairs,
+            seconds,
+            PathBuf::from(out),
+        )
+        .await;
         return;
     }
     let Some(a) = args(&argv) else {
-        fail("usage: hostile --dir <empty folder> [--honest 50] [--seconds 20] [--repeats 2] [--arms a,b]")
+        fail(
+            "usage: hostile --dir <empty folder> [--honest 50] [--seconds 20] [--repeats 2] [--arms a,b]",
+        )
     };
     println!(
         "hostile bench: {} honest agents, each its own lamp once a second, {} s a run, 50 ms ticks",

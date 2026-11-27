@@ -152,6 +152,18 @@ fn delivery_metadata(frame: &[u8]) -> Option<DeliveryTrace> {
 /// How many of one agent's intents may be in the world's line at a time, sent and not yet answered (S2).
 pub const TURN: usize = 4;
 
+/// The most one agent's intents kept here may hold at once, bytes (O8, #2805): each intent's own and [`KEPT_EACH`]
+/// for its place in the gateway's maps, until it is answered. About 600 small intents or 60 of the largest
+/// (`intent_limits.txt`), far above an honest agent's few at a time; a client that sends faster than its world answers
+/// is refused [`SLOW_DOWN`] at once, by name, and never kept, so it never grows the gateway's memory toward its
+/// limit, nor its deadline sweep's work. A creator's bulk edit is not charged (`bulk.rs`, its own gauge).
+pub const KEPT_MOST: usize = 256 << 10;
+/// What one kept intent's place in the gateway's maps is charged, bytes, besides its own.
+pub const KEPT_EACH: usize = 256;
+/// The gateway's own answer to an intent whose agent's kept intents are at [`KEPT_MOST`]: send it again once one of
+/// them is answered.
+pub const SLOW_DOWN: &str = "agent.slow-down";
+
 /// The key of the frame sent first on each connection to the world, `{31: []}`: this is the world's gateway, so the
 /// answers an ended connection could not take come here (worldd's `handover::ASK`).
 pub const HANDOVER: u64 = 31;
@@ -206,6 +218,9 @@ pub enum Sent {
     Sent,
     /// The world is away: answer it with [`RESTARTING`].
     Restarting,
+    /// Its agent's kept intents are at [`KEPT_MOST`]: answer it with [`SLOW_DOWN`]. Not kept. With the intents so
+    /// refused since the gateway started (the gauge).
+    Full(u64),
 }
 
 #[derive(Default)]
@@ -228,6 +243,8 @@ struct Pending {
     flying: bool,
     /// Sent on more than one connection: the world may answer it on each.
     resent: bool,
+    /// What it is charged against its agent's [`KEPT_MOST`], bytes: 0 for a creator's bulk edit.
+    charge: usize,
 }
 
 #[derive(Default)]
@@ -252,6 +269,9 @@ struct State {
     recent: VecDeque<(Vec<u8>, u64)>,
     /// Every kept intent answered lately, by actor's bytes and sequence, newest last ([`ANSWERED`]).
     answered: VecDeque<(Vec<u8>, u64)>,
+    /// O8: each agent's kept intents' charge, bytes ([`KEPT_MOST`]), and the intents refused [`SLOW_DOWN`] (its gauge).
+    charged: BTreeMap<Vec<u8>, usize>,
+    slowed: u64,
 }
 
 /// What an answer from the world is to the gateway.
@@ -266,6 +286,16 @@ enum Answered {
 }
 
 impl State {
+    /// A kept intent of `key`'s, charged `charge`, was taken out of [`State::pending`].
+    fn release(&mut self, key: &[u8], charge: usize) {
+        if let Some(c) = self.charged.get_mut(key) {
+            *c = c.saturating_sub(charge);
+            if *c == 0 {
+                self.charged.remove(key);
+            }
+        }
+    }
+
     fn remember(&mut self, key: Vec<u8>, sequence: u64) {
         if self.recent.len() == RECENT {
             self.recent.pop_front();
@@ -324,7 +354,8 @@ impl State {
 
 impl Link {
     /// Hands an intent to the world, keeping it until it is answered; `received` is when its socket read it (the
-    /// steady clock, [`times::stamp`]) and `left` how long its expiry was off then, µs.
+    /// steady clock, [`times::stamp`]) and `left` how long its expiry was off then, µs. It is charged against its
+    /// agent's [`KEPT_MOST`], and refused ([`Sent::Full`]) when that would go over.
     pub fn submit(
         &self,
         key: Vec<u8>,
@@ -333,6 +364,34 @@ impl Link {
         bytes: Vec<u8>,
         received: u64,
         left: i64,
+    ) -> Sent {
+        let charge = bytes.len() + KEPT_EACH;
+        self.keep(key, actor, sequence, bytes, received, left, charge)
+    }
+
+    /// As [`Link::submit`], for a creator's bulk edit: never charged, so never refused for [`KEPT_MOST`].
+    pub fn submit_bulk(
+        &self,
+        key: Vec<u8>,
+        actor: Actor,
+        sequence: u64,
+        bytes: Vec<u8>,
+        received: u64,
+        left: i64,
+    ) -> Sent {
+        self.keep(key, actor, sequence, bytes, received, left, 0)
+    }
+
+    #[allow(clippy::too_many_arguments)] // `submit`'s, and its charge
+    fn keep(
+        &self,
+        key: Vec<u8>,
+        actor: Actor,
+        sequence: u64,
+        bytes: Vec<u8>,
+        received: u64,
+        left: i64,
+        charge: usize,
     ) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let out = s.out.clone();
@@ -348,6 +407,14 @@ impl Link {
         if s.index.contains_key(&(key.clone(), sequence)) {
             // Sent again while still unanswered: it is answered once.
             return Sent::Sent;
+        }
+        let held = s.charged.get(&key).copied().unwrap_or(0);
+        if charge > 0 && held + charge > KEPT_MOST {
+            s.slowed += 1;
+            return Sent::Full(s.slowed);
+        }
+        if charge > 0 {
+            s.charged.insert(key.clone(), held + charge);
         }
         let n = s.next;
         s.next += 1;
@@ -371,6 +438,7 @@ impl Link {
                 reason,
                 flying: false,
                 resent: false,
+                charge,
             },
         );
         drop(out);
@@ -449,6 +517,7 @@ impl Link {
             return Answered::Unheld;
         };
         s.landed(&p.key, p.flying);
+        s.release(&p.key, p.charge);
         if p.resent {
             s.remember(id.0.clone(), id.1);
         }
@@ -493,6 +562,7 @@ impl Link {
                     q.retain(|w| *w != n);
                 }
                 s.landed(&p.key, p.flying);
+                s.release(&p.key, p.charge);
                 // The world's own answer may still come: it is not passed on a second time.
                 s.remember(p.key.clone(), p.sequence);
                 out.push((p.key, p.actor, p.sequence, p.reason));
@@ -820,5 +890,57 @@ mod delivery_tests {
         assert_eq!((receipt.sequence, refusal.sequence), (1, 1));
         assert_eq!((receipt.kind, refusal.kind), (1, 2));
         assert_eq!((receipt.version, refusal.version), (Some(7), Some(7)));
+    }
+}
+
+#[cfg(test)]
+mod kept_tests {
+    use super::*;
+    use replica::ids::{Id, Scope};
+
+    fn soul(n: u64) -> (Vec<u8>, Actor) {
+        let a = Actor::Soul(Id::new(Scope([0x52; 16]), n).unwrap());
+        (encode(&a.to_value()).unwrap(), a)
+    }
+
+    /// O8 (#2805): one agent's kept intents are bounded by KEPT_MOST, refused past it without being kept, and freed by
+    /// their answers and by the deadline sweep; another agent, a repeat and a bulk edit are not held by it.
+    #[test]
+    fn o8_an_agents_kept_intents_are_bounded_and_freed() {
+        let link = Link::default();
+        let _queue = link.connected();
+        let ((key, actor), (other, other_actor)) = (soul(1), soul(2));
+        let bytes = vec![0u8; 1000];
+        let fits = (KEPT_MOST / (bytes.len() + KEPT_EACH)) as u64;
+        let submit =
+            |key: &Vec<u8>, a, seq| link.submit(key.clone(), a, seq, bytes.clone(), 0, 1_000_000);
+        for seq in 1..=fits {
+            assert_eq!(submit(&key, actor, seq), Sent::Sent);
+        }
+        assert_eq!(submit(&key, actor, fits + 1), Sent::Full(1));
+        assert_eq!(submit(&key, actor, fits + 2), Sent::Full(2));
+        assert_eq!(
+            link.unanswered() as u64,
+            fits,
+            "a refused intent is not kept"
+        );
+        // Another agent's intent, and a repeat of one kept (answered once), are taken.
+        assert_eq!(submit(&other, other_actor, 1), Sent::Sent);
+        assert_eq!(submit(&key, actor, 1), Sent::Sent);
+        // A creator's bulk edit is never charged.
+        let bulk = vec![0u8; KEPT_MOST];
+        assert_eq!(
+            link.submit_bulk(key.clone(), actor, 10_000, bulk, 0, 1_000_000),
+            Sent::Sent
+        );
+        // An answer frees its place.
+        assert!(matches!(
+            link.answered(&key, 1, &Value::Array(Vec::new())),
+            Answered::Kept(..)
+        ));
+        assert_eq!(submit(&key, actor, fits + 1), Sent::Sent);
+        // The deadline sweep frees every place it answers.
+        assert!(link.overdue(u64::MAX / 2).len() as u64 >= fits + 2);
+        assert!(link.state.lock().unwrap().charged.is_empty());
     }
 }

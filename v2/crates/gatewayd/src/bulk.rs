@@ -101,7 +101,7 @@ pub async fn submit(State(gw): State<Arc<Gateway>>, headers: HeaderMap, body: By
     }
     let left = intent.expiry.saturating_sub(crate::socket::unix_us());
     let size = u64::try_from(body.len()).unwrap_or(u64::MAX);
-    match gw.link.submit(
+    match gw.link.submit_bulk(
         grant.key(),
         actor,
         intent.sequence,
@@ -125,5 +125,11 @@ pub async fn submit(State(gw): State<Arc<Gateway>>, headers: HeaderMap, body: By
                 .into_response()
         }
         Sent::Restarting => refuse(&gw, StatusCode::SERVICE_UNAVAILABLE, "world.restarting"),
+        // A bulk edit is never charged against the creator's kept intents (O8, #2805).
+        Sent::Full(_) => refuse(
+            &gw,
+            StatusCode::TOO_MANY_REQUESTS,
+            crate::world_link::SLOW_DOWN,
+        ),
     }
 }

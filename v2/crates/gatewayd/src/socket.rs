@@ -25,7 +25,7 @@ use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token, View, ViewToken};
 use crate::views;
-use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
+use crate::world_link::{FRAME_MOST, KEPT_MOST, RESTARTING, SLOW_DOWN, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
 
@@ -80,6 +80,15 @@ const MESSAGE_MOST: usize = LIMITS.frame_bytes as usize;
 const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
+/// The close of a socket that sent a message over [`MESSAGE_MOST`] (O8, #2805): 1009, Message Too Big, refused from
+/// its header's length, unread.
+pub const TOO_BIG: u16 = 1009;
+pub const MESSAGE_TOO_BIG: &str = "message.too-big";
+/// The close of a socket that sent a frame the WebSocket protocol cannot read (O8): 1002, Protocol Error.
+pub const UNREADABLE: u16 = 1002;
+pub const FRAME_UNREADABLE: &str = "frame.unreadable";
+/// [`SLOW_DOWN`]'s plain words, in the refusal's detail.
+const SLOW_DOWN_WORDS: &str = "Too many of this Soul's intents are waiting at the gateway. Send it again once one of them is answered.";
 
 /// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
 /// entries (`entries.rs`), a creator's bulk edits (#3695, `bulk.rs`) and uploads (#3697, `uploads.rs`).
@@ -231,9 +240,30 @@ async fn next_binary(socket: &mut WebSocket) -> Option<Vec<u8>> {
         match socket.recv().await? {
             Ok(Message::Binary(b)) => return Some(b.to_vec()),
             Ok(Message::Ping(_) | Message::Pong(_)) => {}
+            Err(e) => {
+                unreadable(socket, &e).await;
+                return None;
+            }
             _ => return None,
         }
     }
+}
+
+/// A socket sent what could not be read (O8, #2805): it is closed with the reason, [`MESSAGE_TOO_BIG`] for a message
+/// over [`MESSAGE_MOST`], else [`FRAME_UNREADABLE`], if it can still take a frame. One already gone takes nothing; the
+/// send is bounded either way.
+async fn unreadable(socket: &mut WebSocket, e: &axum::Error) {
+    // tungstenite's `Error::Capacity` (axum's error shows its inner one): the message's length was over the limit.
+    let (code, reason) = if e.to_string().starts_with("Space limit exceeded") {
+        (TOO_BIG, MESSAGE_TOO_BIG)
+    } else {
+        (UNREADABLE, FRAME_UNREADABLE)
+    };
+    let close = CloseFrame {
+        code,
+        reason: reason.into(),
+    };
+    let _ = tokio::time::timeout(VIEW_BEHIND_GRACE, socket.send(Message::Close(Some(close)))).await;
 }
 
 async fn send(socket: &mut WebSocket, frame: Vec<u8>) -> bool {
@@ -446,6 +476,10 @@ async fn serve(
                         crate::mailbox::on_text(&gw, grant, attached.session, t.as_str());
                         continue;
                     }
+                    Some(Err(e)) => {
+                        unreadable(&mut socket, &e).await;
+                        break;
+                    }
                     _ => break,
                 };
                 if !crate::creator::permits(&gw,actor,authority) {
@@ -612,6 +646,10 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                         crate::mailbox::on_view_text(&gw, &view.grants, t.as_str(), reply.clone());
                         continue;
                     }
+                    Some(Err(e)) => {
+                        unreadable(&mut socket, &e).await;
+                        break;
+                    }
                     _ => break,
                 };
                 if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
@@ -739,7 +777,8 @@ fn take_intent(
             .collect();
         return match gw.link.ask(grant.key(), session, n.clone(), ask) {
             Sent::Sent => None,
-            Sent::Restarting => Some(sync_refused(n, RESTARTING)),
+            // A sync request is never charged against KEPT_MOST; it is not kept.
+            Sent::Restarting | Sent::Full(_) => Some(sync_refused(n, RESTARTING)),
         };
     }
     let intent = match decode_intent(&bytes) {
@@ -795,6 +834,26 @@ fn take_intent(
                 gw.unsent(grant, sequence);
             }
             own
+        }
+        // O8 (#2805): its agent's kept intents are at their bound. Answered on this socket alone, not kept: the gauge
+        // is logged at each power of two, so a flood writes a few lines, not one each.
+        Sent::Full(slowed) => {
+            gw.unsent(grant, sequence);
+            if slowed.is_power_of_two() {
+                (gw.log)(&format!(
+                    "an agent's intents kept here reached {} KiB; {slowed} intents refused {SLOW_DOWN} so far",
+                    KEPT_MOST >> 10
+                ));
+            }
+            Some(own_answer(Answer::Refused {
+                actor,
+                sequence,
+                reason: Name::new(SLOW_DOWN).unwrap_or_else(|| unreachable!("a fixed name")),
+                now: gw.link.now(),
+                changed: Vec::new(),
+                op: None,
+                detail: Some(SLOW_DOWN_WORDS.to_owned()),
+            }))
         }
     }
 }
