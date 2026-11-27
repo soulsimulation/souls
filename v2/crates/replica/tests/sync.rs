@@ -522,7 +522,7 @@ fn a_records_key_this_build_does_not_read_is_refused_at_restore() {
         Value::Map(m) => m,
         _ => unreachable!("a record is a map"),
     };
-    let label = |m: &std::collections::BTreeMap<u64, Value>| match m.get(&5).or(m.get(&1)) {
+    let label = |m: &std::collections::BTreeMap<u64, Value>, k: u64| match m.get(&k) {
         Some(Value::Map(a)) if a.get(&1) == Some(&Value::Uint(1)) => Purpose::StatePublic,
         _ => Purpose::StatePrivate,
     };
@@ -545,11 +545,11 @@ fn a_records_key_this_build_does_not_read_is_refused_at_restore() {
     let mut tm = map(&records[&top]);
     tm.insert(11, Value::Uint(1));
     let tb = encode(&Value::Map(tm.clone())).unwrap();
-    let th = Hash::of(label(&tm), &tb).to_bytes();
+    let th = Hash::of(label(&tm, 5), &tb).to_bytes();
     records.insert(th.clone(), tb);
     tops[0] = Value::Bytes(th);
     let ab = encode(&Value::Map(am.clone())).unwrap();
-    let ah = Hash::of(label(&am), &ab).to_bytes();
+    let ah = Hash::of(label(&am, 1), &ab).to_bytes();
     records.insert(ah.clone(), ab);
     audiences[0] = (*a, ah);
     let e = read(&records, &audiences)
