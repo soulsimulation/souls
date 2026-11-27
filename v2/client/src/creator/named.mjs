@@ -42,8 +42,10 @@ const qmul = ([aw, ax, ay, az], [bw, bx, by, bz]) => [aw * bw - ax * bx - ay * b
 const unit = (q) => { const n = Math.hypot(...q) || 1; return q.map((c) => c / n); };
 const conj = ([w, x, y, z]) => [w, -x, -y, -z];
 const rot = (q, [x, y, z]) => { const r = qmul(qmul(q, [0, x, y, z]), conj(q)); return [r[1], r[2], r[3]]; };
+/** An orientation as the pose's sign rule takes it: its first non-zero part positive (q and -q are one turn). */
+export const signed = (q) => (q.find((c) => c !== 0) < 0 ? q.map((c) => (c === 0 ? 0 : -c)) : q);
 /** A turn about +y by `yaw` radians, as the pose writes it (replica `Quat::from_yaw_mdeg`, `things.mjs`). */
-export const quatOfYaw = (yaw) => [Math.round(Math.cos(yaw / 2) * Q), 0, Math.round(Math.sin(yaw / 2) * Q), 0];
+export const quatOfYaw = (yaw) => signed([Math.round(Math.cos(yaw / 2) * Q), 0, Math.round(Math.sin(yaw / 2) * Q), 0]);
 const yawOf = (q) => { const [w, , y] = unit(q); return 2 * Math.atan2(y, w); };
 const angle = (a, b) => { const d = (((a - b) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI; return Math.abs(d); };
 const near = (a, b) => a.every((v, k) => Math.abs(v - b[k]) <= NEAR_UM);
@@ -107,7 +109,7 @@ export function resolveName(ix, name, def) {
 }
 
 const spotOf = (n) => ({ ...(n.pose.slot !== undefined ? { slot: n.pose.slot } : {}), support: { which: n.pose.support.which, ...(n.pose.support.node ? { node: n.pose.support.node } : {}), ...(n.pose.support.height !== undefined ? { height: num(n.pose.support.height) } : {}) } });
-const moveTo = (n, atUm, q) => ({ op: 'move', node: n.id, atUm: atUm.map(Math.round), orientation: q.map(Math.round), ...spotOf(n) });
+const moveTo = (n, atUm, q) => ({ op: 'move', node: n.id, atUm: atUm.map(Math.round), orientation: signed(q.map(Math.round)), ...spotOf(n) });
 /** Where it stands and faces now against where it was and where it goes: already, ready or moved-since. */
 function where(cur, from, to, yaw, fromR, r) {
   const turned = r === undefined || angle(yaw, r) <= NEAR_RAD, was = fromR === undefined || angle(yaw, fromR) <= NEAR_RAD;

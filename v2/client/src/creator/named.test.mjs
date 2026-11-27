@@ -128,3 +128,13 @@ test('the open ground\'s height is read from the export\'s tiles, as the engine 
   assert.equal(lift(32_000_000, 32_000_000), 2_500_000);
   assert.equal(lift(-1, 0), null);
 });
+
+test('a turn past half a turn is written with the pose\'s sign rule: the first non-zero part positive', () => {
+  for (const r of [3.1416, 4.7122, -1.571, 6.2]) {
+    const q = quatOfYaw(r);
+    assert.ok(q.find((c) => c !== 0) > 0, `${r}: ${q}`);
+    assert.ok(Math.abs(Math.abs(q[2] / 2 ** 30) - Math.abs(Math.sin(r / 2))) < 1e-6);
+  }
+  const lighthouse = planOf({ ops: [{ op: 'turn', node: 'tower-a', at_ground: [82.6, -150], from_r: 0, r: 3.1416 }] }, world(), flat)[0];
+  assert.ok(lighthouse.ops[0].orientation.find((c) => c !== 0) > 0);
+});

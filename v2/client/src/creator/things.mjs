@@ -24,7 +24,8 @@ export const CLONES_MOST = 100;
 
 const no = (code, detail) => ({ ok: false, code, detail });
 const um = (v) => Number(v);
-const quatOf = (yaw) => [Math.round(Math.cos(yaw / 2) * Q), 0, Math.round(Math.sin(yaw / 2) * Q), 0];
+// The pose's sign rule: the first non-zero part positive (a yaw past half a turn has a negative w).
+const quatOf = (yaw) => { const q = [Math.round(Math.cos(yaw / 2) * Q), 0, Math.round(Math.sin(yaw / 2) * Q), 0]; return q[0] < 0 || (q[0] === 0 && q[2] < 0) ? q.map((c) => (c === 0 ? 0 : -c)) : q; };
 
 /** `x,z` metres, or a refusal by `code`. */
 export function pairOf(v, flag, code) {
