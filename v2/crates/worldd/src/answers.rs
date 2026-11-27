@@ -4638,7 +4638,7 @@ impl Clock {
         }
         let next = match seat(None) {
             Some(t) => format!(
-                "no {kind} free in {room}; the nearest free seat there is {} ({}): sit on it, or wait for a {kind} to be left",
+                "no {kind} free in {room}; the nearest free seat there is {} ({}): sit on it, or wait for one to be left",
                 replica::world_model::show(t),
                 kind_of(t).map_or_else(String::new, |k| k.0),
             ),
