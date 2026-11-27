@@ -6,7 +6,7 @@ import {beforeNavigation as observeNavigation,depictedBodyIds} from './camera-ob
 import {openCostTime} from './camera-observation-cost.mjs';
 import {publicEnd,nativeReader,receiptState} from './camera-observation-cost-source.mjs';
 export const beforeNavigation=observeNavigation;
-export const ROUTE=Object.freeze([{target:'lab-presentation-hall',holdSeconds:4},{target:'plaza',holdSeconds:3},{target:'bench',holdSeconds:0}]);
+export const ROUTE=Object.freeze([{target:'lab-presentation-hall-door-1',holdSeconds:4},{target:'plaza',holdSeconds:3},{target:'orchard',holdSeconds:0}]);
 export function routeCoverage(rows){
  const points=rows.map(r=>r.subject?.transform?.positionM).filter(Boolean);let distance=0,turn=0,stopped=0,previous=null;
  for(let i=1;i<points.length;i++){const d=points[i].map((v,j)=>v-points[i-1][j]),length=Math.hypot(...d);distance+=length;if(length<.03)stopped++;if(length>.2){if(previous){const dot=d.reduce((n,v,j)=>n+v*previous[j],0)/(length*Math.hypot(...previous));turn=Math.max(turn,Math.acos(Math.min(1,Math.max(-1,dot)))*180/Math.PI);}previous=d;}}
