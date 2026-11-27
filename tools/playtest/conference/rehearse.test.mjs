@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { offersOf } from '../../../v2/client/src/check/offers.mjs';
 import { completed, discoverConference, performConference, rehearsalTemplate } from './rehearse.mjs';
 
 const receipt = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
@@ -21,14 +19,17 @@ test('the rehearsal reuses both existing definitions and refuses an incomplete f
 });
 
 test('discovery rejects a client that hides a required argument, before sending any action', async () => {
-  const entry = (name) => JSON.parse(readFileSync(new URL(`../../../content/kinds/${name}.json`, import.meta.url), 'utf8'));
-  const lecture = offersOf('lectern', entry('hall/lecture'));
-  const stand = entry('conference/conference_question'), question = offersOf('question', stand);
+  // Public inspect answers only: do not import the client's implementation into this diagnostic.
+  const offer = (name, more = {}) => ({ name, usage: `act ${name}:target`, ...more });
+  const lecture = [offer('take_the_lectern', { params: { place: { type: 'slot', of: ['lectern'] } } }),
+    offer('attend', { params: { seat: { type: 'slot' } } }), offer('step_down'), offer('leave')];
+  const question = [offer('post_question', { params: { words: { type: 'text' } } }),
+    ...['mark_answered', 'withdraw_question'].map((name) => offer(name, { who: { link: 'asker' } }))];
   const calls = [];
   const seat = { label: 'Reader', cli: async (...words) => {
     calls.push(words);
     if (words[0] === 'together') return { ok: true, activities: ['hall-lecture', 'speaker-introduction', 'round-of-applause'].map((word) => ({ word, card: word })) };
-    if (words[0] === 'inspect') return { ok: true, offers: words[1] === 'lectern' ? lecture : question, card: stand.text.card };
+    if (words[0] === 'inspect') return { ok: true, offers: words[1] === 'lectern' ? lecture : question, card: 'Post a question, then withdraw your request.' };
     return { ok: true };
   } };
   await discoverConference({ seat, lecture: 'lectern', question: 'question' });
