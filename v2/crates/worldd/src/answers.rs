@@ -9044,7 +9044,9 @@ mod tests {
                 sky::F_WEATHER,
                 Value::Text(Name::new("souls:storm").unwrap()),
             ),
+            set(sky::F_CLOUD, int(100)),
             set(sky::F_RAIN, int(90)),
+            set(sky::F_WIND, int(80)),
             set(sky::F_WEATHER_UNTIL, int(40 * 3_600_000_000)),
             set(
                 sky::F_STRIKE,
