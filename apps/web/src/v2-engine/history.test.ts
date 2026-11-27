@@ -363,3 +363,28 @@ test('cooperative conversion observes cancellation before another publication',a
  const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});
  await assert.rejects(()=>h.chunks(T0/TICK_US,T0/TICK_US+60*TICKS,60,controller.signal),/aborted/);
 });
+
+test('abort releases a pending worker seek and ignores its late completion',{timeout:1000},async()=>{
+ (globalThis as {location?:unknown}).location??={href:'https://example.invalid/'};
+ const controller=new AbortController();let postedSeq=0;
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){postedSeq=m.seq;setTimeout(()=>controller.abort(),0);},terminate(){}};
+ const h=new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'});
+ await assert.rejects(()=>h.chunks(T0/TICK_US,T0/TICK_US+20,1,controller.signal),/aborted/);
+ assert.ok(postedSeq);w.onmessage?.({data:{t:'error',seq:postedSeq,message:'late completion'}} as MessageEvent);
+});
+
+test('abort releases a pending first-history lookup',{timeout:1000},async()=>{
+ const real=globalThis.fetch;(globalThis as {location?:unknown}).location??={href:'https://example.invalid/'};
+ globalThis.fetch=()=>new Promise(()=>{});const controller=new AbortController();
+ try{const h=new V2History('/s/fixture/history/',()=>{throw Error('no worker should start');},{rulesVersion:'test/1'});
+ const result=h.chunks(T0/TICK_US,T0/TICK_US+20,1,controller.signal);setTimeout(()=>controller.abort(),0);await assert.rejects(()=>result,/aborted/);
+ }finally{globalThis.fetch=real;}
+});
+
+test('event-split final metadata belongs to the completed second endpoint',async()=>{
+ (globalThis as {location?:unknown}).location??={href:'https://example.invalid/'};
+ const start=Date.UTC(2026,0,1);const sky={60:86_400,61:start*1000-T0};
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s:{seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[{...place,sky}],samples:[],transitions:[{at:T0+1_250_000,nodes:[body(0)],removed:[]}]}}} as MessageEvent));},terminate(){}};
+ const chunks=await new V2History('/s/fixture/history/',()=>w as unknown as Worker,{rulesVersion:'test/1'}).chunks(T0/TICK_US,(T0+3_000_000)/TICK_US,3);
+ const final=chunks[1].take.finalState as {env:{datetime:string|null};tick:number};assert.equal(final.env.datetime,new Date(start+2000).toISOString().replace('Z',''));assert.equal(final.tick,(T0+2_000_000)/TICK_US);
+});

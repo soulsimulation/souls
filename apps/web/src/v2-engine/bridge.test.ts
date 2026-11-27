@@ -344,3 +344,17 @@ test('a history bundle standing turn precedes its later bundled motion samples',
       moved ? 'the later walking heading wins after the as-at-read turn' : 'the as-at-read standing orientation is not postponed');
   }
 });
+
+test('opt-in history publication splits only at explicit causal endpoints and keeps quiet chunks coarse',()=>{
+ const b=new V2Bridge({rulesVersion:'test/1'},undefined,20,true);
+ b.receive({t:'part',p:{number:0,from:T0,to:T0,nodes:[world,building,floor],removed:[],samples:[]}});
+ const point=(seconds:number)=>b.receive({t:'pointer',p:{newest:null,newestTo:null,period:0,anchorWorld:0,anchorWallMs:0,quietUntil:T0+seconds*1e6+BEHIND_US}});
+ point(1.25);
+ b.receive({t:'part',p:{number:0,from:T0+1_250_000,to:T0+1_250_000,nodes:[{...body,at:T0+1_250_000}],removed:[],samples:[]}});
+ point(2);
+ const chunks=b.view.takes.chunks;
+ assert.deepEqual(chunks.map(c=>[c.fromTick-T0/TICK_US,c.toTick-T0/TICK_US]),[[0,20],[20,25],[25,40]]);
+ assert.equal(sampleTake(chunks[1].take as unknown as Take,.249).entities[E],undefined);
+ assert.ok(sampleTake(chunks[2].take as unknown as Take,0).entities[E]);
+ point(20);assert.ok(b.view.takes.chunks.length<=13,'retention is a time window, not240 fine pieces');
+});

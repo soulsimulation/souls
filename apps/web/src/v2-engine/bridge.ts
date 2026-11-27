@@ -197,8 +197,10 @@ export class V2Bridge {
   /** Ticks a chunk: the live page's half second (CHUNK); a past window's one second, as the old `/v1/takes` (history.ts). */
   private readonly chunk: number;
   private readonly keep: number;
-  constructor(frame: Omit<Frame, 'datetime'>, hour?: string, chunk = CHUNK) {
-    this.frame = frame; this.hour = hour; this.chunk = chunk; this.keep = Math.round(KEEP_CHUNKS_US / (chunk * TICK_US));
+  private readonly historySegments: boolean;
+  private historyNext: number | undefined;
+  constructor(frame: Omit<Frame, 'datetime'>, hour?: string, chunk = CHUNK, historySegments = false) {
+    this.frame = frame; this.hour = hour; this.chunk = chunk; this.keep = Math.round(KEEP_CHUNKS_US / (chunk * TICK_US)); this.historySegments = historySegments;
   }
 
   start(stream: string, make: () => Worker): void {
@@ -524,7 +526,7 @@ export class V2Bridge {
     if (to === null) return;
     // A body's samples come at its turns and steps, not every tick: a chunk is made once the world is BEHIND_US past its
     // end, so the sample after it is in and a walking body is not held at its last one.
-    const end = chunkEnd(to - BEHIND_US, this.chunk), bodies = this.bodies(), things = this.things();
+    const end = chunkEnd(to - BEHIND_US, this.historySegments ? 1 : this.chunk), bodies = this.bodies(), things = this.things();
     const first = Math.max(end - this.keep * this.chunk, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / this.chunk) * this.chunk);
     // what each is doing at the time the page shows (the world's newest time less the page's lag)
     const shown = to - BEHIND_US;
@@ -541,7 +543,19 @@ export class V2Bridge {
     if (end === this.view.takes.serverTick) return;
     this.speak(end);
     const datetime = this.datetime(end * TICK_US);
-    for (let from = first; from < end; from += this.chunk) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, this.chunk, things));
+    if (this.historySegments) {
+      // Only history opts in: a caller stops publication at each recorded causal boundary.
+      // Quiet spans use ordinary aligned chunks; an event endpoint splits only that span.
+      let from = Math.max(first, this.historyNext ?? first);
+      while (from < end) {
+        const next = Math.min(end, (Math.floor(from / this.chunk) + 1) * this.chunk);
+        if (from >= 0) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, next - from, things));
+        from = next;
+      }
+      this.historyNext = from;
+    } else {
+      for (let from = first; from < end; from += this.chunk) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, this.chunk, things));
+    }
     for (const from of [...this.built.keys()]) if (from < first) this.built.delete(from);
     // samples kept a body: a minute of world time before the oldest chunk kept
     const cut = first * TICK_US - KEEP_CHUNKS_US - 60_000_000;
