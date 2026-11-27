@@ -50,12 +50,6 @@ export function isTake(x: unknown): x is Take {
   return recordedTakeSchema.safeParse(x).success;
 }
 
-/** Each chunk object's check, once: what it parsed to, or null when malformed. A chunk is not changed once made, and the
- *  v2 bridge hands the live view a new array of the same chunk objects every half second (bridge.ts `built`), so the
- *  view checked every kept chunk again each time: about 25 ms a frame in zod on a 4x phone. A parsed chunk is its own
- *  check (the schema has no defaults or transforms), so merging checked chunks again costs nothing. */
-const checked = new WeakMap<object, Chunk | null>();
-
 /** Chunks that can be drawn, sorted by start tick, one per start tick. Malformed ones are dropped. */
 export function validChunks(list: unknown): Chunk[] {
   if (!Array.isArray(list)) return [];
@@ -63,14 +57,8 @@ export function validChunks(list: unknown): Chunk[] {
   for (const raw of list) {
     const retained=ownedLiveChunk(raw);
     if(retained){byStart.set(retained.fromTick,retained as unknown as Chunk);continue;}
-    let chunk = raw && typeof raw === 'object' ? checked.get(raw) : undefined;
-    if (chunk === undefined) {
-      const parsed = recordedTakeChunkSchema.safeParse(raw);
-      chunk = parsed.success ? parsed.data as unknown as Chunk : null;
-      if (raw && typeof raw === 'object') checked.set(raw, chunk);
-      if (chunk) checked.set(chunk, chunk);
-    }
-    if (chunk) byStart.set(chunk.fromTick, chunk);
+    const parsed = recordedTakeChunkSchema.safeParse(raw);
+    if (parsed.success) byStart.set(parsed.data.fromTick, parsed.data as unknown as Chunk);
   }
   return [...byStart.values()].sort((a, b) => a.fromTick - b.fromTick);
 }
