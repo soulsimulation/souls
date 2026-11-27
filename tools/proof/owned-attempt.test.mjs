@@ -448,3 +448,24 @@ test('an undeclared abort not in flight at a driver navigation still fails, as d
     assert.equal(report.status,'FAIL',name);assert.match(report.error,/unexpected-network-error/,name);assert.equal(network[0].expected,false,name);
   }
 });
+
+test('native customer page owns finite commands and service groups without qualifying injected proof', async t => {
+  const services = []; let verified = false;
+  const f = setup(t, { boot: async o => {
+    const finite = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }); o.onSpawn(finite, { transient: true, processGroup: true }); finite.exitCode = 0; finite.emit('exit', 0);
+    for (let i = 0; i < 3; i++) { const c = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }); services.push(c); o.onSpawn(c, { processGroup: true }); }
+    return { child: services[0], children: services, base: `https://example.com:${o.port}`, viewer: `https://example.com:${o.port}/w/fixture/`, dataDir: o.data, recipe: { verify() { verified = true; } } };
+  } });
+  f.o.world.kind = 'native-page'; const report = await f.runner(f.o);
+  assert.equal(report.status, 'PASS'); assert.equal(report.qualified, false); assert.equal(verified, true);
+  assert.equal(report.teardown.children.length, 4); assert.ok(report.teardown.children.every(c => c.exited));
+});
+test('native customer-page partial startup closes registered services before a browser can exist', async t => {
+  const f = setup(t, { boot: async o => {
+    for (let i = 0; i < 2; i++) { const c = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }); o.onSpawn(c, { processGroup: true }); }
+    throw Error('native-page startup failure');
+  } });
+  f.o.world.kind = 'native-page'; const report = await f.runner(f.o);
+  assert.equal(report.status, 'BOOT_ABORT'); assert.equal(report.browserStarted, false);
+  assert.equal(report.teardown.children.length, 2); assert.ok(report.teardown.children.every(c => c.exited)); assert.equal(report.qualified, false);
+});
