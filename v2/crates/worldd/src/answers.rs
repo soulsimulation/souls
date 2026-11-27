@@ -4992,7 +4992,7 @@ impl Clock {
                     self.replica.tree(),
                     &mut b.runner.controller,
                     &mut b.slots,
-                    &b.town.surfaces,
+                    &b.town,
                     &a,
                     now,
                 ),

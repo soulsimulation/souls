@@ -1537,6 +1537,40 @@ impl Carry {
         Ok((at, t1))
     }
 
+    /// A take's track (#5067): the crew's node, set where its part was as it was taken (`from`: the part in its slot is
+    /// exactly where it was, so its change of parent moved nothing), goes into its carriers' hands at `to` as a lift's
+    /// does ([`Hoist`], [`Carry::step`]): one motion sample a tick, never in one step, however far the part stood from
+    /// their middle. `span`: between its carriers at the take. `rest`: the ground the part was on and its place there,
+    /// where a take broken off sets it back. It takes [`hoist_time`] of how far it goes. Returns the track's times.
+    pub fn take_up(
+        &mut self,
+        at: Micros,
+        from: (Vec3, Quat),
+        to: (Vec3, Quat),
+        span: i64,
+        rest: (Id, Vec3, Quat),
+    ) -> R<(Micros, Micros)> {
+        let d = |a: i64, b: i64| i128::from(a - b).pow(2);
+        let far = (d(to.0.x, from.0.x) + d(to.0.y, from.0.y) + d(to.0.z, from.0.z)).isqrt();
+        let t1 = at + hoist_time(i64::try_from(far).unwrap_or(i64::MAX));
+        let floor = self.low(from)?.min(self.low(to)?);
+        self.track.push((at, to.0, to.1));
+        self.span = span;
+        self.hoist = Some(Hoist {
+            phase: Phase::Lift,
+            t0: at,
+            t1,
+            from,
+            to,
+            at: from,
+            rest,
+            by: None,
+            transfer: None,
+            floor,
+        });
+        Ok((at, t1))
+    }
+
     /// Where its carriers were at its last sample, `(front, back)` on the open ground's plan, µm: its span apart along
     /// the sample's turn, about its middle. None before its first.
     pub fn ends(&self) -> R<Option<(Xz, Xz)>> {

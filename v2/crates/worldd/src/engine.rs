@@ -147,9 +147,18 @@ pub struct Act {
     pub params: BTreeMap<u64, Value>,
 }
 
-/// A take waiting for its commit (0.135 A2): the crew's ground, its node's place and turn, its carriers' span, and
-/// each side carrier's place at the part (C5).
-type Taking = (Id, Vec3, replica::pose::Quat, i64, Vec<(Id, [i64; 2])>);
+/// A take waiting for its commit (0.135 A2): the crew's ground, its node's place and turn between its carriers, their
+/// span, each side carrier's place at the part (C5), and (#5067) the node's pose where the part was taken and where
+/// the part lay on that ground: its carry's track starts there.
+type Taking = (
+    Id,
+    Vec3,
+    replica::pose::Quat,
+    i64,
+    Vec<(Id, [i64; 2])>,
+    (Vec3, replica::pose::Quat),
+    (Vec3, replica::pose::Quat),
+);
 
 /// A carrying ground's fixed geometry and what it was read at (0.135 C7, [`Engine`]'s `fixed`): the walkers' ground
 /// versions, and the carries on it, each by its activity and when it began.
@@ -624,10 +633,11 @@ fn face_middle(
     }
 }
 
-/// Turns each of `carriers` where it stands to face where it holds its crew's load, the crew's node at `node` (#5067:
-/// a carrier who walked up from the side lifted with its back to the load). Its body's own turn, the facing input the
-/// mover turns it to as #423 turns members to their activity's middle ([`crate::bodies::turn_free`]): only a body
-/// whose legs nothing else drives, so one walking or kept in its place by an order keeps its facing.
+/// Turns each of `carriers` to face where it holds its crew's load, the crew's node at `node` (#5067: a carrier who
+/// walked up from the side lifted with its back to the load, and one who walked on with it stood turned the way it
+/// had walked). Its body's own turn: the facing input the mover turns a body to, set by the world's own rule
+/// (`Controller::face`), so it holds whatever drives its legs, through a walk and at every stop. One standing on its
+/// hold keeps its facing (`sim::controller::facing_toward`).
 fn face_holds(
     c: &mut Controller,
     carriers: &[crate::assembly::Carrier],
@@ -639,7 +649,7 @@ fn face_holds(
         };
         let to = Vec3::new(node.0.x + g.x, k.feet.y, node.0.z + g.z);
         if let Some(facing) = sim::controller::facing_toward(k.feet, to) {
-            crate::bodies::turn_free(c, k.body, facing);
+            let _ = c.face(k.body, facing);
         }
     }
 }
@@ -866,14 +876,15 @@ impl Engine {
         Ok(())
     }
 
-    /// Runs act `a` at `now` on a copy of `live`, the bodies' controller `c`, the walkers' `surfaces` (each node's, for
-    /// the ways carriers walk beside a part on its set-in track, #5067). Its entries wait in [`Engine::out`].
+    /// Runs act `a` at `now` on a copy of `live`, the bodies' controller `c`, the walkers' `town` (its ground for each
+    /// size of body, for the ways carriers walk beside a part on its set-in track, #5067). Its entries wait in
+    /// [`Engine::out`].
     pub fn act(
         &mut self,
         live: &Tree,
         c: &mut Controller,
         slots: &mut Slots,
-        surfaces: &BTreeMap<Id, sim::mover::Surface>,
+        town: &sim::walk::town::Town,
         a: &Act,
         now: Micros,
     ) -> R<()> {
@@ -1233,9 +1244,13 @@ impl Engine {
                     let reach = slots.reach_of(front).min(slots.reach_of(back));
                     // #5067: a carrier may walk beside the part where every step of the straight way is ground its
                     // body stands on, and the world is not carrying it already.
-                    let floor = surfaces.get(&ground);
                     let bodies: &Controller = c;
                     let walkable = |body: Id, a: Vec3, b: Vec3| {
+                        // The ground of the carrier's own size of body.
+                        let floor = bodies
+                            .build(body)
+                            .and_then(|build| town.surfaces_for(build.size))
+                            .and_then(|floors| floors.get(&ground));
                         let Some(floor) = floor.filter(|_| !bodies.carried(body)) else {
                             return false;
                         };
@@ -1346,7 +1361,7 @@ impl Engine {
                             sides: &beside,
                         })
                     });
-                    let ((at, turn), holding) = asm.take(
+                    let taken = asm.take(
                         &mut tree,
                         &self.activities,
                         &mut self.mint,
@@ -1360,14 +1375,17 @@ impl Engine {
                         slots.reach_of(front).min(slots.reach_of(back)),
                         crew.as_ref(),
                     )?;
-                    face_holds(c, &holding, (at, turn));
+                    let (at, turn) = taken.to;
+                    face_holds(c, &taken.carriers, taken.to);
                     // A crew's sides (0.135 C5) carry beside the part from where they stand at the take.
                     let sides = beside
                         .iter()
                         .map(|s| (s.body, Carry::place_of(f, k, s.feet)))
                         .collect::<Vec<_>>();
-                    self.taking
-                        .insert(activity, (ground, at, turn, apart(f, k), sides));
+                    self.taking.insert(
+                        activity,
+                        (ground, at, turn, apart(f, k), sides, taken.from, taken.lay),
+                    );
                 }
             }
             Verb::Lift | Verb::SetDown => {
@@ -2334,20 +2352,34 @@ impl Engine {
             self.stop_refused(tr, now);
             self.came_back(tr, c, now);
         }
-        // #5067: those who walked beside a part whose seating was refused walk back beside it, each from the tick the
-        // world is no longer carrying its body, while the part is on its way back.
+        // #5067: those who walked beside a part whose seating was refused walk back beside it, from where each is, while
+        // the part is on its way back.
         for (activity, ground, w) in std::mem::take(&mut self.walk_back) {
             if !self.asm.as_ref().is_some_and(|s| s.busy(activity)) {
                 continue;
             }
-            if c.carried(w.body) {
-                self.walk_back.push((activity, ground, w));
-            } else if let Err(r) = c.carry(w.body, walk_track(ground, &w)) {
+            // One still walking on (a set-in stopped mid-track) turns back from where it is.
+            if let Err(r) = c.carry_on(w.body, walk_track(ground, &w)) {
                 eprintln!(
                     "worldd: {} did not walk back beside its part: {r}",
                     show(w.body)
                 );
             }
+        }
+        // #5067: while it holds a load, each carrier faces its hold: through the lift, the walk, every stop, the set-in
+        // and the way back. Where the crew's node is: its last sample, or where its seating's track has it now.
+        let mut nodes: Vec<(Id, (Vec3, replica::pose::Quat))> = self
+            .carries
+            .iter()
+            .filter(|(_, carry)| !carry.lowering())
+            .filter_map(|(a, carry)| carry.track.last().map(|(_, p, q)| (*a, (*p, *q))))
+            .collect();
+        if let Some(asm) = self.asm.as_ref() {
+            nodes.extend(asm.tracks(now).into_iter().map(|t| (t.activity, t.node)));
+        }
+        for (activity, node) in nodes {
+            let carriers = self.reaches(live, c, slots, activity);
+            face_holds(c, &carriers, node);
         }
         self.collect(None);
     }
@@ -3499,7 +3531,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let Some((ground, at, turn, span, sides)) = taking else {
+        let Some((ground, at, turn, span, sides, from, lay)) = taking else {
             return;
         };
         let part = self
@@ -3536,15 +3568,35 @@ impl Engine {
                     self.header.clone(),
                     self.rules.clone(),
                 );
-                carry.track.push((now, at, turn));
-                // Its carriers' span at the take: a carry they let drift apart breaks off (0.135 C3).
-                carry.span = span;
                 if let Some(l) = self.held_load(live, part) {
                     carry.load = l;
                 }
-                // #5067: who holds which grip, said once the take is committed.
                 let mut tree = live.frozen();
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
+                // #5067: the take is a track from where the part was into its carriers' hands, said as a lift's is; its
+                // carriers' span at the take is kept (a carry they let drift apart breaks off, 0.135 C3).
+                match carry.take_up(now, from, (at, turn), span, (ground, lay.0, lay.1)) {
+                    Ok(times) => {
+                        self.activities.next = tree.next();
+                        if let Err(e) = self.activities.carry_track(
+                            &mut tree,
+                            r.activity,
+                            part,
+                            "souls:lift",
+                            times,
+                            None,
+                            word,
+                        ) {
+                            eprintln!("worldd: a take's track was not said: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("worldd: a take's track did not start: {e}");
+                        carry.track.push((now, at, turn));
+                        carry.span = span;
+                    }
+                }
+                // Who holds which grip, said once the take is committed.
                 self.grip(&mut tree, r.activity, part, &sides, word);
                 carry.sides = sides;
                 self.carries.insert(r.activity, carry);
