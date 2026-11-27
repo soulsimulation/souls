@@ -1,5 +1,5 @@
 //! Removing one person's words from what is served (Engine v2 W7, #2826): `worldd remove-words`, an operator's command
-//! on a stopped world's folder. A production use needs the site owner's yes each time.
+//! on a world's folder, stopped or running (rule 6). A production use needs the site owner's yes each time.
 //!
 //! 1. **Whose.** A person is named by their Souls' bodies (`--author`, repeated): the principal each record of K16's
 //!    text store keeps as its author (a creator's id for a creator's words). Their references are listed from the
@@ -27,15 +27,23 @@
 //! 5. **A dry run** (`--dry-run`) removes nothing and writes no text file: it counts the references, those already
 //!    as asked, and the text files and rows that would go. Opening the store is a start's own recovery (a torn tail
 //!    cut, an erasure cut short finished).
-//! 6. **Only on a stopped world.** A running world holds its store's files locked, so the command is refused
-//!    (`world-running`) and touches nothing.
+//! 6. **On a running world too, its clock never stopped.** A running world holds its store's files locked, so the
+//!    command hands the ask to it through its asks folder (`removal.asks/`, [`asks_dir`]) and waits for the answer.
+//!    The world takes it on a thread of its own ([`watch`]), never its clock's: the same steps on its open store, each
+//!    reference's removal one short hold of the store's index; then, [`AGAIN`] later, the text files once more, for
+//!    a part being cut as it ran (V1 writes a part's words from the store, so a part cut after the removal has none
+//!    of them). A world that takes no ask within [`TAKEN_WITHIN`] gets it taken back: the command is refused
+//!    (`world-running`) and nothing changes.
 //!
-//! Not here: a running world's removal, who may remove whose words and a profile's removal (W7's directory half), the
-//! copies the recovery chain and O20's backups keep until they are deleted (#2826's plan).
+//! Who may remove whose words is the directory's to say (`directoryd::pairing::removal`): `--by` is recorded as
+//! given. Not here: a profile's removal, the copies the recovery chain, O20's backups and caches keep until they are
+//! deleted (#2826's write-up).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use replica::audience::{REFERENCE, references};
 use replica::effects::{Body, Change, Header, Part, Refusal, read_id};
@@ -303,15 +311,19 @@ pub fn run(args: &[String]) -> i32 {
 const USAGE: &str = "usage: worldd remove-words <world folder> --author <id> [--author <id> ...] \
                      [--from <world µs> --to <world µs>] [--hide | --erase | --restore] --by <id> [--dry-run]";
 
-fn cli(args: &[String]) -> Result<String, String> {
-    let world = args
-        .get(2)
-        .filter(|a| !a.starts_with("--"))
-        .map(PathBuf::from)
-        .ok_or(USAGE)?;
+/// One ask, read from the command's words after `remove-words <world folder>`.
+struct Asked {
+    authors: BTreeSet<Id>,
+    range: Option<(Micros, Micros)>,
+    grade: Grade,
+    by: Id,
+    dry_run: bool,
+}
+
+fn parse(flags: &[String]) -> Result<Asked, String> {
     let (mut authors, mut by, mut from, mut to) = (BTreeSet::new(), None, None, None);
     let (mut grade, mut dry_run) = (Grade::Hidden, false);
-    let mut rest = args[3..].iter();
+    let mut rest = flags.iter();
     while let Some(flag) = rest.next() {
         let mut value = || rest.next().cloned().ok_or(format!("{flag} needs a value"));
         match flag.as_str() {
@@ -337,21 +349,49 @@ fn cli(args: &[String]) -> Result<String, String> {
         (Some(f), Some(t)) if f < t => Some((f, t)),
         _ => return Err("--from and --to go together, from before to".into()),
     };
+    Ok(Asked {
+        authors,
+        range,
+        grade,
+        by,
+        dry_run,
+    })
+}
+
+fn cli(args: &[String]) -> Result<String, String> {
+    let world = args
+        .get(2)
+        .filter(|a| !a.starts_with("--"))
+        .map(PathBuf::from)
+        .ok_or(USAGE)?;
+    let flags = &args[3..];
+    parse(flags)?;
     let text = world.join("log.text");
     if !text.is_dir() {
         return Err("the world has no text store (log.text): no words to remove".into());
     }
     let header = std::fs::read(world.join("header")).map_err(|e| format!("header: {e}"))?;
     let header = Header::read(&header).map_err(said)?;
-    let store =
-        Store::open_dir(&text, Minter::new(crate::words::scope(header.lineage))).map_err(|e| {
-            match e.name {
-                "log-locked" => {
-                    "world-running: the world holds its text store; stop it first".into()
-                }
-                _ => said(e),
-            }
-        })?;
+    match Store::open_dir(&text, Minter::new(crate::words::scope(header.lineage))) {
+        Ok(store) => {
+            let done = apply(&world, &store, flags);
+            store.close();
+            done
+        }
+        Err(e) if e.name == "log-locked" => ask_running(&world, flags),
+        Err(e) => Err(said(e)),
+    }
+}
+
+/// Applies the ask in `flags` to the world in `world` with its text store `store`: rules 1 to 5.
+fn apply(world: &Path, store: &Store, flags: &[String]) -> Result<String, String> {
+    let Asked {
+        authors,
+        range,
+        grade,
+        by,
+        dry_run,
+    } = parse(flags)?;
     let log = log_records(&world.join("log")).map_err(said)?;
     let checkpoint = match world.join("checkpoints").is_dir() {
         true => sim::checkpoint::restore(&world.join("checkpoints")).map_err(said)?,
@@ -375,8 +415,7 @@ fn cli(args: &[String]) -> Result<String, String> {
         dry_run,
         keep,
     };
-    let t = remove(&store, &world.join("views"), &ask, ranged.as_ref()).map_err(said)?;
-    store.close();
+    let t = remove(store, &world.join("views"), &ask, ranged.as_ref()).map_err(said)?;
     let how = match grade {
         Grade::Hidden => "hidden",
         Grade::Erased => "erased",
@@ -407,4 +446,121 @@ fn cli(args: &[String]) -> Result<String, String> {
         },
         t.rows,
     ))
+}
+
+/// A running world's folder of asks (rule 6): `<n>.ask`, the command's words after the world's folder, one a line;
+/// `<n>.taking` while the world applies it; `<n>.done`, its answer: `ok <what it did>` or `refused <why>`.
+pub fn asks_dir(world: &Path) -> PathBuf {
+    world.join("removal.asks")
+}
+
+/// How often a running world looks for asks, and how long after a removal it writes the stream's text files again
+/// (rule 6).
+pub const EVERY: Duration = Duration::from_millis(250);
+pub const AGAIN: Duration = Duration::from_secs(2);
+/// How long the command waits for the world to take its ask, and then for the world's answer (the promise is 60 s).
+pub const TAKEN_WITHIN: Duration = Duration::from_secs(5);
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(60);
+
+/// Hands the ask to the running world through its asks folder and waits for its answer. An ask the world has not
+/// taken within [`TAKEN_WITHIN`] is taken back, so it never acts later, unseen.
+fn ask_running(world: &Path, flags: &[String]) -> Result<String, String> {
+    let dir = asks_dir(world);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let n = format!(
+        "{}-{}",
+        u64::try_from(crate::answers::now()).unwrap_or(0),
+        std::process::id()
+    );
+    let (ask, taking, done) = (
+        dir.join(format!("{n}.ask")),
+        dir.join(format!("{n}.taking")),
+        dir.join(format!("{n}.done")),
+    );
+    crate::view_out::write_whole(&ask, flags.join("\n").as_bytes()).map_err(said)?;
+    let asked = std::time::Instant::now();
+    loop {
+        if let Ok(answer) = std::fs::read_to_string(&done) {
+            let _ = std::fs::remove_file(&done);
+            return match answer.split_once(' ') {
+                Some(("ok", line)) => Ok(format!("{line} (the running world, on its own thread)")),
+                Some((_, why)) => Err(why.to_owned()),
+                None => Err(answer),
+            };
+        }
+        let waited = asked.elapsed();
+        if waited >= TAKEN_WITHIN && !taking.exists() && std::fs::remove_file(&ask).is_ok() {
+            return Err(format!(
+                "world-running: the world holds its text store and took no ask within {} s; nothing changed",
+                TAKEN_WITHIN.as_secs()
+            ));
+        }
+        if waited >= ANSWER_WITHIN {
+            return Err(format!(
+                "removal-unanswered: the world took the ask and has not answered; its answer will be {}",
+                done.display()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A running world takes removals (rule 6) on a thread of its own, never its clock's: every [`EVERY`] it applies each
+/// ask in its asks folder to its open store, oldest first, writes the answer, and [`AGAIN`] after a removal writes
+/// the stream's text files again without the removed rows, for a part that was being cut as it ran. One left
+/// `.taking` by a stop is taken again at the next start (a removal done twice changes nothing more).
+pub fn watch(world: PathBuf, store: Arc<Store>) -> std::io::Result<()> {
+    let dir = asks_dir(&world);
+    std::thread::Builder::new()
+        .name("removal".into())
+        .spawn(move || {
+            let mut again: Option<std::time::Instant> = None;
+            loop {
+                if again.is_some_and(|t| std::time::Instant::now() >= t) {
+                    again = None;
+                    if let Err(e) = purge(&world.join("views"), &store.redactions(), false) {
+                        eprintln!("worldd: removal: the text files again: {}", said(e));
+                    }
+                }
+                let mut found: Vec<PathBuf> = match std::fs::read_dir(&dir) {
+                    Ok(e) => e
+                        .flatten()
+                        .map(|e| e.path())
+                        .filter(|p| p.extension().is_some_and(|x| x == "ask" || x == "taking"))
+                        .collect(),
+                    Err(_) => Vec::new(),
+                };
+                found.sort();
+                for path in found {
+                    let taking = path.with_extension("taking");
+                    if path != taking && std::fs::rename(&path, &taking).is_err() {
+                        continue; // taken back by the command
+                    }
+                    let answer = match std::fs::read_to_string(&taking) {
+                        Ok(text) => {
+                            let flags: Vec<String> = text.lines().map(str::to_owned).collect();
+                            let changes = parse(&flags).is_ok_and(|a| !a.dry_run);
+                            match apply(&world, &store, &flags) {
+                                Ok(line) => {
+                                    if changes {
+                                        again = Some(std::time::Instant::now() + AGAIN);
+                                    }
+                                    eprintln!("worldd: removal: {line}");
+                                    format!("ok {line}")
+                                }
+                                Err(why) => format!("refused {why}"),
+                            }
+                        }
+                        Err(e) => format!("refused removal-io: {e}"),
+                    };
+                    let done = taking.with_extension("done");
+                    if let Err(e) = crate::view_out::write_whole(&done, answer.as_bytes()) {
+                        eprintln!("worldd: removal: the answer: {}", said(e));
+                    }
+                    let _ = std::fs::remove_file(&taking);
+                }
+                std::thread::sleep(EVERY);
+            }
+        })
+        .map(|_| ())
 }

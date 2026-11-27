@@ -746,12 +746,20 @@ fn files_of(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     out
 }
 
-/// W7 (#2826): `worldd remove-words` on a stopped world's folder, made from a real run: refused while the world holds
-/// its store; a dry run changes no byte; `--from`/`--to` reads the log for the time; the erase leaves the name, the
-/// other person's words, the log and the parts as they were.
-#[test]
-fn w7_the_command_on_a_stopped_worlds_folder() {
-    let r = run("w7-cli");
+/// A stopped world's folder made from a real run (W7, #2826): A says two sentences and gets a name and description, B
+/// says one. The folder, A's body, the stream's folder, the log, and the command's words for A's words with `more`.
+#[allow(clippy::type_complexity)]
+fn w7_world(
+    name: &str,
+) -> (
+    PathBuf,
+    Id,
+    Id,
+    PathBuf,
+    Vec<u8>,
+    Box<dyn Fn(&[&str]) -> Vec<String>>,
+) {
+    let r = run(name);
     let (a, b) = (r.pairs[0].0, r.pairs[1].0);
     let asks = [
         intent(a, "eden:say", None, 1, &[(1, words("first of mine"))]),
@@ -770,8 +778,8 @@ fn w7_the_command_on_a_stopped_worlds_folder() {
     }
     let header = r.header.clone();
     let (log, stream) = r.end(|_, _| {});
-    let src = std::env::temp_dir().join(format!("worldd-words-{}-w7-cli", std::process::id()));
-    let folder = dir("w7-cli-world");
+    let src = std::env::temp_dir().join(format!("worldd-words-{}-{name}", std::process::id()));
+    let folder = dir(&format!("{name}-world"));
     std::fs::write(folder.join("header"), &header).unwrap();
     std::fs::write(folder.join("log"), &log).unwrap();
     std::fs::create_dir_all(folder.join("log.text").join("uploads")).unwrap();
@@ -785,23 +793,28 @@ fn w7_the_command_on_a_stopped_worlds_folder() {
     }
     let id = |i: Id| format!("{}-{}", replica::encode::to_hex(&i.scope().0), i.counter());
     let asker = Id::new(Scope([0x78; 16]), 1).unwrap();
-    let args = |more: &[&str]| -> Vec<String> {
-        let mut v: Vec<String> = [
-            "worldd",
-            "remove-words",
-            folder.to_str().unwrap(),
-            "--author",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let world = folder.to_str().unwrap().to_owned();
+    let args = Box::new(move |more: &[&str]| -> Vec<String> {
+        let mut v: Vec<String> = ["worldd", "remove-words", &world, "--author"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         v.extend([id(a), "--by".into(), id(asker)]);
         v.extend(more.iter().map(|s| s.to_string()));
         v
-    };
+    });
+    (folder, a, asker, views, log, args)
+}
+
+/// W7 (#2826): `worldd remove-words` on a stopped world's folder, made from a real run: refused while the world holds
+/// its store and takes no ask; a dry run changes no byte; `--from`/`--to` reads the log for the time; the erase leaves
+/// the name, the other person's words, the log and the parts as they were.
+#[test]
+fn w7_the_command_on_a_stopped_worlds_folder() {
+    let (folder, _, asker, views, log, args) = w7_world("w7-cli");
     let before = files_of(&folder);
 
-    // The world holds its store: refused, nothing touched.
+    // The store is held and no world takes the ask: refused, nothing touched.
     let held = Store::open_dir(&folder.join("log.text"), Minter::new(Scope([1; 16]))).unwrap();
     assert_eq!(worldd::removal::run(&args(&["--erase"])), 2);
     held.close();
@@ -863,4 +876,80 @@ fn w7_the_command_on_a_stopped_worlds_folder() {
     let list = store.removals();
     assert_eq!(list.len(), 3, "the hide, then two erasures");
     assert!(list.iter().all(|x| x.by == asker));
+}
+
+/// W7 follow-up (#2826): a running world, holding its store, takes `remove-words` on a thread of its own within 60 s,
+/// while its store goes on taking words (the clock's own work stands in a thread writing all the while).
+#[test]
+fn w7_a_running_world_takes_the_removal_on_its_own_thread() {
+    use std::time::Instant;
+    let (folder, _, asker, views, log, args) = w7_world("w7-running");
+    let before = files_of(&folder);
+    let store =
+        Arc::new(Store::open_dir(&folder.join("log.text"), Minter::new(Scope([1; 16]))).unwrap());
+    worldd::removal::watch(folder.clone(), Arc::clone(&store)).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let talker = Id::new(Scope([0x79; 16]), 1).unwrap();
+    let writer = {
+        let (store, stop) = (Arc::clone(&store), Arc::clone(&stop));
+        std::thread::spawn(move || {
+            let (mut n, mut worst) = (0u32, Duration::ZERO);
+            while !stop.load(Ordering::Relaxed) {
+                let t = Instant::now();
+                store
+                    .write_queued(b"still talking", Audience::Everyone, talker)
+                    .unwrap();
+                worst = worst.max(t.elapsed());
+                n += 1;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            (n, worst)
+        })
+    };
+    let started = Instant::now();
+    assert_eq!(worldd::removal::run(&args(&["--erase", "--dry-run"])), 0);
+    for (p, b) in &before {
+        if p.starts_with(&views) {
+            assert_eq!(&std::fs::read(p).unwrap(), b, "a dry run writes nothing");
+        }
+    }
+    assert_eq!(worldd::removal::run(&args(&["--erase"])), 0);
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(60), "{took:?}");
+    let now = words_now(&views);
+    for l in ["first of mine", "second of mine"] {
+        assert!(!now.contains(&l.to_owned()), "{now:?}");
+    }
+    for l in ["not mine at all", "Oriel", "keeps the lamps"] {
+        assert!(now.contains(&l.to_owned()), "{l:?} stays");
+    }
+    let list = store.removals();
+    assert_eq!(list.len(), 2, "the two erasures");
+    assert!(list.iter().all(|x| x.by == asker));
+    stop.store(true, Ordering::Relaxed);
+    let (n, worst) = writer.join().unwrap();
+    eprintln!(
+        "w7 running: removal answered in {took:?}; {n} words written meanwhile, the slowest in {worst:?}"
+    );
+    assert!(n > 0 && worst < Duration::from_secs(1), "{n} {worst:?}");
+    assert_eq!(
+        std::fs::read(folder.join("log")).unwrap(),
+        log,
+        "no log byte changes"
+    );
+    for (p, b) in &before {
+        if p.starts_with(&views) && p.extension().is_none() {
+            assert_eq!(
+                &std::fs::read(p).unwrap(),
+                b,
+                "a part never changes: {}",
+                p.display()
+            );
+        }
+    }
+    let left: Vec<_> = std::fs::read_dir(worldd::removal::asks_dir(&folder))
+        .unwrap()
+        .flatten()
+        .collect();
+    assert!(left.is_empty(), "every ask answered and its answer read");
 }

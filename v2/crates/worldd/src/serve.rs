@@ -3845,6 +3845,8 @@ fn serve(args: &[String]) -> R<()> {
     )
     .map_err(|e| format!("the text store: {}", refusal(e)))?;
     let text = Arc::new(text);
+    // A removal of a person's words asked while the world runs, taken on a thread of its own (W7, `worldd::removal`).
+    worldd::removal::watch(dir.clone(), Arc::clone(&text)).map_err(|e| e.to_string())?;
     let mut off = match &bucket {
         Some(spec) => {
             let machine = arg(args, "--machine")
