@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { historyBase, V2History } from './history.ts';
-import { dayIndexKey, headerKey, yearCountsKey } from './history-keys.ts';
+import { dayIndexKey, headerKey, walk, yearCountsKey, type DayIndex } from './history-keys.ts';
 import { TICK_US, TICKS } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 import type { Seeked } from './history-worker.ts';
@@ -136,6 +136,40 @@ test('the history export\'s paths are the ones the origin serves: the counts und
   assert.equal(at(dayIndexKey(0)), 'https://soul.game/s/w/a-a-0/history/bundles/00000000/index');
   assert.equal(at(yearCountsKey(56)), 'https://soul.game/s/w/a-a-0/history/history/everyone/counts/year/0056');
   assert.equal(historyBase('/s/w/a-a-0/views/a/a-0/0/a-0/1/everyone/', {}), '/s/w/a-a-0/history/', 'the export beside the stream\'s views');
+});
+
+test('a world made through New world (its clock from 0): every history file the page asks of it is one its export serves', async () => {
+  // my-mars-lab-2 on soul.game, 26 Nov (read-only curl): its export in bundles/00000000/ (200), the wall's day 20783
+  // (bundles/00020783/index: 404), the page's live head 6 h 38 min of world time in, its newest bundle 8 min back
+  const DAY = 86_400_000_000, nowUs = 23_916_000_000, first = 4_115_192_082, newest = 23_435_192_082;
+  const served = (indexes: Map<number, DayIndex>) => {
+    const asked: string[] = [];
+    return { asked, get: async (day: number) => { asked.push(dayIndexKey(day)); return indexes.get(day) ?? null; } };
+  };
+  const created = new Map<number, DayIndex>([[0, [[first, 'bundles/00000000/a', new Uint8Array(32)], [newest, 'bundles/00000000/b', new Uint8Array(32)]]]]);
+  for (const at of [nowUs - 60_000_000, nowUs, first]) { // Back 1 min, Pause, From the start
+    const o = served(created), got = await walk(at, nowUs, first, o.get);
+    assert.equal(got?.key, at === first ? 'bundles/00000000/a' : 'bundles/00000000/b');
+    assert.equal(await got!.later(), at === first ? newest : null);
+    assert.deepEqual(o.asked, [dayIndexKey(0)], `at ${at} µs: day 0's index only, never day 1's, which the world has not reached`);
+  }
+  // an imported world (Eden: its clock reads as the wall's): yesterday's newest bundle is followed into today's index
+  const today = 20783, eden = new Map<number, DayIndex>([[today - 1, [[(today - 1) * DAY + 5e9, 'y', new Uint8Array(32)]]], [today, [[today * DAY + 7e9, 't', new Uint8Array(32)]]]]);
+  const o = served(eden), y = await walk(today * DAY - 60_000_000, today * DAY + 60e9, undefined, o.get);
+  assert.equal(await y!.later(), today * DAY + 7e9);
+  assert.deepEqual(o.asked, [dayIndexKey(today - 1), dayIndexKey(today)]);
+  const t = served(eden); await (await walk(today * DAY + 30e9, today * DAY + 60e9, undefined, t.get))!.later();
+  assert.deepEqual(t.asked, [dayIndexKey(today)], 'today\'s newest bundle: no index of tomorrow');
+  // the page's live head reaches the worker as the world's now; unknown (the first motion fetch), the window's end
+  (globalThis as { location?: unknown }).location ??= { href: 'http://127.0.0.1/w/x/' };
+  const { w } = fakeWorker(), posts: { seq: number; at: number; now?: number }[] = [], post = w.postMessage.bind(w);
+  w.postMessage = (m) => { posts.push(m); post(m); };
+  const h = new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' });
+  const from = (T0 + 30_000_000) / TICK_US, to = from + 4 * TICKS;
+  await h.chunks(from, to, 4, undefined, to + 100);
+  assert.ok(posts.length && posts.every((m) => m.now === (to + 100) * TICK_US), JSON.stringify(posts.map((m) => m.now)));
+  posts.length = 0; await h.chunks(from, to, 4);
+  assert.ok(posts.length && posts.every((m) => m.now === to * TICK_US), JSON.stringify(posts.map((m) => m.now)));
 });
 
 test('K3: the first moment asks only for years that can hold it: back past a year that has its day 0, at most two when there are none', async () => {
