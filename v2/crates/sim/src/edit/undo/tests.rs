@@ -8,7 +8,7 @@ use crate::edit::plan;
 use crate::log::{Log, Mem};
 use replica::edit::{Edit, Op, Ref, Spot, check, reverses};
 use replica::effects::{FIXTURE_HEADER, Header, fixture_bytes};
-use replica::hash::state_hash;
+use replica::hash::{node_hash, state_hash};
 use replica::ids::{Minter, Scope};
 use replica::pose::{Quat, Support, Vec3};
 use replica::world_model::Kind;
