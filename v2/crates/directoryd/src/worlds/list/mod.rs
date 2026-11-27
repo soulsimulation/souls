@@ -817,7 +817,8 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
         let entries =
             std::fs::read_dir(&templates).or_else(|e| refuse("template-io", e.to_string()))?;
         for e in entries.flatten() {
-            if e.path().join("template").is_file() {
+            // A folder named as imported rows are is no template: its worlds would count toward no limit (rule 4).
+            if e.path().join("template").is_file() && e.file_name() != IMPORTED {
                 found.insert(
                     e.file_name().to_string_lossy().into_owned(),
                     Template::read(&e.path())?,
