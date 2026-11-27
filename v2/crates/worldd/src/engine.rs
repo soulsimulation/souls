@@ -192,7 +192,7 @@ pub struct Engine {
     /// again when the part comes back, keeps them.
     set_sides: BTreeMap<Id, Vec<(Id, [i64; 2])>>,
     /// Carriers to walk back beside their crew's part on a refused seating's way back (#5067), by crew: each begun at
-    /// the next tick its body is free to be carried ([`Engine::walk_back`]).
+    /// the next tick its body is free to be carried (`Engine::tick`).
     walk_back: Vec<(Id, Id, crate::assembly::Walk)>,
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
@@ -557,7 +557,6 @@ const LAY_OUT: i64 = 2_200_000;
 /// or its own body leaving): about one a tick, so some 5 s; then its hold stays kept.
 const RETRIES: u8 = 100;
 
-/// How far apart two carriers stand along the ground, µm.
 /// How far apart the points of a carrier's way beside its part are checked against the ground it stands on, µm (#5067).
 const WALK_STEP: i64 = 25_000;
 
@@ -575,6 +574,32 @@ fn walk_track(ground: Id, w: &crate::assembly::Walk) -> sim::controller::Track {
     }
 }
 
+/// Whether every step of the straight way from `a` to `b` on `ground` (µm), [`WALK_STEP`] apart, is ground a body of
+/// `body`'s own size stands on, as the walkers' `town` has it now (#5067: where the world may carry a carrier beside
+/// its crew's part).
+fn way_is_ground(
+    c: &Controller,
+    town: &sim::walk::town::Town,
+    ground: Id,
+    body: Id,
+    a: Vec3,
+    b: Vec3,
+) -> bool {
+    let floor = c
+        .build(body)
+        .and_then(|build| town.surfaces_for(build.size))
+        .and_then(|floors| floors.get(&ground));
+    let Some(floor) = floor else {
+        return false;
+    };
+    let n = (apart(a, b) / WALK_STEP).max(1);
+    (0..=n).all(|k| {
+        let at = |u: i64, v: i64| u + (i128::from(v - u) * i128::from(k) / i128::from(n)) as i64;
+        floor.holds([at(a.x, b.x), at(a.z, b.z)])
+    })
+}
+
+/// How far apart two carriers stand along the ground, µm.
 fn apart(f: Vec3, k: Vec3) -> i64 {
     let (dx, dz) = (i128::from(f.x - k.x), i128::from(f.z - k.z));
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
@@ -1246,22 +1271,7 @@ impl Engine {
                     // body stands on, and the world is not carrying it already.
                     let bodies: &Controller = c;
                     let walkable = |body: Id, a: Vec3, b: Vec3| {
-                        // The ground of the carrier's own size of body.
-                        let floor = bodies
-                            .build(body)
-                            .and_then(|build| town.surfaces_for(build.size))
-                            .and_then(|floors| floors.get(&ground));
-                        let Some(floor) = floor.filter(|_| !bodies.carried(body)) else {
-                            return false;
-                        };
-                        let far = apart(a, b);
-                        let n = (far / WALK_STEP).max(1);
-                        (0..=n).all(|k| {
-                            let at = |u: i64, v: i64| {
-                                u + (i128::from(v - u) * i128::from(k) / i128::from(n)) as i64
-                            };
-                            floor.holds([at(a.x, b.x), at(a.z, b.z)])
-                        })
+                        !bodies.carried(body) && way_is_ground(bodies, town, ground, body, a, b)
                     };
                     let (effects, walks) = asm.put(
                         &mut tree,
@@ -1896,9 +1906,10 @@ impl Engine {
         live: &Tree,
         c: &mut Controller,
         slots: &mut Slots,
-        versions: &sim::ground::Versions,
+        town: &sim::walk::town::Town,
         now: Micros,
     ) {
+        let versions = &town.versions;
         if !self.steered.is_empty() {
             let home = crate::carrier::settle(live, slots, &mut self.steered, now);
             self.out.extend(home);
@@ -2356,6 +2367,21 @@ impl Engine {
         // the part is on its way back.
         for (activity, ground, w) in std::mem::take(&mut self.walk_back) {
             if !self.asm.as_ref().is_some_and(|s| s.busy(activity)) {
+                continue;
+            }
+            // From where its body is now, and only over ground it stands on (review of #5206): it may have stepped off
+            // its line since its walk ended, or the ground may have been rebuilt since the put. One not standing on the
+            // crew's ground, or with no such way back, stays where it stands; its carry breaks off as its part comes
+            // back without it (`came_back`).
+            let here = c
+                .body(w.body)
+                .filter(|m| m.pose.frame.slot.is_none() && sim::index::place_of(m).0 == ground)
+                .map(|m| m.pose.position);
+            if !here.is_some_and(|at| way_is_ground(c, town, ground, w.body, at, w.to)) {
+                eprintln!(
+                    "worldd: {} stays where it stands: no ground straight back beside its part",
+                    show(w.body)
+                );
                 continue;
             }
             // One still walking on (a set-in stopped mid-track) turns back from where it is.
