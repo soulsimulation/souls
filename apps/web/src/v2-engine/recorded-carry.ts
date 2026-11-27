@@ -3,6 +3,8 @@ import type {NodeRec,PartRec,SnapshotRec,SampleRec} from './source/source.ts';
 import type {CarryChange,CarryGrips,CrewMember,Q4,V3} from './source/carry-record.ts';
 export type NativePose={p:V3;q:Q4}; // world metres, unit quaternion [w,x,y,z]
 type Timed<T>={at:number;value:T};
+// Public kind fields may contain exact i64 big integers; JSON serialization is not node equality.
+const same=(a:unknown,b:unknown):boolean=>{if(a===b)return true;if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;if(a instanceof Uint8Array||b instanceof Uint8Array)return a instanceof Uint8Array&&b instanceof Uint8Array&&a.length===b.length&&a.every((v,i)=>v===b[i]);const x=a as Record<string,unknown>,y=b as Record<string,unknown>,keys=Object.keys(x);return keys.length===Object.keys(y).length&&keys.every(k=>Object.hasOwn(y,k)&&same(x[k],y[k]));};
 const Q=2**30;
 const norm=(q:Q4):Q4=>{const n=Math.hypot(...q);if(!Number.isFinite(n)||n<.5)throw Error('carry-pose: invalid quaternion');return q.map(x=>x/n)as Q4;};
 export const rotate=(q:Q4,p:V3):V3=>{const[w,x,y,z]=q,[a,b,c]=p,tx=2*(y*c-z*b),ty=2*(z*a-x*c),tz=2*(x*b-y*a);return[a+w*tx+y*tz-z*ty,b+w*ty+z*tx-x*tz,c+w*tz+x*ty-y*tx];};
@@ -34,7 +36,7 @@ export class RecordedCarry{
    const effective=old?(p?.to??time):p?time:n.at??time;
    const exactTransfer=p?.carryChanges?.some(c=>c.node===n.id&&c.pose);
    const poseChanged=!old||JSON.stringify([old.parent,old.slot,old.pos,old.rot])!==JSON.stringify([n.parent,n.slot,n.pos,n.rot]);
-   if(!exactTransfer&&(!old||JSON.stringify(old)!==JSON.stringify(n))){
+   if(!exactTransfer&&(!old||!same(old,n))){
     // Metadata has its own boundary (slot points, kind/origin), but cannot restart an existing motion track.
     const prior=this.record(n.id,effective);this.poseStarts.set(n,poseChanged?effective:prior?this.poseStarts.get(prior)??r.at(-1)?.at??effective:effective);put(r,effective,n);
    }this.records.set(n.id,r);
