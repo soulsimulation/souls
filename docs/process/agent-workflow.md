@@ -37,8 +37,8 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 | re-pinning a baseline inside a feature commit | regenerate the walk or bundle baseline (`--write`) in its own commit, with the reason in the message, after rebasing |
 
 **Codex's files.** Files Codex owns are listed in [`tools/ci/codex-files.txt`](../../tools/ci/codex-files.txt) (Gene,
-26 Nov; #5068). The `ci` workflow's `codex-files` job fails `ci-ok` when a PR without the `codex:land` label changes
-one; a `warn` entry (the shared `apps/web/src/WorldEntityLayer.ts`) only adds a warning to the job summary. A lane
+26 Nov; #5068). The `ci` workflow's `codex-files` job fails `ci-ok` when a PR from main's lanes (any commit with a
+`Co-Authored-By: Claude` trailer; Codex's commits carry none) changes one; a `warn` entry (the shared `apps/web/src/WorldEntityLayer.ts`) only adds a warning to the job summary. A lane
 that needs such a change writes the exact diff for Codex on #5068 instead. When Codex agrees, the coordinator names
 that on #5068, adds `codex:files-ok` and re-runs the failed jobs (labels start no run; the job reads them when it runs).
 

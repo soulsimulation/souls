@@ -5,8 +5,9 @@
 # of segments, `{a,b}` either. A line starting with `warn ` only reports (a job summary line and a warning, never a
 # failure): it is for a shared file where Codex owns only one path through it, so a whole-file rule would block main.
 #
-# A PR is Codex's when it carries the `codex:land` label. The coordinator passes another PR whose change Codex has
-# agreed to with the `codex:files-ok` label, and names that agreement on #5068.
+# The check applies to a PR from main's lanes: one with any commit carrying a `Co-Authored-By: Claude` trailer (Codex's
+# commits never do). The coordinator passes such a PR whose change Codex has agreed to with the `codex:files-ok` label,
+# and names that agreement on #5068.
 
 mars/viewer/app/engine-view/{humans,posture-transition,activity-poses,take-replay}.ts
 apps/web/src/v2-engine/{bridge,takes,take-gestures,take-parts,use-v2-souls,creator-kinds}.ts

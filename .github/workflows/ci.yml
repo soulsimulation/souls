@@ -126,8 +126,9 @@ jobs:
           tools/changelog/compile.test.mjs
           e2e/local-smoke.test.mjs
 
-  # Codex's files (Gene, 26 Nov; #5068): a PR without `codex:land` fails when it changes a file in
-  # tools/ci/codex-files.txt (a `warn` entry only reports). It reads the PR's changed files and labels from the API
+  # Codex's files (Gene, 26 Nov; #5068): a lane's PR (a commit with a `Co-Authored-By: Claude` trailer) fails when it
+  # changes a file in tools/ci/codex-files.txt (a `warn` entry only reports); Codex's PRs pass. It reads the PR's
+  # changed files, commits and labels from the API
   # and checks out just the script and the list. Labels start no run: after the coordinator adds `codex:files-ok`,
   # re-run the failed jobs; the labels are read when the job runs. .github/scripts/codex-files.mjs
   codex-files:

@@ -1,18 +1,19 @@
 #!/usr/bin/env node
-// Codex's files (Gene, 26 Nov; #5068): a pull request that is not Codex's fails when it changes a file listed in
-// tools/ci/codex-files.txt, and gets a warning line for a `warn` entry. A PR is Codex's when it carries the
-// `codex:land` label: every Codex PR is opened from the same account and an `agent/` branch like ours and carries no
-// body marker, while Codex labels each PR it wants landed (the landing protocol on #5068). `codex:files-ok` is the
-// coordinator's override for a change Codex agreed to, named on #5068.
+// Codex's files (Gene, 26 Nov; #5068): a pull request from main's lanes fails when it changes a file listed in
+// tools/ci/codex-files.txt, and gets a warning line for a `warn` entry. A PR is main's when any of its commits carries a
+// `Co-Authored-By: Claude` trailer: every Claude lane writes it in every commit, Codex's commits never carry it, and
+// both open PRs from the same account on `agent/` branches with no body marker. Codex adds its `codex:land` label only
+// when a PR is ready to land, so keying on that would turn Codex's own drafts red. Any other PR passes.
+// `codex:files-ok` is the coordinator's override for a change Codex agreed to, named on #5068.
 //
-//   node .github/scripts/codex-files.mjs --repo owner/name --pr 123      (the ci workflow: files and labels from the API)
-//   node .github/scripts/codex-files.mjs --files a.ts,b.ts [--labels x,y] (local)
+//   node .github/scripts/codex-files.mjs --repo owner/name --pr 123   (the ci workflow: files, commits and labels from the API)
+//   node .github/scripts/codex-files.mjs --files a.ts,b.ts [--claude] [--labels x,y]   (local; --claude: a lane's PR)
 // Labels are read when the job runs, not from the event, so re-running the failed job after adding a label counts it.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-export const CODEX_LABEL = 'codex:land';
+export const CLAUDE_TRAILER = /^co-authored-by:\s*claude\b/im;
 export const OVERRIDE_LABEL = 'codex:files-ok';
 const LIST = new URL('../../tools/ci/codex-files.txt', import.meta.url);
 
@@ -45,18 +46,20 @@ export function parseList(text) {
   });
 }
 
-/** Judge one PR. `files` are changed paths (a rename lists both its old and new path). */
-export function check({ files, labels, rules }) {
+/** Whether a PR is a Claude lane's: any commit message carries the `Co-Authored-By: Claude` trailer. */
+export const claudeAuthored = messages => messages.some(m => CLAUDE_TRAILER.test(m));
+
+/** Judge one PR. `files` are changed paths (a rename lists both its old and new path); `claude`: a lane's PR. */
+export function check({ files, labels, rules, claude }) {
   const hits = [];
   for (const file of new Set(files)) {
     const rule = rules.find(r => r.re.test(file));
     if (rule) hits.push({ file, glob: rule.glob, level: rule.level });
   }
-  const codex = labels.includes(CODEX_LABEL);
   const override = labels.includes(OVERRIDE_LABEL);
   const failing = hits.filter(h => h.level === 'fail');
   const warnings = hits.filter(h => h.level === 'warn');
-  const exempt = codex ? `${CODEX_LABEL}: a Codex PR` : override ? `${OVERRIDE_LABEL}: the coordinator passed it (#5068)` : '';
+  const exempt = !claude ? 'no Co-Authored-By: Claude commit, not a lane PR' : override ? `${OVERRIDE_LABEL}: the coordinator passed it (#5068)` : '';
   return { ok: Boolean(exempt) || failing.length === 0, exempt, failing, warnings };
 }
 
@@ -64,7 +67,7 @@ export function report(result) {
   const lines = [];
   if (result.exempt) lines.push(`Codex's files: exempt (${result.exempt}).`);
   else if (result.failing.length) {
-    lines.push(`Codex's files: this PR changes files Codex owns (Gene, 26 Nov; #5068). Write the exact change for Codex on #5068 instead, or the coordinator adds \`${OVERRIDE_LABEL}\` once Codex agrees and re-runs this job.`);
+    lines.push(`Codex's files: this lane PR changes files Codex owns (Gene, 26 Nov; #5068). Write the exact change for Codex on #5068 instead, or the coordinator adds \`${OVERRIDE_LABEL}\` once Codex agrees and re-runs this job.`);
     for (const h of result.failing) lines.push(`- ${h.file} (${h.glob})`);
   } else lines.push("Codex's files: none changed.");
   if (!result.exempt) for (const h of result.warnings)
@@ -79,16 +82,18 @@ function gh(args) {
 function main(argv) {
   const arg = name => { const i = argv.indexOf(`--${name}`); return i < 0 ? undefined : argv[i + 1]; };
   const list = (s) => (s ?? '').split(',').map(x => x.trim()).filter(Boolean);
-  let files, labels;
+  let files, labels, claude;
   if (arg('pr')) {
     const repo = arg('repo') ?? process.env.GITHUB_REPOSITORY;
     files = gh([`repos/${repo}/pulls/${arg('pr')}/files?per_page=100`]).flatMap(f => [f.filename, f.previous_filename].filter(Boolean));
     labels = gh([`repos/${repo}/issues/${arg('pr')}/labels?per_page=100`]).map(l => l.name);
+    claude = claudeAuthored(gh([`repos/${repo}/pulls/${arg('pr')}/commits?per_page=100`]).map(c => c.commit.message));
   } else {
     files = list(arg('files'));
     labels = list(arg('labels'));
+    claude = argv.includes('--claude');
   }
-  const result = check({ files, labels, rules: parseList(readFileSync(LIST, 'utf8')) });
+  const result = check({ files, labels, rules: parseList(readFileSync(LIST, 'utf8')), claude });
   const text = report(result);
   console.log(text);
   if (process.env.GITHUB_ACTIONS) {
