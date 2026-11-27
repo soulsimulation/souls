@@ -5,9 +5,9 @@ import type {CameraVersion} from '../../../../packages/camera/src/observation.ts
 import {DisplayedCameraObserver} from './observation.ts';
 import type {DrawnSubject,ObservationResult} from './observation.ts';
 import type {SceneInfo} from '../WorldGeometry.ts';
-import {FollowCamera,FollowGeometry,publishedFollowGround,type FollowViewport} from './follow-camera.ts';
+import {FollowCamera,FollowGeometry,publishedFollowGround,type FollowProjection,type FollowViewport} from './follow-camera.ts';
 export const FOLLOW_DIAGNOSTIC_CAP=8192;
-export type FollowInput={key:string;tick:number;seconds:number;at:number;mode:string;id:string|null;camera:PerspectiveCamera;aim:Vector3;viewport?:FollowViewport};
+export type FollowInput={key:string;tick:number;seconds:number;at:number;mode:string;id:string|null;camera:PerspectiveCamera;aim:Vector3;viewport?:FollowViewport;projection?:FollowProjection};
 export class FollowController{
  readonly enabled:boolean;
  private observer=new DisplayedCameraObserver();private policy=new FollowCamera();private geometry=new FollowGeometry();
@@ -30,7 +30,7 @@ export class FollowController{
    if(!p||![input.at,input.seconds,input.tick,p.at,p.seconds,p.tick].every(Number.isFinite)||p.key!==input.key||p.result.status!=='observed'||age<0||age>250||gap<0||gap>.25||p.tick>input.tick){this.policy.reset(input.camera.position,input.aim);this.reason='depicted-input-stale';return;}
    const subject=p.result.value.subjects.find(s=>s.id===input.id);if(!subject||subject.state!=='present'){this.policy.reset(input.camera.position,input.aim);this.reason='subject-unavailable';return;}
    const preparing=performance.now();const {roots,revision}=source();this.geometry.prepare(roots,revision);this.preparationMs=performance.now()-preparing;
-   const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground,input.viewport);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;
+   const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground,input.viewport,input.projection);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;
    input.camera.position.copy(pose.eye);input.aim.copy(pose.aim);input.camera.lookAt(pose.aim);
   }finally{this.controlMs=performance.now()-start;}
  }
