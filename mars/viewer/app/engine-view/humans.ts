@@ -31,6 +31,7 @@ import {BODY_MODEL as ENGINE_BODY} from '../../engine/body/model.ts';
 // All of it is a pure function of (world history, entity id): no randomness.
 import * as THREE from 'three';
 import { hashId, humanGroundAt, humanGroundSampler, setHumanGround, templateNameFor } from './people-light.ts';
+import { seatedFootWeight, seatedSupportY } from './seated-ground.ts';
 import type { Entity, Pose, WorldState } from '../../engine/world/types.ts';
 import type { Vec3 } from '../../engine/core/math.ts';
 import type { Link } from '../../engine/spatial/types.ts';
@@ -1843,7 +1844,7 @@ export class HumanViews {
   private libraryBody(v: View, lib: LibPlan, curW: number, prevW: number, yaw: number): boolean {
     const h = v.rig.holder, t = v.rig.template;
     if (!v.spine || v.legs.length < 2) return false;
-    let seatW = 0, seatShift = 0, seatX = 0, seatZ = 0;
+    let seatW = 0, seatShift = 0, seatX = 0, seatZ = 0, supportW = 0;
     for (const [one, wgt] of [[lib.cur, curW], [lib.prev, prevW]] as [LibOne | null, number][]) {
       if (!one || wgt <= 1e-4) continue;
       const body = one.pick.body;
@@ -1858,6 +1859,7 @@ export class HumanViews {
           // through the plank's front. Translate the fitted seated layout,
           // including foot goals, rather than stretching legs or moving a seat.
           if (body === 'seat') {
+            supportW += wgt * k;
             seatX -= wgt * k * (rest.hip.x * Math.cos(yaw) - rest.hip.z * Math.sin(yaw));
             seatZ -= wgt * k * (rest.hip.x * Math.sin(yaw) + rest.hip.z * Math.cos(yaw));
           }
@@ -1911,6 +1913,7 @@ export class HumanViews {
       const goal = feet[i].p.clone(); goal.x += seatX; goal.z += seatZ;
       goal.y = Math.max(goal.y, floorY);
       legTo(l, v.ankle[i], goal, V().copy(_fwd).addScaledVector(UP, 0.35), 0.995, feet[i].q);
+      fitSeatedFoot(v, i, supportW);
     });
     return seatW > 0.5;
   }
@@ -2768,6 +2771,37 @@ function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number)
   }
 }
 
+/** Seat-owned leg correction, after its pelvis fit. No root/pelvis/bearing or hand-contact target changes. */
+function fitSeatedFoot(v: View, i: number, phase: number) {
+  if (phase <= 0 || v.grip || v.on || v.frame) return;
+  const leg = v.legs[i], holder = v.rig.holder, refs = v.surf.foot.get(leg.side);
+  if (!refs?.length) return;
+  holder.updateMatrixWorld(true);
+  const ankle = leg.foot.getWorldPosition(V()), hip = leg.upper.getWorldPosition(V()), knee = leg.lower.getWorldPosition(V());
+  const end = leg.lower.localToWorld(v.ankle[i].clone()), length = hip.distanceTo(knee) + knee.distanceTo(end);
+  const ground = humanGroundSampler(), legRefs = v.surf.leg?.get(leg.side);
+  const clearance = () => {
+    let low = Infinity;
+    eachSkinnedWorld(refs, _vp, p => { low = Math.min(low, p.y - seatedSupportY(holder.position.y, ground?.(p.x, p.z)) - .003); });
+    // Trouser cuffs blend across the ankle; they must also clear the support.
+    if (legRefs) eachSkinnedWorld(legRefs, _vp, p => { low = Math.min(low, p.y - seatedSupportY(holder.position.y, ground?.(p.x, p.z))); });
+    return low;
+  };
+  const before = clearance();
+  if (!Number.isFinite(before)) return;
+  const supportGoal = ankle.clone(); supportGoal.y -= before;
+  const weight = seatedFootWeight(hip.toArray(), supportGoal.toArray(), length, phase);
+  if (weight <= 0) return;
+  const targetClearance = before * (1 - weight), rotation = leg.foot.getWorldQuaternion(new THREE.Quaternion());
+  for (let pass = 0; pass < 3; pass++) {
+    const delta = targetClearance - clearance();
+    if (Math.abs(delta) < .0001) break;
+    leg.foot.getWorldPosition(ankle); ankle.y += delta;
+    legTo(leg, v.ankle[i], ankle, V().copy(_fwd).addScaledVector(UP, .35), .995, rotation);
+    holder.updateMatrixWorld(true);
+  }
+}
+
 /**
  * Stairs: plant each foot on its tread (stair-gait.ts), lower the pelvis just enough that no leg has
  * to over-extend (it rises riser by riser with the body point), knees forward, feet flat except the
@@ -2907,6 +2941,7 @@ function sitPose(v: View, w: number, ground: number) {
       kp = pole.clone().addScaledVector(UP, 1.2 * crossW).addScaledVector(_right, -0.6 * crossW);
     }
     legTo(l, v.ankle[i], goal, kp, 0.995);
+    if (crossW <= 0 || l.side > 0) fitSeatedFoot(v, i, w);
   }
 }
 
