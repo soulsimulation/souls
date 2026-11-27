@@ -4,8 +4,13 @@ import { createViewGeometry } from './index.ts';
 import type { ViewGeometry, ViewGeometryProvider, Vec3, GeometryOverlay } from './index.ts';
 import { scene, box, panel } from './fixtures.ts';
 import { oracle } from './oracle.ts';
-function build(g: ViewGeometry): ViewGeometryProvider { const b = createViewGeometry(g); assert.equal(b.status, 'ready', b.status === 'rejected' ? b.reason : ''); if (b.status !== 'ready')
-    throw Error('build refused'); return b.provider; }
+function build(g: ViewGeometry): ViewGeometryProvider {
+    const b = createViewGeometry(g);
+    assert.equal(b.status, 'ready', b.status === 'rejected' ? b.reason : '');
+    if (b.status !== 'ready')
+        throw Error('build refused');
+    return b.provider;
+}
 function q(p: ViewGeometryProvider, from: Vec3, to: Vec3, radiusM = 0) { return { version: p.version, from, to, radiusM, maxWork: 100000 }; }
 function compare(g: ViewGeometry, from: Vec3, to: Vec3, radius = 0) { const p = build(g), r = radius ? p.clearance(q(p, from, to, radius)) : p.segment(q(p, from, to)); assert.equal(r.status, oracle(g, from, to, radius, radius > 0), JSON.stringify({ from, to, radius, r })); return r; }
 test('doors/windows are actual holes, with distinct glass/foliage occlusion and clearance', () => {
@@ -46,9 +51,9 @@ test('closed solid interiors block; unsupported occupancy/partial/stale/budget r
 });
 test('nested nonuniform, mirrored and sheared transforms preserve world-space sphere radius against independent oracle', () => {
     const g: ViewGeometry = { ...scene([{ ...box('transformed', [-1, -1, -.1], [1, 1, .1]), node: 'child' }]), nodes: [{ id: 'parent', parent: null, matrix: [0, 0, -2, 0, 0, 3, 0, 0, 1, 0, 0, 0, 4, 1, 2, 1] }, { id: 'child', parent: 'parent', matrix: [-1, 0, 0, 0, .3, 1, 0, 0, 0, 0, 2, 0, 1, 0, 0, 1] }] };
-    const mirrored: ViewGeometry = { ...scene([{ ...panel('mirror', 'front'), node: 'mirror' }]), nodes: [{ id: 'mirror', parent: null, matrix: [-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1] }] };
-    assert.equal(compare(mirrored, [0,1,1], [0,1,-1]).status, 'clear');
-    assert.equal(compare(mirrored, [0,1,-1], [0,1,1]).status, 'blocked');
+    const mirrored: ViewGeometry = { ...scene([{ ...panel('mirror', 'front'), node: 'mirror' }]), nodes: [{ id: 'mirror', parent: null, matrix: [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }] };
+    assert.equal(compare(mirrored, [0, 1, 1], [0, 1, -1]).status, 'clear');
+    assert.equal(compare(mirrored, [0, 1, -1], [0, 1, 1]).status, 'blocked');
     for (let i = 0; i < 40; i++) {
         const y = -1 + (i % 8) * .5, z = -2 + Math.floor(i / 8) * .7;
         compare(g, [0, y, z], [8, y, z], .15);
@@ -74,7 +79,10 @@ test('moving overlays share static index, replace prior dynamic poses, and rejec
     assert.equal(p.withOverlay({ ...overlay, meshes: [box('static', [0, 0, 0], [1, 1, 1])] }).status, 'rejected');
     compare({ ...scene(), meshes: overlay.meshes }, [0, 1, -3], [0, 1, 3], .2);
     const moved = { ...scene(), meshes: [box('actor', [5, 0, -1], [7, 2, 1])] };
-    for (const x of [0, 6]) { const from: Vec3 = [x, 1, -3], to: Vec3 = [x, 1, 3]; assert.equal(b.provider.clearance(q(b.provider, from, to, .2)).status, oracle(moved, from, to, .2, true)); }
+    for (const x of [0, 6]) {
+        const from: Vec3 = [x, 1, -3], to: Vec3 = [x, 1, 3];
+        assert.equal(b.provider.clearance(q(b.provider, from, to, .2)).status, oracle(moved, from, to, .2, true));
+    }
     assert.equal(p.withOverlay({ ...overlay, base: { ...p.version, world: 'other-world' } }).status, 'rejected');
 });
 test('snapshots are detached immutable plain data; malformed/sparse/degenerate/unclosed transforms refuse', () => {
@@ -107,10 +115,44 @@ test('indexed segment/capsule decisions match a slow oracle amid many irrelevant
     assert.equal(distant.triangles, 0);
     assert.equal(distant.work, 1);
 });
-test('large-coordinate centroid piercing cannot become a false clear through distance cancellation', () => { const vertices: readonly Vec3[] = [[-514277.37548947334, 676485.7355039567, 43812.07460537553], [-281595.1361786574, 80874.57139045, -229133.96009244025], [-380000.51798298955, 62726.71543993056, -189059.99846756458]]; const corrected = vertices.map(p => [...p]) as [
-    number,
-    number,
-    number
-][]; const g = scene([{ ...panel(), vertices: corrected, triangles: [[0, 1, 2]] }]), p = build(g), from: Vec3 = [-391957.27241959877, 273362.09491020377, -124793.0802805894], to: Vec3 = [-391958.0806811481, 273362.58664602105, -124794.84235583013]; assert.equal(oracle(g, from, to, 0, false), 'blocked'); assert.notEqual(p.segment(q(p, from, to)).status, 'clear'); assert.notEqual(p.clearance(q(p, from, to, .01)).status, 'clear'); });
+test('large-coordinate centroid piercing cannot become a false clear through distance cancellation', () => {
+    const vertices: readonly Vec3[] = [[-514277.37548947334, 676485.7355039567, 43812.07460537553], [-281595.1361786574, 80874.57139045, -229133.96009244025], [-380000.51798298955, 62726.71543993056, -189059.99846756458]];
+    const corrected = vertices.map(p => [...p]) as [
+        number,
+        number,
+        number
+    ][];
+    const g = scene([{ ...panel(), vertices: corrected, triangles: [[0, 1, 2]] }]), p = build(g), from: Vec3 = [-391957.27241959877, 273362.09491020377, -124793.0802805894], to: Vec3 = [-391958.0806811481, 273362.58664602105, -124794.84235583013];
+    assert.equal(oracle(g, from, to, 0, false), 'blocked');
+    assert.notEqual(p.segment(q(p, from, to)).status, 'clear');
+    assert.notEqual(p.clearance(q(p, from, to, .01)).status, 'clear');
+});
 import { inspectPose, browserExample } from './client.fixture.ts';
 test('browser client consumes CAM02 inspection pose and unknown never authorizes presentation', () => { assert.equal(browserExample(), true); const p = build(scene([box('glass', [-1, 0, .05], [1, 2, .06], 'glass')])), pose = { eyeM: [0, 1, 0] as Vec3, targetM: [0, 1, 5] as Vec3, up: [0, 1, 0] as Vec3, verticalFovRadians: 1, nearM: .1, farM: 100 }, r = inspectPose(p, p.version, pose, 390 / 844, 1000); assert.equal(r.sight.status, 'clear'); assert.equal(r.volume.status, 'blocked'); assert.equal(r.canPresent, false); assert.equal(inspectPose(build({ ...scene(), coverage: 'partial' }), p.version, pose, 390 / 844, 1000).canPresent, false); });
+test('duplicated open caps cannot certify a closed volume', () => {
+    const vertices: readonly Vec3[] = [[-1, -1, -1], [1, -1, -1], [0, 1, -1], [-1, -1, 1], [1, -1, 1], [0, 1, 1]];
+    for (const triangles of [[[0, 1, 2], [0, 1, 2], [3, 4, 5], [3, 4, 5]], [[0, 1, 2], [2, 1, 0], [3, 4, 5], [5, 4, 3]]] as const) {
+        const result = createViewGeometry(scene([{ ...panel(), topology: 'convex-solid', vertices, triangles }]));
+        assert.equal(result.status, 'rejected');
+        if (result.status === 'rejected')
+            assert.equal(result.reason, 'view-geometry.duplicate-solid-face');
+    }
+    const valid = build(scene([box('valid', [-1, -1, -1], [1, 1, 1])]));
+    assert.equal(valid.clearance(q(valid, [0, 0, 0], [0, 0, 0])).reason, 'inside-solid');
+});
+test('analytically interior skinny coplanar point is refused before unstable distance tests', () => {
+    // P=.5A+.25B+.25C lies in the triangle; aspect ratio is 1e-12.
+    const g = scene([{ ...panel(), vertices: [[0, 0, 0], [1e6, 0, 0], [1e6, 1e-6, 0]], triangles: [[0, 1, 2]] }]);
+    const result = createViewGeometry(g);
+    assert.deepEqual(result, { status: 'rejected', reason: 'view-geometry.ill-conditioned-triangle' });
+});
+test('hidden and array serialization hooks are refused without executing caller code', () => {
+    let calls = 0;
+    for (const kind of ['function', 'getter', 'array'] as const) {
+        const g = scene([panel()]);
+        const target = kind === 'array' ? g.meshes : g;
+        Object.defineProperty(target, 'toJSON', kind === 'getter' ? { get() { calls++; throw Error('must not execute'); } } : { value() { calls++; return scene(); } });
+        assert.equal(createViewGeometry(g).status, 'rejected');
+    }
+    assert.equal(calls, 0);
+});

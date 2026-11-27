@@ -36,6 +36,7 @@ export type ViewMesh = Readonly<{
     id: string;
     node: string | null;
     material: string;
+    /** World-transformed triangles require cross magnitude / longest edge squared > 1e-6; unsupported conditioning is refused. */
     vertices: readonly Vec3[];
     triangles: readonly (readonly [
         number,
