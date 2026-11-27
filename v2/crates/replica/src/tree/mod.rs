@@ -27,7 +27,7 @@ mod check;
 mod seal;
 
 pub use check::Rules;
-pub use seal::{BIG_FIELD, PROF, Sealed};
+pub use seal::{BIG_FIELD, Sealed};
 
 use crate::effects::{
     Body, Change, Effect, Flight, Header, LinkState, NodeState, Part, Refusal, State, TimerRec,
