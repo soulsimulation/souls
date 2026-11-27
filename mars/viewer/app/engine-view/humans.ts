@@ -66,6 +66,7 @@ import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, formPresses, pressWeight, type FormPress, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import type { HeldSet } from './held-entry.ts';
 import { accompanistOf } from './piano-score.ts';
 import { ACT_BLEND, ACT_HISTORY, OWN_FADE, blendFrames, postureKind, postureNow, posturePhaseEnds, type PostureChange, type PostureNow } from './posture-transition.ts';
 import {posePianoHand} from './piano-hands.ts';
@@ -200,6 +201,8 @@ type View = {
   gaze?: { prev: number; cur: number };
   /** Body activity layer (activity-poses.ts): the engine's prop, sitting on the ground, running, and the prop mesh. */
   propWanted?: string;
+  /** Native public observation, retained separately from the legacy visual/contact owner. */
+  heldEntries?: HeldSet;
   /** Take time (s) the body began to carry its prop in one hand (the carry pose eases in from it). */
   carrySince?: number;
   instrument?:string;
@@ -288,6 +291,8 @@ const CARRY_EASE = 0.4;
  * function of take time: clip seconds = metres / clip ground speed (feet speed-matched).
  */
 export type SampledHuman = {
+  /** Native held metadata; absent on legacy takes, entries:[] only after observing no held things. */
+  heldEntries?: HeldSet;
   /** Public recorded Soul association, never inferred from a display name/id. */
   publicSoulKey?:string;
   bodyModel?:string;
@@ -727,6 +732,7 @@ export class HumanViews {
       v.sleepPose = e.human?.sleepPose;
       v.base = base;
       v.propWanted = (e.human as { prop?: string }).prop;
+      v.heldEntries = undefined; // old tick input makes no claim about native held metadata
       v.instrument=(e.human as {instrument?:string}).instrument;v.game=recordedGame((e.human as {game?:unknown}).game)??undefined;v.gameTick=world.tick;v.gameDt=DT;
       v.gait = chooseGait(v.gait, v.speed, world.tick * DT, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.grip = e.human.grip?.entity;
@@ -970,6 +976,7 @@ export class HumanViews {
       v.groundSeat = onGround(act, f.baseActivity);
       if (v.groundSeat) v.seat = GROUND_SEAT;
       v.propWanted = f.prop;
+      v.heldEntries = f.heldEntries;
       v.instrument=f.instrument;v.game=f.game;v.gameTick=f.gameTick;v.gameDt=f.gameDt;
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
       v.gait = chooseGait(v.gait, v.speed, t, act === 'jog' || act === 'run'); v.running = v.gait.running;
@@ -2000,6 +2007,9 @@ export class HumanViews {
   positions() {
     return new Map([...this.views].map(([id, v]) => [id, v.rig.holder.position]));
   }
+
+  /** Read-only native metadata after sampling; no inferred grip or pose is added. */
+  heldEntriesOf(id:string):HeldSet|undefined { return this.views.get(id)?.heldEntries; }
 
   info() {
     return [...this.views].map(([id, v]) => ({ id, template: v.rig.template.name, clipSpeed: +v.rig.template.walkSpeed.toFixed(3), forward: v.rig.template.forward, speed: +v.speed.toFixed(3), walkWeight: +v.cur.walkW.toFixed(2), activity: v.activity, base: v.base, grip: v.grip ?? null, gripSlot: v.gripSlot ?? null, reach: v.grip || v.cur.hands.left || v.cur.hands.right ? v.reachRatio : null, armLen: v.arms[0] ? +armLen(v.arms[0]).toFixed(3) : null, arms: v.arms.length, sit: +v.cur.sitW.toFixed(2), seat: v.cur.sitW > 0 ? +v.seat.toFixed(2) : null, crossed: v.cross, pose: { drop: +v.cur.pose.drop.toFixed(3), bend: +v.cur.pose.bend.toFixed(3), rise: +v.cur.pose.rise.toFixed(3), kneel: +v.cur.pose.kneel.toFixed(3) } }));

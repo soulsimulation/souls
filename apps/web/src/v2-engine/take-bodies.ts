@@ -4,6 +4,7 @@
 
 import { lookBody } from '../humanoid/look.ts';
 import type { BodySlot } from './source/kind-bounds.ts';
+import type { HeldSet } from '../../../../mars/viewer/app/engine-view/held-entry.ts';
 
 /** A body's seat while it is in a slot: the slot's height above its thing's base (mm), and whether it lies there. */
 /** `heading` (radians, atan2(dz, dx)): the way a sitter faces, out of the seat (the slot's yaw turning the thing's +z),
@@ -55,6 +56,13 @@ export function propOf(kind: string): string {
 
 /** A change of what a body holds: world time (µs) and the prop, null when its hands are empty again. */
 export type Held = { at: number; prop: string | null };
+
+/** Public held-record observations. No observation before t means unknown, not an empty hand. */
+export function heldEntriesAt(history: readonly HeldSet[] | undefined, t: number): HeldSet | undefined {
+  let found: HeldSet | undefined;
+  for (const sample of history ?? []) { if (sample.observedAt > t) break; found = sample; }
+  return found;
+}
 
 /** What `held` (in time order) has in the hand at world time `t` µs. */
 export function heldAt(held: readonly Held[] | undefined, t: number): string | null {
