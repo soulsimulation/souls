@@ -5,9 +5,9 @@
 // between seeks. The node records are read as the stream worker reads them, the fields the bridge reads.
 import init, { historyTimeline } from 'replica';
 import * as replica from 'replica';
-import { decode, encode } from 'cborg';
+import { decode, encode } from './source/profile.ts';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
-import {nativeId as key,carryFields,carryChangesInBundle,type CarryChange} from './source/carry-record.ts';
+import {nativeId as key,carryFields,bundleCarryChanges,type CarryChange} from './source/carry-fields.ts';
 import {fieldsOf} from './source/kinds-state.ts';
 import type {NodeRec} from './source/source.ts';
 import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
@@ -81,7 +81,7 @@ function dayIndex(base: URL, day: number, today: number): Promise<DayIndex | nul
   if (kept && (day < today || Date.now() - kept.at < 5000)) return kept.p;
   const p = get(new URL(dayIndexKey(day), base)).then((b) => {
     if (!b) return null;
-    const m = decode(b, { useMaps: true }) as Map<number, unknown>;
+    const m = decode(b) as Map<number, unknown>;
     return (m.get(3) as unknown[][]).map((r) => [num(r[0]), text.decode(r[1] as Uint8Array), r[2] as Uint8Array] as [number, string, Uint8Array]);
   });
   days.set(day, { p, at: Date.now() });
@@ -148,16 +148,16 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
   await ready;
   const inflated=await inflate(stored);
   // Read the extent only to request the validated API. No node/effect is exposed before it validates the entire batch.
-  const extent=decode(inflated,{useMaps:true}) as Map<number,unknown>,from=num(extent.get(3)),to=from+num(extent.get(4));
+  const extent=decode(inflated) as Map<number,unknown>,from=num(extent.get(3)),to=from+num(extent.get(4));
   if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||to<from)throw Error('history: invalid bundle extent');
   if(typeof historyTimeline!=='function')throw Error('history: served replica lacks validated node timeline');
-  const out=decode(historyTimeline(await header,inflated,found.sha,BigInt(from),BigInt(to)),{useMaps:true}) as Map<number,unknown>;
+  const out=decode(historyTimeline(await header,inflated,found.sha,BigInt(from),BigInt(to))) as Map<number,unknown>;
   const nodes=(out.get(2) as Map<number,unknown>[]).map(nodeRec);
   const motion=(nodes:HistoryNode[],at:number):HistorySample[]=>nodes.flatMap(n=>n.parent&&n.at===at?[[n.id,n.parent,n.slot,at,...n.pos,n.rot] as HistorySample]:[]);
   const transitions:HistoryTransition[]=(out.get(3) as Map<number,unknown>[]).map(t=>{const at=num(t.get(1)),nodes=(t.get(2) as Map<number,unknown>[]).map(nodeRec);return{at,nodes,removed:(t.get(3) as IdValue[]).map(key),samples:motion(nodes,at)};});
   const samples=motion(nodes,from),later=await found.later(),start=num(out.get(4)),length=num(out.get(5));
   const courses=replica.courseAt?coursePlaces(replica.courseAt,nodes,start,start+length):{};
-  post({t:'seeked',s:{seq,at,start,length,next:later,nodes,samples,timeline:{from:num(out.get(1)),transitions},carryChanges:carryChangesInBundle(inflated),...(Object.keys(courses).length?{courses}:{})}});
+  post({t:'seeked',s:{seq,at,start,length,next:later,nodes,samples,timeline:{from:num(out.get(1)),transitions},carryChanges:bundleCarryChanges(extent),...(Object.keys(courses).length?{courses}:{})}});
 }
 
 self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number; ahead?: true }>) => {

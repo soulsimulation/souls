@@ -7,7 +7,8 @@
 // place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
 import * as replica from 'replica';
-import { decode, encode } from 'cborg';
+import { decode } from 'cborg';
+import { encode } from './profile.ts';
 import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from './sound-record.ts';
 import { readChanged } from './changed.ts';
