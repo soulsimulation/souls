@@ -173,8 +173,10 @@ pub fn aside(
                 at.y,
                 at.z + (i128::from(nz) * i128::from(step) / i128::from(n)) as i64,
             );
-            let legal = world.nearest(node, to).is_some_and(|q| len(q, to) == 0);
-            if legal && taken.iter().all(|&t| len(t, to) >= apart) {
+            // Free first: in a crowd most spots are taken, and the ground's nearest point is the dearer question.
+            if taken.iter().all(|&t| len(t, to) >= apart)
+                && world.nearest(node, to).is_some_and(|q| len(q, to) == 0)
+            {
                 return Some(to);
             }
         }
