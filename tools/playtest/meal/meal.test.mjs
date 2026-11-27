@@ -82,8 +82,9 @@ test('the meal table preserves canonical physical surface metadata without addin
 
 // Public reply fixtures, deliberately independent of the client implementation. Act aliases make it observable
 // that the workflow uses inspected offers rather than reconstructing form:<id> from authored fixture entries.
-function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchingOffer = false, expiredOffer = false, canAfter, ladleRefused = false, wrongLadleQuantity = false } = {}) {
-  const calls = [], state = { cooked: false, soup: 0, bowl: 0, parent: 'pot', water: 5000, running: false };
+function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchingOffer = false, expiredOffer = false, canAfter, ladleRefused = false, wrongLadleQuantity = false,
+  chairNeedsPullOut = false, sitRefusal, pullOutResult, retrySitRefused = false, chairOfferTarget = 'chair' } = {}) {
+  const calls = [], state = { cooked: false, soup: 0, bowl: 0, parent: 'pot', water: 5000, running: false, chairPulled: false };
   const ids = { 'soup-pot': 'pot', 'meal-bowl': 'bowl', 'wash-sink': 'sink', 'meal-table': 'table', 'diner-chair': 'chair' };
   const offer = (id, name, params, who = 'anyone') => ({ name, act: `${name}-public:${id}`, who, ...(params ? { params } : {}) });
   const inspect = (id) => ({ ok: true, id, card: `Public ${id} card`, ...(id === 'bowl' ? { parent: state.parent } : {}), state:
@@ -92,7 +93,7 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
     offers: [offer(id, 'walk'), ...(id === 'pot' ? [offer(id, 'cook'), offer(id, 'ladle', missingBowlParameter ? {} : { bowl: { type: 'thing', optional: true } })] :
       id === 'bowl' ? [offer(id, 'take'), offer(id, 'bite', null, 'holder')] :
       id === 'sink' ? [offer(id, 'turn_on'), offer(id, 'turn_off'), offer(id, 'wash', { thing: { type: 'thing' } })] :
-      id === 'chair' ? [offer(id, 'sit')] : [])] });
+      id === 'chair' ? [offer(id, 'sit'), offer(chairOfferTarget, 'pull_out')] : [])] });
   const seats = ['cook', 'server', 'diner'].map((label) => ({ label, run: async (...words) => {
     calls.push({ label, words });
     const [command, word] = words;
@@ -118,6 +119,12 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
     if (command === 'receipt') { state.parent = 'table'; return { ok: true, receipt: { answers: [{ answer: 'receipt' }] } }; }
     if (command === 'act') {
       const form = word.split(':')[0];
+      if (form === 'sit-public' && (chairNeedsPullOut && !state.chairPulled || state.chairPulled && retrySitRefused)) return sitRefusal ?? {
+        ok: false, phase: 'refused', reason: 'souls:no-way', receipt: { target: 'chair',
+          answers: [{ answer: 'accepted' }, { answer: 'refused', reason: 'souls:no-way' }],
+          try: { name: 'pull_out', act: 'pull_out-public:chair', checked: 'unknown' } },
+      };
+      if (form === 'pull_out-public') { if (pullOutResult) return pullOutResult; state.chairPulled = true; }
       if (form === 'cook-public') { state.cooked = true; state.soup = 6; }
       if (form === 'ladle-public') {
         if (ladleRefused) return { ok: false, phase: 'refused', reason: 'no_free_hand' };
@@ -190,6 +197,42 @@ test('a bowl that leaves its holder during eating stops before washing or claimi
   await assert.rejects(meal({ seats: fixture.seats, report }), /consumed bowl left the diner/);
   assert.equal(report.complete, false);
   assert(!fixture.calls.some((c) => c.words.includes('wash-public:sink')));
+});
+
+test('the same-chair native refusal permits one offered pull-out and one authoritative sit retry', async () => {
+  const fixture = publicMeal({ chairNeedsPullOut: true }), report = { complete: false, steps: [] };
+  await meal({ seats: fixture.seats, report, endpoint: 'empty-bowl-risen' });
+  assert.equal(report.chairRecovery.refused.receipt.try.checked, 'unknown');
+  assert.equal(report.chairRecovery.pulledOut.phase, 'done'); assert.equal(report.chairRecovery.resat.phase, 'done');
+  assert.equal(fixture.calls.filter(c => c.words[1] === 'pull_out-public:chair').length, 1);
+  assert.equal(fixture.calls.filter(c => c.words[1] === 'sit-public:chair').length, 2);
+  assert.equal(report.bowlIdentity.heldBy, 'diner-body');
+});
+
+test('another receipt target, suggested target, offer target or refusal cannot trigger chair recovery', async () => {
+  const base = { ok: false, phase: 'refused', reason: 'souls:no-way', receipt: { target: 'chair', answers: [{ answer: 'refused', reason: 'souls:no-way' }], try: { name: 'pull_out', act: 'pull_out-public:chair' } } };
+  const cases = [
+    { sitRefusal: { ...base, receipt: { ...base.receipt, target: 'another-chair' } } },
+    { sitRefusal: { ...base, receipt: { ...base.receipt, try: { name: 'pull_out', act: 'pull_out-public:another-chair' } } } },
+    { chairOfferTarget: 'another-chair', sitRefusal: { ...base, receipt: { ...base.receipt, try: { name: 'pull_out', act: 'pull_out-public:another-chair' } } } },
+    { sitRefusal: { ...base, reason: 'seat.out-of-reach', receipt: { ...base.receipt, answers: [{ answer: 'refused', reason: 'seat.out-of-reach' }] } } },
+  ];
+  for (const options of cases) {
+    const fixture = publicMeal({ chairNeedsPullOut: true, ...options }), report = { complete: false, steps: [] };
+    await assert.rejects(meal({ seats: fixture.seats, report }));
+    assert(!fixture.calls.some(c => c.words[1]?.startsWith('pull_out-public:'))); assert.equal(report.chairRecovery, undefined);
+  }
+});
+
+test('a refused or unfinished pull-out and a second sit refusal stop without another recovery', async () => {
+  for (const options of [{ pullOutResult: { ok: false, phase: 'refused', reason: 'blocked' } }, { pullOutResult: { ok: true, phase: 'accepted' } }, { retrySitRefused: true }]) {
+    const fixture = publicMeal({ chairNeedsPullOut: true, ...options }), report = { complete: false, steps: [] };
+    await assert.rejects(meal({ seats: fixture.seats, report }));
+    assert.equal(fixture.calls.filter(c => c.words[1] === 'pull_out-public:chair').length, 1);
+    assert(fixture.calls.filter(c => c.words[1] === 'sit-public:chair').length <= 2);
+    assert.equal(report.chairRecovery, undefined); assert.equal(report.complete, false);
+    assert(!fixture.calls.some(c => c.words.includes('bite-public:bowl')));
+  }
 });
 
 

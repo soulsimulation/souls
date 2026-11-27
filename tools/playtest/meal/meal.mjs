@@ -235,7 +235,19 @@ export async function meal({ seats, report, log = () => {}, observe = async () =
   requireField(heldBowl, 'soup', 2, 'accepted filled bowl');
   await observe({ phase: 'diner-held', soup: 2, bowl: heldBowl, holder: dinerBody, role: diner.label });
   await use(diner, 'carry bowl to chair', 'diner-chair', 'walk');
-  await use(diner, 'sit holding bowl', 'diner-chair', 'sit');
+  const sitting = await record(diner, 'sit holding bowl', 'act', ...words(diner, 'diner-chair', 'sit'), '--wait');
+  if (sitting.ok !== true || sitting.phase !== 'done') {
+    const receipt = sitting.receipt, refusal = receipt?.answers?.at(-1), hint = receipt?.try;
+    const offered = discovery.diner.things['diner-chair'].offers.find(o => o.name === 'pull_out');
+    const recoverable = sitting.phase === 'refused' && sitting.reason === 'souls:no-way'
+      && refusal?.answer === 'refused' && refusal.reason === 'souls:no-way' && receipt.target === ids['diner-chair']
+      && hint?.name === 'pull_out' && hint.act === offered?.act && typeof offered?.act === 'string'
+      && offered.act.endsWith(':' + ids['diner-chair']);
+    if (!recoverable) requireDone(sitting, 'sit holding bowl');
+    const pulledOut = await act(diner, 'pull out the refused chair', hint.act);
+    const resat = await use(diner, 'retry sit holding bowl once', 'diner-chair', 'sit');
+    report.chairRecovery = { refused: sitting, pulledOut, resat };
+  }
   const seatedBowl = await inspect(diner, 'meal-bowl');
   requireField(seatedBowl, 'soup', 2, 'seated full bowl');
   if (seatedBowl.parent !== dinerBody) throw new Error('seated bowl left the diner');
