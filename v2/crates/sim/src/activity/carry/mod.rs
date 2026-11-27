@@ -1192,6 +1192,10 @@ pub struct Carry {
     pub way: Vec<turn::Ends>,
     /// The lift's or the set-down's track the node is on, if any (#5067).
     pub hoist: Option<Hoist>,
+    /// Whether a lift's track broken off goes back to where the load lay ([`Hoist::rest`]). Not for a part taken out
+    /// of a slot or a stand ([`Carry::take_up`]): it was unjoined as it was taken, so set back there it would hang;
+    /// it goes straight down from where it is, to rest on the ground.
+    pub back: bool,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -1244,6 +1248,7 @@ impl Carry {
             raise: 0,
             way: Vec::new(),
             hoist: None,
+            back: true,
         }
     }
 
@@ -1327,6 +1332,29 @@ impl Carry {
     ) -> R<Option<(Micros, Micros)>> {
         match self.hoist {
             Some(h) if h.phase != Phase::Lift => return Ok(None),
+            Some(h) if !self.back => {
+                // Straight down from where the node is on its track, to rest under it on its carriers' floor (the
+                // track's end is between them at carrying height).
+                let floor = match (self.track.last(), here) {
+                    (Some(&(_, c, _)), _) => c.y - HEIGHT,
+                    (None, Some((_, Some(f)))) => f,
+                    _ => h.to.0.y - HEIGHT,
+                };
+                let under = Vec3::new(h.at.0.x, floor, h.at.0.z);
+                self.hoist = None;
+                return self
+                    .lower_from(
+                        tree,
+                        at,
+                        node,
+                        h.at,
+                        h.at.0.y - floor,
+                        (under, h.at.1),
+                        Phase::Release(why),
+                        None,
+                    )
+                    .map(Some);
+            }
             Some(h) => {
                 let (to, rest) = (h.from, h.rest);
                 let t1 = at + hoist_time(h.at.0.y - to.0.y);
@@ -1561,7 +1589,8 @@ impl Carry {
     /// exactly where it was, so its change of parent moved nothing), goes into its carriers' hands at `to` as a lift's
     /// does ([`Hoist`], [`Carry::step`]): one motion sample a tick, never in one step, however far the part stood from
     /// their middle. `span`: between its carriers at the take. `rest`: the ground the part was on and its place there,
-    /// where a take broken off sets it back. It takes [`hoist_time`] of how far it goes. Returns the track's times.
+    /// where a take broken off sets it back when it rested on that ground ([`Carry::back`]); one taken out of a slot or
+    /// a stand goes straight down instead. It takes [`hoist_time`] of how far it goes. Returns the track's times.
     pub fn take_up(
         &mut self,
         at: Micros,
