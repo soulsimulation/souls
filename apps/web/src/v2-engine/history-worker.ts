@@ -7,7 +7,7 @@ import init, { historyTimeline } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
-import {nativeId as key,carryGrips,crewMembers,carryChangesInBundle,type CarryChange,type CarryGrips,type CrewMember} from './source/carry-record.ts';
+import {nativeId as key,carryFields,carryChangesInBundle,type CarryChange} from './source/carry-record.ts';
 import {fieldsOf} from './source/kinds-state.ts';
 import type {NodeRec} from './source/source.ts';
 import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
@@ -53,7 +53,6 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
     rot: ((pose?.get(3) as unknown[]) ?? [1 << 30, 0, 0, 0]).map(num) as HistoryNode['rot'],
     at: moved ? num(moved.get(1)) : null,
   };
-  rec.crewMembers=crewMembers(f.get(4));rec.carryGrips=carryGrips(f.get(6));if(rec.crewMembers!==undefined||rec.carryGrips!==undefined)rec.carryField=!f.has(6)?'absent':rec.carryGrips?'valid':'invalid';
   rec.fields=fieldsOf(f);
   const origin=f.get(1),definition=f.get(2);
   if(typeof origin==='string'&&definition instanceof Uint8Array){rec.defines=origin;rec.entry=definition;}
@@ -62,6 +61,7 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
   if(Array.isArray(f.get(102)))rec.defBodies=(f.get(102) as unknown[][]).flatMap(r=>r[0] instanceof Uint8Array&&r[1] instanceof Uint8Array?[[text.decode(r[0]),text.decode(r[1])] as [string,string]]:[]);
   if (f.get(1) instanceof Uint8Array) rec.origin = text.decode(f.get(1) as Uint8Array);
   if (f.has(13)) rec.slots = rows(f.get(13));
+  carryFields(rec,f); // membership, holds and (#5134) where an activity's node holds its slots' riders
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
   if (f.has(80)) rec.course = encode(f.get(80));
   // the world node's calendar (fields 60, 61), which dates each take as the live bridge dates it

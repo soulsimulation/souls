@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {encode,decode}from'cborg';
-import {carryGrips,crewMembers,carryChanges,carryChangesInPart,historyMotion,nativeId}from'./carry-record.ts';
+import {carryFields,carryGrips,crewMembers,carryChanges,carryChangesInPart,historyMotion,nativeId,riderPoints}from'./carry-record.ts';
 const id=(n:number)=>[new Uint8Array(16),n],m=(o:Record<number,unknown>)=>new Map(Object.entries(o).map(([k,v])=>[+k,v]));
 const member=[['souls:front',id(1),id(2),id(3),id(4)]];
 const grips=m({1:id(8),2:id(9),3:'souls:carry',4:100,6:[m({1:id(1),2:'point:grip',3:[0,0,0],4:[[0,-200000,0],[0,200000,0]]})]});
@@ -20,4 +20,19 @@ test('unused track labels do not replace the release event when the crew is remo
  const released=new Map([...grips,[3,'souls:released'],[4,200]]);
  const end=m({2:200,6:id(8),7:[m({1:2,2:id(8)})],8:[m({1:'souls:carry-track',2:m({1:id(8),2:id(9),3:'souls:set-down',4:100,5:200})}),m({1:'souls:carry-grips',2:released})]});
  const out=carryChanges([end]);assert.equal(out.length,1);assert.equal(out[0].at,200);assert.equal(out[0].node,nativeId(id(8)));assert.equal(out[0].grips?.phase,'souls:released');assert.deepEqual(out[0].grips?.holds,carryGrips(grips)?.holds);
+});
+
+// #5134: the generated activity's node says where it holds its slot's rider (native field 15, written when the node is
+// made). Only that word gives an activity's node slot points: no kind name, no source entry and no zero is assumed.
+test('an activity node reads its riders\' points from field 15; anything else leaves its slot unknown',()=>{
+ const read=(fields:Record<number,unknown>,slots?:number[][])=>{const rec:Parameters<typeof carryFields>[0]={...(slots?{slots}:{})};carryFields(rec,m(fields));return rec;};
+ assert.deepEqual(read({4:member,15:[[1,0,0,0]]}).slots,[[1,0,0,0]],'the points the world wrote');
+ assert.deepEqual(read({4:member,15:[[1n,0n,-25n,0n]]}).slots,[[1,0,-25,0]],'whole numbers as the public record holds them');
+ assert.equal('slots'in read({4:member}),false,'a crew of a world that does not say: no slot points, so its load stays unplaced');
+ assert.equal('slots'in read({15:[[1,0,0,0]]}),false,'field 15 on a node that is no activity (no members) is another kind\'s own field');
+ assert.equal('slots'in read({4:[...member,...member],15:[[1,0,0,0]]}),false,'nor on one whose membership does not read');
+ for(const bad of [[],[[1,0,0]],[[1,0,0,0,0]],[[1,0,0,.5]],[[1,0,0,'0']],'[[1,0,0,0]]',[1,0,0,0],m({1:0})])assert.equal(riderPoints(bad),undefined,`malformed points say nothing: ${JSON.stringify(bad,(_,v)=>v instanceof Map?[...v]:v)}`);
+ assert.equal('slots'in read({4:member,15:[[1,0,0]]}),false);
+ assert.deepEqual(read({4:member,15:[[1,9,9,9]]},[[1,5,0,0]]).slots,[[1,5,0,0]],'a node\'s own slot points (field 13) are never replaced');
+ assert.equal(read({4:member}).carryField,'absent');assert.equal(read({4:member,6:grips}).carryField,'valid');assert.equal(read({4:member,6:'x'}).carryField,'invalid');assert.equal('carryField'in read({}),false);
 });

@@ -181,3 +181,30 @@ test('the construction kinds\' own entries draw their own shapes (looks.shape): 
   parts.receive({ t: 'snapshot', s: { nodes: [place, ground, node('fa', 'mars:rack_upright@1220eb', 'g.1', [0, 0, 0])], removed: [] } });
   assert.equal(JSON.parse(new TextDecoder().decode(applied.flat()[0].entry)).looks.shape.shapes.length, 5);
 });
+
+// #5134: the load of a generated carry activity stands from the point its crew's own node gives (the world's field 15,
+// read by the workers into `slots`). The source entry `mars:carry` declares a load slot too, but the generated kind has
+// another name and its pin does not bind slot geometry: the page never takes the entry's point for it, nor a zero.
+test('a load in a generated carry activity\'s slot is placed only from the crew node\'s own points, never from the source entry by name', () => {
+  const entries = bundledEntries({
+    c: { format: 'souls-entry/1', kind: 'mars:carry', slots: { load: { admits: 'thing', most: 1, at_mm: [0, 0, 0] } }, geometry: { bounds_mm: [600, 1000, 600] } },
+    m: { format: 'souls-entry/1', kind: 'mars:rack_beam', points: { end_l: {} }, geometry: { bounds_mm: [51, 102, 2743] } },
+  });
+  const crew = node('crew', 'mars:carry_activity@1220ab', 'g.1', [4_000_000, 900_000, 2_000_000]);
+  const load = node('load', 'mars:rack_beam@1220cc', 'crew', [0, 0, -250_000], { slot: 1 });
+  const silent = new CarriedParts(fake().kinds, entries);
+  silent.receive({ t: 'snapshot', s: { nodes: [place, ground, crew, load], removed: [] } });
+  assert.equal(silent.recorded.pose('load', T0), null, 'a crew that gives no points: the load stays unplaced');
+  assert.deepEqual(silent.frames(T0).filter((n) => n.id === 'crew' && n.slots), [], 'and the entry\'s slot is not handed on under the generated kind');
+  const told = new CarriedParts(fake().kinds, entries);
+  told.receive({ t: 'snapshot', s: { nodes: [place, ground, { ...crew, slots: [[1, 0, 0, 0]] }, load], removed: [] } });
+  assert.deepEqual(told.recorded.pose('load', T0)?.p.map((v) => +v.toFixed(3)), [4, 0.9, 1.75], 'the crew\'s place, its point, then the load\'s own');
+  // a point that is not the origin is used as written, not replaced by a zero
+  const off = new CarriedParts(fake().kinds, entries);
+  off.receive({ t: 'snapshot', s: { nodes: [place, ground, { ...crew, slots: [[1, 0, 100, 0]] }, load], removed: [] } });
+  assert.deepEqual(off.recorded.pose('load', T0)?.p.map((v) => +v.toFixed(3)), [4, 1, 1.75]);
+  // a slot the node gives no point for stays unknown
+  const other = new CarriedParts(fake().kinds, entries);
+  other.receive({ t: 'snapshot', s: { nodes: [place, ground, { ...crew, slots: [[2, 0, 0, 0]] }, load], removed: [] } });
+  assert.equal(other.recorded.pose('load', T0), null);
+});

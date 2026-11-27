@@ -21,12 +21,26 @@ export function crewMembers(v:unknown):CrewMember[]|undefined{
  if(v===undefined)return;
  try{if(!Array.isArray(v))return;const out=v.map(row=>{if(!Array.isArray(row)||row.length!==5||typeof row[0]!=='string')throw Error('member');return{role:row[0],body:nativeId(row[1]),soul:nativeId(row[2]),link:nativeId(row[3]),intent:nativeId(row[4])};});if(new Set(out.map(m=>m.body)).size!==out.length)return;return out;}catch{return;}
 }
+/** Where an activity's node holds each slot's rider (native field 15, `replica::activity::F_RIDES`): `[slot, x, y, z]`
+ *  rows, mm in its own frame, rowed as a thing's slot points. Anything but whole rows of four says nothing. */
+export function riderPoints(v:unknown):number[][]|undefined{
+ try{if(Array.isArray(v)&&v.length)return v.map(r=>{if(!Array.isArray(r)||r.length!==4)throw Error('rider');return r.map(whole);});}catch{/* says nothing */}
+}
 export function carryGrips(v:unknown):CarryGrips|undefined{
  if(v===undefined)return;
  try{const m=map(v),hs=m.get(6);if(typeof m.get(3)!=='string'||!Array.isArray(hs))return;
  const holds=hs.map(h=>{const r=map(h),hands=r.get(4),grip=r.get(2);if(typeof grip!=='string'||!grip.startsWith('point:')||!Array.isArray(hands)||hands.length!==2)throw Error('hold');return{body:nativeId(r.get(1)),grip,gripUm:point(r.get(3)),handsUm:[point(hands[0]),point(hands[1])]as[V3,V3]};});
  if(new Set(holds.map(h=>h.body)).size!==holds.length)return;
  return{crew:nativeId(m.get(1)),load:nativeId(m.get(2)),phase:m.get(3)as string,sinceUs:whole(m.get(4)),...(m.has(5)?{untilUs:whole(m.get(5))}:{}),holds};}catch{return;}
+}
+/** A public node's carry fields, read the same way by the stream and the history worker: its independent membership
+ *  (field 4), its load-local holds (field 6) and whether that field read, and, on an activity's node only (one with
+ *  members) that has no slot points of its own (field 13), where it holds its slots' riders (field 15). A node without
+ *  either keeps no slot points, so a load in its slot stays unplaced. */
+export function carryFields(rec:{slots?:number[][];crewMembers?:CrewMember[];carryGrips?:CarryGrips;carryField?:'absent'|'valid'|'invalid'},f:Map<number,unknown>){
+ rec.crewMembers=crewMembers(f.get(4));rec.carryGrips=carryGrips(f.get(6));
+ if(rec.crewMembers!==undefined||rec.carryGrips!==undefined)rec.carryField=!f.has(6)?'absent':rec.carryGrips?'valid':'invalid';
+ const rides=rec.crewMembers&&!rec.slots&&riderPoints(f.get(15));if(rides)rec.slots=rides;
 }
 /** The native field-4 Set retains its OWN entry timestamp, independently of grip events. */
 export function carryChanges(entries:unknown[]):CarryChange[]{
