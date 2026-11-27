@@ -1,4 +1,4 @@
 ---
 type: perf
 ---
-On a phone, a world's first moments no longer freeze the page for almost two seconds when its stream arrives, and the people in it start moving sooner.
+On a phone, a world's first moments no longer freeze the page for almost two seconds when its stream arrives.
