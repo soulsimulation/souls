@@ -1219,7 +1219,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // most; 20 s in all): the arrival view holds, then cuts to a Soul drawn as itself, with no town tour between (its
       // scene's reset jumped to a random view ~0.5 s before) and no Soul as a stand-in
       const firstLivePending=earlyWanted&&!past.current&&s.conn.replica.souls.size>0&&now<20_000&&(liveAt===null?!['failed','cancelled'].includes(initialGate?.snapshot().stage??''):standIns.children.length>0&&now<liveAt+1500);
-      if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !firstLivePending && !(arrivalPending && !s.conn.replica.souls.size)) {
+      // a recording drawn before the stream has listed anyone (a moment link's, moment-link.ts landingNow) has its own
+      // people: the broadcast frames them from its first frame, not from the arrival's view until the stream speaks (one cut)
+      if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !firstLivePending && !(arrivalPending && !s.conn.replica.souls.size && !past.current)) {
         const shot = broadcast.sample(at.entities, records, base ?? (entityLayer.active ? openGroundScene(entityLayer.groundExtent()) : null), at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
         if (shot?.pose) {
           camera.position.fromArray(shot.pose.position);
