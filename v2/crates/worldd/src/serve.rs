@@ -5512,6 +5512,73 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #2803: the log a start reads from its checkpoint's place gives the readers before it (the stream, the shipper)
+    /// the same records from the disk, a batch at a time, from any record: from the place on without reading what is
+    /// before it, from before it out of the log's first record, and no further than the records there at the start.
+    #[test]
+    fn the_log_on_the_disk_gives_every_reader_the_records_a_whole_read_held() {
+        use worldd::view_out::History;
+        let dir = std::env::temp_dir().join(format!("on-disk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log");
+        // Records over two batches, so a read crosses one.
+        let records: Vec<Vec<u8>> = (0..40u8)
+            .map(|i| vec![i; (LogReader::BATCH / 16) + i as usize])
+            .collect();
+        let (mut log, _) = Log::open(FileStore::open(&path).unwrap(), EPOCH).unwrap();
+        for r in &records[..25] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(25).unwrap();
+        let place = log.durable_at();
+        for r in &records[25..] {
+            log.append(r.clone()).unwrap();
+        }
+        log.wait_durable(40).unwrap();
+        let store = log.close();
+        // A start from the place holds only the records after it.
+        let (log, found) = Log::open_at(store, EPOCH, Some(place)).unwrap();
+        drop(log.close());
+        assert_eq!((found.first, found.records.len()), (25, 15));
+        let disk = OnDisk {
+            path: path.clone(),
+            first: 0,
+            end: 38,
+            at: Some(place),
+        };
+        let read = |from: u64| {
+            let mut out = Vec::new();
+            disk.each_from(from, &mut |n, b| {
+                out.push((n, b.to_vec()));
+                Ok(true)
+            })
+            .unwrap();
+            out
+        };
+        let want = |from: u64| {
+            (from..38)
+                .map(|n| (n, records[n as usize].clone()))
+                .collect::<Vec<_>>()
+        };
+        for from in [0, 3, 24, 25, 30, 37, 38] {
+            assert_eq!(read(from), want(from), "from record {from}");
+        }
+        // A reader that has what it needs stops the read.
+        let mut seen = 0;
+        disk.each_from(10, &mut |_, _| {
+            seen += 1;
+            Ok(seen < 3)
+        })
+        .unwrap();
+        assert_eq!(seen, 3);
+        // A log shorter than the start said is refused by name, never read as fewer records.
+        let short = OnDisk { end: 41, ..disk };
+        let e = short.each_from(30, &mut |_, _| Ok(true)).unwrap_err();
+        assert_eq!(e.name, "log-read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A part handed to an archiver that is gone is not counted as waiting.
     #[test]
     fn a_part_the_channel_refuses_is_not_counted_as_queued() {
