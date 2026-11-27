@@ -298,6 +298,9 @@ pub struct Bodies {
     place_moves: BTreeMap<(Id, Id), Id>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
     sleeping: BTreeMap<Id, Driver>,
+    /// The things with a seat in each room (#3178): under the floor each seat is on and each node above its thing in
+    /// the town's tree. A sit by kind looks its room up here ([`Bodies::seat_by_kind`]), never scans the tree.
+    rooms: BTreeMap<Id, BTreeSet<Id>>,
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
@@ -475,6 +478,7 @@ impl Bodies {
             wind_moves: BTreeMap::new(),
             place_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
+            rooms: BTreeMap::new(),
         })
     }
 
@@ -671,9 +675,49 @@ impl Bodies {
         Ok(())
     }
 
-    /// Adds a seat.
+    /// Adds a seat, and its thing to the rooms it is in ([`Bodies::seat_by_kind`]).
     pub fn add_place(&mut self, place: PlaceAt) -> R<()> {
-        self.slots.add(place)
+        let (thing, floor) = (place.thing, place.floor);
+        self.slots.add(place)?;
+        let tree = &self.town.tree;
+        let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
+        let mut room = Some(floor);
+        let mut up = parent(thing);
+        for _ in 0..64 {
+            let Some(r) = room else { break };
+            self.rooms.entry(r).or_default().insert(thing);
+            room = up;
+            up = up.and_then(parent);
+        }
+        Ok(())
+    }
+
+    /// The thing a sit by kind takes in `room` (#3178; I5's selector, any free slot of a kind in a node, nearest the
+    /// body, ties by id): of the things with a seat there that `fits` (its kind and its form, as the caller reads
+    /// them), the one whose free slot nearest `body` (C19's pick) is nearest, ties by thing. A slot `taken` names is
+    /// not free. Bound at commit on the clock thread, one sit at a time, so each of a tick's sits sees the seats
+    /// taken before it: one lookup per seat of the room, no rule run. `None` when no seat there is free.
+    pub fn seat_by_kind(
+        &self,
+        room: Id,
+        body: Id,
+        fits: &dyn Fn(Id) -> bool,
+        taken: &dyn Fn(Id, u64) -> bool,
+    ) -> Option<Id> {
+        let c = &self.runner.controller;
+        let from = c.body(body)?.pose.position;
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        self.rooms
+            .get(&room)?
+            .iter()
+            .filter(|t| fits(**t))
+            .filter_map(|&t| {
+                let s = self.slots.free_unless(c, body, t, &|s| taken(t, s))?;
+                let p = self.slots.place_in(t, s)?.stand().ok()?;
+                Some((d(p.x, from.x) + d(p.z, from.z), t))
+            })
+            .min()
+            .map(|(_, t)| t)
     }
 
     /// Where `body` is: the node of its frame (its floor, or the thing whose slot it sits in) and its position there.

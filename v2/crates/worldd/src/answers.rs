@@ -149,6 +149,7 @@ use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
+use replica::selector::{FREE_SLOT, Selector};
 use replica::sky::{self, Sky};
 use replica::sync::Records;
 use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
@@ -1309,6 +1310,8 @@ struct Clock {
     /// the next through the form runner when the world has bodies.
     forms: Acts,
     forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
+    /// The sits by kind among them (#3178): each one's selector and its intent, bound to a seat when its form starts.
+    by_kind: BTreeMap<Id, (Selector, Intent)>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -1894,6 +1897,18 @@ fn spot_of(
     }))
 }
 
+/// A sit by kind (#3178): a sit (`eden:sit`) aimed at I5's free-slot selector (selector 1, any free slot of a kind in
+/// a node). `None` for any other intent, else the selector or its refusal by name (`selector-not-a-record`, ...).
+fn kind_sit(intent: &Intent) -> Option<Result<Selector, &'static str>> {
+    let target @ Target::Selector(FREE_SLOT, _) = intent.target.as_ref()? else {
+        return None;
+    };
+    match intent.verb.as_str().split_once(':') {
+        Some((ns, "sit")) if ns != "souls" => Some(Selector::read(target).map_err(|r| r.name)),
+        _ => None,
+    }
+}
+
 /// Binds a resolved spot once, at commit (`sim::commit::spot`): a slot is sat in (or walked to), a thing or a point
 /// is walked to, as N9's target in the frame of the node it stands in. Refused by the checker's name.
 fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
@@ -2383,8 +2398,14 @@ impl Clock {
                 (vec![reply], stamps),
             );
         }
+        // A sit by kind (#3178) is a seat's own form, its seat bound when it starts.
+        let mut by_kind = match self.bodies {
+            Some(_) => kind_sit(&intent),
+            None => None,
+        };
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
+            Some(_) if by_kind.is_some() => None,
             Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
@@ -2402,6 +2423,20 @@ impl Clock {
         };
         let verb = engine::Verb::of(intent.verb.as_str());
         let taken = match (spotted, moved, verb, intent.kind()) {
+            _ if by_kind.is_some() => match by_kind.as_ref().map(Result::as_ref) {
+                Some(Err(r)) => Err(*r),
+                _ => self.body_of(&intent).map(|body| {
+                    Taken::Form(Act {
+                        id: self.next_intent,
+                        cause: Cause::Intent(id),
+                        actor,
+                        body,
+                        candidates: Vec::new(),
+                        recheck: None,
+                        spot: None,
+                    })
+                }),
+            },
             (Some(a), _, _, _) => a.map(Taken::Form),
             (None, Some(m), _, _) => m.map(Taken::Move),
             // The engine's own acts (C2): activities, offers and carrying, by verb.
@@ -2552,6 +2587,9 @@ impl Clock {
             Taken::Move(m) => self.moving.push((id, m)),
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
+                if let Some(Ok(selector)) = by_kind.take() {
+                    self.by_kind.insert(id, (selector, intent.clone()));
+                }
                 let i = acts::intent(id, intent.expiry, actor, bytes);
                 self.forming.push((id, act, i, form_args));
             }
@@ -4546,6 +4584,71 @@ impl Clock {
         }
     }
 
+    /// The seat a sit by kind takes as its form starts (#3178), on the clock thread, one sit at a time: the thing of the
+    /// selector's kind in its node, whose own sit form (a walk to its nearest free slot, then the sit) a named sit runs,
+    /// with the free slot nearest the body ([`Bodies::seat_by_kind`]); a seat another run is on its way to and a thing
+    /// private to another are not free. Its form then takes the slot as for a named sit, so a burst of sits fills
+    /// every seat. None free is refused `place.none-free`, naming the next step: the nearest free seat of another
+    /// kind there, else to wait for a seat to be left.
+    fn seat_by_kind(
+        &self,
+        selector: &Selector,
+        asked: &Intent,
+        body: Id,
+        now: Micros,
+    ) -> Result<(Id, String), Refusal> {
+        let Selector::FreeSlot { kind, node, .. } = selector;
+        let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
+        let Some(b) = self.bodies.as_ref() else {
+            return Err(Refusal {
+                name: "bodies-off",
+                detail: "the world has no bodies".into(),
+            });
+        };
+        let soul = match asked.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        let kind_of = |t: Id| {
+            tree.handle(t).and_then(|h| tree.node(h)).map(|n| {
+                let entry = import_eden::entry_name(n.kind().as_str(), n.fields());
+                let entry = entry.split('@').next().unwrap_or(entry).to_owned();
+                (replica::world_model::plain(n.kind().as_str()).to_owned(), entry)
+            })
+        };
+        // The seat's own sit form, read as a named sit's: the intent aimed at the thing, with no arguments.
+        let probe = std::cell::RefCell::new(Intent {
+            parameters: BTreeMap::new(),
+            ..asked.clone()
+        });
+        let seat = |of: Option<&str>| {
+            let fits = |t: Id| {
+                probe.borrow_mut().target = Some(Target::Node(t));
+                of.is_none_or(|k| kind_of(t).is_some_and(|(p, e)| p == k || e == k))
+                    && replica::who_may::private_to(tree, t, soul).is_none()
+                    && self.forms.fixture_sit(tree, &probe.borrow())
+            };
+            let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
+            b.seat_by_kind(*node, body, &fits, &taken)
+        };
+        if let Some(t) = seat(Some(kind.as_str())) {
+            let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
+            return Ok((t, form.to_owned()));
+        }
+        let next = match seat(None) {
+            Some(t) => format!(
+                "no {kind} free in {room}; the nearest free seat there is {} ({}): sit on it, or wait for a {kind} to be left",
+                replica::world_model::show(t),
+                kind_of(t).map_or_else(String::new, |k| k.0),
+            ),
+            None => format!("every seat in {room} is held: wait for one to be left"),
+        };
+        Err(Refusal {
+            name: sim::commit::bind::NONE_FREE,
+            detail: next,
+        })
+    }
+
     /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
     /// going for its intent, gets its first receipt again, or is refused by name.
     fn start_forms(&mut self, now: Micros) {
@@ -4553,6 +4656,7 @@ impl Clock {
         // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
         self.forms.hold_sight();
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
+            let by_kind = self.by_kind.remove(&id);
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -4561,11 +4665,20 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let candidates: Vec<(Id, String)> = act
+            let mut candidates: Vec<(Id, String)> = act
                 .candidates
                 .iter()
                 .map(|c| (c.this, c.form.clone()))
                 .collect();
+            if let Some((selector, asked)) = by_kind {
+                match self.seat_by_kind(&selector, &asked, act.body, now) {
+                    Ok(c) => candidates = vec![c],
+                    Err(r) => {
+                        self.end(id, |c| c.refused(actor, sequence, &r));
+                        continue;
+                    }
+                }
+            }
             let r = self.forms.start(
                 self.replica.tree(),
                 self.bodies.as_mut(),
@@ -6643,6 +6756,7 @@ pub fn start<S: Storage + 'static>(
             acts
         },
         forming: Vec::new(),
+        by_kind: BTreeMap::new(),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
