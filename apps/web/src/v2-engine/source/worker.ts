@@ -135,7 +135,6 @@ function runKey(run: unknown): string | undefined {
   return run === undefined ? undefined : typeof run === 'number' || typeof run === 'bigint' ? String(run) : key(run as IdValue);
 }
 
-
 type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
 
 async function run(stream: URL) {
