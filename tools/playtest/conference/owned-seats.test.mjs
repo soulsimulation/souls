@@ -2,11 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { createServer as unixServer } from 'node:net';
-import { atSocket, runtimeOf } from '../../../v2/client/src/home/home.mjs';
+import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { after, test } from 'node:test';
 import { conferenceCaptureResources, conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident, conferenceCreatorArgs, verifyConferenceCreatorPermission, pairConferenceCreator } from './owned-seats.mjs';
 
@@ -116,14 +114,14 @@ test('capture preflight refuses missing recorder and changed bytes before any ow
 test('Node permission mode blocks the real daemon auto-start path before a missing-socket child can exist', async () => {
   const root = resolve(import.meta.dirname, '../../..'), home = join(directory, 'permission-home');
   mkdirSync(home);
-  const module = new URL('../../../v2/client/src/daemon/client.mjs', import.meta.url).href;
-  const script = `import { call } from ${JSON.stringify(module)};
-    try { await call(${JSON.stringify(home)}, 'c_public', {op:'describe'}, {within:500}); process.exitCode=2; }
-    catch(error) { console.log(JSON.stringify({code:error.code,permission:error.permission,canSpawn:process.permission.has('child')})); }`;
-  const result = await ownedConferenceCommand(recipe, ['--permission', `--allow-fs-read=${root}`, `--allow-fs-write=${home}`,
-    '--input-type=module', '-e', script], options());
-  assert.deepEqual(result, { code: 'ERR_ACCESS_DENIED', permission: 'ChildProcess', canSpawn: false });
-  const runtime = join(home, 'souls/c_public/runtime');
+  const soul = 'c_' + 'b'.repeat(32) + '-0';
+  const args = conferenceCreatorArgs({ clientRoot: root, home, soul }, ['describe']), opts = { ...options(), cwd: home, env: { ...options().env, SOULS_HOME: home } };
+  assert(!args.includes('--allow-child-process'));
+  await assert.rejects(ownedConferenceCommand(recipe, args, opts), /command-exit:1/);
+  const answer = JSON.parse(JSON.parse(readFileSync(opts.log)).stdout);
+  assert.equal(answer.code, 'ERR_ACCESS_DENIED');
+  assert.match(answer.detail, /allow-child-process/);
+  const runtime = join(home, 'souls', soul, 'runtime');
   assert(existsSync(join(runtime, 'daemon.log')), 'the real missing-socket launch path reached its pre-spawn log open');
   assert(!existsSync(join(runtime, 'daemon.lock')) && !existsSync(join(runtime, 'daemon.sock')), 'no resident was created');
 });
@@ -145,35 +143,38 @@ test('the exact served-layout creator CLI restores a permitted cwd on long socke
   // Exact existing modules in the served layout: the source checkout would give
   // an overly broad read allowance covering cwd and hide the production failure.
   for (const path of ['v2/client/src', 'tools/lib']) cpSync(join(source, path), join(root, path), { recursive: true });
-  const rt = runtimeOf(home, soul), requests = [];
-  assert(Buffer.byteLength(rt.socket) > 100, 'exercise actual atSocket chdir/restore branch');
-  const server = unixServer(socket => {
-    let text = ''; socket.on('data', bytes => {
-      text += bytes; if (!text.includes('\n')) return;
-      requests.push(JSON.parse(text.split('\n')[0]));
-      socket.end(JSON.stringify({ ok: true, nodes: [{ id: 'ground', kind: 'eden:ground', parent: null }], kinds: {} }) + '\n');
-    });
+  // Public IPC fixture layout, not an imported or copied client path-resolution algorithm.
+  const runtime = join(home, 'souls', soul, 'runtime'); mkdirSync(runtime, { recursive: true });
+  assert(Buffer.byteLength(join(runtime, 'daemon.sock')) > 100, 'exercise the ordinary client long socket path');
+  const fixture = spawn(process.execPath, [join(import.meta.dirname, 'creator-ipc.fixture.mjs')],
+    { cwd: runtime, stdio: ['ignore', 'pipe', 'pipe'] });
+  recipe.registerCommand(fixture);
+  let transcript = '';
+  fixture.stdout.on('data', bytes => { transcript += bytes; });
+  await new Promise((ok, no) => {
+    const timer = setTimeout(() => no(Error('fixture readiness timeout')), 2000);
+    fixture.stdout.on('data', () => { if (transcript.includes('"ready":true')) { clearTimeout(timer); ok(); } });
+    fixture.once('error', error => { clearTimeout(timer); no(error); });
+    fixture.once('exit', () => { clearTimeout(timer); no(Error('fixture exited before readiness')); });
   });
-  await new Promise(ok => atSocket(rt.socket, path => server.listen(path, ok)));
+  const requests = () => transcript.trim().split('\n').map(line => JSON.parse(line)).filter(row => row.request).map(row => row.request);
   const args = conferenceCreatorArgs({ clientRoot: root, home, soul }, ['describe']);
   assert(!args.includes('--allow-child-process'));
   try {
-    const script = `import {call} from ${JSON.stringify(pathToFileURL(join(root, 'v2/client/src/daemon/client.mjs')).href)};
-      try { await call(${JSON.stringify(home)},${JSON.stringify(soul)},{op:'describe'},{ms:200});process.exitCode=2; }
-      catch(e) { console.log(JSON.stringify({code:e.code,permission:e.permission,resource:e.resource})); }process.exit();`;
-    const denied = await ownedConferenceCommand(recipe, [...args.slice(0, 4), '--input-type=module', '-e', script],
-      { ...options(), cwd: resolve(home, '..'), env: { ...options().env, SOULS_HOME: home } });
-    assert.deepEqual(denied, { code: 'ERR_ACCESS_DENIED', permission: 'FileSystemRead', resource: resolve(home, '..') });
-    assert.deepEqual(requests, [], 'restoring the forbidden cwd failed before the ordinary request');
+    const deniedOptions = { ...options(), cwd: resolve(home, '..'), env: { ...options().env, SOULS_HOME: home } };
+    await assert.rejects(ownedConferenceCommand(recipe, args, deniedOptions), /command-exit:1/);
+    const denied = JSON.parse(JSON.parse(readFileSync(deniedOptions.log)).stdout);
+    assert.equal(denied.code, 'ERR_ACCESS_DENIED');
+    assert.deepEqual(requests(), [], 'restoring the forbidden cwd failed before the ordinary request');
     const answer = await ownedConferenceCommand(recipe, args, { ...options(), cwd: home, env: { ...options().env, SOULS_HOME: home } });
     assert.equal(answer.ok, true); assert.equal(answer.nodes[0].id, 'ground');
-    assert.deepEqual(requests, [{ op: 'describe' }]);
-  } finally { await new Promise(ok => server.close(ok)); }
+    assert.deepEqual(requests(), [{ op: 'describe' }]);
+  } finally { const closed = once(fixture, 'close'); fixture.kill('SIGTERM'); await closed; }
   const opts = { ...options(), cwd: home, env: { ...options().env, SOULS_HOME: home } };
   await assert.rejects(ownedConferenceCommand(recipe, args, opts), /command-exit:1/);
   const log = JSON.parse(readFileSync(opts.log));
-  assert.match(log.stdout, /ERR_ACCESS_DENIED/); assert.equal(requests.length, 1);
-  assert(!existsSync(rt.lock));
+  assert.match(log.stdout, /ERR_ACCESS_DENIED/); assert.equal(requests().length, 1);
+  assert(!existsSync(join(runtime, 'daemon.lock')));
 });
 
 
