@@ -164,6 +164,24 @@ test('the unchanged ordinary creator CLI answers on an owned socket and fails cl
 
 
 // Protocol-boundary unit fixtures only: no native process, world, token or modified product client.
+for (const [principal, error] of [[null, /public boot creator principal missing or unreadable/], ['not-a-principal', /public boot creator principal malformed/]]) {
+  test(`creator pairing refuses a ${principal === null ? 'missing' : 'malformed'} public principal before launching commands`, async () => {
+    const run = mkdtempSync(join(directory, 'creator-principal-')), data = join(run, 'data');
+    mkdirSync(join(data, 'world'), { recursive: true });
+    if (principal !== null) writeFileSync(join(data, 'world', 'creator'), principal);
+    const pkg = join(run, 'pkg'); mkdirSync(pkg);
+    for (const file of ['replica.js', 'replica_bg.wasm']) writeFileSync(join(pkg, file), '');
+    let registered = 0;
+    const owned = { kind: 'native-page', checkout: run, pkg,
+      world: { directory: 'http://example.invalid/', world: 'unit', gateway: 'ws://example.invalid', page: 'http://example.invalid/' },
+      registerCommand() { registered++; }, registerClient() { registered++; } };
+    await assert.rejects(pairConferenceCreator({ recipe: owned, paths: { data, dir: run },
+      bundle: join(run, 'unused.mjs'), signal: controller.signal }), error);
+    assert.equal(registered, 0, 'invalid metadata cannot launch a pairing or resident');
+    assert(!existsSync(join(data, 'seats')), 'failure precedes creator-seat provisioning');
+  });
+}
+
 for (const [approvalStatus, readyLine, error] of [[403, 'ready', /synthetic creator approval/], [200, 'wrong', /resident-ready-invalid/]]) {
   test(`creator approval ${approvalStatus} and readiness ${readyLine} failures remain under the existing owner`, async () => {
     const run = mkdtempSync(join(directory, 'creator-boundary-')), data = join(run, 'data'); mkdirSync(data);
@@ -191,13 +209,12 @@ console.log(JSON.stringify({ok:true,soul:'c_${principal}'}));`,
     }
     writeFileSync(join(root, '.whole'), 'unit fixture');
     const bundle = join(run, 'bundle.mjs'); writeFileSync(bundle, 'console.log(JSON.stringify({ok:true}));');
-    const worldDir = join(run, 'world'); mkdirSync(worldDir); writeFileSync(join(worldDir, 'creator'), principal);
+    const worldDir = join(data, 'world'); mkdirSync(worldDir); writeFileSync(join(worldDir, 'creator'), principal);
     const pkg = join(run, 'pkg'); mkdirSync(pkg); for (const file of ['replica.js', 'replica_bg.wasm']) writeFileSync(join(pkg, file), '');
     const owned = { kind: 'native-page', checkout: root, pkg,
       world: { directory: `http://127.0.0.1:${server.address().port}`, world: 'unit', gateway: 'ws://example.invalid', page: 'http://example.invalid/' },
       registerCommand(child) { localChildren.push(child); children.push(child); },
       registerClient(child) { localChildren.push(child); residents.push(child); children.push(child); } };
-    owned.world.dir = worldDir;
     try {
       await assert.rejects(pairConferenceCreator({ recipe: owned, paths: { data, dir: run }, bundle, signal: abort.signal }), error);
       assert(localChildren.length >= 3, 'version, exact permission probe and pair were registered');

@@ -203,6 +203,13 @@ export async function verifyConferenceCreatorPermission({ recipe, paths, clientR
 
 export async function pairConferenceCreator({ recipe, paths, bundle, signal }) {
   requireConferenceRecipe(recipe);
+  // The unchanged native-page fixture starts its world under paths.data/world;
+  // recipe.world exposes public endpoints, not the world's filesystem directory.
+  // This is run.sh's public seeded principal, never a token or stored credential.
+  let principal;
+  try { principal = readFileSync(join(paths.data, 'world', 'creator'), 'utf8').trim(); }
+  catch { assert.fail('conference-proof public boot creator principal missing or unreadable'); }
+  assert(/^[0-9a-f]{32}-[0-9]+$/.test(principal), 'conference-proof public boot creator principal malformed');
   const label = 'conference-creator', folder = join(paths.data, 'seats', label), home = join(folder, '.souls');
   mkdirSync(folder, { recursive: true });
   const seat = { label, folder, home, env: seatEnv(home, recipe.pkg), soul: null };
@@ -211,9 +218,6 @@ export async function pairConferenceCreator({ recipe, paths, bundle, signal }) {
   assert.equal(hash(readFileSync(join(clientRoot, creatorModule))), hash(readFileSync(join(recipe.checkout, creatorModule))),
     'conference-proof served creator source mismatch');
   await verifyConferenceCreatorPermission({ recipe, paths, clientRoot, signal });
-  // This is run.sh's public seeded creator principal, never a token or a stored credential.
-  const principal = readFileSync(join(recipe.world.dir, 'creator'), 'utf8').trim();
-  assert(/^[0-9a-f]{32}-[0-9]+$/.test(principal), 'conference-proof public boot creator principal missing');
   let resolveApproval;
   const approval = new Promise(ok => { resolveApproval = ok; });
   const pairing = command([join(clientRoot, 'v2/client/src/pair/pair.mjs'), ...pairArgs(recipe.world, label), '--creator', `creator-${principal}`], {
