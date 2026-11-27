@@ -783,9 +783,9 @@ impl Skill for Route {
         };
         // The shoulder turn (N10's rung, E16): a body the world named as it began keeps one radius and slack, not two,
         // so one standing still in the only way (a doorway, the one gap, by its own order to stay) never walls it in:
-        // it squeezes past, one radius off (the guard picks no gap). One on the move again, one within CROWDED of the walk's
-        // last goal (no walk ends inside a Soul standing on its goal), every other body and every carried load keep
-        // their whole space.
+        // it squeezes past, one radius off (the guard picks no gap). One on the move again, one within CROWDED of the
+        // walk's last goal (no walk ends inside a Soul standing on its goal), every other body and every carried load
+        // keep their whole space.
         let goal = (leg.link.is_none() && self.leg + 1 == self.legs.len()).then_some(leg.to);
         let squeezed = |n: &Near| {
             past.as_ref().is_some_and(|ids| ids.contains(&n.id))
