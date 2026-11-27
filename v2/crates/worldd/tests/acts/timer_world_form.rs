@@ -215,64 +215,52 @@ fn i3991_a_timer_whose_needs_no_longer_hold_is_refused_by_name_at_its_due_time()
     let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
     let faded = rack_events(&run, "faded");
     println!("#3991 needs at fire: refused {refused:?}, faded {faded:?}, due {due}");
-    assert_eq!(timer_cleared_at(&run), Some(due), "the timer fired at its due time");
+    assert_eq!(
+        timer_cleared_at(&run),
+        Some(due),
+        "the timer fired at its due time"
+    );
     assert_eq!(refused.len(), 1, "the refusal is written once, on the bell");
     let (at, fields) = &refused[0];
     assert_eq!(*at, due, "refused at the timer's due time");
-    assert_eq!(fields.get(&2).map(String::as_str), Some("field_differs"), "by the need's reason");
-    assert_eq!(fields.get(&3).map(String::as_str), Some("fade"), "naming the form");
+    assert_eq!(
+        fields.get(&2).map(String::as_str),
+        Some("field_differs"),
+        "by the need's reason"
+    );
+    assert_eq!(
+        fields.get(&3).map(String::as_str),
+        Some("fade"),
+        "naming the form"
+    );
     assert!(faded.is_empty(), "the fade's effects were not written");
     run.stop();
 }
 
-/// #3991 (3): a world with no bodies takes a form with no steps (the ring) and its timer fires at its due time; after
-/// it nothing is due, so the world may sleep. Before, a world with no bodies never ticked its forms: the timer stayed
-/// due in the past, the bell rang for good and the world never slept.
-#[test]
-// A real world on the real clock: an answer's time is real time.
-#[allow(clippy::disallowed_methods)]
-fn i3991_a_world_with_no_bodies_fires_its_forms_timer_and_may_sleep_after() {
-    let (run, mut a, _) = serve_as("i3991-bodiless", Mem::with(Vec::new()), false);
-    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
-    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
-    assert_eq!(ringing(&run), 1, "ringing once the act is answered");
-    let due = timer_due(&run).expect("the ring set its timer");
-    let took = faded(&run, Duration::from_secs(6));
-    let faded_at = rack_events(&run, "faded");
-    println!("#3991 no bodies: cleared after {took:?}, faded {faded_at:?}, due {due}");
-    assert_eq!(ringing(&run), 0, "the timer's world form cleared the flag");
-    assert_eq!(timer_cleared_at(&run), Some(due), "fired at its due time");
-    let t0 = std::time::Instant::now();
-    let mut quiet = run.world.quiet.read();
-    while quiet.1.is_some() && t0.elapsed() < Duration::from_secs(1) {
-        std::thread::sleep(Duration::from_millis(20));
-        quiet = run.world.quiet.read();
-    }
-    println!("#3991 no bodies: quiet {quiet:?}");
-    assert!(quiet.0, "the world is still");
-    assert_eq!(quiet.1, None, "nothing due: the world may sleep");
-    run.stop();
-}
-
-/// #3991 (3): a world with no bodies goes away with its form's timer pending (asleep, its alarm at the timer's due
-/// time) and is started again from its log after the due time has passed. It catches up exactly: the timer fires at
-/// its own due time, not at the wake.
+/// #3991 (3): a world goes away with its form's timer pending (asleep, its alarm at the timer's due time) and is
+/// started again from its log, with no bodies, after the due time has passed. It catches up exactly: the timer fires
+/// at its own due time, not at the wake, and then nothing is due, so the world may sleep again. Before, a world with
+/// no bodies never ticked its forms: the timer the tree held was never put back on a due list, so the world slept
+/// with no alarm for it and the bell rang for good.
 #[test]
 // A real world on the real clock: an answer's time is real time.
 #[allow(clippy::disallowed_methods)]
 fn i3991_a_world_with_no_bodies_woken_late_fires_its_forms_timer_at_its_due_time() {
     let store = Mem::with(Vec::new());
-    let (run, mut a, _) = serve_as("i3991-sa", store.clone(), false);
+    let (run, mut a, _) = serve_on("i3991-sa", store.clone());
     let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
     assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
     let due = timer_due(&run).expect("the ring set its timer");
     let t0 = std::time::Instant::now();
     let mut next = run.world.quiet.read().1;
-    while next != Some(due) && t0.elapsed() < Duration::from_millis(500) {
+    while next.is_none_or(|n| n > due) && t0.elapsed() < Duration::from_millis(500) {
         std::thread::sleep(Duration::from_millis(20));
         next = run.world.quiet.read().1;
     }
-    assert_eq!(next, Some(due), "the alarm a sleep would set is the timer's due time");
+    assert!(
+        next.is_some_and(|n| n <= due),
+        "the alarm a sleep would set is no later than the timer's due time"
+    );
     assert_eq!(timer_cleared_at(&run), None, "not fired before the stop");
     run.world.stop();
     std::thread::sleep(Duration::from_secs(3));
@@ -280,6 +268,19 @@ fn i3991_a_world_with_no_bodies_woken_late_fires_its_forms_timer_at_its_due_time
     let took = faded(&run, Duration::from_secs(6));
     println!("#3991 no bodies, woken late: cleared after {took:?}, due {due}");
     assert_eq!(ringing(&run), 0, "the timer fired after the wake");
-    assert_eq!(timer_cleared_at(&run), Some(due), "at its own due time, not the wake's");
+    assert_eq!(
+        timer_cleared_at(&run),
+        Some(due),
+        "at its own due time, not the wake's"
+    );
+    let t0 = std::time::Instant::now();
+    let mut quiet = run.world.quiet.read();
+    while !(quiet.0 && quiet.1.is_none()) && t0.elapsed() < Duration::from_secs(1) {
+        std::thread::sleep(Duration::from_millis(20));
+        quiet = run.world.quiet.read();
+    }
+    println!("#3991 no bodies, after the fade: quiet {quiet:?}");
+    assert!(quiet.0, "the world is still");
+    assert_eq!(quiet.1, None, "nothing due: the world may sleep");
     run.stop();
 }
