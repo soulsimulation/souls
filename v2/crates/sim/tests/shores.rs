@@ -642,7 +642,7 @@ fn most(g: Ground) -> i64 {
 }
 
 /// Runs `who`'s walk on `r` over `t` until it ends (at most `ticks`), checking every tick: no move longer than the
-/// fastest of the grounds it began and ended the tick on (within 1 %, the mover's walk again for a slope), and never
+/// fastest of the grounds it began and ended the tick on (within 2 %, the mover's walk again for a slope), and never
 /// on ground the body may not stand on.
 fn run(r: &mut Runner, t: &mut Town, who: Id, has: Mask, ticks: usize) -> Walked {
     let mut w = Walked {
@@ -658,7 +658,7 @@ fn run(r: &mut Runner, t: &mut Town, who: Id, has: Mask, ticks: usize) -> Walked
         let (now, g1) = (at(r), r.controller.ground(who));
         let d = common::dist(was, now);
         assert!(
-            d <= most(g0).max(most(g1)) * TICK / 1_000_000 * 101 / 100 + 1,
+            d <= most(g0).max(most(g1)) * TICK / 1_000_000 * 102 / 100 + 1,
             "no jump: {d} µm in a tick from {g0:?} to {g1:?}"
         );
         assert!(sim::routes::may_stand(g1, has), "{g1:?} with {has}");

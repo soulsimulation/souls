@@ -142,6 +142,7 @@ impl Water {
         }
         Some(Ok(Shore {
             middle: Vec3::new((a[0] + b[0]) * 500, 0, (a[1] + b[1]) * 500),
+            edge: [a, b],
             far,
             ground: map.piece(far).ground,
             gait: if wetter == Ground::Water {
@@ -152,18 +153,31 @@ impl Water {
         }))
     }
 
-    /// Where a shore crossing lands a body on `far` ground (piece `piece` of `map`), from `middle` (µm): the nearest
-    /// point of that piece, then of the ground's surface (`dry`, the open ground's, for dry ground).
-    pub fn landing(
-        &self,
-        map: &Map,
-        dry: &Surface,
-        far: Ground,
-        piece: u32,
-        middle: Vec3,
-    ) -> Option<Vec3> {
-        let (_, p) = exits::nearest(std::slice::from_ref(map.piece(piece)), middle)?;
-        let s = match far {
+    /// Where a shore crossing lands a body (#3225): [`IN`] from the middle of the edge, square to it, into the far
+    /// piece, or that piece's nearest point to there; then the nearest point of the far ground's surface (`dry`, the
+    /// open ground's, for dry ground). So the carry lasts more than the tick it starts in, and the walk sees it.
+    pub fn landing(&self, map: &Map, dry: &Surface, shore: &Shore) -> Option<Vec3> {
+        let far = std::slice::from_ref(map.piece(shore.far));
+        let [a, b] = shore.edge;
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+        let len = (i128::from(ex).pow(2) + i128::from(ez).pow(2)).isqrt() as i64;
+        let m = shore.middle;
+        let out = |k: i64| {
+            Vec3::new(
+                m.x - ez * k / len.max(1),
+                m.y,
+                m.z + ex * k / len.max(1),
+            )
+        };
+        // The side of the edge the far piece lies on.
+        let side = if exits::piece_of(far, out(-PROBE)).is_some() && exits::piece_of(far, out(PROBE)).is_none() {
+            -1
+        } else {
+            1
+        };
+        let target = if len == 0 { m } else { out(side * IN) };
+        let (_, p) = exits::nearest(far, target)?;
+        let s = match shore.ground {
             Ground::Dry => dry,
             g => self.surface(g)?.0,
         };
@@ -171,11 +185,18 @@ impl Water {
     }
 }
 
+/// How far into the far piece a shore crossing lands a body, µm: more than a tick's walk at any gait.
+pub const IN: i64 = 150_000;
+/// How far off the edge its far side is looked for, µm.
+const PROBE: i64 = 20_000;
+
 /// A shore crossing as [`Water::shore`] reads it.
 #[derive(Clone, Copy, Debug)]
 pub struct Shore {
     /// The middle of the edge the two grounds share, µm (height 0: the open ground's plan).
     pub middle: Vec3,
+    /// The edge, both its ends (mm, the ground's frame).
+    pub edge: [[i64; 2]; 2],
     /// The far piece of the map, and its ground.
     pub far: u32,
     pub ground: Ground,

@@ -3844,10 +3844,7 @@ impl Town {
         }
         let ground = self.ground;
         let dry = self.surfaces.get(&ground)?;
-        let Some(land) = self
-            .water
-            .landing(&self.map, dry, shore.ground, shore.far, shore.middle)
-        else {
+        let Some(land) = self.water.landing(&self.map, dry, &shore) else {
             return Some(Err(refusal("link-end-off-ground", show(link))));
         };
         let on = match shore.ground {
