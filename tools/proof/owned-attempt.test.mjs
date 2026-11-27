@@ -486,3 +486,26 @@ test('browser ownership and observation count survive calibration rejection, inc
     if (closeFails) assert.match(report.teardown.browserError, /context-close-failed/);
   }
 });
+
+test('late onOpened then setup rejection closes the real context without rewriting frozen evidence', async t => {
+  for (const closeFails of [false, true]) {
+    const controller = new AbortController(); let onOpened, rejectSetup, closes = 0;
+    const f = setup(t, { browser: async o => {
+      onOpened = o.onOpened; setTimeout(() => controller.abort(Error('launch interrupted')), 1);
+      return await new Promise((_, reject) => { rejectSetup = reject; });
+    } });
+    f.o.signal = controller.signal;
+    const report = await f.runner(f.o);
+    assert.equal(report.status, 'CLEANUP_FAIL'); assert.equal(report.teardown.browserClosed, false);
+    const original = readFileSync(join(report.paths.dir, 'report.json')), ledger = readFileSync(f.o.ledger);
+    onOpened({ close: async () => { closes++; if (closeFails) throw Error('late-close-failed'); } });
+    rejectSetup(Error('calibration-aborted-after-open'));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(closes, 1); assert.deepEqual(readFileSync(join(report.paths.dir, 'report.json')), original);
+    assert.deepEqual(readFileSync(f.o.ledger), ledger); assert.equal(report.browserObservationStarted, undefined);
+    const evidence = JSON.parse(readFileSync(join(report.paths.dir, 'late-browser-cleanup.json')));
+    assert.equal(evidence.browserOpenedAfterAbort, true); assert.equal(evidence.closed, !closeFails);
+    assert.match(evidence.setupError, /calibration-aborted-after-open/);
+    if (closeFails) assert.match(evidence.error, /late-close-failed/);
+  }
+});

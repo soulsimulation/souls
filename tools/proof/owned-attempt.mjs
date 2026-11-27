@@ -166,7 +166,7 @@ async function run(o, d) {
   const children = [], transients = new Set(), processGroups = new Set();
   const native = o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies' || o.world.kind === 'native-page';
   const healthy = () => children.every(c => transients.has(c) ? c.signalCode === null && (c.exitCode === null || c.exitCode === 0) : c.exitCode === null && c.signalCode === null);
-  let state, report, paths, browser, child, childError, worldDeath, observationStop, closing = false, cleanupFailed = false, finalized = false, timedOut = false;
+  let state, report, paths, browser, child, childError, worldDeath, observationStop, closing = false, cleanupFailed = false, finalized = false, timedOut = false, browserCleanupStarted = false;
   const controller = new AbortController(), onAbort = () => controller.abort(o.signal?.reason ?? new Error('proof.interrupted'));
   const timeout = error => { timedOut = true; controller.abort(error); };
   const onSignal = () => controller.abort(new Error('proof.interrupted'));
@@ -262,11 +262,22 @@ async function run(o, d) {
     const fixture = await bounded(() => driver.prepare?.({ base: world.base, paths, signal: controller.signal, recipe: world.recipe, arm: slot.arm, repeat: slot.repeat }), controller.signal, o.phaseTimeoutMs ?? 30000, 'prepare', timeout);
     controller.signal.throwIfAborted();
     requireThat(healthy(), 'owned-world-exited');
-    let launchSettled = false, lateBrowser;
+    let launchSettled = false, lateBrowser, lateOpened, lateCleanup;
+    const closeLate = context => lateCleanup ??= (async () => {
+      const result = { browserOpenedAfterAbort: true, closed: false };
+      try { await bounded(() => context.close(), null, o.cleanupTimeoutMs ?? 8000, 'late-browser-close'); result.closed = true; }
+      catch (error) { result.error = String(error); }
+      writeNew(join(paths.dir, 'late-browser-context-cleanup.json'), result); return result;
+    })();
     const markObservation = () => {
       if (!report.browserObservationStarted) { report.browserObservationStarted = true; state.captures++; report.captureOrdinal = state.historicalCaptures + state.captures; }
     };
     const opening = Promise.resolve().then(() => d.browser({ ...o, signal: controller.signal, onOpened(context) {
+      if (browserCleanupStarted || finalized || controller.signal.aborted) {
+        lateOpened = context;
+        if (!finalized) { cleanupFailed = true; report.teardown.browserOpenPending = true; }
+        void closeLate(context).catch(() => {}); return;
+      }
       browser = context; markObservation();
     } }, paths, world.base));
     opening.then(value => { launchSettled = true; lateBrowser = value; }, () => { launchSettled = true; });
@@ -276,12 +287,10 @@ async function run(o, d) {
       else if (!launchSettled) {
         cleanupFailed = true; report.teardown.browserOpenPending = true;
         // A late context is still ours. Preserve its separate cleanup result; never rewrite the failed report.
-        void opening.then(async context => {
-          const result = { browserOpenedAfterAbort: true, closed: false };
-          try { await bounded(() => context.close(), null, o.cleanupTimeoutMs ?? 8000, 'late-browser-close'); result.closed = true; }
-          catch (e) { result.error = String(e); }
-          writeNew(join(paths.dir, 'late-browser-cleanup.json'), result);
-        }, error => writeNew(join(paths.dir, 'late-browser-cleanup.json'), { browserOpenedAfterAbort: false, error: String(error) })).catch(() => {});
+        void opening.then(context => closeLate(context), async error => lateOpened
+          ? { ...await closeLate(lateOpened), setupError: String(error) }
+          : { browserOpenedAfterAbort: false, error: String(error) })
+          .then(result => writeNew(join(paths.dir, 'late-browser-cleanup.json'), result)).catch(() => {});
       }
       throw error;
     }
@@ -330,6 +339,7 @@ async function run(o, d) {
         evidence('explanation.md', `${report.error ?? 'Predeclared journey passed.'}\n\n${o.explanation ?? 'See assertions and source-bound repair history.'}\n`);
       } catch (e) { report.evidenceError = String(e); report.status = 'EVIDENCE_FAIL'; }
       try { if (observationStop) await bounded(observationStop, null, o.cleanupTimeoutMs ?? 8000, 'observer-close'); } catch (e) { report.teardown.observerError = String(e); cleanupFailed = true; }
+      browserCleanupStarted = true;
       try { if (browser) await bounded(() => browser.close(), null, o.cleanupTimeoutMs ?? 8000, 'browser-close'); report.teardown.browserClosed = !report.teardown.browserOpenPending; } catch (e) { report.teardown.browserError = String(e); cleanupFailed = true; }
       try {
         for (const event of report.network) event.expected = expectedNetwork(event, report, report.ownedOrigin);
@@ -357,7 +367,7 @@ async function run(o, d) {
       }
       try {
         if (existsSync(paths.log)) report.evidence.push({ file: paths.log, hash: digest(readFileSync(paths.log)) });
-        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json|native-page-provenance\.json|native-input-facts\.json|native-manual\.png)$/.test(f))) { const at = join(paths.dir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
+        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json|native-page-provenance\.json|native-input-facts\.json|native-manual\.png|native-document\.html)$/.test(f))) { const at = join(paths.dir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
         const captureDir = join(paths.dir, 'capture');
         if (existsSync(captureDir)) for (const file of readdirSync(captureDir)) { const at = join(captureDir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
         for (const file of readdirSync(paths.video)) {
