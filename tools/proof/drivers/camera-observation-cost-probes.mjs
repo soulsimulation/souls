@@ -11,8 +11,10 @@ export function clockCostProbe() {
  for(let i=0;i<8192&&performance.now()-start<8;i++){const before=performance.now(),after=performance.now(),delta=after-previous;reads++;if(delta>0)steps.push(delta);else if(delta===0)zero++;else throw Error('camera-cost-nonmonotone-clock');pairs.push(after-before);previous=after;}
  steps.sort((a,b)=>a-b);pairs.sort((a,b)=>a-b);return{reads,elapsedMs:performance.now()-start,minimumPositiveStepMs:steps[0]??null,maximumObservedStepMs:steps.at(-1)??null,zeroReads:zero,noopMedianMs:pairs.length?pairs[Math.ceil(pairs.length*.5)-1]:null,noopP95Ms:pairs.length?pairs[Math.ceil(pairs.length*.95)-1]:null,scope:'Empirical resolution and no-op noise outside the sampled phase, not a guaranteed clock-error bound or a quiet-machine certification'};
 }
-export function sampledWitnessValid(witness,rows,start,end,{requireSubject=true}={}) {
+export function sampledWitnessValid(witness,rows,start,end,{expectation='represented'}={}) {
  if(!witness||witness.phase!=='sample'||witness.status!=='complete'||!witness.equal||!witness.scene?.history)return false;
+ if(!['absent','represented'].includes(expectation))return false;
+ const sceneMatches=expectation==='absent'?witness.scene.subjects===0&&witness.scene.represented===0:witness.scene.subjects>0&&witness.scene.represented>0;
  const row=rows.find(r=>r[0]===witness.sequence);
- return!!row&&row[2]>=start&&row[2]<=end&&row[55]===1&&row[56]===witness.scene.seek&&row[3]===witness.scene.tick&&(!requireSubject||(witness.scene.subjects>0&&witness.scene.represented>0));
+ return!!row&&row[2]>=start&&row[2]<=end&&row[55]===1&&row[56]===witness.scene.seek&&row[3]===witness.scene.tick&&sceneMatches;
 }
