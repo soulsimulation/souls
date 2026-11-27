@@ -297,7 +297,7 @@ impl Deck {
     pub fn put(&mut self, k: usize, c: Id, slot: &str, joins: Option<&[Id]>) -> Got {
         let mut p = BTreeMap::from([(1, self.site.to_value()), (2, Value::Uint(self.slots[slot]))]);
         if let Some(j) = joins {
-            p.insert(4, Value::Array(j.iter().map(Id::to_value).collect()));
+            p.insert(4, Value::Array(j.iter().map(|i| i.to_value()).collect()));
         }
         self.hands[k].act("part:put", c, p)
     }

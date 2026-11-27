@@ -333,7 +333,13 @@ with (a rack beam's `beam_end` mates with an upright's `beam_seat`); no other po
 link (section 4), never a parent: a beam seated between two uprights is a child of its bay
 (`content/kinds/construction/`). The kind that declares the joining link bears on the kind it names, which stands; a
 kind whose link names a kind that itself bears rests on it, a tier up, and needs as many of those held up as the link's
-`most` (a shade cloth on its two rails, `content/kinds/carpentry/`).
+`most` (a shade cloth on its two rails, `content/kinds/carpentry/`). This goes as deep as the kinds say: a joist whose
+link names a beam, a sheet whose link names the joist, a tread whose link names its flight. A part is held up when it
+is held by its crew or joined to enough held-up parts of the kinds its link names; a joint to any other kind holds
+nothing up (a sheet joined to a beam rests on nothing), and a part with something resting on it is not taken out
+(`support.none`, naming what would be left). Only a standing kind's bracing is still rack-shaped: by the kinds that
+join it directly, on a left and a right column, at one height or two. A part with a body on it, in a standing place it
+gives or on a floor it holds, is not taken out either (`part.stood-on`).
 A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
 may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
 declares its bounds.
