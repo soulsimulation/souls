@@ -617,7 +617,11 @@ impl Gateway {
         let held = hub.grants.get(&grant.key());
         let connected = !*self.closing.borrow()
             && held.is_some_and(|h| h.sessions.values().any(|l| !l.frames.is_closed()));
-        mailbox::agent(grant, connected, connected && held.is_some_and(Held::listening))
+        mailbox::agent(
+            grant,
+            connected,
+            connected && held.is_some_and(Held::listening),
+        )
     }
 
     /// The socket signed in for `grant` as `session` says whether a reader of its messages is open now; the grant
