@@ -231,12 +231,18 @@ async fn o8_a_sync_flood_past_its_budget_is_refused_by_name_and_never_sent() {
         let Ok(Some(Ok(Message::Binary(b)))) =
             tokio::time::timeout(Duration::from_secs(5), f.next()).await
         else {
-            panic!("{slowed} refused, {} waiting, of {sent}", gw.link.syncs_waiting());
+            panic!(
+                "{slowed} refused, {} waiting, of {sent}",
+                gw.link.syncs_waiting()
+            );
         };
         let Value::Map(m) = decode(&b).unwrap().value else {
             panic!("not a map");
         };
-        assert!(matches!(m.get(&20), Some(Value::Uint(_))), "under its own number");
+        assert!(
+            matches!(m.get(&20), Some(Value::Uint(_))),
+            "under its own number"
+        );
         assert_eq!(
             m.get(&24),
             Some(&Value::Text(Name::new(world_link::SLOW_DOWN).unwrap()))
@@ -244,7 +250,10 @@ async fn o8_a_sync_flood_past_its_budget_is_refused_by_name_and_never_sent() {
         slowed += 1;
     }
     let waiting = gw.link.syncs_waiting();
-    assert!(slowed > 0 && waiting < 300, "bounded: {waiting} waiting, {slowed} refused");
+    assert!(
+        slowed > 0 && waiting < 300,
+        "bounded: {waiting} waiting, {slowed} refused"
+    );
     assert_eq!(gw.link.syncs_slowed(), slowed);
     // Another agent's request goes to the world: it is told nothing here.
     let mut h = connect(&url, honest.reveal()).await;

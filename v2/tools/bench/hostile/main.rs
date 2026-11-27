@@ -238,8 +238,9 @@ struct Honest {
     reasons: Mutex<BTreeMap<String, u64>>,
 }
 
-/// One honest agent: first frame, sign-in, then its own lamp toggled once a second from `offset` until `stop`, then a
+/// One honest agent: first frame, sign-in, then its own lamp toggled every `every` from `offset` until `stop`, then a
 /// wait for its answers.
+#[allow(clippy::too_many_arguments)] // one agent's place in the run
 async fn honest(
     url: String,
     token: String,
@@ -270,8 +271,7 @@ async fn honest(
     let mut sent: BTreeMap<u64, Instant> = BTreeMap::new();
     let mut waits = Vec::new();
     let mut seq = 0u64;
-    let mut tick =
-        tokio::time::interval_at(tokio::time::Instant::now() + offset, every);
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + offset, every);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut drain: Option<Instant> = None;
     let mut closed = false;
@@ -379,7 +379,10 @@ fn everything(_pairs: &[(Id, Id)]) -> Vec<u8> {
         .unwrap_or_else(|_| fail("the root's id"));
     let request = Value::Map(
         [
-            (1, Value::Array(vec![Value::Map([(1, root.to_value())].into())])),
+            (
+                1,
+                Value::Array(vec![Value::Map([(1, root.to_value())].into())]),
+            ),
             (2, Value::Uint(1)),
             (3, Value::Uint(u32::MAX as u64)),
         ]
@@ -523,7 +526,10 @@ async fn attack(
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                count(&t, format!("held {} s", started.elapsed().as_secs().min(99) / 10 * 10));
+                count(
+                    &t,
+                    format!("held {} s", started.elapsed().as_secs().min(99) / 10 * 10),
+                );
                 // Now read what is left, to see how it was let go.
                 let _ = tokio::time::timeout(Duration::from_secs(5), read_all(rx, t.clone())).await;
             }
@@ -538,7 +544,11 @@ async fn attack(
             let reader = tokio::spawn(read_all(rx, t.clone()));
             while Instant::now() < end {
                 sent += 1;
-                if tx.send(Message::Binary(everything(&pairs).into())).await.is_err() {
+                if tx
+                    .send(Message::Binary(everything(&pairs).into()))
+                    .await
+                    .is_err()
+                {
                     count(&t, "send failed");
                     break;
                 }
@@ -584,7 +594,8 @@ async fn attack(
                             match tokio_tungstenite::connect_async(&url).await {
                                 Ok((ws, _)) => {
                                     let (_, rx) = ws.split();
-                                    let _ = tokio::time::timeout(left, read_all(rx, t.clone())).await;
+                                    let _ =
+                                        tokio::time::timeout(left, read_all(rx, t.clone())).await;
                                     if Instant::now() >= end {
                                         count(&t, "ws held to the end");
                                     }
@@ -612,7 +623,8 @@ async fn attack(
                     let mut n = 0u64;
                     while Instant::now() < end {
                         n += 1;
-                        let guess = Token::issue(Grant::Actor(Actor::Soul(me.0))).expect("random bytes");
+                        let guess =
+                            Token::issue(Grant::Actor(Actor::Soul(me.0))).expect("random bytes");
                         match signed_in(&url, guess.reveal()).await {
                             Some((_, outcome)) => count(&t, format!("sign-in {outcome}")),
                             None => count(&t, "connect failed or closed"),
@@ -819,20 +831,21 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
         .map(|(k, attack)| {
             let me = a.honest + k;
             let out = dir.join(format!("hostile-{attack}.txt"));
-            let child = Command::new(std::env::current_exe().unwrap_or_else(|_| fail("this binary")))
-                .args([
-                    "attack",
-                    attack,
-                    &url,
-                    &tokens[me],
-                    &n.to_string(),
-                    &a.seconds.to_string(),
-                ])
-                .arg(&out)
-                .arg(me.to_string())
-                .stdout(Stdio::null())
-                .spawn()
-                .unwrap_or_else(|e| fail(format!("the hostile: {e}")));
+            let child =
+                Command::new(std::env::current_exe().unwrap_or_else(|_| fail("this binary")))
+                    .args([
+                        "attack",
+                        attack,
+                        &url,
+                        &tokens[me],
+                        &n.to_string(),
+                        &a.seconds.to_string(),
+                    ])
+                    .arg(&out)
+                    .arg(me.to_string())
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .unwrap_or_else(|e| fail(format!("the hostile: {e}")));
             ((*attack).to_owned(), out, child)
         })
         .collect();
@@ -881,7 +894,8 @@ async fn run(a: &Args, arm: &str, rep: usize) -> String {
         hostile
             .iter()
             .map(|(attack, out, _)| {
-                let told = std::fs::read_to_string(out).unwrap_or_else(|_| "nothing written".into());
+                let told =
+                    std::fs::read_to_string(out).unwrap_or_else(|_| "nothing written".into());
                 format!("{attack}: {}", told.trim())
             })
             .collect::<Vec<_>>()

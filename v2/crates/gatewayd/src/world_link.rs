@@ -1018,7 +1018,11 @@ mod kept_tests {
         assert!(fits >= 100, "far above a daemon's one at a time: {fits}");
         assert_eq!(ask(&key, n + 1), Sent::Full(2));
         assert_eq!(link.syncs_slowed(), 2);
-        assert_eq!(link.syncs_waiting() as u64, fits, "a refused request is not kept");
+        assert_eq!(
+            link.syncs_waiting() as u64,
+            fits,
+            "a refused request is not kept"
+        );
         let mut sent = Vec::new();
         while let Ok(b) = queue.try_recv() {
             sent.push(b);
@@ -1031,7 +1035,10 @@ mod kept_tests {
             Value::Map(m) => m.get(&wire::ASK).cloned().unwrap(),
             _ => unreachable!(),
         };
-        let answer = encode(&Value::Map([(wire::ASK, ours), (1, Value::Array(Vec::new()))].into())).unwrap();
+        let answer = encode(&Value::Map(
+            [(wire::ASK, ours), (1, Value::Array(Vec::new()))].into(),
+        ))
+        .unwrap();
         assert!(matches!(link.sync_answered(&answer), Some(Some(_))));
         assert_eq!(ask(&key, n + 2), Sent::Sent);
         // The world going away gives up every request and frees every place.
