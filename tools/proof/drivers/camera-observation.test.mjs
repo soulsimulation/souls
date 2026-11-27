@@ -66,13 +66,32 @@ test('complete old revision cannot hide failed or incomplete potentially eligibl
 });
 test('undecodable actual bundle revision propagates refusal instead of leaving only old candidate',()=>{
  const raw=Buffer.from('validated-shape-counterexample'),sha=createHash('sha256').update(raw).digest('hex'),url='https://example.test/history/bundles/0-'+sha;
- assert.throws(()=>decodeRecordedBundle(url,deflateRawSync(raw),()=>{throw Error('native-history-integrity-refusal');}),/native-history-integrity-refusal/);
- assert.throws(()=>decodeRecordedBundle(url,Buffer.from('not-deflate'),()=>assert.fail('cannot decode corrupt bytes')));
- assert.equal(decodeRecordedBundle(url,deflateRawSync(raw),bytes=>bytes.toString()),raw.toString());
+ assert.throws(()=>decodeRecordedBundle(deflateRawSync(raw),Buffer.from(sha,'hex'),()=>{throw Error('native-history-integrity-refusal');}),/native-history-integrity-refusal/);
+ assert.throws(()=>decodeRecordedBundle(Buffer.from('not-deflate'),Buffer.from(sha,'hex'),()=>assert.fail('cannot decode corrupt bytes')));
+ assert.equal(decodeRecordedBundle(deflateRawSync(raw),Buffer.from(sha,'hex'),bytes=>bytes.toString()),raw.toString());
 });
 test('direct native/display comparison rejects opposite sides of prewalk within1mm each',()=>{
  const native=[{positionM:[1.0009,0,0]}],initial=[1,0,0],paused=[.9991,0,0];
  assert.equal(agreeRecordedPoses(native,initial),true);assert.equal(agreeRecordedPoses([{positionM:paused}],initial),true);
  assert.equal(agreeRecordedPoses(native,paused),false);
  assert.equal(agreeRecordedPoses([{positionM:[1,0,0]},{positionM:[1.0001,0,0]}],[1.0005,0,0]),true);
+});
+
+import {capturedIndexBindings} from './camera-observation.mjs';
+import {encode,decode} from '../../../apps/web/node_modules/cborg/cborg.js';
+const indexResponse=rows=>({url:'https://example.test/world/history/bundles/00000000/index',status:200,headers:{},bytes:Buffer.from(encode(new Map([[3,rows]])))});
+const indexKey=new TextEncoder().encode('bundles/00000000/opaque-public-key');
+test('opaque non-hash public key uses actual captured index SHA and exact history-root resolution',()=>{
+ const raw=Buffer.from('public payload'),digest=createHash('sha256').update(raw).digest(),r=indexResponse([[0,indexKey,digest]]),bindings=capturedIndexBindings([r],decode),url='https://example.test/world/history/bundles/00000000/opaque-public-key';
+ assert.deepEqual(bindings.get(url).digest,digest);assert.equal(decodeRecordedBundle(deflateRawSync(raw),bindings.get(url).digest,bytes=>bytes.toString()),'public payload');
+ assert.throws(()=>decodeRecordedBundle(deflateRawSync(Buffer.from('tampered')),digest,()=>assert.fail('must reject before native decode')),/index-hash-mismatch/);
+});
+test('missing, conflicting, malformed and incomplete actual index bindings fail closed',()=>{
+ const digest=Buffer.alloc(32,1),other=Buffer.alloc(32,2),row=[0,indexKey,digest];
+ assert.equal(capturedIndexBindings([],decode).size,0);assert.throws(()=>decodeRecordedBundle(Buffer.from('x'),undefined,()=>{}),/digest-missing/);
+ assert.throws(()=>capturedIndexBindings([indexResponse([row]),indexResponse([[0,indexKey,other]])],decode),/conflicting-binding/);
+ assert.throws(()=>capturedIndexBindings([indexResponse([[0,indexKey,Buffer.alloc(31)]])],decode),/malformed/);
+ assert.throws(()=>capturedIndexBindings([{...indexResponse([row]),status:503}],decode),/incomplete-or-failed/);
+ assert.throws(()=>capturedIndexBindings([{...indexResponse([row]),status:206,headers:{'content-range':'bytes 0-2/100'}}],decode),/incomplete-or-failed/);
+ assert.throws(()=>capturedIndexBindings([indexResponse([[0,new TextEncoder().encode('https://elsewhere.test/bundle'),digest]])],decode),/key-invalid/);
 });

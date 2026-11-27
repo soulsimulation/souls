@@ -64,10 +64,28 @@ export function completeRecordedResponses(responses) {
  }
  return complete;
 }
-/** Integrity/decoder refusal propagates: an undecodable revision is never silently skipped. */
-export function decodeRecordedBundle(url,bytes,read) {
+/** Production day-index rows bind public keys relative to the history root, not to URL filenames. */
+export function capturedIndexBindings(responses,decode) {
+ const bindings=new Map(),text=new TextDecoder('utf-8',{fatal:true});
+ for(const r of responses){const index=new URL(r.url);if(!/\/bundles\/\d{8}\/index$/.test(index.pathname))continue;
+  if(r.error||!r.bytes||r.status<200||r.status>=300)throw Error('recorded-index-incomplete-or-failed');
+  if(r.status===206){const m=/^bytes 0-(\d+)\/(\d+)$/.exec(r.headers['content-range']??'');if(!m||Number(m[1])+1!==Number(m[2])||r.bytes.length!==Number(m[2]))throw Error('recorded-index-incomplete-or-failed');}
+  const document=decode(r.bytes,{useMaps:true}),rows=document instanceof Map?document.get(3):null;if(!Array.isArray(rows))throw Error('recorded-index-malformed');
+  const base=new URL(index.href);base.pathname=index.pathname.slice(0,index.pathname.lastIndexOf('/bundles/')+1);base.search='';base.hash='';
+  let previous=-1;
+  for(const row of rows){if(!Array.isArray(row)||row.length!==3||!['number','bigint'].includes(typeof row[0])||!Number.isSafeInteger(Number(row[0]))||Number(row[0])<0||Number(row[0])<=previous||!(row[1] instanceof Uint8Array)||!row[1].length||!(row[2] instanceof Uint8Array)||row[2].length!==32)throw Error('recorded-index-malformed');previous=Number(row[0]);
+   const key=text.decode(row[1]),url=new URL(key,base);if(url.origin!==base.origin||!url.pathname.startsWith(base.pathname)||url.search||url.hash||url.username||url.password)throw Error('recorded-index-key-invalid');
+   const digest=Buffer.from(row[2]),known=bindings.get(url.href);if(known&&!known.digest.equals(digest))throw Error('recorded-index-conflicting-binding');
+   if(!known)bindings.set(url.href,{digest,indexResponses:[]});bindings.get(url.href).indexResponses.push({file:r.file,indexUrl:r.url,sha256:hash(r.bytes)});
+  }
+ }
+ return bindings;
+}
+/** Integrity/decoder refusal propagates: the actual index digest is the trust binding. */
+export function decodeRecordedBundle(bytes,expected,read) {
+ if(!(expected instanceof Uint8Array)||expected.length!==32)throw Error('recorded-index-digest-missing');
  const raw=inflateRawSync(bytes),digest=createHash('sha256').update(raw).digest();
- if(!new URL(url).pathname.endsWith('-'+digest.toString('hex')))throw Error('recorded-bundle-content-address-mismatch');
+ if(!digest.equals(Buffer.from(expected)))throw Error('recorded-bundle-index-hash-mismatch');
  return read(raw,digest);
 }
 export function agreeRecordedPoses(candidates,initial,toleranceM=0.001) {
@@ -79,14 +97,15 @@ export async function publicTarget(state,target,body,initial) {
  if(!header)throw Error('recorded-public-header-not-retained');
  const {decode}=await import(new URL('../../../apps/web/node_modules/cborg/cborg.js',import.meta.url));
  const replica=await import(new URL('../../../v2/target/wasm-load/pkg/replica.js',import.meta.url));replica.initSync({module:readFileSync(new URL('../../../v2/target/wasm-load/pkg/replica_bg.wasm',import.meta.url))});
- const key=id=>id?Buffer.from(id[0]).toString('hex')+'.'+id[1]:null,candidates=[];
+ const key=id=>id?Buffer.from(id[0]).toString('hex')+'.'+id[1]:null,candidates=[],bindings=capturedIndexBindings(state.responses,decode);
  for(const [url,bytes]of responses){if(!new URL(url).pathname.includes('/bundles/')||new URL(url).pathname.endsWith('/index'))continue;
-  let rawSha256;const result=decodeRecordedBundle(url,bytes,(raw,digest)=>{rawSha256=digest.toString('hex');return decode(replica.historyAt(header,raw,digest,BigInt(Math.round(target*50000)),false),{useMaps:true});});
+  const binding=bindings.get(url);if(!binding)throw Error('recorded-index-binding-missing');
+  let rawSha256;const result=decodeRecordedBundle(bytes,binding.digest,(raw,digest)=>{rawSha256=digest.toString('hex');return decode(replica.historyAt(header,raw,digest,BigInt(Math.round(target*50000)),false),{useMaps:true});});
   const at=target*50000;if(at<Number(result.get(4))||at>Number(result.get(4))+Number(result.get(5)))continue;
   const nodes=new Map(result.get(2).map(n=>[key(n.get(1)),n])),node=nodes.get(body);if(!node)throw Error('recorded-target-body-absent-in-eligible-revision');
   // The owned fixture's root body has a world parent. Decline nested oracle rather than invent a transform.
   let parentId=key(node.get(3));const seen=new Set();while(parentId){if(seen.has(parentId))throw Error('recorded-target-parent-cycle');seen.add(parentId);const parent=nodes.get(parentId);if(!parent)throw Error('recorded-target-parent-missing');const pose=parent.get(7);if(pose&&((pose.get(2)??[]).some(v=>Number(v)!==0)||(pose.get(3)??[1073741824,0,0,0]).some((v,i)=>Number(v)!==(i===0?1073741824:0))))throw Error('recorded-target-nonidentity-parent');parentId=key(parent.get(3));}
-  candidates.push({bundleUrl:url,bundleSha256:hash(bytes),rawSha256,positionM:node.get(7).get(2).map(v=>Number(v)/1e6)});
+  candidates.push({bundleUrl:url,bundleSha256:hash(bytes),rawSha256,indexResponses:binding.indexResponses,positionM:node.get(7).get(2).map(v=>Number(v)/1e6)});
  }
  if(!agreeRecordedPoses(candidates,initial))throw Error('recorded-target-revisions-ambiguous-or-not-prewalk');
  return {targetTick:target,candidates,positionM:initial,toleranceM:0.001,basis:'All eligible actual captured public revisions agree with the older stationary pre-walk frame within1mm; native historyAt at integer20Hz target. Specifically consumed revision is not identified. Strict draw alignment remains1e-9.'};
