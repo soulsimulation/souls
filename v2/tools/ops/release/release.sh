@@ -791,10 +791,16 @@ unswap() {
 # quiet <unit>: stopped when it runs, and started again by resume. resume: every unit quiet stopped, last first.
 STOPPED=()
 quiet() { systemctl is-active --quiet "$1" 2> /dev/null && systemctl stop "$1" && STOPPED+=("$1"); }
+# A path unit placement() reset (REVIVED) must still be up once started: one failing again names itself.
+REVIVED=
 resume() {
   local i
   for ((i = ${#STOPPED[@]} - 1; i >= 0; i--)); do systemctl start "${STOPPED[i]}" || true; done
   STOPPED=()
+  if [ -n "$REVIVED" ] && ! systemctl is-active --quiet souls-place.path; then
+    echo "placement: warning: souls-place.path is not active after its reset: New world is still not placing (journalctl -u souls-place.service)"
+  fi
+  REVIVED=
 }
 # put <new> <live> <prev>: swap, or every rename back, every stopped unit started and the release stopped.
 put() { swap "$@" || {
@@ -888,8 +894,10 @@ placement() {
   # A path unit failed by systemd's start limit (26 Nov: placed nothing after that until someone noticed) is cleared
   # here and started again with the others, so each release leaves New world placing.
   if systemctl is-failed --quiet souls-place.path 2> /dev/null; then
+    echo "placement: souls-place.path had failed (New world was not placing): reset, started again with the others"
     systemctl reset-failed souls-place.path souls-place.service || true
     STOPPED+=(souls-place.path)
+    REVIVED=1
   fi
   s=$((SECONDS + ${RELEASE_PLACE_WAIT_S:-300}))
   while systemctl is-active --quiet souls-place.service 2> /dev/null; do

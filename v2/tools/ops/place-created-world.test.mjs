@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir } from 'node:
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { placeRequest, drain, REFUSED_PAUSE_MS, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed, command } from './place-created-world.mjs';
+import { placeRequest, drain, refusedPause, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed, command } from './place-created-world.mjs';
 
 // Canonical T0 fixture data, independent of the initializer's decoder. Actual native proof uses Rust's real records.
 const cbor = value => {
@@ -89,15 +89,16 @@ test('mismatched owner and symlinked input refuse before privileged configuratio
 test('a request refused again and again keeps one attempt, and a refused run takes its pause',async()=>{
   const f=await fixture();
   try {
+    process.env.SOULS_PLACE_REFUSED_PAUSE_MS='300';
     const request='c'.repeat(64),inbox=join(f.config.placement,'requests'),attempts=join(f.config.placement,'attempts');
     for(let i=0;i<3;i++){
       await writeFile(join(inbox,request),'');
       const at=Date.now();await drain(f.config);
-      assert.ok(Date.now()-at>=REFUSED_PAUSE_MS,'a refused run lasts its pause');
+      assert.ok(Date.now()-at>=refusedPause(),'a refused run lasts its pause');
     }
     assert.deepEqual(await readdir(inbox),[]);
     assert.deepEqual(await readdir(attempts),[request],'one attempt, under the request it was');
-  } finally {await rm(f.dir,{recursive:true,force:true});}
+  } finally {delete process.env.SOULS_PLACE_REFUSED_PAUSE_MS;await rm(f.dir,{recursive:true,force:true});}
 });
 
 test('configuration-only placement writes exact existing units without reading or changing world data',async()=>{
@@ -182,7 +183,16 @@ test('#1960 B7: on a bucket, placement reads intent, name and list there, and th
     assert.equal(store.kind,'bucket');
     const ready=await placeRequest(f.config,f.request,{run:routed(f),asSouls:async()=>{},store});
     assert.equal(ready.ready,true);assert.equal(ready.instance,f.instance);
-    assert.deepEqual(reads,[`world-create/${f.request}`,`world-name/${f.row.name}`,'world-list']);
+    // Read once to check the request, and the name and list again after its status is written (directory rule 10).
+    assert.deepEqual(reads,[`world-create/${f.request}`,`world-name/${f.row.name}`,'world-list',`world-name/${f.row.name}`,'world-list']);
+    // A create the directory ended between the two reads (its row gone) is refused before anything is placed.
+    const ended=await fixture(),list=join(ended.config.worldsRoot,'directory/world-list');let placed=0;
+    try {
+      const folderStore=directoryStore(ended.config,{});let lists=0;
+      const racing={kind:'folder',get:async key=>{if(key==='world-list'&&++lists===2)await writeFile(list,JSON.stringify({worlds:[]}));return folderStore.get(key);}};
+      await assert.rejects(placeRequest(ended.config,ended.request,{run:async()=>{placed++;},asSouls:async()=>{placed++;},store:racing}),/placement-create-ended/);
+      assert.equal(placed,0,'nothing prepared, configured or started');
+    } finally {await rm(ended.dir,{recursive:true,force:true});}
     assert.ok(!f.configured.includes('--folder-store'),'on a bucket the world reads DIRECTORY_STORE_URL, as the directory does');
     await assert.rejects(store.get('../world-list'),/placement-store-key-invalid/);
   } finally {await rm(f.dir,{recursive:true,force:true});}

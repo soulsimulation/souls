@@ -241,6 +241,11 @@ export async function placeRequest(config, request, { run = command, asSouls: un
   const port = receipt?.port ?? existing?.port ?? (() => { for (let p = config.portFirst; p <= config.portLast; p++) if (!reservations.includes(p)) return p; fail('placement-port-unavailable'); })();
   if (!Number.isInteger(port) || port < config.portFirst || port > config.portLast || reservations.includes(port)) fail('placement-port-invalid');
   phase.port = port; await atomic(statusPath,phase);
+  // Rule 10 of the directory's list: a create unplaced for 15 minutes ends, its row removed, then the placement asked
+  // again. This status is written first and the row and name read again after, so one of the two sees the other.
+  const still = record(await store.get(`world-name/${row.name}`)), again = JSON.parse(await store.get('world-list'));
+  if (!(still instanceof Map) || !Buffer.isBuffer(still.get(2)) || still.get(2).toString('hex') !== row.lineage
+      || !again.worlds?.some(r => r.name === row.name && r.lineage === row.lineage)) fail('placement-create-ended');
   await underSouls('prepare',request);
   await run('/bin/bash',[join(config.library,'ops/place-world.sh'),'--configuration-only','--instance',instance,'--creator',row.creator.replace(':','-'),
     '--port',String(port),'--build',config.build,'--resume','--directory',new URL(config.directory).host,
@@ -281,9 +286,9 @@ export async function drain(config) {
   }
   // A refused run lasts at least REFUSED_PAUSE_MS: a page asking again for the same failing create starts this unit at
   // most a few times in systemd's start limit (5 in 10 s), which would otherwise fail souls-place.path for good.
-  if (refused) await pause(REFUSED_PAUSE_MS);
+  if (refused) await pause(refusedPause());
 }
-export const REFUSED_PAUSE_MS = Number(process.env.SOULS_PLACE_REFUSED_PAUSE_MS ?? 3000);
+export const refusedPause = () => Number(process.env.SOULS_PLACE_REFUSED_PAUSE_MS ?? 3000);
 
 // No top-level await: drain imports archive-world.mjs, which imports this module, so an entry module still awaiting its
 // own evaluation would never settle that import (Node exits 13, every request set aside unplaced; 26 Nov).
@@ -313,5 +318,10 @@ if (isMain(import.meta.url)) setImmediate(async () => {
       if (mode === 'probe') await ready(config, join(config.worldsRoot, 'worlds', phase.instance), phase.port);
       if (mode === 'publish') await publishData(config, phase);
     } else await drain(config);
-  } catch (error) { console.error(`placement: ${error.message}`); process.exitCode = 1; }
+  } catch (error) {
+    console.error(`placement: ${error.message}`); process.exitCode = 1;
+    // A run refused before its drain (its configuration, its folders) pauses too. One that cannot load at all cannot:
+    // the release resets a failed path unit and says so (release.sh placement).
+    if (process.argv[2] !== '--as-souls') await pause(refusedPause());
+  }
 });

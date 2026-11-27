@@ -582,6 +582,79 @@ fn rule10_a_placed_or_unknown_placement_keeps_the_create() {
 }
 
 #[test]
+fn rule10_a_ready_list_row_keeps_its_name_whatever_its_intent_says() {
+    // The list row was marked ready, but the intent's last write was lost: the intent still says unready.
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let t = 10 * DAY;
+    let click = ask("k", "live", "Live");
+    placing(&store, &gets, starts.clone(), place.clone(), None)
+        .create(&click, person(1), 0, t)
+        .expect("placed");
+    let key = store
+        .keys()
+        .into_iter()
+        .find(|k| k.starts_with("world-create/"))
+        .unwrap();
+    let prior = store.get(&key).unwrap().unwrap();
+    let mut intent: Json = serde_json::from_slice(&prior.bytes).unwrap();
+    intent["row"]["ready"] = json!(false);
+    store
+        .put(
+            &key,
+            &serde_json::to_vec(&intent).unwrap(),
+            When::Is(&prior.etag),
+        )
+        .unwrap();
+    // The probe says not placed (its status lost or unreadable as `world-starting`): the name of the ready world stays.
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    assert_eq!(w.end_stale_creates(t + 2 * PLACE_WITHIN).unwrap(), 0);
+    let again = w
+        .create(&click, person(1), 0, t + 2 * PLACE_WITHIN)
+        .expect("the same world");
+    assert_eq!(again["world"]["ready"], true);
+    assert!(store.get(&NameRecord::key("live")).unwrap().is_some());
+    assert_eq!(w.list().unwrap()["worlds"][0]["ready"], true);
+}
+
+#[test]
+fn rule10_a_placement_that_starts_while_a_create_ends_keeps_it() {
+    // The first probe finds no status; by the second (after the row went) the placement has written one.
+    let (store, gets) = (Memory::default(), AtomicUsize::new(0));
+    let t = 10 * DAY;
+    let mut w = worlds(&store, &gets, Arc::new(AtomicUsize::new(0)));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let seen = probes.clone();
+    w.starter = Box::new(move |s: &Start| {
+        if !s.probe {
+            return refuse("world-starting", "pending");
+        }
+        match seen.fetch_add(1, Ordering::SeqCst) {
+            0 => refuse("world-starting", "no status yet"),
+            _ => refuse("start-failed", "a placement may be running"),
+        }
+    });
+    w.create(&ask("k", "racing", "Racing"), person(1), 0, t)
+        .unwrap_err();
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(probes.load(Ordering::SeqCst), 2);
+    let rows = w.list().unwrap()["worlds"].clone();
+    assert_eq!(rows.as_array().unwrap().len(), 1, "the row is back");
+    assert_eq!(rows[0]["name"], "racing");
+    assert!(store.get(&NameRecord::key("racing")).unwrap().is_some());
+}
+
+#[test]
 fn w16_handoff_hash_only_named_expiry_pending_restart_and_round_trip() {
     let store = Memory::default();
     let gets = AtomicUsize::new(0);

@@ -95,7 +95,7 @@ fn placed(root: &std::path::Path, s: &Start) -> R<()> {
             return refuse("start-failed", "placement status is unreadable");
         };
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
+            return refuse("start-failed", "a placement status is unparseable");
         };
         if value["name"] != s.name || value["lineage"] != lineage.as_str() {
             continue;
@@ -191,6 +191,12 @@ mod tests {
         );
         write("c", "lab", true, PLACING_FOR + 60);
         assert_eq!(probe("lab"), Ok(()));
+        std::fs::write(status.join("d"), "{not json").unwrap();
+        assert_eq!(
+            probe("lab-3"),
+            Err("start-failed"),
+            "an unparseable status is not known"
+        );
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(
             probe("lab"),

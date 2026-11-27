@@ -561,6 +561,9 @@ esac`);
   const revived = run(['placement', sha, 'run'], { ...env, BUSY: '1', RELEASE_PLACE_WAIT_S: '1', PATH_FAILED: '1' });
   assert.equal(revived.status, 3, revived.stdout + revived.stderr);
   unchanged('a revived path unit');
+  assert.match(revived.stdout, /^placement: souls-place\.path had failed \(New world was not placing\): reset/m);
+  // The shim keeps it failed: the release names that it did not come back.
+  assert.match(revived.stdout, /^placement: warning: souls-place\.path is not active after its reset/m);
   assert.deepEqual(restarts(), ['reset-failed souls-place.path souls-place.service', 'start souls-place.path']);
   rmSync(log);
 
