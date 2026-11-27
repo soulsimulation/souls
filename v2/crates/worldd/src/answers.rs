@@ -10407,6 +10407,44 @@ mod standing_order_carry_tests {
         assert!(Carry::read(&[0xf3; 32]).unwrap().is_none());
     }
 
+    /// [`restore`] passes a checkpoint over for its carry, as for a record it does not read whole, and gives the one
+    /// before: every reader of a served world's checkpoints starts from it.
+    #[test]
+    fn a_checkpoint_whose_carry_this_build_does_not_read_is_passed_over_for_the_one_before() {
+        let zone = Id::new(Scope([0x73; 16]), 0).unwrap();
+        let mut tree = replica::tree::Tree::start(zone, name("souls:place"));
+        let dir = std::env::temp_dir().join(format!("souls-carry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let version = Version {
+            lineage: Scope([0x73; 16]),
+            zone,
+            epoch: 1,
+            sequence: 1,
+        };
+        let old = Carry::of(&Sequences::default(), 5, Placed::new(), 3, &[], &[]).to_bytes();
+        let Value::Map(mut later) = decode(&old).unwrap().value else {
+            panic!("carry")
+        };
+        later.insert(8, Value::Uint(1));
+        let later = encode(&Value::Map(later)).unwrap();
+        let mut taken = Checkpoints::open(&dir, 1, Blobs::default()).unwrap();
+        taken.take(&mut tree, version, 1, &old).unwrap();
+        taken.take(&mut tree, version, 2, &later).unwrap();
+        taken.wait().unwrap();
+        drop(taken);
+        let r = restore(&dir).unwrap().expect("the one before");
+        assert_eq!(r.root.record, 1);
+        assert_eq!(r.rejected.len(), 1);
+        assert_eq!(r.rejected[0].1.name, "checkpoint-carry");
+        assert_eq!(read_carry(&r.root.seed).next_intent, 5);
+        assert_eq!(
+            checkpoint::restore(&dir).unwrap().unwrap().root.record,
+            2,
+            "read without the carry's check, the newest"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     fn read_carry(bytes: &[u8]) -> Carry {
         Carry::read(bytes).unwrap().expect("a carry")
     }

@@ -101,11 +101,14 @@ and rolling builds (O1, O7) are not here.
     key it did not know): a record that holds a key the build does not read is refused by name, in the tree's
     records (`checkpoint-record`: a node, an audience, a link, a timer, a flight, a big field), in the root record
     (`checkpoint-root-bad`) and in a served world's carry, the part of its restart kept in the seed
-    (`checkpoint-carry`). The restart then uses the checkpoint before, or stops with `checkpoint-none-good`; it never
-    runs on with part of the world missing. So a new key in any of these is a change of format: a build from before
-    it cannot be put back once two checkpoints have been written with the key (the last two are kept), and the way
-    out is forward. A node's fields are data and are carried whole whatever their numbers; the log's records keep
-    the fields a build does not know (`effects.md`) and are never written again.
+    (`checkpoint-carry`). The restart then uses the checkpoint before and the log after it, or stops with
+    `checkpoint-none-good`; it never starts from a checkpoint read in part. So a new key in any of these is a change
+    of format, and putting back a build from before it has two outcomes. While a checkpoint from before the key is
+    still kept (the last two are), the older build starts from that one and the log, and its next checkpoint
+    replaces the newer build's: what the key held is kept only as far as the older checkpoint and the log hold it
+    (true of a record written another way, not of new state). Once both kept checkpoints hold the key, the older
+    build stops by name and the way out is forward. A node's fields are data and are carried whole whatever their
+    numbers; the log's records keep the fields a build does not know (`effects.md`) and are never written again.
 
 **Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a
 pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (mark 3); a resumes and writes 3 to its
