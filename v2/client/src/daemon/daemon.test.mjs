@@ -42,9 +42,10 @@ let relay, arrivals, roots, rt;
  * A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile;
  * `refuse` closes each new connection at once; `stall(true)` moves no byte either way on any connection, new ones too,
  * and closes none (a stalled network), until `stall(false)` lets what waited through. `onUp(down)` is called once, as
- * the next frame of data a client sends passes; with `down.instead` set to a text, the client gets that text as a
- * frame in place of what the gateway sends it next, and nothing of that connection's after it.
+ * the next frame of data a client sends passes, with that client's connection: once `down.hushed`, nothing the gateway
+ * sends reaches it, and `down.write(textFrame(..))` gives it a frame of the relay's own.
  */
+const textFrame = (text) => Buffer.concat([Buffer.from([0x81, text.length]), Buffer.from(text)]); // WebSocket, under 126 B
 function makeRelay(port) {
   const pairs = new Set();
   const r = {
@@ -58,12 +59,7 @@ function makeRelay(port) {
     pairs.add([down, up]);
     if (r.stalled) { down.pause(); up.pause(); }
     down.on('data', (d) => { up.write(d); if ((d[0] & 0x0f) === 2) { const f = r.onUp; r.onUp = null; f?.(down); } }); // 2: binary
-    up.on('data', (d) => {
-      if (r.deaf || down.hushed) return;
-      if (down.instead === undefined) { down.write(d); return; }
-      down.write(Buffer.concat([Buffer.from([0x81, down.instead.length]), Buffer.from(down.instead)])); // one text frame
-      down.hushed = true;
-    });
+    up.on('data', (d) => { if (!r.deaf && !down.hushed) down.write(d); });
     for (const s of [down, up]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); up.destroy(); }); }
   });
   r.server = server;
@@ -545,10 +541,15 @@ test('#4980: a frame heard just after a sync was asked, then nothing: the socket
   const from = said().length;
   let t0 = null, letGoMs;
   // From the sync's ask on the gateway is heard no more, but for one frame that was on its way: it reaches the daemon
-  // just after its ask, when the sync's answer would have (a text frame that says nothing to it). CI's failures were
-  // this order: a sync asked at sign-in, the subscription's frames just after it, and the test before this one
-  // stalling the network then. The frame after the ask had the socket found behind, as on a slow link, and kept 60 s.
-  relay.onUp = (down) => { down.instead = '{}'; t0 = performance.now(); };
+  // 100 ms after its ask (a text frame that says nothing to it). CI's failures were this order: a sync asked at
+  // sign-in, the subscription's frames just after it, and the test before this one stalling the network then. The
+  // frame after the ask had the socket found behind, as on a slow link, and kept 60 s. (A machine that stops this
+  // process for half a second then sends no frame: one that late is no longer one on its way.)
+  relay.onUp = (down) => {
+    down.hushed = true;
+    t0 = performance.now();
+    setTimeout(() => { if (performance.now() - t0 < 500 && !down.destroyed) down.write(textFrame('{}')); }, 100);
+  };
   try {
     // A look asks the world once the copy is over 1 s old: asked again until a sync's ask has passed.
     for (let i = 0; t0 === null; i++) {
