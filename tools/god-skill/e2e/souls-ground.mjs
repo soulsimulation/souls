@@ -95,7 +95,7 @@ async function shotOnce(name, { eye, at, wait = 4000 } = {}) {
   if (!release) { log('  (chrome lease busy; screenshot skipped)'); return true; }
   let browser = null;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); });
     const page = await ctx.newPage();
@@ -119,7 +119,7 @@ async function shotDuring(name, { eye, at, afterMs = 10000 }, run) {
   if (!release) { log('  (chrome lease busy; mid-motion screenshot skipped)'); return run(); }
   let browser = null, p = null;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); });
     const page = await ctx.newPage();

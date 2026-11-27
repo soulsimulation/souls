@@ -98,7 +98,7 @@ try {
   const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../god-skill/lib/chrome-lease.mjs');
   const release = await chromeLease('s3-camera');
   try {
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=user-gesture-required'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=user-gesture-required'] });
     try {
       const configs = [['desktop', { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 }]];
       if (phone) configs.push(['phone', { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }]);

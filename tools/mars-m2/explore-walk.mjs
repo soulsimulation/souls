@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Real input in real Chrome (shared lease), as a stranger: open the world, open Explore, type a search, click a location,
+// Real input in Chromium (shared lease), as a stranger: open the world, open Explore, type a search, click a location,
 // screenshot what the visitor then sees (dpr 1 and 2). Lists every Explore location label it found.
 //   node tools/mars-m2/explore-walk.mjs --base <world URL> --out <dir> --pick "Inside: Mimos floor" [--pick ...] [--dpr 1,2]
 import assert from 'node:assert/strict';
@@ -16,7 +16,7 @@ mkdirSync(out, { recursive: true });
 const { chromium } = createRequire(`${ROOT}/mars/viewer/package.json`)('@playwright/test');
 const { chromeLease } = await import(process.env.CHROME_LEASE_MODULE ?? '../god-skill/lib/chrome-lease.mjs');
 const release = await chromeLease('n3-explore', { waitMs: 45 * 60000 });
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 try {
   for (const dpr of dprs) {

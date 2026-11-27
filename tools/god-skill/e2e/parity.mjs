@@ -51,7 +51,7 @@ const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@
 const release = await chromeLease('L11-parity-e2e');
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   const page = await (await browser.newContext({ viewport: { width: 1200, height: 800 } })).newPage();
   page.setDefaultTimeout(PAGE_MS);
   const errors = []; page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)));

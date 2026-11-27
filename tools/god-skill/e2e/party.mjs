@@ -122,7 +122,7 @@ async function withPage(fn) {
   if (!release) { log('  (chrome lease busy; screenshot skipped)'); return false; }
   let browser = null;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); });
     return await fn(await ctx.newPage());

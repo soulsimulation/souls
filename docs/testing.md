@@ -184,6 +184,16 @@ runs and authors them. Rendering diagnostics for camera follow and temporal stab
 holds the camera still and fails on any region that flips between frames (#1265).
 The engine's own browser tests are in `mars/viewer/e2e/`.
 
+### Browser channel
+
+Scripts launch Playwright's own Chromium with `channel: 'chromium'` (the full build in new headless mode), never the
+installed Google Chrome (`channel: 'chrome'` or an `executablePath` into Chrome.app). On macOS it draws WebGL on the
+hardware GPU (ANGLE Metal); the bare default, the headless shell, falls back to SwiftShader, so always name the
+channel. A run that hangs on real Chrome leaves a headless copy of Chrome.app alive; macOS then treats the user's
+Chrome as open and shows no window. Install once per Playwright version in use:
+`pnpm --filter mars-campus-viewer exec playwright install chromium`. `tools/test-harness/browser-channel.test.mjs`
+fails on any new real-Chrome launch outside its short allowlist (renderers whose last fallback is Chrome).
+
 ## CI window
 
 Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci` once, with no label**:

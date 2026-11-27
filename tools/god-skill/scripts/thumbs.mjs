@@ -57,7 +57,7 @@ const pose = async (name) => { const r = (await api(`/v1/world/entities/${name}`
 
 const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
 const releaseChrome = await chromeLease('L5-thumbs');
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
 const page = await (await browser.newContext({ viewport: { width: 768, height: 768 } })).newPage();
 page.setDefaultTimeout(900_000);
 const first = placed[0];

@@ -38,7 +38,7 @@ node tools/speed/profile-arrival.mjs <world-url> --out <dir> [--cpu 4] [--mbps 6
 ```
 
 `--mobile` means 390×844 at DPR 3, touch input and 4× CPU throttling. The app may cap its render pixel ratio below the
-emulated DPR, and both are reported. Probes need real Chrome on a hardware GPU and refuse software renderers. A
+emulated DPR, and both are reported. Probes need Playwright Chromium on a hardware GPU and refuse software renderers. A
 probe holds a Chrome lease for its whole run, so two probes never share the GPU. `profile-arrival.mjs` records a
 sampled V8 CPU profile from navigation to the arrival card's ready signal (`arrival.cpuprofile`, plus a summary by
 source file and function).
