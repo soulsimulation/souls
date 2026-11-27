@@ -1263,8 +1263,6 @@ mod attend;
 mod effect_refused;
 #[path = "acts/named_args.rs"]
 mod named_args;
-#[path = "acts/sit_by_kind.rs"]
-mod sit_by_kind;
 
 /// #3888 A1, A2: the world decides a form's needs at commit, links included, by R2's one evaluator, whatever the
 /// client said. A throw to an end nobody plays is refused `not_linked` naming need 1, and nothing changes; with a
