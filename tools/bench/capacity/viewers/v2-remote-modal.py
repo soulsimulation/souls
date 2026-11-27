@@ -5,6 +5,7 @@
 #   REMOTE_PKG=<replica wasm-bindgen pkg dir> modal run tools/bench/capacity/viewers/v2-remote-modal.py \
 #       --base https://stream.example --stream /s/w/<world>/views/.../everyone/ --viewers 1000 --arm even \
 #       [--secs 240] [--per-share 500] [--slow 20] --out <file.jsonl>
+# REMOTE_CPU (default 2) is each machine's processor share: about 1 per 250 readers.
 import json
 import os
 import subprocess
@@ -26,7 +27,7 @@ if PKG:
 app = modal.App("souls-remote-readers", image=image)
 
 
-@app.function(cpu=2.0, memory=2048, timeout=1200)
+@app.function(cpu=float(os.environ.get("REMOTE_CPU", "2")), memory=2048, timeout=1200)
 def share(a: dict) -> list:
     cmd = ["node", "/app/tools/bench/capacity/viewers/v2-remote.mjs", "--base", a["base"], "--stream", a["stream"], "--pkg", "/app/pkg",
            "--viewers", str(a["viewers"]), "--arm", a["arm"], "--secs", str(a["secs"]), "--procs", str(a["procs"]),

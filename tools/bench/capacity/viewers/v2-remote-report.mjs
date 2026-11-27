@@ -48,6 +48,7 @@ const out = {
   hitRatioWithJoins: (() => { const h = {}; for (const w of windows) for (const x of Object.values(w.cache)) merge(h, x); const n = hcount(h); return n ? +((h.HIT ?? 0) / n).toFixed(4) : null; })(),
   notHitPerS: +((cached - (cacheAll.HIT ?? 0)) / secs).toFixed(2),
   errors: windows.reduce((s, w) => merge(s, w.errors), {}), behind: sum(windows, (w) => w.behind), reinstalls: sum(windows, (w) => w.reinstalls),
+  refusal: rows.find((r) => r.refusal)?.refusal ?? null,
   edgeLocations: windows.reduce((s, w) => merge(s, w.colo ?? {}), {}),
   readerCores: +(sum(windows, (w) => w.cpuSeconds) / (10 * windows.length)).toFixed(2), readerLoopP99Ms: Math.max(...windows.map((w) => w.loopP99Ms)),
 };
