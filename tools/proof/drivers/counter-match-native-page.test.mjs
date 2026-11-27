@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createRequire } from 'node:module';
 import { readFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator, counterBootBoard, counterSceneBoard, counterJourney } from './counter-match-native-page.mjs';
+import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator, counterBootBoard, counterSceneBoard, counterJourney, counterBoardSnapshot, counterBoardRead } from './counter-match-native-page.mjs';
 import { drawnLoad } from '../../playtest/carry-contact/oracle.mjs';
 import { defOf } from '../../entry/look.mjs';
 const THREE=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('three');
@@ -164,4 +164,31 @@ test('intermediate count scale follows integer permille truncation without rerun
   const wrong=sample(2,3,'second');wrong.board.fill.relativeScale[0]=.429;wrong.board.fill.spanX=.665*.429;
   assert.throws(()=>counterDrawCheckpoint([sample(1,3,'second'),wrong],{remaining:3,turn:'second'}),/fill scale/);
   assert(counterDrawCheckpoint([sample(1,2,'first'),sample(2,2,'first')],{remaining:2,turn:'first'}));
+});
+
+
+test('bounded board failure witnesses distinguish detachment, hidden ancestors and invalid matrices without mutation',()=>{
+  const f=boardFixture(),before=f.root.matrixWorld.toArray(),snap=()=>counterBoardSnapshot(f.layer,f.scene,'table',42,100);
+  assert.equal(snap().root.attached,true);assert.equal(snap().root.allObservedVisible,true);assert.equal(snap().root.matrix.finite,true);
+  f.scene.remove(f.root);assert.equal(snap().root.attached,false);f.scene.add(f.root);
+  f.scene.visible=false;assert.equal(snap().root.attached,true);assert.equal(snap().root.allObservedVisible,false);f.scene.visible=true;
+  f.root.matrixWorld.elements[0]=NaN;assert.equal(snap().root.matrix.finite,false);assert.equal(snap().root.matrix.determinant,null);
+  assert.equal(snap().root.matrix.elements[0],'NaN');f.root.matrixWorld.fromArray(before);
+  f.root.matrixWorld.elements.fill(0);assert.equal(snap().root.matrix.finite,true);assert.equal(snap().root.matrix.nondegenerate,false);
+  f.root.matrixWorld.fromArray(before);assert.deepEqual(snap().root.matrix.elements,before);assert.deepEqual(f.root.matrixWorld.toArray(),before);
+  const missing=counterBoardSnapshot(f.layer,f.scene,'absent',43,101);assert.equal(missing.present,false);
+  const serialized=Function(`return (${counterBoardSnapshot.toString()})`)();assert.deepEqual(serialized(f.layer,f.scene,'table',42,100),snap());
+  let parent=f.root;for(let i=0;i<40;i++){const next=new THREE.Group();next.add(parent);parent=next;}f.scene.add(parent);
+  assert.equal(snap().root.ancestors.length,32);assert.equal(snap().root.truncated,true);assert.equal(snap().root.attached,null);
+  assert.doesNotThrow(()=>JSON.stringify(snap()));
+});
+
+test('board diagnostics precede the read, retain the original witness and never mask its failure',()=>{
+  const original=Error('original oracle failure'),events=[],retained=[];
+  const run=()=>counterBoardRead(()=>{events.push('read');throw original;},()=>{events.push('snapshot');return{frame:4};},r=>retained.push(r));
+  assert.throws(run,error=>error===original);assert.deepEqual(events,['snapshot','read']);assert.deepEqual(retained,[{snapshot:{frame:4},error:String(original)}]);
+  const failed=[];assert.throws(()=>counterBoardRead(()=>{throw original;},()=>{throw Error('snapshot unavailable');},r=>failed.push(r)),error=>error===original);
+  assert.match(failed[0].snapshot.diagnosticFailure,/snapshot unavailable/);
+  assert.throws(()=>counterBoardRead(()=>{throw original;},()=>({}),()=>{throw Error('retention unavailable');}),error=>error===original);
+  assert.equal(counterBoardRead(()=>7,()=>({}),()=>{throw Error('must not retain success');}),7);
 });

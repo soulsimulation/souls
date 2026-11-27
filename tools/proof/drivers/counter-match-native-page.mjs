@@ -42,6 +42,31 @@ export function counterWorldPage(catalog, base) {
   page.search='';page.hash='';return page.href;
 }
 
+/** Bounded pre-read observations only: no transform updates or geometry reads. Self-contained for the page. */
+export function counterBoardSnapshot(layer,scene,entity,frame,at) {
+  const text=value=>typeof value==='string'?value.slice(0,128):null,number=value=>Number.isFinite(value)?value:null;
+  const d=layer.drawn?.get(entity),out={frame:number(frame),at:number(at),entity:text(entity),present:!!d};
+  if(!d)return out;
+  Object.assign(out,{removing:d.removing===true,inst:text(d.inst),shown:typeof d.shown==='boolean'?d.shown:null});
+  const root=d.obj,ancestors=[];let o=root,attached=false;
+  while(o&&ancestors.length<32){ancestors.push({uuid:text(o.uuid),visible:typeof o.visible==='boolean'?o.visible:null,scene:o===scene});if(o===scene){attached=true;break;}o=o.parent;}
+  const truncated=!!o&&!attached&&ancestors.length===32,m=root?.matrixWorld,e=m?.elements,count=e?.length;
+  const finite=count===16&&Array.from({length:16},(_,i)=>e[i]).every(Number.isFinite);
+  const det=m?.determinant?.();
+  out.root={uuid:text(root?.uuid),ancestors,truncated,attached:truncated?null:attached,
+    allObservedVisible:ancestors.every(a=>a.visible===true),matrix:{count:number(count),finite,
+      elements:count===16?Array.from({length:16},(_,i)=>Number.isFinite(e[i])?e[i]:String(e[i]).slice(0,32)):null,
+      determinant:number(det),nondegenerate:Number.isFinite(det)?Math.abs(det)>1e-12:null}};
+  return out;
+}
+
+/** Diagnostics may fail, but must never replace or waive the original board-read failure. */
+export function counterBoardRead(read,diagnose,retain) {
+  const message=error=>{try{return String(error).slice(0,1024);}catch{return 'error unavailable';}};
+  let snapshot;try{snapshot=diagnose();}catch(error){snapshot={diagnosticFailure:message(error)};}
+  try{return read();}catch(error){try{retain({snapshot,error:message(error)});}catch{}throw error;}
+}
+
 /** Reads actual attached role meshes. Current EntityInstancer excludes role subtrees; never read its hidden prototype. */
 export function counterDrawTools({vector,drawnLoad,maxVertices=10000}) {
   const fail=why=>{throw Error(`counter drawn state: ${why}`);};
@@ -140,7 +165,7 @@ export function counterBrowserStop(){
   if(observer.stopped){if(observer.stopError)throw observer.stopError;return observer.stopResult;}observer.stopped=true;
   try{observer.stopRender();if(observer.prototype.show!==observer.show)throw Error('counter people observer ownership changed');observer.prototype.show=observer.original;
     const measurementSummary=observer.samples.reduce((s,row)=>{if(!Number.isFinite(row.measurementMs)||row.measurementMs<0)throw Error('counter measurement timing missing');s.count++;s.totalMs+=row.measurementMs;s.maxMs=Math.max(s.maxMs,row.measurementMs);return s;},{count:0,totalMs:0,maxMs:0,basis:'retained successful samples; failed callbacks are not timed'});
-    return observer.stopResult={samples:observer.samples,failures:observer.failures,measurementSummary,cadenceMs:250,sampleLimit:observer.sampleLimit,qualification:observer.qualification};
+    return observer.stopResult={samples:observer.samples,failures:observer.failures,boardFailures:observer.boardFailures??[],measurementSummary,cadenceMs:250,sampleLimit:observer.sampleLimit,qualification:observer.qualification};
   }catch(error){observer.stopError=error;throw error;}
 }
 export function counterFinalization(page,paths,state){
@@ -166,7 +191,7 @@ export async function beforeNavigation({paths,page,base}) {
   const state=states.get(paths.dir);assert(state,'counter preparation missing');
   const oracleURL=new URL('/__proof/counter-oracle.mjs',base).href,geometryURL=new URL('/__proof/counter-geometry.mjs',base).href;
   await page.route(oracleURL,route=>route.fulfill({status:200,contentType:'text/javascript',body:readFileSync(new URL('../../playtest/carry-contact/oracle.mjs',import.meta.url),'utf8')}));
-  await page.route(geometryURL,route=>route.fulfill({status:200,contentType:'text/javascript',body:`export ${conferenceClearanceTools.toString()}\nexport ${counterDrawTools.toString()}\nexport ${counterSceneBoard.toString()}`}));
+  await page.route(geometryURL,route=>route.fulfill({status:200,contentType:'text/javascript',body:`export ${conferenceClearanceTools.toString()}\nexport ${counterDrawTools.toString()}\nexport ${counterSceneBoard.toString()}\nexport ${counterBoardSnapshot.toString()}\nexport ${counterBoardRead.toString()}`}));
   Object.assign(state,{oracleURL,geometryURL});const response=r=>{if(new URL(r.url()).origin===new URL(base).origin&&/\/people-kit-[^/]+\.js$/.test(new URL(r.url()).pathname))state.kitURL=r.url();};
   page.on('response',response);counterFinalization(page,paths,state);
   return async()=>{page.off('response',response);try{if(!page.isClosed())await state.finalize();}finally{try{state.persist();}finally{try{await page.unroute(oracleURL);}finally{try{await page.unroute(geometryURL);}finally{states.delete(paths.dir);}}}}};
@@ -183,11 +208,11 @@ export default async function({page,paths,check,expectHttp,signal}){
   await page.screenshot({path:join(paths.dir,'counter-setup.png')}); // Actual full-body/both-feet framing requires root's visual inspection.
   assert(state.kitURL,'counter production people kit missing');
   await page.evaluate(async({oracleURL,geometryURL,kitURL,souls,bootBoard})=>{
-    const {observeRender,bodyGeometry,drawnLoad}=await import(oracleURL),{conferenceClearanceTools,counterDrawTools,counterSceneBoard}=await import(geometryURL),{TakePeople}=await import(kitURL);
+    const {observeRender,bodyGeometry,drawnLoad}=await import(oracleURL),{conferenceClearanceTools,counterDrawTools,counterSceneBoard,counterBoardSnapshot,counterBoardRead}=await import(geometryURL),{TakePeople}=await import(kitURL);
     const world=window.__soulsEntity,prototype=TakePeople.prototype,original=prototype.show;
     if(!world||!original||window.__counterDrawObserver)throw Error('counter final-draw interface unavailable');
     const board=counterSceneBoard(world.layer.model,bootBoard),vector=()=>world.camera.position.clone(),geometry=conferenceClearanceTools({vector,drawnLoad,bodyGeometry}),readBoard=counterDrawTools({vector,drawnLoad});
-    const samples=[],failures=[],sampleLimit=Math.ceil(90000/250)+1;let people,previous=-Infinity;
+    const samples=[],failures=[],boardFailures=[],sampleLimit=Math.ceil(90000/250)+1;let people,previous=-Infinity;
     function show(...args){const result=original.apply(this,args);people=this;return result;}prototype.show=show;
     const bounds=points=>{if(!points.length)throw Error('counter empty actual skin group');const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity],low=[],high=[];
       for(const{p}of points)for(let i=0;i<3;i++){if(p[i]<min[i]){min[i]=p[i];low[i]=p;}if(p[i]>max[i]){max[i]=p[i];high[i]=p;}}return{vertices:points.length,min,max,extrema:{low,high}};};
@@ -202,9 +227,9 @@ export default async function({page,paths,check,expectHttp,signal}){
           footGroups:['L','R'].map(side=>({inferred:true,dominantBoneSuffix:side,...bounds(feet.filter(p=>p.bone.endsWith(side)))}))};
       });
       samples.push({at,tick:frame.tick,dt:frame.dt,frame:stamp.frame,currentCanvas:stamp.canvas===world.renderer.domElement&&stamp.canvas.isConnected,
-        stage:'after-world-render',units:'m',renderTarget:null,bodies,state:{...world.layer.model.entities.get(board)?.state},board:readBoard(world.layer,world.scene,board),measurementMs:performance.now()-at});
+        stage:'after-world-render',units:'m',renderTarget:null,bodies,state:{...world.layer.model.entities.get(board)?.state},board:counterBoardRead(()=>readBoard(world.layer,world.scene,board),()=>counterBoardSnapshot(world.layer,world.scene,board,stamp.frame,at),failure=>{if(boardFailures.length<30)boardFailures.push(failure);}),measurementMs:performance.now()-at});
     },error=>{if(failures.length<30)failures.push(String(error));});
-    window.__counterDrawObserver={samples,failures,sampleLimit,stopRender,prototype,show,original,qualification:'actual submitted bodyDraw and board-role measurements every250ms; inferred foot groups; no every-frame, skin/table/hand contact, unrestricted stand admission or independent-agent certification'};
+    window.__counterDrawObserver={samples,failures,boardFailures,sampleLimit,stopRender,prototype,show,original,qualification:'actual submitted bodyDraw and board-role measurements every250ms; inferred foot groups; no every-frame, skin/table/hand contact, unrestricted stand admission or independent-agent certification'};
   },{oracleURL:state.oracleURL,geometryURL:state.geometryURL,kitURL:state.kitURL,souls:state.seats.map(s=>s.soul),bootBoard:state.bootBoard});
   state.observerInstalled=true;let expected,stateReads=0;
   await counterJourney(state,async()=>{
