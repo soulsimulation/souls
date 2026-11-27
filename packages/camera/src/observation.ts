@@ -77,7 +77,7 @@ export function validateCameraObservation(input: unknown): CameraContractResult<
   if (!cameraPlainData(input) || !contractVersion(input.version) || !contractText(input.audience)
     || input.coordinateFrame !== 'world-y-up-rh' || !contractRecord(input.units) || input.units.distance !== 'm'
     || input.units.time !== 's' || input.units.angle !== 'rad' || !contractRecord(input.depicted)
-    || !contractCount(input.depicted.tick) || !contractNumber(input.depicted.seconds) || input.depicted.seconds < 0
+    || !contractNumber(input.depicted.tick) || !contractNumber(input.depicted.seconds) || input.depicted.seconds < 0
     || !['complete', 'partial'].includes(input.coverage as string) || !Array.isArray(input.subjects))
     return contractRejected('camera.observation-malformed', 'observation');
   const ids = new Set<string>(), missing: string[] = input.coverage === 'partial' ? ['observation.coverage'] : [];

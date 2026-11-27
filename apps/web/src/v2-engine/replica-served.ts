@@ -3,7 +3,7 @@
 // world routed to v2 (`<world>/replica.js` and `replica_bg.wasm`, the deployed v2 client's own files; the launcher's
 // cutover.mjs), so its bytes are always the running world's. The page's reader (reader.ts) posts that address to the
 // worker before the stream; it is taken here, ahead of the worker's own handler.
-type Replica = { default: () => Promise<unknown>; StreamPlayer: unknown; readPointer: unknown; historyAt: unknown; courseAt: unknown };
+type Replica = { default: () => Promise<unknown>; StreamPlayer: unknown; readPointer: unknown; historyAt: unknown; historyTimeline: unknown; courseAt: unknown };
 
 let address: (url: string) => void = () => {};
 const served = new Promise<string>((y) => { address = y; });
@@ -22,6 +22,9 @@ export let readPointer: any;
 /** R2: a past moment, for the old page's history worker (history-worker.ts). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export let historyAt: any;
+/** Validated exact-time public node transitions for history conversion. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export let historyTimeline: any;
 /** K4 (0.135): where a thing on a course is, for both workers (course-samples.ts). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export let courseAt: any;
@@ -30,5 +33,5 @@ export let courseAt: any;
 export default async function init(): Promise<void> {
   const m = await import(/* @vite-ignore */ await served) as Replica;
   await m.default();
-  ({ StreamPlayer, readPointer, historyAt, courseAt } = m);
+  ({ StreamPlayer, readPointer, historyAt, historyTimeline, courseAt } = m);
 }

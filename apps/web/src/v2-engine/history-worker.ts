@@ -3,10 +3,11 @@
 // bundle that holds the moment, inflated here and applied on R1's replica (WASM, `historyAt`), so the page's thread
 // only turns the records into takes (history.ts). Only the WASM module, the header and the day indexes read are kept
 // between seeks. The node records are read as the stream worker reads them, the fields the bridge reads.
-import init, { historyAt } from 'replica';
+import init, { historyAt, historyTimeline } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { coursePlaces, type CoursePlaces } from './course-samples.ts';
+import { readTimeline, type HistoryTransition } from './history-timeline.ts';
 import { DAY_US, dayIndexKey, headerKey, walk, type DayIndex } from './history-keys.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
@@ -17,7 +18,7 @@ export type HistoryNode = { id: string; kind: string; parent: string | null; slo
 /** A body's motion sample `[body, frame, slot, at µs, x, y, z µm]` (source.ts SampleRec). */
 export type HistorySample = [string, string, number | null, number, number, number, number];
 /** What one seek gives the page: the moment's state, its bundle's samples, and where the next bundle starts. */
-export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[];
+export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[]; transitions: HistoryTransition[];
   /** K4 (0.135): where each node on a course is over the bundle, worked out here so the page never loads the replica. */
   courses?: CoursePlaces };
 export type HistoryMsg = { t: 'seeked'; s: Seeked } | { t: 'error'; seq: number; message: string };
@@ -139,16 +140,23 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
   // a read ahead stopped before the seek knew it wanted that bundle: read it again
   const stored = await bundle(base, found.key).catch(() => bundle(base, found.key));
   await ready;
-  const out = decode(historyAt(await header, await inflate(stored), found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
-  const nodes = (out.get(2) as Map<number, unknown>[]).map(nodeRec);
+  const inflated = await inflate(stored), h = await header;
+  if (typeof historyTimeline !== 'function') throw new Error('history timeline binding unavailable');
+  // One existing call supplies motion samples. Count its validation/serialization as well as the timeline.
+  const out = decode(historyAt(h, inflated, found.sha, BigInt(Math.round(at)), false), { useMaps: true }) as Map<number, unknown>;
+  const start = num(out.get(4)), length = num(out.get(5)), to = Math.max(at, start + length);
+  const { nodes, transitions } = readTimeline(decode(historyTimeline(h, inflated, found.sha, BigInt(at), BigInt(to)), { useMaps: true }), nodeRec, key, at, to);
   const samples: HistorySample[] = (out.get(3) as Map<number, unknown>[]).map((s) => {
     const p = (s.get(5) as unknown[]).map(num);
     return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
   });
   const later = await found.later();
-  const start = num(out.get(4)), length = num(out.get(5));
-  const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
-  post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
+  const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, at, start + length) : {};
+  if (replica.courseAt) for (const row of transitions) {
+    const c = coursePlaces(replica.courseAt, row.nodes, row.at, start + length);
+    if (Object.keys(c).length) row.courses = c;
+  }
+  post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, transitions, ...(Object.keys(courses).length ? { courses } : {}) } });
 }
 
 self.onmessage = (e: MessageEvent<{ base: string; seq: number; at: number; now: number; floor?: number; ahead?: true }>) => {

@@ -1,9 +1,10 @@
 // Actual apps/web over a fresh native world. Product builds are pinned separately from the owning helper/driver.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync, writeFileSync, readdirSync, statSync, openSync, closeSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
+import { pairSeat } from '../playtest/arena/new-engine/seat.mjs';
 import { startOldPage } from '../playtest/arena/new-engine/old-page.mjs';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = name => { throw Error('proof.native-page-' + name); };
@@ -60,5 +61,23 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   const runtime = await startOldPage({ checkout: root, template: m.template, dir: data, port, bin: join(root, 'v2/target/release'),
     marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });
-  return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: { kind: 'native-page', verify: () => verifyNativePageArtifacts(root, artifacts) } };
+  return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: { kind: 'native-page', async joinActor(label='camera-subject') {
+    signal?.throwIfAborted();
+    const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:'Camera Subject',pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
+    signal?.throwIfAborted();const fd=openSync(log,'a',0o600);let daemon;
+    try { daemon=spawn(process.execPath,[join(root,'v2/client/src/daemon/daemon.mjs'),'--home',seat.home,'--soul',seat.soul,'--pkg',join(root,'v2/target/wasm-load/pkg'),'--ready-fd','3'],{cwd:seat.folder,env:{PATH:process.env.PATH,BRAIN_MODE:'fake'},detached:true,stdio:['ignore',fd,fd,'pipe']});onSpawn(daemon,{processGroup:true}); } finally {closeSync(fd);}
+    await waitActorReady(daemon,{signal,timeoutMs:15000});
+    const joined=await seat.join({ms:15000});if(!joined.body)throw Error('native-actor-join-failed');
+    return {body:joined.body,cli:(...words)=>seat.cli(...words)};
+  }, verify: () => verifyNativePageArtifacts(root, artifacts) } };
+}
+
+/** Readiness ownership is separate from process teardown, which remains with the attempt owner. */
+export function waitActorReady(daemon,{signal,timeoutMs=15000}={}) {
+ return new Promise((resolve,reject)=>{
+  let text='',settled=false;const pipe=daemon.stdio[3];
+  const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);pipe.off('data',data);daemon.off('error',failed);daemon.off('exit',exited);signal?.removeEventListener('abort',aborted);error?reject(error):resolve();};
+  const data=d=>{text+=d;if(text.includes('ready\n'))finish();},failed=e=>finish(e),exited=()=>finish(Error('native-actor-daemon-exited')),aborted=()=>finish(signal.reason??Error('native-actor-daemon-aborted'));
+  const timer=setTimeout(()=>finish(Error('native-actor-daemon-timeout')),timeoutMs);pipe.on('data',data);daemon.once('error',failed);daemon.once('exit',exited);signal?.addEventListener('abort',aborted,{once:true});if(signal?.aborted)aborted();
+ });
 }

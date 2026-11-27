@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { sleep } from '../../lib/clock.mjs';
+import { runOwnedCommand } from './world.mjs';
 
 export const CLI = join(REPO_ROOT, 'v2/client/src/cli/souls.mjs');
 export const PAIR = join(REPO_ROOT, 'v2/client/src/pair/pair.mjs');
@@ -29,7 +30,12 @@ export const seatEnv = (home, pkg = REPLICA_PKG) => ({ PATH: process.env.PATH, H
 export const pairArgs = (world, label) => ['--directory', world.directory, '--world', world.world, '--gateway', world.gateway,
   '--device', 'playtest machine', '--label', label, '--advert', `${world.page}views/world.json`];
 
-function runNode(args, { env, cwd, timeoutMs = 120_000, onText } = {}) {
+function runNode(args, { env, cwd, timeoutMs = 120_000, onText, onSpawn, signal } = {}) {
+  if (onSpawn) return (async () => {
+    let out='';
+    try { const text=await runOwnedCommand(process.execPath,args,{env,cwd,timeoutMs,signal,onSpawn(child,mode){onSpawn(child,mode);child.stdout.on('data',d=>{out+=d;onText?.(out);});}});return {code:0,out:text,err:''}; }
+    catch(error){return {code:1,out,err:String(error)};}
+  })();
   return new Promise((ok) => {
     const p = spawn(process.execPath, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
@@ -43,36 +49,37 @@ function runNode(args, { env, cwd, timeoutMs = 120_000, onText } = {}) {
 /** Pairs one Soul: pair.mjs asks, the test person `owner` (default `label`) approves, the token comes back into the
  *  seat's home. `name`: the Soul's name, saved by its owner on the directory (`/v1/account/souls/profile`), which the
  *  world gives its body (the page's name tag, its search). */
-export async function pairSeat({ world, dir, label, owner = label, name = null, pkg = REPLICA_PKG, approveMs = 60_000 }) {
+export async function pairSeat({ world, dir, label, owner = label, name = null, pkg = REPLICA_PKG, approveMs = 60_000, checkout = REPO_ROOT, onSpawn, signal }) {
   if (!/^[a-z][a-z0-9-]{0,31}$/.test(label ?? '')) throw new Error('label: lowercase letters, digits, dashes');
   const folder = resolve(dir, label), home = join(folder, '.souls'), log = join(folder, 'commands.jsonl');
   mkdirSync(folder, { recursive: true });
   const env = seatEnv(home, pkg);
   let asked = null;
-  const asking = runNode([PAIR, ...pairArgs(world, label)], { cwd: folder, env, timeoutMs: approveMs + 30_000,
+  const asking = runNode([join(checkout,'v2/client/src/pair/pair.mjs'), ...pairArgs(world, label)], { cwd: folder, env, timeoutMs: approveMs + 30_000, onSpawn, signal,
     onText: (t) => { asked ??= t.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((j) => j?.step === 'approve') ?? null; } });
   const until = Date.now() + approveMs;
-  while (!asked && Date.now() < until) await sleep(50);
+  while (!asked && Date.now() < until) { signal?.throwIfAborted(); await sleep(50); }
+  signal?.throwIfAborted();
   if (!asked) throw new Error(`${label}: no pairing code in ${approveMs / 1000} s`);
   const approve = await fetch(new URL('/v1/pair/approve', world.directory), { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: asked.code, confirm: true, test_person: owner }) });
+    signal: AbortSignal.any([signal,AbortSignal.timeout(10000)].filter(Boolean)), body: JSON.stringify({ code: asked.code, confirm: true, test_person: owner }) });
   if (approve.status !== 200) throw new Error(`${label}: the owner's approval answered ${approve.status}`);
   const done = await asking;
   const said = lastJson(done.out);
   if (done.code !== 0 || !said?.ok) throw new Error(`${label}: pairing failed: ${done.out.slice(-300)} ${done.err.slice(-300)}`);
   if (name) {
     // the directory keys the Soul as its owner's list names it (`soul-<hex>-<n>`; the client's `s_<hex>-<n>`)
-    const post = (path, body) => fetch(new URL(path, world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: owner }) });
+    const post = (path, body) => fetch(new URL(path, world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, ...(signal?{signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}:{}), body: JSON.stringify({ ...body, test_person: owner }) });
     const mine = (await (await post('/v1/account/souls', {})).json()).souls ?? [];
     const key = mine.find((s) => s.soul.replace(/^soul-/, '') === said.soul.replace(/^s_/, ''))?.soul ?? said.soul;
     const named = await post('/v1/account/souls/profile', { soul: key, name });
     if (named.status !== 200) throw new Error(`${label}: naming the Soul ${name} answered ${named.status} ${await named.text().catch(() => "")} (a name is the world's once)`);
   }
-  return seatOf({ label, folder, home, soul: said.soul, env, log });
+  return seatOf({ label, folder, home, soul: said.soul, env, log, checkout, onSpawn, signal });
 }
 
 /** A seat over an already paired home. */
-export function seatOf({ label, folder, home, soul, env, log }) {
+export function seatOf({ label, folder, home, soul, env, log, checkout=REPO_ROOT, onSpawn, signal }) {
   let body = null;
   const seat = {
     label, soul, home, folder,
@@ -80,7 +87,7 @@ export function seatOf({ label, folder, home, soul, env, log }) {
     /** The thin command with this seat's Soul; → its JSON answer (or {ok:false, raw}) */
     async cli(...words) {
       const t = Date.now();
-      const r = await runNode([CLI, ...words, '--soul', soul], { cwd: folder, env, timeoutMs: 120_000 });
+      const r = await runNode([join(checkout,'v2/client/src/cli/souls.mjs'), ...words, '--soul', soul], { cwd: folder, env, timeoutMs: onSpawn ? 30000 : 120000, onSpawn, signal });
       const answer = lastJson(r.out) ?? { ok: false, raw: (r.out + r.err).slice(-500) };
       appendFileSync(log, JSON.stringify({ at: t, ms: Date.now() - t, words, answer }) + '\n');
       return answer;

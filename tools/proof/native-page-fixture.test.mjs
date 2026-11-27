@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, waitActorReady } from './native-page-fixture.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
 import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
@@ -65,4 +65,10 @@ test('owned group cleanup kills descendants even after its direct leader has exi
     await stopOwnedChild(leader, { processGroup: true });
     assert.throws(() => process.kill(-leader.pid, 0), { code: 'ESRCH' });
   } finally { try { process.kill(-leader.pid, 'SIGKILL'); } catch {} }
+});
+
+test('actor readiness abort/failure removes listeners and the owner can clean the registered child',async()=>{
+ const controller=new AbortController();const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore','ignore','ignore','pipe']});
+ const pending=waitActorReady(child,{signal:controller.signal});controller.abort(Error('actor-abort'));await assert.rejects(pending,/actor-abort/);assert.equal(child.stdio[3].listenerCount('data'),0);assert.equal(child.listenerCount('exit'),0);await stopOwnedChild(child,{processGroup:true});assert.throws(()=>process.kill(-child.pid,0),{code:'ESRCH'});
+ const failed=spawn(process.execPath,['-e','process.exit(2)'],{detached:true,stdio:['ignore','ignore','ignore','pipe']});await assert.rejects(waitActorReady(failed),/daemon-exited/);assert.equal(failed.stdio[3].listenerCount('data'),0);await stopOwnedChild(failed,{processGroup:true});
 });

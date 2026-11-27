@@ -4,8 +4,7 @@
 // samples are played through a bridge of their own (bridge.ts, the live stream's), so a past chunk is made exactly as
 // a live one. Nothing here draws.
 import { decode } from 'cborg';
-import { V2Bridge } from './bridge.ts';
-import { TICK_US, TICKS, type Frame, type RecordedChunk } from './takes.ts';
+import { TICK_US, type Frame, type RecordedChunk } from './takes.ts';
 import type { HistoryMsg, Seeked } from './history-worker.ts';
 import { DAY_US, dayIndexKey, yearCountsKey } from './history-keys.ts';
 
@@ -17,8 +16,6 @@ export function historyBase(stream: string, config: unknown): string | null {
   return i > 0 ? `${stream.slice(0, i)}/history/` : null;
 }
 
-/** How far the bridge is moved on at a time, so it makes every chunk on the way (it keeps its newest twelve). */
-const STEP_US = 6 * TICKS * TICK_US;
 /** How long before a moment the page's window of it starts (WorldGeometry.ts rewindWindow). */
 const LEAD_US = 10_000_000;
 
@@ -48,18 +45,27 @@ export class V2History {
     this.worker.postMessage({ base: new URL(this.base, location.href).href, ...m, floor: this.floor });
   }
   /** The moment `at` (µs), with the world's time `now` (µs): no seek asks for a day after now's. */
-  private seek(at: number, now: number): Promise<Seeked> {
+  private seek(at: number, now: number, signal?: AbortSignal): Promise<Seeked> {
     const seq = ++this.seq;
     return new Promise((ok, no) => {
-      this.waiting.set(seq, (r) => (r instanceof Error ? no(r) : ok(r)));
-      this.post({ seq, at, now });
+      const cancel = () => { this.waiting.delete(seq); no(new Error('aborted')); };
+      if (signal?.aborted) { cancel(); return; }
+      signal?.addEventListener('abort', cancel, { once: true });
+      this.waiting.set(seq, (r) => { signal?.removeEventListener('abort', cancel); r instanceof Error ? no(r) : ok(r); });
+      try { this.post({ seq, at, now }); } catch (e) { this.waiting.delete(seq); signal?.removeEventListener('abort', cancel); no(e); }
     });
   }
   /** K3: where a window from `at` (µs) starts, and the floor of its seeks' walks: a window before the world's first
    *  moment starts there, and no seek walks back through the empty days before it (a young world: each would be a
    *  404). Not known (no public events yet): no day before the asked one's. */
-  private async start(at: number, endUs: number): Promise<number> {
-    const known = await this.first(endUs).catch(() => null);
+  private async start(at: number, endUs: number, signal?: AbortSignal): Promise<number> {
+    const query = this.first(endUs).catch(() => null);
+    const known = await new Promise<number | null>((ok, no) => {
+      const cancel = () => no(new Error('aborted'));
+      if (signal?.aborted) { cancel(); return; }
+      signal?.addEventListener('abort', cancel, { once: true });
+      query.then((v) => { signal?.removeEventListener('abort', cancel); ok(v); });
+    });
     if (known !== null && at < known) at = known;
     this.floor = known ?? Math.min(at, this.floor ?? Infinity);
     return at;
@@ -79,37 +85,9 @@ export class V2History {
    *  `nowTick` is the world's tick now, as the page has it (its live head); unknown, the window's end, which is then
    *  taken to be no later than now. It is the world's own clock, which for a world made through New world began at 0. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal, nowTick?: number | null): Promise<RecordedChunk[]> {
-    // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
-    const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
-    const now = (nowTick ?? to) * TICK_US;
-    let at = await this.start(from * TICK_US, endUs), first = true, next: number | null = null;
-    const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
-    // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
-    while (at < endUs + STEP_US && got.size < limit) {
-      if (signal?.aborted) throw new Error('aborted');
-      // K3: a window that begins before the world's first moment (a link to its first minute) is read from that moment
-      const s = await this.seek(at, now).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f, now); });
-      // the bundle's time, and the quiet after it until the next bundle: a world with no records writes no bundle, so
-      // past the newest one (no next yet) the world is as that bundle left it, and a minute ago is played from there
-      const until = Math.min(s.next ?? Infinity, endUs + 2 * STEP_US);
-      // the bundle's state and its motion, then its time step by step
-      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples, ...(s.courses ? { courses: s.courses } : {}) } });
-      first = false;
-      for (let t = s.start + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
-        bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: Math.min(t, until) } });
-        take();
-      }
-      next = s.next;
-      if (s.next === null || s.next <= at) break;
-      at = s.next;
-    }
-    // K3: a window in a gap (the world was stopped, or before its first served moment) has no chunks: the window as
-    // long from the next bundle is played instead, so a replay goes on across the gap
-    if (!got.size && next !== null && next > endUs && !signal?.aborted) {
-      const from2 = Math.floor(next / TICK_US);
-      return this.chunks(from2, from2 + (to - from), limit, signal, nowTick ?? to);
-    }
-    return [...got.values()].sort((a, b) => a.fromTick - b.fromTick).slice(0, limit);
+    const { historyChunks } = await import('./history-timeline.ts');
+    return historyChunks({ frame: this.frame, hour: this.hour, start: this.start.bind(this),
+      seek: this.seek.bind(this), first: this.first.bind(this) }, from, to, limit, signal, nowTick);
   }
 
   /** K3: the world time (µs) of the history's first moment the world ran: the first bundle of the first day with
