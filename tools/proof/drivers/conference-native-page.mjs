@@ -74,6 +74,36 @@ export async function prepare({ base, paths, recipe, signal }) {
   return { people: state.seats.length, fixtures: state.fixtures };
 }
 
+export function conferenceFinalization(page, paths, state) {
+  state.persistSequence = () => {
+    if (state.sequenceSaved) return;
+    save(paths, 'conference-sequence.json', {
+      qualification: 'concise storytelling diagnostic; full question, handover and independent-agent acceptance remain open',
+      stage: 'before-observer-collection',
+      result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
+      depictedJourney: state.depictedJourney ?? null,
+      frameReads: state.frameReads ?? [], frameReadErrors: state.frameReadErrors ?? [], finalizationError: state.finalizationError ?? null,
+    });
+    state.sequenceSaved = true;
+  };
+  state.finalizeDraw = () => state.drawFinalization ??= (async () => {
+    // Preserve command receipts first. Returning a rejected cached promise never calls browser stop twice.
+    state.persistSequence();
+    try {
+      const draw = await page.evaluate(() => window.__conferenceDrawObserver?.stop());
+      if (draw) {
+        save(paths, 'conference-final-draw.json', draw);
+        assert(draw.samples?.length >= 2 && draw.failures?.length === 0, 'conference final collection missing or failed');
+      }
+      state.finalizationOutcome = { ok: Boolean(draw), samples: draw?.samples?.length ?? 0, failures: draw?.failures ?? [], reason: draw ? null : 'observer not installed' };
+    } catch (error) {
+      state.finalizationOutcome = { ok: false, error: String(error) }; throw error;
+    } finally {
+      save(paths, 'conference-finalization.json', state.finalizationOutcome);
+    }
+  })();
+}
+
 export async function beforeNavigation({ paths, page, base }) {
   const state = states.get(paths.dir);
   const oracleURL = new URL('/__proof/conference-oracle.mjs', base).href;
@@ -82,28 +112,21 @@ export async function beforeNavigation({ paths, page, base }) {
   state.oracleURL = oracleURL;
   const response = r => { if (new URL(r.url()).origin === new URL(base).origin && /\/people-kit-[^/]+\.js$/.test(new URL(r.url()).pathname)) state.kitURL = r.url(); };
   page.on('response', response);
+  conferenceFinalization(page, paths, state);
   return async () => {
     page.off('response', response);
-    if (!page.isClosed()) {
-      const draw = await page.evaluate(() => window.__conferenceDrawObserver?.stop());
-      if (draw) save(paths, 'conference-final-draw.json', draw);
+    try { if (!page.isClosed()) await state.finalizeDraw(); }
+    finally {
+      try { state.persistSequence(); }
+      finally { try { await page.unroute(oracleURL); } finally { states.delete(paths.dir); } }
     }
-    await page.unroute(oracleURL);
-    const state = states.get(paths.dir);
-    if (state) save(paths, 'conference-sequence.json', {
-      qualification: 'concise storytelling diagnostic; full question, handover and independent-agent acceptance remain open',
-      result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
-      depictedJourney: state.depictedJourney ?? null,
-      frameReads: state.frameReads ?? [], frameReadErrors: state.frameReadErrors ?? [],
-    });
-    states.delete(paths.dir);
   };
 }
 
 export default async function ({ page, paths, check, expectHttp, signal }) {
   const state = states.get(paths.dir); assert(state, 'conference-proof preparation missing');
   expectHttp('/safety.md', 404, 'The old-page fixture does not route this optional standalone client document.');
-  const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=8,5,-8&at=0,1,2';
+  const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=6,3.5,6&at=0,1,2';
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.querySelector('.viewer-history[data-viewer-ready="true"]') && !document.querySelector('.viewer-arrival'), null, { timeout: 30000 });
   const snapshot = async label => writeFileSync(join(paths.dir, `conference-accessibility-${label}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
@@ -122,11 +145,12 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     let people, previous = -Infinity;
     function show(...args) { const result = original.apply(this, args); people = this; return result; }
     prototype.show = show;
-    const samples = [], failures = [];
+    const samples = [], failures = [], sampleLimit = Math.ceil(90000 / 250) + 1;
     const stopRender = observeRender(world.renderer, world, stamp => {
       const at = performance.now(); if (at - previous < 250) return; previous = at;
+      if (samples.length >= sampleLimit) throw Error('conference final-draw90s sample limit exceeded');
       if (!people?.humans?.meshPoints) throw Error('conference visible body mesh interface missing');
-      const frame = world.gameFrame();
+      const frame = world.gameFrame(), diagnostics = world.contactFrame().bones;
       const bodies = souls.map(soul => {
         const matches = frame.souls.filter(s => s.id === soul);
         if (matches.length !== 1) throw Error('conference final-draw identity missing or ambiguous');
@@ -134,11 +158,28 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
         bodyGeometry(root, world.scene);
         const points = people.humans.meshPoints(entity, 1);
         if (!points.length || points.some(q => q.p.length !== 3 || !q.p.every(Number.isFinite))) throw Error('conference final-draw skin missing');
-        const bounds = group => ({ min: [0,1,2].map(i => Math.min(...group.map(q => q.p[i]))), max: [0,1,2].map(i => Math.max(...group.map(q => q.p[i]))) });
+        const bounds = group => {
+          if (!group.length) throw Error('conference empty skin group');
+          const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], low = [], high = [];
+          for (const q of group) for (let i = 0; i < 3; i++) {
+            if (q.p[i] < min[i]) { min[i] = q.p[i]; low[i] = q.p; }
+            if (q.p[i] > max[i]) { max[i] = q.p[i]; high[i] = q.p; }
+          }
+          return { vertices: group.length, min, max, extrema: { low, high } };
+        };
         const legs = points.filter(q => q.part === 'leg'), feet = points.filter(q => q.part === 'foot');
         if (!legs.length || !feet.length) throw Error('conference feet or legs missing');
+        const anchors = diagnostics?.[entity]?.feet;
+        if (!Array.isArray(anchors) || anchors.length !== 2 || anchors.some(p => p.length !== 3 || !p.every(Number.isFinite))) throw Error('conference both foot identities missing');
+        const sides = [[], []];
+        for (const q of feet) {
+          const distance = anchor => q.p.reduce((sum, n, i) => sum + (n - anchor[i]) ** 2, 0);
+          sides[distance(anchors[0]) <= distance(anchors[1]) ? 0 : 1].push(q);
+        }
         return { soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
-          footAndLegSkin: [...feet, ...legs], activity: frame.entities[entity]?.activity };
+          // Inferred nearest-rendered-ankle clusters; these are not native contact/rig vertex-side identities.
+          footClusters: sides.map((group, index) => ({ inferred: true, nearestRenderedAnkleIndex: index, anchor: anchors[index], ...bounds(group) })),
+          activity: frame.entities[entity]?.activity };
       });
       samples.push({ stage: 'after-world-render', units: 'm', at, frame: stamp.frame, tick: frame.tick, dt: frame.dt,
         currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected, renderTarget: null, bodies });
@@ -147,7 +188,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       stopRender();
       if (prototype.show !== show) throw Error('conference people observer ownership changed');
       prototype.show = original;
-      return { cadenceMs: 250, meshStride: 1, samples, failures, qualification: 'actual visible skin measurements; visual body/object contact review still required' };
+      return { cadenceMs: 250, sampleLimit, meshStride: 1, samples, failures, qualification: 'all stride1 vertices measured; bounded per-part/foot extrema retained every250ms, not every-frame coverage; no native contact certification; root must visually review all5 bodies/both feet and object clearance' };
     } };
   }, { oracleURL: state.oracleURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul) });
   state.frameReads = []; state.frameReadErrors = [];
@@ -197,5 +238,10 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       'Ordinary receipts plus advancing depicted story phrases, point, clap and settled endpoint; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
-  finally { reading = false; await readFrames; }
+  finally {
+    reading = false; await readFrames;
+    try { await state.finalizeDraw(); }
+    catch (error) { state.finalizationError = String(error); throw error; }
+    finally { state.persistSequence(); }
+  }
 }

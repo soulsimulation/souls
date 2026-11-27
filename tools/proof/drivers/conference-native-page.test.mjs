@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { conferenceFixtures, conferenceJourney } from './conference-native-page.mjs';
+import { conferenceFixtures, conferenceJourney, conferenceFinalization } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
 
 test('tracked conference fixture preserves the existing authored layout exactly', () => {
@@ -59,4 +60,30 @@ test('receipt-only, stale and missing presenter diagnostics cannot qualify a dep
   const valid = [...phases, sample(300, 'point'), sample(320, 'clap'), sample(340, 'idle'), sample(341, 'idle')];
   assert.equal(conferenceJourney(valid, 'soul').phases.length, 3);
   assert.throws(() => conferenceJourney(valid.slice(0, -2), 'soul'), /settled endpoint/);
+});
+
+test('render-observer collection is idempotent and a collection error cannot discard action receipts', async () => {
+  const scratch = resolve(import.meta.dirname, '../../../.local'); mkdirSync(scratch, { recursive: true });
+  const paths = { dir: mkdtempSync(join(scratch, 'conference-finalize-test-')) };
+  const state = { rows: [{ words: ['receipt', '7'], answer: { receipt: { answers: [{ answer: 'refused', reason: 'left' }] } } }] };
+  let calls = 0;
+  conferenceFinalization({ evaluate: async () => {
+    calls++;
+    assert.deepEqual(JSON.parse(readFileSync(join(paths.dir, 'conference-sequence.json'))).rows, state.rows, 'receipts were saved before risky collection');
+    throw Error('lost browser context');
+  } }, paths, state);
+  const first = state.finalizeDraw(), again = state.finalizeDraw();
+  assert.equal(first, again, 'rejection is cached, not retried');
+  await assert.rejects(first, /lost browser context/);
+  await assert.rejects(again, /lost browser context/);
+  await assert.rejects(state.finalizeDraw(), /lost browser context/);
+  state.finalizationError = 'lost browser context'; state.persistSequence(); state.persistSequence();
+  assert.deepEqual(JSON.parse(readFileSync(join(paths.dir, 'conference-sequence.json'))).rows, state.rows);
+  assert.equal(calls, 1);
+  assert.equal(JSON.parse(readFileSync(join(paths.dir, 'conference-finalization.json'))).ok, false);
+  const goodPaths = { dir: mkdtempSync(join(scratch, 'conference-finalize-test-')) }, good = {};
+  conferenceFinalization({ evaluate: async () => { calls++; return { samples: [{ frame: 1 }, { frame: 2 }], failures: [] }; } }, goodPaths, good);
+  await good.finalizeDraw(); await good.finalizeDraw();
+  assert.equal(calls, 2, 'restored observer is collected once');
+  assert.equal(JSON.parse(readFileSync(join(goodPaths.dir, 'conference-final-draw.json'))).samples.length, 2);
 });
