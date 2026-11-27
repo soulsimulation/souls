@@ -494,7 +494,9 @@ fn entries() -> Json {
     .unwrap();
     let tap = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:tap", "owner": "thing",
-      "state": { "water": { "n": 28, "type": "int", "default": 1000000, "min": 0, "audience": { "rule": "everyone" } } } }"#,
+      "state": { "water": { "n": 28, "type": "int", "default": 1000000, "min": 0, "audience": { "rule": "everyone" } } },
+      "forms": { "draw": { "who": "anyone", "starts": "act", "steps": [],
+        "effects": [{ "change": "set", "field": "water", "by": -100, "event": "drew" }] } } }"#,
     )
     .unwrap();
     Json::Obj(vec![

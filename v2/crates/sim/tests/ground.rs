@@ -460,6 +460,7 @@ fn fields_are_the_importers() {
     assert_eq!(g::F_WATER_LEVEL, import_eden::F_WATER_LEVEL);
     assert_eq!(g::F_PLACE_OF, import_eden::F_PLACE_OF);
     assert_eq!(g::F_DOORWAYS, import_eden::F_DOORWAYS);
+    assert_eq!(sim::forms::amounts::F_ENTRY, import_eden::F_ENTRY);
     assert_eq!(g::GROUND, import_eden::GROUND);
     assert_eq!(g::FLOOR, import_eden::FLOOR);
     assert_eq!(g::ROOM, import_eden::ROOM);

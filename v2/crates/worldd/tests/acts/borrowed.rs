@@ -1,6 +1,7 @@
 //! W14 (#4090): a thing whose map row borrows an entry passes that entry's kind checks and selectors, served. A Mars
 //! can (borrowing `test:can`) in hand waters a planter that needs a `test:can` held; a kettle's `fill` finds a Mars
-//! sink (borrowing `test:tap`) by its selector of kind `test:tap` and takes its water from it; a thing that borrows
+//! sink (borrowing `test:tap`) by its selector of kind `test:tap` and takes its water from it; the sink's own `draw` sets
+//! its water by an amount; a thing that borrows
 //! nothing (the vessel) in hand is still refused `not_holding_kind`.
 use super::*;
 
@@ -44,6 +45,16 @@ fn w14_a_borrowed_can_waters_and_a_borrowed_sink_fills() {
         water(&r, mars_sink()),
         Some(Value::Uint(3300)),
         "taken from the sink"
+    );
+    // A set by an amount on the borrowed thing itself (a slice eaten from a pie pack, a sip from a Mars cup): the
+    // sink's own kind has no `water`, its entry has.
+    let drew = a.act("test:draw", Some(mars_sink()), BTreeMap::new());
+    println!("W14 draw from the Mars sink: {drew:?}");
+    assert!(!drew.expect("the draw lands").is_empty(), "one receipt");
+    assert_eq!(
+        water(&run.replay(), mars_sink()),
+        Some(Value::Uint(3200)),
+        "100 less in the sink"
     );
     run.stop();
 }

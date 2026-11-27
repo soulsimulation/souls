@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-A Soul can fill, pour or take an amount from a thing that borrows another kind's actions (a Mars sink, a Mars watering can), where before it was refused.
+An act that changes an amount on a thing that borrows another kind's actions (filling a kettle from a borrowed sink, taking some from it) now works; before, it was refused.
