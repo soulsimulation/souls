@@ -8158,7 +8158,11 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         let mouth = v3(s.x - BEAM_MOUTH, 0, s.z);
         for (mid, h, what) in [
             (staged, turned, "turned 60 degrees, west of the bay"),
-            (mouth, [0, M], "square at the bay's mouth, along the slot's line"),
+            (
+                mouth,
+                [0, M],
+                "square at the bay's mouth, along the slot's line",
+            ),
         ] {
             let want = places(mid, h);
             let mut walk = to(want[0]);
@@ -8204,13 +8208,20 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         let mut got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         if n > 2 {
             // #5067: the set-in would take the beam out of its side carriers' reach; refused by name, nothing moved.
-            println!("crew of {n} puts beam {} in {slot}: {got:?}", beam.counter());
+            println!(
+                "crew of {n} puts beam {} in {slot}: {got:?}",
+                beam.counter()
+            );
             assert_eq!(
                 (got.kind, got.reason.as_str()),
                 (2, "part.grip-out-of-reach"),
                 "a side carrier would be out of reach of its grip: {got:?}"
             );
-            assert_eq!(where_is(&w, beam).0, Some(c), "the beam still rides its crew");
+            assert_eq!(
+                where_is(&w, beam).0,
+                Some(c),
+                "the beam still rides its crew"
+            );
             for k in &members[2..] {
                 let left = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
                 assert_eq!(left.kind, 1, "side Soul {} lets go: {left:?}", k + 1);

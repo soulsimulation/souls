@@ -103,9 +103,23 @@ the two hands 0.2 m either side of where the carrier holds along the load's leng
 front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
 ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and `souls:released` (set down, seated or
 broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it is held (a frame taken standing) is held where each grip lies along its
-carriers' line, at the load's edge and the carry's height. A seating never moves a part out of the reach of a carrier
-who could reach its grip when the seating began (0.7 m on the plan, its standing reach above its feet): refused before
-anyone moves, or its set-in stopped and sent back while it runs, as `part.grip-out-of-reach`.
+carriers' line, at the load's edge and the carry's height. Every carrier must be within reach of its
+own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its
+standing reach above its feet. No carrier is exempt, at any step:
+
+- **Take** (`part:take`, `part:unseat`): refused `part.grip-out-of-reach`, naming the carrier and how far it stands,
+  before anything is written, when any carrier would not reach its hold as the crew will hold the part. A part that
+  stands is held at its edges along its carriers' line, so a frame is taken from beside its edges (0.49 m beyond each,
+  the client's `carry grip <frame> front|back`), not from off its faces.
+- **Lift** (`carry:lift`): the same check against the same holds, refused `carry-grip-out-of-reach`.
+- **Put** (`part:put`): refused `part.grip-out-of-reach` before anyone moves when any carrier is out of reach where the
+  set-in track starts or would be where it ends. A carrier who stepped away walks back to its grip and the crew puts
+  again. While the set-in runs, a carrier who moves out of reach stops it by the same name and the part goes back.
+- So a set-in that moves the part sideways is seated by the carriers who can reach it at both ends. A rack beam goes
+  into a bay from the bay's mouth (about 0.45 m off its slot's line: the frames' columns stand on that line), which
+  its two end carriers reach; a crew with side carriers is refused there, and its sides let go first.
+- Not checked yet: where the part is before a take. It still goes to its carriers' middle in one change of parent.
+
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
 load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
 (`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.

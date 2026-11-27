@@ -719,7 +719,11 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
         .act(
             "eden:walk",
             ground,
-            point(Vec3::new(back.x, 0, back.z + (back.z - at.z).signum() * 900_000)),
+            point(Vec3::new(
+                back.x,
+                0,
+                back.z + (back.z - at.z).signum() * 900_000,
+            )),
         )
         .await
         .expect("the back steps back");
@@ -760,7 +764,8 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
 /// stood, no holds are said). They walk to beside its edges (its own x, 0.49 m beyond each: an ordinary walk, the
 /// authoritative way there) and the same crew takes it, each hold within reach.
 #[tokio::test(flavor = "multi_thread")]
-async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_from_beside_its_edges() {
+async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_from_beside_its_edges()
+{
     let d = scratch("cfar");
     let facts = grips_world(&d);
     let socket = d.join("s");
@@ -797,7 +802,11 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     println!("taken from 2.2 m off its faces: {got:?}");
     assert_eq!(got.map(|_| ()), Err("part.grip-out-of-reach".to_owned()));
     assert!(words(&dir, carry).is_empty(), "no holds said");
-    assert_eq!(moves_of(&dir, frame).len(), before, "the frame did not move");
+    assert_eq!(
+        moves_of(&dir, frame).len(),
+        before,
+        "the frame did not move"
+    );
     // Beside its edges: its own x, 0.49 m beyond its half width.
     let edge = l.half_width + 490_000;
     let near = [spot(at, edge, false), spot(at, -edge, false)];

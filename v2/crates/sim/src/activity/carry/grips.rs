@@ -545,15 +545,25 @@ mod tests {
             let far = |a: [i64; 2], b: [i64; 2]| {
                 (i128::from(a[0] - b[0]).pow(2) + i128::from(a[1] - b[1]).pow(2)).isqrt() as i64
             };
-            let ends = [load.hold_along(load.grips[1]), load.hold_along(load.grips[0])];
+            let ends = [
+                load.hold_along(load.grips[1]),
+                load.hold_along(load.grips[0]),
+            ];
             for d in [0, 350_000, 690_000, 710_000, 1_000_000] {
                 // Both ends as far out along the line: the load stays centred between them.
                 let (f, b) = ([ends[0] + d, 0], [ends[1] - d, 0]);
                 let h = assign(&g, &load, held, front, back, &[]).unwrap();
                 let within = far(f, plan(&h[0])) <= GRIP_REACH && far(b, plan(&h[1])) <= GRIP_REACH;
                 let check = load.check_lift(load.crew as usize, f, b, [0, 0], None);
-                assert_eq!(check.is_ok(), within, "{kind}: its ends {d} µm out: {check:?}");
-                assert!((far(f, plan(&h[0])) - d).abs() <= 2, "{kind}: the front's hold");
+                assert_eq!(
+                    check.is_ok(),
+                    within,
+                    "{kind}: its ends {d} µm out: {check:?}"
+                );
+                assert!(
+                    (far(f, plan(&h[0])) - d).abs() <= 2,
+                    "{kind}: the front's hold"
+                );
             }
             // Its sides, each off the load's edge on the side it stands.
             let (f, b) = ([ends[0] + 350_000, 0], [ends[1] - 350_000, 0]);
@@ -583,9 +593,17 @@ mod tests {
                     .all(|((_, p), hold)| far(*p, plan(hold)) <= GRIP_REACH);
                 let crew = 2 + at.len();
                 let check = load.check_sides(crew, f, b, [0, 0], None, &at);
-                assert_eq!(check.is_ok(), within, "{kind}: its sides {d} µm off: {check:?}");
+                assert_eq!(
+                    check.is_ok(),
+                    within,
+                    "{kind}: its sides {d} µm off: {check:?}"
+                );
                 for ((_, p), hold) in at.iter().zip(&h[2..]) {
-                    assert!((far(*p, plan(hold)) - d).abs() <= 2, "{kind}: {}", hold.grip);
+                    assert!(
+                        (far(*p, plan(hold)) - d).abs() <= 2,
+                        "{kind}: {}",
+                        hold.grip
+                    );
                 }
             }
         }

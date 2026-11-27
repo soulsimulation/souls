@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-A Soul sent to the front or back of a rack frame standing on the floor (one set down mid-carry, say) now stands where the frame can be lifted, instead of 2.2 m off where the lift was refused as out of reach of its grip.
+Carrying and building: every carrier must now be within reach of its own grip (0.7 m) when a crew takes a part, lifts a load or seats a part, and is refused by name if not; no carrier is exempt any more. Souls sent to a rack frame in a stand or a bay now stand beside its edges, where their hands reach it, instead of 2.2 m off its faces. A crew with side carriers can no longer seat a rack beam into a bay (the sides let go first) until the set-in walks them with the part.

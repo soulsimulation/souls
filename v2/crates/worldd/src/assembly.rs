@@ -978,7 +978,10 @@ mod tests {
         let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../content/kinds/construction/rack_upright.json");
         let e = json::parse(&std::fs::read_to_string(p).expect("the entry")).expect("json");
-        let (load, grips) = (Load::of(&e).expect("a load"), grips::grips_of(&e).expect("grips"));
+        let (load, grips) = (
+            Load::of(&e).expect("a load"),
+            grips::grips_of(&e).expect("grips"),
+        );
         let id = |n| Id::new(replica::ids::Scope([1; 16]), n).expect("an id");
         let stood = |n, x: i64, z: i64| Stood {
             body: id(n),
@@ -998,11 +1001,18 @@ mod tests {
             let node = (Vec3::new(0, HEIGHT, 0), turn);
             out_of_reach(&crew.carriers((Vec3::ZERO, conj(turn)?))?, node)
         };
-        assert_eq!(taken(stood(1, 1_100_000, 0), stood(2, -1_100_000, 0)), Ok(()));
+        assert_eq!(
+            taken(stood(1, 1_100_000, 0), stood(2, -1_100_000, 0)),
+            Ok(())
+        );
         let r = taken(stood(1, 0, 2_200_000), stood(2, 0, -2_200_000)).expect_err("out of reach");
         assert_eq!(r.name, "part.grip-out-of-reach");
         assert!(r.detail.contains(&show(id(1))), "{}", r.detail);
-        assert!(r.detail.contains("2162 mm") || r.detail.contains("2161 mm"), "{}", r.detail);
+        assert!(
+            r.detail.contains("2162 mm") || r.detail.contains("2161 mm"),
+            "{}",
+            r.detail
+        );
     }
 
     /// A take of a part above its carriers' standing reach is refused by name (the served test world has none that
