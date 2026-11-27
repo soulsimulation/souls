@@ -247,7 +247,7 @@ test('a part is taken, seated in a slot by name or number, laid on the ground, o
   assert.deepEqual(part({ do: 'put', crew: id(8), into: id(5), slot: 'beam_low_l' }), [{ verb: 'part:put', target: id(8), params: { 1: id(5), 2: 5 } }]);
   assert.deepEqual(part({ do: 'put', crew: id(8), into: id(5), slot: '2' }), [{ verb: 'part:put', target: id(8), params: { 1: id(5), 2: 2 } }]);
   assert.deepEqual(part({ do: 'put', crew: id(8), into: '2,6' }), [{ verb: 'part:put', target: id(8), params: { 1: id(1), 3: [2e6, 0, 6e6] } }]);
-  assert.deepEqual(part({ do: 'put', crew: id(8), into: 'here' }), [{ verb: 'part:put', target: id(8), params: { 1: id(1), 3: [0, 0, 6e6] } }]);
+  assert.deepEqual(part({ do: 'put', crew: id(8), into: 'here' }), [{ verb: 'part:put', target: id(8), params: { 1: id(1) } }], 'here names no point: the world finds free ground where the crew stands');
   assert.equal(part({ do: 'put', crew: id(8), into: id(5), slot: 'roof' }).code, 'part-slot-unknown');
   assert.equal(part({ do: 'lift', crew: id(8) }).code, 'part-usage');
 });

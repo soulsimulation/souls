@@ -130,6 +130,9 @@ pub const HEIGHT: i64 = 1_050_000;
 /// The nearest a carrier's place is to its end grip along a low load, µm, and how far beyond the load's end it is
 /// then at least ([`Load::reach`]).
 pub const REACH_NEAR: i64 = 250_000;
+/// How high above its carriers' feet a load that stands as it is held is lifted, µm (#5067): its foot. A standing frame
+/// is lifted clear of the ground and walked, never raised to [`HEIGHT`] (its foot a metre up, its top over three).
+pub const STAND_LIFT: i64 = 150_000;
 pub const END_CLEAR: i64 = 75_000;
 /// The sweep's step along the route, µm.
 pub const SWEEP_STEP: i64 = 50_000;
@@ -293,6 +296,12 @@ pub struct Load {
     pub long: Vec3,
     /// Half its bounds in its own frame, µm (0.135 C7: what it takes up as it is held, whichever way it is turned).
     pub half: Vec3,
+    /// How high above its carriers' feet its carry's node is while it is held, µm (#5067: the carry's own height):
+    /// [`HEIGHT`], or [`STAND_LIFT`] for a load that stands as it is held ([`Load::held_at`]).
+    pub carried: i64,
+    /// How far above its carry's node its middle is as it is held, µm: none for a load held by its middle
+    /// ([`Load::held`]); a part taken where its origin is ([`Load::held_at`]) has its middle that far above it.
+    pub above: i64,
 }
 
 impl Load {
@@ -309,6 +318,8 @@ impl Load {
             rest: 0,
             long: Vec3::new(HALF_LENGTH, 0, 0),
             half: Vec3::new(HALF_LENGTH, 0, HALF_WIDTH),
+            carried: HEIGHT,
+            above: 0,
         }
     }
 
@@ -342,12 +353,20 @@ impl Load {
         Ok((Vec3::new(-m.x, -m.y, -m.z), self.turn))
     }
 
-    /// The load held turned `turn` in its crew's slot instead of [`Load::turn`] (a frame taken standing from its
-    /// stand), its [`Load::rest`] the half of it that stands upright so turned: set down, it rests on its lowest side
-    /// on the floor, not its middle (which would sink a standing frame half its height into the ground).
-    pub fn held_turned(&self, turn: Quat) -> R<Load> {
+    /// The load held at `position` turned `turn` in its crew's slot instead of as [`Load::held`] has it (a frame taken
+    /// standing from its stand), its [`Load::rest`] the half of it that stands upright so turned: set down, it rests on
+    /// its lowest side on the floor, not its middle (which would sink a standing frame half its height into the ground).
+    /// Its middle is [`Load::above`] its carry's node there. One that stands so held (its long axis more than half
+    /// upright, [`Load::lies_along`]) is carried [`STAND_LIFT`] above its carriers' feet, any other at [`HEIGHT`].
+    pub fn held_at(&self, position: Vec3, turn: Quat) -> R<Load> {
         let mut l = Load { turn, ..*self };
         l.rest = l.held_half()?.y;
+        l.above = position.y + turn.rotate(self.middle).map_err(pose_refusal)?.y;
+        l.carried = if self.lies_along(turn)?.is_none() {
+            STAND_LIFT
+        } else {
+            HEIGHT
+        };
         Ok(l)
     }
 
@@ -453,6 +472,8 @@ impl Load {
                 _ => Vec3::new(0, 0, d * 500),
             },
             half: Vec3::new(w * 500, h * 500, d * 500),
+            carried: HEIGHT,
+            above: 0,
         })
     }
 
@@ -473,7 +494,7 @@ impl Load {
     }
 
     /// Its outline as it is held, as a load to draw on the plan ([`outline`]), and the heights it spans, µm above its
-    /// carriers' feet: its middle at [`HEIGHT`] (0.135 C7).
+    /// carriers' feet: its middle [`Load::above`] its node at [`Load::carried`] (0.135 C7).
     pub fn as_held(&self) -> R<(Load, [i64; 2])> {
         let e = self.held_half()?;
         let plan = Load {
@@ -481,7 +502,8 @@ impl Load {
             half_width: e.z,
             ..*self
         };
-        Ok((plan, [HEIGHT - e.y, HEIGHT + e.y]))
+        let middle = self.carried + self.above;
+        Ok((plan, [middle - e.y, middle + e.y]))
     }
 
     /// Where a carrier at the grip `along` its length (µm from its middle) holds it: the middle of its two hands, each
@@ -1242,7 +1264,8 @@ impl Carry {
         }
     }
 
-    /// The lowest corner of the held load with the node at `(p, q)`, y µm (#5067): its middle is the node's origin.
+    /// The lowest corner of the held load with the node at `(p, q)`, y µm (#5067): its middle is [`Load::above`] the
+    /// node's origin.
     pub fn low(&self, (p, q): (Vec3, Quat)) -> R<i64> {
         let o = q.then(self.load.turn).map_err(pose_refusal)?;
         let h = self.load.half;
@@ -1254,7 +1277,7 @@ impl Carry {
                 .map_err(pose_refusal)?;
             e = e.max(-c.y);
         }
-        Ok(p.y - e)
+        Ok(p.y + self.load.above - e)
     }
 
     /// The node's pose `(p, q)` raised, if need be, so the held load's lowest corner is no lower than `floor` (#5067).
@@ -1342,8 +1365,8 @@ impl Carry {
             None => {}
         }
         let (from, height) = match (self.track.last(), here) {
-            (Some(&(_, c, q)), _) => ((c, q), HEIGHT),
-            (None, Some((p, floor))) => (p, floor.map_or(HEIGHT, |f| p.0.y - f)),
+            (Some(&(_, c, q)), _) => ((c, q), self.load.carried),
+            (None, Some((p, floor))) => (p, floor.map_or(self.load.carried, |f| p.0.y - f)),
             (None, None) => return refuse("carry-set-down-nowhere", "no sample of the carry"),
         };
         let under = Vec3::new(from.0.x, from.0.y - height, from.0.z);
@@ -1375,7 +1398,7 @@ impl Carry {
         let Some((c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
             return refuse("carry-set-down-nowhere", "no sample of the carry");
         };
-        let c = Vec3::new(c.x, c.y - HEIGHT, c.z);
+        let c = Vec3::new(c.x, c.y - self.load.carried, c.z);
         let c = Vec3::new(c.x, c.y + self.rests_on(tree, node, c, q)?, c.z);
         let (position, orientation) = self.load.resting(c, q)?;
         let entries = self.put_entries(tree, node, position, orientation, transfer)?;
@@ -1404,7 +1427,8 @@ impl Carry {
         let (c, q) = rest;
         let up = self.rests_on(tree, node, c, q)?;
         let (position, orientation) = self.load.resting(Vec3::new(c.x, c.y + up, c.z), q)?;
-        let drop = height - up - self.load.rest;
+        // The node comes down until the load's middle, `above` it, is `rest` over what it rests on.
+        let drop = height + self.load.above - up - self.load.rest;
         let to = (Vec3::new(from.0.x, from.0.y - drop, from.0.z), from.1);
         let t1 = at + hoist_time(drop);
         let floor = self.low(from)?.min(self.low(to)?);
@@ -1471,11 +1495,17 @@ impl Carry {
         self.log.write(tree, at, entries)
     }
 
-    /// The frame's pose for carriers at `front` and `back` (µm, the open ground's frame).
+    /// The frame's pose for carriers at `front` and `back` (µm, the open ground's frame), at [`HEIGHT`].
     pub fn pose(front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
+        Carry::pose_at(front, back, HEIGHT)
+    }
+
+    /// The frame's pose for carriers at `front` and `back` (µm, the open ground's frame), `height` above their feet
+    /// (#5067: a carry's own, [`Load::carried`]).
+    pub fn pose_at(front: Vec3, back: Vec3, height: i64) -> R<(Vec3, Quat)> {
         let c = Vec3::new(
             (front.x + back.x) / 2,
-            (front.y + back.y) / 2 + HEIGHT,
+            (front.y + back.y) / 2 + height,
             (front.z + back.z) / 2,
         );
         Ok((c, yaw_toward([front.x - back.x, front.z - back.z])?))
@@ -1495,7 +1525,7 @@ impl Carry {
         lay: (Vec3, Quat),
         transfer: Id,
     ) -> R<(Micros, Micros)> {
-        let (c, q) = Carry::pose(front, back)?;
+        let (c, q) = Carry::pose_at(front, back, self.load.carried)?;
         let (position, orientation) = self.load.held()?;
         let from = self.load.lying(lay)?;
         let leave = TransferRec::Leave {
@@ -1624,7 +1654,7 @@ impl Carry {
             self.raise = rest_top(fixed, &self.load, from, &[])?;
             return Err(r);
         }
-        let (c, q) = Carry::pose(front, back)?;
+        let (c, q) = Carry::pose_at(front, back, self.load.carried)?;
         // #5067: on a lift's track the node's sample is the lift's, toward where its carriers have the frame now.
         let lift = self.hoist.filter(|h| h.phase == Phase::Lift);
         let (p, o) = match lift {
@@ -1673,11 +1703,12 @@ impl Carry {
             Some(_) => return refuse("carry-setting-down", "the load is on its way down"),
             None => {}
         }
-        let (c, q) = Carry::pose(front, back)?;
+        let (c, q) = Carry::pose_at(front, back, self.load.carried)?;
         let from = self.track.last().map_or((c, q), |t| (t.1, t.2));
-        let floor = Vec3::new(c.x, c.y - HEIGHT, c.z);
+        let height = self.load.carried;
+        let floor = Vec3::new(c.x, c.y - height, c.z);
         let times =
-            self.lower_from(tree, at, node, from, HEIGHT, (floor, q), Phase::SetDown, by)?;
+            self.lower_from(tree, at, node, from, height, (floor, q), Phase::SetDown, by)?;
         if let Some(h) = self.hoist.as_mut() {
             h.transfer = Some(transfer);
         }

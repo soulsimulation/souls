@@ -195,6 +195,9 @@ pub struct Engine {
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
     taking: BTreeMap<Id, Taking>,
+    /// Each take on its track into its carriers' hands (#5067): its part, and the Soul and intent that took it. Its
+    /// holds are said when the track ends (`souls:lifted`), the part in its carriers' hands, not while it is on its way.
+    take_grips: BTreeMap<Id, (Id, Id, Id)>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -634,6 +637,60 @@ fn face_holds(
     }
 }
 
+/// How far clear of a part put down beside its crew each carrier's centre is, µm (#5067): the ground a standing part
+/// takes about it (a body's radius and 60 mm, 0.34 m) and 80 mm more, so a carrier a few centimetres off its place
+/// still stands on ground.
+const PUT_BESIDE: i64 = 420_000;
+
+/// Where a crew whose node is at `from` (on its ground, µm) puts its `load` down "here" (#5067), in the order tried:
+/// under its node, between its carriers; then beside them, the load's half width as it is held and [`PUT_BESIDE`] off
+/// their line, on its + side, then on its − side. Each a point on the crew's ground, at its carriers' feet.
+fn put_here(from: (Vec3, replica::pose::Quat), load: &Load) -> R<Vec<Option<Vec3>>> {
+    let pose = |e| refusal("part-pose", format!("{e:?}"));
+    let floor = from.0.y - load.carried;
+    let off = load.held_half()?.z + PUT_BESIDE;
+    let across = from.1.rotate(Vec3::new(0, 0, off)).map_err(pose)?;
+    Ok([0, 1, -1]
+        .into_iter()
+        .map(|k| {
+            Some(Vec3::new(
+                from.0.x + k * across.x,
+                floor,
+                from.0.z + k * across.z,
+            ))
+        })
+        .collect())
+}
+
+/// Why a put was refused, of the refusals of each place tried (#5067): the first's name. A part put down where its
+/// crew stands (`here`) says what the places beside the crew were refused for too, and where to step; one put at a
+/// point (`pointed`) where a body stands says how to have the world find the ground.
+fn put_refusal(mut refused: Vec<Refusal>, here: bool, pointed: bool) -> Refusal {
+    if refused.is_empty() {
+        return refusal("part-needs-a-place", "parameter 2 or 3");
+    }
+    let mut first = refused.remove(0);
+    if here {
+        let beside: Vec<String> = refused
+            .iter()
+            .map(|r| format!("{} ({})", r.name, r.detail))
+            .collect();
+        first.detail = format!(
+            "{}; beside the crew: {}; next: the carriers step apart along their line until each stands 350 mm \
+             beyond the end it holds, or carry it to open ground, then put it down again",
+            first.detail,
+            beside.join("; ")
+        );
+    } else if pointed && first.name == "site.occupied" {
+        first.detail = format!(
+            "{}; next: put it down with no point (part put <crew> here) and the world finds free ground between or \
+             beside its carriers",
+            first.detail
+        );
+    }
+    first
+}
+
 /// Where the controller has a body: the node it stands on and its position there.
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
@@ -683,6 +740,7 @@ impl Engine {
 
             asm: None,
             taking: BTreeMap::new(),
+            take_grips: BTreeMap::new(),
             joining: None,
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
@@ -1218,21 +1276,44 @@ impl Engine {
                         _ => return Err(refusal("part-joins", "parameter 4: ids")),
                     };
                     let reach = slots.reach_of(front).min(slots.reach_of(back));
-                    let effects = asm.put(
-                        &mut tree,
-                        &self.activities,
-                        &self.mint,
-                        now,
-                        by,
-                        activity,
-                        (to, slot, point),
-                        joins,
-                        reach,
-                        from,
-                        ground,
-                        apart(f, k),
-                        &carriers,
-                    )?;
+                    // #5067: a part put on the crew's own ground with no point is put down where the crew stands, on
+                    // ground the world finds free: between its carriers, else beside them on either side of their
+                    // line, clear of where they stand ([`put_here`]). A point is that point or a refusal.
+                    let here = slot.is_none() && point.is_none() && to == ground;
+                    let places = if here {
+                        put_here(from, &carry.load)?
+                    } else {
+                        vec![point]
+                    };
+                    let mut refused: Vec<Refusal> = Vec::new();
+                    let mut put = None;
+                    for p in places {
+                        match asm.put(
+                            &mut tree,
+                            &self.activities,
+                            &self.mint,
+                            now,
+                            by,
+                            activity,
+                            (to, slot, p),
+                            joins.clone(),
+                            reach,
+                            from,
+                            ground,
+                            apart(f, k),
+                            &carriers,
+                        ) {
+                            Ok(e) => {
+                                put = Some(e);
+                                break;
+                            }
+                            Err(r) => refused.push(r),
+                        }
+                    }
+                    let effects = match put {
+                        Some(e) => e,
+                        None => return Err(put_refusal(refused, here, point.is_some())),
+                    };
                     if let Some(carry) = self.carries.remove(&activity) {
                         self.set_sides.insert(activity, carry.sides);
                     }
@@ -1538,6 +1619,7 @@ impl Engine {
                         by,
                     )?;
                     // #5067: who holds which grip, said with the lift; and each carrier turns to face its hold.
+                    self.take_grips.remove(&activity);
                     self.grip(&mut tree, activity, board, &carry.sides, by);
                     if let Some((holding, node)) = &facing {
                         face_holds(c, holding, *node);
@@ -1977,13 +2059,15 @@ impl Engine {
                 self.rules.clone(),
             );
             // 0.135 C4: set down the way it is held, as its entry states it.
-            if let Some((l, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
+            if let Some((l, at, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
+                let p = n.place()?;
                 Some((
                     self.loads.get(plain(n.kind().as_str()))?,
-                    n.place()?.orientation,
+                    p.position,
+                    p.orientation,
                 ))
             }) {
-                carry.load = l.held_turned(held).unwrap_or(Load { turn: held, ..*l });
+                carry.load = l.held_at(at, held).unwrap_or(Load { turn: held, ..*l });
             }
             // #5067: from where the node is, down a set-down's track to rest on its carriers' floor (a lift cut off
             // by the restart left the node between the floor and carrying height).
@@ -2151,6 +2235,18 @@ impl Engine {
                         w,
                     ) {
                         eprintln!("worldd: a lift's end was not said: {r}");
+                    }
+                    // #5067: a take's holds are said now, the part in its carriers' hands.
+                    if let Some((part, soul, intent)) = self.take_grips.remove(&activity)
+                        && part == board
+                    {
+                        let sides = self
+                            .carries
+                            .get(&activity)
+                            .map(|c| c.sides.clone())
+                            .unwrap_or_default();
+                        let word = (now, Actor::Soul(soul), Cause::Intent(intent));
+                        self.grip(tr, activity, part, &sides, word);
                     }
                     self.unhold(activity);
                 }
@@ -3374,8 +3470,8 @@ impl Engine {
     fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
         let n = tree.handle(part).and_then(|h| tree.node(h))?;
         let l = self.loads.get(plain(n.kind().as_str()))?;
-        let turn = n.place()?.orientation;
-        Some(l.held_turned(turn).unwrap_or(Load { turn, ..*l }))
+        let (at, turn) = n.place().map(|p| (p.position, p.orientation))?;
+        Some(l.held_at(at, turn).unwrap_or(Load { turn, ..*l }))
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
@@ -3504,6 +3600,8 @@ impl Engine {
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
                 // #5067: the take is a track from where the part was into its carriers' hands, said as a lift's is; its
                 // carriers' span at the take is kept (a carry they let drift apart breaks off, 0.135 C3).
+                // Who holds which grip is said when it is true (#5067): at the end of the take's track (`souls:lifted`),
+                // the part in its carriers' hands, not while it is still on its way to them.
                 match carry.take_up(now, from, (at, turn), span, (ground, lay.0, lay.1)) {
                     Ok(times) => {
                         self.activities.next = tree.next();
@@ -3518,15 +3616,17 @@ impl Engine {
                         ) {
                             eprintln!("worldd: a take's track was not said: {e}");
                         }
+                        self.take_grips
+                            .insert(r.activity, (part, r.soul, r.intent));
                     }
                     Err(e) => {
+                        // No track: the part is in its carriers' hands at once, and its holds are said now.
                         eprintln!("worldd: a take's track did not start: {e}");
                         carry.track.push((now, at, turn));
                         carry.span = span;
+                        self.grip(&mut tree, r.activity, part, &sides, word);
                     }
                 }
-                // Who holds which grip, said once the take is committed.
-                self.grip(&mut tree, r.activity, part, &sides, word);
                 carry.sides = sides;
                 self.carries.insert(r.activity, carry);
                 self.collect(Some((r.intent, r.soul)));
@@ -3743,7 +3843,7 @@ impl Engine {
                 carry.ground,
                 ends,
                 plan.half_width,
-                c1.y - sim::activity::carry::HEIGHT,
+                c1.y - carry.load.carried,
                 velocity,
                 carriers,
             ));

@@ -824,8 +824,8 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
     assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
     // The take moved nothing in one step: the crew's node was first set where the frame stood (the frame in its slot
-    // exactly there), then went into its carriers' hands, at carrying height, a sample a tick, none more than 0.1 m from the last.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // exactly there), then went into its carriers' hands, lifted 0.15 m, a sample a tick, none more than 0.1 m from
+    // the last. Its holds are said when that track has ended (`souls:lifted`), so the track is whole by now.
     let track: Vec<Vec3> = effects(&dir)
         .into_iter()
         .filter_map(|e| match e.body {
@@ -865,8 +865,8 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     );
     let last = track.last().copied().unwrap();
     assert!(
-        (last.y - sim::activity::carry::HEIGHT).abs() <= 5_000,
-        "in its carriers' hands: {last:?}"
+        (last.y - sim::activity::carry::STAND_LIFT).abs() <= 5_000,
+        "in its carriers' hands, its foot 0.15 m up: {last:?}"
     );
     // Each carrier turned to face its hold (the back walked past the frame and stood with its back to it): its
     // body's own turn, as a turn toward the frame's middle would have it, within 2 s.
@@ -893,6 +893,239 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    drop(served);
+}
+
+/// When the log first holds a `souls:carry-track` word of `phase` for `carry`, and a `souls:carry-grips` word in the
+/// carry phase: each its place among the log's events, in the order they were written.
+fn said_at(dir: &Path, carry: Id, phase: &str) -> (Option<usize>, Option<usize>) {
+    let mut at = (None, None);
+    let all = effects(dir);
+    for (k, ev) in all.iter().flat_map(|e| e.events.iter().flatten()).enumerate() {
+        if ev.fields.get(&1) != Some(&carry.to_value()) {
+            continue;
+        }
+        let third = match ev.fields.get(&3) {
+            Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => String::new(),
+        };
+        if ev.name.as_str() == "souls:carry-track" && third == phase && at.0.is_none() {
+            at.0 = Some(k);
+        }
+        if ev.name.as_str() == grips::GRIPS && third == grips::CARRY && at.1.is_none() {
+            at.1 = Some(k);
+        }
+    }
+    at
+}
+
+/// How far the point `p` is from the segment `a`-`b` on the plan, µm.
+fn off_segment(p: Vec3, a: Vec3, b: Vec3) -> i64 {
+    let (ex, ez) = (i128::from(b.x - a.x), i128::from(b.z - a.z));
+    let (px, pz) = (i128::from(p.x - a.x), i128::from(p.z - a.z));
+    let len2 = (ex * ex + ez * ez).max(1);
+    let t = (px * ex + pz * ez).clamp(0, len2);
+    let (dx, dz) = (px - ex * t / len2, pz - ez * t / len2);
+    (dx * dx + dz * dz).isqrt() as i64
+}
+
+/// #5067, the standing frame from take to put, by two Souls on a served world.
+/// - **Strict reach at the take:** both stand a metre north of their places beside the frame's edges (as a walk that
+///   stopped short leaves them). As the crew would hold the frame each is within reach, so the take was admitted and
+///   the frame fetched a metre across the ground to them. Now it is refused `part.grip-out-of-reach`: each must reach
+///   its hold where the frame is. Nothing is written.
+/// - **Its own lift height:** taken from their places, the frame's foot is 0.15 m above their feet (not 1.05 m); its
+///   hands are 0.85 m and 1.15 m up its posts, so 1.00 m and 1.30 m above the ground.
+/// - **The hold is said when it is true:** `souls:carry-grips` in the carry phase comes after `souls:lifted`, never
+///   with the take's commit.
+/// - **Put down where the crew stands:** they carry it 3 m north, its foot still 0.15 m up; the back steps 0.3 m
+///   toward the frame, so both stand where the frame would take the ground between them. A put at their middle is refused `site.occupied`; a put with no point is laid:
+///   the world sets the frame down beside them, standing, turned as it was held, on ground clear of both.
+#[tokio::test(flavor = "multi_thread")]
+async fn grips_a_standing_frame_is_lifted_15_cm_held_once_lifted_and_put_down_where_its_crew_stands()
+{
+    let d = scratch("cstand");
+    let facts = grips_world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, frame) = (im.nodes["ground"], im.nodes["loose-upright"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut souls = Vec::new();
+    for (s, t) in ids.iter().zip(&tokens) {
+        souls.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    for (j, s) in souls.iter_mut().enumerate() {
+        s.act(
+            "eden:walk",
+            ground,
+            point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)),
+        )
+        .await
+        .expect("born");
+    }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
+    let l = Load::of(&construction("rack_upright.json")).unwrap();
+    let at = upright_at();
+    let before = moves_of(&dir, frame).len();
+    let edge = l.half_width + 350_000;
+    let near = [spot(at, edge, false), spot(at, -edge, false)];
+    // A metre north of their places: each 1.06 m from the edge it would hold, where the frame is.
+    let short: Vec<Vec3> = near
+        .iter()
+        .map(|p| Vec3::new(p.x, 0, p.z + M))
+        .collect();
+    let carry = crew_at(&mut souls, &dir, ground, &bodies, &[0, 1], &short).await;
+    let got = souls[0]
+        .act("part:take", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await;
+    said(&served);
+    println!("taken from a metre short of their places: {got:?}");
+    assert_eq!(got.map(|_| ()), Err("part.grip-out-of-reach".to_owned()));
+    assert!(words(&dir, carry).is_empty(), "no holds said");
+    assert_eq!(moves_of(&dir, frame).len(), before, "the frame did not move");
+    // At their places beside its edges.
+    for (k, p) in near.iter().enumerate() {
+        souls[k].send("eden:walk", ground, point(*p)).await;
+    }
+    for s in souls.iter_mut() {
+        s.answer().await.expect("walks beside its edge");
+    }
+    together(&dir, &bodies, &near, 60).await;
+    souls[0]
+        .act("part:take", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await
+        .expect("taken from beside its edges");
+    let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
+    // Said when it is true: after the take's track ended.
+    let (lifted, held) = said_at(&dir, carry, "souls:lifted");
+    println!("souls:lifted is event {lifted:?}, the carry's holds event {held:?}");
+    assert!(
+        matches!((lifted, held), (Some(a), Some(b)) if a < b),
+        "the holds are said after souls:lifted: {lifted:?}, {held:?}"
+    );
+    // Lifted 0.15 m: the crew's node (the frame's foot) above its carriers' feet.
+    let node = |dir: &Path| {
+        effects(dir)
+            .into_iter()
+            .filter_map(|e| match e.body {
+                Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                    Change::Motion(h) if h.node == carry => Some(h.pose.position),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .next_back()
+            .expect("the crew's node has samples")
+    };
+    let up = node(&dir);
+    assert!(
+        (up.y - sim::activity::carry::STAND_LIFT).abs() <= 5_000,
+        "its foot 0.15 m up: {up:?}"
+    );
+    // Its hands on its posts, 1.00 m and 1.30 m above the ground; each carrier within reach of them.
+    let feet = stood(&dir);
+    for hold in &h.holds {
+        let ys: Vec<i64> = hold.hands.iter().map(|p| up.y + p.y).collect();
+        assert!(
+            (ys[0] - 1_000_000).abs() <= 5_000 && (ys[1] - 1_300_000).abs() <= 5_000,
+            "{}: its hands {ys:?} µm above the ground",
+            hold.grip
+        );
+        assert!(
+            (hold.hands[0].x.abs() - l.half_width).abs() <= 40_000,
+            "on its post's outer face: {:?}",
+            hold.hands
+        );
+        let f = feet[&hold.body];
+        let to = Vec3::new(up.x + hold.hands[0].x, 0, up.z + hold.hands[0].z);
+        let off = off_segment(f, to, to);
+        println!("{} stands {} mm from its hold", hold.grip, off / 1000);
+        assert!(off <= sim::activity::carry::GRIP_REACH, "{off}");
+    }
+    // The front walks the crew 3 m north with the frame standing between them (to the walkers' ground a taken part
+    // stays where it last rested until it is put down, so nobody steps toward it there).
+    let north: Vec<Vec3> = near
+        .iter()
+        .map(|p| Vec3::new(p.x, 0, p.z + 3 * M))
+        .collect();
+    souls[0]
+        .act("eden:walk", ground, point(north[0]))
+        .await
+        .expect("the front carries it north");
+    together(&dir, &bodies, &north, 10).await;
+    let carried = node(&dir);
+    assert!(
+        (carried.y - sim::activity::carry::STAND_LIFT).abs() <= 5_000,
+        "carried with its foot 0.15 m up: {carried:?}"
+    );
+    // The back steps 0.3 m toward the frame: both now stand where the frame would take the ground between them.
+    let step = Vec3::new(north[1].x + 300_000, 0, north[1].z);
+    souls[1].send("eden:walk", ground, point(step)).await;
+    let _ = souls[1].answer().await;
+    let off = close_to(&dir, bodies[1], step, 80_000, 20).await;
+    println!("the back stepped in to within {} mm of its new place", off / 1000);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mid = node(&dir);
+    let at_middle = souls[0]
+        .act(
+            "part:put",
+            carry,
+            BTreeMap::from([
+                (1, ground.to_value()),
+                (3, point(Vec3::new(mid.x, 0, mid.z))[&1].clone()),
+            ]),
+        )
+        .await;
+    println!("put at the crew's middle: {at_middle:?}");
+    assert_eq!(at_middle.map(|_| ()), Err("site.occupied".to_owned()));
+    let moved = moves_of(&dir, frame).len();
+    souls[0]
+        .act("part:put", carry, BTreeMap::from([(1, ground.to_value())]))
+        .await
+        .expect("put down where the crew stands");
+    let end = Instant::now() + Duration::from_secs(20);
+    let laid = loop {
+        let m = moves_of(&dir, frame);
+        if m.len() > moved
+            && let Some(p) = m.last().filter(|p| p.frame.node == ground)
+        {
+            break p.clone();
+        }
+        assert!(Instant::now() < end, "the frame was not put down");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    said(&served);
+    let (p, o) = (laid.position, laid.orientation);
+    let ax = o.rotate(Vec3::new(l.half_width, 0, 0)).unwrap();
+    let (a, b) = (
+        Vec3::new(p.x + ax.x, 0, p.z + ax.z),
+        Vec3::new(p.x - ax.x, 0, p.z - ax.z),
+    );
+    let feet = stood(&dir);
+    let clear: Vec<i64> = bodies.iter().map(|b2| off_segment(feet[b2], a, b)).collect();
+    println!(
+        "put down at ({}, {}, {}) mm, {} mm beside the crew's line; its carriers {:?} mm clear of it",
+        p.x / 1000,
+        p.y / 1000,
+        p.z / 1000,
+        (p.z - mid.z).abs() / 1000,
+        clear.iter().map(|c| c / 1000).collect::<Vec<_>>()
+    );
+    assert!(p.y.abs() <= 2_000, "on the ground: {p:?}");
+    assert_eq!(o.rotate(Vec3::new(0, M, 0)).unwrap().y, M, "standing");
+    assert!(ax.z.abs() <= 20_000, "turned as it was held, its width along its carriers' line: {ax:?}");
+    assert!(
+        clear.iter().all(|c| *c >= 340_000),
+        "each carrier stands clear of it: {clear:?} µm"
+    );
+    assert!(
+        ((p.z - mid.z).abs() - 458_000).abs() <= 30_000 && (p.x - mid.x).abs() <= 30_000,
+        "beside the crew, 0.46 m off their line: {p:?} from {mid:?}"
+    );
+    word_that(&dir, carry, "let go", |h| h.phase == grips::RELEASED).await;
     drop(served);
 }
 

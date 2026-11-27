@@ -20,9 +20,10 @@
 //!   side of the body as it is drawn. A hand's target is the load's drawn pose times its point. A load that stands as
 //!   it is held (a frame taken standing) is taken along the line its carriers stand on: its front and its back each
 //!   hold its edge on that line toward them (a rack frame's post, a timber bent's: the outermost member of a part
-//!   whose bounds are its own), [`STAND_HOLD`] above the carry's height, its hands [`HAND_HALF`] above and below
+//!   whose bounds are its own), [`STAND_HOLD`] up it from its foot, its hands [`STAND_HAND_HALF`] above and below
 //!   (#5067: the edge, not the grip's distance along the line, which lay in the air between a bent's posts; and at a
-//!   height a standing body's hands reach, not at the load's foot). A side's stays where its grip lies along the line.
+//!   height a standing body's hands reach with the load lifted [`super::STAND_LIFT`], not at the load's foot). A
+//!   side's stays where its grip lies along the line.
 //!
 //! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs (the phase's start, or a carrier's leave),
 //! 5?: until µs, 6: [hold, ...]}`, a hold
@@ -46,14 +47,15 @@ pub const GRIPS: &str = "souls:carry-grips";
 /// How far either side of where a carrier holds its load its two hands are, along the load's long axis, µm (#5067:
 /// 0.1 m; at 0.2 m the far hand was 0.55 m ahead of an end carrier, beyond a standing body's arm).
 pub const HAND_HALF: i64 = 100_000;
-/// How far either side of where it is held a load that stands has its carrier's two hands, up and down it, µm: the
-/// lower at the carry's height, the upper 0.3 m above.
+/// How far either side of where it is held a load that stands has its carrier's two hands, up and down it, µm: 0.85 m
+/// and 1.15 m up it.
 pub const STAND_HAND_HALF: i64 = 150_000;
 
-/// How far above the carry's height (its slot's) a load that stands as it is held is held, µm (#5067): its two hands
-/// [`STAND_HAND_HALF`] below and above that. A frame taken standing has its foot at the carry's height, 1.05 m above
-/// its carriers' feet, so its hands are 1.05 m and 1.35 m above the ground.
-pub const STAND_HOLD: i64 = 150_000;
+/// How far up from its foot a load that stands as it is held is held, µm (#5067), or at its top when it is shorter: its
+/// two hands [`STAND_HAND_HALF`] below and above that. A frame taken standing is lifted [`super::STAND_LIFT`] (its
+/// foot 0.15 m above its carriers' feet), so its hands are 1.00 m and 1.30 m above the ground, where a standing body
+/// holds it upright.
+pub const STAND_HOLD: i64 = 1_000_000;
 
 /// The phases a carry's holds are in: carried, on a seating's set-in track, on its way back, let go.
 pub const CARRY: &str = "souls:carry";
@@ -304,7 +306,7 @@ pub fn assign(
     };
     // A load that stands as it is held (a frame taken standing) is taken along the line its carriers stand on: its
     // front and its back at its edge on that line, a side where its grip lies along it and at the load's edge on the
-    // side it stands, each [`STAND_HOLD`] above the carry's height (its slot's).
+    // side it stands, each [`STAND_HOLD`] up it from its foot.
     let standing = load.lies_along(held.1)?.is_none();
     let middle_c = held
         .0
@@ -338,7 +340,7 @@ pub fn assign(
         };
         let c = Vec3::new(
             middle_c.x + along,
-            STAND_HOLD.clamp(middle_c.y - ext.y, middle_c.y + ext.y),
+            (middle_c.y - ext.y + STAND_HOLD).min(middle_c.y + ext.y),
             z,
         );
         conj(held.1)?
@@ -525,21 +527,20 @@ mod tests {
         let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
         assert_eq!(names(&h), ["grip_high", "grip_low"]);
         for (hold, x) in h.iter().zip([609_500, -609_500]) {
-            // At its edge toward the carrier (its post's outer face), its lower hand at the carry's height (its foot),
-            // its upper 0.3 m above.
+            // At its edge toward the carrier (its post's outer face), its hands 0.85 m and 1.15 m up its post.
             assert_eq!(
                 hold.hands,
-                [Vec3::new(x, 0, 0), Vec3::new(x, 300_000, 0)],
+                [Vec3::new(x, 850_000, 0), Vec3::new(x, 1_150_000, 0)],
                 "{}",
                 hold.grip
             );
         }
-        // Its foot held 0.9 m below the slot: its hands at the carry's height and 0.3 m above.
+        // Wherever it is held in the slot, the same points of the load: measured up it from its foot.
         let low = (Vec3::new(0, -900_000, 0), Quat::IDENTITY);
         let h = assign(&g, &load, low, id(1), id(2), &[]).unwrap();
         let want = [
-            Vec3::new(609_500, 900_000, 0),
-            Vec3::new(609_500, 1_200_000, 0),
+            Vec3::new(609_500, 850_000, 0),
+            Vec3::new(609_500, 1_150_000, 0),
         ];
         assert_eq!(h[0].hands, want);
         // A timber bent, whose grips lie 0.55 m from its middle, is held at its edge too: its post, not the air
@@ -550,8 +551,8 @@ mod tests {
         assert_eq!(
             [h[0].middle(), h[1].middle()],
             [
-                Vec3::new(900_000, 150_000, 0),
-                Vec3::new(-900_000, 150_000, 0)
+                Vec3::new(900_000, 1_000_000, 0),
+                Vec3::new(-900_000, 1_000_000, 0)
             ]
         );
     }

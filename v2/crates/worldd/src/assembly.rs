@@ -528,7 +528,6 @@ impl Assembly {
         let inside = conj(turn)?
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
-        let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
         // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
         // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
         // One that stands, or whose origin is over its middle already (a beam), is held where its origin is.
@@ -539,6 +538,13 @@ impl Assembly {
             }
             _ => Vec3::ZERO,
         };
+        // #5067: the carry's own height: a part that stands as it is held is lifted clear of the ground, any other
+        // carried where a standing body holds it (`Load::held_at`).
+        let height = match crew {
+            Some(c) => c.load.held_at(slot, inside)?.carried,
+            None => HEIGHT,
+        };
+        let frame = Vec3::new(middle.x, middle.y + height, middle.z);
         // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
         // between its front and its back, the part in its slot turned as it is).
         let carriers = match crew {
@@ -550,6 +556,16 @@ impl Assembly {
         // crew's carry takes it into its carriers' hands on a track (`Carry::take_up`), never in one step.
         let off = turn.rotate(slot).map_err(pose)?;
         let from = Vec3::new(at.pos.x - off.x, at.pos.y - off.y, at.pos.z - off.z);
+        // #5067: and each reaches its hold where the part is now, so the hold it will be said to have is one it can take
+        // from where it stands: a part is never fetched across the ground to carriers who stopped short of it.
+        out_of_reach(&carriers, (from, turn)).map_err(|mut r| {
+            r.detail = format!(
+                "{}, where {} is now; next: each carrier stands at its grip (carry grip), then take it",
+                r.detail,
+                show(part)
+            );
+            r
+        })?;
         self.aim(tree, activity, ground)?;
         self.seating.take(
             tree,
@@ -626,6 +642,28 @@ impl Assembly {
             }
             (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
+        // #5067: a part put on its crew's own ground comes to rest as it is held, where the set-in's track takes it
+        // (its node at the point, turned as its carriers stand): never turned or moved again in the step that lets it
+        // go. Before, it was set unturned with its origin on the point, a jump for a crew that had turned, or for a
+        // part held by its middle.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let as_held = match (slot, to == ground) {
+            (None, true) => tree
+                .handle(part)
+                .and_then(|h| tree.node(h))
+                .filter(|n| n.parent() == Some(activity))
+                .and_then(|n| n.place())
+                .map(|h| -> R<(Vec3, Quat)> {
+                    let o = from.1.rotate(h.position).map_err(pose)?;
+                    Ok((
+                        Vec3::new(at.x + o.x, at.y + o.y, at.z + o.z),
+                        from.1.then(h.orientation).map_err(pose)?,
+                    ))
+                })
+                .transpose()?,
+            _ => None,
+        };
+        let (place, turn) = as_held.unwrap_or((place, Quat::IDENTITY));
         let (dx, dz) = (i128::from(at.x - from.0.x), i128::from(at.z - from.0.z));
         if dx * dx + dz * dz > i128::from(PUT_REACH).pow(2) {
             return Err(refusal(
@@ -671,7 +709,7 @@ impl Assembly {
         let target = Target {
             to: Frame { node: to, slot },
             place,
-            turn: Quat::IDENTITY,
+            turn,
             at,
             joins: joined,
             hold: bay && s.stands(pk.as_str()),
@@ -1053,7 +1091,7 @@ mod tests {
                 back,
                 sides: &[],
             };
-            let node = (Vec3::new(0, HEIGHT, 0), turn);
+            let node = (Vec3::new(0, sim::activity::carry::STAND_LIFT, 0), turn);
             out_of_reach(&crew.carriers((Vec3::ZERO, conj(turn)?))?, node)
         };
         assert_eq!(
