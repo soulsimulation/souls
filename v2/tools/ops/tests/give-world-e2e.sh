@@ -9,17 +9,17 @@
 set -euo pipefail
 B=$(cd "${1:?a folder with directoryd and gatewayd}" && pwd)
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-# A short folder: the gateway's control socket sits beside the world's tokens file, and a socket's path has at most 107
-# bytes (a world folder under a checkout's .local is longer).
-R=$(mktemp -d /tmp/gw-e2e.XXXXXX); R=$(cd "$R" && pwd)
+# Short folders: the gateway's control socket sits beside the world's tokens file, and a socket's path has at most 107
+# bytes, so the map's worldsRoot here is /w (production's /var/lib/souls/worlds leaves no room for a prefix).
+R=$(mktemp -d /tmp/gwXXXXXX); R=$(cd "$R" && pwd)
 free() { node -e 's=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'; }
 DP=$(free) GP=$(free)
 X=$(printf '9%.0s' {1..32}) I=$(printf 'a%.0s' {1..32})-$(printf 'a%.0s' {1..32})-0
-ETC=$R/etc/souls W=$R/var/lib/souls/worlds/worlds/$I STORE=/var/lib/souls/directory/accounts.sqlite
+ETC=$R/etc/souls W=$R/w/worlds/$I STORE=/var/lib/souls/directory/accounts.sqlite
 mkdir -p "$ETC/placement-data" "$W" "$R/var/lib/souls/directory" "$R/pids"
 od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$ETC/view.key"
 echo "DIRECTORYD_ARGS=--listen 127.0.0.1:$DP --public-url http://127.0.0.1:$DP --store $STORE --test-sign-in --view-key /etc/souls/view.key" > "$ETC/directory.args"
-echo "{\"format\":\"souls/world-authority/1\",\"aliases\":{},\"worldsRoot\":\"/var/lib/souls/worlds\",\"worlds\":{\"eden\":{\"creator\":\"$X:0\",\"instance\":\"$I\"}}}" > "$ETC/placement-data/authority.json"
+echo "{\"format\":\"souls/world-authority/1\",\"aliases\":{},\"worldsRoot\":\"/w\",\"worlds\":{\"eden\":{\"creator\":\"$X:0\",\"instance\":\"$I\"}}}" > "$ETC/placement-data/authority.json"
 echo "{\"format\":\"souls/world/1\",\"name\":\"$I\",\"creator\":\"$X-0\"}" > "$W/world.json"
 printf '# World-bound pairing authority\n# souls-creator/1 0 %s:0\n' "$X" > "$W/tokens"
 echo "GATEWAYD_ARGS=--listen 127.0.0.1:$GP --world $R/none.sock --tokens $W/tokens --build 1220$(printf 'ab%.0s' {1..32})" > "$ETC/gateway-$I.env"
