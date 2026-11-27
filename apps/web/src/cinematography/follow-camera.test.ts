@@ -121,3 +121,9 @@ test('single-centre preview completes a real expensive geometry comparison witho
  // An exhausted shared budget remains unknown, never a fabricated clear result.
  q.prepare([g],'1');for(let i=0;i<9;i++)q.segment(v(6,5,8),v(0,1,0));assert.equal(q.stats.blockVisits,4096);assert.equal(q.segment(v(6,5,10),v(0,1,2)),'unknown');assert.equal(q.stats.unknown,'block-query-cap');
 });
+
+
+test('below-ground preview to blocked future centre cannot masquerade as anticipatory visibility',()=>{
+ const{q}=space(),camera=new PerspectiveCamera(45,1,.1,100),aim=v(0,1,0),policy=new FollowCamera(),source=subject(),body={...source,travelMps:{value:[0,0,1.4] as [number,number,number],confidence:1,source:'derived' as const}};camera.position.set(6,5,8);camera.lookAt(aim);camera.updateMatrixWorld(true);q.segment=(_from,to,radius=0)=>radius>0||to.z<1?'clear':'blocked';let refused=false;
+ for(let i=0;i<120;i++){const r=policy.step(body,camera,aim,1/60,q,(_x,z)=>z>9?10:0);if(r.preview.current===-1&&r.preview.alternative===0)refused=true;assert.notEqual(r.reason,'viewpoint-change');assert.equal(r.preview.selected,false);camera.position.copy(r.eye);aim.copy(r.aim);camera.lookAt(aim);camera.updateMatrixWorld(true);}assert.ok(refused,'fixture must exercise hypothetical below-ground incumbent and blocked alternative');
+});

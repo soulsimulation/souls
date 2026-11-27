@@ -177,7 +177,7 @@ export class FollowCamera{
     // A maximal or unknown incumbent cannot justify extra alternative preview work.
     const shift=new Vector3().fromArray(preview.shift);preview.current=query(root.clone().add(this.offset).add(shift),shift,true);if(preview.current!==null&&preview.current<1)preview.alternative=query(eye.clone().add(shift),shift,true);if(preview.current===null||preview.current<1&&preview.alternative===null)preview.status='query-unknown';
    }
-   const anticipated=preview.current!==null&&preview.alternative!==null&&preview.alternative>preview.current+.25;
+   const anticipated=preview.current===0&&preview.alternative===1;
    if(current!==null&&alternative!==null&&alternative>=current&&(alternative>current+.25||anticipated)&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';preview.selected=anticipated&&alternative<=current+.25;}
   }
   }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
