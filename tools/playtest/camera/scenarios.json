@@ -1,0 +1,680 @@
+{
+  "schema": "camera-scenarios/1",
+  "protocol": "cam01/1",
+  "status": "fixture recipes and run plan; not an executable runner or completed runs",
+  "repeatsPerArm": 2,
+  "repeatSeedRule": "Repeat 1 uses listed seed; repeat 2 uses listed seed + 10000. Paired arms reuse the identical repeat tape, including legal act receipts and information-delivery order.",
+  "sets": {
+    "tuning": {
+      "seedBase": 507700,
+      "worldVariant": "courtyard and single-house plan",
+      "use": "development and diagnosis"
+    },
+    "holdout": {
+      "seedBase": 507800,
+      "worldVariant": "unfamiliar offset rooms, stairs and waterside plan",
+      "use": "sealed until selected candidate; no tuning"
+    },
+    "reserve": {
+      "seedBase": 507900,
+      "worldVariant": "unfamiliar rotated multi-floor rooms and divided garden plan",
+      "use": "replace consumed holdout after repair; no tuning before confirmation"
+    }
+  },
+  "cases": [
+    {
+      "id": "tuning-turns",
+      "set": "tuning",
+      "seed": 507700,
+      "profile": "turns"
+    },
+    {
+      "id": "tuning-thresholds",
+      "set": "tuning",
+      "seed": 507701,
+      "profile": "thresholds"
+    },
+    {
+      "id": "tuning-stationary",
+      "set": "tuning",
+      "seed": 507702,
+      "profile": "stationary"
+    },
+    {
+      "id": "tuning-carriers",
+      "set": "tuning",
+      "seed": 507703,
+      "profile": "carriers"
+    },
+    {
+      "id": "tuning-groups",
+      "set": "tuning",
+      "seed": 507704,
+      "profile": "groups"
+    },
+    {
+      "id": "tuning-active",
+      "set": "tuning",
+      "seed": 507705,
+      "profile": "active"
+    },
+    {
+      "id": "tuning-quiet",
+      "set": "tuning",
+      "seed": 507706,
+      "profile": "quiet"
+    },
+    {
+      "id": "holdout-turns",
+      "set": "holdout",
+      "seed": 507800,
+      "profile": "turns"
+    },
+    {
+      "id": "holdout-thresholds",
+      "set": "holdout",
+      "seed": 507801,
+      "profile": "thresholds"
+    },
+    {
+      "id": "holdout-stationary",
+      "set": "holdout",
+      "seed": 507802,
+      "profile": "stationary"
+    },
+    {
+      "id": "holdout-carriers",
+      "set": "holdout",
+      "seed": 507803,
+      "profile": "carriers"
+    },
+    {
+      "id": "holdout-groups",
+      "set": "holdout",
+      "seed": 507804,
+      "profile": "groups"
+    },
+    {
+      "id": "holdout-active",
+      "set": "holdout",
+      "seed": 507805,
+      "profile": "active"
+    },
+    {
+      "id": "holdout-quiet",
+      "set": "holdout",
+      "seed": 507806,
+      "profile": "quiet"
+    },
+    {
+      "id": "reserve-turns",
+      "set": "reserve",
+      "seed": 507900,
+      "profile": "turns"
+    },
+    {
+      "id": "reserve-thresholds",
+      "set": "reserve",
+      "seed": 507901,
+      "profile": "thresholds"
+    },
+    {
+      "id": "reserve-stationary",
+      "set": "reserve",
+      "seed": 507902,
+      "profile": "stationary"
+    },
+    {
+      "id": "reserve-carriers",
+      "set": "reserve",
+      "seed": 507903,
+      "profile": "carriers"
+    },
+    {
+      "id": "reserve-groups",
+      "set": "reserve",
+      "seed": 507904,
+      "profile": "groups"
+    },
+    {
+      "id": "reserve-active",
+      "set": "reserve",
+      "seed": 507905,
+      "profile": "active"
+    },
+    {
+      "id": "reserve-quiet",
+      "set": "reserve",
+      "seed": 507906,
+      "profile": "quiet"
+    }
+  ],
+  "fixtureContract": {
+    "actors": "fake/scripted test worlds only; all movement and activity through legal engine acts; no teleports or alternate motion path",
+    "geometry": "Freeze generated world, public projection/assets and legal act tape hashes before any camera outcome is inspected. Failed fixture feasibility validation is unknown and requires a newly versioned comparison, never post-hoc exclusions.",
+    "variation": "Set seed controls legal act timing/turn choices and fixture variant; it is not runtime Math.random. Preserve refused acts and timing drift.",
+    "visibility": "Frame intervals are half-open [start,end), in depicted-world seconds, mapped to original-video presentation timestamps; all initial fixture intervals are feasible.",
+    "holdouts": "Freeze recipes, seeds and hashes without viewing candidate outcomes; keep holdout/reserve runs separate from tuning. A holdout inspected for tuning is consumed; use untouched reserve for final confirmation."
+  },
+  "render": {
+    "desktop": {
+      "cssViewport": [
+        1280,
+        720
+      ],
+      "deviceScaleFactor": 1
+    },
+    "portraitEmulation": {
+      "cssViewport": [
+        390,
+        844
+      ],
+      "deviceScaleFactor": 1,
+      "physicalEvidence": false
+    },
+    "landscapeEmulation": {
+      "cssViewport": [
+        844,
+        390
+      ],
+      "deviceScaleFactor": 1,
+      "physicalEvidence": false
+    },
+    "physicalMobile": "Record and hold actual CSS/physical pixels, DPR and refresh within each paired orientation cell; never label emulation as physical.",
+    "common": [
+      "same built served apps/web page except declared variant",
+      "same source/assets/public tape hashes",
+      "same viewport, DPR, renderer backend, graphics/shadows/quality and refresh policy",
+      "same initial lens, zoom/preference, hour/lighting and reduced-motion setting",
+      "same browser/version/launch flags and recording/profiling settings",
+      "no shot pin or authored track in automatic-camera quality runs"
+    ],
+    "coldWarm": "Cold: fresh test context and empty camera caches, record startup separately. Warm: identical prelude and five-minute foreground warmup, retained warmed caches; reset world tape identically."
+  },
+  "arms": {
+    "current": "camera at frozen source commit",
+    "selectedCandidate": "named candidate commit/configuration/effort; optional methods default off unless adopted",
+    "disabled": "same rendered scene and legal act tape; automatic camera computation disabled with fixed manual view, only for attribution controls, never a visual-quality competitor"
+  },
+  "matrices": [
+    {
+      "id": "focused",
+      "owner": "CAM-05 establishes; visible tasks reuse affected cases",
+      "sets": [
+        "tuning"
+      ],
+      "resources": [
+        "desktop",
+        "mobile"
+      ],
+      "arms": [
+        "current",
+        "selectedCandidate"
+      ],
+      "profiles": [
+        "turns",
+        "thresholds",
+        "stationary",
+        "carriers",
+        "groups",
+        "active",
+        "quiet"
+      ],
+      "conditions": [
+        "cold",
+        "warm"
+      ],
+      "orientations": [
+        "portrait",
+        "landscape"
+      ],
+      "secondsPerCell": 180,
+      "repeats": 2,
+      "rule": "Each Cartesian cell is separate; desktop uses rotated fixed viewport, physical mobile uses actual orientation. Unavailable cells are unknown; schedule additional device cells explicitly before dispatch."
+    },
+    {
+      "id": "broadcast",
+      "owner": "CAM-36",
+      "sets": [
+        "tuning"
+      ],
+      "resources": [
+        "desktop"
+      ],
+      "arms": [
+        "current",
+        "selectedCandidate"
+      ],
+      "profiles": [
+        "active",
+        "quiet"
+      ],
+      "conditions": [
+        "warm"
+      ],
+      "orientations": [
+        "landscape"
+      ],
+      "secondsPerCell": 900,
+      "repeats": 2,
+      "totalRecordingMinutes": 120,
+      "rule": "Repeat the corresponding 180-second profile five times on one continuous tape; preserve coverage history across cycles."
+    },
+    {
+      "id": "mobile-initial",
+      "owner": "CAM-40",
+      "sets": [
+        "tuning"
+      ],
+      "resources": [
+        "mobile"
+      ],
+      "arms": [
+        "disabled",
+        "current",
+        "selectedCandidate"
+      ],
+      "profiles": [
+        "mobile-mixed"
+      ],
+      "conditions": [
+        "warm"
+      ],
+      "orientations": [
+        "portrait"
+      ],
+      "secondsPerCell": 1200,
+      "repeats": 2,
+      "totalRecordingMinutes": 120,
+      "setupWarmupCooldownMinutes": [
+        30,
+        60
+      ],
+      "rule": "Selected candidate is economical. This initial six-cell matrix qualifies only portrait, economical effort and the declared physical device/browser; any landscape/other effort/cold sustained claim needs separately scheduled cells. Do not claim 20 minutes per mode from a mixed run."
+    },
+    {
+      "id": "mixed-current",
+      "owner": "CAM-05",
+      "sets": [
+        "tuning"
+      ],
+      "resources": [
+        "desktop"
+      ],
+      "arms": [
+        "current"
+      ],
+      "profiles": [
+        "mixed"
+      ],
+      "conditions": [
+        "warm"
+      ],
+      "orientations": [
+        "landscape"
+      ],
+      "secondsPerCell": 3600,
+      "repeats": 2,
+      "totalRecordingMinutes": 120
+    },
+    {
+      "id": "mixed-candidate",
+      "owner": "CAM-43",
+      "sets": [
+        "tuning"
+      ],
+      "resources": [
+        "desktop"
+      ],
+      "arms": [
+        "selectedCandidate"
+      ],
+      "profiles": [
+        "mixed"
+      ],
+      "conditions": [
+        "warm"
+      ],
+      "orientations": [
+        "landscape"
+      ],
+      "secondsPerCell": 3600,
+      "repeats": 2,
+      "totalRecordingMinutes": 120,
+      "rule": "Reuse CAM-05 controls only with explicit source/input/assets/render/protocol applicability; invalid controls require a separately bounded re-recording task."
+    },
+    {
+      "id": "unfamiliar",
+      "owner": "CAM-42",
+      "sets": [
+        "holdout"
+      ],
+      "resources": [
+        "desktop",
+        "mobile"
+      ],
+      "arms": [
+        "current",
+        "selectedCandidate"
+      ],
+      "profiles": [
+        "turns",
+        "thresholds",
+        "stationary",
+        "carriers",
+        "groups",
+        "active",
+        "quiet"
+      ],
+      "conditions": [
+        "warm"
+      ],
+      "orientations": [
+        "portrait",
+        "landscape"
+      ],
+      "secondsPerCell": 180,
+      "repeats": 2,
+      "rule": "Run selected frozen cells within amended dispatch bounds; unrun cells remain unknown. After holdout tuning, repeat confirmation on reserve, never the consumed holdout."
+    }
+  ],
+  "mixedSession": {
+    "periodSeconds": 3600,
+    "segments": [
+      {
+        "seconds": [
+          0,
+          600
+        ],
+        "profile": "turns",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          600,
+          1200
+        ],
+        "profile": "thresholds",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          1200,
+          1800
+        ],
+        "profile": "stationary",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          1800,
+          2400
+        ],
+        "profile": "carriers",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          2400,
+          3000
+        ],
+        "profile": "groups",
+        "mode": "broadcast"
+      },
+      {
+        "seconds": [
+          3000,
+          3300
+        ],
+        "profile": "active",
+        "mode": "broadcast"
+      },
+      {
+        "seconds": [
+          3300,
+          3600
+        ],
+        "profile": "quiet",
+        "mode": "broadcast"
+      }
+    ],
+    "rule": "Loop each 180-second profile within its segment, truncating the final cycle; preserve camera history between cycles and switch modes with real UI input at segment boundaries."
+  },
+  "mobileSession": {
+    "periodSeconds": 1200,
+    "segments": [
+      {
+        "seconds": [
+          0,
+          240
+        ],
+        "profile": "turns",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          240,
+          480
+        ],
+        "profile": "thresholds",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          480,
+          660
+        ],
+        "profile": "stationary",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          660,
+          840
+        ],
+        "profile": "carriers",
+        "mode": "follow"
+      },
+      {
+        "seconds": [
+          840,
+          960
+        ],
+        "profile": "groups",
+        "mode": "broadcast"
+      },
+      {
+        "seconds": [
+          960,
+          1080
+        ],
+        "profile": "active",
+        "mode": "broadcast"
+      },
+      {
+        "seconds": [
+          1080,
+          1200
+        ],
+        "profile": "quiet",
+        "mode": "broadcast"
+      }
+    ],
+    "rule": "Loop/truncate the frozen profile tapes within each segment; real UI mode changes. Each 20-minute cell contains 14 minutes Follow and 6 minutes Broadcast; it proves neither 20 minutes per mode nor landscape coverage. Report costs and temperature by segment as well as whole run."
+  },
+  "profiles": {
+    "turns": {
+      "mode": "follow",
+      "durationSeconds": 180,
+      "stages": [
+        "0-30 idle then walk",
+        "30-90 walk/jog with seeded unpredictable left/right and reversal acts",
+        "90-120 stop/start and near-camera crossing",
+        "120-180 repeat turns with face/context preferences"
+      ],
+      "criticalEvents": [
+        "turn",
+        "stop",
+        "recovery"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    },
+    "thresholds": {
+      "mode": "follow",
+      "durationSeconds": 180,
+      "stages": [
+        "0-30 outside approach",
+        "30-75 enter and leave an open narrow doorway",
+        "75-120 traverse two small rooms and a multi-floor threshold",
+        "120-180 closed-door refusal then legal opening/exit"
+      ],
+      "criticalEvents": [
+        "doorway",
+        "occlusion",
+        "recovery"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    },
+    "stationary": {
+      "mode": "follow",
+      "durationSeconds": 180,
+      "stages": [
+        "0-30 approach activity object",
+        "30-100 sit/read or use object without walking",
+        "100-140 interrupted action and return to idle",
+        "140-180 action resumes with foreground occluder"
+      ],
+      "criticalEvents": [
+        "action-change",
+        "occlusion",
+        "recovery"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    },
+    "carriers": {
+      "mode": "follow",
+      "durationSeconds": 180,
+      "stages": [
+        "0-30 approach and legally board",
+        "30-120 carrier travels and turns with rider",
+        "120-150 stop and disembark",
+        "150-180 follow on foot"
+      ],
+      "criticalEvents": [
+        "board",
+        "turn",
+        "disembark",
+        "recovery"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    },
+    "groups": {
+      "mode": "broadcast",
+      "durationSeconds": 180,
+      "stages": [
+        "0-45 group activity forms",
+        "45-90 group walks and a new member joins",
+        "90-135 split into two independently active groups",
+        "135-180 merge then settle"
+      ],
+      "criticalEvents": [
+        "group-change",
+        "cut",
+        "occlusion"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    },
+    "active": {
+      "mode": "broadcast",
+      "durationSeconds": 180,
+      "stages": [
+        "0-60 two separated activities begin",
+        "60-120 activity moves and attention-worthy event occurs",
+        "120-180 activity resolves while another continues"
+      ],
+      "criticalEvents": [
+        "scene-change",
+        "cut",
+        "turn"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    },
+    "quiet": {
+      "mode": "broadcast",
+      "durationSeconds": 180,
+      "stages": [
+        "0-60 still room and seated subject",
+        "60-120 small meaningful stationary activity",
+        "120-180 quiet landscape and settled group"
+      ],
+      "criticalEvents": [
+        "scene-change",
+        "cut"
+      ],
+      "feasibility": {
+        "feasibleSeconds": [
+          [
+            0,
+            180
+          ]
+        ],
+        "infeasibleSeconds": [],
+        "basis": "Fixture must provide at least one public, collision-clear readable shot at every depicted tick, including inside rooms and aboard carriers. Camera occlusion/poor framing is a failure, not infeasibility."
+      }
+    }
+  }
+}
