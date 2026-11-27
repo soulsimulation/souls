@@ -19,8 +19,10 @@ export class DrawGeometry {
     // Observe only this representation. A changing mesh/attribute/bind layout invalidates unfinished and completed detail.
     const meshes: SkinnedMesh[] = [], signature: unknown[] = [], pending = [root]; let visited=0;
     while(pending.length && visited++ < 256) {
-      const object=pending.pop()!; pending.push(...object.children);
+      const object=pending.pop()!;if(object.children.length>256-visited-pending.length)return {bounds:null,head:null};
+      for(const child of object.children)pending.push(child);
       const mesh=object as SkinnedMesh;if(!mesh.isMesh||!mesh.geometry?.attributes.position)continue;
+      if(mesh.isSkinnedMesh&&mesh.skeleton.bones.length>128)return {bounds:null,head:null};
       meshes.push(mesh);signature.push(mesh,mesh.geometry,mesh.skeleton,...mesh.bindMatrix?.elements??[]);
       for(const key of ['position','skinIndex','skinWeight']) { const a=mesh.geometry.attributes[key];signature.push(a,a && ('version' in a?a.version:a.data.version),a?.count); }
     }

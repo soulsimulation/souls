@@ -69,7 +69,7 @@ export async function pairSeat({ world, dir, label, owner = label, name = null, 
   if (done.code !== 0 || !said?.ok) throw new Error(`${label}: pairing failed: ${done.out.slice(-300)} ${done.err.slice(-300)}`);
   if (name) {
     // the directory keys the Soul as its owner's list names it (`soul-<hex>-<n>`; the client's `s_<hex>-<n>`)
-    const post = (path, body) => fetch(new URL(path, world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: owner }) });
+    const post = (path, body) => fetch(new URL(path, world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, ...(signal?{signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}:{}), body: JSON.stringify({ ...body, test_person: owner }) });
     const mine = (await (await post('/v1/account/souls', {})).json()).souls ?? [];
     const key = mine.find((s) => s.soul.replace(/^soul-/, '') === said.soul.replace(/^s_/, ''))?.soul ?? said.soul;
     const named = await post('/v1/account/souls/profile', { soul: key, name });

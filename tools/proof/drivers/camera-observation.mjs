@@ -22,11 +22,14 @@ export default async function({page,paths,check,fixture,signal}) {
  await page.waitForFunction(body=>{const r=window.__cameraObservation;return r?.frame?.status==='observed'&&r.frame.value.subjects.some(s=>s.id===body&&s.state==='present')&&!document.querySelector('.viewer-arrival')},fixture.actor.body,{timeout:30000});
  const read=()=>page.evaluate(()=>window.__cameraObservation),samples=[];
  const sample=async phase=>{const value=await read();check(`${phase}-draw-matrix-alignment`,alignmentValid(value,fixture.actor.body));samples.push({phase,...value});return value;};
+ let input=0;const snapshot=async name=>writeFileSync(join(paths.dir,`accessibility-before-${++input}-${name}.yml`),await page.locator('body').ariaSnapshot(),{flag:'wx'});
+ await snapshot('explore');await page.getByRole('button',{name:/^Explore /}).click();await snapshot('select-subject');await page.getByRole('dialog',{name:/^Explore /}).getByRole('button',{name:/Camera Subject/}).click();
+ await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-mode')==='follow',null,{timeout:20000});
+ await page.waitForTimeout(1500);check('selected-subject-visible',await page.locator('.world-name-tag').filter({hasText:'Camera Subject'}).isVisible());
  await sample('live-before');const command=await fixture.actor.cli('act',fixture.target);check('legal-walk-accepted',command.ok!==false&&command.phase!=='refused');
  let moved=false;const until=Date.now()+15000;
  while(Date.now()<until){signal.throwIfAborted();const r=await read();if(r?.movement?.some(([id,m])=>id===fixture.actor.body&&m.state==='travel')){moved=true;break}await page.waitForTimeout(50);}
- check('drawn-subject-travels',moved);await sample('live-moving');await page.screenshot({path:join(paths.dir,'live-moving.png')});
- let input=0;const snapshot=async name=>writeFileSync(join(paths.dir,`accessibility-before-${++input}-${name}.yml`),await page.locator('body').ariaSnapshot(),{flag:'wx'});
+ check('drawn-subject-travels',moved);await sample('live-moving');await page.waitForTimeout(1000);await page.screenshot({path:join(paths.dir,'live-moving.png')});
  await snapshot('time-route');const direct=page.getByRole('button',{name:/time controls$/});if(await direct.isVisible())await direct.click();else{await page.getByRole('button',{name:'Menu',exact:true}).click();await snapshot('time-menu');await page.getByRole('menuitem',{name:/^Time(?:\s|$)/}).click();}
  await snapshot('pause');await page.getByRole('dialog',{name:'Time',exact:true}).getByRole('button',{name:'Pause',exact:true}).click();
  await page.waitForFunction(()=>window.__cameraObservation?.frame?.value?.version.epoch.includes('history'),null,{timeout:20000});

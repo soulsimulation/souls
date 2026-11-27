@@ -65,3 +65,7 @@ test('real take coverage bounds activity freshness in live and history without a
  const activity=drawnTakeActivity('read',{prop:'book'},{startTick:20,ticks:10,dt:.05});assert.deepEqual(activity,{kind:'read',validThroughSeconds:1.5});assert.equal(drawnTakeActivity('read',{},null),null);
  const observer=new DisplayedCameraObserver(),body=root();observer.capture({version,tick:29.5,seconds:1.475,subjects:[{id:'reader',root:body,activity}]});const after=observer.capture({version,tick:30.5,seconds:1.525,subjects:[{id:'reader',root:body,activity}]});if(after.status!=='observed'||after.value.subjects[0].state!=='present')throw Error('fixture');assert.equal(after.value.subjects[0].activity,null);
 });
+
+test('wide hierarchies decline detail before enqueueing children or allocating bone envelopes',()=>{
+ const body=root();for(let i=0;i<300;i++)body.add(root());const grant={remaining:1000};assert.equal(new DrawGeometry().inspect(body,new Vector3(),new Quaternion(),false,grant).bounds,null);assert.equal(grant.remaining,1000);
+});

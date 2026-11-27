@@ -63,7 +63,7 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });
   return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: { kind: 'native-page', async joinActor(label='camera-subject') {
     signal?.throwIfAborted();
-    const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
+    const seat=await pairSeat({world:runtime.world,dir:join(data,'actors'),label,name:'Camera Subject',pkg:join(root,'v2/target/wasm-load/pkg'),checkout:root,onSpawn,signal,approveMs:15000});
     signal?.throwIfAborted();const fd=openSync(log,'a',0o600);let daemon;
     try { daemon=spawn(process.execPath,[join(root,'v2/client/src/daemon/daemon.mjs'),'--home',seat.home,'--soul',seat.soul,'--pkg',join(root,'v2/target/wasm-load/pkg'),'--ready-fd','3'],{cwd:seat.folder,env:{PATH:process.env.PATH,BRAIN_MODE:'fake'},detached:true,stdio:['ignore',fd,fd,'pipe']});onSpawn(daemon,{processGroup:true}); } finally {closeSync(fd);}
     await waitActorReady(daemon,{signal,timeoutMs:15000});
