@@ -10,8 +10,8 @@
 //! - **Its own space** (#4215). Under the push, a hard guard: over a tick a walker closes on each body near it by at
 //!   most half the gap beyond two radii ([`ROOM`] each), and not at all when already inside; the other keeps its own
 //!   half, so no step ends inside another body's space. A step the guard holds is a wait, never a jump. Under the
-//!   ladder's shoulder turn a body at rest is no longer guarded (E16), so one standing in the only way never walls a
-//!   walker in.
+//!   ladder's shoulder turn the still bodies the world names keep one radius and [`SLACK`], not two (E16), so one
+//!   standing in the only way never walls a walker in; it squeezes past through the widest gap there is.
 //! - **A way round** (A2-2). Held [`DETOUR_AFTER`] ticks by a body standing ahead (seen at rest [`STANDING`] ticks),
 //!   it walks first to a point beside that body, or sideways past the end of a row of them, that a straight walk
 //!   reaches clear of every body; hemmed in, it steps back and looks again from there. A standing body never pushes it
@@ -37,9 +37,10 @@
 //!   copy; through the host the skill sees each result a tick later, T1). For [`SLID`] ticks after the mover slid it,
 //!   the part of its step along that edge keeps within the guard's bounds too (#4215, A2-2).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
-//!   pushes it, and it squeezes past one at rest), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
-//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
-//!   the walk leaves its count alone in [`F_ROUTE`] (`[count, []]`), so a read of the body copies no legs.
+//!   pushes it, and it may squeeze past the still bodies it names), [`F_ROUTE`] (a new route, walked from its first
+//!   leg) and [`F_HELD`] (the world walks it out to legal ground: it stands and clears its mark). Ending the walk by
+//!   name is the world's: the run is ended. A route taken, the walk leaves its count alone in [`F_ROUTE`]
+//!   (`[count, []]`), so a read of the body copies no legs.
 //! - **Sent to a point** (N9, [`Route::sent`]). The world's spot tables grant the walker a standing spot near the
 //!   point and the world gives the route there as [`F_ROUTE`]; until then it stands. It arrives within [`AT_SPOT`] of
 //!   its spot, no body pushes it within [`CALM`] of it, and those standing on their own spots ([`F_SETTLED`]) do not
@@ -366,6 +367,19 @@ fn guard(
     room: i64,
     slide: Option<[i64; 2]>,
 ) -> [i64; 2] {
+    guard_by(p, v, dt, near, |_| room, slide)
+}
+
+/// [`guard`] with each body's own `room`: under the shoulder turn a body the world named keeps one radius and slack,
+/// not two (E16).
+fn guard_by(
+    p: [i64; 2],
+    v: [i64; 2],
+    dt: Micros,
+    near: &[Near],
+    room: impl Fn(&Near) -> i64,
+    slide: Option<[i64; 2]>,
+) -> [i64; 2] {
     let dt = i128::from(dt.max(1));
     let bounds: Vec<([i128; 2], i128, i128)> = near
         .iter()
@@ -375,8 +389,9 @@ fn guard(
                 i128::from(n.position.z - p[1]),
             ];
             let gap = (u[0] * u[0] + u[1] * u[1]).isqrt();
+            let room = i128::from(room(n));
             // At one point there is no way toward it: any step is apart.
-            (gap > 0).then(|| (u, gap, (gap - i128::from(room)).max(0) / 2 * 1_000_000 / dt))
+            (gap > 0).then(|| (u, gap, (gap - room).max(0) / 2 * 1_000_000 / dt))
         })
         .collect();
     let mut v = [i128::from(v[0]), i128::from(v[1])];
@@ -496,7 +511,12 @@ impl Skill for Route {
             self.mark(host, body, None);
             return Progress::Going;
         }
-        let shoulder = host.field(body, F_SHOULDER).is_some();
+        // The shoulder turn (N10's rung): the still bodies the world named as it began, to squeeze past (E16).
+        let past: Option<Vec<Id>> = host.field(body, F_SHOULDER).map(|v| match v {
+            Value::Array(a) => a.iter().filter_map(|i| read_id(i).ok()).collect(),
+            _ => Vec::new(),
+        });
+        let shoulder = past.is_some();
         let Some(leg) = self.legs.get(self.leg).copied() else {
             // Sent to a point: it stands until its route is given.
             if self.spot && self.route == 0 {
@@ -761,31 +781,25 @@ impl Skill for Route {
             }
             _ => self.slide.and_then(|(t, k)| (k > 1).then_some((t, k - 1))),
         };
-        // The shoulder turn (N10's rung, E16): a body at rest no longer holds it either, so one standing in the only
-        // way (a doorway, the one gap, by its own order to stay) never walls it in: it squeezes past. Bodies on the
-        // move keep their space.
-        let passing: Vec<Near>;
-        let guarded: &[Near] = if shoulder {
-            passing = near
-                .iter()
-                .filter(|n| {
-                    !self
-                        .resting
-                        .iter()
-                        .any(|(i, k)| *i == n.id && *k >= STANDING)
-                })
-                .copied()
-                .collect();
-            &passing
-        } else {
-            &near
+        // The shoulder turn (N10's rung, E16): a body the world named as it began keeps one radius and slack, not two,
+        // so one standing still in the only way (a doorway, the one gap, by its own order to stay) never walls it in:
+        // it squeezes past, through the widest gap there is. One on the move again, one within CROWDED of the walk's
+        // last goal (no walk ends inside a Soul standing on its goal), every other body and every carried load keep
+        // their whole space.
+        let goal = (leg.link.is_none() && self.leg + 1 == self.legs.len()).then_some(leg.to);
+        let squeezed = |n: &Near| {
+            past.as_ref().is_some_and(|ids| ids.contains(&n.id))
+                && n.velocity.x == 0
+                && n.velocity.z == 0
+                && goal.is_none_or(|g| len([n.position.x - g.x, n.position.z - g.z]) > CROWDED)
         };
-        let step = guard(
+        let squeeze = self.room + SLACK;
+        let step = guard_by(
             [p.x, p.z],
             want,
             self.tick,
-            guarded,
-            room,
+            &near,
+            |n| if squeezed(n) { squeeze } else { room },
             self.slide.map(|(t, _)| t),
         );
         // Held: the guard cut its step to under half (read at the leg's end next tick, A2-2).

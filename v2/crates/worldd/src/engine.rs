@@ -2346,6 +2346,8 @@ impl Engine {
         // The bodies alone in the way of a side no wall or part blocks (E16): named in the refusal, so the holder
         // can ask them to stand clear.
         let mut in_way: BTreeSet<Id> = BTreeSet::new();
+        // A side only the holder's own body stands on: it steps aside and lays it down again.
+        let mut own_only = false;
         // The part's own footprint where it stands, and its own fixed outlines, which it leaves.
         let (lx, lz) = (
             load.half_length.max(load.half_width),
@@ -2436,8 +2438,9 @@ impl Engine {
                 .filter(|(_, b)| overlap(&sweep, b))
                 .map(|(id, _)| *id)
                 .collect();
-            let clear =
-                !walled && standing.is_empty() && !own.as_ref().is_some_and(|b| overlap(&rest, b));
+            let mine = own.as_ref().is_some_and(|b| overlap(&rest, b));
+            let clear = !walled && standing.is_empty() && !mine;
+            own_only |= !walled && standing.is_empty() && mine;
             if !walled {
                 in_way.extend(standing);
             }
@@ -2445,20 +2448,44 @@ impl Engine {
         });
         let Some((c0, along)) = free else {
             // E16: a refusal names a next step. Bodies standing where it would lie are named (they may be asked to
-            // stand clear); with every side walled, another Soul joining the crew can take it down with this one.
-            let detail = if in_way.is_empty() {
-                format!(
-                    "{}: no side clear of walls and parts; next: ask another Soul to join this crew, then take it \
-                     down together (part:unseat)",
-                    show(part)
-                )
-            } else {
-                let who: Vec<String> = in_way.iter().map(|b| show(*b)).collect();
+            // stand clear): two at most, and only those everyone may see, the rest counted, so it fits an answer. A
+            // side only the holder stands on: it steps aside. With every side walled, another Soul joining the crew
+            // can take it down with this one.
+            let detail = if !in_way.is_empty() {
+                let seen = |b: &Id| {
+                    tree.handle(*b)
+                        .and_then(|h| tree.node(h))
+                        .is_some_and(|n| n.audience() == replica::world_model::Audience::Everyone)
+                };
+                let mut who: Vec<String> = in_way
+                    .iter()
+                    .filter(|b| seen(b))
+                    .take(2)
+                    .map(|b| show(*b))
+                    .collect();
+                let more = in_way.len() - who.len();
+                match (who.is_empty(), more) {
+                    (_, 0) => {}
+                    (true, 1) => who.push("someone".to_owned()),
+                    (true, _) => who.push(format!("{more} others")),
+                    (false, _) => who.push(format!("{more} more")),
+                }
                 format!(
                     "{}: {} stand{} where it would lie; next: ask them to stand clear, then lay it down again",
                     show(part),
                     who.join(" and "),
-                    if who.len() == 1 { "s" } else { "" }
+                    if in_way.len() == 1 { "s" } else { "" }
+                )
+            } else if own_only {
+                format!(
+                    "{}: its holder stands where it would lie; next: step aside, then lay it down again",
+                    show(part)
+                )
+            } else {
+                format!(
+                    "{}: no side clear of walls and parts; next: ask another Soul to join this crew, then take it \
+                     down together (part:unseat)",
+                    show(part)
                 )
             };
             return Err(refusal("laydown.no-room", detail));

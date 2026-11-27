@@ -1738,22 +1738,9 @@ fn ringed(gap: bool, staying: bool) -> Result<Bodies, replica::effects::Refusal>
         if gap { in_the_gap() } else { at2() },
         Quat::IDENTITY,
     )?;
-    let mut ring = vec![
-        (424_264, 424_264),
-        (0, 600_000),
-        (-424_264, 424_264),
-        (-600_000, 0),
-        (-424_264, -424_264),
-        (0, -600_000),
-        (424_264, -424_264),
-    ];
-    if !gap {
-        ring.push((600_000, 0));
-    }
     let mut places = Vec::new();
-    for (k, (dx, dz)) in ring.into_iter().enumerate() {
+    for (k, at) in ring(gap).into_iter().enumerate() {
         let who = id(40 + k as u64);
-        let at = Vec3::new(at1().x + dx, 0, at1().z + dz);
         places.push((
             who,
             town.surfaces[&ground].place(who, frame, at, Quat::IDENTITY)?,
@@ -1770,6 +1757,25 @@ fn ringed(gap: bool, staying: bool) -> Result<Bodies, replica::effects::Refusal>
         b.runner.staying.insert(w2());
     }
     Ok(b)
+}
+
+/// Where the ring's bodies stand: 0.6 m round the first walker, every way but east when `gap`.
+fn ring(gap: bool) -> Vec<Vec3> {
+    let mut ring = vec![
+        (424_264, 424_264),
+        (0, 600_000),
+        (-424_264, 424_264),
+        (-600_000, 0),
+        (-424_264, -424_264),
+        (0, -600_000),
+        (424_264, -424_264),
+    ];
+    if !gap {
+        ring.push((600_000, 0));
+    }
+    ring.into_iter()
+        .map(|(dx, dz)| Vec3::new(at1().x + dx, 0, at1().z + dz))
+        .collect()
 }
 
 fn ring_with_a_still_body() -> Result<Bodies, replica::effects::Refusal> {
@@ -1930,7 +1936,9 @@ fn e16_a_soul_staying_in_the_only_way_is_squeezed_past_at_the_shoulder_turn() {
     );
     assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
     assert_eq!(at(&r, w2()), in_the_gap(), "never moved");
-    assert_walked(&run, w1());
+    let mut stood = ring(true);
+    stood.push(in_the_gap());
+    assert_walked(&run, w1(), &stood);
     run.world.stop();
 }
 
@@ -1957,15 +1965,34 @@ fn e16_a_walker_ringed_in_by_souls_staying_squeezes_out() {
         "the walker arrived: {off} µm off"
     );
     assert_eq!(at(&r, w2()), at2(), "the second body where it stood");
-    assert_walked(&run, w1());
+    assert_walked(&run, w1(), &ring(false));
     run.world.stop();
 }
 
-/// Every move `who` made in the log, sample to sample, is at most walking speed: nothing teleports (E16).
-fn assert_walked(run: &Run, who: Id) {
+/// `who`'s path in the log (E16). Sample to sample it moves no further than walking speed allows over the time it
+/// could have walked: one tick after a sample standing still (a jump after a stand is caught), at most a keyframe's
+/// span after one walking. Nothing teleports. And it never comes nearer one radius and slack, the shoulder turn's
+/// squeeze, to any of `stood` (the bodies standing still in its way): it passes them, never through them.
+fn assert_walked(run: &Run, who: Id, stood: &[Vec3]) {
+    const TICK: i128 = 50_000;
+    let speed = i128::from(skills::walk::SPEED);
+    let every = i128::from(worldd::bodies::KEYFRAME_US).div_ceil(TICK) * TICK;
+    let near = |q: Vec3, p: Vec3, s: Vec3| {
+        // The distance from `s` to the segment from `q` to `p`, on the plan.
+        let (ax, az) = (i128::from(p.x - q.x), i128::from(p.z - q.z));
+        let (bx, bz) = (i128::from(s.x - q.x), i128::from(s.z - q.z));
+        let l2 = ax * ax + az * az;
+        let t = if l2 == 0 {
+            0
+        } else {
+            ((ax * bx + az * bz) * 1_000_000 / l2).clamp(0, 1_000_000)
+        };
+        let (cx, cz) = (bx - ax * t / 1_000_000, bz - az * t / 1_000_000);
+        (cx * cx + cz * cz).isqrt()
+    };
     let log = run.store.0.lock().unwrap().bytes.clone();
-    let mut last: Option<(i64, Vec3)> = None;
-    let (mut fastest, mut samples) = (0i128, 0);
+    let mut last: Option<(i64, Vec3, Vec3, Frame)> = None;
+    let (mut fastest, mut samples, mut closest) = (0i128, 0, i128::MAX);
     for rec in recover(&log).unwrap().records {
         if sim::recorder::is_input(&rec) {
             continue;
@@ -1980,22 +2007,48 @@ fn assert_walked(run: &Run, who: Id) {
                     continue;
                 }
                 let p = h.pose.position;
-                if let Some((t, q)) = last
-                    && h.at > t
-                {
-                    let d = (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt();
-                    fastest = fastest.max(d * 1_000_000 / i128::from(h.at - t));
+                let from = match last {
+                    Some((t, q, v, f)) if h.at > t && f == h.pose.frame => {
+                        let d =
+                            (i128::from(p.x - q.x).pow(2) + i128::from(p.z - q.z).pow(2)).isqrt();
+                        let span = i128::from(h.at - t);
+                        let walked = if v == Vec3::ZERO {
+                            TICK
+                        } else {
+                            span.min(every)
+                        };
+                        let most = speed * walked / 1_000_000 + 2_000;
+                        assert!(
+                            d <= most,
+                            "at {} µs: {d} µm in one sample, {span} µs after the last (walking: {}); at most {most}",
+                            h.at,
+                            v != Vec3::ZERO
+                        );
+                        fastest = fastest.max(d * 1_000_000 / span);
+                        q
+                    }
+                    _ => p,
+                };
+                for s in stood {
+                    closest = closest.min(near(from, p, *s));
                 }
-                last = Some((h.at, p));
+                last = Some((h.at, p, h.linear, h.pose.frame));
                 samples += 1;
             }
         }
     }
-    println!("E16 {samples} motion samples, fastest {fastest} um/s");
+    println!(
+        "E16 {samples} motion samples, fastest {fastest} um/s, closest to a body standing {closest} um"
+    );
     assert!(samples > 1, "it moved");
     assert!(
-        fastest <= 2_000_000,
+        fastest <= speed + 2_000,
         "never faster than walking: {fastest} um/s"
+    );
+    let squeeze = i128::from(skills::route::ROOM + skills::route::SLACK);
+    assert!(
+        closest >= squeeze - 5_000,
+        "past the bodies standing, never through them: {closest} um from one (the squeeze keeps {squeeze})"
     );
 }
 

@@ -20,8 +20,9 @@
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
 //!   again once from where it stands; at 5 s each still body in its way (within [`NEAR`] of it, or within [`ROOM`]
 //!   of the far end of the link it waits for) that has no order to stay there is sent `make-way`, and the world steps
-//!   it aside ([`Rung::StepAside`]); at 9 s it passes with a shoulder turn (no neighbour pushes it, and it squeezes
-//!   past a body at rest: `skills::route`, E16); at 15 s its order ends by name, `goal-unreachable`, naming what it
+//!   it aside ([`Rung::StepAside`]); at 9 s it passes with a shoulder turn (no neighbour pushes it, and it may squeeze
+//!   past the still bodies within [`NEAR`] of it then, named in `F_SHOULDER`: `skills::route`, E16); at 15 s its
+//!   order ends by name, `goal-unreachable`, naming what it
 //!   waited for and a next step ([`UNREACHABLE_NEXT`]). Each is a [`Record`] in [`Ladder::log`].
 //! - **Still bodies** (Gene's decision, 0.132 A2-3: no Soul is left stuck). When the only way is blocked, the world
 //!   moves a still body aside by the smallest step that clears the walker's line: across that line, to
@@ -874,11 +875,34 @@ impl Ladder {
             }
             if idle >= SHOULDER && c.rung < 3 {
                 c.rung = 3;
+                // E16: the bodies it may squeeze past, named once as the turn begins: those within NEAR of it standing
+                // still with no walk of their own (staying by their own order, or with none), not in a queue, not
+                // being walked out or carried across a link. A walker held by its own guard, a carried load and
+                // anyone who comes later keep their whole space.
+                let (node, here) = crate::index::place_of(&body);
+                let past: Vec<Value> = runner
+                    .controller
+                    .near()
+                    .bodies_within(node, here, NEAR)
+                    .into_iter()
+                    .filter(|&(id, _)| {
+                        id != who
+                            && (runner.staying.contains(&id) || !running.contains(&id))
+                            && !self.outs.contains(&id)
+                            && !runner.controller.carried(id)
+                            && waiting(runner.fields.get(&id)).is_none()
+                            && runner
+                                .controller
+                                .body(id)
+                                .is_some_and(|b| b.linear == Vec3::ZERO)
+                    })
+                    .map(|(id, _)| id.to_value())
+                    .collect();
                 runner
                     .fields
                     .entry(who)
                     .or_default()
-                    .insert(F_SHOULDER, Value::Uint(1));
+                    .insert(F_SHOULDER, Value::Array(past));
                 self.record(now, who, order, Rung::Shoulder);
             } else if idle >= MAKE_WAY && c.rung < 2 {
                 c.rung = 2;
