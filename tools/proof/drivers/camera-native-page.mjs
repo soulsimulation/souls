@@ -10,6 +10,9 @@ export function suppliedNativeStream(html) {
   if (typeof stream !== 'string' || !/^\/s\/[A-Za-z0-9._/-]+\/$/.test(stream) || stream.split('/').some(s => s === '.' || s === '..')) throw Error('native-document-stream-invalid');
   return stream;
 }
+export function displayedNativeTick(value) {
+  return typeof value === 'string' && value.trim().length > 0 && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
 export function beforeNavigation({ page, base }) {
   const state = { documents: [], responses: [] }; observations.set(page, state);
   const response = value => {
@@ -52,7 +55,7 @@ export default async function ({ page, paths, check, base, signal }) {
   const until = Date.now() + 10000;
   while (!active() && Date.now() < until) { signal?.throwIfAborted(); await page.waitForTimeout(50); }
   check('native-stream-selected', active());
-  check('native-displayed-tick', /^\d+$/.test(await page.locator('.viewer-history').getAttribute('data-viewer-tick') ?? ''));
+  check('native-displayed-tick', displayedNativeTick(await page.locator('.viewer-history').getAttribute('data-viewer-tick')));
   let input = 0;
   const snapshot = async name => writeFileSync(join(paths.dir, `accessibility-before-${++input}-${name}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
   await nativeCameraMode(page, 'manual', snapshot);

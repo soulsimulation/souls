@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { suppliedNativeStream, nativeCameraMode, beforeNavigation } from './camera-native-page.mjs';
+import { suppliedNativeStream, nativeCameraMode, beforeNavigation, displayedNativeTick } from './camera-native-page.mjs';
 import { EventEmitter } from 'node:events';
 test('native stream comes from the supplied document config, not unrelated mentions or executable text', () => {
   assert.equal(suppliedNativeStream('<head><script>window.__simConfig={"v2Stream":"/s/fixture/live/"}</script></head>'), '/s/fixture/live/');
@@ -24,4 +24,9 @@ test('responsive camera input uses visible direct controls or Menu then Camera, 
     assert.equal(clicks.at(-1), `click:button:${mode === 'manual' ? 'Free' : 'Broadcast'}`);
     for (let i = 0; i < events.length; i++) if (events[i].startsWith('click:')) assert.match(events[i - 1], /^snapshot:/);
   }
+});
+
+test('depicted native ticks may be fractional, but absent, nonfinite or negative values are not readiness', () => {
+  for (const tick of ['0', '42.25', '1024.0001']) assert.equal(displayedNativeTick(tick), true);
+  for (const tick of [null, '', ' ', 'Infinity', 'NaN', '-0.1', 'not-a-tick']) assert.equal(displayedNativeTick(tick), false);
 });
