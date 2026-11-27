@@ -7,8 +7,8 @@
 //!   generic layer alone: what the batch created is removed (a link it made, unlinked), what it removed is created
 //!   again with the same ids, kinds, poses, audiences, fields and links, and what it moved or set is moved or set back.
 //!   A change with no generic inverse (a field the batch added, since T6 has no unset, unless its reader has a value
-//!   that reads as unset, `replica::edit::claims::neutral`; a node in motion; a body that is not changes; an unlink)
-//!   makes that batch's undo refused `undo.no-inverse`.
+//!   that reads as unset, `replica::edit::claims::neutral` and on the world's root `replica::sky::unset_on_world`; a
+//!   node in motion; a body that is not changes; an unlink) makes that batch's undo refused `undo.no-inverse`.
 //! - **Things, never a game (B10, #4239).** An activity node in what a batch removed (a game under its board) is
 //!   left out of the before-values, with its membership links and its members' role links on the node it was under:
 //!   undoing the board's removal brings back the board, its fields and its seats, and no activity or role link. The
@@ -379,8 +379,14 @@ fn inverse(before: &Before, tree: &Tree, part: &Part) -> Result<Vec<Write>, Refu
         }
         for k in n.fields().keys().filter(|k| !w.fields.contains_key(k)) {
             // A field the batch added is set back to the value that reads as unset, where its reader has one (a
-            // claim list, a plan); any other has no inverse, since T6 has no unset.
-            let Some(to) = replica::edit::claims::neutral(*k) else {
+            // claim list, a plan; on the world's root, a creator's weather end or strike); any other has no inverse,
+            // since T6 has no unset.
+            let world = || {
+                n.parent()
+                    .is_none()
+                    .then(|| replica::sky::unset_on_world(*k))
+            };
+            let Some(to) = replica::edit::claims::neutral(*k).or_else(|| world().flatten()) else {
                 return no_inverse(format!("{id:?} field {k} was added, and T6 has no unset"));
             };
             out.push(Write {

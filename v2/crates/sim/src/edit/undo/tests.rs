@@ -502,6 +502,21 @@ fn a4_a_batch_that_added_a_claim_list_is_undone_to_the_empty_list() {
         w.undo(&mut ok()).expect_err("no inverse").name,
         "undo.no-inverse"
     );
+    // Nor a sky field's number on a thing: its unset is the world root's alone (`sky::unset_on_world`).
+    let mut w = W::new(KEPT_MOST);
+    let (_, cr, _, _) = w.furnish(None);
+    w.edit(
+        vec![Op::Set {
+            node: Ref::Node(cr),
+            field: replica::sky::F_WEATHER_UNTIL,
+            to: Value::Uint(1),
+        }],
+        None,
+    );
+    assert_eq!(
+        w.undo(&mut ok()).expect_err("no inverse on a thing").name,
+        "undo.no-inverse"
+    );
 }
 
 /// 0.134 R4: a recolour is undone to the colour before it, and the first one to no tint (the empty list); redo gives

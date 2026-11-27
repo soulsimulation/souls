@@ -8775,6 +8775,9 @@ mod tests {
             offsets: vec![(0, 0)],
         };
         cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        // Ten-minute ticks, so the run reaches the weather's next change after the undo.
+        cfg.tick = Duration::from_secs(600);
+        let tick_us: i64 = 600_000_000;
         let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
         let until: i64 = 40 * 3_600_000_000;
         let storm: Vec<Op> = [
@@ -8844,8 +8847,17 @@ mod tests {
         assert_eq!(kind, 1, "the storm is set: {reason:?}");
         let (kind, reason, now) = run(intent(3, now, parameters_of(&Asked::Undo)), 6);
         assert_eq!(kind, 1, "the storm is undone: {reason:?}");
-        let (kind, reason, _) = run(intent(4, now, parameters_of(&Asked::Redo)), 8);
+        let (kind, reason, now) = run(intent(4, now, parameters_of(&Asked::Redo)), 8);
         assert_eq!(kind, 1, "and redone: {reason:?}");
+        let (kind, reason, _) = run(intent(5, now, parameters_of(&Asked::Undo)), 10);
+        assert_eq!(kind, 1, "and undone again: {reason:?}");
+        // Then the clock runs on past the weather's next change before the storm (read below from the log).
+        let run_to = |tick: i64| {
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+        };
+        run_to(12 * 3600_000_000 / tick_us);
         world.stop();
         // The world node's fields and E6's weather timer: before the storm, after its undo, after the redo.
         let at = |live: &Replica| {
@@ -8867,14 +8879,13 @@ mod tests {
                 continue;
             }
             let part = replica::effects::Part::read(&bytes).unwrap();
-            let named: Vec<(Actor, String)> = part
+            let named: Vec<(Actor, String, i64)> = part
                 .effects
                 .iter()
                 .flat_map(|e| {
-                    e.events
-                        .iter()
-                        .flatten()
-                        .map(move |ev| (e.envelope.actor, ev.name.as_str().to_owned()))
+                    e.events.iter().flatten().map(move |ev| {
+                        (e.envelope.actor, ev.name.as_str().to_owned(), e.envelope.at)
+                    })
                 })
                 .collect();
             // Snapshots just before the storm's part, the undo's and the redo's (each by the creator).
@@ -8889,7 +8900,7 @@ mod tests {
             live.apply(&part).unwrap();
         }
         snaps.push(at(&live));
-        let [before, stormy, undone, redone] = &snaps[..] else {
+        let [before, stormy, undone, redone, _] = &snaps[..] else {
             panic!(
                 "the storm, its undo and its redo: {} snapshots",
                 snaps.len()
@@ -8942,8 +8953,8 @@ mod tests {
         );
         let mine: Vec<&str> = log
             .iter()
-            .filter(|(a, _)| *a == Actor::Creator(creator))
-            .map(|(_, n)| n.as_str())
+            .filter(|(a, ..)| *a == Actor::Creator(creator))
+            .map(|(_, n, _)| n.as_str())
             .collect();
         assert!(
             mine.contains(&sim::edit::undo::EV_UNDONE)
@@ -8954,6 +8965,33 @@ mod tests {
         assert!(
             first(sim::edit::undo::EV_UNDONE) < first(sim::edit::undo::EV_REDONE),
             "the undo before the redo: {mine:?}"
+        );
+        // Live, after the second undo: E6's table resumes at the next change it held before the storm, and nothing
+        // fires at the storm's end.
+        let next = sky::as_int(&before.0[&sky::F_WEATHER_NEXT]).unwrap();
+        assert!(
+            10 * tick_us < next && next < 12 * 3600_000_000 && next < until,
+            "the run passes the old next change {next} µs, before the storm's end"
+        );
+        let fires: Vec<i64> = log
+            .iter()
+            .filter(|(a, n, _)| *a == Actor::World && n == sky::EV_WEATHER)
+            .map(|(.., at)| *at)
+            .collect();
+        assert!(
+            fires.contains(&next),
+            "the table resumes at {next}: {fires:?}"
+        );
+        assert!(
+            !fires.contains(&until),
+            "nothing at the storm's end: {fires:?}"
+        );
+        let tree = live.tree();
+        let f = tree.node(tree.root()).unwrap().fields();
+        assert_ne!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap())),
+            "no storm"
         );
     }
 
