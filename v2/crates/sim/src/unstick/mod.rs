@@ -174,9 +174,7 @@ pub fn aside(
                 at.z + (i128::from(nz) * i128::from(step) / i128::from(n)) as i64,
             );
             // Free first: in a crowd most spots are taken, and the ground's nearest point is the dearer question.
-            if taken.iter().all(|&t| len(t, to) >= apart)
-                && world.nearest(node, to).is_some_and(|q| len(q, to) == 0)
-            {
+            if taken.iter().all(|&t| len(t, to) >= apart) && world.legal(node, to) {
                 return Some(to);
             }
         }
@@ -275,6 +273,10 @@ pub trait Unstick: World {
     fn far_end(&self, link: Id, node: Id, at: Vec3) -> Option<(Id, Vec3)>;
     /// The nearest legal point on `node` to `at` (µm): `at` itself when it is legal.
     fn nearest(&self, node: Id, at: Vec3) -> Option<Vec3>;
+    /// Whether `at` is legal on `node`: its own nearest legal point. A world may answer it faster, never otherwise.
+    fn legal(&self, node: Id, at: Vec3) -> bool {
+        self.nearest(node, at).is_some_and(|q| len(q, at) == 0)
+    }
 }
 
 /// One rung climbed, or the last rung walked.
@@ -961,7 +963,9 @@ impl Ladder {
                         let placed = placed.get_or_insert_with(|| {
                             let mut by: BTreeMap<Id, Vec<(Id, Vec3)>> = BTreeMap::new();
                             for b in runner.controller.bodies() {
-                                by.entry(node_of(b)).or_default().push((b.id, b.pose.position));
+                                by.entry(node_of(b))
+                                    .or_default()
+                                    .push((b.id, b.pose.position));
                             }
                             by
                         });
@@ -1291,11 +1295,82 @@ mod tests {
             }
             // Free some spots at random, so some cases step aside.
             taken.retain(|_| next(2) != 0);
-            let near: Vec<Vec3> = taken.iter().copied().filter(|&t| len(t, at) <= bound).collect();
+            let near: Vec<Vec3> = taken
+                .iter()
+                .copied()
+                .filter(|&t| len(t, at) <= bound)
+                .collect();
             let whole = aside(&Open, node, at, line, &taken);
             assert_eq!(aside(&Open, node, at, line, &near), whole, "case {case}");
             found += usize::from(whole.is_some());
         }
         assert!(found > 100, "the cases step bodies aside ({found})");
+    }
+
+    /// A surface's `holds` (its cells, then its triangles) says a point is on the ground exactly when
+    /// `exits::piece_of` (every triangle) does: inside, outside, on edges and corners, across two cells, with triangles
+    /// wound either way and one of no area lying inside another.
+    #[test]
+    fn a_surface_holds_what_its_pieces_hold() {
+        let node = Id::new(replica::ids::Scope([7; 16]), 2).unwrap();
+        let piece = |vertices: Vec<[i32; 3]>, triangles: Vec<[u32; 3]>| crate::ground::Piece {
+            outline: vec![vertices.clone()],
+            vertices,
+            triangles,
+            ground: Ground::Dry,
+        };
+        let pieces = vec![
+            // A square across the 16 m cells' corner, one triangle wound each way.
+            piece(
+                vec![
+                    [10_000, 0, 10_000],
+                    [22_000, 0, 10_000],
+                    [22_000, 0, 22_000],
+                    [10_000, 0, 22_000],
+                ],
+                vec![[0, 1, 2], [0, 3, 2]],
+            ),
+            // A thin wedge, and a triangle of no area along a line inside the square.
+            piece(
+                vec![
+                    [-3_000, 0, -3_000],
+                    [9_000, 0, -2_000],
+                    [-2_000, 0, 7_000],
+                    [12_000, 0, 12_000],
+                    [14_000, 0, 14_000],
+                    [18_000, 0, 18_000],
+                ],
+                vec![[0, 1, 2], [3, 4, 5]],
+            ),
+        ];
+        let surface = crate::mover::Surface::new(node, pieces.clone());
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * m as u64 + 1)) as i64 - m
+        };
+        let corners = [
+            -3_000, 9_000, -2_000, 7_000, 10_000, 12_000, 14_000, 16_000, 18_000, 22_000,
+        ];
+        let (mut on, mut off) = (0, 0);
+        for case in 0..20_000 {
+            // Points anywhere, and points on the grid of the corners (edges and corners exactly).
+            let at = if case % 2 == 0 {
+                Vec3::new(
+                    8_000_000 + next(16_000_000),
+                    0,
+                    8_000_000 + next(16_000_000),
+                )
+            } else {
+                let c = |k: i64| corners[k.unsigned_abs() as usize % corners.len()] as i64 * 1000;
+                Vec3::new(c(next(20)), 0, c(next(20)))
+            };
+            let held = crate::ground::exits::piece_of(&pieces, at).is_some();
+            assert_eq!(surface.holds([at.x, at.z]), held, "{at:?}");
+            if held { on += 1 } else { off += 1 }
+        }
+        assert!(on > 1000 && off > 1000, "{on} on, {off} off");
     }
 }

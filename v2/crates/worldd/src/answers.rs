@@ -10392,7 +10392,8 @@ mod state_hash_kept_tests {
         let id = |n| Id::new(Scope([0x5b; 16]), n).unwrap();
         let ground = id(1);
         let mut kept = PoseRows::new();
-        let mut bodies: Vec<(Id, Pose)> = (10..30).map(|n| (id(n), pose(ground, n as i64))).collect();
+        let mut bodies: Vec<(Id, Pose)> =
+            (10..30).map(|n| (id(n), pose(ground, n as i64))).collect();
         let tree = [
             (Audience::Everyone, Hash::of(Purpose::Fixture, b"a")),
             (Audience::Of(id(2)), Hash::of(Purpose::Fixture, b"b")),
@@ -10411,7 +10412,11 @@ mod state_hash_kept_tests {
                 _ => {}
             }
             let t = if tick % 2 == 0 { &tree[..1] } else { &tree[..] };
-            assert_eq!(state_hash_kept(t, &bodies, &mut kept), state_hash(t, &bodies), "tick {tick}");
+            assert_eq!(
+                state_hash_kept(t, &bodies, &mut kept),
+                state_hash(t, &bodies),
+                "tick {tick}"
+            );
             assert!(kept.len() <= bodies.len().max(20) + 1);
         }
     }
