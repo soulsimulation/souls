@@ -363,9 +363,23 @@ impl<S: Store> Worlds<S> {
             return Ok(false);
         }
         let (_, rows) = read_rows(&inner.dir.store)?;
-        Ok(!rows
+        if rows
             .iter()
-            .any(|r| r.get("name") == row.get("name") && r.get("lineage") == row.get("lineage")))
+            .any(|r| r.get("name") == row.get("name") && r.get("lineage") == row.get("lineage"))
+        {
+            return Ok(false);
+        }
+        // A name record of this lineage still there (a stop between the row's removal and the record's): the click
+        // goes on, lists the row again, and a later ask ends it whole.
+        let Some(name) = row.get("name").and_then(Json::as_str) else {
+            return Ok(true);
+        };
+        Ok(match inner.dir.store.get(&NameRecord::key(name))? {
+            None => true,
+            Some(o) => NameRecord::read(&o.bytes).map_or(true, |n| {
+                Some(to_hex(&n.lineage).as_str()) != row.get("lineage").and_then(Json::as_str)
+            }),
+        })
     }
 
     /// Rule 10 for one row: whether its create ended now. A row that is ready, has no `ready: false`, is within

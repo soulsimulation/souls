@@ -91,6 +91,16 @@ fn placed(root: &std::path::Path, s: &Start) -> R<()> {
         .or_else(|_| refuse("start-failed", "placement status is unreadable"))?;
     for e in entries {
         let e = e.or_else(|_| refuse("start-failed", "placement status is unreadable"))?;
+        // Only a request's own status (64 hex characters), as the placement reads them: never its temporary files.
+        let file = e.file_name();
+        let file = file.to_string_lossy();
+        if file.len() != 64
+            || !file
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            continue;
+        }
         let Ok(bytes) = std::fs::read(e.path()) else {
             return refuse("start-failed", "placement status is unreadable");
         };
@@ -171,27 +181,27 @@ mod tests {
             Err("world-starting"),
             "no status: never placed"
         );
-        write("a", "lab-2", true, 0);
+        write(&"a".repeat(64), "lab-2", true, 0);
         assert_eq!(
             probe("lab"),
             Err("world-starting"),
             "another world's status"
         );
-        write("b", "lab", false, 60);
+        write(&"b".repeat(64), "lab", false, 60);
         assert_eq!(
             probe("lab"),
             Err("start-failed"),
             "written a minute ago: may still be placing"
         );
-        write("b", "lab", false, PLACING_FOR + 60);
+        write(&"b".repeat(64), "lab", false, PLACING_FOR + 60);
         assert_eq!(
             probe("lab"),
             Err("world-starting"),
             "an old, unfinished placement"
         );
-        write("c", "lab", true, PLACING_FOR + 60);
+        write(&"c".repeat(64), "lab", true, PLACING_FOR + 60);
         assert_eq!(probe("lab"), Ok(()));
-        std::fs::write(status.join("d"), "{not json").unwrap();
+        std::fs::write(status.join("d".repeat(64)), "{not json").unwrap();
         assert_eq!(
             probe("lab-3"),
             Err("start-failed"),

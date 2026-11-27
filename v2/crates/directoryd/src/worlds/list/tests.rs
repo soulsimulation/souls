@@ -655,6 +655,47 @@ fn rule10_a_placement_that_starts_while_a_create_ends_keeps_it() {
 }
 
 #[test]
+fn rule10_a_name_record_left_without_its_row_is_ended_whole_by_its_click() {
+    // A stop between the row's removal and the name record's: the click lists the row again, then it ends whole.
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    let click = ask("k", "half", "Half");
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    w.create(&click, person(1), 0, t).unwrap_err();
+    let list = store.get(KEY).unwrap().unwrap();
+    store
+        .put(KEY, br#"{"worlds":[]}"#, When::Is(&list.etag))
+        .unwrap();
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN)
+            .unwrap_err()
+            .name,
+        "world-starting",
+        "the name record is still there: the row is listed again"
+    );
+    assert_eq!(w.list().unwrap()["worlds"][0]["name"], "half");
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN).unwrap(), 1);
+    assert!(store.get(&NameRecord::key("half")).unwrap().is_none());
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 1)
+            .unwrap_err()
+            .name,
+        "create-failed"
+    );
+}
+
+#[test]
 fn w16_handoff_hash_only_named_expiry_pending_restart_and_round_trip() {
     let store = Memory::default();
     let gets = AtomicUsize::new(0);
