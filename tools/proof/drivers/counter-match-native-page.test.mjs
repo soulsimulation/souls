@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createRequire } from 'node:module';
+import { readFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { counterDrawTools, counterDrawCheckpoint, counterWorldPage, counterBrowserStop, counterFinalization, proveCounterCreator } from './counter-match-native-page.mjs';
+import { drawnLoad } from '../../playtest/carry-contact/oracle.mjs';
+import { defOf } from '../../entry/look.mjs';
+const THREE=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('three');
+const tools=()=>counterDrawTools({vector:()=>new THREE.Vector3(),drawnLoad});
+function boardFixture(scale=1,color='#bb493e'){
+  const scene=new THREE.Scene(),root=new THREE.Group();root.position.set(3,.2,-2);root.rotation.y=.7;scene.add(root);
+  const fill=new THREE.Mesh(new THREE.BoxGeometry(.665,.036,.064),new THREE.MeshBasicMaterial({color:'#d9b64c'}));
+  fill.userData.role='fill';fill.userData.looksRest={scale:[1,1,1]};fill.position.y=.748;fill.scale.x=scale;root.add(fill);
+  const light=new THREE.Mesh(new THREE.BoxGeometry(.1,.014,.08),new THREE.MeshBasicMaterial({color}));
+  light.userData.role='light';light.userData.looksRest={scale:[1,1,1]};light.position.set(0,.737,.2);root.add(light);scene.updateMatrixWorld(true);
+  return{scene,root,fill,light,layer:{drawn:new Map([['table',{obj:root}]]),instancer:{pools:new Map()}}};
+}
+
+test('template projects exact current authored definition/state/table and retains the colliding top',()=>{
+  const entry=JSON.parse(readFileSync(new URL('../../../content/kinds/turn_games/counter_match.json',import.meta.url)));
+  const template=JSON.parse(readFileSync(new URL('../../../worlds/templates/counter-match-rehearsal.json',import.meta.url)));
+  assert.deepEqual(template.batches[0].ops[0].def,defOf(entry));assert.equal(template.batches[0].ops[0].def.make.args.shapes[0].collide,true);
+  assert.deepEqual(template.batches[0].ops[1],{op:'place',def:'core/counter_match@1',name:'counter-match',p:[3,0,0]});
+});
+
+test('actual submitted fill width/scale and light color survive root rotation and zero fill',()=>{
+  for(const scale of [1,.857,0]){
+    const f=boardFixture(scale,scale===.857?'#3d6baf':'#bb493e'),read=tools()(f.layer,f.scene,'table');
+    assert(Math.abs(read.fill.spanX-.665*scale)<1e-6);assert.equal(read.fill.relativeScale[0],scale);
+    assert.deepEqual(read.light.materials,[scale===.857?'3d6baf':'bb493e']);assert.equal(read.source,'visible-root');
+    assert(read.fill.matrices.every(m=>m.matrix.length===16&&m.vertices>0));
+  }
+});
+
+test('hidden/material-excluded/submitted-range failures cannot supply visual-state evidence',()=>{
+  const f=boardFixture();f.fill.visible=false;assert.throws(()=>tools()(f.layer,f.scene,'table'),/hidden or detached/);f.fill.visible=true;
+  f.light.material.visible=false;assert.throws(()=>tools()(f.layer,f.scene,'table'),/submitted geometry\/material/);f.light.material.visible=true;
+  f.fill.geometry.setDrawRange(0,0);assert.throws(()=>tools()(f.layer,f.scene,'table'),/submitted geometry\/material/);
+});
+
+test('unexpected instancing validates the actual slot but fails closed without role association',()=>{
+  const f=boardFixture(),mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial(),2);
+  mesh.setMatrixAt(0,new THREE.Matrix4().makeTranslation(99,0,0));mesh.setMatrixAt(1,new THREE.Matrix4().makeTranslation(3,0,0));mesh.count=2;f.scene.add(mesh);f.scene.updateMatrixWorld(true);
+  f.layer.drawn.set('table',{obj:new THREE.Object3D(),inst:'pool',shown:true});
+  f.layer.instancer.pools.set('pool',{slots:new Map([['table',1]]),parts:[{local:new THREE.Matrix4()}],meshes:[mesh]});
+  assert.throws(()=>tools()(f.layer,f.scene,'table'),/unexpected instanced role identity unavailable/);
+  f.layer.instancer.pools.get('pool').slots.set('table',3);assert.throws(()=>tools()(f.layer,f.scene,'table'),/instance part unavailable/);
+});
+
+const sample=(n,remaining=6,turn='second')=>({tick:n*5,frame:n,currentCanvas:true,bodies:[{activity:'idle'},{activity:'idle'},{activity:'idle'}],state:{remaining,turn},board:{fill:{relativeScale:[Math.trunc(remaining*1000/7)/1000,1,1],spanX:.665*Math.trunc(remaining*1000/7)/1000},light:{materials:[turn==='first'?'bb493e':'3d6baf']}}});
+test('state checkpoints reject stale clocks, stale visual fill/tint and missing people',()=>{
+  assert(counterDrawCheckpoint([sample(1),sample(2)],{remaining:6,turn:'second'}));
+  assert.throws(()=>counterDrawCheckpoint([sample(1),sample(1)],{remaining:6,turn:'second'}),/clock/);
+  const bad=sample(2);bad.board.fill.relativeScale[0]=1;assert.throws(()=>counterDrawCheckpoint([sample(1),bad],{remaining:6,turn:'second'}),/fill scale/);
+  bad.board.fill.relativeScale[0]=.857;bad.board.light.materials=['bb493e'];assert.throws(()=>counterDrawCheckpoint([sample(1),bad],{remaining:6,turn:'second'}),/turn light/);
+  const missing=sample(2);missing.bodies.pop();assert.throws(()=>counterDrawCheckpoint([sample(1),missing],{remaining:6,turn:'second'}),/full group/);
+});
+
+test('public world selection rejects foreign and ambiguous pages',()=>{
+  const row={name:'Counter match rehearsal',template:'counter-match-rehearsal',url:'/w/counter/'};
+  assert.equal(counterWorldPage({worlds:[row]},'https://example.test'),'https://example.test/w/counter/');
+  assert.throws(()=>counterWorldPage({worlds:[row,row]},'https://example.test'),/ambiguous/);
+  assert.throws(()=>counterWorldPage({worlds:[{...row,url:'https://other.test/w/counter/'}]},'https://example.test'),/owned origin/);
+});
+
+test('creator uses one returned identity, with no guessed placement fallback or registry edit',async()=>{
+  const calls=[],creator={label:'creator',cli:async(...words)=>{calls.push(words);if(words[0]==='place')return{ok:true,sequence:7,names:{1:'returned-thing'}};
+    if(words.length===1)return{ok:true,kinds:{'eden:counter_match@revision':{}},nodes:[{id:'ground',kind:'souls:ground'}]};
+    return{ok:true,id:words[1],kind:'eden:counter_match@revision',in:[{id:'ground'}],at:[12,0,12]};}};
+  const result=await proveCounterCreator({creator});assert.equal(result.id,'returned-thing');assert.deepEqual(calls.at(-1),['describe','returned-thing']);
+  assert.equal(calls.filter(w=>w[0]==='place').length,1);
+  const bad={...creator,cli:async(...words)=>words[0]==='place'?{ok:false,code:'place-refused'}:creator.cli(...words)};
+  await assert.rejects(proveCounterCreator({creator:bad}),/place refused/);
+});
+
+test('browser stop and host finalization cache failures and preserve command receipts before collection',async()=>{
+  const old=globalThis.window;let stops=0;const original=()=>{},show=()=>{},prototype={show};
+  try{globalThis.window={__counterDrawObserver:{samples:[{measurementMs:2}],failures:[],sampleLimit:361,prototype,show,original,stopRender:()=>stops++}};
+    const result=counterBrowserStop();assert.equal(counterBrowserStop(),result);assert.equal(stops,1);assert.equal(prototype.show,original);
+    const other=()=>{};window.__counterDrawObserver={samples:[],prototype:{show:other},show,original,stopRender:()=>stops++};
+    assert.throws(()=>counterBrowserStop(),/ownership/);assert.throws(()=>counterBrowserStop(),/ownership/);assert.equal(stops,2);assert.equal(window.__counterDrawObserver.prototype.show,other);
+  }finally{globalThis.window=old;}
+  mkdirSync(new URL('../../../.local',import.meta.url),{recursive:true});const dir=mkdtempSync(new URL('../../../.local/counter-source-test-',import.meta.url).pathname);
+  const state={rows:[{receipt:'kept'}],stages:[],observerInstalled:true};let calls=0;
+  const page={evaluate:async()=>{calls++;assert.equal(JSON.parse(readFileSync(join(dir,'command-counter-sequence.json'))).rows[0].receipt,'kept');return undefined;}};
+  counterFinalization(page,{dir},state);await assert.rejects(state.finalize(),/collector missing/);await assert.rejects(state.finalize(),/collector missing/);assert.equal(calls,1);
+});
+
+
+test('intermediate count scale follows integer permille truncation without rerunning the looks evaluator',()=>{
+  assert(counterDrawCheckpoint([sample(1,3,'second'),sample(2,3,'second')],{remaining:3,turn:'second'}));
+  const wrong=sample(2,3,'second');wrong.board.fill.relativeScale[0]=.429;wrong.board.fill.spanX=.665*.429;
+  assert.throws(()=>counterDrawCheckpoint([sample(1,3,'second'),wrong],{remaining:3,turn:'second'}),/fill scale/);
+  assert(counterDrawCheckpoint([sample(1,2,'first'),sample(2,2,'first')],{remaining:2,turn:'first'}));
+});

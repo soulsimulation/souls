@@ -101,7 +101,7 @@ test('declined consent stops before any counter action', async () => {
   assert(!fixture.calls.some(c => c.words[0] === 'act' && c.words[1] !== 'approach:observed-table'));
 });
 
-test('a continuing definite wrong-turn refusal prevents claiming recovery', async () => {
+test('a continuing native wrong-turn refusal prevents claiming recovery', async () => {
   const fixture = publicGame({ staleTurn: true });
   await assert.rejects(run(fixture), /take_2_second: refused/);
   assert.equal(fixture.calls.filter(c => c.words[0] === 'act' && c.words[1] !== 'approach:observed-table').length, 3);

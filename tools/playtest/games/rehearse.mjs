@@ -132,7 +132,7 @@ export async function rehearseCounterMatch({ seats, name, record = () => {}, sle
   };
   if (midRoundDeparture) await depart(second.at(-1), { remaining: 3, turn: 'second' });
   const next = midRoundDeparture ? second[0] : second.at(-1);
-  await use(next, 'take_1_second', secondArgs(next)); await read(second.at(-1), { remaining: 2, turn: 'first' });
+  await use(next, 'take_1_second', secondArgs(next)); await read(next, { remaining: 2, turn: 'first' });
   await use(first, 'take_2_first'); const finished = await read(first, { remaining: 0, turn: 'second', winner: 'first' });
   await use(first, 'restart'); await read(first, { remaining: 7, turn: 'first', winner: null });
   for (const seat of [...second].reverse().filter(s => !departures.includes(s.label))) await depart(seat, { remaining: 7, turn: 'first' });

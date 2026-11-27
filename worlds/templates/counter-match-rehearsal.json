@@ -1,0 +1,318 @@
+{
+  "schema": "genesis/1",
+  "name": "Counter match rehearsal",
+  "description": "One existing counter table on open ground for a three-Soul turn game.",
+  "constants": {
+    "extent": 50,
+    "ground": "land"
+  },
+  "batches": [
+    {
+      "group": "counter-match-rehearsal",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-counter_match",
+            "version": 1,
+            "description": "Offerer first vs 1–3 second; second_stand/second_back/second_far; last wins.",
+            "tags": [
+              "game",
+              "table"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "round": 0.004,
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.7,
+                      0
+                    ],
+                    "size": [
+                      0.95,
+                      0.06,
+                      0.65
+                    ],
+                    "tint": "wood",
+                    "collide": true
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.4,
+                      0.335,
+                      -0.25
+                    ],
+                    "size": [
+                      0.06,
+                      0.67,
+                      0.06
+                    ],
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.4,
+                      0.335,
+                      0.25
+                    ],
+                    "size": [
+                      0.06,
+                      0.67,
+                      0.06
+                    ],
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.4,
+                      0.335,
+                      -0.25
+                    ],
+                    "size": [
+                      0.06,
+                      0.67,
+                      0.06
+                    ],
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.4,
+                      0.335,
+                      0.25
+                    ],
+                    "size": [
+                      0.06,
+                      0.67,
+                      0.06
+                    ],
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.748,
+                      0
+                    ],
+                    "size": [
+                      0.665,
+                      0.036,
+                      0.064
+                    ],
+                    "tint": "gold",
+                    "role": "fill"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.332,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.238,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.142,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      -0.048,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.048,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.142,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.238,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0.332,
+                      0.733,
+                      -0.055
+                    ],
+                    "size": [
+                      0.004,
+                      0.006,
+                      0.024
+                    ],
+                    "tint": "gold"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.737,
+                      0.2
+                    ],
+                    "size": [
+                      0.1,
+                      0.014,
+                      0.08
+                    ],
+                    "tint": "red",
+                    "role": "light"
+                  }
+                ],
+                "looks_table": [
+                  {
+                    "part": "fill",
+                    "field": "remaining",
+                    "do": "scale",
+                    "axis": "x",
+                    "range": [
+                      0,
+                      7
+                    ],
+                    "to": [
+                      0,
+                      1000
+                    ]
+                  },
+                  {
+                    "part": "light",
+                    "field": "turn",
+                    "do": "tint",
+                    "at": {
+                      "first": "#bb493e",
+                      "second": "#3d6baf"
+                    }
+                  }
+                ],
+                "looks_units": {
+                  "remaining": "count"
+                }
+              }
+            },
+            "params": {},
+            "palette": {
+              "wood": "#70482b",
+              "gold": "#d9b64c",
+              "red": "#bb493e",
+              "blue": "#3d6baf"
+            },
+            "state": {
+              "remaining": {
+                "type": "number",
+                "default": 7
+              },
+              "turn": {
+                "type": "enum",
+                "values": [
+                  "first",
+                  "second"
+                ],
+                "default": "first"
+              }
+            },
+            "size": {
+              "box": [
+                1.5,
+                0.9,
+                1.5
+              ]
+            }
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/counter_match@1",
+          "name": "counter-match",
+          "p": [
+            3,
+            0,
+            0
+          ]
+        }
+      ]
+    }
+  ]
+}
