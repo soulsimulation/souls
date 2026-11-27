@@ -116,3 +116,15 @@ test('an edit the world refuses is sent again an op at a time, so each op has it
   assert.equal(plan[2].code, 'edit.would-bury');
   assert.equal(sent[0], 8); // one edit first: 1 + 1 + 1 + 2 + 2 + 1 operations
 });
+
+test('the open ground\'s height is read from the export\'s tiles, as the engine reads it', async () => {
+  const { liftOf } = await import('./named.mjs');
+  // one 64 m tile, 2 x 2 cells: heights 1, 2 m along x at z 0, 3, 4 m at z 64 m (3 x 3 samples, little-endian i32 mm)
+  const h = Buffer.alloc(9 * 4);
+  [1000, 1500, 2000, 2000, 2500, 3000, 3000, 3500, 4000].forEach((v, i) => h.writeInt32LE(v, i * 4));
+  const w = { nodes: [{ id: id(1), fields: { 24: 64000, 25: [[0, 0, { hex: h.toString('hex') }, { hex: '00000000' }]] } }] };
+  const lift = await liftOf(w);
+  assert.equal(lift(0, 0), 1_000_000);
+  assert.equal(lift(32_000_000, 32_000_000), 2_500_000);
+  assert.equal(lift(-1, 0), null);
+});

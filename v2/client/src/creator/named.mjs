@@ -235,10 +235,10 @@ export async function liftOf(world) {
   const g = world.nodes.find((n) => n.fields?.[F.TILES] !== undefined);
   if (!g) return null;
   const { heightAt } = await import('./terrain/terrain.mjs');
-  const tiles = g.fields[F.TILES].map(([tx, tz, h]) => {
+  const tiles = g.fields[F.TILES].map(([tx, tz, h, c]) => {
     const b = Buffer.from(h.hex, 'hex'), heights = new Int32Array(b.length / 4);
     for (let i = 0; i < heights.length; i++) heights[i] = b.readInt32LE(i * 4);
-    return { tx: num(tx), tz: num(tz), heights };
+    return { tx: num(tx), tz: num(tz), heights, classes: new Uint8Array(Buffer.from(c.hex, 'hex')) };
   });
   const tileMm = num(g.fields[F.TILE_SIZE]);
   return (x, z) => { const h = heightAt(tiles, tileMm, BigInt(Math.round(x)), BigInt(Math.round(z))); return h === null ? null : Number(h); };
