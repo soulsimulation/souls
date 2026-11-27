@@ -3101,11 +3101,8 @@ fn a2_parts_rest_at_the_grounds_height() {
         let (p, q) = frame_ends_of(&w, fa);
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
-        assert_eq!(
-            hands[ab.0].act("part:take", c, part(fa)).kind,
-            1,
-            "{what}: taken"
-        );
+        let got = hands[ab.0].act("part:take", c, part(fa));
+        assert_eq!(got.kind, 1, "{what}: taken: {got:?}");
         let (p, q) = ends(ua);
         both(hands, ab, p, q, what);
         let got = hands[ab.0].act(
@@ -4169,12 +4166,13 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     // Its node goes back along a track to where its set-in started; its carriers walk 2 m off meanwhile, so its
     // carry does not start again (it would pull the frame after them): it breaks off there, frame B set down.
     let (p, q) = ends(ua, -2_800_000);
-    both(
-        &mut hands,
-        (2, 3),
-        p,
-        q,
-        "crew B walks off while frame B comes back",
+    hands[2].walk_to(g, p);
+    hands[3].walk_to(g, q);
+    let (x, y) = (socket_end(&mut hands[2].s), socket_end(&mut hands[3].s));
+    assert_eq!(
+        (x.kind, y.kind),
+        (1, 1),
+        "crew B walks off while frame B comes back: {x:?} {y:?}"
     );
     std::thread::sleep(Duration::from_secs(3));
     let (parent, _, laid) = where_is(&w, fb);
@@ -4475,8 +4473,11 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     );
     let inside = v3((bl.x + br.x) / 2, 0, (ua.z + ub.z) / 2);
     one(&mut hands, 1, inside, "Soul 2 into the bay");
-    let (p, q) = along(br);
-    both(&mut hands, (0, 2), p, q, "beam 2 to the bay");
+    // Round the bay to its east mouth, where `beam_low_r` is put in from ([`beam_way`]).
+    for at in beam_way(where_is(&w, crew_c).2, br) {
+        let (p, q) = along(at);
+        both(&mut hands, (0, 2), p, q, "beam 2 to the bay");
+    }
     let got = hands[0].act("part:put", crew_c, into("beam_low_r"));
     refused(
         &got,
@@ -5401,8 +5402,10 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         both(&w, &mut souls, g, (0, 1), b0, b1, "to the beam").await;
         let got = souls[0].act("part:take", crew_c, part(beam)).await;
         assert_eq!(got.kind, 1, "beam taken: {got:?}");
-        let (b0, b1) = beam_along(slot_of(bay, slots[slot]));
-        both(&w, &mut souls, g, (0, 1), b0, b1, "the beam to the bay").await;
+        for at in beam_way(where_is(&w, crew_c).2, slot_of(bay, slots[slot])) {
+            let (b0, b1) = beam_along(at);
+            both(&w, &mut souls, g, (0, 1), b0, b1, "the beam to the bay").await;
+        }
         let got = souls[0]
             .act("part:put", crew_c, in_slot(bay, slots[slot]))
             .await;
@@ -5473,8 +5476,10 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         );
         assert_eq!(got.kind, 1, "beam out");
         let home = start[2 + k].2;
-        let (b0, b1) = beam_along(home);
-        both(&w, &mut souls, g, (1, 3), b0, b1, "the beam to the yard").await;
+        for at in beam_way(slot_of(bay, slots[slot]), home) {
+            let (b0, b1) = beam_along(at);
+            both(&w, &mut souls, g, (1, 3), b0, b1, "the beam to the yard").await;
+        }
         let got = souls[1].act("part:put", crew_d, on_ground(home)).await;
         assert_eq!(got.kind, 1, "beam laid in the yard: {got:?}");
     }
@@ -5993,10 +5998,7 @@ fn frame_legs(now: Option<(Vec3, Vec3)>, to: (Vec3, Vec3)) -> Vec<(Vec3, Vec3)> 
 /// let a crew walking in file stretch by as far as the first walks before the second starts.
 fn heading_walk(front: Vec3, back: Vec3) -> BTreeMap<u64, Value> {
     BTreeMap::from([
-        (
-            1,
-            Value::Array(vec![int(front.x), int(0), int(front.z)]),
-        ),
+        (1, Value::Array(vec![int(front.x), int(0), int(front.z)])),
         (
             3,
             Value::Array(vec![int(front.x - back.x), int(front.z - back.z)]),
@@ -6055,6 +6057,37 @@ fn frame_ends(at: Vec3) -> (Vec3, Vec3) {
     )
 }
 
+/// How far past a bay's end, and how far either side of its middle, a beam's crew walks round it to its far mouth, µm.
+const BEAM_ROUND: (i64, i64) = (5_500_000, 3_500_000);
+
+/// The places a beam's middle goes through, carried from `from` to `to`: straight there, unless `to` is a bay's slot
+/// whose mouth is on the bay's far side from `from` (its right slot for a crew west of it), or `from` is such a slot:
+/// then round the bay's south end, never through the bay between its frames' columns.
+fn beam_way(from: Vec3, to: Vec3) -> Vec<Vec3> {
+    let side = |at: Vec3| match at.x.rem_euclid(1_000_000) {
+        o if o == 1_000_000 - BEAM_LINE => Some((-1, at.x + BEAM_LINE)),
+        o if o == BEAM_LINE => Some((1, at.x - BEAM_LINE)),
+        _ => None,
+    };
+    let round = |bay: i64, z: i64| {
+        [
+            v3(bay - BEAM_ROUND.1, 0, z - BEAM_ROUND.0),
+            v3(bay + BEAM_ROUND.1, 0, z - BEAM_ROUND.0),
+        ]
+    };
+    match (side(from), side(to)) {
+        (_, Some((s, bay))) if (from.x - bay).signum() != s => {
+            let [w, e] = round(bay, to.z);
+            if s > 0 { vec![w, e, to] } else { vec![e, w, to] }
+        }
+        (Some((s, bay)), _) if (to.x - bay).signum() != s => {
+            let [w, e] = round(bay, from.z);
+            if s > 0 { vec![e, w, to] } else { vec![w, e, to] }
+        }
+        _ => vec![to],
+    }
+}
+
 /// A beam's carriers, its length along z, the first at its +z end: [`BEAM_END`] from its middle, in line with it; for
 /// a beam slot of a rack bay, at the bay's mouth on the slot's side ([`BEAM_MOUTH`] off its line). The test worlds'
 /// bays stand at whole metres, so a point [`BEAM_LINE`] west or east of a whole metre is a bay's left or right slot's
@@ -6071,12 +6104,13 @@ fn beam_ends(at: Vec3) -> (Vec3, Vec3) {
     (v3(x, 0, at.z + BEAM_END), v3(x, 0, at.z - BEAM_END))
 }
 
-/// Where a holder and its helper stand to start a hold crew on a frame at `at` in a bay: the holder 1 m to the side
-/// `side` (+1 east, -1 west: away from where the beams come in), the helper 1.2 m to the other side and 0.8 m out
-/// from the bay (`out` -1 for `upright_a`, +1 for `upright_b`).
+/// Where a holder and its helper stand to start a hold crew on a frame at `at` in a bay: the holder 1.1 m to the side
+/// `side` (+1 east, -1 west) and 1 m out past the bay's end (`out` -1 for `upright_a`, +1 for `upright_b`), clear of
+/// where the frame's carriers stand beside its edges and of the bay's mouths, where the beams' crews stand; the helper
+/// 1.2 m to the other side and 0.8 m out.
 fn hold_places(at: Vec3, side: i64, out: i64) -> (Vec3, Vec3) {
     (
-        v3(at.x + side * 1_000_000, 0, at.z),
+        v3(at.x + side * 1_100_000, 0, at.z + out * 1_000_000),
         v3(at.x - side * 1_200_000, 0, at.z + out * 800_000),
     )
 }
@@ -6220,7 +6254,8 @@ async fn beam_in(
     at: Vec3,
     what: &str,
 ) {
-    let c = carry_in(s, a, b, beam, beam_ends, &[at], into_slot(bay, k), what).await;
+    let via = beam_way(where_is(s.w, beam).2, at);
+    let c = carry_in(s, a, b, beam, beam_ends, &via, into_slot(bay, k), what).await;
     leave_crew(a, c, what).await;
     leave_crew(b, c, what).await;
 }
@@ -6278,7 +6313,9 @@ async fn beam_out(
     let got = a.act("part:unseat", c, part_of(beam)).await;
     println!("{what}: {got:?}");
     assert_eq!(got.kind, 1, "{what}: out");
-    walk_two(s, a, b, beam_ends(home), what).await;
+    for to in beam_way(at, home) {
+        walk_two(s, a, b, beam_ends(to), what).await;
+    }
     let on_ground = BTreeMap::from([
         (1, s.g.to_value()),
         (3, Value::Array(vec![int(home.x), int(home.y), int(home.z)])),
@@ -6441,9 +6478,11 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
     };
 
     // Build. The middle bay: team 1 carries frame A into `upright_a` while team 2 carries its frame from the east
-    // yard to wait 0.9 m north of it, inside the bay.
-    let wait_a = v3(m_a.x, 0, m_a.z + 900_000);
-    let (to_ma, to_wait, to_ea, to_wa) = ([m_a], [wait_a], [e_a], [w_a]);
+    // yard to wait 3 m south of it; then it steps up to 0.4 m short of the slot, from where each of its carriers
+    // still reaches its hold where the frame would go (#5067).
+    let wait_a = v3(m_a.x, 0, m_a.z - 400_000);
+    let far_a = v3(m_a.x, 0, m_a.z - 3_000_000);
+    let (to_ma, to_wait, to_ea, to_wa) = ([m_a], [far_a], [e_a], [w_a]);
     let (crew_ma, crew_mb) = tokio::join!(
         carry_in(
             &s,
@@ -6466,6 +6505,7 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         ),
     );
     leave_crew(s2, crew_ma, "Soul 2 lets go of frame A; Soul 1 holds it").await;
+    walk_two(&s, s4, s5, frame_ends(wait_a), "team 2 up to upright_a").await;
     let was = where_is(&w, crew_mb);
     let got = s4.act("part:put", crew_mb, into_slot(bm, ua)).await;
     refused(
@@ -6484,13 +6524,9 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         "team 2's frame still rides its crew"
     );
     assert_eq!(where_is(&w, crew_mb), was, "and nothing moved");
-    // Team 2 brings its frame round frame A (east, then north) to 0.9 m east of `upright_b`, while Soul 2 of team 1
-    // stands where frame B's west column would be.
-    let round = [
-        v3(m_a.x + 2_000_000, 0, wait_a.z),
-        v3(m_a.x + 2_000_000, 0, m_b.z),
-        v3(m_b.x + 900_000, 0, m_b.z),
-    ];
+    // Team 2 brings its frame round the bay ([`frame_legs`]) to `upright_b`, while Soul 2 of team 1 stands where frame
+    // B's west column would be.
+    let round = [m_b];
     let column = v3(m_b.x - 572_000, 0, m_b.z);
     let ((), got) = tokio::join!(
         async {

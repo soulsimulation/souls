@@ -8,9 +8,9 @@
 //                                     offered to those bodies on the open ground, or on a part to hold it where it stands
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
 //   carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walks to that end of a load (its
-//                                     grip's place, from its entry, as for one lying when it stands on the floor;
-//                                     beside the edges of a part that stands in a stand or a bay, 0.49 m off each
-//                                     along its wider side: `part take` holds it at its edges), beside it along its
+//                                     grip's place, from its entry; a part that stands and is seated by crews (a
+//                                     frame, a bent): 0.49 m beyond where it is held standing, along its wider
+//                                     side, where `part take` and `carry lift` both admit it), beside it along its
 //                                     own x (1.2 m), or to the n-th side carrier's place, beside a grip between its
 //                                     ends; front or back --out <m>: that far off its line, away from the middle of what
 //                                     it is seated in (an unseated part comes down at its carriers' middle: outside)
@@ -41,12 +41,12 @@ const ID = /^[0-9a-f]{32}-\d+$/;
 const M = 1_000_000;
 /** sim::activity::carry::REACH: a carrier stands this far beyond its grip, µm. */
 export const REACH = 350_000;
-/** How far beyond the edge of a part that stands upright in a stand or a bay (no long axis on the plan) each of its
- * two carriers stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges
- * along the line its carriers stand on and refuses a carrier more than 0.7 m from its hold (`part.grip-out-of-reach`),
- * so its carriers stand beside its edges: 1.1 m from the middle of a 1.22 m rack frame, clear of a frame stand's walk
- * box (1.05 m) and of the frame's own columns in a bay (0.95 m). It was 2.2 m off its faces, 2.16 m from the hold. One
- * standing on the floor is lifted as one lying. */
+/** How far beyond where it holds a part that stands upright (no long axis on the plan) each of its two carriers
+ * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part where its grips lie along
+ * the line its carriers stand on, no further out than its edges (a rack frame at its edges, a timber bent 0.55 m from
+ * its middle), and refuses a carrier more than 0.7 m from its hold (`part.grip-out-of-reach`). So its carriers stand
+ * 0.49 m beyond that: 1.1 m from the middle of a 1.22 m rack frame, clear of a frame stand's walk box (1.05 m) and of
+ * the frame's own columns in a bay (0.95 m). It was 2.2 m off its faces, 2.16 m from the hold. */
 export const STANDING_OFF = 490_000;
 /** Where a crew stands from a thing of no entry, as from a part standing, µm. */
 export const STANDING_FROM = 2_200_000;
@@ -109,7 +109,11 @@ export function loadOf(entry) {
   const inner = along.slice(1, -1).slice(0, 4), halfWidth = Math.max(...[0, 1, 2].filter((i) => i !== axis).map((i) => b[i])) * 500;
   // standing (its length is its height): its wider side on the plan, its own x or z, where its carriers hold its edges
   const wide = b[0] >= b[2] ? 0 : 2;
-  return { axis, long, halfLength: b[axis] * 500, halfWidth, wide, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
+  // where a carrier holds it when it is taken standing: its outermost grip along the carriers' line, no further out
+  // than its edge on its wider side (sim's grips::assign); and whether it is a part crews seat (it has joints)
+  const hold = Math.min(Math.max(Math.abs(along[0]), Math.abs(along.at(-1))), b[wide] * 500);
+  const joins = Object.values(entry.points ?? {}).some((p) => p?.role === 'joint');
+  return { axis, long, halfLength: b[axis] * 500, halfWidth, wide, hold, joins, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
 }
 
 /** `v` turned by the quaternion `q` ([w, x, y, z], any scale), as the copy's poses hold it. */
@@ -121,12 +125,12 @@ export function turn(q, v) {
 
 /**
  * Where a carrier stands at a thing for its `end`, on the plan, µm. Front or back: on a load that lies, its place along
- * its long axis (front at the + end); on one that stands (a frame): `floor` (it stands on the open ground, as a frame
- * set down does), along its own z, front at +, its places as `carry:lift` checks them on that line (REACH beyond its
- * outermost grips: the 2.4 m frame's 1.13 m out, the 6.1 m frame's 3.1 m; #5067, where 2.2 m was 1.42 m from the 2.4 m
- * frame's grip and refused `carry-grip-out-of-reach`); else (in a stand or a bay, to be taken standing) beside its
- * edges, along its wider side on the plan (a frame's own x), front at +, STANDING_OFF beyond each edge (`from`, when
- * given, is from its middle along that line). A thing of no entry: 2.2 m along its z. Left or right is beside it
+ * its long axis (front at the + end); on one that stands: a part crews seat (it has joints: a rack frame, a timber
+ * bent), or anything in a stand or a bay, along its wider side on the plan (a frame's own x), front at +, STANDING_OFF
+ * beyond where it is held standing (#5067: `part:take` and `carry:lift` both admit it there; 2.2 m off its faces was
+ * refused by both); `from`, when given, is from its middle along that line. A load only lifted that stands on the
+ * floor (`floor`: the 6.1 m frame), along its own z, its places as `carry:lift` checks them (REACH beyond its outermost
+ * grips, 3.1 m). A thing of no entry: 2.2 m along its z. Left or right is beside it
  * along its own x, `from` (default 1.2 m), right at +. `side<n>` is the n-th side carrier's place
  * (`sim::activity::carry::Load::side_places`): beside its n-th grip between its ends, counted from the back, along the
  * line its front and back stand on, half its width and REACH off that line, the first on its + side, then alternating;
@@ -140,9 +144,11 @@ export function gripSpot(at, load, end, from = null, away = null, floor = false)
   const unit = (v) => { const f = Math.hypot(v[0], v[2]) || 1; return [v[0] / f, v[2] / f]; };
   const v = load ? turn(rot, load.long) : [0, 0, 0], flat = Math.hypot(v[0], v[2]);
   const lies = load && 2 * flat >= load.halfLength;
-  // The line its front and back stand on: its long axis lying; standing on the floor (to be lifted and laid along
-  // that line), its own z; standing in a stand or a bay (to be taken as it stands, held at its edges), its wider side.
-  const edges = load && !lies && !floor;
+  // The line its front and back stand on: its long axis lying; standing, a part crews seat (it has joints: a rack
+  // frame, a timber bent), wherever it stands, or anything standing in a stand or a bay: its wider side, to be taken as
+  // it stands (a lift from there is admitted too: it lays the part along that line); else (a load only lifted,
+  // standing on the floor) its own z.
+  const edges = load && !lies && (load.joins || !floor);
   const line = lies ? unit(v) : unit(turn(rot, edges && load.wide === 0 ? [M, 0, 0] : [0, 0, M]));
   const side = /^side([1-4])$/.exec(end);
   if (side) {
@@ -156,8 +162,8 @@ export function gripSpot(at, load, end, from = null, away = null, floor = false)
     const x = unit(turn(rot, [M, 0, 0])), d = (from ?? BESIDE) * sign;
     return [mid[0] + x[0] * d, mid[2] + x[1] * d];
   }
-  const d = from != null ? from * sign : load && (lies || floor) ? load.places[end === 'front' ? 1 : 0]
-    : edges ? (load.halfWidth + STANDING_OFF) * sign : STANDING_FROM * sign;
+  const d = from != null ? from * sign : edges ? (load.hold + STANDING_OFF) * sign
+    : load && (lies || floor) ? load.places[end === 'front' ? 1 : 0] : STANDING_FROM * sign;
   const p = [mid[0] + line[0] * d, mid[2] + line[1] * d];
   if (!away) return p;
   // Across the line, the side its middle lies from `away.from` (both ends the same side).

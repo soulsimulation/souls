@@ -109,8 +109,10 @@ standing reach above its feet. No carrier is exempt, at any step:
 
 - **Take** (`part:take`, `part:unseat`): refused `part.grip-out-of-reach`, naming the carrier and how far it stands,
   before anything is written, when any carrier would not reach its hold as the crew will hold the part. A part that
-  stands is held at its edges along its carriers' line, so a frame is taken from beside its edges (0.49 m beyond each,
-  the client's `carry grip <frame> front|back`), not from off its faces.
+  stands is held where its grips lie along its carriers' line, no further out than its edges (a rack frame at its
+  edges, 0.61 m from its middle; a timber bent 0.55 m from its middle), so it is taken from beside those places, along
+  its wider side (0.49 m beyond each, the client's `carry grip <part> front|back`), not from off its faces. A part that
+  lies is measured, and held, by its middle.
 - **Lift** (`carry:lift`): the same check against the same holds, refused `carry-grip-out-of-reach`.
 - **Put** (`part:put`): refused `part.grip-out-of-reach` before anyone moves when any carrier is out of reach where the
   set-in track starts or would be where it ends. A carrier who stepped away walks back to its grip and the crew puts

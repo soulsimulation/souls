@@ -85,7 +85,8 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
-/// How far the part's middle may be from the middle of its two carriers, along the ground, µm.
+/// How far the part may be from the middle of its two carriers, along the ground, µm: its middle when it lies, its
+/// origin when it stands.
 pub const GRASP: i64 = 1_500_000;
 /// How far, along the ground, the crew's node may be from where the part goes when it is put: the set-in track is
 /// short and straight, not a way to move a part across the world.
@@ -485,9 +486,20 @@ impl Assembly {
             (front.z + back.z) / 2,
         );
         within_reach(at.pos.y - middle.y, reach)?;
+        // A part that lies is measured, and held, by its middle (a laid frame's origin is its foot, 1.2 m from it), as
+        // the lift measures it; one that stands, or one of no entry, by its origin.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let lies = match crew {
+            Some(c) => c.load.lies_along(at.rot)?.is_some(),
+            None => false,
+        };
+        let off = match crew {
+            Some(c) if lies => at.rot.rotate(c.load.middle).map_err(pose)?,
+            _ => Vec3::ZERO,
+        };
         let (dx, dz) = (
-            i128::from(at.pos.x - middle.x),
-            i128::from(at.pos.z - middle.z),
+            i128::from(at.pos.x + off.x - middle.x),
+            i128::from(at.pos.z + off.z - middle.z),
         );
         if dx * dx + dz * dz > i128::from(GRASP).pow(2) {
             return Err(refusal(
@@ -507,9 +519,8 @@ impl Assembly {
         // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
         // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
         // One that stands, or whose origin is over its middle already (a beam), is held where its origin is.
-        let pose = |e| refusal("part-pose", format!("{e:?}"));
         let slot = match crew {
-            Some(c) if c.load.lies_along(at.rot)?.is_some() => {
+            Some(c) if lies => {
                 let m = inside.rotate(c.load.middle).map_err(pose)?;
                 Vec3::new(-m.x, 0, -m.z)
             }

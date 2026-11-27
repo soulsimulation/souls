@@ -79,23 +79,33 @@ test('a grip is the load\'s place from its entry; a standing part\'s beside its 
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
 });
 
-test('#5067: a frame standing on the floor is approached where carry:lift checks its grips, not 2.2 m off', () => {
-  // sim::activity::carry::Load::check_lift on a standing load: each end within GRIP_REACH (0.7 m) of its grip, which lies
-  // along the carriers' line from the load's middle by the entry's outermost grips (±0.78 m for the 2.4 m frame).
+test('#5067: a standing frame is approached where both part:take and carry:lift admit it, not 2.2 m off its faces', () => {
+  // Beside its edges, along its own x. part:take holds it at its edges (sim grips::assign: its grips along the carriers'
+  // line, no further out than its edge); carry:lift lays it along that line, its grips ±0.78 m from its middle
+  // (Load::check_lift). Each end within GRIP_REACH (0.7 m) of both, on the floor (a frame set down) and in its stand.
   const GRIP_REACH = 700_000, frame = loadOf(kinds['mars:rack_upright']);
+  assert.equal(frame.hold, 609_500, 'held at its edge');
+  assert.equal(frame.joins, true, 'a part crews seat');
   const grip = frame.places.map((p, k) => p + (k === 0 ? REACH : -REACH));
   assert.deepEqual(grip, [-780_000, 780_000]);
   const on = { ...ctx, parentOf: (n) => (n === id(4) ? id(1) : rows.get(n)?.parent ?? null) };
   const mid = at(id(4)).pos;
-  for (const [end, g] of [['back', grip[0]], ['front', grip[1]]]) {
-    const p = carryIntents({ do: 'grip', thing: id(4), end }, on)[0].params[1];
-    const off = Math.hypot(p[0] - mid[0], p[2] - (mid[2] + g));
-    assert.ok(off <= GRIP_REACH, `${end} ${Math.round(off / 1000)} mm from its grip`);
+  for (const c of [on, ctx]) {
+    for (const [end, g, sign] of [['back', grip[0], -1], ['front', grip[1], 1]]) {
+      const p = carryIntents({ do: 'grip', thing: id(4), end }, c)[0].params[1];
+      near(p, [mid[0] + sign * 1_099_500, 0, mid[2]], `${end}, beside its edge`);
+      assert.ok(Math.abs(p[0] - (mid[0] + sign * frame.hold)) <= GRIP_REACH, `${end} within part:take's reach of its edge`);
+      assert.ok(Math.abs(p[0] - (mid[0] + g)) <= GRIP_REACH, `${end} within carry:lift's reach of its grip`);
+    }
   }
-  // In its stand it is taken standing, from beside its edges: within part:take's reach of the edge each holds.
-  const edge = frame.halfWidth, back = send({ do: 'grip', thing: id(4), end: 'back' })[0].params[1];
-  near(back, [-1_099_500, 0, 5.85e6], 'the standing frame\'s back, in its stand');
-  assert.ok(Math.abs(back[0] - mid[0]) - edge <= GRIP_REACH, 'within reach of the edge it holds');
+  // A timber bent is held 0.55 m from its middle, not at its 0.9 m edge: its carriers stand 0.49 m beyond that.
+  const bent = loadOf({ geometry: { bounds_mm: [1800, 1900, 100] }, points: { low: { role: 'grip', at_mm: [0, 400, 0] }, high: { role: 'grip', at_mm: [0, 1500, 0] }, j: { role: 'joint', at_mm: [0, 0, 0] } } });
+  assert.deepEqual([bent.hold, bent.joins], [550_000, true]);
+  near(gripSpot({ pos: [0, 0, 0] }, bent, 'front', null, null, true), [1_040_000, 0], 'the bent\'s front, on the floor');
+  // The 6.1 m frame is only lifted (no joints): standing on the floor, along its z at its lift places.
+  const tall = loadOf(kinds['mars:rack_upright_6m']);
+  assert.equal(tall.joins, false);
+  near(gripSpot({ pos: [0, 0, 0] }, tall, 'front', null, null, true), [0, tall.places[1]], 'the tall frame\'s front');
 });
 
 test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
