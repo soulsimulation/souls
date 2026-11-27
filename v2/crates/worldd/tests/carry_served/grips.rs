@@ -794,7 +794,7 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
 /// #5067 (admission at the take, the initially unreachable frame): two Souls stand 2.2 m off the faces of the loose
 /// 2.4 m rack frame (where the client's approach used to send them), 2.16 m from the edge each would hold, and ask to
 /// take it: refused `part.grip-out-of-reach`, naming a carrier, before anything is written (the frame stands where it
-/// stood, no holds are said). They walk to beside its edges (its own x, 0.49 m beyond each: an ordinary walk, the
+/// stood, no holds are said). They walk to beside its edges (its own x, 0.45 m beyond each: an ordinary walk, the
 /// authoritative way there) and the same crew takes it, each hold within reach.
 #[tokio::test(flavor = "multi_thread")]
 async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_from_beside_its_edges()
@@ -840,8 +840,8 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         before,
         "the frame did not move"
     );
-    // Beside its edges: its own x, 0.49 m beyond its half width.
-    let edge = l.half_width + 490_000;
+    // Beside its edges: its own x, 0.45 m beyond its half width.
+    let edge = l.half_width + 450_000;
     let near = [spot(at, edge, false), spot(at, -edge, false)];
     for (k, p) in near.iter().enumerate() {
         souls[k].send("eden:walk", ground, point(*p)).await;
@@ -856,5 +856,45 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         .expect("taken from beside its edges");
     let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
     assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
+    // Each carrier turned to face its hold (the back walked past the frame and stood with its back to it): its
+    // body's own turn, as a turn toward the frame's middle would have it, within 2 s.
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        let facing = facings(&dir);
+        let toward = |k: usize| {
+            let want = sim::controller::facing_toward(near[k], at).expect("a facing");
+            let (a, b) = (
+                want.rotate(Vec3::new(M, 0, 0)).unwrap(),
+                facing[&bodies[k]].rotate(Vec3::new(M, 0, 0)).unwrap(),
+            );
+            (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z)) * 100
+                / (i128::from(M) * i128::from(M))
+        };
+        let (f, b) = (toward(0), toward(1));
+        if f >= 95 && b >= 95 {
+            println!("each carrier faces the frame: {f} and {b} hundredths");
+            break;
+        }
+        assert!(
+            Instant::now() < end,
+            "each carrier faces its hold: {f} and {b} hundredths of straight at it"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     drop(served);
+}
+
+/// Each body's turn as the log's body rows last have it.
+fn facings(dir: &Path) -> BTreeMap<Id, replica::pose::Quat> {
+    let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+    let mut at = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        let Ok(p) = Part::read(&r) else { continue };
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                at.insert(b, pose.orientation);
+            }
+        }
+    }
+    at
 }

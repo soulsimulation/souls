@@ -102,15 +102,19 @@ audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: pha
 the two hands 0.2 m either side of where the carrier holds along the load's length, from the carry's back toward its
 front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
 ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and `souls:released` (set down, seated or
-broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it is held (a frame taken standing) is held where each grip lies along its
-carriers' line, at the load's edge and the carry's height. Every carrier must be within reach of its
+broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
+is held (a frame taken standing) is held by its front and its back at its edge on the line they stand on (a rack
+frame's posts, a timber bent's), 0.5 m above the carry's height, the hands 0.2 m below and above that: for the 2.4 m
+rack frame `[±609.5, 300, 0]` and `[±609.5, 700, 0]` mm in its own frame, which carried is 1.2 m and 1.6 m above the
+ground. Every carrier must be within reach of its
 own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its
 standing reach above its feet. No carrier is exempt, at any step:
 
 - **Take** (`part:take`, `part:unseat`): refused `part.grip-out-of-reach`, naming the carrier and how far it stands,
   before anything is written, when any carrier would not reach its hold as the crew will hold the part. A part that
-  stands is held at its edges along its carriers' line, so a frame is taken from beside its edges (0.49 m beyond each,
-  the client's `carry grip <frame> front|back`), not from off its faces.
+  stands is held at its edges along its carriers' line, so it is taken from beside its edges, along its wider side
+  (0.45 m beyond each, within arm's reach of both hands: the client's `carry grip <part> front|back`), not from off its
+  faces. A part that lies is measured, and held, by its middle.
 - **Lift** (`carry:lift`): the same check against the same holds, refused `carry-grip-out-of-reach`.
 - **Put** (`part:put`): refused `part.grip-out-of-reach` before anyone moves when any carrier is out of reach where the
   set-in track starts. A carrier who stepped away walks back to its grip and the crew puts again. On the track each

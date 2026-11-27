@@ -9,7 +9,8 @@
 //!   ones).
 //! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers and each carrier
 //!   within reach of the hold the carry's rule gives it ([`Crew`], below), goes into the crew's slot in one commit
-//!   (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
+//!   (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had; one that lies is
+//!   held by its middle between its carriers, one that stands by its foot.
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
 //! - **Put** ([`Assembly::put`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
 //!   `reach.too-high`, B18's `support.none`), by `connectors-do-not-mate` for a join the kinds' connectors do not
@@ -90,7 +91,8 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
-/// How far the part's middle may be from the middle of its two carriers, along the ground, µm.
+/// How far the part may be from the middle of its two carriers, along the ground, µm: its middle when it lies, its
+/// origin when it stands.
 pub const GRASP: i64 = 1_500_000;
 /// How far, along the ground, the crew's node may be from where the part goes when it is put: the set-in track is
 /// short and straight, not a way to move a part across the world.
@@ -498,7 +500,8 @@ impl Assembly {
     /// `back` on `ground` (µm in its frame): the part into the crew's slot, written on `tree` and waiting in
     /// [`Assembly::ready`]. `crew`, for a part that is a load with grips: every carrier where it stands, each refused
     /// `part.grip-out-of-reach` by name when it does not reach its hold as the crew will hold the part (#5067), before
-    /// anything is written. Returns the crew's node's pose, where its carry starts.
+    /// anything is written. Returns the crew's node's pose, where its carry starts, and each carrier with its hold in
+    /// that node's frame (for the turn of each toward its hold, `crate::engine`).
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -514,7 +517,7 @@ impl Assembly {
         unseat: bool,
         reach: i64,
         crew: Option<&Crew>,
-    ) -> R<(Vec3, Quat)> {
+    ) -> R<((Vec3, Quat), Vec<Carrier>)> {
         if self.held.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
         }
@@ -582,9 +585,20 @@ impl Assembly {
             (front.z + back.z) / 2,
         );
         within_reach(at.pos.y - middle.y, reach)?;
+        // A part that lies is measured, and held, by its middle (a laid frame's origin is its foot, 1.2 m from it), as
+        // the lift measures it; one that stands, or one of no entry, by its origin.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let lies = match crew {
+            Some(c) => c.load.lies_along(at.rot)?.is_some(),
+            None => false,
+        };
+        let off = match crew {
+            Some(c) if lies => at.rot.rotate(c.load.middle).map_err(pose)?,
+            _ => Vec3::ZERO,
+        };
         let (dx, dz) = (
-            i128::from(at.pos.x - middle.x),
-            i128::from(at.pos.z - middle.z),
+            i128::from(at.pos.x + off.x - middle.x),
+            i128::from(at.pos.z + off.z - middle.z),
         );
         if dx * dx + dz * dz > i128::from(GRASP).pow(2) {
             return Err(refusal(
@@ -601,17 +615,37 @@ impl Assembly {
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
+        // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
+        // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
+        // One that stands, or whose origin is over its middle already (a beam), is held where its origin is.
+        let slot = match crew {
+            Some(c) if lies => {
+                let m = inside.rotate(c.load.middle).map_err(pose)?;
+                Vec3::new(-m.x, 0, -m.z)
+            }
+            _ => Vec3::ZERO,
+        };
         // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
         // between its front and its back, the part in its slot turned as it is).
-        if let Some(crew) = crew {
-            out_of_reach(&crew.carriers((Vec3::ZERO, inside))?, (frame, turn))?;
-        }
+        let carriers = match crew {
+            Some(crew) => crew.carriers((slot, inside))?,
+            None => Vec::new(),
+        };
+        out_of_reach(&carriers, (frame, turn))?;
         self.aim(tree, activity, ground)?;
-        self.seating
-            .take(tree, acts, mint, now, activity, part, (frame, turn), inside)?;
+        self.seating.take(
+            tree,
+            acts,
+            mint,
+            now,
+            activity,
+            part,
+            (frame, turn),
+            (slot, inside),
+        )?;
         self.drain(by, activity, Step::Taken);
         self.held.insert(activity, part);
-        Ok((frame, turn))
+        Ok(((frame, turn), carriers))
     }
 
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
