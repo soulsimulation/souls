@@ -243,7 +243,7 @@ fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
         let tx = tx.clone();
         std::thread::spawn(move || {
             for l in BufReader::new(pipe).lines().map_while(Result::ok) {
-                if l.starts_with("worldd: k18d-edit-stage ") || l.contains("TMP5216") {
+                if l.starts_with("worldd: k18d-edit-stage ") {
                     eprintln!("{l}");
                 }
                 let _ = tx.send(l);

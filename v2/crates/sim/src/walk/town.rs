@@ -53,7 +53,7 @@ use super::water::Water;
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::open::Index;
-use crate::ground::scene::xform_to;
+use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::{
     HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
 };
@@ -73,7 +73,7 @@ use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
-use replica::world_model::show;
+use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -340,6 +340,18 @@ fn reach(b: &Building) -> Option<[i64; 4]> {
     })
 }
 
+/// Whether `thing` is a building in `tree`, as a whole build lists them (`Map::build_cut`): there, with a floor among
+/// its children. A thing whose last floor was removed (#5216: a deck whose one floor went) is one no longer.
+fn is_building(tree: &Tree, thing: Id) -> bool {
+    let floor = |&c| {
+        tree.node(c)
+            .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
+    };
+    tree.handle(thing)
+        .and_then(|h| tree.children(h))
+        .is_some_and(|kids| kids.iter().any(floor))
+}
+
 /// Whether boxes `a` and `b` meet.
 fn overlap(a: [i64; 4], b: [i64; 4]) -> bool {
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
@@ -494,6 +506,14 @@ impl Rebuilt {
         match &self.fresh {
             Fresh::Squares(sq, ..) => sq.len(),
             _ => 0,
+        }
+    }
+
+    /// How many buildings were read again alone: 0 when the whole was built.
+    pub fn buildings(&self) -> usize {
+        match &self.fresh {
+            Fresh::Squares(_, _, bs) | Fresh::Buildings(bs) => bs.len(),
+            Fresh::Whole(_) => 0,
         }
     }
 }
@@ -678,11 +698,23 @@ impl Installing<'_> {
                         next += n;
                     }
                 }
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions);
+                put_buildings(
+                    self.map,
+                    self.surfaces,
+                    self.buildings,
+                    (tree, ground),
+                    bs,
+                    versions,
+                );
             }
-            Fresh::Buildings(bs) => {
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions)
-            }
+            Fresh::Buildings(bs) => put_buildings(
+                self.map,
+                self.surfaces,
+                self.buildings,
+                (tree, ground),
+                bs,
+                versions,
+            ),
         }
         *self.basis = after;
         *self.link_at = link_index(self.buildings);
@@ -690,12 +722,13 @@ impl Installing<'_> {
     }
 }
 
-/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it.
+/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it, and
+/// its open ground (whose gates are a building of its own, never one that left).
 fn put_buildings(
     map: &mut Map,
     surfaces: &mut BTreeMap<Id, Surface>,
     buildings: &mut Vec<Building>,
-    tree: &Tree,
+    (tree, ground): (&Tree, Id),
     bs: Vec<(Building, BTreeMap<Id, Surface>)>,
     versions: &Versions,
 ) {
@@ -704,8 +737,8 @@ fn put_buildings(
         map.replace(&b, &|n| versions.of(n));
         surfaces.extend(floors);
         let at = buildings.iter().position(|o| o.thing == b.thing);
-        // A building removed (S13): it leaves the list, with its floors' surfaces.
-        if tree.handle(b.thing).is_none() {
+        // A building removed (S13), or left with no floor (#5216): it leaves the list, with its floors' surfaces.
+        if b.thing != ground && !is_building(tree, b.thing) {
             if let Some(i) = at {
                 for f in buildings.remove(i).floors.keys() {
                     surfaces.remove(f);
@@ -1039,7 +1072,7 @@ impl Town {
                     for (id, surface) in surfaces {
                         floors.insert(*id, Arc::new(surface.clone()));
                     }
-                    if building.thing != ground && base.handle(building.thing).is_none() {
+                    if building.thing != ground && !is_building(base, building.thing) {
                         known.remove(&building.thing);
                         reaches.remove(&building.thing);
                     } else if building.thing != ground {
@@ -1287,8 +1320,9 @@ impl Town {
                 return None;
             }
             // A building removed with the squares it stood on cut again (S13): a building of nothing, whose floors
-            // and links leave the map, when its links met the open ground on those squares only.
-            if cut.is_some() && after.handle(thing).is_none() {
+            // and links leave the map, when its links met the open ground on those squares only. So is a thing left
+            // with no floor (#5216: a deck whose one floor was removed): a whole build lists it no longer.
+            if cut.is_some() && thing != ground && !is_building(after, thing) {
                 let elsewhere = |l: &Id| {
                     open.meets
                         .iter()
