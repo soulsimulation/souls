@@ -214,10 +214,10 @@ export class TakePeople {
   setViewer(v:HumanViewer|null){this.humans.viewer=v;}
   poseStats(){return this.humans.poseStats;}
   contactDiagnostics(){return this.humans.bones();}
-  private nativeCarry:Record<string,{hands:Hands;weight:number}>={};
+  private nativeCarry:Record<string,{hands:Hands;weight:number;crew?:string;load?:string;sinceUs?:number;preparing?:boolean}>={};
   /** Native world-space palms sampled by the page at this exact depicted body clock. */
   private nativeCarryOwner:((id:string,fromSeconds:number,toSeconds:number)=>boolean)|undefined;
-  setNativeCarry(contacts:Record<string,{hands:Hands;weight:number}>,owner?:((id:string,fromSeconds:number,toSeconds:number)=>boolean)){this.nativeCarry=contacts;this.nativeCarryOwner=owner;}
+  setNativeCarry(contacts:Record<string,{hands:Hands;weight:number;crew?:string;load?:string;sinceUs?:number;preparing?:boolean}>,owner?:((id:string,fromSeconds:number,toSeconds:number)=>boolean)){this.nativeCarry=contacts;this.nativeCarryOwner=owner;}
 
   instrumentOf(id:string){return this.humans.instrumentOf(id);}
   activityAgeOf(id:string){return this.humans.activityAgeOf(id);}
@@ -641,11 +641,13 @@ export class TakePeople {
       const publicSoulKey=(src.human as {soul?:unknown}|undefined)?.soul;
       const game=recordedGame(e.state.game);
       const person:SampledHuman={itemPose:itemPoseOf(e.state.itemTransferV1 as NonNullable<Entity['human']>['itemTransferV1'],e.state.heldItemsV1 as NonNullable<Entity['human']>['heldItemsV1'],this.take.startTick+frame.tick,this.take.dt),...(e.state.handActuator?{handActuator:e.state.handActuator as NonNullable<Entity['human']>['handActuator'],handActuatorTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.handTransferV1?{transfer:e.state.handTransferV1 as NonNullable<Entity['human']>['handTransferV1'],transferTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.wateringV1?{watering:e.state.wateringV1 as NonNullable<Entity['human']>['wateringV1'],wateringTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.letGoV1?{letGo:e.state.letGoV1 as NonNullable<Entity['human']>['letGoV1'],letGoTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.cupV1?{cup:e.state.cupV1 as NonNullable<Entity['human']>['cupV1'],cupTime:(this.take.startTick+frame.tick)*this.take.dt}:{}), ...(body?.modelUrl?{bodyModel:admittedBodyUrl(body.modelUrl)??body.modelUrl}:body?.params&&typeof body.model==='string'?{bodyModel:body.model}:{}),...(typeof publicSoulKey==='string'?{publicSoulKey}:{}), ...(seatHeight!==undefined?{seatHeight}:{}), ...(shore.status==='recorded'?{shore:shore.contact}:{}), shoreTime:(this.take.startTick+t/this.take.dt)*this.take.dt,waterTransition:this.waterTransition(id,t), ...(Array.isArray(e.state.formPress)?{formPress:e.state.formPress as SampledHuman['formPress']}:{}), id, p: e.p, yaw: e.yaw, walk, walkDist: dist, activity: e.activity, grip: g?.entity, gripSlot: g?.slot, carryWeight, hands: e.hands, baseActivity: st.baseActivity ?? undefined, ...this.activityHistory(id, frame.tick, e.activity ?? 'idle', climbing ? 0 : walk), ...(typeof (st as {partner?: unknown}).partner==='string'?{partner:(st as {partner:string}).partner}:{}), ...(e.state.handHold||e.state.rps?{...(e.state.handHold?{handHold:e.state.handHold as HandHoldState}:{}),...(e.state.rps?{rps:e.state.rps as RpsState}:{}),handGameTick:this.take.startTick+frame.tick,handGameDt:this.take.dt}:{}), ...(typeof st.prop==='string'?{prop:st.prop}:{}), ...(typeof e.state.instrument==='string'?{instrument:e.state.instrument}:{}),...(game?{game,gameTick:this.take.startTick+frame.tick,gameDt:this.take.dt}:{}),...(Number.isFinite(speed)?{speed:Math.abs(speed)}:{}), on: st.on ?? undefined, ...(proneYaw !== undefined ? { proneYaw } : {}), ...(phaseK !== undefined ? { phaseK } : {}), ...(st.sleepPose ? { sleepPose: recordedSleepPose(this.take,id,frame.tick,st.sleepPose) } : {}) };
+      delete e.state.nativeCarryIdentity;
       delete e.state.nativeCarry; // sampled frames may be reused: ownership must end on release/seek.
       const nativeCarry=this.nativeCarry[id];
       if(nativeCarry&&!person.itemPose&&!person.handActuator&&!person.transfer&&!person.watering&&!person.cup&&!person.letGo&&!person.prop&&!person.handHold&&!person.rps&&!person.on&&!person.formPress?.length&&!person.partner&&!person.instrument&&!person.shore&&!person.seatHeight&&person.baseActivity!=='sit'&&!/^(sit|sleep|lie|bench-press)(-|$)/.test(person.activity??'')&&!e.hands?.left&&!e.hands?.right){
         person.hands=nativeCarry.hands;person.carryWeight=nativeCarry.weight;
         e.state.nativeCarry=true;
+        if(nativeCarry.crew&&nativeCarry.load)e.state.nativeCarryIdentity={crew:nativeCarry.crew,load:nativeCarry.load,sinceUs:nativeCarry.sinceUs,preparing:!!nativeCarry.preparing};
       }
       person.clipOrigin=this.clipOrigin(id,frame.tick,person);people.push(person);
     }

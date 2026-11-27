@@ -110,3 +110,6 @@ test('only independently known absent/released phases are inactive; their load c
  s.expectedLoad.matrix=matrix([1,0,0]).toArray();s.expectedLoad.previousMatrix=matrix([1,0,0]).toArray();assert.equal(gradeInactive(s,{now:110}).status,'failed-load-clock');
  delete s.expectedLoad;assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');
 });
+
+
+test('release completion accepts only independently upcoming new ownership, not a stale old marker',()=>{const s=nativeSample();s.nativeContacts=null;s.contactState={at:10e6,crew:'n-crew',field:'valid',grips:{crew:'n-crew',load:'n-load',phase:'souls:released',sinceUs:9e6,holds:[]}};s.bodies[0].nativeCarryOwned=true;s.bodies[0].nativeCarryIdentity={crew:'next-crew',load:'next-load',sinceUs:10100000,preparing:true};s.nativeUpcoming=[{crew:'next-crew',load:'next-load',sinceUs:10100000,holds:[{body:'n-body'}]}];assert.equal(gradeInactive(s,{now:110}).ok,true);s.bodies[0].nativeCarryIdentity.sinceUs=9e6;assert.equal(gradeInactive(s,{now:110}).ok,false);s.bodies[0].nativeCarryIdentity.sinceUs=10100000;s.nativeUpcoming=[];assert.equal(gradeInactive(s,{now:110}).ok,false);});

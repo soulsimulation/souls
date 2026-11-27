@@ -6,8 +6,8 @@ import {worldPoint,type NativePose} from './recorded-carry.ts';
 import type {CarryObservation} from './recorded-carry.ts';
 import type {CarryGrips} from './source/carry-record.ts';
 export type CarryHands={left:[number,number,number];right:[number,number,number]};
-export type NativeCarryBody={body:string;crew:string;load:string;grip:string;phase:string;sinceUs:number;untilUs?:number;hands:CarryHands;order:[number,number];weight:number};
-export type CarryPageFrame={at:number;loads:Record<string,NativePose>;bodies:Record<string,NativeCarryBody>;observations:CarryObservation[];contactStates:ReturnType<CarriedParts['recorded']['contactStates']>;phaseHistory:Record<string,CarryGrips[]>;evidence:Record<string,ReturnType<CarriedParts['recorded']['evidence']>>;errors:string[]};
+export type NativeCarryBody={body:string;crew:string;load:string;grip:string;phase:string;sinceUs:number;untilUs?:number;hands:CarryHands;order:[number,number];weight:number;preparing?:boolean};
+export type CarryPageFrame={at:number;loads:Record<string,NativePose>;bodies:Record<string,NativeCarryBody>;observations:CarryObservation[];preparations:CarryGrips[];contactStates:ReturnType<CarriedParts['recorded']['contactStates']>;phaseHistory:Record<string,CarryGrips[]>;evidence:Record<string,ReturnType<CarriedParts['recorded']['evidence']>>;errors:string[]};
 let current:CarriedParts|null=null;
 let bodies:ReadonlyMap<string,string>=new Map();
 export const setNativeBodyEntities=(map:ReadonlyMap<string,string>)=>{bodies=map;};
@@ -22,7 +22,7 @@ export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:C
   const pose=records.pose(id,at);if(pose){loads[layerDraws(n)&&n.origin?n.origin:entityId(id)]=pose;evidence[id]=records.evidence(id,at);}
  }
  const depicted=[...observations,...records.retiring(at).map(grips=>({grips,members:null,pose:records.pose(grips.load,at),at}))];
- for(const o of depicted){const g=o.grips;if(!o.pose){errors.push('load-frame:'+g.load);continue;}
+ for(const o of depicted.sort((a,b)=>Number(a.grips.phase==='souls:released')-Number(b.grips.phase==='souls:released'))){const g=o.grips;if(!o.pose){errors.push('load-frame:'+g.load);continue;}
   const n=records.nodeAt(g.load,at);if(!n){errors.push('load-node:'+g.load);continue;}loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=o.pose;
   const released=g.phase==='souls:released';
   if(!released&&!o.members){errors.push('crew-members:'+g.crew);continue;}
@@ -34,12 +34,20 @@ export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:C
   for(const h of g.holds){const entity=byBody.get(h.body),order=records.anatomical(g,h.body);if(!entity||!order){errors.push('carrier-frame:'+h.body);continue;}
    if(!released&&!o.members?.some(m=>m.body===h.body)){errors.push('carrier-membership:'+h.body);continue;}
    const points=h.handsUm.map(p=>worldPoint(o.pose!,p));
-   if(ambiguous.has(entity))continue;
+   if(ambiguous.has(entity)||released&&bodies[entity])continue;
    if(bodies[entity]){errors.push('ambiguous-carrier:'+h.body);delete bodies[entity];ambiguous.add(entity);continue;}
    bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,...(g.untilUs!==undefined?{untilUs:g.untilUs}:{}),hands:{left:points[order[0]],right:points[order[1]]},order,weight};
   }
  }
- const contactStates=records.contactStates(at);return{at,loads,bodies,observations,contactStates,phaseHistory:Object.fromEntries(contactStates.map(o=>[o.crew,records.phaseHistory(o.crew,at)])),evidence,errors};
+ const preparing=records.preparing(at);
+ for(const{grips:g,holds}of preparing){const pose=records.pose(g.load,at);if(!pose){errors.push('prepare-load-frame:'+g.load);continue;}const n=records.nodeAt(g.load,at);if(!n){errors.push('prepare-load-node:'+g.load);continue;}
+  loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=pose;evidence[g.load]=records.evidence(g.load,at);
+  const u=Math.max(0,Math.min(1,1-(g.sinceUs-at)/300000)),weight=u*u*(3-2*u);
+  for(const h of holds){const entity=byBody.get(h.body);if(!entity||bodies[entity]||ambiguous.has(entity))continue;const order=records.anatomical(g,h.body);if(!order){errors.push('prepare-carrier-frame:'+h.body);continue;}const points=h.handsUm.map(p=>worldPoint(pose,p));
+   bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,hands:{left:points[order[0]],right:points[order[1]]},order,weight,preparing:true};
+  }
+ }
+ const contactStates=records.contactStates(at);return{at,loads,bodies,observations,preparations:preparing.map(p=>p.grips),contactStates,phaseHistory:Object.fromEntries(contactStates.map(o=>[o.crew,records.phaseHistory(o.crew,at)])),evidence,errors};
 }
 
 export function carryOwnerBetween(entity:string,fromSeconds:number,toSeconds:number,byBody:ReadonlyMap<string,string>,source:CarriedParts|null=current){if(!source)return false;for(const[body,id]of byBody)if(id===entity)return source.recorded.ownedBetween(body,Math.round(fromSeconds*1e6),Math.round(toSeconds*1e6));return false;}

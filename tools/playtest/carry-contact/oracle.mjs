@@ -152,7 +152,7 @@ function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
  if(!released&&!absent)return invalid('missing/unknown contacts are not a native inactive interval');
  const clock=gradeLoadClock(sample);if(clock.reason)return invalid(clock.reason);
  const complete=released&&atUs-state.grips.sinceUs>=300000;
- if(complete&&sample.bodies.some(b=>b.nativeCarryOwned))return invalid('native release did not clear body contact ownership');
+ if(complete&&sample.bodies.some(b=>{if(!b.nativeCarryOwned)return false;const owner=b.nativeCarryIdentity;return !owner||!sample.nativeUpcoming?.some(g=>g.crew===owner.crew&&g.load===owner.load&&g.sinceUs===owner.sinceUs&&g.sinceUs>atUs&&g.sinceUs-atUs<=300000&&g.holds.some(h=>h.body===b.native));}))return invalid('native release did not clear body contact ownership');
  return{status:clock.ok?(released?'native-release-observation':'native-inactive-observation'):'failed-load-clock',basis:'inactive-interval',ok:clock.ok,certifiesActiveContact:false,contacts:[],clock,releaseComplete:complete,sinceUs:released?state.grips.sinceUs:null};
 }
 
@@ -231,14 +231,14 @@ function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
           if (!people.palmOf(binding.entity, hand, out)) fail('live palm unavailable');
           palms[hand] = out.toArray();
         }
-        return { ...binding, visibleSkin, palms, root: root.matrixWorld.toArray(),nativeCarryOwned:!!frame.entities[binding.entity]?.state?.nativeCarry,order:nativeFrame?.bodies?.[binding.entity]?.order };
+        return { ...binding, visibleSkin, palms, root: root.matrixWorld.toArray(),nativeCarryOwned:!!frame.entities[binding.entity]?.state?.nativeCarry,nativeCarryIdentity:frame.entities[binding.entity]?.state?.nativeCarryIdentity,order:nativeFrame?.bodies?.[binding.entity]?.order };
       });
       const sample = { stage: 'after-world-render', units: 'm', currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected,
         renderTarget: world.renderer.getRenderTarget(), frame: stamp.frame, at: now, tick: frame.tick, worldSeconds: world.worldSeconds,
         load: { ...config.binding.load, parts: load.parts, matrix: load.matrix.toArray(), source: load.source, matrices: load.matrices ?? null }, bodies, grips,
         nativeContacts: observation?{...observation.grips,source:'souls:carry-grips',units:'um',space:'load-local',observedWorldUs:atUs}:null,
         crew:observation&&activeMembers?{native:observation.grips.crew,source:'native-membership',observedWorldUs:atUs,members:activeMembers.map(m=>m.body)}:null,
-        expectedLoad:null,contactState,nativeHistory:observation?nativeFrame.phaseHistory?.[observation.grips.crew]:null };
+        expectedLoad:null,contactState,nativeUpcoming:nativeFrame.preparations,nativeHistory:observation?nativeFrame.phaseHistory?.[observation.grips.crew]:null };
       {const evidence=nativeFrame.evidence?.[config.binding.load.native],matrix=nativeMatrix(evidence,atUs);
         const bounds=config.entry?.geometry?.bounds_mm;if(!finite3(bounds))fail('load bounds unavailable');
         const pointsUm=[-1,1].flatMap(x=>[0,1].flatMap(y=>[-1,1].map(z=>[x*bounds[0]*500,y*bounds[1]*1000,z*bounds[2]*500])));

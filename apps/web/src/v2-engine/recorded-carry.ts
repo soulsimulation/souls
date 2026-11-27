@@ -89,13 +89,19 @@ export class RecordedCarry{
   }return{source:'native-records',at:time,frames};
  }
  observations(time:number):CarryObservation[]{if(this.error)return[];const out:CarryObservation[]=[];for(const[id,h]of this.grips){const g=at(h,time);if(g&&(g.phase!=='souls:released'||time-g.sinceUs<300000))out.push({grips:g,members:at(this.members.get(id),time)??null,pose:this.pose(g.load,time),at:time});}return out;}
+ /** Upcoming validated assignments can prepare on the page's existing behind-native clock, never become active early. */
+ preparing(time:number){const out:{grips:CarryGrips;holds:CarryGrips['holds']}[]=[];for(const h of this.grips.values()){
+  const next=h.find(r=>r.at>time&&r.value.phase!=='souls:released');if(!next||next.at-time>300000)continue;
+  const prior=at(h,time),holds=next.value.holds.filter(hold=>!prior||prior.phase==='souls:released'||prior.load!==next.value.load||!prior.holds.some(p=>p.body===hold.body&&p.grip===hold.grip&&JSON.stringify(p.handsUm)===JSON.stringify(hold.handsUm)));
+  if(holds.length)out.push({grips:next.value,holds});}return out;
+ }
  contactStates(time:number){
   const ids=new Set([...this.grips.keys(),...this.members.keys()]);return[...ids].map(crew=>{const node=this.record(crew,time),grips=at(this.grips.get(crew),time)??null,members=at(this.members.get(crew),time)??null;
    return{crew,at:time,field:node?.carryField??(grips?'valid' as const:'unknown' as const),grips,members};});
  }
  phaseHistory(crew:string,time:number){return(this.grips.get(crew)??[]).filter(r=>r.at<=time).map(r=>r.value);}
  /** Owner barriers use public intervals, not the previous rendered frame or mutable adapter flags. */
- ownedBetween(body:string,from:number,to:number){for(const h of this.grips.values())for(let i=0;i<h.length;i++){const g=h[i].value;if(!g.holds.some(hold=>hold.body===body))continue;const end=g.phase==='souls:released'?g.sinceUs+300000:Math.min(h[i+1]?.at??Infinity,g.untilUs??Infinity)+300000;if(g.sinceUs<=to&&end>=from)return true;}return false;}
+ ownedBetween(body:string,from:number,to:number){for(const h of this.grips.values())for(let i=0;i<h.length;i++){const g=h[i].value;if(!g.holds.some(hold=>hold.body===body))continue;const end=g.phase==='souls:released'?g.sinceUs+300000:Math.min(h[i+1]?.at??Infinity,g.untilUs??Infinity)+300000;if(g.sinceUs-300000<=to&&end>=from)return true;}return false;}
  /** A member removed from field 6 releases its previous hands at that exact public boundary. This is depiction only;
   * independent field-4 membership and the active contact interval remain unchanged. */
  retiring(time:number):CarryGrips[]{const out:CarryGrips[]=[];for(const h of this.grips.values()){let i=h.length-1;while(i>=0&&h[i].at>time)i--;if(i<1||time-h[i].at>=300000)continue;const now=h[i],before=h[i-1].value;if(now.value.phase==='souls:released')continue;const holds=before.holds.filter(old=>!now.value.holds.some(next=>next.body===old.body));if(holds.length)out.push({...before,phase:'souls:released',sinceUs:now.at,untilUs:undefined,holds});}return out;}
