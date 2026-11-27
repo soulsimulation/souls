@@ -41,6 +41,9 @@ const ID = /^[0-9a-f]{32}-\d+$/;
 const M = 1_000_000;
 /** sim::activity::carry::REACH: a carrier stands this far beyond its grip, µm. */
 export const REACH = 350_000;
+/** sim::activity::carry::SIDE_REACH: a side carrier stands this far off its load's side, µm (#5067: room to stand on
+ * when the part is seated beside it). */
+export const SIDE_REACH = 450_000;
 /** How far beyond the edge of a part that stands upright in a stand or a bay (no long axis on the plan) each of its
  * two carriers stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges
  * along the line its carriers stand on and refuses a carrier more than 0.7 m from its hold (`part.grip-out-of-reach`),
@@ -129,7 +132,7 @@ export function turn(q, v) {
  * given, is from its middle along that line). A thing of no entry: 2.2 m along its z. Left or right is beside it
  * along its own x, `from` (default 1.2 m), right at +. `side<n>` is the n-th side carrier's place
  * (`sim::activity::carry::Load::side_places`): beside its n-th grip between its ends, counted from the back, along the
- * line its front and back stand on, half its width and REACH off that line, the first on its + side, then alternating;
+ * line its front and back stand on, half its width and SIDE_REACH off that line, the first on its + side, then alternating;
  * null when it has no such grip. `from` in µm; `at`: the thing's place in the world ({pos, rot}). `away`, for front or
  * back: `{ by, from }`, the spot moved `by` µm across the line, on the side away from the point `from` (µm on the plan:
  * the middle of what the thing is seated in), so a part unseated to its carriers' middle comes down outside its bay.
@@ -148,7 +151,7 @@ export function gripSpot(at, load, end, from = null, away = null, floor = false)
   if (side) {
     const k = Number(side[1]) - 1, along = load?.inner?.[k];
     if (along === undefined) return null;
-    const across = (load.halfWidth + REACH) * (k % 2 === 0 ? 1 : -1);
+    const across = (load.halfWidth + SIDE_REACH) * (k % 2 === 0 ? 1 : -1);
     return [mid[0] + line[0] * along - line[1] * across, mid[2] + line[1] * along + line[0] * across];
   }
   if (end === 'left' || end === 'right') {

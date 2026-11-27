@@ -182,6 +182,9 @@ pub struct Engine {
     /// Each crew's side carriers and their places while its part is on a seating's track (#5067): its carry, taken up
     /// again when the part comes back, keeps them.
     set_sides: BTreeMap<Id, Vec<(Id, [i64; 2])>>,
+    /// Carriers to walk back beside their crew's part on a refused seating's way back (#5067), by crew: each begun at
+    /// the next tick its body is free to be carried ([`Engine::walk_back`]).
+    walk_back: Vec<(Id, Id, crate::assembly::Walk)>,
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
@@ -546,6 +549,23 @@ const LAY_OUT: i64 = 2_200_000;
 const RETRIES: u8 = 100;
 
 /// How far apart two carriers stand along the ground, µm.
+/// How far apart the points of a carrier's way beside its part are checked against the ground it stands on, µm (#5067).
+const WALK_STEP: i64 = 25_000;
+
+/// The world's carry of a carrier beside its crew's part on a set-in track or its way back (#5067,
+/// [`crate::assembly::Walk`]): along the straight line to where it stands at the track's end on `ground`, at the
+/// walk's pace, as the world carries a body out of a seat (`sim::slots::climb_track`); it waits for nobody.
+fn walk_track(ground: Id, w: &crate::assembly::Walk) -> sim::controller::Track {
+    sim::controller::Track {
+        link: None,
+        line: vec![w.to],
+        speed: w.speed,
+        to: ground,
+        arrive: None,
+        hold: false,
+    }
+}
+
 fn apart(f: Vec3, k: Vec3) -> i64 {
     let (dx, dz) = (i128::from(f.x - k.x), i128::from(f.z - k.z));
     i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
@@ -667,6 +687,7 @@ impl Engine {
             loads: BTreeMap::new(),
             grips: BTreeMap::new(),
             set_sides: BTreeMap::new(),
+            walk_back: Vec::new(),
             riding: Vec::new(),
             retried: BTreeMap::new(),
             fixed: BTreeMap::new(),
@@ -825,12 +846,14 @@ impl Engine {
         Ok(())
     }
 
-    /// Runs act `a` at `now` on a copy of `live`, the bodies' controller `c`. Its entries wait in [`Engine::out`].
+    /// Runs act `a` at `now` on a copy of `live`, the bodies' controller `c`, the walkers' `surfaces` (each node's, for
+    /// the ways carriers walk beside a part on its set-in track, #5067). Its entries wait in [`Engine::out`].
     pub fn act(
         &mut self,
         live: &Tree,
         c: &mut Controller,
         slots: &mut Slots,
+        surfaces: &BTreeMap<Id, sim::mover::Surface>,
         a: &Act,
         now: Micros,
     ) -> R<()> {
@@ -1188,7 +1211,24 @@ impl Engine {
                         _ => return Err(refusal("part-joins", "parameter 4: ids")),
                     };
                     let reach = slots.reach_of(front).min(slots.reach_of(back));
-                    let effects = asm.put(
+                    // #5067: a carrier may walk beside the part where every step of the straight way is ground its
+                    // body stands on, and the world is not carrying it already.
+                    let floor = surfaces.get(&ground);
+                    let bodies: &Controller = c;
+                    let walkable = |body: Id, a: Vec3, b: Vec3| {
+                        let Some(floor) = floor.filter(|_| !bodies.carried(body)) else {
+                            return false;
+                        };
+                        let far = apart(a, b);
+                        let n = (far / WALK_STEP).max(1);
+                        (0..=n).all(|k| {
+                            let at = |u: i64, v: i64| {
+                                u + (i128::from(v - u) * i128::from(k) / i128::from(n)) as i64
+                            };
+                            floor.holds([at(a.x, b.x), at(a.z, b.z)])
+                        })
+                    };
+                    let (effects, walks) = asm.put(
                         &mut tree,
                         &self.activities,
                         &self.mint,
@@ -1202,7 +1242,13 @@ impl Engine {
                         ground,
                         apart(f, k),
                         &carriers,
+                        &walkable,
                     )?;
+                    for w in walks {
+                        if let Err(r) = c.carry(w.body, walk_track(ground, &w)) {
+                            eprintln!("worldd: {} did not walk beside its part: {r}", show(w.body));
+                        }
+                    }
                     if let Some(carry) = self.carries.remove(&activity) {
                         self.set_sides.insert(activity, carry.sides);
                     }
@@ -2262,6 +2308,18 @@ impl Engine {
             self.stop_refused(tr, now);
             self.came_back(tr, c, now);
         }
+        // #5067: those who walked beside a part whose seating was refused walk back beside it, each from the tick the
+        // world is no longer carrying its body, while the part is on its way back.
+        for (activity, ground, w) in std::mem::take(&mut self.walk_back) {
+            if !self.asm.as_ref().is_some_and(|s| s.busy(activity)) {
+                continue;
+            }
+            if c.carried(w.body) {
+                self.walk_back.push((activity, ground, w));
+            } else if let Err(r) = c.carry(w.body, walk_track(ground, &w)) {
+                eprintln!("worldd: {} did not walk back beside its part: {r}", show(w.body));
+            }
+        }
         self.collect(None);
     }
 
@@ -2272,6 +2330,7 @@ impl Engine {
         let mut written = std::mem::take(&mut asm.moved);
         for (activity, s) in std::mem::take(&mut asm.stopped) {
             let by = s.by;
+            let (walks, walked_on) = (s.walks.clone(), s.ground);
             match asm.stop(tree, now, activity, s) {
                 Ok(effects) => {
                     written.push((by, effects));
@@ -2281,6 +2340,11 @@ impl Engine {
                         .into_iter()
                         .find(|t| t.activity == activity)
                         .map(|t| t.until);
+                    // Those who walked beside the part walk back beside it.
+                    self.walk_back.retain(|(a, _, _)| *a != activity);
+                    let (span, ground) = (until.map_or(0, |u| u - now), walked_on);
+                    self.walk_back
+                        .extend(walks.iter().map(|w| (activity, ground, w.back(span))));
                     let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
                     if let Err(r) = regrip(
                         &mut self.activities,

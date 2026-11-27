@@ -786,7 +786,7 @@ fn trace(out: &str, fixed: &Fixed, path: &[Xz], carry: &Carry, walkers: &[(Xz, X
 mod from_entry {
     use replica::rules::json::parse;
 
-    use super::super::{Fixed, GRIP_REACH, Load, REACH};
+    use super::super::{Fixed, GRIP_REACH, Load, REACH, SIDE_REACH};
 
     const M: i64 = 1_000_000;
 
@@ -1047,7 +1047,7 @@ mod from_entry {
             plank.inner,
             [Some(-1_400_000), Some(0), Some(1_400_000), None]
         );
-        let off = 150_000 + REACH;
+        let off = 150_000 + SIDE_REACH;
         assert_eq!(
             plank.side_places(),
             vec![[-1_400_000, off], [0, -off], [1_400_000, off]]

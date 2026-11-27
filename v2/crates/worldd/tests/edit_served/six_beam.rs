@@ -4,9 +4,13 @@
 //!
 //! Two Souls stand the bay's frames in its uprights' slots and hold them (B18: a frame stands held until beams join
 //! it). Two carry the yard's easternmost beam out to open ground and lay it down; four, then three, take it, carry it
-//! 3 m and lay it down again (crews of two, three and four still carry the beam). Then six take it, carry it to the
-//! bay and seat it in `beam_high_l`. Each word of who holds which grip (`souls:carry-grips`) names six distinct grips,
-//! the same holds from the take through the set-in; seated, each carrier stands within reach of its grip.
+//! 3 m and lay it down again (crews of two, three and four still carry the beam). Then six take it and carry it to the
+//! bay's mouth, 0.45 m west of `beam_high_l`'s line: the frames' columns stand on that line, so nobody can stand on
+//! it within reach of an end grip. They put it in from there: on the set-in track the front and the back stand (each
+//! 0.57 m from its hold when the beam is seated) and the four sides walk beside the beam, the two east of it into the
+//! open bay, each keeping its place at its grip (#5067's walking set-in). Each word of who holds which grip
+//! (`souls:carry-grips`) names six distinct grips, the same holds from the take through the set-in; seated, each
+//! carrier stands within reach of its hold, the sides having walked as far as the beam went.
 
 use super::*;
 use sim::activity::carry::grips::{GRIPS, Holds};
@@ -157,12 +161,12 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
         unreachable!()
     };
 
-    // The frames: B into `upright_b`, its north carrier holding it; then A into `upright_a`, its south carrier
-    // holding it. Both holders stand outside the bay.
+    // The frames: B into `upright_b`, then A into `upright_a`, each held by its east carrier (Souls 4 and 1), east of
+    // the bay: clear of the bay's west mouth, where the beam's crew stands.
     let crew_b = carry_in(
         &s,
-        s3,
         s4,
+        s3,
         fb,
         frame_ends,
         &[m_b],
@@ -198,17 +202,18 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
     .await;
     let at = carry_by(&s, &mut [&mut *s2, &mut *s3, &mut *s5], &l, beam, at, 3 * M).await;
 
-    // Six take it, carry it to 2.5 m west of the slot, its ends standing out past the frames' posts, and step east
-    // into place: the front and the back on the slot's line beyond the posts, the sides beside their grips.
+    // Six take it, carry it to 2.5 m west of the slot and step east to the bay's mouth: the front and the back in line
+    // with the beam, [`BEAM_MOUTH`] west of the slot's line, the sides beside their grips either side of it.
     let six: &mut [&mut GwSoul] = &mut [&mut *s2, &mut *s3, &mut *s5, &mut *s6, &mut *s7, &mut *s8];
     walk_all(&s, six, &places(at, &l, 6, l.places()[1]), "six gather").await;
     let c = crew_all(&s, six).await;
     let got = six[0].act("part:take", c, part_of(beam)).await;
     println!("six take the beam: {got:?}");
     assert_eq!(got.kind, 1, "six take the beam");
-    let end = 1_750_000;
+    let end = l.places()[1];
     let slot = v3(m_hl.x, 0, m_hl.z);
     let west = v3(slot.x - 2_500_000, 0, slot.z);
+    let mouth = v3(slot.x - BEAM_MOUTH, 0, slot.z);
     walk_all(
         &s,
         six,
@@ -216,7 +221,11 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
         "six carry it to the bay",
     )
     .await;
-    walk_all(&s, six, &places(slot, &l, 6, end), "six step into place").await;
+    walk_all(&s, six, &places(mouth, &l, 6, end), "six step to the mouth").await;
+    let stood: Vec<Vec3> = six
+        .iter()
+        .map(|a| body_at(&w, body_of(&w, a.soul)))
+        .collect();
     // Where each stands from the slot's line as the put is asked (across it, along it), mm.
     for (k, a) in six.iter().enumerate() {
         let b = body_at(&w, body_of(&w, a.soul));
@@ -246,6 +255,22 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
         words.windows(2).all(|p| p[0].holds == p[1].holds),
         "the same holds throughout"
     );
+    // The sides walked beside the beam as far as it went on the plan (the set-in's own track, east); the ends stood.
+    let seated = where_is(&w, beam).2;
+    let went = [
+        seated.x - (stood[0].x + stood[1].x) / 2,
+        seated.z - (stood[0].z + stood[1].z) / 2,
+    ];
+    for (k, a) in six.iter().enumerate() {
+        let b = body_at(&w, body_of(&w, a.soul));
+        let (dx, dz) = (b.x - stood[k].x, b.z - stood[k].z);
+        println!("carrier {k} went {} mm east, {} mm south", dx / 1000, dz / 1000);
+        let want = if k < 2 { [0, 0] } else { went };
+        assert!(
+            (dx - want[0]).abs() <= 30_000 && (dz - want[1]).abs() <= 30_000,
+            "carrier {k} went ({dx}, {dz}) µm; the beam {went:?} µm"
+        );
+    }
     // Seated: each carrier within reach of its grip, on the plan.
     let (copy, _) = served_copy(&w);
     let t = copy.tree();
