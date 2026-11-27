@@ -68,10 +68,6 @@ export const JOBS = [
   { name: 'client-cli', kind: 'client-cli', light: true, assets: true, steps: ['V3-client-cli'] },
   { name: 'native', kind: 'native', assets: true, steps: ['V3-mars-engine'] },
   { name: 'latency', kind: 'latency', assets: false, steps: ['V5-server-full'] },
-  // #898: the generator of the reference pages (docs/site actions, api, mcp) still runs against the server's code. Server
-  // and package changes can break it; so can the generator and the pages' own prose, which the gate's scope map leaves free
-  // (docs and tools never gate on Modal), so `paths` adds the job for those in CI only.
-  { name: 'docs-reference', kind: 'docs-reference', light: true, assets: false, steps: ['V5-server-full', 'V3-walk'], paths: /^(?:tools\/docs\/|docs\/site\/(?:actions|api|mcp)\.md$)/ },
   // the server inventory in SERVER_SHARDS duration-balanced shards (server-test-files.mjs). Shard 0 also runs every
   // god-skill unit test (GOD_SKILL_TESTS, the replay corpus among them; none needs a browser or a live server): about
   // 35 s, and some need the pulled media, so they ride on a leg that god paths already select (#918).
@@ -134,7 +130,7 @@ export const LOW_RISK_WEB = /^packages\/form-rules\/src\//;
 export const FRAGMENT = /^changes\//;
 
 /** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A diff
- * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference, the v2 legs for
+ * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, the v2 legs for
  * content/kinds and moves) and, for form-rules source, the web jobs; any other diff is picked by the release gate's path
  * map, where an unmapped path (the lockfile, .github, content/ outside the low-risk folders ...) runs every job. */
 export function jobsFor(all, reason = all === null ? 'no usable base' : 'an empty diff') {

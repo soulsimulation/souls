@@ -10,7 +10,8 @@ import-eden = { path = "../import-eden" }
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
 skills = { path = "../../crates/skills" }
+# A template's tree is built as worldd builds a world from facts: its courses step first (`worldd::courses`).
+worldd = { path = "../../crates/worldd" }
 
 [dev-dependencies]
 directoryd = { path = "../../crates/directoryd" }
-worldd = { path = "../../crates/worldd" }

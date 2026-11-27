@@ -48,6 +48,9 @@ test('MIND-PANEL-COPY: owner terms, never a bare label; the one-use code control
  const card=label=>render(h(SoulCardView,{...CARD_FIXTURES.connected,link:{...CARD_FIXTURES.connected.link,holder:{label,since:null}},open:{details:true}}));
  const travel=card('travel');assert.match(travel,/Held by your agent/);assert.match(travel,/from “travel” · listening now/);assert.doesNotMatch(travel,/>travel<|<b>travel<\/b>|travel ·/);
  assert.match(card('eden-agent 1.9.9'),/>eden-agent 1\.9\.9 · listening now</);
+ // first-day 27 Nov: a client connected with nobody reading its messages never says "listening now"
+ const asleep=render(h(SoulCardView,{...CARD_FIXTURES.connected,link:{...readLink({state:'connected',reason:'asleep'}),holder:{label:'eden-agent 1.9.9',since:null}},open:{details:true}}));
+ assert.match(asleep,/>Connected</);assert.match(asleep,/>eden-agent 1\.9\.9 · not listening now: messages wait for it</);assert.doesNotMatch(asleep,/listening now</);
  for(const [name,props] of Object.entries(CARD_FIXTURES)){const html=render(h(SoulCardView,{...props,open:{details:true,pair:true}}));assert.doesNotMatch(html,/one-use|Connect a new agent|Request one-use code/,name);}
 });
 // LINK (Gene 2026-10-24): the grant poll is gone; the card's owner state comes from the owner inbox poll (pollInbox, under useSoulInbox and AgentMessageBox).

@@ -150,7 +150,9 @@ from `exportArgv` in `v2/tools/import-world/import-world.ts`: read access only t
 asset index, map and selected backup, and write access only to the fresh facts directory. No network, child-process
 or worker permission is granted. SQLite opens the backup read-only and immutable. Repeat these two steps for each
 backup (the validator also accepts several facts files). The convenience `import-world.ts` wrapper invokes
-`cargo run`; use the installed validator above on production.
+`cargo run`; use the installed validator above on production. It walks nothing unless asked: `--ways --entries
+<checkout>/content/kinds` also walks every floor and seat from the arrival point and back (minutes on a world of
+Eden's size; see `v2/tools/import-world/README.md`).
 
 ### An imported world in the directory
 
@@ -159,7 +161,10 @@ so nothing else puts it in the directory's list. `register-world` writes its nam
 the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
 and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
 with the map naming it: a map entry the directory cannot find in its own list has no owner to check, so its pairings
-are refused (`world-authority-missing`) until it is registered.
+are refused (`world-authority-missing`) until it is registered. `place-world.sh` gives a world whose `world.json` names
+a creator its creator's flags (`--creator --directory --creator-authority-required`); its creator's sign-in works once
+the directory has written the creator marker into the world's tokens file, after it is registered. A world whose
+creator no account holds: `give-world.mjs` (docs/operations.md).
 
 A slow or stalled store never stops the directory or refuses an approval. Each request waits at most 2 s for a
 world's owner record, then uses the owner last read (after a restart, the one in that world's tokens file) and says so
@@ -246,12 +251,19 @@ and CPUWeight 100 inside the same slice; it does not change the slice or any wor
 Directoryd stays at 256M. The root phase writes only protected placement metadata and the existing per-world unit
 configuration. A fixed child clears supplementary groups and drops to the installed Souls account before touching
 world data, forking, exporting streams or updating world route metadata. No request chooses a program, path or unit.
+Each request leaves `attempts/<request>` (a new attempt replaces the last). A run that refuses a request, or is
+refused before its drain, lasts at least 3 s, so a page retrying a failing create stays under systemd's start limit
+(5 starts in 10 s). A program that cannot load at all still fails at once and can fail `souls-place.path`; each
+release resets a failed path unit, says so, and warns if it does not stay active. A create the placement has not
+finished 15 minutes after it was made ends: the directory answers its click `create-failed`, takes its row off the
+list, asks the placement once more, and only then removes its name record, so the name is free again (the directory
+also checks at its start). This assumes the one directory, on the machine that places.
 
 Package the **existing public Eden template**, with serving support made by the same build, before enabling creation:
 
 ```sh
 worldd seed --facts <approved-public-facts> --entries <existing-public-entries> --souls 0 --dir <support>
-templates <approved-public-facts> <catalogue> --support <support>
+templates <approved-public-facts> <catalogue> --name eden-2026 --support <support>
 bash v2/tools/ops/install.sh bundle <out> <binaries> <page> <catalogue>
 ```
 
@@ -260,8 +272,25 @@ The catalogue is built from Eden's facts (X6's export of a backup), which are no
 
 ```sh
 /usr/local/lib/souls/worldd seed --facts <facts> --entries <existing-public-entries> --souls 0 --dir <support>
-/usr/local/lib/souls/publish-template <facts> /usr/local/lib/souls/templates --support <support>
+/usr/local/lib/souls/publish-template <facts> <scratch> --name <name> --support <support>
+W=/usr/local/lib/souls/worldd T=/usr/local/lib/souls/templates
+cp -a <scratch>/<name> $T/.<name>.new
+$W fork --from $T/.<name>.new/ckpt --template $T/.<name>.new --to <scratch>/fork --through <32 hex>:1
+install -d -m 755 $T/.aside && { [ ! -e $T/<name> ] || mv $T/<name> $T/.aside/<name>.<date>; } && mv $T/.<name>.new $T/<name>
+systemctl restart souls-directory
 ```
+
+`publish-template` builds the tree as worldd builds a seeded world: worldd's courses step first (the punts on the
+water, the rides' and boats' courses), then the import with the entries the seed kept, so a kind whose entry joins
+parts (a rack bay, a shade site) is pinned by its entry, and a world made from Eden's template has a seeded Eden's
+punts and courses (`/usr/local/lib/souls/publish-template courses <scratch>/fork/checkpoints` lists them). It writes
+`<out>/<name>` (renamed into place when whole) and its source checkpoint `<out>/<name>.source`, and refuses either if
+it exists. The dry-run fork uses `/usr/local/lib/souls/worldd`, the
+build `/etc/souls/placement.json` pins, against the copy beside the catalogue; the swap is a rename, so a create never
+reads a half-copied template. The directory reads the catalogue only at its start, every folder with a `template`
+file directly in it (so `.aside/` is not read, but a `.<name>.new` left behind would be), so it is restarted after the
+swap; until then it creates from the lineage it read, which the initializer refuses. A template is checked against the forking build's pins, so it is
+published again each time the placement pin moves to a new build.
 
 Only allowlisted facts, public entry/move data, entry coordinates and exact runtime pin/hash metadata are packaged.
 Creator metadata, tokens, logs and seeded state are excluded. The published filtered checkpoint remains the world;
@@ -271,7 +300,8 @@ The release owner configures `/etc/souls/placement.json` before activating the p
 hash and trusted catalogue, directory/origin addresses and reserved gateway port range. The installed helper requires
 the fixed route metadata `/var/lib/souls/routes/worlds.json` and route output `/var/lib/souls-routes`. Installation
 never overwrites this operator configuration. The existing route service owns its launcher/public-origin settings.
-When upgrading its build, update that pin to the verified installed binary. The inbox is root:souls 0770; the fixed
+Each release then moves that pin with the library's `worldd` and `ops/` and republishes the catalogue's templates on its
+own build ([release.md](../release.md), New world). The inbox is root:souls 0770; the fixed
 parent, private status/authority files and attempts stay root-owned. The directory can write only the inbox there.
 Atomic token and retirement-notice replacement also needs the directory service's sandbox to permit writes to
 the fixed placed-world subtree `/var/lib/souls/worlds/worlds`, owned by the existing Souls account. This is subtree
@@ -311,6 +341,8 @@ Configure these names in the origin's existing `origin.env` (the origin service 
   default directory listener; adjust it if that listener changes. No path, credentials, query or fragment is allowed.
 - `SIM_SITE_OWNERS`: explicit comma-separated canonical account ids. `CATALOG_GENE_OWNER_ID` remains the
   compatibility fallback only when `SIM_SITE_OWNERS` is empty. Neither setting grants a world-owner fallback.
+  The directory reads `SIM_SITE_OWNERS` too (no fallback), as a line in `/etc/souls/directory.args`: New world's
+  per-account limits do not apply to these accounts. Imported worlds count toward no account's limits.
 - `SOULS_DATA`: the existing data location; its `owner-overview.json` is the existing collector's snapshot.
 
 The directory must use the same production provider and allowed application origins. The origin forwards only the

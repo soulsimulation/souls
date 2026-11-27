@@ -11,7 +11,7 @@ const url=new URL(origin);assert.equal(url.hostname,'127.0.0.1');assert.ok(+url.
 const out=process.env.POLISH_OUT??scratchDir('polish/layout-final');mkdirSync(out,{recursive:true});
 const report={status:'running',views:[]},release=await chromeLease('polish');let browser;
 try{
- browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+ browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
  for(const [width,dpr,follow] of [[1280,1],[890,1],[390,1],[1280,2],[890,2],[390,2],[390,3],[768,1,true]]){
   const context=await browser.newContext({viewport:{width,height:844},deviceScaleFactor:dpr,isMobile:width===390,hasTouch:width===390});
   await context.addInitScript(()=>localStorage.setItem('sim.dev','polish'));

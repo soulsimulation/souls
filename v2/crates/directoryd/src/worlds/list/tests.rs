@@ -24,6 +24,9 @@ impl Store for Counted<'_> {
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
         self.inner.put(key, bytes, when)
     }
+    fn delete(&self, key: &str) -> R<()> {
+        self.inner.delete(key)
+    }
 }
 
 fn person(n: u8) -> Id {
@@ -143,6 +146,119 @@ fn a4_two_clicks_make_one_world() {
         .expect_err("taken");
     assert_eq!(e.name, "name-taken");
     assert_eq!(forks.load(Ordering::SeqCst), 1);
+}
+
+/// Registers `n` imported worlds (`imp-<i>`) founded by `creator`, made at `made`, as the operator's
+/// `register-world` does.
+fn import(store: &Memory, creator: Id, n: u8, made: u64) {
+    for i in 1..=n {
+        let name = format!("imp-{i}");
+        register::register(
+            store,
+            &register::Imported {
+                name: &name,
+                label: "Bo",
+                lineage: [0x40 + i; 16],
+                zone: Id::new(Scope([0x40 + i; 16]), 1).expect("an id"),
+                creator,
+                now: made,
+            },
+        )
+        .expect("registered");
+    }
+}
+
+#[test]
+fn a5_imported_worlds_count_toward_no_limit() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let made = 1_000_000u64;
+    // Six imported worlds, the last a minute ago, founded by a first-day account: more than every limit.
+    import(&store, person(2), 6, made + 60);
+    let w = worlds(&store, &gets, forks);
+    assert_eq!(
+        w.list().expect("a list")["worlds"].as_array().map(Vec::len),
+        Some(6)
+    );
+    w.create(&ask("a", "new-1", "Bo"), person(2), made, made + 120)
+        .expect("imported worlds count toward no limit");
+    // Worlds made through New world still count: the hour, then the first day, then five.
+    let e = w
+        .create(&ask("b", "new-2", "Bo"), person(2), made, made + 180)
+        .expect_err("an hour");
+    assert_eq!(e.name, "world-limit-hourly");
+    w.create(&ask("c", "new-2", "Bo"), person(2), made, made + 3800)
+        .expect("after the hour");
+    let e = w
+        .create(&ask("d", "new-3", "Bo"), person(2), made, made + 8000)
+        .expect_err("the first day");
+    assert_eq!(e.name, "world-limit-new-account");
+    for i in 3..=5 {
+        w.create(
+            &ask(&format!("o{i}"), &format!("new-{i}"), "Bo"),
+            person(2),
+            made,
+            made + DAY + i,
+        )
+        .expect("an older account");
+    }
+    let e = w
+        .create(&ask("o6", "new-6", "Bo"), person(2), made, made + 2 * DAY)
+        .expect_err("five made");
+    assert_eq!(e.name, "world-limit");
+}
+
+#[test]
+fn a5_a_site_owner_has_no_limits_and_a_newcomer_keeps_them() {
+    assert_eq!(
+        site_owners(" acct_site, ,acct_other ,"),
+        ["acct_other".to_owned(), "acct_site".to_owned()].into()
+    );
+    assert!(site_owners("").is_empty());
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let made = 1_000_000u64;
+    import(&store, person(2), 6, made);
+    let mut w = worlds(&store, &gets, forks);
+    w.site_owners = site_owners("acct_site");
+    // A site owner in their account's first minutes: seven worlds, a minute apart, past all three limits.
+    for i in 1..=7u64 {
+        w.create_for(
+            &ask(&format!("s{i}"), &format!("site-{i}"), "Bo"),
+            person(2),
+            "acct_site",
+            made,
+            made + 60 * i,
+        )
+        .expect("a site owner has no limits");
+    }
+    // A newcomer, with site owners configured: all three limits, exactly as before.
+    let nb = |k: &str, name: &str, at: u64| {
+        w.create_for(&ask(k, name, "Cy"), person(3), "acct_new", made, made + at)
+    };
+    nb("a", "cy-1", 60).expect("first");
+    assert_eq!(
+        nb("b", "cy-2", 120).expect_err("an hour").name,
+        "world-limit-hourly"
+    );
+    nb("c", "cy-2", 3700).expect("after the hour");
+    assert_eq!(
+        nb("d", "cy-3", 8000).expect_err("the first day").name,
+        "world-limit-new-account"
+    );
+    for i in 3..=5 {
+        nb(&format!("o{i}"), &format!("cy-{i}"), DAY + i).expect("an older account");
+    }
+    assert_eq!(
+        nb("o6", "cy-6", 2 * DAY).expect_err("five").name,
+        "world-limit"
+    );
 }
 
 #[test]
@@ -363,6 +479,332 @@ fn w3b_pending_retry_survives_directory_restart_and_keeps_owned_identity() {
             .unwrap()
             .map(|o| NameRecord::read(&o.bytes).unwrap().lineage),
         Some(expected)
+    );
+}
+
+/// A placement that places only while `place` is set, counting the starts it is asked for (probes apart); a probe
+/// answers `probe` (`None`: placed).
+fn placing<'a>(
+    store: &'a Memory,
+    gets: &'a AtomicUsize,
+    starts: Arc<AtomicUsize>,
+    place: Arc<std::sync::atomic::AtomicBool>,
+    probe: Option<&'static str>,
+) -> Worlds<Counted<'a>> {
+    let mut w = worlds(store, gets, Arc::new(AtomicUsize::new(0)));
+    w.starter = Box::new(move |s: &Start| {
+        if s.probe {
+            return match probe {
+                None => Ok(()),
+                Some(name) => refuse(name, "probe"),
+            };
+        }
+        starts.fetch_add(1, Ordering::SeqCst);
+        if place.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            refuse("world-starting", "pending")
+        }
+    });
+    w
+}
+
+#[test]
+fn rule10_an_unplaced_create_ends_named_and_frees_its_name() {
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    let t = 10 * DAY;
+    let click = ask("lab-click", "my-mars-lab", "Mars Lab");
+    assert_eq!(
+        w.create(&click, person(1), 0, t).unwrap_err().name,
+        "world-starting"
+    );
+    // Within the limit, the same click asks the placement again (reprocessed), and keeps the name.
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN - 1)
+            .unwrap_err()
+            .name,
+        "world-starting"
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_some()
+    );
+    // Past it: a named refusal, the row off the list, the name record gone, and no placement asked for.
+    let ended = w
+        .create(&click, person(1), 0, t + PLACE_WITHIN)
+        .unwrap_err();
+    assert_eq!(ended.name, "create-failed");
+    assert!(ended.detail.contains("my-mars-lab"), "{}", ended.detail);
+    assert_eq!(w.list().unwrap()["worlds"], json!([]));
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    // The same click stays ended; the owner's new click takes the name and is placed.
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 1)
+            .unwrap_err()
+            .name,
+        "create-failed"
+    );
+    place.store(true, Ordering::SeqCst);
+    let again = w
+        .create(
+            &ask("lab-click-2", "my-mars-lab", "Mars Lab"),
+            person(1),
+            0,
+            t + PLACE_WITHIN + 2,
+        )
+        .expect("the name is free");
+    assert_eq!(again["world"]["ready"], true);
+    // The first click, retried later, still cannot touch the new world.
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 3)
+            .unwrap_err()
+            .name,
+        "create-failed"
+    );
+    assert_eq!(
+        w.list().unwrap()["worlds"][0]["lineage"],
+        again["world"]["lineage"]
+    );
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn rule10_a_stale_create_with_no_click_left_ends_at_the_start_or_at_anyones_create() {
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    {
+        let w = placing(
+            &store,
+            &gets,
+            starts.clone(),
+            place.clone(),
+            Some("world-starting"),
+        );
+        w.create(
+            &ask("lost-click", "my-mars-lab", "Mars Lab"),
+            person(1),
+            0,
+            t,
+        )
+        .unwrap_err();
+        w.create(
+            &ask("lost-click-2", "other-lab", "Other"),
+            person(1),
+            0,
+            t + 1,
+        )
+        .unwrap_err();
+    }
+    // A directory started within the limit keeps them; one started past it ends both.
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN - 1).unwrap(), 0);
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN + 1).unwrap(), 2);
+    assert_eq!(w.list().unwrap()["worlds"], json!([]));
+    assert!(
+        store
+            .get(&NameRecord::key("my-mars-lab"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.get(&NameRecord::key("other-lab")).unwrap().is_none());
+    // Someone else's create also ends a stale one, here before its own name check.
+    place.store(false, Ordering::SeqCst);
+    w.create(
+        &ask("c3", "third", "Third"),
+        person(1),
+        0,
+        t + 2 * PLACE_WITHIN,
+    )
+    .unwrap_err();
+    place.store(true, Ordering::SeqCst);
+    let taken = w
+        .create(
+            &ask("c4", "third", "Taken"),
+            person(2),
+            0,
+            t + 3 * PLACE_WITHIN,
+        )
+        .expect("the stale reservation of another account ended first");
+    assert_eq!(taken["world"]["creator"], principal_text(person(2)));
+}
+
+#[test]
+fn rule10_a_placed_or_unknown_placement_keeps_the_create() {
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    placing(&store, &gets, starts.clone(), place.clone(), None)
+        .create(&ask("k", "placed", "Placed"), person(1), 0, t)
+        .unwrap_err();
+    // Not known (status unreadable, or a placement still running): kept as it is.
+    let unknown = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("start-failed"),
+    );
+    assert_eq!(unknown.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(unknown.list().unwrap()["worlds"][0]["ready"], false);
+    // Placed after all (the page never asked again): its row is ready and its name stays.
+    let placed = placing(&store, &gets, starts.clone(), place.clone(), None);
+    assert_eq!(placed.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(placed.list().unwrap()["worlds"][0]["ready"], true);
+    assert!(store.get(&NameRecord::key("placed")).unwrap().is_some());
+}
+
+#[test]
+fn rule10_a_ready_list_row_keeps_its_name_whatever_its_intent_says() {
+    // The list row was marked ready, but the intent's last write was lost: the intent still says unready.
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let t = 10 * DAY;
+    let click = ask("k", "live", "Live");
+    placing(&store, &gets, starts.clone(), place.clone(), None)
+        .create(&click, person(1), 0, t)
+        .expect("placed");
+    let key = store
+        .keys()
+        .into_iter()
+        .find(|k| k.starts_with("world-create/"))
+        .unwrap();
+    let prior = store.get(&key).unwrap().unwrap();
+    let mut intent: Json = serde_json::from_slice(&prior.bytes).unwrap();
+    intent["row"]["ready"] = json!(false);
+    store
+        .put(
+            &key,
+            &serde_json::to_vec(&intent).unwrap(),
+            When::Is(&prior.etag),
+        )
+        .unwrap();
+    // The probe says not placed (its status lost or unreadable as `world-starting`): the name of the ready world stays.
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    assert_eq!(w.end_stale_creates(t + 2 * PLACE_WITHIN).unwrap(), 0);
+    let again = w
+        .create(&click, person(1), 0, t + 2 * PLACE_WITHIN)
+        .expect("the same world");
+    assert_eq!(again["world"]["ready"], true);
+    assert!(store.get(&NameRecord::key("live")).unwrap().is_some());
+    assert_eq!(w.list().unwrap()["worlds"][0]["ready"], true);
+}
+
+#[test]
+fn rule10_a_placement_that_starts_while_a_create_ends_keeps_it() {
+    // The first probe finds no status; by the second (after the row went) the placement has written one.
+    let (store, gets) = (Memory::default(), AtomicUsize::new(0));
+    let t = 10 * DAY;
+    let mut w = worlds(&store, &gets, Arc::new(AtomicUsize::new(0)));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let seen = probes.clone();
+    w.starter = Box::new(move |s: &Start| {
+        if !s.probe {
+            return refuse("world-starting", "pending");
+        }
+        match seen.fetch_add(1, Ordering::SeqCst) {
+            0 => refuse("world-starting", "no status yet"),
+            _ => refuse("start-failed", "a placement may be running"),
+        }
+    });
+    w.create(&ask("k", "racing", "Racing"), person(1), 0, t)
+        .unwrap_err();
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN).unwrap(), 0);
+    assert_eq!(probes.load(Ordering::SeqCst), 2);
+    let rows = w.list().unwrap()["worlds"].clone();
+    assert_eq!(rows.as_array().unwrap().len(), 1, "the row is back");
+    assert_eq!(rows[0]["name"], "racing");
+    assert!(store.get(&NameRecord::key("racing")).unwrap().is_some());
+}
+
+#[test]
+fn rule10_a_name_record_left_without_its_row_is_ended_whole_by_its_click() {
+    // A stop between the row's removal and the name record's: the click lists the row again, then it ends whole.
+    let (store, gets, starts) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let place = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let t = 10 * DAY;
+    let click = ask("k", "half", "Half");
+    let w = placing(
+        &store,
+        &gets,
+        starts.clone(),
+        place.clone(),
+        Some("world-starting"),
+    );
+    w.create(&click, person(1), 0, t).unwrap_err();
+    let list = store.get(KEY).unwrap().unwrap();
+    store
+        .put(KEY, br#"{"worlds":[]}"#, When::Is(&list.etag))
+        .unwrap();
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN)
+            .unwrap_err()
+            .name,
+        "world-starting",
+        "the name record is still there: the row is listed again"
+    );
+    assert_eq!(w.list().unwrap()["worlds"][0]["name"], "half");
+    assert_eq!(w.end_stale_creates(t + PLACE_WITHIN).unwrap(), 1);
+    assert!(store.get(&NameRecord::key("half")).unwrap().is_none());
+    assert_eq!(
+        w.create(&click, person(1), 0, t + PLACE_WITHIN + 1)
+            .unwrap_err()
+            .name,
+        "create-failed"
     );
 }
 
@@ -744,4 +1186,197 @@ fn n_g8_the_creator_sets_the_welcome_visitors_are_shown() {
     assert!(!w.is_creator("mine", person(2)).expect("read"));
     w.set_welcome("mine", person(1), "").expect("cleared");
     assert_eq!(w.welcome_of("mine").expect("read"), None);
+}
+
+/// Rule 9 (26 Nov): each row's `souls` is what its world's `health.json` on this machine says, read again once
+/// [`SOULS_EVERY`] seconds have passed; a world with no file here, or no folder set, lists `souls: null`.
+#[test]
+fn the_souls_in_each_world_come_from_its_health_file() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let mut w = worlds(&store, &gets, forks);
+    w.create(&ask("k1", "busy", "Ann"), person(1), 0, 10 * DAY)
+        .expect("made");
+    w.create(&ask("k2", "never-started", "Bo"), person(2), 0, 10 * DAY)
+        .expect("made");
+    let row = |w: &Worlds<Counted<'_>>, name: &str| {
+        w.list().expect("a list")["worlds"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|r| r["name"] == name)
+            .cloned()
+            .expect("listed")
+    };
+    assert_eq!(row(&w, "busy")["souls"], Json::Null, "no folder set: none");
+    let root = std::env::temp_dir().join(format!("directoryd-souls-{}", std::process::id()));
+    let busy = row(&w, "busy");
+    let folder = folder_of(&busy).expect("a folder name");
+    // worldd's instance name, as the folder is named: `<32 hex>-<32 hex>-<counter>`, the row's lineage and zone
+    let parts: Vec<&str> = folder.split('-').collect();
+    let hex = |p: &str| p.len() == 32 && p.bytes().all(|b| b.is_ascii_hexdigit());
+    assert!(
+        parts.len() == 3
+            && hex(parts[0])
+            && hex(parts[1])
+            && !parts[2].is_empty()
+            && parts[2].bytes().all(|b| b.is_ascii_digit()),
+        "{folder}"
+    );
+    assert_eq!(parts[0], busy["lineage"].as_str().expect("a lineage"));
+    assert_eq!(
+        format!("{}:{}", parts[1], parts[2]),
+        busy["zone"].as_str().expect("a zone")
+    );
+    std::fs::create_dir_all(root.join(&folder)).expect("a world folder");
+    let health_at = |n: u64, at_s: u64| {
+        std::fs::write(
+            root.join(&folder).join("health.json"),
+            format!(
+                "{{\"at_unix_ms\":{},\"written\":3,\"souls\":{n}}}\n",
+                at_s * 1000
+            ),
+        )
+        .expect("written")
+    };
+    let health = |n: u64| health_at(n, crate::accounts::serve::now());
+    health(4);
+    w.souls_root = Some(root.clone());
+    assert_eq!(row(&w, "busy")["souls"], 4);
+    assert_eq!(
+        row(&w, "never-started")["souls"],
+        Json::Null,
+        "no file: none"
+    );
+    // Read again only once SOULS_EVERY has passed.
+    health(5);
+    let t = crate::accounts::serve::now() + 1;
+    let at = |now| w.souls_of(std::slice::from_ref(&folder), now)[&folder];
+    assert_eq!(
+        at(t),
+        Some(4),
+        "within {SOULS_EVERY} s: the count read before"
+    );
+    assert_eq!(at(t + SOULS_EVERY), Some(5));
+    // A clock gone back reads again rather than hold the old count.
+    health(6);
+    assert_eq!(at(t - 2), Some(6));
+    // A file not written for more than SOULS_FRESH seconds is a world not running here: none.
+    health_at(7, t - SOULS_FRESH - 5);
+    assert_eq!(at(t + 2 * SOULS_EVERY), None, "a stale file gives no count");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// One HTTP request to a served directory: its status and JSON answer.
+fn call(addr: &str, method: &str, path: &str, bearer: Option<&str>, body: &Json) -> (u16, Json) {
+    use std::io::{Read, Write};
+    let body = if method == "GET" {
+        String::new()
+    } else {
+        body.to_string()
+    };
+    let auth = bearer.map_or(String::new(), |b| format!("authorization: Bearer {b}\r\n"));
+    let mut s = std::net::TcpStream::connect(addr).expect("connects");
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nhost: {addr}\r\n{auth}content-length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    (
+        out[9..12].parse().unwrap(),
+        serde_json::from_str(out.split("\r\n\r\n").nth(1).unwrap()).unwrap_or_default(),
+    )
+}
+
+/// 26 Nov (my-mars-lab-2): a world made by New world (the directory's create, as the launcher asks it) is unlisted
+/// and listed again by its creator over HTTP (`POST /v1/worlds/settings`, the request the launcher's owner route
+/// passes on), and by nobody else. Unlisted, the list asked with no sign-in leaves it out (what the launcher's list
+/// follows), and its creator's own list keeps it, marked.
+#[test]
+fn a_created_world_is_unlisted_and_listed_by_its_creator_over_http() {
+    use crate::accounts::serve::{App, run};
+    let store: &'static (dyn Store + Send + Sync) = Box::leak(Box::new(Memory::default()));
+    let mut templates = BTreeMap::new();
+    templates.insert(
+        "mars-camp".to_owned(),
+        Template {
+            dir: "mars-camp".into(),
+            lineage: [0xe0; 16],
+            zone: Id::new(Scope([0xe0; 16]), 1).expect("an id"),
+        },
+    );
+    let app = Arc::new(App {
+        store: crate::accounts::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: None,
+        origin: None,
+        mailbox_key: None,
+        pairing: None,
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: Some(Worlds::new(
+            Directory::new(store, Name::new("m1").expect("a name")),
+            templates,
+            Box::new(|_| Ok(())),
+        )),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    std::thread::spawn(move || run(listener, app));
+
+    let ask = json!({"key": "click-1", "name": "my-mars-lab-2", "template": "mars-camp", "label": "My Mars Lab"});
+    let (status, made) = call(&addr, "POST", "/v1/worlds", Some("test:Ada"), &ask);
+    assert_eq!(status, 200, "{made}");
+    let public = || {
+        let (status, list) = call(&addr, "GET", "/v1/worlds", None, &Json::Null);
+        assert_eq!(status, 200, "{list}");
+        list["worlds"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter_map(|r| r["name"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let set = |who: Option<&str>, world: &str, unlisted: bool| {
+        call(
+            &addr,
+            "POST",
+            "/v1/worlds/settings",
+            who,
+            &json!({"world": world, "unlisted": unlisted}),
+        )
+    };
+    assert_eq!(public(), ["my-mars-lab-2"]);
+    // Nobody signed in, someone else, or a world that is not there: refused, and it stays listed.
+    assert_eq!(
+        set(None, "my-mars-lab-2", true),
+        (401, json!({"refused": "token-missing"}))
+    );
+    assert_eq!(
+        set(Some("test:Bea"), "my-mars-lab-2", true),
+        (403, json!({"refused": "not-the-creator"}))
+    );
+    assert_eq!(
+        set(Some("test:Ada"), "nowhere", true),
+        (404, json!({"refused": "world-missing"}))
+    );
+    assert_eq!(public(), ["my-mars-lab-2"]);
+    // Its creator: off the public list, still on her own, marked.
+    let (status, row) = set(Some("test:Ada"), "my-mars-lab-2", true);
+    assert_eq!(status, 200, "{row}");
+    assert_eq!(row["world"]["name"], "my-mars-lab-2");
+    assert_eq!(row["world"]["unlisted"], true);
+    assert!(public().is_empty(), "off the public list");
+    let (_, own) = call(&addr, "GET", "/v1/worlds", Some("test:Ada"), &Json::Null);
+    assert_eq!(own["worlds"][0]["name"], "my-mars-lab-2");
+    assert_eq!(own["worlds"][0]["unlisted"], true);
+    // And back on it.
+    assert_eq!(set(Some("test:Ada"), "my-mars-lab-2", false).0, 200);
+    assert_eq!(public(), ["my-mars-lab-2"]);
 }

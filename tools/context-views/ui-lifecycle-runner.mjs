@@ -116,7 +116,7 @@ export async function runUiLifecycleProof({ root, withFixtureSession, report, sa
     try {
       const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
       budget(); assert.ok(deadline - Date.now() >= 20000, 'enough work budget before browser launch');
-      browserServer = await chromium.launchServer({ executablePath: process.env.GOD_LOOK_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--ignore-gpu-blocklist'], timeout: 5000 });
+      browserServer = await chromium.launchServer({ ...(process.env.GOD_LOOK_CHROME ? { executablePath: process.env.GOD_LOOK_CHROME } : { channel: 'chromium' }), headless: true, args: ['--ignore-gpu-blocklist'], timeout: 5000 });
       await session.registerProcess(browserServer.process().pid);
       budget();
       browser = await chromium.connect(browserServer.wsEndpoint(), { timeout: 5000 });
@@ -148,8 +148,9 @@ export async function runUiLifecycleProof({ root, withFixtureSession, report, sa
           }
           check('extra wall card remains usable as text', ['ready', 'unavailable'].includes(terminal.status), { ref: target.ref, status: terminal.status, reason: terminal.reason });
         }
-        const label = await button.getAttribute('aria-description');
-        check('architectural disclosure ' + target.ref, /Architectural context.*fixed daylight.*default doors.*no Souls/.test(label ?? ''), { label });
+        // #5038: a card is named by its place alone, with no hover text about how its picture was made
+        const label = await button.getAttribute('aria-description') ?? await button.getAttribute('title');
+        check('card named by its place only ' + target.ref, label === null, { label });
       }
       await Promise.all([...responseTasks]); await settled();
       await snapshot('ui-explore-ready');

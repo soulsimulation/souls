@@ -11,9 +11,12 @@ each due change at its due time.
 `SOULS_SLEEP=1` in the unit's environment, off by default and turned on per world by `sleep-rollout.sh` below; 0.133 S3b,
 `worldd/src/sleep.rs`) reads its clock each second: **still** (no intent queued or open, no act forming or checking,
 no body moving for an intent or for the wind-down) and its **next due time**, the earliest over its due lists (the
-sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends).
-Still for 60 s on end, with nothing due within 60 s (`supervisor::sleep::may_sleep`), it sleeps. Agents' sockets live
-in the gateway and keep no world awake. The order is fixed:
+sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends, the
+forms' timers: a bell's fade, a planter's next stage). A form's timer pending when the world sleeps or restarts goes
+back on its list from the timers the tree holds, at the first tick (#3991), and fires in a world with no bodies too;
+its form's needs are decided when it fires, and one refused is written on its thing as `souls:timer-refused`. Still for 60 s on end, with nothing due
+within 60 s (`supervisor::sleep::may_sleep`), it sleeps. Agents' sockets live in the gateway and keep no world awake.
+The order is fixed:
 
 1. its log durable to the last record (a woken world resumes from its newest checkpoint and the records after it, as
    after any restart);
@@ -55,7 +58,10 @@ socket is group-writable and a world or a gateway running as souls can reach it.
 - **Waking** is `systemctl start --no-block worldd@<world>.service` (a world already running is left as it is), or
   with `$SUPERVISOR_WAKE` set, that program run with the world's name.
 - **Idle**, it blocks on its queue and reads the wall clock again at least once a second, so a stepped clock moves an
-  alarm by at most a second (clock jumps are O10's).
+  alarm by at most a second. The world's sleep watch reads the world's own clock (O10), so a step never makes it
+  sleep with a change due; its alarm is its next due world time, which the machine's clock reaches then. A world
+  running ahead after `clock.stepped` (`world-restarting.md`) rejoins the machine's clock when it wakes from a
+  sleep longer than the step; an intent wakes it at once.
 
 ```text
 WORLDS_ROOT=/var/lib/souls/worlds /usr/local/lib/souls/supervisor wake <world>   # wake one now

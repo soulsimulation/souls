@@ -12,7 +12,7 @@ import { AccountPicture } from '../AccountPicture.tsx';
 import { HomeSouls } from './HomeSouls.tsx';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
-export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | 'place' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
+export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'drawn' | 'template' | 'place' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
 /** How people sign in on this launcher's worlds (the public Clerk settings; never a secret). */
 export type LauncherAuth = { provider: 'clerk' | 'dev'; clerkSatellite?: ClerkSatellite; clerkPublishableKey?: string; clerkIssuer?: string; authenticationOrigin?: string };
 export type LauncherList = { contract: 'local-worlds/1'; launcher: string; worlds: LauncherWorldCard[]; templates: LauncherTemplate[]; auth?: LauncherAuth };
@@ -67,8 +67,9 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
     t = setTimeout(poll, 6000);
     return () => { stopped = true; clearTimeout(t); cancel(); };
   }, []);
-  // the fullest worlds first; a world whose count is unknown goes last
-  const worlds = [...list.worlds].sort((a, b) => (b.entities ?? -1) - (a.entities ?? -1));
+  // the list's own order (featured first, then the most Souls, then the newest: tools/world-launcher/listing.mjs); a
+  // world the new engine runs has no "things" count, so sorting by it here sank those below every old one (26 Nov)
+  const worlds = list.worlds;
   // two worlds with one name are told apart by their address, shown only on those cards
   const shared = new Set(worlds.map((w) => w.name).filter((n, i, all) => all.indexOf(n) !== i));
   return (
@@ -99,7 +100,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       <div className="lh-cards">
         {worlds.map((w) => (
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>
-            {/* #887: the owner's picture, else the template's default (one shared, immutable URL); lazy, never shifts the card */}
+            {/* #887: the owner's picture, else the launcher's drawing of the world, else the template's default (one shared, immutable URL); lazy, never shifts the card */}
             {w.thumbnail && <img className="lh-thumb" src={w.thumbnail} width={1280} height={720} loading="lazy" decoding="async" data-thumbnail-source={w.thumbnailSource ?? ''}
               alt={w.thumbnailSource !== 'template' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
             <span className="lh-label-over">

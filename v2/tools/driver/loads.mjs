@@ -28,8 +28,9 @@ export const MIX = Object.freeze({
 });
 
 /** The mix's rate arms: every agent acting every 4 s (125 acts a second at 500), a burst at 2.7 times that, and
- *  Gene's stated rate, about 1,000 acts a minute at 500 agents (each every 29.4 s, about 17 a second). */
-export const RATES = Object.freeze({ every4: 4, burst: 1.5, gene17: 29.4 });
+ *  Gene's stated rates, 2 to 5 acts a minute a Soul: about 1,000 acts a minute at 500 agents (each every 29.4 s,
+ *  about 17 a second) and 5 a minute (each every 12 s, about 42 a second at 500). */
+export const RATES = Object.freeze({ every4: 4, burst: 1.5, gene17: 29.4, gene42: 12 });
 
 /** FNV-1a of a text, as a share of 1. */
 const share = (t) => { let h = 2166136261; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619); return (h >>> 0) / 2 ** 32; };
@@ -78,7 +79,7 @@ export function merge(a, b, name) {
 }
 
 /** The ladder's steps (X7, #4015): agent counts for the measured runs on a served world. */
-export const LADDER = Object.freeze([10, 20, 50, 100, 200, 350, 500, 750, 1000]);
+export const LADDER = Object.freeze([10, 20, 50, 100, 200, 300, 350, 500, 750, 1000]);
 
 /** A ladder step's two arms, its count fixed by its name (`--agents` is not read): uneven is the shared `event` shape
  *  as it is; even is `uniform` at the pace that intends as many acts as the uneven arm with the same seconds and seed,

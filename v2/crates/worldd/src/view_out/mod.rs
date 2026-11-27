@@ -49,7 +49,11 @@
 //!     its words. The public writer ([`PublicWriter`]) given the importer's name dictionary also writes the words of
 //!     the place names its public nodes reference (import-eden's field 4, a SHA-256 of the words; #3574) as
 //!     `[hash, words]` rows: the baseline's for its state, a part's for the nodes its records create, each checked
-//!     against its hash (#3571's rule).
+//!     against its hash (#3571's rule). A text file is derived from the store, not exact (W7, #2826): a removal after
+//!     it was written takes the removed references' rows out of it ([`purge_text`], `worldd::removal`), and a text
+//!     file written again from the recovery chain on a start is written without them, replacing what the disk holds
+//!     when it differs ([`PublicWriter`]'s `text_again`), so a restart never brings removed words back and never
+//!     refuses a purged file as `stream-immutable`. Parts, baselines and their recovery objects are never changed.
 //! 11. **A still world says so** (V5b, #3460). [`follow`] is handed the world's clock and tells the writer the world's
 //!     time now ([`Writer::idle`]) after each frame, and at least every 20 ms without one. Once a stretch's time has
 //!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
@@ -305,13 +309,79 @@ pub fn capture_checkpoint(path: &Path, expected: &sim::checkpoint::Root) -> R<Ve
 pub fn write_whole(path: &Path, bytes: &[u8]) -> R<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    let mut f = fs::File::create(&tmp).map_err(io)?;
+    whole_via(path, &PathBuf::from(tmp), bytes)
+}
+
+/// As [`write_whole`], for a text file (rule 10), under a temporary name of this write alone (W7, #2826): a removal's
+/// purge and a writer may write one text file at once, each whole, the last rename standing, never one's bytes in
+/// the other's file. A write killed midway leaves its own `.tmp` behind, which the origin never serves.
+pub fn write_text(path: &Path, bytes: &[u8]) -> R<()> {
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    whole_via(path, &PathBuf::from(tmp), bytes)
+}
+
+fn whole_via(path: &Path, tmp: &Path, bytes: &[u8]) -> R<()> {
+    let mut f = fs::File::create(tmp).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
     // Synced before the rename (B1-7): after a power cut the name holds the old bytes or the new, never a short file.
     f.sync_all().map_err(io)?;
     drop(f);
-    fs::rename(&tmp, path).map_err(io)
+    fs::rename(tmp, path).map_err(io)
+}
+
+/// After a text file was written from `bytes` without the rows `list` names (rule 10, W7 #2826): while the store's
+/// list has changed since, the file again with the list now. A removal after the last read finds the file there and
+/// purges it itself (`worldd::removal`), so no removal lands between and is missed.
+fn settle(store: &Store, path: &Path, bytes: &[u8], mut list: Redactions) -> R<()> {
+    loop {
+        let now = store.redactions();
+        if now == list {
+            return Ok(());
+        }
+        derive(path, purge_text(bytes, &now)?.as_deref().unwrap_or(bytes))?;
+        list = now;
+    }
+}
+
+/// Writes a text file derived from the store (rule 10): whole, unless the disk holds these bytes already.
+fn derive(path: &Path, bytes: &[u8]) -> R<()> {
+    if fs::read(path).is_ok_and(|on_disk| on_disk == bytes) {
+        return Ok(());
+    }
+    if let Some(p) = path.parent() {
+        fs::create_dir_all(p).map_err(io)?;
+    }
+    write_text(path, bytes)
+}
+
+/// A text file (rule 10) without the rows of the references `redactions` names (W7, #2826), or `None` when it holds
+/// none of them. A place name's row, keyed by its hash, is kept.
+pub fn purge_text(bytes: &[u8], redactions: &Redactions) -> R<Option<Vec<u8>>> {
+    let Value::Array(rows) = decode(bytes)
+        .map_err(|e| fault("stream-words", e.to_string()))?
+        .value
+    else {
+        return Err(fault("stream-words", "a text file is a list"));
+    };
+    let held = rows.len();
+    let removed = |row: &Value| match row {
+        Value::Array(p) => p
+            .first()
+            .and_then(|k| replica::effects::read_id(k).ok())
+            .is_some_and(|r| redactions.contains(r)),
+        _ => false,
+    };
+    let kept: Vec<Value> = rows.into_iter().filter(|row| !removed(row)).collect();
+    if kept.len() == held {
+        return Ok(None);
+    }
+    wire(Value::Array(kept)).map(Some)
 }
 
 /// What a writer has written.
@@ -1188,6 +1258,9 @@ pub struct PublicWriter<S> {
     links: std::collections::BTreeSet<Id>,
     left: std::collections::BTreeSet<Id>,
     moved: std::collections::BTreeSet<Id>,
+    /// The nodes the open cut's removes took out, each with what was under it, read before each part applied: their
+    /// rows go, and the links and timers that went with them are among `links` and `timers` (a gesture's end).
+    gone: std::collections::BTreeSet<Id>,
     /// Cuts worked out whole since the writer opened (#4192).
     pub whole_cuts: u64,
     /// The references each node row of the published state holds, and those of the rest of it (#3799).
@@ -1420,7 +1493,32 @@ pub struct PublicStart<'a> {
     /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
     pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
-    pub history: Option<&'a sim::log::Recovered>,
+    pub history: Option<&'a dyn History>,
+}
+
+/// The world's log records from its first kept one on, as a reader recovering from them needs them (#2803): held in
+/// memory ([`sim::log::Recovered`], a test's), or read from the disk a batch at a time (`worldd serve`'s), so a
+/// restart never holds the whole log.
+pub trait History {
+    /// The first record held.
+    fn first(&self) -> u64;
+    /// Hands each record from `from` on to `each`, in order, while it returns `Ok(true)`.
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()>;
+}
+
+impl History for sim::log::Recovered {
+    fn first(&self) -> u64 {
+        self.first
+    }
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()> {
+        let from = from.max(self.first);
+        for (n, raw) in (from..).zip(self.after(from)) {
+            if !each(n, raw)? {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 impl PublicStart<'_> {
     /// Only the public legacy transition may choose an older retained source. The engine's newest restore stays
@@ -1723,6 +1821,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             links: std::collections::BTreeSet::new(),
             left: std::collections::BTreeSet::new(),
             moved: std::collections::BTreeSet::new(),
+            gone: std::collections::BTreeSet::new(),
             whole_cuts: 0,
             refs: None,
             still_at: None,
@@ -1860,18 +1959,18 @@ impl<S: ObjectStore> PublicWriter<S> {
                     )
                 })?;
                 if w.migration_state.is_none() {
-                    w.bridge_to(history.first)?;
+                    w.bridge_to(history.first())?;
                 }
-                for (offset, raw) in history.records.iter().enumerate() {
-                    let n = history.first + offset as u64;
+                history.each_from(w.cursor, &mut |n, raw| {
                     if n < w.cursor {
-                        continue;
+                        return Ok(true);
                     }
                     if w.migration_state.is_some() {
-                        break;
+                        return Ok(false);
                     }
                     w.apply_record(n, raw)?;
-                }
+                    Ok(true)
+                })?;
                 let prefix = w.migration_state.take().ok_or_else(|| {
                     fault(
                         "stream-legacy-source-missing",
@@ -1949,7 +2048,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         immutable(&w.root.join(stream::header_path(header)), header.stored())?;
         immutable(&w.generation_dir().join("baseline"), &w.baseline)?;
-        immutable(
+        w.text_again(
             &w.generation_dir().join("baseline.text"),
             &w.get(&w.baseline_text)?,
         )?;
@@ -1990,7 +2089,13 @@ impl<S: ObjectStore> PublicWriter<S> {
                 return Err(fault("stream-words", "a row is a pair"));
             };
             let id = replica::effects::read_id(&p[0])?;
-            Ok((id, replica::audience::references(&p[1])))
+            // A node taken out is a row of its id alone: no references.
+            Ok((
+                id,
+                p.get(1)
+                    .map(replica::audience::references)
+                    .unwrap_or_default(),
+            ))
         };
         // From a whole state: the one after a whole cut, or the one before the first cut by rows.
         let version = |v: &Value| match v {
@@ -2286,7 +2391,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.closed.insert(0, (record, closed_at));
         self.next_generation(baseline, text, switch)?;
         immutable(&self.generation_dir().join("baseline"), &self.baseline)?;
-        immutable(&self.generation_dir().join("baseline.text"), &words)?;
+        self.text_again(&self.generation_dir().join("baseline.text"), &words)?;
         self.prune();
         self.prune_store();
         Ok(())
@@ -2530,6 +2635,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .unwrap_or(self.closed.len());
                 self.closed.split_off(keep)
             };
+            // The current chain, which the backup's clean-up never deletes (#4954).
+            if let Some(spool) = &self.spool {
+                spool.live(self.live.iter().map(|h| self.object_key(h)).collect());
+            }
             for (record, _) in gone.iter().rev() {
                 let key = self.object_key(record);
                 if let Some(spool) = &self.spool {
@@ -2699,15 +2808,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     /// R15: backs this writer's spooled recovery chain up to `store` on its own thread ([`backup`]), telling `report`
-    /// how it stands. A writer opened without a spool has nothing to back up.
-    pub fn back_up<T: ObjectStore + Send + 'static>(
+    /// how it stands, and deletes old generations from it through `cleanup`, another client, on a thread of their own
+    /// (#4954). A writer opened without a spool has nothing to back up.
+    pub fn back_up<T: ObjectStore + Send + 'static, C: ObjectStore + Send + 'static>(
         &mut self,
         store: T,
+        cleanup: C,
         report: Box<dyn Fn(BackupState) + Send>,
     ) -> R<()> {
         let prefix = self.prefix.clone();
         match &mut self.spool {
-            Some(spool) => backup::start(spool, store, prefix, report),
+            Some(spool) => backup::start(spool, store, cleanup, prefix, report),
             None => Ok(()),
         }
     }
@@ -2828,7 +2939,12 @@ impl<S: ObjectStore> PublicWriter<S> {
                 if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(fault("stream-recovery", "invalid legacy file name"));
                 }
-                immutable(&self.dir.join(name.as_str()), &self.get(hash)?)?;
+                let path = self.dir.join(name.as_str());
+                if name.as_str().ends_with(".text") {
+                    self.text_again(&path, &self.get(hash)?)?;
+                } else {
+                    immutable(&path, &self.get(hash)?)?;
+                }
                 self.live.insert(hash.clone());
             }
         }
@@ -2935,9 +3051,30 @@ impl<S: ObjectStore> PublicWriter<S> {
             return Err(fault("stream-recovery", "canonical projection differs"));
         }
         for (name, bytes) in files {
-            immutable(&self.generation_dir().join(name), &bytes)?;
+            let path = self.generation_dir().join(&name);
+            if name.ends_with(".text") {
+                self.text_again(&path, &bytes)?;
+            } else {
+                immutable(&path, &bytes)?;
+            }
         }
         Ok(())
+    }
+    /// Writes a text file again (rule 10, W7 #2826): `recovered` without the rows of references removed since it was
+    /// published, written whole when the disk holds other bytes (a purge, or a hidden reference since restored). With
+    /// no store the file is exact, as a part is.
+    fn text_again(&self, path: &Path, recovered: &[u8]) -> R<()> {
+        let Some(store) = &self.text else {
+            return immutable(path, recovered);
+        };
+        let list = store.redactions();
+        derive(
+            path,
+            purge_text(recovered, &list)?
+                .as_deref()
+                .unwrap_or(recovered),
+        )?;
+        settle(store, path, recovered, list)
     }
     /// A node is a row of the public projection when it is live in `t` and public (#3667).
     fn visible(&self, t: &replica::tree::Tree, id: Id) -> bool {
@@ -3020,6 +3157,11 @@ impl<S: ObjectStore> PublicWriter<S> {
             let part = Part::read(raw)?;
             // The entries that put a thing into a closed container or touch one in it (#3948): never published.
             let kept = self.kept_out(&part);
+            let waiting = if self.incremental {
+                self.note_removed(&part)
+            } else {
+                Vec::new()
+            };
             // Whole canonical validation first. Never publish a partial producer result or private ledger. The part is
             // taken entry by entry, as a viewer applies it; the view, the duplicates and the cut's state are kept only
             // when every entry applied, and a part refused part way poisons the writer. The view reads the writer's tree
@@ -3207,7 +3349,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
             // What the cut can be published from (#3799): motion, fields set and nodes set in a slot touch only their
             // rows; links made or ended only theirs; a leave whose arrive is in the same cut only the rows of what it
-            // moved (#4192).
+            // moved (#4192); a remove only the rows of what it took out.
             for e in &part.effects {
                 match &e.body {
                     Body::Changes(cs) => {
@@ -3231,13 +3373,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 | replica::effects::Change::Unlink { link } => {
                                     self.links.insert(*link);
                                 }
-                                c => {
-                                    prof::cause(match c {
-                                        replica::effects::Change::Remove { .. } => "remove",
-                                        _ => "other-change",
-                                    });
-                                    self.structural = true
-                                }
+                                // A node taken out with what is under it, its links and its timers: their rows, noted
+                                // before the part applied (`note_removed`).
+                                replica::effects::Change::Remove { .. } => {}
                             }
                         }
                     }
@@ -3269,6 +3407,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 }
             }
+            self.note_landed(waiting);
             let at = part.effects.last().map(|e| e.envelope.at);
             if let Some(at) = at {
                 let win = at.div_euclid(stream::PERIOD_US);
@@ -3403,6 +3542,70 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.links.clear();
         self.left.clear();
         self.moved.clear();
+        self.gone.clear();
+    }
+    /// Notes what each remove in `part` takes out, read on the writer's tree before the part applies: the node and
+    /// every node under it in `gone`, the links at any of them in `links` and their timers in `timers`, so the cut can
+    /// publish their rows gone rather than work out the public state whole. A node put under one of them earlier in
+    /// the same part is not noted: one made in the cut was never public, and one moved there is not live at the cut,
+    /// which is then worked out whole.
+    ///
+    /// A node made in the part takes in the links already made to its id (`Tree` rule 7), public until then: the
+    /// nodes made and the links waiting for each are returned, so that those of one taken out in the same part are
+    /// noted once it has applied ([`PublicWriter::note_landed`]). One that stays makes the cut whole (`bare`).
+    fn note_removed(&mut self, part: &Part) -> Vec<(Id, Vec<Id>)> {
+        let tree = self.canonical.tree();
+        let mut gone = std::collections::BTreeSet::new();
+        let mut waiting = Vec::new();
+        let removes = part.effects.iter().any(|e| {
+            matches!(&e.body, Body::Changes(cs)
+                if cs.iter().any(|c| matches!(c.change, replica::effects::Change::Remove { .. })))
+        });
+        if !removes {
+            return waiting;
+        }
+        for e in &part.effects {
+            let Body::Changes(cs) = &e.body else {
+                continue;
+            };
+            for c in cs {
+                if let replica::effects::Change::Create { node, .. } = &c.change {
+                    let links = tree.links_at(*node);
+                    if !links.is_empty() {
+                        waiting.push((*node, links.iter().map(|e| e.link).collect()));
+                    }
+                }
+                let replica::effects::Change::Remove { node } = &c.change else {
+                    continue;
+                };
+                let mut todo: Vec<_> = tree.handle(*node).into_iter().collect();
+                while let Some(h) = todo.pop() {
+                    if let Some(n) = tree.node(h) {
+                        gone.insert(n.id());
+                    }
+                    self.links
+                        .extend(tree.links_of(h).unwrap_or(&[]).iter().map(|e| e.link));
+                    todo.extend_from_slice(tree.children(h).unwrap_or(&[]));
+                }
+            }
+        }
+        self.timers.extend(
+            tree.timers()
+                .iter()
+                .filter(|(_, t)| gone.contains(&t.node))
+                .map(|(id, _)| *id),
+        );
+        self.gone.extend(gone);
+        waiting
+    }
+    /// After a part applied: the links that waited for a node it made ([`PublicWriter::note_removed`]) are noted
+    /// when the part also took that node out, so the cut publishes them gone.
+    fn note_landed(&mut self, waiting: Vec<(Id, Vec<Id>)>) {
+        for (node, links) in waiting {
+            if self.canonical.tree().handle(node).is_none() {
+                self.links.extend(links);
+            }
+        }
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
@@ -3436,14 +3639,26 @@ impl<S: ObjectStore> PublicWriter<S> {
                     );
                 }
             }
+            // A node a remove took out: its row gone; one the cut made and took out was never public. Any other not
+            // live here (sent away, or moved under one taken out before it went) is left to the whole cut.
+            ids.extend(&self.gone);
+            let mut sure = true;
             let rows = ids
                 .iter()
-                .filter_map(|id| {
-                    let n = tree.node_state_of(*id)?;
-                    (n.audience == Audience::Everyone && !self.hidden(tree, *id))
-                        .then(|| (*id, n.to_value()))
+                .filter_map(|id| match tree.node_state_of(*id) {
+                    Some(n) => (n.audience == Audience::Everyone && !self.hidden(tree, *id))
+                        .then(|| (*id, Some(n.to_value()))),
+                    None if self.gone.contains(id) || self.made.contains(id) => Some((*id, None)),
+                    None => {
+                        sure = false;
+                        None
+                    }
                 })
                 .collect();
+            // A node taken out while a public flight is open is left to the whole cut: a flight's link to it, or a
+            // flying node framed by it, is in rows (keys 4, 8 and 9) this cut does not hold. No flying node, no flight.
+            sure &= self.gone.is_empty()
+                || replica::stream::public::flying_ids(self.player.state())?.is_empty();
             // A link's row as the public state holds it: public, with no end a node here that is not public or is
             // hidden in a closed container (#3948); none once ended. One with an end not live here (a node in flight,
             // or gone) is left to the whole cut.
@@ -3518,7 +3733,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
-            match (timers, links, landed && bare) {
+            match (timers, links, landed && bare && sure) {
                 (Some(timers), Some(links), true) => {
                     self.player
                         .row_delta(tree.next(), rows, timers, links, &self.made)?
@@ -3624,7 +3839,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         // A returned public child can become live without being canonically touched by Return. Bind its
         // actual query version, including zero for an ordinary checkpoint's formerly flying child.
-        // A cut of rows only (#3799) adds and removes no node, so no flying child becomes live in it.
+        // A cut by rows (#3799) lands no flight, so no flying child becomes live in it.
         let flying = replica::stream::public::flying_ids(self.player.state())?;
         if let Some(after) = after.as_ref().filter(|_| !flying.is_empty()) {
             let before = object_map(&wire(self.player.state().clone())?)?;
@@ -3684,12 +3899,31 @@ impl<S: ObjectStore> PublicWriter<S> {
             ids.extend(rows_of(self.player.state()));
             ids
         });
-        let changed = self
-            .changes
-            .iter()
-            .filter(|(i, _)| shown_ids.as_ref().is_none_or(|s| s.contains(i)))
-            .map(|(i, v)| (*i, *v))
-            .collect::<Vec<_>>();
+        // A cut by rows names versions only of nodes in the published state or made with a row in its delta, as a
+        // whole cut names them only of nodes in the state before or after it: one it made and took out again, or one
+        // left out (C5) that a remove took out, is in neither.
+        let made_rows: std::collections::BTreeSet<Id> = match &delta {
+            Some(Value::Map(d)) => match d.get(&2) {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .filter_map(|r| match r {
+                        Value::Array(p) if p.len() == 2 => replica::effects::read_id(&p[0]).ok(),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        };
+        let mut changed = Vec::new();
+        for (i, v) in &self.changes {
+            if shown_ids.as_ref().is_some_and(|s| !s.contains(i))
+                || after.is_none() && !made_rows.contains(i) && !self.player.holds(*i)?
+            {
+                continue;
+            }
+            changed.push((*i, *v));
+        }
         // A whole cut's rows that differ from the published state: its context's delta, and what the words index
         // is brought up to date from (#4192).
         let whole_delta = match &after {
@@ -3769,8 +4003,18 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.generation_dir().join(number.to_string()),
             self.generation_dir().join(format!("{number}.text")),
         );
+        // A removal while the part was cut (W7, #2826): the local file is written without its rows, derived from the
+        // store as rule 10 says; the recovery object keeps the bytes as cut, never served.
+        let list = self.text.as_ref().map(|store| store.redactions());
+        let derived = match &list {
+            Some(list) => purge_text(&text, list)?,
+            None => None,
+        };
         let (part_written, text_written) = std::thread::scope(|s| {
-            let text = beside(s, || immutable(&text_file, &text));
+            let text = beside(s, || match &derived {
+                Some(purged) => derive(&text_file, purged),
+                None => immutable(&text_file, &text),
+            });
             (
                 immutable(&part_file, &bytes),
                 text.join("the text file's writer panicked"),
@@ -3778,6 +4022,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         });
         part_written?;
         text_written?;
+        if let (Some(store), Some(list)) = (&self.text, list) {
+            settle(store, &text_file, &text, list)?;
+        }
         lap.mark(8);
         self.last_to = Some(sp.to);
         if let Some(began) = began {
@@ -3816,7 +4063,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
-        let real = crate::answers::now();
+        // The anchor pairs the world's time with the machine's wall clock, which viewers compare with their own: the
+        // world's clock runs ahead of the machine's by a step (O10, `measures::CLOCK_AHEAD_MS`).
+        let wall = crate::answers::now();
+        let ahead = crate::measures::CLOCK_AHEAD_MS.load(std::sync::atomic::Ordering::Relaxed);
+        let real = wall.saturating_add(ahead.saturating_mul(1000));
         let world =
             mapped_now(self.canonical.tree().time(), self.clock_seed, real).or_else(|_| {
                 if self.canonical.tree().time().is_empty() {
@@ -3831,7 +4082,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             header: self.header.hash().to_bytes(),
             newest_to: self.last_to,
             anchor_world: world,
-            anchor_wall_ms: u64::try_from(real.div_euclid(1000))
+            anchor_wall_ms: u64::try_from(wall.div_euclid(1000))
                 .map_err(|_| fault("stream-clock", "negative wall time"))?,
             quiet_until: quiet,
         };

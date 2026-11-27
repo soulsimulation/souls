@@ -4,9 +4,10 @@
 //   node --test apps/web/src/gen-mesh/motion-obstacles.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import { CORE_KIT, WorldModel, applyBatch, type DefInput, type Entity, type StoredDef } from '@souls/world-compiler';
 import terrainKit from '../../../../packages/world-compiler/src/core-kit/terrain.json' with { type: 'json' };
-import { solidFootprints, surroundings } from './motion.ts';
+import { creatureStep, makeRig, solidFootprints, surroundings } from './motion.ts';
 
 function world() {
   const w = new WorldModel({ constants: { extent: 1000, ground: 'land' }, seed: 'obstacles' });
@@ -118,4 +119,55 @@ test('certified mesh bounds include arbitrary scale and 2-D poses while avoiding
   w.footprint = (e, d) => { called.push(e.id); return footprint(e, d); };
   solidFootprints(w, [100, 0, 16]);
   assert.deepEqual(called, ['large']);
+});
+
+// #1563: a solid's first footprint bakes its def's physics; at arrival the solids near the first creatures were all baked
+// in one frame (~0.19 s of one 0.38 s task on a 4x phone). Creatures now build their obstacle lists over frames, within
+// a budget per frame, and hold still until their list is complete.
+/** A world of 24 benches round the origin, each its own bake (the bake key holds the seed), and a clock on which each
+ *  bake costs `cost` ms. */
+function slowBakes(cost: number) {
+  const w = world();
+  for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2, r = 5 + (i % 3) * 3; put(w, `b${i}`, { p: [Math.cos(a) * r, 0, Math.sin(a) * r], seed: 100 + i }); }
+  const bakes = (w as unknown as { bakes: Map<string, unknown> }).bakes, bake = w.bake.bind(w);
+  const clock = { now: 0, misses: 0 };
+  w.bake = ((...a: Parameters<typeof bake>) => { const n = bakes.size, out = bake(...a); if (bakes.size > n) { clock.misses++; clock.now += cost; } return out; }) as typeof w.bake;
+  return { w, bakes, clock };
+}
+function withClock<T>(clock: { now: number }, fn: () => T): T {
+  const real = performance.now.bind(performance);
+  (performance as { now: () => number }).now = () => clock.now;
+  try { return fn(); } finally { (performance as { now: () => number }).now = real; }
+}
+
+test('#1563: a creature holds still at home until every solid near it is baked, a few bakes a frame', () => {
+  const { w, clock } = slowBakes(5);
+  const obj = new THREE.Group();
+  const rig = makeRig(obj, { gait: 'quadruped-walk', kind: 'wander', speed: 1.2, radius: 12, seed: 7, model: w, box: [1, 1, 1] });
+  const home: [number, number] = [0, 0], frames: { misses: number; x: number; z: number }[] = [];
+  withClock(clock, () => {
+    for (let f = 0; f < 400; f++) {
+      const m0 = clock.misses; clock.now += 16;
+      creatureStep(obj, rig, null, 1000 + f * 0.25, { y: 0, yaw: 0 }, home);
+      frames.push({ misses: clock.misses - m0, x: obj.position.x, z: obj.position.z });
+    }
+  });
+  const baking = frames.reduce((last, f, i) => (f.misses > 0 ? i + 1 : last), 0);
+  assert.ok(baking >= 6, `the bakes were spread over frames (${baking})`);
+  assert.ok(frames.every((f) => f.misses <= 2), `at most a budget's worth of bakes per frame: ${frames.map((f) => f.misses).join(',')}`);
+  // the frame of the last bakes completes the list, and may take the first step
+  assert.ok(frames.slice(0, baking - 1).every((f) => f.x === 0 && f.z === 0), 'no step before the obstacle list is complete');
+  assert.ok(frames.slice(baking).some((f) => Math.hypot(f.x, f.z) > 0.05), 'once it is, the creature walks');
+});
+
+test('#1563: the list built over frames is the one built at once, from the same number of bakes', () => {
+  const at = slowBakes(5), over = slowBakes(5);
+  const want = withClock(at.clock, () => surroundings(at.w, [0, 0], 12, 'land', new Set()).obstacles.list(0));
+  const s = surroundings(over.w, [0, 0], 12, 'land', new Set());
+  let calls = 0;
+  withClock(over.clock, () => { for (let t = 0; !s.obstacles.ready(t); t++) { over.clock.now += 16; calls++; } });
+  assert.ok(calls >= 6, `built over ${calls} frames`);
+  assert.deepEqual(s.obstacles.list(0), want);
+  assert.equal(over.clock.misses, at.clock.misses, 'as many bakes');
+  assert.equal(over.bakes.size, at.bakes.size);
 });

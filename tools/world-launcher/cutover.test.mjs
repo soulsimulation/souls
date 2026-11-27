@@ -4,7 +4,8 @@ import { chmodSync, existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSyn
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
-import { bindingId, cutoverFence, withV2Stream } from './cutover.mjs';
+import { bindingId, cutoverFence, searchPlaces, snapshotPlaces, withV2Stream } from './cutover.mjs';
+import { newEngineClock } from './page-meta.mjs';
 import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
@@ -160,6 +161,29 @@ test('a mutation waiting for actual child boot is fenced again after activation 
   const r = await pending;
   assert.equal(r.status, 409); assert.equal((await r.json()).code, 'world.new-engine');
   assert.doesNotMatch(readFileSync(hits, 'utf8'), /\/v1\/edge\/act/, 'only startup health probes reached the old process');
+});
+
+test('first day: a search lists the places a newcomer means first, and small things after them', () => {
+  // Eden's "park" (27 Nov): 51 things in id order, "Park pond lilies 3" first and Town Park 26th
+  const thing = (id, name, about) => ({ id, def: 'core-thing@1', in: { parent: 'world' }, name, p: [0, 0, 0], r: 0, ...(about ? { about } : {}) });
+  const entities = [thing('e_01', 'park-pond-lilies-3'), thing('e_02', 'park-drinking-water'), thing('e_03', 'park-gazebo', { title: 'Park Gazebo', what: 'The sheltered pavilion in Town Park.' }),
+    thing('e_04', 'farm-hamlet', { title: 'Farm Hamlet', what: 'The small farming settlement west of Town Park.' }), thing('e_05', 'park-pond', { title: 'Park Pond', what: 'The pond within Town Park.' }),
+    thing('e_06', 'park-slide'), thing('e_07', 'park-pond-jetty', { title: 'Park Pond Jetty', what: 'The small jetty over Park Pond.' }), thing('e_08', 'trees-south-park-canopy'),
+    thing('e_09', 'town-park', { title: 'Town Park', what: 'A public green with a pond and a gazebo.' }), thing('e_10', 'sparkle-fountain', { title: 'Sparkle Fountain', what: 'A fountain.' }),
+    thing('e_11', 'cafe', { title: 'Café', what: 'Coffee.', aliases: ['park cafe'] }), thing('e_12', 'park', { title: 'Park', what: 'The lawn.' })];
+  const places = snapshotPlaces({ defs: [], entities });
+  const titles = (q) => searchPlaces(places, q).map((p) => p.target.title);
+  assert.deepEqual(titles('park'), [
+    'Park', 'Town Park',                                   // the title itself, then a title that ends with it: a park
+    'Park Pond', 'Park Gazebo', 'Park Pond Jetty',         // a word of the title, shorter first
+    'Sparkle Fountain',                                    // inside a word
+    'Café', 'Farm Hamlet',                                 // only its alias or its description
+    'Park slide', 'Park pond lilies 3', 'Park drinking water', 'Trees south park canopy',   // no authored meaning: after every place
+  ]);
+  assert.deepEqual(titles('town park'), ['Town Park', 'Park Pond', 'Farm Hamlet', 'Park Gazebo'], 'a phrase, the same way');
+  assert.deepEqual(titles('drinking water'), ['Park drinking water'], 'a small thing is still found by its name');
+  assert.deepEqual(titles('lilies'), ['Park pond lilies 3']);
+  assert.deepEqual(titles('(park'), [], 'a query is text, never a pattern');
 });
 
 test('#4177: withV2Stream writes the stream into the inline config and leaves a page without one alone', () => {
@@ -318,7 +342,7 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   // the directory's world list names them; quiet is unlisted
   const { createServer } = await import('node:http');
   const directory = createServer((req, res) => res.writeHead(req.url === '/v1/worlds' ? 200 : 404, { 'content-type': 'application/json' })
-    .end(JSON.stringify({ worlds: [{ name: 'fresh', label: 'Fresh Fields', template: 'empty', creator: 'abc:1', made: 1700000000 }, { name: 'quiet', label: 'Quiet', unlisted: true }] })));
+    .end(JSON.stringify({ worlds: [{ name: 'fresh', label: 'Fresh Fields', template: 'empty', creator: 'abc:1', made: 1700000000, souls: 3 }, { name: 'quiet', label: 'Quiet', unlisted: true }] })));
   const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname, started = [];
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {}, cutoverBindingFile: file, webDir: web, v2DirectoryUrl: `http://127.0.0.1:${D}`,
@@ -331,11 +355,15 @@ test('D2: a world with only a new-engine route is served at /w/<slug>/ by the ol
   const fresh = list.worlds.find(w => w.slug === 'fresh');
   assert.equal(fresh?.name, 'Fresh Fields', 'listed under its directory label'); assert.equal(fresh.engine, 'new'); assert.equal(fresh.url, '/w/fresh/?dev=1');
   assert.deepEqual(list.worlds.map(w => w.slug).sort(), ['eden', 'fresh'], 'the unlisted, previewed and archived routes are not listed');
+  assert.equal(fresh.souls, 3, '26 Nov: the Souls in it now, from the directory\'s row');
 
   const page = await get('/w/fresh/');
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
   const html = await page.text(), c = config(html);
   assert.match(html, /<title>Fresh Fields · Souls<\/title>/); assert.match(html, /<link rel="canonical" href="http:\/\/127\.0\.0\.1:\d+\/w\/fresh\/">/);
+  // 27 Nov: the world's clock when the page was sent, before any script reads it, so the first frame has the world's light
+  const sent = /<head[^>]*><script>window\.__simWorldClock="([^"]+)";<\/script>/.exec(html)?.[1];
+  assert.ok(sent && Math.abs(Date.parse(`${sent}Z`) - Date.parse(`${newEngineClock()}Z`)) < 60_000, `the page's world clock: ${sent}`);
   assert.deepEqual([c.worldKey, c.worldPath, c.worldId, c.worldName, c.worldEngine, c.authProvider, c.devAuth], ['fresh', '/w/fresh', 'v2:fresh', 'Fresh Fields', true, 'dev', true]);
   assert.deepEqual([c.v2Stream, c.v2History, c.v2Bodies, c.v2Gateway, c.v2Directory], ['/s/fresh/', '/s/h-fresh/', '/w/fresh/v2/bodies/', '/w/fresh/v2/ws', '/']);
   const { soulClient, ...routed } = await (await get('/w/fresh/v1/config', { accept: 'application/json' })).json();
@@ -455,14 +483,20 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
   writeFileSync(join(clientDir, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
   // eden is the newest world, so a start's wake-recent and the keep-alive would pick it first
-  const worlds = [{ slug: 'eden', createdAt: 2 }, { slug: 'other', createdAt: 1 }].map(w => ({ ...w, name: w.slug, template: 'empty', owner: 'synthetic-owner' }));
+  const worlds = [{ slug: 'eden', createdAt: 2, souls: 23, entities: 5020 }, { slug: 'other', createdAt: 1 }].map(w => ({ ...w, name: w.slug, template: 'empty', owner: 'synthetic-owner' }));
   writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: [], worlds }));
   writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:1', stream: '/s/eden/', canonical: true } } }));
+  // the directory's world list counts the Souls in eden now (worldd's health.json, read by directoryd's list)
+  const { createServer } = await import('node:http');
+  let directoryAsked = 0;
+  const directory = createServer((req, res) => { directoryAsked += req.url === '/v1/worlds'; res.writeHead(req.url === '/v1/worlds' ? 200 : 404, { 'content-type': 'application/json' }).end(JSON.stringify({ worlds: [{ name: 'eden', label: 'Eden', souls: 4 }] })); });
+  const D = await testPort(1); await new Promise(r => directory.listen(D, '127.0.0.1', r));
+  t.after(() => directory.close());
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname, asked = [];
   // the old world's program is not there: any start of eden's old process would be a spawn of a missing file
   const missing = join(dir, 'no-such-old-server');
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, webDir, base: '/', log: () => {}, eager: 4, keepAlive: true, keepAliveMs: 30, prewarm: false,
-    cutoverBinding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir },
+    cutoverBinding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir }, v2DirectoryUrl: `http://127.0.0.1:${D}`,
     command: (w, port) => { asked.push(w.slug); return w.slug === 'eden' ? { cmd: missing, args: [] } : { cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port) } }; } });
   t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
   const get = (path, headers = {}) => fetch(`${base}/w/eden${path}`, { headers });
@@ -470,9 +504,12 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
   const bot = await get('/', { accept: 'text/html', 'user-agent': 'Googlebot/2.1' });
   assert.equal(bot.status, 200, 'a crawler gets the same page'); assert.equal(bot.headers.get('x-souls-engine'), 'new');
-  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls', '/mcp']) {
+  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls']) {
     const r = await get(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path);
   }
+  // no MCP: a plain 410 that points to the For agents page, never the old world's endpoint
+  const mcp = await fetch(`${base}/w/eden/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(mcp.status, 410); assert.match(await mcp.text(), /^Souls does not serve MCP\..*\/docs\/for-agents\n$/);
   // the page's polled reads are never a 404, with nothing published either (the release walk fails on any same-origin 404)
   for (const path of ['/v1/world/visitors', '/v1/world/context', '/v1/world/context?q=pond']) assert.equal((await get(path)).status, 200, path);
   const seq = await get('/v1/world/seq'); assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 0, entities: 0 }, 'nothing published: seq 0');
@@ -489,6 +526,12 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   // the site's own pages and the world list need no world process
   const listed = (await (await fetch(`${base}/__sim/worlds.json`)).json()).worlds.find(w => w.slug === 'eden');
   assert.deepEqual([listed?.status, listed?.engine], ['running', 'new'], 'listed as live on the new engine, not asleep');
+  // 26 Nov: the registry's 23 is the old engine's count (the homepage showed "Eden 2026 · 23 Souls" while Explore listed 4):
+  // the card shows the Souls in it now, the directory's count, and no "things" figure from the old engine
+  assert.deepEqual([listed.souls, listed.entities], [4, null], 'the new engine\'s Souls, not the old engine\'s 23 Souls and 5020 things');
+  // the list asks the directory at most every 10 s, whatever the page asks
+  for (let i = 0; i < 20; i++) await fetch(`${base}/__sim/worlds.json`).then(r => r.arrayBuffer());
+  assert.equal(directoryAsked, 1, 'twenty more lists, no more asks of the directory');
   // wake-recent at start and the keep-alive have had their turns: they keep other living, never eden
   for (let i = 0; i < 100 && launcher.pool.status('other').status !== 'running'; i++) await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 200));
@@ -510,5 +553,23 @@ test('D2b: the child pool refuses a moved world: ensure answers new-engine, and 
     assert.deepEqual([released, spawned, pool.status('eden').status], [1, [], 'stopped']);
     await assert.rejects(pool.ensure({ slug: 'eden' }), (e) => e.code === 'new-engine');
     await pool.closeAll();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('#4159: a binding naming the stream CDN gives the routed page v2StreamOrigin; a malformed one refuses the binding', () => {
+  const dir = mkdtempSync(new URL('stream-cdn-', scratch).pathname);
+  try {
+    const routesFile = join(dir, 'worlds.json');
+    writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { stream: '/s/eden/', canonical: true } } }));
+    const valid = { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir: join(dir, 'client') };
+    for (const bad of ['http://stream.soul.game', 'https://stream.soul.game/', 'https://stream.soul.game/s/', '//stream.soul.game', 'https://', 'stream.soul.game', 'https://Stream.soul.game', 7])
+      assert.throws(() => cutoverFence({ binding: { ...valid, v2StreamOrigin: bad } }), /cutover.binding-invalid/, String(bad));
+    const w = { slug: 'eden' };
+    assert.equal(cutoverFence({ binding: valid }).v2Fields(w).v2StreamOrigin, undefined, 'none named: the page reads its own origin');
+    const named = cutoverFence({ binding: { ...valid, v2StreamOrigin: 'https://stream.soul.game' } });
+    assert.equal(named.v2Stream(w), '/s/eden/', 'the stream path is unchanged');
+    assert.equal(named.v2Fields(w).v2StreamOrigin, 'https://stream.soul.game');
+    assert.match(withV2Stream('<script>window.__simConfig={"worldKey":"eden"}</script>', named.v2Stream(w), named.v2Fields(w)), /"v2StreamOrigin":"https:\/\/stream\.soul\.game"/, 'written into the page');
+    assert.equal(named.v2Fields({ slug: 'other' }), null, 'another world is never given it');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

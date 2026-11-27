@@ -4,7 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, 
 import { join, resolve } from 'node:path';
 import { request } from '../daemon/client.mjs';
 import { CREDENTIALS, Refused, runtimeOf } from '../home/home.mjs';
-import { pairAddress } from '../pair/address.mjs';
+import { pairAddress, worldNameOf } from '../pair/address.mjs';
 import { localId } from '../pair/pair.mjs';
 import { writeGuide } from '../home/guide.mjs';
 
@@ -146,7 +146,8 @@ export async function accountPair(home, named, url, { as, move = false, fresh = 
   if (!/^soul-[0-9a-f]{32}-\d+$/.test(b.grant) || typeof b.token !== 'string' || !b.token.startsWith(`${b.grant}.`)) fail('pair-answer', 'invalid Soul credential answer');
   const soul = localId(b.grant), creds = read(home, CREDENTIALS), config = read(home, 'config.json');
   creds.souls = { ...creds.souls, [soul]: { ...creds.souls?.[soul], [address.world]: { token: b.token } } }; put(home, CREDENTIALS, creds);
-  config.worlds = { ...config.worlds, [address.world]: { ...config.worlds?.[address.world], url: address.url, gateway: address.gateway } };
+  const worldName = await worldNameOf(address.directory, address.world, { get });
+  config.worlds = { ...config.worlds, [address.world]: { ...config.worlds?.[address.world], url: address.url, gateway: address.gateway, ...(worldName ? { name: worldName } : {}) } };
   config.souls = { ...config.souls, [soul]: { ...config.souls?.[soul], id: soul, account: a.alias, world: address.world, ...(row?.name ? { name: row.name } : {}) } }; put(home, 'config.json', config);
   privateState = read(home, CREDENTIALS); if (privateState.pendingAccountPair?.idempotencyKey === pending.idempotencyKey) delete privateState.pendingAccountPair; put(home, CREDENTIALS, privateState);
   let guide; try { guide = writeGuide(home); } catch { guide = { failed: 'guide unavailable; credentials are paired' }; }
@@ -232,7 +233,11 @@ export async function soulRetireWait(home, { within = 60_000, sleep = (ms) => ne
       const c = read(home, 'config.json');
       if (p.soul) c.souls = { ...c.souls, [p.soul]: { ...c.souls?.[p.soul], retiredAt: new Date().toISOString() } };
       clear(c);
-      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone; its memory stays here' } : {}) };
+      // First day (26 Nov): its daemon stops and the folder's guide stops listing it, so nothing of it keeps running
+      // (a plain `quit` no longer finds a retired Soul) and the next chat is not told it lives here.
+      if (p.soul) await request(runtimeOf(home, p.soul).socket, { op: 'stop' }).catch(() => {});
+      try { writeGuide(home); } catch { /* the guide is a convenience; the retire is done */ }
+      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone and its client stopped; its memory stays here' } : {}) };
     }
     // The owner's Keep on its card clears the ask (directory `/v1/account/souls/keep`).
     if (state === 'kept') { clear(); return { ok: true, retire: 'kept', soul: p.soul ?? p.grant, retired: false, why: 'Your person kept it. Nothing changed.' }; }
@@ -249,6 +254,7 @@ export async function soulRevoke(home, named, { as, ...io } = {}) {
   if (held) {
     await request(runtimeOf(home, id).socket, { op: 'stop' }).catch(() => {});
     delete creds.souls[id]; put(home, CREDENTIALS, creds);
+    try { writeGuide(home); } catch { /* as retire's */ }
   }
   return { ok: true, revoked: true, soul: { id: row.id, name: row.name ?? null }, account: a.alias, ...(held ? { here: 'unpaired; its memory stays here' } : {}), next: `adopt ${row.name ?? row.id}   (brings it back here)` };
 }

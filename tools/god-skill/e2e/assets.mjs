@@ -91,7 +91,7 @@ async function look(name, { eye, at, settle = 6000, size = [1280, 800] } = {}) {
   const t0 = now();
   if (!page) {
     releaseChrome = await chromeLease('L5-assets-e2e');
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     page = await (await browser.newContext({ viewport: { width: size[0], height: size[1] } })).newPage();
     page.setDefaultTimeout(900_000);
     page.on('pageerror', (e) => pageErrors.push(String(e).slice(0, 300)));

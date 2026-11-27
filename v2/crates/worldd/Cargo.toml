@@ -7,7 +7,7 @@ description = "The world process (Engine v2, #2635): its clock and watchdog (K7,
 
 [dependencies]
 replica = { path = "../replica" }
-rustix = { version = "1", default-features = false, features = ["time", "std"] }
+rustix = { version = "1", default-features = false, features = ["fs", "time", "std"] }
 # D6: a SIGTERM or SIGINT says so before the world ends (src/stopped.rs).
 libc = "0.2"
 sim = { path = "../sim" }
@@ -33,6 +33,8 @@ hold-load = []
 backup = { path = "../../tools/ops/backup" }
 # G1e (#3532): a served world's creator edits it through a real gateway (tests/edit_served.rs).
 gatewayd = { path = "../gatewayd" }
+# A world made from a published template, rehearsed and served again as a release's deploy moves it (tests/serve.rs).
+templates = { path = "../../tools/templates" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

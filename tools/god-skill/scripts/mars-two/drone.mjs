@@ -64,7 +64,7 @@ if (isMain(import.meta.url)) {
   const { chromium } = createRequire(join(ROOT, 'mars/viewer/package.json'))('@playwright/test');
   const release = await chromeLease('marsland drone');
   try {
-    const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const b = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     const page = await (await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: dpr })).newPage();
     for (const name of names.length ? names : Object.keys(VIEWS)) {
       const v = VIEWS[name], p = pose(v);

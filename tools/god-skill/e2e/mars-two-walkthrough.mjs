@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lane MARS walkthrough (copied from lane LM's lm-two-walkthrough.mjs): a person signs in on the /worlds launcher in
-// Clerk mode, creates Mars two from the New-world dialog (template mars-two) and is its god at birth; real Chrome
+// Clerk mode, creates Mars two from the New-world dialog (template mars-two) and is its god at birth; Chromium
 // (lease), real input at --dpr 1|2; looks around the campus; pairs a god agent that finds the Mars furniture in the
 // library and places a sofa by name; joins as a Soul.
 // Clerk in the browser: a test-only stand-in for clerk-js (window.Clerk, defined before the app loads, so the real
@@ -58,7 +58,7 @@ const STUB = `(() => {
 })();`;
 
 const release = await chromeLease('lane-mars-two walkthrough');
-const browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
 let pairing = null;
 try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: DPR });

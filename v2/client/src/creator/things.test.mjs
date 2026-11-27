@@ -65,3 +65,31 @@ test('select by kind, name, parent, area and distance; a removal leaves out what
   assert.deepEqual(selectOf(nodes, { near: [10, 5], radius: 1 }).map((r) => r.id), ['b']);
   assert.deepEqual(removeOps(nodes, ['h', 'c', 'b']), [{ op: 'remove', node: 'h' }, { op: 'remove', node: 'b' }]);
 });
+
+test('select --near and --area find what stands in a room on a building\'s floor, at its place on the ground (#5006 row 30)', async () => {
+  const { selectOf, spotsOf } = await import('./things.mjs');
+  // as the template's halls are: a hall at (14, -8), its floor, a room on it with its outline in its own frame, a chair
+  // 1.4 m north of the room's middle; a second hall turned a quarter, its chair 1 m along the room's x
+  const q = (yaw) => [Math.round(Math.cos(yaw / 2) * (1 << 30)), 0, Math.round(Math.sin(yaw / 2) * (1 << 30)), 0];
+  const at = (x, y, z, yaw = 0) => ({ frame: null, at: [x, y, z], orientation: q(yaw), support: { which: 1, node: 'g', height: 0 } });
+  const box = [[-4780, -3780], [4780, -3780], [4780, 3780], [-4780, 3780]];
+  const hall = [
+    { id: 'w', kind: 'eden:world@1', parent: null, fields: {} },
+    { id: 'g', kind: 'eden:ground@1', parent: 'w', fields: {} },
+    { id: 'h', kind: 'eden:hall@1', parent: 'g', fields: {}, pose: at(14_000_000, 0, -8_000_000) },
+    { id: 'f', kind: 'eden:floor@1', parent: 'h', fields: {}, pose: at(0, 0, 0) },
+    { id: 'r', kind: 'eden:room@1', parent: 'f', fields: { 11: box }, pose: at(0, 100_000, 0) },
+    { id: 'c', kind: 'eden:chair@1', parent: 'r', fields: {}, pose: at(0, 0, -1_400_000) },
+    { id: 'h2', kind: 'eden:hall@1', parent: 'g', fields: {}, pose: at(-30_000_000, 0, 0, Math.PI / 2) },
+    { id: 'f2', kind: 'eden:floor@1', parent: 'h2', fields: {}, pose: at(0, 0, 0) },
+    { id: 'r2', kind: 'eden:room@1', parent: 'f2', fields: { 11: box }, pose: at(0, 100_000, 0) },
+    { id: 'c2', kind: 'eden:chair@1', parent: 'r2', fields: {}, pose: at(1_000_000, 0, 0) },
+  ];
+  const spots = spotsOf(hall), round = (s) => [s.x, s.z].map((v) => Math.round(v * 100) / 100 + 0);
+  assert.deepEqual(round(spots.get('r')), [14, -8], 'the room at its middle, in the hall');
+  assert.deepEqual(round(spots.get('c')), [14, -9.4], 'the chair in the room, where the hall is');
+  assert.deepEqual(round(spots.get('c2')), [-30, -1], 'a turned hall turns what is in it');
+  assert.deepEqual(selectOf(hall, { near: [14, -8], radius: 3 }).map((r) => r.id), ['h', 'c']);
+  assert.deepEqual(selectOf(hall, { area: [13, -10, 15, -9] }).map((r) => r.id), ['c']);
+  assert.deepEqual(selectOf(hall, { near: [0, -1.4], radius: 1 }), [], 'nothing is matched in the room\'s own frame');
+});

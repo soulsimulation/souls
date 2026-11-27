@@ -35,7 +35,7 @@ const check=(name,fn)=>{fn();checks.push({name,pass:true});};
 const samePosition=(actual,expected)=>assert.ok(actual.every((v,i)=>Math.abs(v-expected[i])<1e-8),'camera displacement exceeds 1e-8 metres');
 try{
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(4944,'127.0.0.1',resolve);});
- browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({channel:'chromium',headless:true});
  page=await browser.newPage({viewport:{width:1000,height:850}});page.on('pageerror',e=>errors.push(String(e)));
  await page.goto('http://127.0.0.1:4944');await page.waitForFunction(()=>!!window.fixture);
  const state=()=>page.evaluate(()=>window.fixture.state());

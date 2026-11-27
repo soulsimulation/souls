@@ -3,11 +3,11 @@ import react from '@vitejs/plugin-react';
 import { entryPrefetchScript } from './src/snapshot-prefetch.ts';
 import { worldListPrefetchScript } from './src/world-list-prefetch.ts';
 import { rewritePhasedHtml } from './src/phased-entry.ts';
+import { bodySlotsOf } from './src/v2-engine/take-bodies.ts';
 import { anonymousHello } from '../../packages/client/src/hello.ts';
 import { PWA_MANIFEST, pwaHeadTags, pwaManifest, type PwaIcons } from './src/pwa-manifest.ts';
 import { changelogHtml } from './src/changelog-page.ts';
 import { buildDocs } from './src/docs-site.ts';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -132,8 +132,7 @@ function changelogPage(): Plugin {
 // docs/<slug>/index.html and its Markdown twin docs/<slug>.md (/docs: docs/index.html and docs.md), llms.txt, llms-full.txt,
 // docs/pages.json (the launcher's sitemap) and changelog.md (the changelog page's own source). Static files, no script, no
 // chunk: the viewer bundle is untouched. SIM_SITE_ORIGIN (default https://soul.game) is the origin canonical URLs and
-// llms.txt name. docs/site/WRITING.md is the writing guide, not a page. #898: the reference pages' generated part is not
-// in the tree; tools/docs/generate.mjs writes it here from the server's own modules, and a build it can't serve in full fails.
+// llms.txt name. docs/site/WRITING.md is the writing guide, not a page.
 function docsSite(): Plugin {
   let base = '/';
   const dir = fileURLToPath(new URL('../../docs/site', import.meta.url)), template = fileURLToPath(new URL('./docs-template.html', import.meta.url));
@@ -146,8 +145,7 @@ function docsSite(): Plugin {
     configResolved(c) { base = c.base; },
     generateBundle() {
       const t0 = performance.now();
-      const generated: Record<string, string> = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../../tools/docs/generate.mjs', import.meta.url)), '--json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
-      const { pages, out } = buildDocs({ files: files(dir).map((f) => relative(dir, f)), read: (r) => generated[r] ?? readFileSync(join(dir, r), 'utf8'), template: readFileSync(template, 'utf8'),
+      const { pages, out } = buildDocs({ files: files(dir).map((f) => relative(dir, f)), read: (r) => readFileSync(join(dir, r), 'utf8'), template: readFileSync(template, 'utf8'),
         changelog: readFileSync(changelog, 'utf8'), base, origin });
       for (const [fileName, source] of out) this.emitFile({ type: 'asset', fileName, source });
       this.info(`docs: ${pages.length} pages (${pages.filter((p) => !p.stub).length} published) in ${(performance.now() - t0).toFixed(0)} ms`);
@@ -251,7 +249,7 @@ function vendorGroups() {
  *  page draws a world from the stream), which draws each such thing as its shape, in its state; in dev there is none.
  *  `KIND_STATE_URL`: a data file of each kind's state fields by name and number, which the page names a thing's fields by
  *  (world-state.ts), fetched with the looks. */
-function kindBounds(): Plugin {
+export function kindBounds(): Plugin {
   const dir = fileURLToPath(new URL('../../content/kinds', import.meta.url));
   let build = false;
   return {
@@ -259,12 +257,17 @@ function kindBounds(): Plugin {
     configResolved(c) { build = c.command === 'build'; },
     transform(_code, id) {
       if (!id.endsWith('/src/v2-engine/source/kind-bounds.ts')) return null;
+      const slots: Record<string, ReturnType<typeof bodySlotsOf>> = {};
       const out: Record<string, number[]> = {}, looks: Record<string, unknown> = {}, state: Record<string, Record<string, unknown[]>> = {};
       for (const family of readdirSync(dir)) for (const f of readdirSync(join(dir, family))) {
         if (!f.endsWith('.json')) continue;
         const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; state?: unknown; geometry?: { bounds_mm?: unknown }; looks?: { shape?: { shapes?: unknown }; table?: unknown } };
         this.addWatchFile(file);
-        if (typeof e.kind !== 'string' || e.owner !== 'thing' || e.roles || !Array.isArray(e.geometry?.bounds_mm)) continue;
+        if (typeof e.kind !== 'string' || e.owner !== 'thing') continue;
+        const places = bodySlotsOf(e);
+        if (places.length) slots[e.kind] = places;
+        // Roles also belong to physical things (a lectern); only geometry distinguishes them from activities here.
+        if (!Array.isArray(e.geometry?.bounds_mm)) continue;
         out[e.kind] = e.geometry.bounds_mm as number[];
         for (const [k, f] of Object.entries((e.state ?? {}) as Record<string, { n?: unknown; type?: unknown; default?: unknown; values?: unknown }>)) {
           if (typeof f?.n !== 'number' || (f.type !== 'bool' && f.type !== 'int' && f.type !== 'enum')) continue;
@@ -275,7 +278,7 @@ function kindBounds(): Plugin {
       }
       const url = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-looks.json', source: JSON.stringify(looks) })}` : 'null';
       const stateUrl = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-state.json', source: JSON.stringify(state) })}` : 'null';
-      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};\nexport const KIND_STATE_URL = ${stateUrl};`, map: null };
+      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};\nexport const KIND_STATE_URL = ${stateUrl};\nexport const KIND_SLOTS = ${JSON.stringify(slots)};`, map: null };
     },
   };
 }
@@ -312,7 +315,7 @@ function remoteInlineConfig(): Plugin {
 function devProxy() {
   // One RegExp key (a key starting with ^ is one) matching whole path segments: /history/… goes to the server, a page
   // /history-x stays with Vite.
-  const roots = 'v1|__sim|skill\\.md|cards\\.md|mcp|healthz|modular|mars-assets|engine|models|history|2020|browser|data/manifest\\.json';
+  const roots = 'v1|__sim|skill\\.md|cards\\.md|mcp|healthz|modular|mars-assets|world-assets|engine|models|history|2020|browser|data/manifest\\.json';
   const remote = process.env.SIM_DEV_API?.replace(/\/+$/, '');
   if (remote) { const opts = { target: remote, changeOrigin: true, secure: true, ws: true }; return { '^/w/[^/]+/[^?]+': opts, [`^/(?:${roots})(?:[/?]|$)`]: opts, '^/ws(?:[/?]|$)': opts }; }
   const http = `http://127.0.0.1:${process.env.PORT ?? 4500}`;

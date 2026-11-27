@@ -6,6 +6,12 @@
 //!   is written (T8): one Soul, several, or everyone in a room at that instant ([`present`]); one who comes in later
 //!   was not asked. The view tier addresses it to each body asked (R4). The kind has two roles; the offer expires after
 //!   the kind's `proposal_lasts`.
+//! - **An accept keeps a group's offer open** (the Mars Lab crew of six, 26 Nov): for a kind that takes more than two,
+//!   while some body asked has not answered, each accept renews the offer's lapse to the kind's `proposal_lasts` from
+//!   that accept, never past [`OPEN_MOST`] times it from the offer, so a crew whose agents each take a while still
+//!   forms and an abandoned offer still lapses. The offer says both (fields 7 and 8); each join names the lapse it set
+//!   (`souls:activity-joined` field 2), and a crew not started yet holds it as its node's expiry, with the wait of its
+//!   first pair renewed to it. All of it is world time, fired on the world's ticks, never the wall clock.
 //! - **Accepting is joining**, an ordinary intent of the Soul asked ([`Activities::accept`]). Each acceptor makes a
 //!   pair with the asker, with its own expiry: the first one joins the offer's own node, each later one a new node.
 //!   Pairs are held in order of arrival; the one at the front starts when both its bodies are free: at once, or when
@@ -16,7 +22,7 @@
 //! - **Declining is an intent** ([`Activities::decline`]) and **a lapse is a timer** ([`Activities::lapse`]). Each
 //!   reaches the asker as a named outcome, `souls:offer-declined` or `souls:offer-lapsed`. An offer that every body
 //!   asked declined, or that nobody accepted in time, ends: its node goes. A pair that waited past its own expiry lapses
-//!   the same way and goes.
+//!   the same way and goes, its lapse naming each who accepted it (a crew's later joiners too), so none is left in it.
 //! - **Standing consent is not here.** A Soul that accepts some offers with no model turn does so by a reflex rule in
 //!   its own client (R9, `v2/client/src/reflex/consent.mjs`), which sends the same accept. With that client stopped
 //!   nothing answers, and the offer lapses. The engine holds no setting that fires when an offer arrives (TRUNK T10).
@@ -64,6 +70,10 @@ pub const GIVEN: &str = "souls:given";
 /// How far apart, µm, two bodies may stand on one floor for a give: an arm's length each.
 pub const GIVE_REACH: i64 = 1_500_000;
 
+/// How long an offer stays open at most, as a count of its kind's `proposal_lasts` from the offer: the bound on the
+/// renewals its accepts make, so an offer no one finishes answering still lapses.
+pub const OPEN_MOST: i64 = 5;
+
 /// The due list's name for an offer's expiry.
 const OFFER_TIMER: &str = "souls:offer-lapse";
 /// The due list's name for an accepted pair's own expiry.
@@ -94,6 +104,8 @@ pub(super) struct Open {
     sequence: u64,
     asked: BTreeSet<Id>,
     answered: BTreeSet<Id>,
+    /// When it was made, and when it lapses unless an accept renews it.
+    made: Micros,
     expires: Micros,
     timer: Id,
     /// Whether the offer's own node has its pair.
@@ -124,6 +136,8 @@ pub(super) struct Offers {
     pub(super) queues: BTreeMap<Id, VecDeque<Id>>,
     /// What each timer is for: an offer or a pair, by its activity.
     pub(super) timers: BTreeMap<Id, Id>,
+    /// Why each waiting pair's last start was refused, by its activity: said when a member asks it to act.
+    pub(super) why: BTreeMap<Id, Refusal>,
 }
 
 /// The bodies in `room` at this instant: its children that the controller drives. An offer to a room asks these.
@@ -202,6 +216,9 @@ impl Activities {
                 detail: show(place),
             })?;
         let expires = ask.at.saturating_add(k.proposal_lasts);
+        let latest = ask
+            .at
+            .saturating_add(k.proposal_lasts.saturating_mul(OPEN_MOST));
         let revision = k.revision;
         let (id, link, timer) = (minted(mint)?, minted(mint)?, minted(mint)?);
         let node = Node {
@@ -239,6 +256,10 @@ impl Activities {
         ]);
         if let Some(thing) = given {
             fields.insert(6, thing.to_value());
+        } else if k.most > 2 && asked.len() > 1 {
+            // A group's offer to several: how long each accept keeps it open, µs, and the latest it stays open.
+            fields.insert(7, at(k.proposal_lasts));
+            fields.insert(8, at(latest));
         }
         // B10: the asker's role link on the activity's thing, when it is offered at one.
         let bound: Vec<Bound> = match given {
@@ -287,6 +308,7 @@ impl Activities {
                 sequence,
                 asked,
                 answered: BTreeSet::new(),
+                made: ask.at,
                 expires,
                 timer,
                 taken: false,
@@ -349,7 +371,7 @@ impl Activities {
         }
         let k = &self.kinds[&o.kind];
         if o.taken && k.most > 2 {
-            return self.join_offer(tree, mint, c, ask, body, offer, &o);
+            return self.join_offer(tree, mint, c, due, ask, body, offer, &o);
         }
         let expires = ask.at.saturating_add(k.proposal_lasts);
         let revision = k.revision;
@@ -424,7 +446,11 @@ impl Activities {
         for m in &node.members {
             bound.extend(self.role_link(tree, mint, &o.kind, o.place, m)?);
         }
-        let fields = BTreeMap::from([(1, offer.to_value())]);
+        let renewed = self.renewed(offer, &o, body, ask.at);
+        let mut fields = BTreeMap::from([(1, offer.to_value())]);
+        if let Some(to) = renewed {
+            fields.insert(2, at(to));
+        }
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
         self.emit_with(
@@ -453,6 +479,9 @@ impl Activities {
         if let Some(open) = self.offers.open.get_mut(&offer) {
             open.answered.insert(body);
             open.taken = true;
+        }
+        if let Some(to) = renewed {
+            self.renew(due, offer, to)?;
         }
         let timer = minted(mint)?;
         due.set(Timer {
@@ -494,6 +523,7 @@ impl Activities {
         tree: &mut Tree,
         mint: &mut Minter,
         c: &mut Controller,
+        due: &mut DueList,
         ask: Ask,
         body: Id,
         offer: Id,
@@ -529,7 +559,7 @@ impl Activities {
             .collect();
         let driver = match l.node.state {
             State::Started => {
-                if let Some(other) = self.holding.get(&body) {
+                if let Some(other) = self.holds_of(&o.kind).get(&body) {
                     return refuse(
                         "body-in-activity",
                         format!("{} is held by {}", show(body), show(*other)),
@@ -542,7 +572,7 @@ impl Activities {
         };
         let mut node = l.node.clone();
         node.members.push(me);
-        let changes = vec![
+        let mut changes = vec![
             Change::Link {
                 link,
                 ty: name(MEMBER),
@@ -557,7 +587,21 @@ impl Activities {
                 by: None,
             },
         ];
-        let fields = BTreeMap::from([(1, offer.to_value())]);
+        let mut fields = BTreeMap::from([(1, offer.to_value())]);
+        // The crew is still forming: its node, not started yet, holds the offer's renewed lapse as its expiry.
+        let renewed = self.renewed(offer, o, body, ask.at);
+        if let Some(to) = renewed {
+            if node.state == State::Proposed {
+                node.expires = to;
+                changes.push(Change::Set {
+                    node: offer,
+                    field: F_EXPIRES,
+                    to: at(to),
+                    by: None,
+                });
+            }
+            fields.insert(2, at(to));
+        }
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
         if let Err(r) = self.emit_with(
             tree,
@@ -578,17 +622,74 @@ impl Activities {
             l.node = node;
             if let Some(d) = driver {
                 l.drivers.insert(body, d);
-                self.holding.insert(body, offer);
+                self.hold(&o.kind, body, offer);
             }
         }
-        // 0.135 G3: one who joins a started activity takes its place too.
+        // 0.135 G3: one who joins a started activity takes its place too; #423: its members face their new middle.
         if driver.is_some() {
             self.mark_places(offer, Some(body));
+            self.to_face.push(offer);
         }
         if let Some(open) = self.offers.open.get_mut(&offer) {
             open.answered.insert(body);
         }
+        if let Some(to) = renewed {
+            self.renew(due, offer, to)?;
+            // Its first pair, still waiting for a body held elsewhere, waits as long as the crew forms.
+            if let Some(p) = self.offers.pairs.get_mut(&offer)
+                && to > p.expires
+            {
+                due.cancel((p.expires, p.timer));
+                due.set(Timer {
+                    node: p.body,
+                    id: p.timer,
+                    due: to,
+                    name: name(PAIR_TIMER),
+                })?;
+                p.expires = to;
+            }
+        }
         Ok(offer)
+    }
+
+    /// The lapse an accept by `body` at `now` renews `offer` (open as `o`) to, when its kind takes more than two, the
+    /// accept leaves a place in its activity and some other body asked has still to answer: the kind's
+    /// `proposal_lasts` from now, never past [`OPEN_MOST`] of them from the offer, never earlier than it was. None when
+    /// `body` is the last to answer or fills the activity (nothing is left to wait for), or the kind is a pair's.
+    fn renewed(&self, offer: Id, o: &Open, body: Id, now: Micros) -> Option<Micros> {
+        let k = self.kinds.get(&o.kind)?;
+        let lasts = k.proposal_lasts;
+        // Only a group forms from several accepts; a pair kind's offer to several makes a pair of each.
+        let room = self
+            .live
+            .get(&offer)
+            .is_some_and(|l| l.node.members.len() + 1 < k.most);
+        let waiting = k.most > 2
+            && room
+            && o.asked
+                .iter()
+                .any(|b| *b != body && !o.answered.contains(b));
+        let latest = o.made.saturating_add(lasts.saturating_mul(OPEN_MOST));
+        waiting.then(|| now.saturating_add(lasts).min(latest).max(o.expires))
+    }
+
+    /// Moves `offer`'s lapse to `to` when that is later: its timer cancelled and set again under its own id.
+    fn renew(&mut self, due: &mut DueList, offer: Id, to: Micros) -> R<()> {
+        let Some(o) = self.offers.open.get_mut(&offer) else {
+            return Ok(());
+        };
+        if to <= o.expires {
+            return Ok(());
+        }
+        due.cancel((o.expires, o.timer));
+        due.set(Timer {
+            node: o.asker,
+            id: o.timer,
+            due: to,
+            name: name(OFFER_TIMER),
+        })?;
+        o.expires = to;
+        Ok(())
     }
 
     /// A give's accept (see the module's notes): the thing from the asker's hand to a free hand of `body`, then the
@@ -819,6 +920,7 @@ impl Activities {
         let Some(p) = self.offers.pairs.remove(&pair) else {
             return Ok(());
         };
+        self.offers.why.remove(&pair);
         if let Some(q) = self.offers.queues.get_mut(&p.asker) {
             q.retain(|x| *x != pair);
         }
@@ -827,11 +929,20 @@ impl Activities {
             .get(&pair)
             .is_some_and(|l| l.node.state == State::Proposed);
         if waiting {
-            let audience = self.live[&pair].audience;
+            let l = &self.live[&pair];
+            let audience = l.audience;
+            // Each who accepted and waited is let go and told: the pair's acceptor, and a crew's later joiners.
+            let waited: Vec<&Id> = l
+                .node
+                .members
+                .iter()
+                .map(|m| &m.body)
+                .filter(|b| **b != p.asker)
+                .collect();
             let fields = BTreeMap::from([
                 (1, p.offer.to_value()),
                 (2, p.asker.to_value()),
-                (3, ids([&p.body])),
+                (3, ids(waited)),
                 (4, pair.to_value()),
             ]);
             let changes = self.withdraw(pair);
@@ -853,8 +964,10 @@ impl Activities {
         Ok(())
     }
 
-    /// Starts the waiting pairs that `body` is in, in order of arrival, while their bodies are free. A pair whose start
-    /// is refused waits on, until its turn comes again or its own expiry.
+    /// Starts the waiting pairs that `body` is in, in order of arrival, while their bodies are free: as a pair's own
+    /// body or as any member joined to it (a crew's side, 0.135 C5). A pair whose start is refused waits on, its
+    /// refusal kept to be said ([`Activities::unstarted_why`]), until its turn comes again or its own expiry. A pair
+    /// no longer waiting (gone, or started another way) holds no one's queue up.
     pub(super) fn advance(
         &mut self,
         tree: &mut Tree,
@@ -866,9 +979,15 @@ impl Activities {
         let mut askers: BTreeSet<Id> = self
             .offers
             .pairs
-            .values()
-            .filter(|p| p.body == body)
-            .map(|p| p.asker)
+            .iter()
+            .filter(|(pair, p)| {
+                p.body == body
+                    || self
+                        .live
+                        .get(pair)
+                        .is_some_and(|l| l.node.members.iter().any(|m| m.body == body))
+            })
+            .map(|(_, p)| p.asker)
             .collect();
         askers.insert(body);
         for asker in askers {
@@ -878,20 +997,31 @@ impl Activities {
                 .get(&asker)
                 .and_then(|q| q.front().copied())
             {
-                let Some(p) = self.offers.pairs.get(&pair) else {
-                    break;
+                let started = match self.offers.pairs.get(&pair) {
+                    None => true,
+                    Some(_) if self.started(pair) => true,
+                    Some(p) => {
+                        let ask = Ask {
+                            soul: p.soul,
+                            intent: p.intent,
+                            at: now,
+                        };
+                        match self.start(tree, c, ask, pair) {
+                            Ok(()) => true,
+                            Err(r) => {
+                                self.offers.why.insert(pair, r);
+                                false
+                            }
+                        }
+                    }
                 };
-                let ask = Ask {
-                    soul: p.soul,
-                    intent: p.intent,
-                    at: now,
-                };
-                if self.start(tree, c, ask, pair).is_err() {
+                if !started {
                     break;
                 }
                 if let Some(q) = self.offers.queues.get_mut(&asker) {
                     q.pop_front();
                 }
+                self.offers.why.remove(&pair);
                 if let Some(p) = self.offers.pairs.remove(&pair) {
                     self.offers.timers.remove(&p.timer);
                     due.cancel((p.expires, p.timer));

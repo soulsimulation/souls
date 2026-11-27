@@ -102,7 +102,7 @@ try {
   });
   const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
   release = await chromeLease('creatures');
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   async function frame(page, name, wheel = 3) {
     // select the resident through its visible name, follow it with the camera, then zoom in with real wheel input
     const label = page.locator('b').filter({ hasText: new RegExp('^' + name + '$') }).first();

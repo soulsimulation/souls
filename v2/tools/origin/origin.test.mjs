@@ -29,6 +29,7 @@ before(async () => {
   dir = mkdtempSync(join(scratch, 'v2-origin-'));
   mkdirSync(join(dir, stream), { recursive: true });
   writeFileSync(join(dir, stream, '7'), part);
+  writeFileSync(join(dir, stream, '7.text'), Buffer.from([0x80]));
   writeFileSync(join(dir, stream, '8.tmp'), part);
   writeFileSync(join(dir, stream, 'pointer'), Buffer.from([0xa0]));
   ({ server } = createOrigin(dir));
@@ -48,6 +49,19 @@ test('a part is public, kept a year, immutable, not transformed, with its SHA-25
   assert.equal(r.headers.get('etag'), `"${createHash('sha256').update(part).digest('hex')}"`);
   assert.equal(r.headers.get('content-type'), 'application/octet-stream');
   assert.deepEqual(Buffer.from(await r.arrayBuffer()), part);
+});
+
+test('W7 (#2826): a text file is kept a minute at most, so its words written again without a removed sentence reach every cache', async () => {
+  const r = await fetch(`${base}/7.text`);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('cache-control'), 'public, max-age=60, no-transform');
+  const purged = Buffer.from([0x80]);
+  assert.equal(r.headers.get('etag'), `"${createHash('sha256').update(purged).digest('hex')}"`);
+  // Written again (whole, then renamed, as a removal does): the next read answers the new bytes.
+  writeFileSync(join(dir, stream, '7.text.tmp'), Buffer.from([0x81, 0x80]));
+  renameSync(join(dir, stream, '7.text.tmp'), join(dir, stream, '7.text'));
+  const again = await fetch(`${base}/7.text`);
+  assert.deepEqual(Buffer.from(await again.arrayBuffer()), Buffer.from([0x81, 0x80]));
 });
 
 test('the pointer is kept for half a period, rounded up to the one whole second max-age can say', async () => {

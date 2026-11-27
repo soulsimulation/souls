@@ -38,6 +38,21 @@ export function propFor(activity: string, prop?: string, instrument?:string): Pr
 }
 /** Extra inputs of a frame: seconds since the activity began (one-shot gestures; undefined = cycle on take time) and
  *  the distance to the partner of a paired gesture (body points; undefined = the contract gap). */
+/** Recorded press phases; world µs, not a new action clock. An early cut gets only cosmetic recovery. */
+export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
+export function formPresses(value: unknown): readonly FormPress[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const valid = value.filter((p): p is FormPress => !!p && (p.hand === 'left' || p.hand === 'right') && [p.start,p.contact,p.end,p.cut ?? p.end].every(Number.isFinite) && p.start < p.contact && p.contact < p.end && (p.cut === undefined || p.cut >= p.start && p.cut <= p.end));
+  return valid.length ? valid : undefined;
+}
+export function pressWeight(p: FormPress, seconds: number): number {
+  const t = seconds * 1_000_000;
+  if (![t,p.start,p.contact,p.end,p.cut ?? p.end].every(Number.isFinite) || !(p.start < p.contact && p.contact < p.end)) return 0;
+  const ease = (x: number) => S(Math.max(0,Math.min(1,x)));
+  const at = (at: number) => at < p.contact ? ease((at-p.start)/(p.contact-p.start)) : 1-ease((at-p.contact)/(p.end-p.contact));
+  return p.cut !== undefined && t >= p.cut ? at(p.cut)*(1-ease((t-p.cut)/(p.end-p.contact))) : at(t);
+}
+
 export type FrameOpts = { groundSeat?: boolean; since?: number; gap?: number;instrument?:string;game?:RecordedGame;gameTick?:number;gameDt?:number;actorId?:string;
   /** Entry 36: whom a singer sings along with (her voice and the head/breath motion follow its sung notes), and, after
    *  her singing ended, the seconds since (the hand lets go of the mic and the pose eases out). */
@@ -63,6 +78,8 @@ export { PIANO_FADE };
 /** One hand goal relative to that arm's shoulder: [forward, outward (+ away from the body midline), up] metres. */
 export type HandGoal = readonly [number, number, number];
 export type ActivityFrame = {
+  /** This frame owns a physical contact with another body, rather than merely an aimed look/gesture. */
+  pairedContact?: boolean;
   /** [left, right]; null = that arm is left to the base posture (dangling / hand on thigh). */
   handWeights?:[number,number];
   /** Piano contact plane and per-hand lift above it, from the shared audible score. */
@@ -122,7 +139,7 @@ export function gameArmBlend(g:RecordedGame,tick:number,dt:number):number{const 
 export function activityFrame(activity: string, base: string, seconds: number, id: string, opts: FrameOpts = {}): ActivityFrame | null {
   const ph = idPhase(id), t = seconds + ph * 7, seated = base === 'sit' || base === 'sit-ground';
   const gap = Math.max(0.3, Math.min(1.6, opts.gap ?? GAP[activity] ?? 0.9)), mid = gap / 2;
-  const since = opts.since ?? ((seconds + ph * 7) % 5), env = (a: number, b: number) => S(Math.min(1, since / a)) * (1 - S(Math.max(0, since - b) / 0.5));
+  const since = opts.since ?? ((seconds + ph * 7) % 5), env = (a: number, b: number) => S(Math.max(0, Math.min(1, since / a))) * (1 - S(Math.min(1, Math.max(0, since - b) / 0.5)));
   const f: ActivityFrame = { hands: null, feetOut: 0, hop: 0, lean: 0, side: 0, lying: null, look: 0 };
   if (opts.released !== undefined && RETURNS.has(activity)) {
     const out = activityFrame(activity, base, seconds, id, { ...opts, released: undefined, since: opts.priorAge });
@@ -245,16 +262,16 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     case 'listen': { const nod = Math.max(0, Math.sin(t * 0.5) - 0.9) * 4;
       f.hands = [[0.24, -0.1, down + 0.02], [0.26, -0.08, down + 0.02]]; f.look = 0.05 + 0.15 * nod; return f; }
     // together/1 paired gestures: the meeting points are on the line between the two bodies (mid = half the gap)
-    case 'handshake': { const pump = Math.sin(since * 9) * 0.035 * S(Math.min(1, since / 0.6)), k = env(0.6, 2.9);
+    case 'handshake': { f.pairedContact = true; const pump = Math.sin(since * 9) * 0.035 * S(Math.min(1, since / 0.6)), k = env(0.6, 2.9);
       f.hands = [null, [0.06 + (mid - 0.06) * k, 0.02 - (HALF + 0.02) * k, -0.62 + (1.0 - SH + 0.62) * k + pump]]; f.lean = 0.05 * k; f.look = 0.12; return f; }
-    case 'high-five': { const k = since < 0.83 ? S(since / 0.83) : 1 - S((since - 0.9) / 0.9);
+    case 'high-five': { f.pairedContact = true; const k = since < 0.83 ? S(since / 0.83) : 1 - S((since - 0.9) / 0.9);
       f.hands = [null, [0.06 + (mid - 0.1 - 0.06) * k, 0.08 - (HALF + 0.03) * k, -0.55 + (1.95 - SH + 0.55) * k]]; f.look = -0.25 * k; return f; }
-    case 'hug': { const k = env(0.9, 4.4), sway = Math.sin(since * 1.6) * 0.05 * k;
+    case 'hug': { f.pairedContact = true; const k = env(0.9, 4.4), sway = Math.sin(since * 1.6) * 0.05 * k;
       // both arms around the other's upper back: one over the shoulder, one under the arm; a little forward lean and sway
       // the hands reach past the partner's flanks to the middle of their back (gap + a torso's depth ahead)
       f.hands = [[0.08 + (mid * 2 + 0.02 - 0.08) * k, 0.1 - (HALF + 0.02) * k, -0.55 + (-0.1 + 0.55) * k], [0.08 + (mid * 2 - 0.04 - 0.08) * k, 0.1 - (HALF + 0.05) * k, -0.55 + (-0.36 + 0.55) * k]];
       f.lean = 0.1 * k; f.side = sway; f.look = -0.05; return f; }
-    case 'give': case 'take': { const k = env(0.7, 2.0), right = activity === 'give' ? 0.06 : -0.06;
+    case 'give': case 'take': { f.pairedContact = true; const k = env(0.7, 2.0), right = activity === 'give' ? 0.06 : -0.06;
       f.hands = [null, [0.1 + (mid - 0.1) * k, 0.04 - (HALF + right) * k, -0.6 + (1.05 - SH + 0.6) * k]]; f.look = 0.3 * k; return f; }
     case 'clap': { const c = Math.abs(Math.sin(t * Math.PI * 2.2)), k = S(Math.min(1, since / 0.4));
       f.hands = [[0.32 * k + 0.02, (-HALF + 0.02 + 0.07 * c) * k + 0.08 * (1 - k), -0.18 * k - 0.5 * (1 - k)], [0.32 * k + 0.02, (-HALF + 0.02 + 0.07 * c) * k + 0.08 * (1 - k), -0.2 * k - 0.5 * (1 - k)]];

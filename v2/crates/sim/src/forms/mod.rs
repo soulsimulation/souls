@@ -26,7 +26,8 @@
 //!
 //! - **Reserved, and ended in one entry** (F3, #2768). Accepting a form writes one entry at commit, in arrival order:
 //!   a `souls:form-started` event and, when the form is done at a thing, the reservation, a `souls:reserves` link from
-//!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`] reserves nothing. A
+//!   the body to the thing. A form done on the body itself or on ground marked [`Forms::shared`], or one that only
+//!   walks to its thing and waits there ([`only_there`]: a warm by a fire, a bridge's cross), reserves nothing. A
 //!   second Soul asking for a reserved thing is refused `thing-reserved`, naming the holder and one next act. A form
 //!   that only takes seats (#4575, [`slots_taken`]: a bench's `sit`, a boat's `board`) holds those seats and not its
 //!   whole thing, so two Souls sit on one bench at once; the second racing for the same seat is refused
@@ -99,6 +100,9 @@
 
 pub mod amounts;
 mod links;
+pub mod stock;
+
+pub use stock::{Stocked, Stocks};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -127,7 +131,7 @@ use crate::timers::{DueList, Timer};
 /// its kind: an entry naming a kind's plain name is refused (`name-not-pinned`). `None` for any other effect, a kind
 /// already pinned, or one the header does not pin (its create is then refused by name, as before).
 fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_runner::Effect> {
-    let form_runner::Effect::Make { kind, into } = e else {
+    let form_runner::Effect::Make { kind, into, set } = e else {
         return None;
     };
     if kind.as_str().contains('@') {
@@ -140,6 +144,7 @@ fn pin_made(header: Option<&Header>, e: &form_runner::Effect) -> Option<form_run
     Some(form_runner::Effect::Make {
         kind: pinned.clone(),
         into: *into,
+        set: set.clone(),
     })
 }
 
@@ -202,6 +207,10 @@ impl<R: Reach> Reach for SeatReach<'_, R> {
 
     fn tip(&self, body: Id, limb: &Name) -> Option<Name> {
         self.inner.tip(body, limb)
+    }
+
+    fn seen(&self, body: Id, thing: Id) -> bool {
+        self.inner.seen(body, thing)
     }
 }
 
@@ -318,6 +327,10 @@ pub struct Ended {
     pub body: Id,
     pub at: Micros,
     pub how: Name,
+    /// The words of the refusal it ended by, when the world refused its step's move (`look: 31200 mm to 05:12, reach
+    /// 20000 mm`), or, for a run done whose move was made from afar, that move's words (`look: from afar, ...`,
+    /// #5063), for its act's answer.
+    pub why: Option<String>,
 }
 
 struct FormRun {
@@ -330,6 +343,8 @@ struct FormRun {
     walk: Option<Driver>,
     /// The move in progress the runner asked for.
     mv: Option<Instance>,
+    /// The words of its last move made from afar (#5063, [`crate::moves::Moves::afar`]), for its end.
+    afar: Option<String>,
     /// The thing it reserves and the link's id, while the link stands.
     held: Option<(Id, Id)>,
     /// The seats it reserves in place of its whole thing ([`slots_taken`], #4575): each one's thing and slot. Empty
@@ -546,6 +561,18 @@ fn slots_taken(
     taken
 }
 
+/// Whether a form with `steps` and `effects` only goes to its thing and stays there a while (a warm by a campfire, a
+/// bridge's cross, a building's walk to a room): every step a walk or a wait, no effect and no long form's stages. It
+/// moves, seats and changes nothing of the thing, so it reserves nothing there: several Souls warm at one fire at once,
+/// and sit on its logs while others warm. Any move, seat, hand or change of the thing reserves as before.
+fn only_there(steps: &[Step], effects: &[form_runner::Effect], long: bool) -> bool {
+    !long
+        && effects.is_empty()
+        && steps
+            .iter()
+            .all(|s| matches!(s, Step::WalkTo { .. } | Step::Wait(_)))
+}
+
 /// Whether `step` changes the body's posture (a seat taken or left, a ground posture): a run in one is let finish it.
 fn posture(step: &Step) -> bool {
     matches!(step, Step::Sit { .. } | Step::Rise | Step::Settle { .. })
@@ -586,6 +613,8 @@ pub struct Forms {
     shared: BTreeSet<Id>,
     /// The kinds' amount fields (F4).
     limits: amounts::Limits,
+    /// Every kind's state fields, which a made thing's fields are read against (#4104).
+    defs: amounts::Defs,
     /// The zone's header, for B4's transfer.
     header: Option<Header>,
     /// The crossings the walks asked for this tick (C17): the caller carries them (`crate::host::carry`) and clears
@@ -605,6 +634,12 @@ pub struct Forms {
     /// The slots each kind declares, by the kind's full name: a slot argument on another thing names one of these
     /// (E14, [`other_slots`]).
     slots_of: BTreeMap<String, BTreeSet<u64>>,
+    /// The world's stocked containers (#4837): a `create` of a stock's kind at one gives the made thing its carried
+    /// fields ([`Forms::stocks`]).
+    stocks: std::sync::Arc<Stocks>,
+    /// While a run is woken by the world's refusal of its step ([`Forms::refused`]): the run, the refusal's name and
+    /// its words, which its end carries ([`Ended::why`]) when it ends by that name in the same wake.
+    refusal: Option<(RunId, Name, String)>,
 }
 
 /// Each slot argument on another thing (E14: a lecture's seat on a bench, a collage's patch on a board) is checked as
@@ -781,6 +816,7 @@ impl Forms {
                 body: o.body,
                 at: now,
                 how: name("restart"),
+                why: None,
             });
         }
         f
@@ -1085,6 +1121,7 @@ impl Forms {
                 body,
                 at: now,
                 how: name("left"),
+                why: None,
             });
             return Ok(());
         }
@@ -1130,6 +1167,7 @@ impl Forms {
                 body: node,
                 at: now,
                 how: name("body-gone"),
+                why: None,
             });
         }
         // A run that holds a seat of the thing, or holds it shared as its own (#4575), ends with it, as one that
@@ -1380,6 +1418,13 @@ impl Forms {
                 detail: replica::world_model::show(body),
             });
         }
+        // An act that waits behind its run's seat step (below) keeps its steps as asked: it is turned and fitted to the
+        // body's place once, when it starts and is opened again, never twice.
+        let asked = running
+            .and_then(|old| self.runs.get(&old))
+            .and_then(|fr| fr.runner.step())
+            .is_some_and(posture)
+            .then(|| steps.clone());
         // A turned thing's points are walked to turned with it (C13, #3440).
         let mut steps = steps;
         if node != body
@@ -1408,6 +1453,37 @@ impl Forms {
                 _ => true,
             });
         }
+        // A body held by a seat, a bed or a standing slot of another thing, asked to do a form here that walks (the
+        // lamp across the room asked from the sofa, Eden indoor audit; a seated Soul's `take` of a book stack, trial
+        // 0.137), first rises from that slot by the rise move (as a form that moves the actor does, `rises_out`), as a
+        // person gets up to go: its legs are the slot's, so the walk was refused `resource-held`. Not from a thing that
+        // moves (a ride, a boat): its seats are left by its own forms. Asked while a sit or rise is still under way, it
+        // waits behind that run and is decided when it starts (#4187): after a sit it rises first, after a rise it
+        // walks from where it stands. A form with a rise, a sit or a settle of its own keeps its steps (a sit at a seat
+        // walks there by itself), and a walk the runner would skip (an approach to a hand step's thing already within
+        // reach, a cup by the chair, #4086) needs no rise, so that take is made from the seat.
+        let held_in = w.places.as_ref().and_then(|p| {
+            p.slots
+                .held_by(body)
+                .filter(|s| *s != node && !p.slots.moves(*s))
+        });
+        let rises_elsewhere = node != body
+            && !in_its_slot
+            && held_in.is_some()
+            && !steps
+                .iter()
+                .any(|s| matches!(s, Step::Rise | Step::Sit { .. } | Step::Settle { .. }))
+            && steps.iter().enumerate().any(|(k, s)| match s {
+                Step::WalkTo { approach, .. } => {
+                    !(*approach
+                        && matches!(steps.get(k + 1), Some(Step::Hand))
+                        && w.geometry.within_reach(body, node) == Some(true))
+                }
+                _ => false,
+            });
+        if rises_elsewhere {
+            steps.insert(0, Step::Rise);
+        }
         // A form that would rise the body out of a slot of the node and link it to the node, asked by an actor already
         // linked so (a stage's `step_up` by a Soul on it), is refused before any step, by R2's name: nothing rises or
         // walks for an act whose effect cannot be (0.135 E17). Only on that rise-first path: elsewhere the link effect
@@ -1416,7 +1492,7 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
-        let rises_first = in_its_slot && !stays;
+        let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
             if let form_runner::Effect::Unlink { ty, .. } = e {
@@ -1443,7 +1519,9 @@ impl Forms {
                 }
             }
         }
-        let reserves = node != body && !self.shared.contains(&node);
+        let reserves = node != body
+            && !self.shared.contains(&node)
+            && !only_there(&steps, &effects, long.is_some());
         // A form that only takes seats reserves those seats, not its whole thing (#4575): two Souls sit on one bench
         // at once, while a form that moves, carries or changes the thing holds all of it.
         let taken = match reserves {
@@ -1513,12 +1591,7 @@ impl Forms {
             // A seat taken or left, or a ground posture, runs to its end first, as a cancel lets it: the body is never
             // left half seated nor moved off a legal path. The new act waits, numbered now, and starts as the old run
             // is left after that step (`wake`); a later act takes its place, and the one it replaces ends `left`.
-            if self
-                .runs
-                .get(&old)
-                .and_then(|fr| fr.runner.step())
-                .is_some_and(posture)
-            {
+            if let Some(steps) = asked {
                 self.last += 1;
                 let run = self.last;
                 let waiting = Waiting {
@@ -1536,6 +1609,7 @@ impl Forms {
                         body,
                         at: now,
                         how: name("left"),
+                        why: None,
                     });
                 }
                 return Ok(Asked::Started(run));
@@ -1597,6 +1671,7 @@ impl Forms {
                 runner: Runner::new(steps, node, limits),
                 walk: None,
                 mv: None,
+                afar: None,
                 held: link.map(|l| (node, l)),
                 slots_held: taken,
                 long,
@@ -1684,10 +1759,12 @@ impl Forms {
         other_slots(w, &self.slots_of, body, entry, form, args)
     }
 
-    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
-    /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
+    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read, and every
+    /// state field, which a made thing's fields are read against (#4104). Called after [`Forms::new`] or
+    /// [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
         self.limits = amounts::limits(kinds);
+        self.defs = amounts::defs(kinds);
         self.postures = kinds
             .admits()
             .keys()
@@ -1768,6 +1845,12 @@ impl Forms {
         self.header = Some(header);
     }
 
+    /// The world's stocked containers (#4837, [`stock`]): a `create` of a stock's kind at one of them gives the made
+    /// thing the fields of the row at the top of its pile. Called after [`Forms::new`] or [`Forms::recover`].
+    pub fn stocks(&mut self, stocks: std::sync::Arc<Stocks>) {
+        self.stocks = stocks;
+    }
+
     /// Writes run `run`'s effects at `at`, but no key already written or waiting to be. Each effect's entries, worked
     /// out against the tree and what is already in [`Forms::out`], go in order, the first carrying its key; they are
     /// one part. All of the run's effects or none: a refusal takes back what this call wrote and is returned.
@@ -1822,6 +1905,7 @@ impl Forms {
                     out: &self.out,
                 },
                 limits: &self.limits,
+                defs: &self.defs,
                 header: self.header.as_ref(),
                 body: fr.body,
                 soul: match fr.intent.actor {
@@ -1832,6 +1916,7 @@ impl Forms {
                 node: fr.node,
                 reserved: &reserved,
                 now: at,
+                stocks: &self.stocks,
             };
             let made = pin_made(self.header.as_ref(), e);
             let entries = match cx.entries(mint, made.as_ref().unwrap_or(e)) {
@@ -1922,6 +2007,21 @@ impl Forms {
             return self.finish(w, run, name("left"), now);
         }
         self.handle(w, run, next, now);
+    }
+
+    /// The world refused run `run`'s step as it started it (a move out of reach, a seat taken): the run is woken by
+    /// the refusal's name, and an end by that name in this wake keeps its words for the act's answer.
+    fn refused<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        run: RunId,
+        r: Refusal,
+        now: Micros,
+    ) {
+        let how = name(r.name);
+        self.refusal = Some((run, how.clone(), r.detail));
+        self.wake(w, run, Woke::Moved(how), now);
+        self.refusal = None;
     }
 
     fn handle<G: Geometry, R: Reach>(
@@ -2026,13 +2126,11 @@ impl Forms {
                         now,
                     )
                     .pop()
-                    .map_or_else(
-                        || Err(name("place-unknown")),
-                        |(_, r)| r.map_err(|e| name(e.name)),
-                    );
+                    .map(|(_, r)| r);
                 match taken {
-                    Ok(n) => fr.mv = Some(n),
-                    Err(how) => self.wake(w, run, Woke::Moved(how), now),
+                    Some(Ok(n)) => fr.mv = Some(n),
+                    Some(Err(r)) => self.refused(w, run, r, now),
+                    None => self.wake(w, run, Woke::Moved(name("place-unknown")), now),
                 }
             }
             // A ground posture where the body stands (C25, SA-G3): its legs held in that stance until a rise or a walk.
@@ -2097,7 +2195,7 @@ impl Forms {
                     now,
                 ) {
                     Ok(n) => fr.mv = Some(n),
-                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                    Err(r) => self.refused(w, run, r, now),
                 }
             }
             Next::Move { name: mv, node, at } => {
@@ -2139,6 +2237,9 @@ impl Forms {
                 ) {
                     Ok(n) => {
                         fr.mv = Some(n);
+                        if let Some(words) = w.moves.afar(n) {
+                            fr.afar = Some(words.to_owned());
+                        }
                         // A repeated move (a dance for a minute) is a record for viewers at its first move and again
                         // every `REWRITE_US` (a viewer who comes in mid-dance draws it from the next), each planned to
                         // the latest its step can end (its start, its length and one more move); the other repeats
@@ -2176,7 +2277,7 @@ impl Forms {
                                 .push(entry(&o, now, Vec::new(), name(MOVED), fields));
                         }
                     }
-                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                    Err(r) => self.refused(w, run, r, now),
                 }
             }
         }
@@ -2324,11 +2425,18 @@ impl Forms {
             link: fr.held.filter(|_| !removed).map(|(_, l)| l),
         };
         self.write_end(&o, now, how.clone());
+        let why = self
+            .refusal
+            .take()
+            .filter(|(r, n, _)| *r == run && *n == how)
+            .map(|(.., why)| why)
+            .or_else(|| fr.afar.clone().filter(|_| how.as_str() == "done"));
         self.ended.push(Ended {
             run,
             body: fr.body,
             at: now,
             how,
+            why,
         });
         if let Some(p) = self.waiting.remove(&fr.body) {
             let (body, run) = (fr.body, p.run);
@@ -2351,6 +2459,7 @@ impl Forms {
                     body,
                     at: now,
                     how: name(r.name),
+                    why: None,
                 }),
             }
         }

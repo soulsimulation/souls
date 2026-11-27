@@ -20,6 +20,9 @@
 //
 //   node tools/test-harness/page-souls.mjs [--souls 12,50,200,500] [--shape event|uniform] [--repeats 2]
 //        [--warm-sec 20] [--measure-sec 60] [--settle-sec 60] [--profile-sec 10] [--out dir] [--port 18990] [--short]
+//        [--tiers desktop,phone] [--cameras broadcast,free] [--profile-at <sizes>] [--trace-sec 0] [--ab name=query;name2=query2]
+// --ab: an A/B on the same world and load: every arm is run once per variant (its query appended to the page's address),
+// the variants alternating in order (ABBA across repeats), so a busy machine's drift falls on both alike.
 // Writes <out>/results.json, <out>/REPORT.md and one screenshot per size, tier and camera (first repeat).
 // Never point it at a live world: it boots its own, with fake minds, under <out>.
 import { isMain } from '../lib/is-main.mjs';
@@ -60,6 +63,15 @@ export function topCosts(profile, n = 12) {
   const idle = (self.get('(idle)') ?? 0);
   return { totalMs: Math.round(total), busyShare: total ? +(1 - idle / total).toFixed(3) : null, self: top(self), inclusive: top(incl) };
 }
+/** A Chrome trace (devtools.timeline) → ms per second of the renderer's main thread by event name: complete events
+ *  ('X') on the CrRendererMain thread, nested ones counted in their own names too (so the names overlap; read each alone). */
+export function traceTotals(trace, sec) {
+  const ev = trace.traceEvents ?? trace, main = new Set();
+  for (const e of ev) if (e.ph === 'M' && e.name === 'thread_name' && e.args?.name === 'CrRendererMain') main.add(`${e.pid}:${e.tid}`);
+  const by = new Map();
+  for (const e of ev) if (e.ph === 'X' && main.has(`${e.pid}:${e.tid}`) && e.dur) by.set(e.name, (by.get(e.name) ?? 0) + e.dur / 1000);
+  return Object.fromEntries([...by].sort((a, b) => b[1] - a[1]).slice(0, 24).map(([k, ms]) => [k, +(ms / sec).toFixed(1)]));
+}
 /** Per tier and camera, the smallest size whose median frame time (the median of its repeats' p50s) is above SLOW_MS,
  *  else 'not reached' with the largest size measured, or 'no data'. */
 export function crossings(rows) {
@@ -75,18 +87,19 @@ export function crossings(rows) {
 export function renderReport(res) {
   const L = [`# Page with many Souls (#2554): shape ${res.shape}`, '', `Renderer: ${res.gl?.renderer ?? 'none'} (${res.gl?.software ? 'software' : 'hardware'}; flags ${res.gl?.flags ?? '-'}). ${res.cores} logical CPUs allowed to this process; a runner's GPU is not a visitor's, so compare arms with each other.`,
     `Each arm: ${res.warmSec} s warm-up after arrival, then ${res.measureSec} s measured. Frame times are requestAnimationFrame deltas (ms); draws and triangles per drawn frame (median); heap is the JS heap at the window's end; long tasks are the main thread's tasks over 50 ms in the window.`, '',
-    '| Souls | tier | camera | rep | frame p50 | frame p95 | fps | >33 ms | draws p50 | tris p50 (k) | GPU ms p50 | heap MB | geometries / textures | long tasks (n / ms / max) | Souls in page | load 1m |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+    '| Souls | tier | camera | variant | rep | frame p50 | frame p95 | fps | >33 ms | draws p50 | tris p50 (k) | GPU ms p50 | heap MB | geometries / textures | long tasks (n / ms / max) | Souls in page | load 1m |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const r of res.rows) {
-    if (r.error) { L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.repeat} | error: ${String(r.error).replace(/\|/g, '/').slice(0, 120)} |||||||||||||`); continue; }
-    L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.repeat} | ${r.frame.p50} | ${r.frame.p95} | ${r.frame.fps} | ${r.frame.over33} | ${r.draws.p50 ?? ''} | ${r.draws.trisP50k ?? ''} | ${r.gpu.p50 ?? '-'} | ${r.mem.heapMB ?? ''} | ${r.mem.geometries ?? ''} / ${r.mem.textures ?? ''} | ${r.long.n} / ${r.long.totalMs} / ${r.long.max} | ${r.page.souls ?? ''} | ${r.host.start.load1} |`);
+    if (r.error) { L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.variant ?? '-'} | ${r.repeat} | error: ${String(r.error).replace(/\|/g, '/').slice(0, 120)} |||||||||||||`); continue; }
+    L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.variant ?? '-'} | ${r.repeat} | ${r.frame.p50} | ${r.frame.p95} | ${r.frame.fps} | ${r.frame.over33} | ${r.draws.p50 ?? ''} | ${r.draws.trisP50k ?? ''} | ${r.gpu.p50 ?? '-'} | ${r.mem.heapMB ?? ''} | ${r.mem.geometries ?? ''} / ${r.mem.textures ?? ''} | ${r.long.n} / ${r.long.totalMs} / ${r.long.max} | ${r.page.souls ?? ''} | ${r.host.start.load1} |`);
   }
   L.push('', 'Size at which the median frame time passes 33 ms (30 frames a second):', '');
   for (const [k, v] of Object.entries(res.crossings)) L.push(`- ${k}: ${v}`);
   if (res.profiles.length) {
-    L.push('', `CPU profiles at ${res.profiles[0].souls} Souls (${res.profileSec} s each, after the measured window):`);
+    L.push('', `CPU profiles (${res.profileSec} s each, after the measured window):`);
     for (const p of res.profiles) {
       if (p.error) { L.push('', `- ${p.tier}/${p.camera}: error ${p.error}`); continue; }
-      L.push('', `- ${p.tier}/${p.camera}: main thread busy ${Math.round(100 * p.busyShare)} % of ${p.totalMs} ms. Self: ${p.self.slice(0, 6).map((x) => `${x.fn} ${x.ms} ms`).join('; ')}. Inclusive: ${p.inclusive.slice(0, 8).map((x) => `${x.fn} ${x.ms} ms`).join('; ')}`);
+      if (p.self) L.push('', `- ${p.souls} Souls ${p.tier}/${p.camera}${p.variant ? ` ${p.variant}` : ''}: main thread busy ${Math.round(100 * p.busyShare)} % of ${p.totalMs} ms. Self: ${p.self.slice(0, 6).map((x) => `${x.fn} ${x.ms} ms`).join('; ')}. Inclusive: ${p.inclusive.slice(0, 8).map((x) => `${x.fn} ${x.ms} ms`).join('; ')}`);
+      if (p.trace) L.push('', `- ${p.souls} Souls ${p.tier}/${p.camera}${p.variant ? ` ${p.variant}` : ''} trace, main thread ms per second: ${p.trace.error ?? Object.entries(p.trace).slice(0, 12).map(([k, v]) => `${k} ${v}`).join('; ')}`);
     }
   }
   L.push('', `Driver: ${JSON.stringify(res.driver)}`);
@@ -162,7 +175,7 @@ async function launchBrowser(chromium) {
 }
 
 /** One arm: a fresh context on the page, arrival, warm-up, the measured window; a CPU profile after it when asked. */
-async function arm({ browser, url, tier, VIEWPORTS, worldArrived, warmSec, measureSec, profileSec, shot }) {
+async function arm({ browser, url, tier, VIEWPORTS, worldArrived, warmSec, measureSec, profileSec, shot, profilePath, traceSec = 0 }) {
   const ctx = await browser.newContext({ ...VIEWPORTS[tier] });
   try {
     await ctx.addInitScript(INIT);
@@ -186,9 +199,14 @@ async function arm({ browser, url, tier, VIEWPORTS, worldArrived, warmSec, measu
     const row = { arrivedMs, frame: frameStats(d.frames), draws: { p50: q(draws, 0.5), p95: q(draws, 0.95), trisP50k: tris.length ? r1(q(tris, 0.5) / 1000) : null }, gpu: { timer: d.timer, n: d.gpu.length, p50: r1(q(d.gpu, 0.5)), p95: r1(q(d.gpu, 0.95)), error: d.gpuErr },
       long: d.long, mem: d.mem, page: d.page, crowd: d.crowd, errors: errors.slice(0, 5) };
     if (shot) await page.screenshot({ path: shot }).catch(() => {});
+    if (traceSec) {
+      // the main thread's time by trace event (style, layout, paint, script, GC): a CPU profile shows script only
+      try { await browser.startTracing(page, { categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8'] }); await page.waitForTimeout(traceSec * 1000); row.trace = traceTotals(JSON.parse(String(await browser.stopTracing())), traceSec); }
+      catch (e) { row.trace = { error: String(e?.message ?? e).slice(0, 160) }; }
+    }
     if (profileSec) {
       const cdp = await ctx.newCDPSession(page);
-      try { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); await cdp.send('Profiler.start'); await page.waitForTimeout(profileSec * 1000); row.profile = topCosts((await cdp.send('Profiler.stop')).profile); }
+      try { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); await cdp.send('Profiler.start'); await page.waitForTimeout(profileSec * 1000); const { profile } = await cdp.send('Profiler.stop'); if (profilePath) writeFileSync(profilePath, JSON.stringify(profile)); row.profile = topCosts(profile); }
       catch (e) { row.profile = { error: String(e?.message ?? e).slice(0, 160) }; }
     }
     return row;
@@ -200,6 +218,10 @@ async function main() {
   const sizes = String(o.souls ?? (short ? '12' : '12,50,200,500')).split(',').map(Number).filter((n) => n > 0).sort((a, b) => a - b);
   const shape = String(o.shape ?? 'event'), repeats = Number(o.repeats ?? (short ? 1 : 2));
   const warmSec = Number(o['warm-sec'] ?? (short ? 5 : 20)), measureSec = Number(o['measure-sec'] ?? (short ? 10 : 60)), settleSec = Number(o['settle-sec'] ?? (short ? 20 : 60)), profileSec = Number(o['profile-sec'] ?? (short ? 5 : 10));
+  const tiers = String(o.tiers ?? TIERS.join(',')).split(',').filter((t) => TIERS.includes(t)), cameras = String(o.cameras ?? CAMERAS.join(',')).split(',').filter((c) => CAMERAS.includes(c));
+  const traceSec = Number(o['trace-sec'] ?? 0);
+  const profileAt = new Set(String(o['profile-at'] ?? sizes.at(-1)).split(',').map(Number));
+  const variants = o.ab ? String(o.ab).split(';').map((x) => { const k = x.indexOf('='); return { name: k < 0 ? x : x.slice(0, k), query: k < 0 ? '' : x.slice(k + 1) }; }) : [{ name: null, query: '' }];
   const port = Number(o.port ?? 18990), out = resolve(o.out ?? join(REPO, '.local/page-souls', new Date().toISOString().replace(/[:.]/g, '-')));
   if (port >= 4930 && port <= 4987) throw new Error(`refusing live-world port ${port}`);
   if (!['event', 'uniform'].includes(shape)) throw new Error('--shape event|uniform');
@@ -214,7 +236,7 @@ async function main() {
   const pw = resolvePlaywright({ serverRoot: REPO }); if (!pw) throw new Error('no Playwright: pnpm install --frozen-lockfile');
   const gathered = SHAPES.agents[shape].place.gatheredShare.value;
   const nv = spawnSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { encoding: 'utf8' });
-  const res = { schema: 'page-souls/1', shape, sizes, repeats, warmSec, measureSec, settleSec, profileSec, cores: availableParallelism(), gpuName: nv.status === 0 ? nv.stdout.trim().split('\n')[0] : null, gl: null, rows: [], profiles: [], schedules: [], driver: { joined: 0, joinS: [], counts: null }, crossings: null };
+  const res = { schema: 'page-souls/1', shape, sizes, repeats, tiers, cameras, variants, warmSec, measureSec, settleSec, profileSec, cores: availableParallelism(), gpuName: nv.status === 0 ? nv.stdout.trim().split('\n')[0] : null, gl: null, rows: [], profiles: [], schedules: [], driver: { joined: 0, joinS: [], counts: null }, crossings: null };
   const save = () => { res.crossings = crossings(res.rows); writeFileSync(join(out, 'results.json'), JSON.stringify(res, null, 1)); writeFileSync(join(out, 'REPORT.md'), renderReport(res)); };
   log(`booting Eden 2026 (fake minds) on :${port}; shape ${shape}, sizes ${sizes.join(',')}, ${repeats} repeats`);
   const w = await startWorld({ serverRoot: REPO, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(out, 'world', 'data'), log: join(out, 'world.log') });
@@ -235,7 +257,7 @@ async function main() {
       log(`${n} Souls joined (${fresh.length} new in ${Math.round((Date.now() - j0) / 1000)} s); first walks, then the ${shape} schedule`);
       // the previous size's schedule ends; the new one covers every joined Soul for this size's whole stay
       stop.end(); await running;
-      const perSize = settleSec + repeats * TIERS.length * CAMERAS.length * (warmSec + measureSec + 120) + (n === sizes.at(-1) ? TIERS.length * CAMERAS.length * profileSec : 0);
+      const perSize = settleSec + repeats * variants.length * tiers.length * cameras.length * (warmSec + measureSec + 120) + (profileAt.has(n) ? variants.length * tiers.length * cameras.length * profileSec : 0);
       const sched = schedule(shape, n, perSize, `v9|${shape}|${n}`, { actSec: 10 }); res.schedules.push({ souls: n, seconds: perSize, summary: describe(sched.summary) });
       const r = rng(n);
       await Promise.all(fresh.map(async (s) => { const id = r() < gathered ? meet[Math.floor(r() * meet.length)] : ids.walk[Math.floor(r() * ids.walk.length)]; const key = `v9-first-${s.i}`;
@@ -243,16 +265,16 @@ async function main() {
       stop = stopper(); running = drive({ base: w.base, souls, sched, ids, meet, stop, counts, call: cs.clientCall, sayBody: cs.sayBody, SAY_PATH: cs.SAY_PATH, actBody: cs.actBody, clientHeaders: cs.clientHeaders });
       await sleep(settleSec * 1000);
       let crowd = null;
-      for (let rep = 1; rep <= repeats; rep++) for (const tier of TIERS) for (const camera of CAMERAS) {
-        const at = crowd ?? [0, 0, 0], url = camera === 'free' ? `${w.base}?dev=1&eye=${at[0]},${+(at[1] + 40).toFixed(1)},${+(at[2] + 40).toFixed(1)}&at=${at.join(',')}` : `${w.base}?dev=1`;
-        const profile = rep === 1 && n === sizes.at(-1) ? profileSec : 0, h0 = host();
-        log(`n${n} r${rep} ${tier} ${camera}: load ${h0.load1}`);
+      for (let rep = 1; rep <= repeats; rep++) for (const tier of tiers) for (const camera of cameras) for (const v of (rep % 2 ? variants : [...variants].reverse())) {
+        const at = crowd ?? [0, 0, 0], url = (camera === 'free' ? `${w.base}?dev=1&eye=${at[0]},${+(at[1] + 40).toFixed(1)},${+(at[2] + 40).toFixed(1)}&at=${at.join(',')}` : `${w.base}?dev=1`) + (v.query ? `&${v.query}` : '');
+        const profile = rep === 1 && profileAt.has(n) ? profileSec : 0, h0 = host();
+        log(`n${n} r${rep} ${tier} ${camera}${v.name ? ` ${v.name}` : ''}: load ${h0.load1}`);
         let row;
-        try { row = await arm({ browser, url, tier, VIEWPORTS, worldArrived, warmSec, measureSec, profileSec: profile, shot: rep === 1 ? join(out, `n${n}-${tier}-${camera}.png`) : null }); }
+        try { row = await arm({ browser, url, tier, VIEWPORTS, worldArrived, warmSec, measureSec, profileSec: profile, shot: rep === 1 ? join(out, `n${n}-${tier}-${camera}${v.name ? `-${v.name}` : ''}.png`) : null, profilePath: join(out, `n${n}-${tier}-${camera}${v.name ? `-${v.name}` : ''}.cpuprofile`), traceSec: rep === 1 && profileAt.has(n) ? traceSec : 0 }); }
         catch (e) { row = { error: String(e?.message ?? e).split('\n')[0].slice(0, 200) }; }
-        const { profile: prof, ...rest } = row;
-        res.rows.push({ souls: n, repeat: rep, tier, camera, joined: souls.length, view: camera === 'free' ? { at, up: 40, back: 40 } : null, host: { start: h0, end: host() }, ...rest });
-        if (prof) res.profiles.push({ souls: n, tier, camera, ...prof });
+        const { profile: prof, trace, ...rest } = row;
+        res.rows.push({ souls: n, repeat: rep, tier, camera, variant: v.name, joined: souls.length, view: camera === 'free' ? { at, up: 40, back: 40 } : null, host: { start: h0, end: host() }, ...rest });
+        if (prof || trace) res.profiles.push({ souls: n, tier, camera, variant: v.name, ...(prof ?? {}), trace });
         if (!crowd && row.crowd) crowd = row.crowd;
         if (row.error) log(`  error: ${row.error}`); else log(`  frame p50 ${row.frame.p50} p95 ${row.frame.p95} ms, ${row.frame.fps} fps, draws ${row.draws.p50}, gpu ${row.gpu.p50 ?? '-'} ms, heap ${row.mem.heapMB} MB, long ${row.long.n}/${row.long.totalMs} ms, Souls in page ${row.page.souls}, camera ${row.page.camera}, tier ${row.page.quality}`);
         res.driver.counts = { ...counts }; save();

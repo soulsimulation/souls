@@ -814,7 +814,11 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         .granted
         .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
     let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
-    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap());
+    let mut walk = Walk::new(
+        id,
+        Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        crate::bodies::WALK,
+    );
     let mut corners = BTreeSet::new();
     for t in 0..2_000i64 {
         let me = *b.runner.controller.body(id).unwrap();
@@ -1014,6 +1018,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     let nearest = select_thing(
         tree,
         &Json::Null,
+        &OnceLock::new(),
         &sel("nearest", Json::Int(1), None),
         this,
         nobody,
@@ -1024,6 +1029,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     let last = select_thing(
         tree,
         &Json::Null,
+        &OnceLock::new(),
         &sel("nearest", Json::Str("last".into()), None),
         this,
         nobody,
@@ -1032,6 +1038,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     let furthest = select_thing(
         tree,
         &Json::Null,
+        &OnceLock::new(),
         &sel("furthest", Json::Int(1), None),
         this,
         nobody,
@@ -1042,6 +1049,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         select_thing(
             tree,
             &Json::Null,
+            &OnceLock::new(),
             &sel("nearest", Json::Int(1), Some("test:no_such_kind")),
             this,
             nobody,
@@ -1052,7 +1060,15 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     );
     let off = Json::Obj(vec![("of".into(), Json::Str("free_slots".into()))]);
     assert_eq!(
-        select_thing(tree, &Json::Null, &off, this, nobody, None),
+        select_thing(
+            tree,
+            &Json::Null,
+            &OnceLock::new(),
+            &off,
+            this,
+            nobody,
+            None
+        ),
         Err(()),
         "not a thing selector"
     );
@@ -1142,27 +1158,43 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
                 .unwrap(),
         )
         .unwrap();
-    let outside = {
-        let id = Id::new(Scope([0xca; 16]), 3).unwrap();
+    let on_ground = |n: u64, at: Vec3| {
+        let id = Id::new(Scope([0xca; 16]), n).unwrap();
         let frame = Frame {
             node: ground,
             slot: None,
         };
         let b = town.surfaces[&ground]
-            .place(id, frame, under, Quat::IDENTITY)
+            .place(id, frame, at, Quat::IDENTITY)
             .unwrap();
         (id, b)
     };
+    let outside = on_ground(3, under);
+    // #5063: another Soul on the open ground, 3 m farther out from the building.
+    let further = place
+        .position
+        .plus(
+            place
+                .orientation
+                .rotate(Vec3::new(
+                    i64::try_from(out).unwrap() * 1000 + 3_000_000,
+                    0,
+                    0,
+                ))
+                .unwrap(),
+        )
+        .unwrap();
+    let beside = on_ground(4, further);
     let split = town.split(1);
     let toward = BTreeMap::new();
     let planning = RefCell::new(Planning::default());
     let sight = Sight {
-        bodies: Arc::new(BTreeMap::from([below, on, outside])),
+        bodies: Arc::new(BTreeMap::from([below, on, outside, beside])),
         carrying: Arc::new(BTreeSet::new()),
         tree: split.shared.tree,
         split: Some(RefCell::new(split)),
         builds: Arc::new(
-            [below.0, on.0, outside.0]
+            [below.0, on.0, outside.0, beside.0]
                 .into_iter()
                 .map(|b| (b, Build::STANDARD))
                 .collect(),
@@ -1205,6 +1237,30 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     );
     assert!(high > reach, "4 m straight overhead: {high}");
     assert_eq!(low, 0, "1 m up, straight overhead");
+    // #5063: what a look or a point beyond its reach may be made at from afar, from the body's own floor only: a room
+    // of its storey, not one a storey up or a Soul there; from the open ground beside the building, the building but
+    // not a room inside it, behind its walls.
+    assert!(sight.seen(below.0, r0), "a room of its own storey");
+    assert!(!sight.seen(below.0, r1), "a room a storey up");
+    assert!(!sight.seen(below.0, on.0), "a Soul a storey up");
+    assert!(sight.seen(on.0, r1), "upstairs, its own storey's room");
+    assert!(
+        sight.seen(outside.0, building),
+        "the building, from the ground beside it"
+    );
+    assert!(
+        !sight.seen(outside.0, r0),
+        "a room behind the building's walls"
+    );
+    assert!(sight.seen(outside.0, beside.0), "a Soul on the open ground");
+    assert!(
+        !sight.seen(outside.0, below.0),
+        "a Soul inside, from outside"
+    );
+    assert!(
+        !sight.seen(below.0, outside.0),
+        "a Soul outside, from inside"
+    );
 }
 
 /// #4330, #4339: a move at a thing argument names that thing for viewers, unless it is in a closed container: the
@@ -1585,4 +1641,281 @@ fn a_harvests_basket_loads_its_count_with_its_roles_left_out() {
     let picked = def.state.get(&28).expect("field 28");
     println!("loaded {} with field 28 {}", names[0], picked.name.as_str());
     assert!(picked.name.as_str().ends_with("picked"));
+}
+
+/// [`ranked_things`] as #5202 left it: a `here` set read from every node of the tree, each node's place walked to the
+/// root on every call. Kept only to show the cells rank the same list.
+fn ranked_by_scan(
+    tree: &Tree,
+    kinds: &Json,
+    select: &Json,
+    node: Id,
+    body: Id,
+    body_at: Option<Vec3>,
+) -> Result<(Ranked, Option<usize>), ()> {
+    let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
+    let here = select.get("in").and_then(Json::str) == Some("here");
+    let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
+        Some("this") => vec![node],
+        // Every node of the tree, narrowed below by reach, building and closed containers.
+        Some("here") => Vec::new(),
+        Some("parent") => parent(node).into_iter().collect(),
+        _ => return Err(()),
+    };
+    let anchor = match select.get("anchor").and_then(Json::str) {
+        Some("me") => world_at(tree, body).or(body_at),
+        Some("this") => world_at(tree, node),
+        _ => return Err(()),
+    };
+    let furthest = match select.get("order").and_then(Json::str) {
+        Some("nearest") => false,
+        Some("furthest") => true,
+        _ => return Err(()),
+    };
+    let rank = match select.get("rank") {
+        Some(Json::Int(n)) if *n >= 1 => Some(usize::try_from(*n).map_err(|_| ())?),
+        Some(Json::Str(l)) if l == "last" => None,
+        _ => return Err(()),
+    };
+    let kind = select.get("kind").and_then(Json::str);
+    let is_body = |id: Id| {
+        tree.links_at(id)
+            .iter()
+            .any(|e| plain(tree.ty(e)) == "souls:body-of")
+    };
+    let d2 = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
+    };
+    let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
+    let handles: Vec<replica::tree::Handle> = if here {
+        let mut all = Vec::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]));
+            all.push(h);
+        }
+        all
+    } else {
+        sets.iter()
+            .filter_map(|s| tree.children(tree.handle(*s)?))
+            .flatten()
+            .copied()
+            .collect()
+    };
+    // Here: the same building or ground as the act's node, when both say; never inside a closed container.
+    let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
+    let same_place = |id: Id| match (frame, replica::select::standing(tree, id)) {
+        (Some(f), Ok((g, _))) => f == g,
+        _ => true,
+    };
+    let closed_above = |id: Id| {
+        let mut up = parent(id);
+        for _ in 0..64 {
+            let Some(p) = up else { return false };
+            let Some(pn) = tree.node(tree.handle(p).unwrap_or_else(|| tree.root())) else {
+                return false;
+            };
+            if p != node
+                && kinds
+                    .get(plain(pn.kind()))
+                    .and_then(|e| e.get("closed"))
+                    .is_some()
+            {
+                return true;
+            }
+            up = pn.parent();
+        }
+        true
+    };
+    let xz = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.z, p.z)
+    };
+    let of_kind = |n: &replica::tree::NodeRef<'_>| {
+        kind.is_none_or(|k| plain(n.kind()) == k || entry_of(n).split('@').next() == Some(k))
+    };
+    // Every test is pure, so their order changes only the work. `here` reads every node of the tree: its reach is
+    // asked before the frame and container walks, which then run only for the few things near the anchor (an even
+    // load at 1,000 Souls held the clock for seconds walking every node's frame, many form starts a tick).
+    let mut ranked: Vec<(Option<i128>, Id)> = handles
+        .into_iter()
+        .filter_map(|h| tree.node(h))
+        .filter(|n| n.id() != node && n.id() != body)
+        .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
+        .filter(|n| of_kind(n))
+        .filter_map(|n| {
+            let p = world_at(tree, n.id());
+            if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
+                return None;
+            }
+            Some((n, p))
+        })
+        .filter(|(n, _)| !is_body(n.id()))
+        .filter(|(n, _)| !here || (same_place(n.id()) && !closed_above(n.id())))
+        .map(|(n, p)| (anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
+        .collect();
+    ranked.sort_by(|(da, a), (db, b)| {
+        let by = match (da, db) {
+            (Some(x), Some(y)) if furthest => y.cmp(x),
+            (Some(x), Some(y)) => x.cmp(y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        by.then(a.cmp(b))
+    });
+    Ok((ranked, rank))
+}
+
+/// A `here` selector: `anchor` (`me` or `this`), `order`, `rank`, and `kind` when given.
+fn here_select(anchor: &str, order: &str, rank: Json, kind: Option<&str>) -> Json {
+    let mut o = vec![
+        ("of".into(), Json::Str("things".into())),
+        ("in".into(), Json::Str("here".into())),
+        ("anchor".into(), Json::Str(anchor.into())),
+        ("order".into(), Json::Str(order.into())),
+        ("rank".into(), rank),
+    ];
+    if let Some(k) = kind {
+        o.push(("kind".into(), Json::Str(k.into())));
+    }
+    Json::Obj(o)
+}
+
+/// For each act node of `nodes`: every `here` selector (anchored on a body 1 m east of the node, on a body with no
+/// place, or on the node; nearest and furthest; rank 1 of any kind, and the last of the kind of the nearest other
+/// thing) ranks the same list from the cells, held across all the calls as a batch of starts holds them, and read
+/// afresh, as from every node of the tree. The number of lists compared and of those not empty.
+fn here_same_as_scan(tree: &Tree, kinds: &Json, nodes: &[Id]) -> (usize, usize) {
+    let held = OnceLock::new();
+    let nobody = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let (mut compared, mut found) = (0, 0);
+    for &node in nodes {
+        let at = world_at(tree, node);
+        let body_at = at.map(|p| Vec3::new(p.x + 1_000_000, p.y, p.z));
+        let any = here_select("this", "nearest", Json::Int(1), None);
+        let nearest_kind = ranked_by_scan(tree, kinds, &any, node, nobody, body_at)
+            .ok()
+            .and_then(|(r, _)| r.first().map(|(_, id)| *id))
+            .and_then(|id| tree.node(tree.handle(id)?))
+            .map(|n| plain(n.kind()).to_owned());
+        for (anchor, body_at) in [("me", body_at), ("me", None), ("this", body_at)] {
+            for order in ["nearest", "furthest"] {
+                for (rank, kind) in [
+                    (Json::Int(1), None),
+                    (Json::Str("last".into()), nearest_kind.as_deref()),
+                ] {
+                    let select = here_select(anchor, order, rank, kind);
+                    let scan = ranked_by_scan(tree, kinds, &select, node, nobody, body_at);
+                    let cells = ranked_things(tree, kinds, &held, &select, node, nobody, body_at);
+                    assert_eq!(cells, scan, "{select:?} from {node:?}");
+                    let fresh = ranked_things(
+                        tree,
+                        kinds,
+                        &OnceLock::new(),
+                        &select,
+                        node,
+                        nobody,
+                        body_at,
+                    );
+                    assert_eq!(fresh, scan, "{select:?} from {node:?}, read afresh");
+                    compared += 1;
+                    found += usize::from(scan.is_ok_and(|(r, _)| !r.is_empty()));
+                }
+            }
+        }
+    }
+    (compared, found)
+}
+
+/// Every node of `tree` with a place, in the tree's order.
+fn placed(tree: &Tree) -> Vec<Id> {
+    let mut out = Vec::new();
+    let mut stack = vec![tree.root()];
+    while let Some(h) = stack.pop() {
+        stack.extend(tree.children(h).unwrap_or(&[]));
+        if let Some(n) = tree.node(h)
+            && world_at(tree, n.id()).is_some()
+        {
+            out.push(n.id());
+        }
+    }
+    out
+}
+
+/// #5202's follow-up: a `here` selector reads the nodes from the cells around its anchor ([`Here`]), and ranks the
+/// same list as from every node of the tree: the synthetic world, from every placed node.
+#[test]
+fn a_here_selector_ranks_the_same_from_the_cells_as_from_every_node() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let nodes = placed(&imported.tree);
+    let (compared, found) = here_same_as_scan(&imported.tree, &Json::Null, &nodes);
+    println!(
+        "{compared} lists compared, {found} not empty, from {} nodes",
+        nodes.len()
+    );
+    assert!(
+        found * 2 >= compared,
+        "most lists find something: {found} of {compared}"
+    );
+}
+
+/// The entries under `content/kinds`, by kind, as the world reads them, and as texts for the import.
+fn content_kinds() -> (Json, Vec<(String, String)>) {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(String, Json)>) {
+        let mut paths: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| Some(e.ok()?.path()))
+            .collect();
+        paths.sort();
+        for p in paths {
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "json") {
+                let text = std::fs::read_to_string(&p).unwrap();
+                let Ok(v) = replica::rules::json::parse(&text) else {
+                    continue;
+                };
+                if v.get("format").and_then(Json::str) == Some("souls-entry/1")
+                    && let Some(kind) = v.get("kind").and_then(Json::str)
+                {
+                    out.push((kind.to_owned(), v.clone()));
+                }
+            }
+        }
+    }
+    let mut all = Vec::new();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    walk(&dir, &mut all);
+    let texts = all.iter().map(|(k, e)| (k.clone(), e.to_json())).collect();
+    (Json::Obj(all), texts)
+}
+
+/// [`a_here_selector_ranks_the_same_from_the_cells_as_from_every_node`] on the whole of Eden 2026 (about 11,000
+/// nodes) with the world's own entries, from every 40th placed node. Needs the facts file: `$EDEN_FACTS`, else
+/// `.local/import-eden/eden-2026.facts.json` (`v2/tools/import-eden/export`).
+#[test]
+#[ignore = "needs the Eden 2026 facts file"]
+fn a_here_selector_ranks_the_same_from_the_cells_on_all_of_eden() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let path = std::env::var("EDEN_FACTS")
+        .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
+    let facts = std::fs::read_to_string(path).expect("the Eden 2026 facts file");
+    let (kinds, texts) = content_kinds();
+    let imported = import_eden::load_with(&facts, &texts).expect("Eden imports");
+    let all = placed(&imported.tree);
+    let nodes: Vec<Id> = all.iter().step_by(40).copied().collect();
+    let (compared, found) = here_same_as_scan(&imported.tree, &kinds, &nodes);
+    println!(
+        "{compared} lists compared, {found} not empty, from {} of {} placed nodes",
+        nodes.len(),
+        all.len()
+    );
+    assert!(all.len() > 5_000, "all of Eden: {}", all.len());
+    assert!(
+        found * 2 >= compared,
+        "most lists find something: {found} of {compared}"
+    );
 }

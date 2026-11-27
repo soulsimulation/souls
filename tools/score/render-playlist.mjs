@@ -5,7 +5,7 @@
 // fallback (gen-mesh/music.ts).
 //
 // Each piece renders with the engine's own Sim.renderOffline (playlist/engine.mjs, end of the Conductor section: the same
-// instruments and master compressor + limiter at -1 dBFS as live playback) inside headless Chrome (Tone's PluckSynth and
+// instruments and master compressor + limiter at -1 dBFS as live playback) inside headless Chromium (Tone's PluckSynth and
 // BitCrusher need worklets, so this cannot run under Node). One deterministic seed per piece (FNV-1a of its id), TRACK_S
 // seconds, 44.1 kHz stereo; the float WAV is downloaded from the page, encoded with ffmpeg (AAC in an .m4a with the moov
 // up front, so a media element can start before the file is down; `--format opus|mp3` for the others) and named by its
@@ -205,7 +205,7 @@ async function renderAll({ pieces, performances = 3, out, seconds, rate, format,
   const pw = findPlaywright(); if (!pw) throw Error('no Playwright found (pnpm install)');
   const { server, origin } = await serve();
   let browser;
-  try { browser = await pw.chromium.launch({ channel: 'chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required', '--disable-gpu'] }); }
+  try { browser = await pw.chromium.launch({ channel: 'chromium', headless: true, args: ['--autoplay-policy=no-user-gesture-required', '--disable-gpu'] }); }
   catch (e) { server.close(); throw e; }
   const rendered = [], failures = [];
   const queue = [...todo];

@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { staticWritable, unitWritable, v2Switch } from './v2-switch.mjs';
+import { notUnitData, staticWritable, unitWritable, v2Switch } from './v2-switch.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
@@ -73,5 +73,22 @@ test('24 Nov: a static folder the launcher unit cannot write is refused before a
     assert.throws(() => v2Switch({ binding, slug: 'eden', stream: '/s/eden/', routes: join(dir, 'routes.json'), client, staticDir: '/var/lib/souls/eden-static' }), /v2-switch.static-not-writable/);
     assert.equal(existsSync(binding), false, 'nothing written'); assert.equal(existsSync(join(dir, 'routes.json')), false);
     staticWritable(join(dir, 'static'));   // a checkout's or laptop's folder is not the unit's to judge
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('27 Nov: a harness\'s own launcher (unit: false, --no-unit) publishes from a per-run folder under /srv, never into a stage\'s data', () => {
+  const runner = '/srv/runner/_work/_temp/timed-1-1/world/static';
+  assert.throws(() => staticWritable(runner), /v2-switch.static-not-writable/, 'the unit could not write it');
+  notUnitData(runner);
+  assert.throws(() => notUnitData('/srv/sim-worlds-data/production/eden-static'), /v2-switch.static-in-unit-data/, 'production data');
+  assert.throws(() => notUnitData('/srv/sim-worlds-data/staging/eden-static'), /v2-switch.static-in-unit-data/, 'any stage\'s data');
+  const dir = mkdtempSync(new URL('static-nounit-', scratch)), binding = join(dir, 'binding.json'), client = join(dir, 'client');
+  try {
+    mkdirSync(client); writeFileSync(join(client, 'replica.js'), 'm'); writeFileSync(join(client, 'replica_bg.wasm'), 'w');
+    const given = { binding, slug: 'eden', stream: '/s/eden/', routes: join(dir, 'routes.json'), client, unit: false };
+    assert.throws(() => v2Switch({ ...given, staticDir: '/srv/sim-worlds-data/production/eden-static' }), /v2-switch.static-in-unit-data/);
+    assert.equal(existsSync(binding), false, 'nothing written');
+    v2Switch({ ...given, staticDir: join(dir, 'static') });
+    assert.equal(existsSync(join(dir, 'static')), true, 'its own folder is made');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

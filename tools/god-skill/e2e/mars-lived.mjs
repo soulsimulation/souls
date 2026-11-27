@@ -11,7 +11,7 @@
 //   Eli   the Tool library: climbs the new stair to the loft, sits on a floor cushion, comes down, walks through the
 //         Dojo's racks and over to the diner.
 // Checks the brief's fixes on the way (the Tool library stair reaches the loft, Mimos's front is glass with a door, the
-// default world has no economy), and photographs Souls in Mimos, the kitchen and the diner in real Chrome at dpr 1 and 2.
+// default world has no economy), and photographs Souls in Mimos, the kitchen and the diner in Chromium at dpr 1 and 2.
 //
 //   node tools/god-skill/e2e/mars-lived.mjs [--port 5874] [--keep] [--no-shots]
 //
@@ -98,7 +98,7 @@ async function shots(list) {
   if (!release) { log('  (chrome lease busy; screenshots skipped)'); return; }
   let browser = null;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     for (const dpr of [1, 2]) {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); });

@@ -204,3 +204,14 @@ The body component fixture supplies only a public placement `live` locator deriv
 This supplied metadata tests the existing Back to live consumer; deployed locator production remains unproved
 and is tracked separately in #3661. The fixture's exact favicon route returns 204. Neither behavior qualifies
 deployed replay or public release input.
+
+### Native customer-page camera proof
+
+For the built apps/web customer page over a fresh native world, use the `native-page` recipe of
+`tools/proof/owned-attempt.mjs` with the committed `tools/proof/drivers/camera-native-page.mjs` driver. The private
+wrapper supplies a pinned product artifact receipt, explicit repository-owned browser cache/executable and
+predeclared attempt slots; it cannot select a running world URL. See the
+[camera capture protocol](../../tools/playtest/camera/README.md#owned-native-page-capture-prerequisite-cam-05a)
+for artifact creation, ownership, full-frame calibration and limits. A prior product build remains separately
+identified from the helper/driver source. Retain failed attempts and original video, inspect encoded desktop and
+portrait frames, and report playback access separately. This capability proof does not qualify camera behavior.

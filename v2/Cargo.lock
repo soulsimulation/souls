@@ -570,6 +570,8 @@ version = "0.0.0"
 dependencies = [
  "import-eden",
  "replica",
+ "sim",
+ "skills",
 ]
 
 [[package]]
@@ -1520,6 +1522,7 @@ dependencies = [
  "sim",
  "skills",
  "supervisor",
+ "templates",
  "testworld",
  "tokio",
  "tokio-tungstenite",

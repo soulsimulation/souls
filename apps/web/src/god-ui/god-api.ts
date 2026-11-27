@@ -13,7 +13,8 @@ import type { V2Creator } from '../v2-engine/creator-socket.ts';
 export { isFlagDef };
 
 export type Pending = { code: string; agent: string; expiresIn: number };
-export type Status = { worldId: string; name: string; hasOwner: boolean; you: 'god' | 'owner' | 'claimant' | 'visitor' | 'anonymous'; pending: Pending[]; entities: number; seq: number; base: string; template?: string | null; agents?: number };
+/** `creatorGrant`: on a world the new engine runs, the creator's grant its agent pairs with (the owner's view only). */
+export type Status = { worldId: string; name: string; hasOwner: boolean; you: 'god' | 'owner' | 'claimant' | 'visitor' | 'anonymous'; pending: Pending[]; entities: number; seq: number; base: string; template?: string | null; agents?: number; creatorGrant?: string | null };
 export type Op = { op: string; def?: string; name?: string; id?: string; [k: string]: unknown };
 export type EditRow = { seq: number; by: string; at: number; note: string | null; grp: string | null; ops: Op[]; undone: number; undo_of: number | null; kind: 'edit' | 'undo' | 'redo' };
 export type FlagRef = { id: string; name: string; label: string; p: [number, number, number] };
@@ -69,10 +70,12 @@ export function v2Creator(): Promise<V2Creator> | null {
   creator ??= import('../v2-engine/creator-socket.ts').then((m) => new m.V2Creator(stream));
   return creator;
 }
-/** The panel's status on a v2 world: the owner's view for the world's creator (the session exchange says so). */
+/** The panel's status on a v2 world: the owner's view for the world's creator (the session exchange says so), with its
+ *  creator grant. No agent is counted here: whether the creator's agent is connected is the mailbox's to say
+ *  (creator-socket.ts `inbox`), and until it is the panel shows the line to give it (#5006 rows 2, 3 and 5). */
 async function v2Status(c: Promise<V2Creator>): Promise<Status> {
   const s = session(), who = s.authed ? await (await c).who() : null;
-  return { worldId: worldKey, name: worldTitle(v2PageWorldName(), worldKey), hasOwner: true, you: who?.creator ? 'owner' : s.authed ? 'visitor' : 'anonymous', pending: [], entities: 0, seq: 0, base: '', agents: 1 };
+  return { worldId: worldKey, name: worldTitle(v2PageWorldName(), worldKey), hasOwner: true, you: who?.creator ? 'owner' : s.authed ? 'visitor' : 'anonymous', pending: [], entities: 0, seq: 0, base: '', agents: 0, creatorGrant: who?.creator ? who.grant : null };
 }
 
 const status = statusPoll<Status | null>(async () => {
@@ -169,5 +172,10 @@ export async function previews(): Promise<PreviewRow[]> {
   } catch { return []; }
 }
 
-/** The one line the god pastes to their agent (the same line the world's welcome gives). */
-export const godPrompt = (base: string) => `Read ${base || location.origin + apiPath('')}/SKILL.md and follow its God mode section: you are the god of this world.`;
+/** The creator's guide every world serves (`<world>/creator.md`; there is no `<world>/SKILL.md`, it answers 404). */
+export const creatorGuide = (base: string) => `${base || location.origin + apiPath('')}/creator.md`;
+/** The one line the god pastes to their agent (as docs/site/for-agents.md gives it). */
+export const godPrompt = (base: string) => `Read ${creatorGuide(base)} and follow it to build this world as its god.`;
+/** On a world the new engine runs, the one line names the creator grant the agent pairs with (creator.md: `pair <world
+ *  url> --creator <creator grant>`); the guide alone never said it (#5006 row 3). */
+export const creatorPrompt = (guide: string, grant: string) => `Read ${guide} and follow it to build this world as its creator, pairing with --creator ${grant}.`;

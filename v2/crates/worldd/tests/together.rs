@@ -122,12 +122,60 @@ fn dance_at() -> ActivityKind {
     k
 }
 
+/// [`dance`] whose roles say how near its middle members stand: 1 m.
+fn dance_near() -> ActivityKind {
+    let mut k = ActivityKind {
+        most: 8,
+        beat: true,
+        ..touch(DANCE_NEAR, 60_000_000, "souls:dance")
+    };
+    for r in &mut k.roles {
+        r.within = Some(1_000_000);
+    }
+    k
+}
+
 fn follow() -> ActivityKind {
     let mut k = touch(FOLLOW, 60_000_000, "souls:none");
     for r in &mut k.roles {
         r.mv = None;
     }
     k.follows = Some(name(GIVER));
+    k
+}
+
+/// A standing group (#423): up to eight members, no moves, nowhere to stand.
+fn group() -> ActivityKind {
+    let mut k = ActivityKind {
+        most: 8,
+        ..touch(GROUP, 60_000_000, "souls:none")
+    };
+    for r in &mut k.roles {
+        r.mv = None;
+    }
+    k
+}
+
+/// [`group`] whose members stand on [`dance_at`]'s ring, walked there only from within 0.5 m of its middle.
+fn group_at() -> ActivityKind {
+    let ring = dance_at();
+    let mut k = ActivityKind {
+        name: name(&full(GROUP_AT)),
+        ..group()
+    };
+    for (r, from) in k.roles.iter_mut().zip(ring.roles) {
+        r.stands = from.stands;
+        r.within = Some(500_000);
+    }
+    k
+}
+
+/// A conversation: two members and no moves, as content's.
+fn talk() -> ActivityKind {
+    let mut k = touch(TALK, 60_000_000, "souls:none");
+    for r in &mut k.roles {
+        r.mv = None;
+    }
     k
 }
 
@@ -141,6 +189,15 @@ const FOLLOW: &str = "test:follow";
 /// Holding hands and a dance whose roles say where members stand (0.135 G3).
 const HOLD_AT: &str = "test:hold_at";
 const DANCE_AT: &str = "test:dance_at";
+/// A dance whose members stand within 1 m of its middle, as content's (`within_mm`): one who accepts from farther than
+/// 2 m of the asker is refused (trial of 25 Nov).
+const DANCE_NEAR: &str = "test:dance_near";
+/// A conversation, by the name the activities hold apart (E26): a Soul in one does one other activity at once.
+const TALK: &str = "souls:conversation";
+/// A standing group of up to eight with no moves (#423): one whose roles say nowhere to stand, and one whose members
+/// stand on [`dance_at`]'s 1 m ring, walked there only from within 0.5 m of its middle.
+const GROUP: &str = "test:group";
+const GROUP_AT: &str = "test:group_at";
 /// Content's handshake, hug, high-five and holding hands, standing where their entries place them (0.134 item 5).
 const W_HANDSHAKE: &str = "test:w_handshake";
 const W_HUG: &str = "test:w_hug";
@@ -184,6 +241,10 @@ fn kinds() -> Vec<(&'static str, String)> {
         (NOD, pinned(NOD, 17)),
         (WAVE, pinned(WAVE, 18)),
         (INTRO, pinned(INTRO, 19)),
+        (DANCE_NEAR, pinned(DANCE_NEAR, 20)),
+        (TALK, pinned(TALK, 21)),
+        (GROUP, pinned(GROUP, 22)),
+        (GROUP_AT, pinned(GROUP_AT, 23)),
     ]
 }
 
@@ -416,6 +477,10 @@ fn tree_rules() -> TreeRules {
                         NOD,
                         WAVE,
                         INTRO,
+                        DANCE_NEAR,
+                        TALK,
+                        GROUP,
+                        GROUP_AT,
                     ],
                 ),
             ),
@@ -437,6 +502,10 @@ fn tree_rules() -> TreeRules {
             (full(NOD), k("activity", &[])),
             (full(WAVE), k("activity", &[])),
             (full(INTRO), k("activity", &[])),
+            (full(DANCE_NEAR), k("activity", &[])),
+            (full(TALK), k("activity", &[])),
+            (full(GROUP), k("activity", &[])),
+            (full(GROUP_AT), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -664,6 +733,10 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             follow(),
             hold_at(),
             dance_at(),
+            dance_near(),
+            talk(),
+            group(),
+            group_at(),
             content_touch(W_HANDSHAKE, "handshake", "souls:handshake"),
             content_touch(W_HUG, "hug", "souls:hug"),
             content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
@@ -737,6 +810,10 @@ impl Run {
                             NOD,
                             WAVE,
                             INTRO,
+                            DANCE_NEAR,
+                            TALK,
+                            GROUP,
+                            GROUP_AT,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
@@ -2139,6 +2216,198 @@ fn greetings_play_each_members_aimed_move_once_then_end() {
             left.iter().all(|t| *t >= last),
             "{kind}: it ends after the moves' last phase ({last} µs): {left:?}"
         );
+    }
+    run.stop();
+}
+
+/// Trial of 25 Nov: a dance accepted by a Soul 80 m off, playing the piano, counted it as dancing where it stood. An
+/// accept from farther than twice its role's `within` of the asker (2.6 m here, the role 1 m from the middle) is refused
+/// `together.too-far` and nothing starts; one from 0.6 m is accepted and both dance.
+#[test]
+fn trial_a_far_member_is_refused_a_dance_until_it_walks_over() {
+    let run = serve("dance-far");
+    let mut c: Vec<Client> = (1..=3).map(|n| run.client(n)).collect();
+    let far = run.created(&c[0].offer(DANCE_NEAR, 3).expect("offered"));
+    let r = c[2]
+        .act("activity:accept", Some(far), &[])
+        .expect_err("2.6 m off");
+    println!("trial: from 2.6 m: {r}");
+    assert!(r.contains("together.too-far"), "{r}");
+    assert!(run.starts(far).is_empty(), "nobody dances");
+    c[0].act("activity:leave", Some(far), &[])
+        .expect("withdrawn");
+    let near = run.created(&c[0].offer(DANCE_NEAR, 2).expect("offered"));
+    c[1].act("activity:accept", Some(near), &[])
+        .expect("from 0.6 m");
+    std::thread::sleep(Duration::from_millis(2_500));
+    let members: BTreeSet<Id> = run.starts(near).iter().map(|s| s.0).collect();
+    assert_eq!(
+        members,
+        [soul(1), soul(2)].into_iter().collect(),
+        "both dance"
+    );
+    run.stop();
+}
+
+/// Trial of 25 Nov: partners in a paired activity faced different ways. Two who begin an activity of two whose roles
+/// say nowhere to stand (a conversation, a handshake here) turn to face each other: Soul 1 faces Soul 2, 0.6 m west
+/// of it, and Soul 2 faces Soul 1.
+#[test]
+fn trial_partners_of_two_face_each_other_as_it_begins() {
+    let run = serve("face-each-other");
+    let mut c: Vec<Client> = (1..=2).map(|n| run.client(n)).collect();
+    let shake = run.created(&c[0].offer(HANDSHAKE, 2).expect("offered"));
+    c[1].act("activity:accept", Some(shake), &[])
+        .expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let ((p1, q1), (p2, q2)) = (run.last(1), run.last(2));
+    let cos = |q: Quat, from: Vec3, to: Vec3| {
+        let (f, d) = (ahead(q), (to.x - from.x, to.z - from.z));
+        let len = ((i128::from(d.0).pow(2) + i128::from(d.1).pow(2)).isqrt()) as f64;
+        (i128::from(f.0) * i128::from(d.0) + i128::from(f.1) * i128::from(d.1)) as f64 / (len * 1e6)
+    };
+    let (c1, c2) = (cos(q1, p1, p2), cos(q2, p2, p1));
+    println!("trial: Soul 1 faces Soul 2 at cos {c1:.3}, Soul 2 faces Soul 1 at cos {c2:.3}");
+    assert!(c1 > 0.95 && c2 > 0.95, "face to face: {c1:.3} {c2:.3}");
+    run.stop();
+}
+
+/// Review of #4925: turning two who begin to talk to face each other takes nothing from their legs. Soul 2 follows
+/// Soul 1, then the two begin a conversation: nobody leaves the follow, and Soul 2 still follows Soul 1 over a 10 m
+/// walk (within 2.5 m of its place behind, walked, never placed).
+#[test]
+fn trial_a_follower_who_begins_to_talk_goes_on_following() {
+    let run = serve("follow-talk");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    std::thread::sleep(Duration::from_millis(300));
+    let started = |run: &Run| {
+        run.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == "souls:activity-started")
+            .count()
+    };
+    let (lefts, begun) = (run.lefts(), started(&run));
+    let talk = run.created(&b.offer(TALK, 1).expect("Soul 2 offers to talk"));
+    a.act("activity:accept", Some(talk), &[])
+        .expect("Soul 1 talks while followed");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(started(&run), begun + 1, "the conversation started");
+    assert_eq!(run.lefts(), lefts, "nobody left the follow");
+    let from = run.rows().len();
+    a.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-30_000_000, 30_000_000))],
+    )
+    .expect("Soul 1 walks");
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, leader, follower) = track(&run, from);
+    println!(
+        "trial: talking, the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    let apart = (((follower.x - leader.x) as i128).pow(2)
+        + ((follower.z - leader.z) as i128).pow(2))
+    .isqrt();
+    assert!(
+        apart < 3_000_000,
+        "the follower ended behind: {follower:?} {leader:?}"
+    );
+    run.stop();
+}
+
+/// How far `q`, the facing of a body at `from`, turns from `to`, degrees (0 facing it).
+fn off(q: Quat, from: Vec3, to: Vec3) -> f64 {
+    let (f, d) = (ahead(q), (to.x - from.x, to.z - from.z));
+    let len = ((i128::from(d.0).pow(2) + i128::from(d.1).pow(2)).isqrt()) as f64;
+    let cos = (i128::from(f.0) * i128::from(d.0) + i128::from(f.1) * i128::from(d.1)) as f64
+        / (len * 1e6);
+    cos.clamp(-1.0, 1.0).acos().to_degrees()
+}
+
+/// Offers `kind` from Soul 1 to Souls 2, 3 and 4 at once, a group's offer.
+fn offer_to_three(c: &mut Client, kind: &str) -> Vec<u64> {
+    let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
+    c.act(
+        "activity:offer",
+        Some(ground()),
+        &[
+            (1, Value::Text(name(&full(kind)))),
+            (2, Value::Text(name(GIVER))),
+            (3, asked),
+        ],
+    )
+    .expect("offered to three")
+}
+
+/// #423: a standing group faces its middle. Soul 1 offers a group with nowhere to stand to Souls 2, 3 and 4, who
+/// accept one after another: as it begins the first two face each other, and as each later one joins, every member
+/// turns to the new middle, each within 5 degrees of it (Souls 1 to 3 stand in a row, Soul 4 1.5 m north of it).
+#[test]
+fn a_standing_group_faces_its_middle_as_it_begins_and_as_each_joins() {
+    let run = serve("group-middle");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let group = run.created(&offer_to_three(&mut c[0], GROUP));
+    for (k, member) in c.iter_mut().enumerate().skip(1) {
+        member
+            .act("activity:accept", Some(group), &[])
+            .expect("accepted");
+        std::thread::sleep(Duration::from_millis(500));
+        let poses: Vec<(Vec3, Quat)> = (1..=k as u64 + 1).map(|n| run.last(n)).collect();
+        let n = poses.len() as i64;
+        let middle = Vec3::new(
+            poses.iter().map(|p| p.0.x).sum::<i64>() / n,
+            0,
+            poses.iter().map(|p| p.0.z).sum::<i64>() / n,
+        );
+        let offs: Vec<f64> = poses.iter().map(|(p, q)| off(*q, *p, middle)).collect();
+        println!("#423: a group of {n}, each off its middle by {offs:.1?} degrees");
+        assert!(
+            offs.iter().all(|d| *d <= 5.0),
+            "a group of {n} faces its middle: {offs:.1?}"
+        );
+    }
+    run.stop();
+}
+
+/// #423: a member of a group with places that is left where it stands faces the group's middle. The group's members
+/// stand on a 1 m ring, walked there from within 0.5 m of its middle: Souls 1 and 2, 0.3 m either side of it as the
+/// group begins, walk to their places; Souls 3 and 4, who join from 2.3 m and 2.0 m off, stay where they stand and
+/// each turns to the middle, within 5 degrees of it. Soul 3 already faces it (+x, the facing it starts with), so Soul 4,
+/// 49 degrees off it before the change, is the one that shows the turn (review).
+#[test]
+fn a_member_left_where_it_stands_faces_its_groups_middle() {
+    let run = serve("group-left");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let group = run.created(&offer_to_three(&mut c[0], GROUP_AT));
+    let middle = Vec3::new((at(1).x + at(2).x) / 2, 0, at(1).z);
+    for member in c.iter_mut().skip(1) {
+        member
+            .act("activity:accept", Some(group), &[])
+            .expect("accepted");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    for n in [3, 4] {
+        let (p, q) = run.last(n);
+        let d = off(q, p, middle);
+        println!("#423: Soul {n}, left where it stands, is off the middle by {d:.1} degrees");
+        assert_eq!(
+            (p.x, p.z),
+            (at(n).x, at(n).z),
+            "Soul {n} stays where it stands"
+        );
+        assert!(d <= 5.0, "Soul {n} faces the middle: {d:.1} degrees off");
     }
     run.stop();
 }

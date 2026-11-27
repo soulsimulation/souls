@@ -34,7 +34,7 @@ const info=()=>{const w=globalThis.__parityView;if(!w)return null;const gl=w.ren
   return {eye:w.camera.position.toArray(),fov:w.camera.fov,buffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],datetime:globalThis.__parityRenderedDatetime,liveDatetime:globalThis.__liveDatetime,gpu:x?gl.getParameter(x.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),frames:globalThis.__parityFrames};};
 const release=await chromeLease('parity');let browser;const report={world,url,at:new Date().toISOString(),shots:[],errors:[]};
 try{
-  browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+  browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
   for(const dpr of probe?[1]:[1,2]){
     const ctx=await browser.newContext({viewport:{width:960,height:640},deviceScaleFactor:dpr,reducedMotion:'reduce'});
     await ctx.addInitScript(observe);

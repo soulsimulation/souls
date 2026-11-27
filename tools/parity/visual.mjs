@@ -66,7 +66,7 @@ export async function captureVisual({root,oldUrl,candidateUrl,poses,outDir,setHo
   const report={status:'UNKNOWN',pairs:[],hourly:[],errors:[],input:[],policy:'exact RGB; no pixel threshold; missing pose/DPR/hour closes gate'};
   const activePages=[];
   try {
-    browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+    browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
     for(const dpr of [1,2]){
       const context=await browser.newContext({viewport:{width:960,height:640},deviceScaleFactor:dpr,reducedMotion:'reduce'});
       await context.addInitScript(observeThree);

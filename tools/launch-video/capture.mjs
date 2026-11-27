@@ -44,7 +44,7 @@ export const takeSeconds = (shot, seconds) => (shot && !shot.live ? (shot.toTick
 
 /** Records one take. `onPlay()` is called as the recording starts (a staged scene's beats run from then). → the sidecar */
 /** `remote`: a staged world on a real site (https), as rack-bay/staged.mjs films one; never a live public world. */
-export async function capture({ url, out, seconds = 10, size = '1080x1350', fps = 60, mbps = 30, hour = null, settle = 6, music = false, headed = false, shot = null, follow = null, speed = 1, onPlay = null, remote = false, log = () => {} }) {
+export async function capture({ url, out, seconds = 10, size = '1080x1350', fps = 60, mbps = 30, hour = null, settle = 6, music = false, headed = false, shot = null, follow = null, speed = 1, onPlay = null, until = null, preset = 'slow', remote = false, log = () => {} }) {
   if (![1, 2, 4, 8].includes(speed) || (speed > 1 && (!shot || shot.live))) throw Error('--speed: 1, 2, 4 or 8, for a range of history');
   if (!url || !(/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url) || (remote && /^https:\/\//.test(url)))) throw Error('--url must be a local world URL');
   out = resolve(out);
@@ -58,7 +58,7 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
   let pacing = null, gpu = null; const errors = [];
   try {
     const args = ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'];
-    const browser = await chromium.launch({ channel: 'chrome', headless: !headed, args }).catch(() => chromium.launch({ headless: !headed, args }));
+    const browser = await chromium.launch({ channel: 'chromium', headless: !headed, args }).catch(() => chromium.launch({ headless: !headed, args }));
     try {
       const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })).newPage();
       page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)));
@@ -69,7 +69,9 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
       await page.waitForFunction(worldArrived, null, { timeout: 180_000 });
       await page.waitForFunction(() => !!window.__edenSound, null, { timeout: 60_000 });
       await page.mouse.click(width / 2, height / 2); // a real gesture: unlocks the page's sound
-      await setEffects(page, true); await setMusic(page, music);
+      // the sound as asked, where the page lets it be set: a page too busy to take the click (a loaded machine) is
+      // recorded as it is, not lost
+      try { await setEffects(page, true); await setMusic(page, music); } catch (e) { log(`audio left as it is: ${String(e.message ?? e).split('\n')[0]}`); }
       // the top bar takes some of the page: grow the window until the canvas itself is the asked size
       const drawn = await page.evaluate(() => { const c = document.querySelector('canvas[aria-label="Live 3D view of the world"]'); return c ? [c.clientWidth, c.clientHeight] : null; });
       if (drawn && (drawn[0] !== width || drawn[1] !== height)) await page.setViewportSize({ width: width + (width - drawn[0]), height: height + (height - drawn[1]) });
@@ -88,6 +90,8 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
       }
       gpu = await page.evaluate(() => { const c = document.createElement('canvas').getContext('webgl2'), x = c?.getExtension('WEBGL_debug_renderer_info'); return x ? c.getParameter(x.UNMASKED_RENDERER_WEBGL) : null; });
       onPlay?.();
+      // `until`: a promise that ends the take early, once what it films is done (a trial's play), `seconds` at most
+      until?.then(() => page.evaluate(() => window.__lvStop?.()).catch(() => {}));
       pacing = await page.evaluate(async ({ seconds, fps, mbps }) => {
         const canvas = document.querySelector('canvas[aria-label="Live 3D view of the world"]');
         if (!canvas) throw Error('no world canvas');
@@ -100,7 +104,9 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
         const dts = []; let last = 0, on = true;
         const tick = (t) => { if (last) dts.push(t - last); last = t; if (on) requestAnimationFrame(tick); };
         rec.start(1000); requestAnimationFrame(tick); window.__soulsShot?.play();
-        await new Promise((r) => setTimeout(r, seconds * 1000));
+        const t0 = performance.now();
+        await new Promise((r) => { setTimeout(r, seconds * 1000); window.__lvStop = r; });
+        seconds = Math.min(seconds, (performance.now() - t0) / 1000);
         on = false; const stopped = new Promise((r) => { rec.onstop = r; }); rec.stop(); await stopped;
         for (const s of sends) await s;
         dts.sort((a, b) => a - b); const q = (p) => +dts[Math.min(dts.length - 1, Math.floor(dts.length * p))].toFixed(2);
@@ -110,7 +116,7 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
     } finally { await browser.close(); }
   } finally { release(); }
 
-  const ff = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-r', String(fps), '-c:v', 'libx264', '-crf', '14', '-preset', 'slow', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart', out], { encoding: 'utf8' });
+  const ff = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-r', String(fps), '-c:v', 'libx264', '-crf', '14', '-preset', preset, '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart', out], { encoding: 'utf8' });
   const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,nb_frames,avg_frame_rate,duration', '-of', 'json', out], { encoding: 'utf8' });
   const vol = spawnSync('ffmpeg', ['-i', out, '-af', 'volumedetect', '-vn', '-f', 'null', '-'], { encoding: 'utf8' }).stderr.match(/(mean|max)_volume: [-\d.]+ dB/g) ?? [];
   const sidecar = { size: [width, height], seconds, speed, shot: shot ? { move: shot.move, live: !!shot.live, fromTick: shot.fromTick ?? null, toTick: shot.toTick ?? null } : null, follow, fps, hour, music, gpu, pacing, volume: vol, streams: JSON.parse(probe.stdout || '{}').streams ?? [], pageErrors: errors, ffmpeg: ff.status === 0 ? 'ok' : ff.stderr.slice(0, 400) };

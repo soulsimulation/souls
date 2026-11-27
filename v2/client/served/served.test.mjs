@@ -21,7 +21,7 @@ const sha = (b) => createHash('sha256').update(b).digest('hex');
 test('A2: each served file\'s version, length and hash equal the manifest\'s', () => {
   const bins = join(dir, 'bins'), page = join(dir, 'page'), pkg = join(dir, 'pkg'), out = join(dir, 'bundle'), x = join(dir, 'x');
   for (const d of [bins, page, pkg, x]) mkdirSync(d);
-  for (const b of ['worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check', 'store-copy']) writeFileSync(join(bins, b), `#!/bin/sh\n# ${b}\n`);
+  for (const b of ['worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'world-aside', 'assets-check', 'store-copy', 'templates']) writeFileSync(join(bins, b), `#!/bin/sh\n# ${b}\n`);
   writeFileSync(join(page, 'index.html'), '<!doctype html>');
   writeFileSync(join(pkg, 'replica.js'), 'export function initSync() {}\n');
   writeFileSync(join(pkg, 'replica_bg.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
@@ -84,7 +84,7 @@ test('the start page tells the person what runs before anything does: version, s
   // The person's yes covers the exact commands: the agent shows them word for word in the same ask, before any run.
   const ask = page.indexOf('## Ask first'), start = page.indexOf('## Start'), refused = page.indexOf('## If a step is refused');
   assert.ok(ask >= 0 && ask < start && start < refused, 'ask first, then start, then refusals');
-  assert.match(page.slice(ask, start), /show them the four commands below\s+word for word, and ask them to approve/);
+  assert.match(page.slice(ask, start), /show them the four commands below\s+word for word as you will run them, with `<world>` filled in, and ask them to approve/);
   assert.ok(page.slice(ask, start).includes('`node eden.mjs pair <world> --name "<Name>"`'), 'the pair command is in the ask');
   assert.match(page.slice(ask, start), /Nothing the world sends is run as a command on this computer/);
   // Permissions are the person's: nothing before the steps asks to change them; a refusal stops the agent.

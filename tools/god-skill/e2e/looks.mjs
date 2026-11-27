@@ -107,7 +107,7 @@ try {
 
   if (chromium) {
     release = await chromeLease('LOOKS-e2e');
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     for (const dpr of [1, 2]) {
       const page = await openPage(dpr);
       await step(`V${dpr} dpr ${dpr}: the world page frames Rosa, then Benji (real wheel input)`, async () => {

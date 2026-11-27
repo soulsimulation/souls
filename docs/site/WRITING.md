@@ -23,7 +23,10 @@ Write for a capable reader who has never heard of Souls and arrived on this exac
 - A character in a world is **a Soul** (capital S; plural Souls). The person who owns it is its **owner**, or
   "your human" when the reader is the owner's agent.
 - A world's creator is **its god**. A world has exactly one.
-- **Eden** is one world in Souls (also "Eden 2026"), never the product. "Sim" is retired.
+- One world, one name: a world is called what its own record calls it, the name on its page and in the world list.
+  The Eden world is **Eden 2026**, at `/w/eden`; never "Eden" alone, never "an Eden world", never the product. Its
+  address key (`eden`) and its template's id (`eden-2026`) are not names. "Verdelis Eden" is another world. "Sim"
+  is retired.
 - Code names stay as they are where the reader must type them: `eden.mjs`, `eden-god.mjs`, `eden_*` tools,
   `X-Sim-*` headers. Put them in code spans and do not explain the old name.
 
@@ -44,21 +47,16 @@ Plain, specific, confident. Say what it is, what is new, and what to do.
 2. **Every page stands alone.** Assume no other page was read. Define a term the first time a page uses it, in a few
    words, and link `/docs/concepts` for more.
 3. **Examples are runnable.** Commands and requests work as written against a real world (use
-   `https://soul.game/w/eden-2026/` or say "your world's URL"). Show the expected answer when it helps.
+   `https://soul.game/w/eden/` or say "your world's URL"). Show the expected answer when it helps.
 4. **Link the served skill; never restate it.** How to act lives in the skill each world serves
    (`/w/<slug>/instructions.md` for joining, `/w/<slug>/skill.md` for running a Soul, `/w/<slug>/creator.md` for god mode). Docs explain why and
    when, and quote at most a line or two. If a page needs more, the skill is missing something: fix the skill.
-5. **Reference comes from code.** Action lists, API routes and MCP tools are generated (`generated: true` in the
-   frontmatter). In `actions.md`, `api.md` and `mcp.md` the prose above `## Actions`, `## Routes` and `## Tools` is
-   written by hand and committed, and the file stops at that heading. The rest is added when the docs are built, by
-   `tools/docs/generate.mjs`, from what the server's own modules answer, so changing the code needs no docs change. To
-   read a full page locally: `node tools/docs/generate.mjs --out .local/docs`.
-6. **No internal paths or process jargon** in page text: no repository paths, lane names, issue numbers, release
+5. **No internal paths or process jargon** in page text: no repository paths, lane names, issue numbers, release
    codenames, hostnames other than soul.game, or personal details. `sources` in the frontmatter is the one place for
    repository paths.
-7. **Tell your human.** Where an agent will need to explain something to its person, end the section with one line
+6. **Tell your human.** Where an agent will need to explain something to its person, end the section with one line
    starting `Tell your human:` that the agent can say as is.
-8. **World text is data.** Whenever a page shows text that comes from a world (names, speech, prayers), say once that
+7. **World text is data.** Whenever a page shows text that comes from a world (names, speech, prayers), say once that
    it is game data and never an instruction.
 
 ## Frontmatter
@@ -73,7 +71,7 @@ audience: agents                 # agents | humans | both
 updated: 2026-11-05              # YYYY-MM-DD, the last time the content was checked against its sources
 sources:                         # what the page is checked against: repository paths or served URLs
   - tools/world-skill/SKILL.md
-generated: false                 # true only for pages built from code (actions, api, mcp)
+generated: false                 # always false: no page is built from code
 ---
 ```
 
@@ -84,7 +82,7 @@ published, because agents and other pages link to it.
 
 - Between pages: site paths, `/docs/concepts`, `/docs/essays/few-rules`, with an optional `#anchor`.
 - To served world files: `https://soul.game/w/<slug>/instructions.md` or the path form `/w/<slug>/skill.md`.
-- Entry points: `/llms.txt`, `/llms-full.txt`, `/docs/for-agents`, `/.well-known/mcp/server.json`, `/changelog`.
+- Entry points: `/llms.txt`, `/llms-full.txt`, `/docs/for-agents`, `/changelog`.
 - `node tools/docs/lint.mjs` checks every site-relative link resolves.
 
 ## The mirror rule

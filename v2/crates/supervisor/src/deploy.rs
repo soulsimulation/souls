@@ -89,15 +89,48 @@ pub const REHEARSAL_ENV: [&str; 8] = [
     "RUST_BACKTRACE",
 ];
 
-/// What `worldd serve` reads from a world's folder besides its log: copied into a rehearsal's scratch folder.
-const FOLDER: [&str; 6] = [
+/// What `worldd serve` reads from a world's folder besides its log and checkpoints: copied into a rehearsal's scratch
+/// folder. A fork's `boot` pins its support (its facts, entries, kinds, `moves.json`, `entry.json` and `bodies.json`)
+/// and `serve` refuses a fork without it or with any of them changed (`served-fork-support-mismatch`); every world
+/// reads its entry, its body catalogue and the code hatches its entries name.
+const FOLDER: [&str; 10] = [
     "world.json",
     "facts.json",
     "header",
     "header.kinds",
     "moves.json",
     "entries",
+    "boot",
+    "entry.json",
+    "bodies.json",
+    "hatches",
 ];
+
+/// Whether a world's folder is a fork's: one made from a template or another world (`worldd fork --template`, which
+/// writes `"fork": true` in its `world.json`). A fork starts from its checkpoint, not from an import's part.
+fn is_fork(state: &Path) -> bool {
+    std::fs::read_to_string(state.join("world.json")).is_ok_and(|t| {
+        t.split_whitespace()
+            .collect::<String>()
+            .contains("\"fork\":true")
+    })
+}
+
+/// A world's checkpoints (`checkpoints/ckpt-<record, 20 digits>`), by the log record each was taken at, oldest first.
+fn checkpoints(state: &Path) -> Vec<(u64, PathBuf)> {
+    let mut out: Vec<(u64, PathBuf)> = std::fs::read_dir(state.join("checkpoints"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let n = name.strip_prefix("ckpt-").filter(|n| n.len() == 20)?;
+            Some((n.parse().ok()?, e.path()))
+        })
+        .collect();
+    out.sort();
+    out
+}
 
 /// A release's library entries for a world (`worldd entries stage`): `<state>/entries.next`, the world's whole
 /// `entries/` with the release's changes. When it is there, the rehearsal runs on it instead of the world's own, and
@@ -614,6 +647,10 @@ fn connect_or_exit(
 /// still fails at once: the process ending ([`Unit::exited`], `canary.exited`) or a refused probe.
 pub const START_WITHIN: Duration = Duration::from_secs(120);
 
+/// The longest a world keeps an act other than a move open before it ends it `act.timed-out`: worldd's
+/// `answers::Config::deadline`. A rehearsal waits this long for the last fed tick's answers.
+pub const ACT_WITHIN: Duration = Duration::from_secs(10);
+
 /// The start bound in a world's limits drop-in (`worldd@<world>.service.d/limits.conf`, written from
 /// `world-limits.json` by `v2/tools/ops/world-limits.mjs`): its `Environment=WORLD_START_WITHIN_S=<s>` line, else
 /// [`START_WITHIN`]. A world that loads longer (Eden) is given its own bound; one that hangs still fails.
@@ -819,7 +856,8 @@ impl Drop for Killed {
 
 /// Runs `build` as `worldd serve` on a scratch copy of the world's folder `state` (into `scratch`, which it empties):
 /// its log as it stood `window` records before its end, then the intents those last records took, in order, then the
-/// probe. The folder's checkpoints are not copied: the build replays the copied log from its start.
+/// probe. An imported world's checkpoints are not copied: the build replays the copied log from its start, the
+/// import's part. A fork's are, those its copied log reaches: a fork starts from its checkpoint.
 pub fn rehearse(
     build: &Path,
     state: &Path,
@@ -834,11 +872,22 @@ pub fn rehearse(
     let found = recover(&bytes).map_err(|e| format!("rehearsal.log-unread: {e}"))?;
     let epoch = found.header.map_or(1, |h| h.epoch);
     // A served world's first record is its import's part, the world from empty (C1): always copied.
-    let keep = found
+    let mut keep = found
         .records
         .len()
         .saturating_sub(window)
         .max(found.records.len().min(1));
+    // A fork's first record follows its checkpoint (K6), and `serve` starts a fork from its checkpoint or refuses it
+    // (`served-fork-checkpoint-missing`): the copy takes the checkpoints its copied log reaches. Only the last two are
+    // kept, so a fork whose oldest is later than the window's start has its copy start there.
+    let forked = if is_fork(state) {
+        checkpoints(state)
+    } else {
+        Vec::new()
+    };
+    if let Some(&(oldest, _)) = forked.first() {
+        keep = keep.max(usize::try_from(oldest).map_or(keep, |n| n.min(found.records.len())));
+    }
     // The recorded intents, one group per tick that took them, fed a tick at a time as they first arrived.
     let mut fed: Vec<Vec<Vec<u8>>> = Vec::new();
     for r in &found.records[keep..] {
@@ -882,6 +931,12 @@ pub fn rehearse(
             copy_tree(&state.join(name), &scratch.join(name))
                 .map_err(|e| format!("rehearsal.scratch: {name}: {e}"))?;
         }
+    }
+    for (_, ckpt) in forked.iter().filter(|(n, _)| *n <= keep as u64) {
+        let to = scratch.join("checkpoints");
+        std::fs::create_dir_all(&to)
+            .and_then(|()| std::fs::copy(ckpt, to.join(ckpt.file_name().unwrap_or_default())))
+            .map_err(|e| format!("rehearsal.scratch: {}: {e}", ckpt.display()))?;
     }
     // The release's entries, when it staged some: the new build is rehearsed with what its restart will read.
     if state.join(ENTRIES_NEXT).is_dir() {
@@ -934,9 +989,16 @@ pub fn rehearse(
         }
         // The copy answers nothing until its clock has caught up, back to back, from the tick its copied log ends at
         // to now: on a quiet world the window's records can span hours, so the first answers have the world's start
-        // bound, not a tick's. Answers that come late count with a later tick's; the last tick waits for them all.
+        // bound, not a tick's. Answers that come late count with a later tick's; the last tick waits for them all,
+        // for as long as the world keeps an act open ([`ACT_WITHIN`]) on top of a tick's wait, within the start bound:
+        // 0.147.0's Eden window ended on a god's edit that live had taken 7 s to check, and it was refused unanswered
+        // after a tick's 8 s.
         let wait = if n == 0 {
             c.start_within
+        } else if n + 1 == fed.len() {
+            (c.answer_within * 4 + ACT_WITHIN)
+                .min(c.start_within)
+                .max(c.answer_within * 4)
         } else {
             c.answer_within * 4
         };
@@ -1417,6 +1479,11 @@ mod tests {
                 Some(d) => (d.to_owned(), true),
                 None => (delay, false),
             };
+            // `<ms>s<slow ms>`: the last fed intent (sequence 3) takes `slow` to check (0.147.0's Eden: a god's edit).
+            let (delay, slow) = match delay.split_once('s') {
+                Some((d, slow)) => (d.to_owned(), slow.parse::<u64>().unwrap()),
+                None => (delay, 0),
+            };
             let listener = std::os::unix::net::UnixListener::bind(sock).unwrap();
             let (mut s, _) = listener.accept().unwrap();
             let Ok(ms) = delay.parse::<u64>() else {
@@ -1442,14 +1509,19 @@ mod tests {
                         (wire::ASK, n.clone()),
                         (wire::IDS, Value::Array(vec![Value::Bytes(vec![1])])),
                     ])),
-                    None => Value::Map(BTreeMap::from([(
-                        2,
-                        Value::Map(BTreeMap::from([
-                            (2, m[&2].clone()),
-                            (3, Value::Uint(2)),
-                            (4, Value::Text(Name::new("intent.expired").unwrap())),
-                        ])),
-                    )])),
+                    None => {
+                        if m[&2] == Value::Uint(3) {
+                            std::thread::sleep(Duration::from_millis(slow));
+                        }
+                        Value::Map(BTreeMap::from([(
+                            2,
+                            Value::Map(BTreeMap::from([
+                                (2, m[&2].clone()),
+                                (3, Value::Uint(2)),
+                                (4, Value::Text(Name::new("intent.expired").unwrap())),
+                            ])),
+                        )]))
+                    }
                 };
                 assert!(send(&mut s, &encode(&answer).unwrap()));
             }
@@ -1502,6 +1574,18 @@ mod tests {
         assert_eq!(
             e, "rehearsal.unanswered: 3 of 3 recorded intents reached no named end",
             "a copy that never answers is still refused"
+        );
+        // 0.147.0's Eden: the window's last intent, a god's edit, took longer to check than a tick's wait (here 2 s
+        // against 800 ms; live had taken 7 s against 8 s) and was refused `rehearsal.unanswered: 1 of 117`. The last
+        // tick waits as long as the world keeps an act open, within the start bound.
+        let r = rehearse_with(&state, "0s2000")
+            .expect("the last fed intent ends within its act's time");
+        assert_eq!((r.copied, r.fed, r.ended), (1, 3, 3));
+        // One that never ends is still refused, at the start bound.
+        let e = rehearse_with(&state, "0s60000").unwrap_err();
+        assert_eq!(
+            e, "rehearsal.unanswered: 1 of 3 recorded intents reached no named end",
+            "an intent that never ends is still refused"
         );
         // 0.136's Eden: a window of quiet records feeds no intent, so the probe was the copy's first ask and met its
         // catch-up with a tick's wait (`rehearsal.canary.unanswered`). The probe then has the start bound.

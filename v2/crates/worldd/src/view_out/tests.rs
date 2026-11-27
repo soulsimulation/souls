@@ -3142,16 +3142,18 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
             .unwrap()
     );
     // A part whose delta does not make the state its digest claims: played deferred it is taken, and refused at verify.
+    // The delta, version and effects stay as written (a valid stream record); only the claimed result digest, in the
+    // context (4) and the part's hash (7) alike, is not the state's.
     let last = parts.len() - 1;
     let mut corrupted = object_map(&parts[last]).unwrap();
     let mut context = object_map(&obj_bytes(&corrupted, 10).unwrap()).unwrap();
-    let Some(Value::Map(delta)) = context.get_mut(&5) else {
-        panic!("a part's context holds its delta")
+    let Some(Value::Bytes(claimed)) = context.get(&4).cloned() else {
+        panic!("a part's context holds its result digest")
     };
-    let Some(Value::Uint(v)) = delta.get(&1).cloned() else {
-        panic!("the delta holds the version")
-    };
-    delta.insert(1, Value::Uint(v + 7));
+    assert_eq!(claimed.len(), 32);
+    let wrong_digest = Value::Bytes(claimed.iter().map(|b| !b).collect());
+    context.insert(4, wrong_digest.clone());
+    corrupted.insert(7, wrong_digest);
     corrupted.insert(10, Value::Bytes(wire(Value::Map(context)).unwrap()));
     let corrupted = wire(Value::Map(corrupted)).unwrap();
     let mut wrong = PublicPlayer::start(h.stored(), &baseline).unwrap();
@@ -4097,6 +4099,182 @@ fn t_late_run(incremental: bool) -> (Vec<u8>, u64) {
     (all, out.whole_cuts - whole)
 }
 
+/// A remove (a gesture's end, a thing taken away) is published from its rows, not as a whole cut (about 0.6 s of the
+/// writer's time a part on Eden's 10,000 nodes): a node taken out with the nodes under it (one private), the links at
+/// them (one to a private node, never public) and their timers; an activity's node taken out in the cut that makes
+/// another node; a node made under one and taken out with it in one part; a node made with a link and a timer in one
+/// part and taken out in the next, one cut; a node made and taken out in one part with a link already made to its id
+/// (`Tree` rule 7); a node holding words taken out; and a node alone. The parts, the words and the reader's state are
+/// the same bytes as when every cut is whole.
+#[test]
+fn removes_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
+    let (rows, rows_whole) = removes_run(true);
+    let (whole, whole_whole) = removes_run(false);
+    assert!(rows == whole, "the cuts by rows differ from the whole cuts");
+    assert_eq!(whole_whole, 7, "every reference cut is whole");
+    assert_eq!(rows_whole, 0, "a remove is a cut by rows");
+}
+
+fn removes_run(incremental: bool) -> (Vec<u8>, u64) {
+    use replica::effects::TimerRec;
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch(&format!("removes-rows-{incremental}"));
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let n = |s: u8| Id::new(Scope([0xB0 + s; 16]), 1).unwrap();
+    let (carrier, child, grand, secret, other, activity, stand, fresh, late) =
+        (n(1), n(2), n(3), n(4), n(5), n(6), n(7), n(8), n(9));
+    let (l1, l2, l3, t1, t2) = (n(10), n(11), n(12), n(13), n(14));
+    let (brief, l4, t3) = (n(15), n(16), n(17));
+    let (ghost, l5) = (n(18), n(19));
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([59; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let said = words
+        .write(b"words on the fresh node", Audience::Everyone, fresh)
+        .unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: Some(words),
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    out.incremental = incremental;
+    let everyone = Audience::Everyone;
+    let private = Audience::Of(secret);
+    let change = |seq: u64, node: Id, audience: Audience, c: Change| {
+        w3e_effect(
+            seq,
+            node,
+            audience,
+            Body::Changes(vec![ChangeRec {
+                change: c,
+                rest: Rest::new(),
+            }]),
+        )
+    };
+    let link = |seq: u64, link: Id, ends: [Id; 2]| {
+        change(
+            seq,
+            ends[0],
+            everyone,
+            Change::Link {
+                link,
+                ty: h.kinds[0].clone(),
+                ends,
+                owner: replica::world_model::End::First,
+                audience: everyone,
+            },
+        )
+    };
+    let timer = |seq: u64, timer: Id, node: Id, audience: Audience| {
+        w3e_effect(
+            seq,
+            node,
+            audience,
+            Body::Timers(vec![TimerRec::Set {
+                timer,
+                due: 10_000_000,
+                name: Name::new("souls:light").unwrap(),
+            }]),
+        )
+    };
+    let remove = |seq: u64, node: Id| change(seq, node, everyone, Change::Remove { node });
+    let log = vec![
+        vec![
+            w3e_create(&h, 0, carrier, h.zone, everyone),
+            w3e_create(&h, 1, child, carrier, everyone),
+            w3e_create(&h, 2, grand, child, everyone),
+            w3e_create(&h, 3, secret, carrier, private),
+            w3e_create(&h, 4, other, h.zone, everyone),
+            w3e_create(&h, 5, activity, h.zone, everyone),
+            w3e_create(&h, 6, stand, h.zone, everyone),
+            link(7, l1, [other, child]),
+            link(8, l2, [carrier, secret]),
+            // A member's link to an activity's node.
+            link(9, l3, [other, activity]),
+            timer(10, t1, child, everyone),
+            timer(11, t2, secret, private),
+        ],
+        // The carrier with its child, the child's child, the private node, the links at them and their timers.
+        vec![remove(12, carrier)],
+        // An activity ends as another node is made, and its member's row changes.
+        vec![
+            w3e_create(&h, 13, fresh, h.zone, everyone),
+            remove(14, activity),
+            change(15, other, everyone, set(other, 1, Value::Uint(7))),
+        ],
+        // A node made under one taken out with it, in one part: never public.
+        vec![w3e_create(&h, 16, late, stand, everyone), remove(17, stand)],
+        // A node made with a link to it and a timer, then taken out in the next part of the same cut: never public.
+        vec![
+            w3e_create(&h, 18, brief, h.zone, everyone),
+            link(19, l4, [fresh, brief]),
+            timer(20, t3, brief, everyone),
+        ],
+        vec![remove(21, brief)],
+        vec![remove(22, other)],
+        // A link to an id no node has yet, and words on the node that owns it.
+        vec![
+            link(23, l5, [fresh, ghost]),
+            change(24, fresh, everyone, set(fresh, 5, said.to_value())),
+        ],
+        // The node is made, which takes the link in, and taken out with it, in one part.
+        vec![
+            w3e_create(&h, 25, ghost, h.zone, everyone),
+            remove(26, ghost),
+        ],
+        vec![remove(27, fresh)],
+    ];
+    // The whole cuts of the cuts that take nothing out are not counted: the first, and the one that links to an id
+    // that is no node yet (a cut whole, as before).
+    let mut other_cuts = 0;
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        actual.apply_bytes(&bytes).unwrap();
+        out.push(i as u64, &bytes).unwrap();
+        let before = out.whole_cuts;
+        // The part that makes `brief` is cut with the one that takes it out.
+        if i != 4 {
+            out.flush().unwrap();
+        }
+        if i == 0 || i == 7 {
+            other_cuts += out.whole_cuts - before;
+        }
+    }
+    // The reader holds the source's public state.
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(wire(out.public_player().state().clone()).unwrap());
+    (all, out.whole_cuts - other_cuts)
+}
+
 /// #2731 (0.133 S4): before a still world exits to sleep, its writer writes what is open and leaves a pointer that
 /// says the world is quiet up to now and still until its next due change (field 11: `[t]`, or `[]` when nothing is
 /// due); once it is awake again its pointer has no field 11.
@@ -4200,7 +4378,7 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
 
 /// C5: a creator defining a kind never stops the public stream. A `souls:kind` node the header does not pin is public,
 /// and so is a thing of the kind it defines; a thing of a kind only a private definition names (which a public reader
-/// cannot check) is left out, logged by name, and the stream goes on, touched or not.
+/// cannot check) is left out, logged by name, and the stream goes on, touched or taken out.
 #[test]
 fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
     let h = header();
@@ -4278,15 +4456,34 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
             BTreeMap::new(),
         )],
         vec![i3948_set(4, secret, 1), i3948_set(5, boxed, 2)],
+        // The left-out node taken out: by rows, naming no version for it, as the whole cut names none.
+        vec![w3e_effect(
+            6,
+            secret,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Remove { node: secret },
+                rest: Rest::new(),
+            }]),
+        )],
     ];
+    let mut whole = 0;
     // The private definition changes nothing public: no part for it.
-    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4]).enumerate() {
+    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4, 5]).enumerate() {
+        if n == 5 {
+            whole = out.whole_cuts;
+        }
         let p = w3e_packet(&h, effects);
         actual.apply_bytes(&p).unwrap();
         out.push(n as u64, &p).unwrap();
         out.flush().unwrap();
         assert_eq!(out.player.next(), parts, "after record {n}");
     }
+    assert_eq!(out.whole_cuts, whole, "the remove is a cut by rows");
+    assert_eq!(
+        out.player.state(),
+        &out.shown(out.canonical.tree()).unwrap()
+    );
     assert!(i3948_holds(&out.player, def) && i3948_holds(&out.player, boxed));
     assert!(
         !i3948_holds(&out.player, secret),
@@ -4298,7 +4495,7 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
     );
     // A reader that plays the parts from the baseline holds the same state.
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
-    for n in 0..4 {
+    for n in 0..5 {
         reader
             .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
             .unwrap();
@@ -4569,7 +4766,7 @@ fn a_store_move_backs_the_whole_chain_up_to_the_new_store() {
     actual.apply_bytes(&first).unwrap();
     out.push(0, &first).unwrap();
     out.flush().unwrap();
-    out.back_up(old, Box::new(|_| {})).unwrap();
+    out.back_up(old, old, Box::new(|_| {})).unwrap();
     assert!(
         out.drainer().unwrap().drain(Duration::from_secs(20)),
         "the old store holds the spool's head"
@@ -4590,7 +4787,7 @@ fn a_store_move_backs_the_whole_chain_up_to_the_new_store() {
         Some((spool.clone(), "new-store".to_owned())),
     )
     .unwrap();
-    moved.back_up(new, Box::new(|_| {})).unwrap();
+    moved.back_up(new, new, Box::new(|_| {})).unwrap();
     assert!(
         moved.drainer().unwrap().drain(Duration::from_secs(20)),
         "the new store holds the spool's head"
@@ -4757,4 +4954,168 @@ fn flight_output(copy: bool, then: &str, linked: bool) -> Vec<u8> {
     all.extend(wire(out.public_player().state().clone()).unwrap());
     COPY_PART.set(false);
     all
+}
+
+/// W7 (#2826): a text file purged of a removed reference stays purged when the writer starts again from its recovery
+/// chain (never refused as `stream-immutable`), its part and the other words untouched; a restored reference's row is
+/// written again by the next start.
+#[test]
+fn w7_a_purged_text_file_is_written_again_without_its_removed_words_on_a_start() {
+    use sim::text::Grade;
+    let h = header();
+    let d = scratch("w7-purge");
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([59; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let (a, b) = (
+        Id::new(Scope([93; 16]), 1).unwrap(),
+        Id::new(Scope([94; 16]), 1).unwrap(),
+    );
+    let gone = words
+        .write(b"words to be removed", Audience::Everyone, a)
+        .unwrap();
+    let kept = words
+        .write(b"words that stay", Audience::Everyone, b)
+        .unwrap();
+    let open = || {
+        PublicWriter::open(
+            PublicStart {
+                root: &views,
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: Some(words.clone()),
+                names: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+        )
+        .unwrap()
+    };
+    let mut out = open();
+    for (seq, body, reference) in [(0, a, gone), (1, b, kept)] {
+        let mut e = w3e_create(&h, seq, body, h.zone, Audience::Everyone);
+        e.events = Some(vec![replica::effects::Event {
+            name: Name::new("souls:said").unwrap(),
+            fields: BTreeMap::from([(1, Value::Map(BTreeMap::from([(21, reference.to_value())])))]),
+            changes: Vec::new(),
+            rest: Rest::new(),
+        }]);
+        out.push(seq, &w3e_packet(&h, vec![e])).unwrap();
+        out.flush().unwrap();
+    }
+    let g = out.generation_dir();
+    drop(out);
+    let rows = |name: &str| -> Vec<Id> {
+        let Value::Array(rows) = decode(&fs::read(g.join(name)).unwrap()).unwrap().value else {
+            panic!("a text file is a list")
+        };
+        rows.iter()
+            .map(|r| match r {
+                Value::Array(p) => replica::effects::read_id(&p[0]).unwrap(),
+                _ => panic!("a row"),
+            })
+            .collect()
+    };
+    let parts = || {
+        (
+            fs::read(g.join("0")).unwrap(),
+            fs::read(g.join("1")).unwrap(),
+        )
+    };
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![gone], vec![kept]));
+    let (before, baseline) = (parts(), fs::read(g.join("baseline")).unwrap());
+
+    words.remove(gone, a, 1, Grade::Hidden).unwrap();
+    assert_eq!(
+        crate::removal::purge(&views, &words.redactions(), true).unwrap(),
+        (1, 1),
+        "a dry run counts"
+    );
+    assert_eq!(rows("0.text"), vec![gone], "and writes nothing");
+    assert_eq!(
+        crate::removal::purge(&views, &words.redactions(), false).unwrap(),
+        (1, 1)
+    );
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![], vec![kept]));
+
+    // A start recovers from the chain, whose object still holds the row: the file stays without it.
+    let again = open();
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![], vec![kept]));
+    assert_eq!(parts(), before, "parts never change");
+    assert_eq!(fs::read(g.join("baseline")).unwrap(), baseline);
+    drop(again);
+
+    // Hidden words shown again come back in the next start's files.
+    words.restore(gone, a, 2).unwrap();
+    let again = open();
+    assert_eq!((rows("0.text"), rows("1.text")), (vec![gone], vec![kept]));
+    drop(again);
+}
+
+/// W7 (#2826): a text file whose words and list were read before a removal, and written after it (a part cut as the
+/// removal ran, so the removal's own pass found no file), is settled by its writer without the removed row.
+#[test]
+fn w7_a_text_file_written_as_a_removal_lands_is_settled_without_its_words() {
+    use sim::text::Grade;
+    let d = scratch("w7-settle");
+    let words = Store::open_dir(
+        &d.join("words"),
+        replica::ids::Minter::at(Scope([60; 16]), 0),
+    )
+    .unwrap();
+    let a = Id::new(Scope([95; 16]), 1).unwrap();
+    let gone = words
+        .write(b"cut before the removal", Audience::Everyone, a)
+        .unwrap();
+    let kept = words.write(b"stays", Audience::Everyone, a).unwrap();
+    let row = |r: Id, w: &[u8]| Value::Array(vec![r.to_value(), Value::Bytes(w.to_vec())]);
+    let bytes = wire(Value::Array(vec![
+        row(gone, b"cut before the removal"),
+        row(kept, b"stays"),
+    ]))
+    .unwrap();
+    let path = d.join("g").join("7.text");
+    let rows = || -> Vec<Id> {
+        let Value::Array(rows) = decode(&fs::read(&path).unwrap()).unwrap().value else {
+            panic!("a text file is a list")
+        };
+        rows.iter()
+            .map(|r| match r {
+                Value::Array(p) => replica::effects::read_id(&p[0]).unwrap(),
+                _ => panic!("a row"),
+            })
+            .collect()
+    };
+    let list = words.redactions();
+    words.remove(gone, a, 1, Grade::Hidden).unwrap();
+    derive(
+        &path,
+        purge_text(&bytes, &list)
+            .unwrap()
+            .as_deref()
+            .unwrap_or(&bytes),
+    )
+    .unwrap();
+    assert_eq!(
+        rows(),
+        vec![gone, kept],
+        "written with the list read before"
+    );
+    settle(&words, &path, &bytes, list).unwrap();
+    assert_eq!(rows(), vec![kept], "settled with the list now");
+    let settled = fs::read(&path).unwrap();
+    settle(&words, &path, &bytes, words.redactions()).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), settled, "nothing changed since");
+    words.close();
+    fs::remove_dir_all(&d).unwrap();
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Lane LM walkthrough (copied from lane X's fix-x-walkthrough.mjs): a person signs in on the /worlds launcher in Clerk
 // mode, creates "Little Martians (Arium)" from the New-world dialog (template littlemartians-two) and is its god at
-// birth; real Chrome (lease), real input at a chosen device pixel ratio (--dpr 1|2); looks around the Arium with the
+// birth; Chromium (lease), real input at a chosen device pixel ratio (--dpr 1|2); looks around the Arium with the
 // keyboard, mouse and wheel; pairs a god agent that places library defs (core/lm-*) by name; joins as a Soul.
 // Clerk in the browser: a test-only stand-in for clerk-js (window.Clerk, defined before the app loads, so the real
 // ClerkProvider/useAuth run unchanged) whose session tokens are minted by the synthetic issuer the launcher's worlds
@@ -58,7 +58,7 @@ const STUB = `(() => {
 })();`;
 
 const release = await chromeLease('lane-lm-two walkthrough');
-const browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
 let pairing = null;
 try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: DPR });

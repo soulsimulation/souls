@@ -8,3 +8,8 @@ export const KIND_LOOKS_URL: string | null = null;
 // file the build writes beside the bundle, for world-state.ts (`setKindFields`): what a thing's fields say of it, named
 // by its entry. Null outside the build.
 export const KIND_STATE_URL: string | null = null;
+
+/** Entry slot numbers are one-based, in declaration order. A missing posture declares a standing place; it is not
+ *  a seat. Public stream slot coordinates take precedence over these entry coordinates when present. */
+export type BodySlot = { row: number[]; posture: 'stand' | 'sit' | 'lie' };
+export const KIND_SLOTS: Record<string, BodySlot[]> = {};
