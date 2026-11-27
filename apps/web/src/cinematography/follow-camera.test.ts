@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {Group,Mesh,BoxGeometry,MeshBasicMaterial,Vector3,PerspectiveCamera,PlaneGeometry,ShaderMaterial,BufferGeometry,Float32BufferAttribute} from 'three';
 import{FollowGeometry,FollowCamera,FOLLOW_LIMITS,followClearanceRadius,publishedFollowGround}from'./follow-camera.ts';import{DisplayedCameraObserver}from'./observation.ts';import{composeVisibleViewport}from'../WorldViewport.ts';
+import{fitNearPlane,setDepthFitGround}from'../../../../mars/viewer/lib/depth-fit.ts';
 const v=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 function box(){return new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());}
 function space(){const g=new Group();g.updateMatrixWorld(true);const q=new FollowGeometry();q.prepare([g],'1');return{g,q};}
@@ -74,4 +75,14 @@ test('executed smoothed Follow never moves its envelope through a thin wall',()=
 test('moving rendered transforms update capsule queries immediately and overlap is a named non-successful hold',()=>{
  const{g,q}=space(),wall=new Mesh(new PlaneGeometry(100,100),new MeshBasicMaterial());wall.rotation.y=Math.PI/2;wall.position.x=2;g.add(wall);g.updateMatrixWorld(true);q.prepare([g],'1');assert.equal(q.segment(v(),v(),.1),'clear');wall.position.x=.05;wall.updateMatrixWorld(true);assert.equal(q.segment(v(),v(),.1),'blocked');
  const camera=new PerspectiveCamera(45,1,.1,100),aim=v(0,1,0);camera.position.set(0,5,10);camera.lookAt(aim);camera.updateMatrixWorld(true);const r=new FollowCamera().step(subject(),camera,aim,1/60,q,()=>0);assert.equal(r.reason,'camera-envelope-overlap');assert.equal(r.candidates,0);assert.ok(r.eye.equals(camera.position));assert.equal(r.motion?.containment,'unproved','surface checks cannot certify a starting point deep inside arbitrary closed geometry');
+});
+
+test('clearance covers the real render-time near fitter at accepted and refused eyes without shared writes',()=>{
+ const camera=new PerspectiveCamera(45,390/844,.1,100);camera.position.set(0,5,8);const original={near:camera.near,position:camera.position.toArray(),projection:camera.projectionMatrix.toArray(),world:camera.matrixWorld.toArray()},projection={width:844,height:390,fov:65};
+ let calls=0;setDepthFitGround((x)=>{calls++;return x>5?-10:0;});try{
+  for(const endpoint of [v(0,2,8),v(0,20,8),v(10,2,8)]){const radius=followClearanceRadius(camera,projection,endpoint)!;assert.ok(radius>followClearanceRadius(new PerspectiveCamera(45,390/844,.1,100))!);
+   for(const eye of [camera.position,endpoint]){const actual=new PerspectiveCamera().copy(camera,false);composeVisibleViewport(actual,844,390,undefined,65);actual.position.copy(eye);actual.updateMatrixWorld(true);fitNearPlane(actual);for(let i=0;i<4;i++)assert.ok(v(i&1?1:-1,i&2?1:-1,-1).applyMatrix4(actual.projectionMatrixInverse).length()<=radius+1e-12);}
+  }
+  assert.ok(calls>0);assert.deepEqual({near:camera.near,position:camera.position.toArray(),projection:camera.projectionMatrix.toArray(),world:camera.matrixWorld.toArray()},original);assert.equal(followClearanceRadius(camera,projection,v(NaN)),null);new Group().add(camera);assert.equal(followClearanceRadius(camera,projection),null);
+ }finally{setDepthFitGround(null);}
 });

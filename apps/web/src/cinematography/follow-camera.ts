@@ -4,6 +4,7 @@ import type {Object3D,BufferGeometry,InstancedMesh} from 'three';
 import {cameraGroundSampler} from '../WorldCameraGround.ts';
 import type {SceneInfo} from '../WorldGeometry.ts';
 import {composeVisibleViewport,visibleViewport} from '../WorldViewport.ts';
+import {fitNearPlane} from '../../../../mars/viewer/lib/depth-fit.ts';
 import type {ViewportInsets} from '../WorldViewport.ts';
 export type FollowProjection={width:number;height:number;insets?:ViewportInsets;fov:number};
 export type FollowViewport={width:number;height:number;insets?:ViewportInsets};
@@ -15,11 +16,16 @@ export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,de
 /** Orientation-independent envelope of the actual near plane, including a pending
  * final viewport projection. Its capsule covers every intermediate eye rotation.
  * Surface clearance is NOT proof that an arbitrary closed solid does not contain it. */
-export function followClearanceRadius(camera:PerspectiveCamera,projection?:FollowProjection):number|null{
- if(!Number.isFinite(camera.near)||camera.near<=0||!Number.isFinite(camera.far)||camera.far<=camera.near)return null;
- let radius=0;const point=new Vector3(),matrices=[camera.projectionMatrixInverse];
- if(projection){const next=new PerspectiveCamera();next.near=camera.near;next.far=camera.far;next.zoom=camera.zoom;next.filmGauge=camera.filmGauge;next.filmOffset=camera.filmOffset;
-  if(!composeVisibleViewport(next,projection.width,projection.height,projection.insets,projection.fov))return null;matrices.push(next.projectionMatrixInverse);}
+export function followClearanceRadius(camera:PerspectiveCamera,projection?:FollowProjection,proposedEye?:Vector3):number|null{
+ if(camera.parent||!Number.isFinite(camera.near)||camera.near<=0||!Number.isFinite(camera.far)||camera.far<=camera.near)return null;
+ let radius=0;const point=new Vector3(),matrices=[camera.projectionMatrixInverse],next=new PerspectiveCamera().copy(camera,false),currentEye=camera.position.clone();
+ if(![...currentEye,...(proposedEye??currentEye)].every(Number.isFinite))return null;
+ if(projection&&!composeVisibleViewport(next,projection.width,projection.height,projection.insets,projection.fov))return null;
+ matrices.push(next.projectionMatrixInverse.clone());
+ // The renderer fits near AFTER camera control. Reuse that exact latched fitter
+ // on a private camera at both possible final eyes: rejected and accepted motion.
+ // Optional passages pass their own endpoint too; no shared camera/ground writes.
+ for(const eye of [currentEye,proposedEye??currentEye]){next.near=camera.near;next.updateProjectionMatrix();next.position.copy(eye);next.updateMatrixWorld(true);fitNearPlane(next);matrices.push(next.projectionMatrixInverse.clone());}
  for(const matrix of matrices){if(!matrix.elements.every(Number.isFinite))return null;for(let i=0;i<4;i++){point.set(i&1?1:-1,i&2?1:-1,-1).applyMatrix4(matrix);if(![point.x,point.y,point.z].every(Number.isFinite)||point.z>=0)return null;radius=Math.max(radius,point.length());}}
  return Number.isFinite(radius)&&radius>0?radius:null;
 }
@@ -145,10 +151,10 @@ export class FollowCamera{
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
-  const radius=followClearanceRadius(camera,projection);if(radius===null){this.velocity.set(0,0,0);return result('clearance-projection-unavailable');}
   let reason='tracking';
   if(geometry.stats.complete){
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
+  const radius=followClearanceRadius(camera,projection,next);if(radius===null){this.velocity.set(0,0,0);return result('clearance-projection-unavailable');}
   const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next,radius);motion={groundY,sweep,radius,surfaceStartOverlap:geometry.stats.surfaceStartOverlap,containment:'unproved',unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?(geometry.stats.surfaceStartOverlap?'camera-envelope-overlap':'motion-obstructed'):'motion-unknown';}
   if(motion.surfaceStartOverlap){this.aimVelocity.set(0,0,0);return result(manual?'user-hold:camera-envelope-overlap':'camera-envelope-overlap',screen);}
   // A Follow gesture changes its orbit/zoom, not the subject's world translation.
@@ -159,7 +165,7 @@ export class FollowCamera{
   // consume a whole candidate fan before the safety sweep has run.
   if(!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
-   const alternative=query(eye),passage=geometry.segment(this.eye,eye,radius);
+   const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,passageRadius);
    if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
   }
   }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
