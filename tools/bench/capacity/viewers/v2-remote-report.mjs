@@ -79,7 +79,9 @@ const jb = windows.reduce((s, w) => s + (w.bytes.baseline ?? 0), 0), jn = window
 out.baselineBytesEach = jn ? Math.round(jb / jn) : null;
 const hostFile = opt('host');
 if (hostFile) {
-  const from = head.start_at + 40_000, to = head.start_at + head.secs * 1000;
+  // the steady span; an arm stopped at a refusal is read from its start to its last window
+  const cut = out.stopped ? windows.at(-1)?.t ?? 0 : null;
+  const from = head.start_at + (cut != null ? 0 : ARRIVED * 1000), to = head.start_at + (cut != null ? cut * 1000 + 5_000 : head.secs * 1000);
   const hs = readFileSync(hostFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).sort((a, b) => a.t - b.t);
   const span = (a, b) => { const s = hs.filter((x) => x.t >= a && x.t <= b); return s.length >= 2 ? [s[0], s.at(-1)] : null; };
   const inSpan = (a, b) => hs.filter((x) => x.t >= a.t && x.t <= b.t);
