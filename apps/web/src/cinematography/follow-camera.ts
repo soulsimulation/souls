@@ -104,7 +104,9 @@ export class FollowCamera{
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
-  const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y)||projected.z>1)return result('projection-unavailable');
+  const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y))return result('projection-unavailable');
+  if(centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
+  if(projected.z>1)return result('projection-unavailable');
   const screen:[number,number]=[projected.x,projected.y];
   if(this.clock<this.gestureUntil){this.eye.copy(camera.position);this.aim.copy(aim);return result('user-hold',screen);}
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
@@ -120,12 +122,19 @@ export class FollowCamera{
    const alternative=query(eye),passage=geometry.segment(this.eye,eye);
    if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
   }
-  // Framing slack comes from the current projection, not a fixed lookAt at the subject.
-  const depth=Math.max(.5,centre.distanceTo(this.eye)),vertical=depth*Math.tan(camera.fov*Math.PI/360),right=new Vector3(1,0,0).applyQuaternion(camera.quaternion),up=new Vector3(0,1,0).applyQuaternion(camera.quaternion);
-  const dx=projected.x-Math.max(-.14,Math.min(.14,projected.x)),dy=projected.y-Math.max(-.10,Math.min(.10,projected.y));
-  const aimGoal=this.aim.clone().addScaledVector(right,dx*vertical*camera.aspect).addScaledVector(up,dy*vertical);
+  // Rebase from the previous drawn eye along its actual viewing ray onto the
+  // subject-depth plane. Subsequent eye translation then compensates around that
+  // nearby world aim instead of also demanding a second pan to follow the eye.
+  // This changes only its representation, not orientation. A persistent world aim
+  // otherwise recedes behind a walking subject and makes the same pan ever slower.
+  const forward=new Vector3(0,0,-1).applyQuaternion(camera.quaternion),right=new Vector3(1,0,0).applyQuaternion(camera.quaternion),up=new Vector3(0,1,0).applyQuaternion(camera.quaternion),relative=centre.clone().sub(camera.position),depth=relative.dot(forward);
+  if(depth<=camera.near)return result('subject-behind-view',screen,tested);
+  const previousDepth=Math.max(.5,this.aim.distanceTo(camera.position)),vertical=depth*Math.tan(camera.fov*Math.PI/360);
+  this.aim.copy(camera.position).addScaledVector(forward,depth);
+  this.aimVelocity.addScaledVector(forward,-this.aimVelocity.dot(forward)).multiplyScalar(depth/previousDepth).clampLength(0,FOLLOW_LIMITS.aimSpeed);
+  const x=relative.dot(right)/(vertical*camera.aspect),y=relative.dot(up)/vertical;
+  const aimGoal=centre.clone().addScaledVector(right,-Math.max(-.14,Math.min(.14,x))*vertical*camera.aspect).addScaledVector(up,-Math.max(-.10,Math.min(.10,y))*vertical);
   approach(this.aim,this.aimVelocity,aimGoal,dt,FOLLOW_LIMITS.aimSpeed,FOLLOW_LIMITS.aimAcceleration,.3);
-  if(this.eye.distanceTo(this.aim)<.5)this.aim.copy(centre); // admitted reset only; avoid a singular orientation
   return result(reason,screen,tested);
  }
 }
