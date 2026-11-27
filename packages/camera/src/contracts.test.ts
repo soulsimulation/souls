@@ -125,7 +125,9 @@ test('explicit zero grants are valid replay inputs; ambient dependencies and ren
 
 
 test('portrait framing uses actual usable viewport and rejects impossible insets or malformed regions', () => {
-  assert.deepEqual(cameraUsableViewport(viewport), { widthCssPx: 374, heightCssPx: 700, aspect: 374 / 700 });
+  assert.deepEqual(cameraUsableViewport(viewport), { widthCssPx: 374, heightCssPx: 700, originCssPx: [8, 48], compositionAspect: 374 / 700, projectionAspect: 390 / 844 });
+  const asymmetric = cameraUsableViewport({ ...viewport, insetsCssPx: { ...viewport.insetsCssPx, right: 24 } });
+  assert.deepEqual(asymmetric, { widthCssPx: 358, heightCssPx: 700, originCssPx: [8, 48], compositionAspect: 358 / 700, projectionAspect: 390 / 844 });
   const o = observation();
   for (const v of [{ ...viewport, widthCssPx: 0 }, { ...viewport, deviceScaleFactor: -1 },
     { ...viewport, insetsCssPx: { ...viewport.insetsCssPx, top: -1 } },

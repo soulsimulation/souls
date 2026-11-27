@@ -1,12 +1,14 @@
 import { cameraPlainData, cameraVersionMismatch, contractBounds, contractNumber, contractRecord, contractRejected, contractText, contractVersion } from './observation.ts';
 import type { CameraBounds, CameraContractResult, CameraObservation, CameraVersion } from './observation.ts';
 
-/** Actual viewport, including physical safe area and UI occlusion already combined by the caller in CSS pixels.
+/** Actual rendered camera viewport, with safe-area and UI composition insets already combined by the caller in CSS pixels.
  * Supply each inset once, not separate additive copies. Portrait mobile is composed from this usable aspect,
- * never a cropped landscape shot. DPR records render scale; it does not rescale CSS-space insets. */
+ * never a cropped landscape shot. The full rendered viewport defines projection aspect; insets define a separate
+ * composition aspect. If the renderer actually crops its viewport, supply those actual cropped dimensions/insets.
+ * DPR records render scale; it does not rescale CSS-space insets. */
 export type CameraViewport = Readonly<{ widthCssPx: number; heightCssPx: number; deviceScaleFactor: number;
   insetsCssPx: Readonly<{ left: number; top: number; right: number; bottom: number }> }>;
-export function cameraUsableViewport(input: unknown): Readonly<{ widthCssPx: number; heightCssPx: number; aspect: number }> | null {
+export function cameraUsableViewport(input: unknown): Readonly<{ widthCssPx: number; heightCssPx: number; originCssPx: readonly [number, number]; compositionAspect: number; projectionAspect: number }> | null {
   if (!contractRecord(input) || !contractNumber(input.widthCssPx) || !contractNumber(input.heightCssPx)
     || input.widthCssPx <= 0 || input.heightCssPx <= 0 || !contractNumber(input.deviceScaleFactor)
     || input.deviceScaleFactor <= 0 || !contractRecord(input.insetsCssPx)) return null;
@@ -14,8 +16,10 @@ export function cameraUsableViewport(input: unknown): Readonly<{ widthCssPx: num
   if (![i.left, i.top, i.right, i.bottom].every(v => contractNumber(v) && v >= 0)) return null;
   const widthCssPx = input.widthCssPx - Number(i.left) - Number(i.right);
   const heightCssPx = input.heightCssPx - Number(i.top) - Number(i.bottom);
-  const aspect = widthCssPx / heightCssPx;
-  return widthCssPx > 0 && heightCssPx > 0 && Number.isFinite(aspect) && aspect > 0 ? { widthCssPx, heightCssPx, aspect } : null;
+  const compositionAspect = widthCssPx / heightCssPx, projectionAspect = input.widthCssPx / input.heightCssPx;
+  return widthCssPx > 0 && heightCssPx > 0 && Number.isFinite(compositionAspect) && compositionAspect > 0
+    && Number.isFinite(projectionAspect) && projectionAspect > 0
+    ? { widthCssPx, heightCssPx, originCssPx: [Number(i.left), Number(i.top)], compositionAspect, projectionAspect } : null;
 }
 
 export type CameraLensBounds = Readonly<{ minVerticalFovRadians: number; maxVerticalFovRadians: number; nearM: number; farM: number }>;
@@ -24,7 +28,10 @@ export type CameraShotIntent = Readonly<{ schema: 'camera-shot/1'; version: Came
   /** World-space interest region allows meaningful quiet coverage with no subjects. */
   focusRegionM: CameraBounds | null; extent: 'full' | 'medium' | 'activity';
   /** Normalized coordinates within the usable viewport AFTER supplied safe/UI insets, origin top-left.
-   * heightFraction is relative to that usable height; vertical lens FOV uses its derived aspect. */
+   * heightFraction is relative to usable height. Vertical lens FOV projects at the FULL rendered viewport aspect,
+   * not the inset composition aspect. For normalized usable (u,v), full-viewport coordinates are
+   * ((leftInset + u*usableWidth)/viewportWidth, (topInset + v*usableHeight)/viewportHeight);
+   * this preserves asymmetric insets without re-centering the projection. */
   viewport: CameraViewport; screenRegion: Readonly<{ left: number; top: number; right: number; bottom: number }>;
   heightFraction: Readonly<{ min: number; max: number }>; lens: CameraLensBounds }>;
 
