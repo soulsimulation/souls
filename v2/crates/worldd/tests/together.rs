@@ -2383,7 +2383,8 @@ fn a_standing_group_faces_its_middle_as_it_begins_and_as_each_joins() {
 /// #423: a member of a group with places that is left where it stands faces the group's middle. The group's members
 /// stand on a 1 m ring, walked there from within 0.5 m of its middle: Souls 1 and 2, 0.3 m either side of it as the
 /// group begins, walk to their places; Souls 3 and 4, who join from 2.3 m and 2.0 m off, stay where they stand and
-/// each turns to the middle, within 5 degrees of it.
+/// each turns to the middle, within 5 degrees of it. Soul 3 already faces it (+x, the facing it starts with), so Soul 4,
+/// 49 degrees off it before the change, is the one that shows the turn (review).
 #[test]
 fn a_member_left_where_it_stands_faces_its_groups_middle() {
     let run = serve("group-left");

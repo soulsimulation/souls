@@ -309,10 +309,10 @@ pub struct Activities {
     stands: BTreeMap<Id, BTreeMap<Id, usize>>,
     /// The member leading each hold that walks hand in hand (0.135 R1), by activity.
     leaders: BTreeMap<Id, Id>,
-    /// Started activities another joined since [`Activities::turns`] last ran (a group's later accept), and members
-    /// of placed activities left where they stand ([`Activities::pending_places`]), by (activity, body): who turns to
-    /// face its activity's middle (#423).
-    rejoined: Vec<Id>,
+    /// Activities started, or another joined after they started (a group's later accept), since [`Activities::turns`]
+    /// last ran, and members of placed activities left where they stand ([`Activities::pending_places`]), by
+    /// (activity, body): who turns to face its activity's middle (#423). Each is read once.
+    to_face: Vec<Id>,
     unplaced: Vec<(Id, Id)>,
 }
 
@@ -339,7 +339,7 @@ impl Activities {
             frames: BTreeMap::new(),
             stands: BTreeMap::new(),
             leaders: BTreeMap::new(),
-            rejoined: Vec::new(),
+            to_face: Vec::new(),
             unplaced: Vec::new(),
         }
     }
@@ -967,6 +967,7 @@ impl Activities {
             l.drivers = drivers;
         }
         self.begun.push(activity);
+        self.to_face.push(activity);
         self.mark_places(activity, None);
         Ok(())
     }
@@ -1223,23 +1224,24 @@ impl Activities {
     }
 
     /// Who turns to face its activity's middle (#423), read once. The members of an activity whose
-    /// roles say nowhere to stand (a conversation; a follow apart) turn as it begins, and again whenever another
-    /// joins it (a group's later accept), so two face each other (trial of 25 Nov: two Souls talking faced different
-    /// ways) and a group of three or more faces its middle. A member of an activity with places that is left where it
-    /// stands ([`Activities::pending_places`]) faces the activity's middle. Members given places face as their stands
-    /// say (0.135 G3).
+    /// roles say nowhere to stand (a conversation; a follow and a crew apart) turn as it begins, and again whenever
+    /// another joins it (a group's later accept), so two face each other (trial of 25 Nov: two Souls talking faced
+    /// different ways) and a group of three or more faces its middle. A member of an activity with places that is left
+    /// where it stands ([`Activities::pending_places`]) faces the activity's middle. Members given places face as their
+    /// stands say (0.135 G3), and a crew's carriers as their carry says.
     pub fn turns(&mut self) -> Vec<Turn> {
-        let rejoined = std::mem::take(&mut self.rejoined);
+        let to_face = std::mem::take(&mut self.to_face);
         let unplaced = std::mem::take(&mut self.unplaced);
         let bodies = |l: &Live| -> Vec<Id> { l.node.members.iter().map(|m| m.body).collect() };
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
-        for a in self.begun.iter().chain(&rejoined) {
+        for a in &to_face {
             let Some(l) = self.live.get(a).filter(|_| seen.insert(*a)) else {
                 continue;
             };
             let kind = &self.kinds[&l.kind];
             if kind.follows.is_none()
+                && offer::several(kind).is_none()
                 && kind.roles.iter().all(|r| r.stands.is_empty())
                 && l.node.members.len() > 1
             {
@@ -1251,7 +1253,11 @@ impl Activities {
             }
         }
         for (a, body) in unplaced {
-            if let Some(l) = self.live.get(&a) {
+            if let Some(l) = self
+                .live
+                .get(&a)
+                .filter(|l| offer::several(&self.kinds[&l.kind]).is_none())
+            {
                 let middle = self.frames.get(&a).copied().flatten();
                 out.push(Turn {
                     bodies: vec![body],

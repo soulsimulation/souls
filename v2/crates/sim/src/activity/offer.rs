@@ -628,7 +628,7 @@ impl Activities {
         // 0.135 G3: one who joins a started activity takes its place too; #423: its members face their new middle.
         if driver.is_some() {
             self.mark_places(offer, Some(body));
-            self.rejoined.push(offer);
+            self.to_face.push(offer);
         }
         if let Some(open) = self.offers.open.get_mut(&offer) {
             open.answered.insert(body);
