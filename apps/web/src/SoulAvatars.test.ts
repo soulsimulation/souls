@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {PORTRAIT_TINTS, portraitTint, soulPortraitView} from './SoulAvatars.ts';
+import {FACE_FILL, PORTRAIT_TINTS, portraitTint, soulPortraitView} from './SoulAvatars.ts';
 
 const luminance = (hex: string) => {
   const [r, g, b] = [1, 3, 5].map(i => { const c = parseInt(hex.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
@@ -63,6 +63,6 @@ test('a look\'s face fills the frame: a mohawk or a tall hat does not shrink it'
   const plain = frame(false), mohawk = frame(true);
   assert.ok(Math.abs(plain.height - mohawk.height) < 1e-6 && plain.target.distanceTo(mohawk.target) < 1e-6, `mohawk ${mohawk.height.toFixed(3)} m, plain ${plain.height.toFixed(3)} m`);
   // the face is about 0.25 m across in the three-quarter view: the frame is that over FACE_FILL, centred on the face
-  assert.ok(plain.height > .25 && plain.height < .34, `frame ${plain.height.toFixed(3)} m`);
+  assert.ok(plain.height * FACE_FILL > .21 && plain.height * FACE_FILL < .29, `frame ${plain.height.toFixed(3)} m`);
   assert.ok(Math.abs(plain.target.y - 1.677) < .03, `centred on the face (${plain.target.y.toFixed(3)})`);
 });
