@@ -300,11 +300,15 @@ async fn o8_a_sync_the_world_never_answers_never_holds_the_agents_next() {
         .send(Message::Binary(sync_ask(7).into()))
         .await
         .unwrap();
-    // The two are given up at their deadline; the new request goes then, and is given up by name 10 s later.
+    // The two are given up at their deadline; the new request goes then, and is given up by name at its own,
+    // counted from when the gateway took it (waiting included).
     let deadline = Duration::from_micros(world_link::SYNC_DEADLINE);
     let told = tokio::time::timeout(deadline * 2 + Duration::from_secs(3), async {
         loop {
-            if let Some(Ok(Message::Binary(b))) = second.next().await
+            let Some(frame) = second.next().await else {
+                panic!("the socket ended");
+            };
+            if let Ok(Message::Binary(b)) = frame
                 && let Value::Map(m) = decode(&b).unwrap().value
                 && m.get(&20) == Some(&Value::Uint(7))
             {
