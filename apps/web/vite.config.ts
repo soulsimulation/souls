@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { entryPrefetchScript } from './src/snapshot-prefetch.ts';
 import { worldListPrefetchScript } from './src/world-list-prefetch.ts';
 import { rewritePhasedHtml } from './src/phased-entry.ts';
+import { bodySlotsOf } from './src/v2-engine/take-bodies.ts';
 import { anonymousHello } from '../../packages/client/src/hello.ts';
 import { PWA_MANIFEST, pwaHeadTags, pwaManifest, type PwaIcons } from './src/pwa-manifest.ts';
 import { changelogHtml } from './src/changelog-page.ts';
@@ -248,7 +249,7 @@ function vendorGroups() {
  *  page draws a world from the stream), which draws each such thing as its shape, in its state; in dev there is none.
  *  `KIND_STATE_URL`: a data file of each kind's state fields by name and number, which the page names a thing's fields by
  *  (world-state.ts), fetched with the looks. */
-function kindBounds(): Plugin {
+export function kindBounds(): Plugin {
   const dir = fileURLToPath(new URL('../../content/kinds', import.meta.url));
   let build = false;
   return {
@@ -256,12 +257,17 @@ function kindBounds(): Plugin {
     configResolved(c) { build = c.command === 'build'; },
     transform(_code, id) {
       if (!id.endsWith('/src/v2-engine/source/kind-bounds.ts')) return null;
+      const slots: Record<string, ReturnType<typeof bodySlotsOf>> = {};
       const out: Record<string, number[]> = {}, looks: Record<string, unknown> = {}, state: Record<string, Record<string, unknown[]>> = {};
       for (const family of readdirSync(dir)) for (const f of readdirSync(join(dir, family))) {
         if (!f.endsWith('.json')) continue;
         const file = join(dir, family, f), e = JSON.parse(readFileSync(file, 'utf8')) as { kind?: unknown; owner?: unknown; roles?: unknown; state?: unknown; geometry?: { bounds_mm?: unknown }; looks?: { shape?: { shapes?: unknown }; table?: unknown } };
         this.addWatchFile(file);
-        if (typeof e.kind !== 'string' || e.owner !== 'thing' || e.roles || !Array.isArray(e.geometry?.bounds_mm)) continue;
+        if (typeof e.kind !== 'string' || e.owner !== 'thing') continue;
+        const places = bodySlotsOf(e);
+        if (places.length) slots[e.kind] = places;
+        // Roles also belong to physical things (a lectern); only geometry distinguishes them from activities here.
+        if (!Array.isArray(e.geometry?.bounds_mm)) continue;
         out[e.kind] = e.geometry.bounds_mm as number[];
         for (const [k, f] of Object.entries((e.state ?? {}) as Record<string, { n?: unknown; type?: unknown; default?: unknown; values?: unknown }>)) {
           if (typeof f?.n !== 'number' || (f.type !== 'bool' && f.type !== 'int' && f.type !== 'enum')) continue;
@@ -272,7 +278,7 @@ function kindBounds(): Plugin {
       }
       const url = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-looks.json', source: JSON.stringify(looks) })}` : 'null';
       const stateUrl = build ? `import.meta.ROLLUP_FILE_URL_${this.emitFile({ type: 'asset', name: 'kind-state.json', source: JSON.stringify(state) })}` : 'null';
-      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};\nexport const KIND_STATE_URL = ${stateUrl};`, map: null };
+      return { code: `export const KIND_BOUNDS = ${JSON.stringify(out)};\nexport const KIND_LOOKS_URL = ${url};\nexport const KIND_STATE_URL = ${stateUrl};\nexport const KIND_SLOTS = ${JSON.stringify(slots)};`, map: null };
     },
   };
 }

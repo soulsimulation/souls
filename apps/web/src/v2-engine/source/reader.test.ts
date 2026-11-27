@@ -110,12 +110,14 @@ class World {
   snapshot() { return encode([...this.nodes.keys()].map((id) => this.rec(id))); }
 }
 
+type Startup = { replies: (number | 'reject' | 'hang' | 'invalid')[]; asked: number; active: number; most: number; waits: number[]; timed: boolean[] };
+
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'part'; p: PartRec } | { t: 'catching'; behind: number } | { t: 'error'; message: string } | { t: string };
 
 /** Runs the worker on `world` (newest part `newest`, parts up to `served` served, the rest 404): its first poll, then
  *  `polls` more, each followed by `each(messages of that poll, poll index)`. */
 async function run(world: World, newest: number, served: number, polls: number, each: (m: Msg[], i: number) => void, tag: string,
-  still?: { quietAt: (i: number) => number; fails: (path: string, i: number) => boolean; hangs?: (path: string, i: number) => boolean }) {
+  still?: { quietAt: (i: number) => number; fails: (path: string, i: number) => boolean; hangs?: (path: string, i: number) => boolean }, startup?: Startup) {
   (globalThis as { __world?: World }).__world = world;
   const baseline = encode(new Map([[3, new Map([[1, 0]])]]));
   const generation = createHash('sha256').update(baseline).digest('hex');
@@ -131,9 +133,20 @@ async function run(world: World, newest: number, served: number, polls: number, 
     return /^\d+$/.test(n) && Number(n) <= served ? n : null;
   };
   const got: Msg[] = [], ticks: (() => Promise<void>)[] = [];
-  const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, self: (globalThis as { self?: unknown }).self };
+  const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, setTimeout: globalThis.setTimeout, self: (globalThis as { self?: unknown }).self };
   try {
     globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (startup && new URL(String(input)).pathname.endsWith('/pointer')) {
+        startup.asked++;startup.active++;startup.most=Math.max(startup.most,startup.active);startup.timed.push(!!init?.signal);
+        try {
+          await Promise.resolve();
+          const reply=startup.replies.shift();
+          if(reply==='reject')throw new TypeError('Failed to fetch');
+          if(reply==='hang')return await new Promise<Response>((_,reject)=>init?.signal?.addEventListener('abort',()=>reject(init.signal!.reason)));
+          if(reply==='invalid')return new Response('not a pointer');
+          if(typeof reply==='number')return new Response(null,{status:reply});
+        } finally {startup.active--;}
+      }
       if (still?.fails(new URL(String(input)).pathname, poll)) throw new TypeError('Failed to fetch');
       // A read that never answers: only its signal, if it has one, ends it.
       if (still?.hangs?.(new URL(String(input)).pathname, poll)) {
@@ -142,18 +155,21 @@ async function run(world: World, newest: number, served: number, polls: number, 
       const body = files(new URL(String(input)).pathname);
       return body === null ? new Response(null, { status: 404 }) : new Response(body as BodyInit);
     }) as typeof fetch;
+    if(startup)globalThis.setTimeout=((fn:()=>void,ms?:number)=>{if(ms===250){startup.waits.push(ms);return before.setTimeout(fn,0);}return before.setTimeout(fn,ms);}) as typeof setTimeout;
     (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => (ticks.push(fn), 1);
     (globalThis as { self?: unknown }).self = { onmessage: null, postMessage: (m: Msg) => got.push(m) };
     await import(new URL(`./worker.ts?${tag}`, import.meta.url).href);
     (globalThis as unknown as { self: { onmessage: (e: unknown) => void } }).self.onmessage({ data: { stream: 'https://stream.example.invalid/a/b/c/d/' } });
     const until = Date.now() + 30_000;
-    while (!ticks.length && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+    while (!ticks.length && !(startup && got.some(m=>m.t==='error')) && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+    if(startup && got.some(m=>m.t==='error')){each(got.splice(0),0);return;}
     assert.ok(ticks.length, 'the first poll ends');
     each(got.splice(0), 0);
     for (let i = 1; i <= polls; i++) { poll = i; await ticks[0](); each(got.splice(0), i); }
   } finally {
     globalThis.fetch = before.fetch;
     globalThis.setInterval = before.setInterval;
+    globalThis.setTimeout = before.setTimeout;
     (globalThis as { self?: unknown }).self = before.self;
   }
 }
@@ -288,4 +304,25 @@ test('move and end envelopes retain run ownership, including legacy ends without
     assert.equal(parts[0].p.moves?.[0].run,'8');
     assert.deepEqual(parts[0].p.runEnds?.map(e=>e.run),['7',undefined]);
   },'run-ownership');
+});
+
+const startupOf=(...replies:Startup['replies']):Startup=>({replies,asked:0,active:0,most:0,waits:[],timed:[]});
+test('startup retries missing and unavailable pointers and a transient request failure before normal playback',async()=>{
+  const startup=startupOf(404,503,'reject'),messages:Msg[]=[];
+  await run(new World(START,[{}]),0,0,1,m=>messages.push(...m),'startup-retry',undefined,startup);
+  assert.deepEqual(messages.filter(m=>m.t==='error'),[]);
+  assert.equal(messages.filter(m=>m.t==='snapshot').length,1);assert.equal(messages.filter(m=>m.t==='part').length,1);
+  assert.deepEqual(startup.waits,[250,250,250],'failed first reads use the normal poll cadence');
+  assert.equal(startup.most,1,'first pointer requests never overlap');assert.ok(startup.timed.every(Boolean),'first and later pointer reads have a deadline');
+});
+test('startup gives up a hung first request and recovers, but malformed pointer bytes remain an error',async()=>{
+  const timeout=AbortSignal.timeout;AbortSignal.timeout=()=>timeout.call(AbortSignal,30);const awake=setInterval(()=>{},1000);
+  try{
+    const startup=startupOf('hang'),messages:Msg[]=[];
+    await run(new World(START,[{}]),0,0,0,m=>messages.push(...m),'startup-hung',undefined,startup);
+    assert.equal(messages.filter(m=>m.t==='part').length,1);assert.deepEqual(messages.filter(m=>m.t==='error'),[]);assert.equal(startup.most,1);assert.deepEqual(startup.waits,[250]);
+  }finally{AbortSignal.timeout=timeout;clearInterval(awake);}
+  const invalid=startupOf('invalid'),messages:Msg[]=[];
+  await run(new World(START,[{}]),0,0,0,m=>messages.push(...m),'startup-invalid',undefined,invalid);
+  assert.equal(messages.filter(m=>m.t==='error').length,1);assert.equal(messages.filter(m=>m.t==='snapshot').length,0);assert.equal(invalid.asked,1);assert.deepEqual(invalid.waits,[],'invalid bytes are not retried or silently suppressed');
 });
