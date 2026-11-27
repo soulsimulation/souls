@@ -882,6 +882,7 @@ fn w7_the_command_on_a_stopped_worlds_folder() {
 /// while its store goes on taking words (the clock's own work stands in a thread writing all the while): 2,002 of A's
 /// references hidden at once, in one sync of the list, the writer never waiting through it.
 #[test]
+#[allow(clippy::disallowed_methods)] // the test times the removal and the writer's waits on the wall clock
 fn w7_a_running_world_takes_the_removal_on_its_own_thread() {
     use std::time::Instant;
     let (folder, a, asker, views, log, args) = w7_world("w7-running");

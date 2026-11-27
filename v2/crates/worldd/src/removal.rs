@@ -475,7 +475,9 @@ fn ask_running(world: &Path, flags: &[String]) -> Result<String, String> {
         dir.join(format!("{n}.done")),
     );
     crate::view_out::write_whole(&ask, flags.join("\n").as_bytes()).map_err(said)?;
-    let asked = std::time::Instant::now();
+    // Waited time counted in steps, not read from a clock (the wall-clock rule): a slow step only waits longer.
+    const STEP: Duration = Duration::from_millis(50);
+    let mut waited = Duration::ZERO;
     loop {
         if let Ok(answer) = std::fs::read_to_string(&done) {
             let _ = std::fs::remove_file(&done);
@@ -485,7 +487,6 @@ fn ask_running(world: &Path, flags: &[String]) -> Result<String, String> {
                 None => Err(answer),
             };
         }
-        let waited = asked.elapsed();
         if waited >= TAKEN_WITHIN && !taking.exists() && std::fs::remove_file(&ask).is_ok() {
             return Err(format!(
                 "world-running: the world holds its text store and did not take the ask within {} s (it may be busy with \
@@ -499,7 +500,8 @@ fn ask_running(world: &Path, flags: &[String]) -> Result<String, String> {
                 done.display()
             ));
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(STEP);
+        waited += STEP;
     }
 }
 
