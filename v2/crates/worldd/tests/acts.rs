@@ -338,11 +338,24 @@ fn entries() -> Json {
     )
     .unwrap();
     // A create names its kind pinned (C25's `stock`).
+    // #3991: a bell's ring (by hand, as a thaumatrope's disc is released, or at once) sets `ringing` and a timer whose
+    // world form, with no steps, clears it.
     let rack = parse(
         &r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
-      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
+      "state": { "ringing": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] }, "stand": { "role": "stand", "at_mm": [0, 0, -430] } },
       "slots": { "rest": { "admits": "thing" } },
-      "forms": { "put": { "who": "anyone",
+      "forms": {
+        "ring_by_hand": { "who": "anyone", "starts": "act", "steps": [{ "step": "walk_to", "point": "stand" },
+            { "step": "move", "move": "press", "at": "edge" }],
+          "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
+            { "change": "timer", "form": "fade", "after_us": 1000000, "event": "will_fade" }] },
+        "ring": { "who": "anyone", "starts": "act", "steps": [],
+          "effects": [{ "change": "set", "field": "ringing", "to": true, "event": "rang" },
+            { "change": "timer", "form": "fade", "after_us": 2000000, "event": "will_fade" }] },
+        "fade": { "who": "world", "starts": "timer", "steps": [],
+          "needs": [{ "need": "state", "field": "ringing", "is": true }],
+          "effects": [{ "change": "set", "field": "ringing", "to": false, "event": "faded" }] }, "put": { "who": "anyone",
         "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] },
         "stock": { "who": "anyone", "steps": [],
           "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] },
@@ -1263,6 +1276,8 @@ mod attend;
 mod effect_refused;
 #[path = "acts/named_args.rs"]
 mod named_args;
+#[path = "acts/timer_world_form.rs"]
+mod timer_world_form;
 
 /// #3888 A1, A2: the world decides a form's needs at commit, links included, by R2's one evaluator, whatever the
 /// client said. A throw to an end nobody plays is refused `not_linked` naming need 1, and nothing changes; with a

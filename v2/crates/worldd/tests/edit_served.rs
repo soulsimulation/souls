@@ -3770,6 +3770,32 @@ fn logged(w: &Seeded) -> Vec<replica::effects::Part> {
         .collect()
 }
 
+/// Crew `crew`'s last word of who holds which grip (#5067, `souls:carry-grips`) once `ok` takes it, within 10 s: its
+/// phase and the bodies holding, in order.
+fn grips_said(w: &Seeded, crew: Id, ok: impl Fn(&str, &[Id]) -> bool) -> (String, Vec<Id>) {
+    use sim::activity::carry::grips::{GRIPS, Holds};
+    let t0 = std::time::Instant::now();
+    loop {
+        let last = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .map(|h| (h.phase, h.holds.iter().map(|x| x.body).collect::<Vec<_>>()))
+            .next_back();
+        if let Some((phase, bodies)) = last.filter(|(p, b)| ok(p, b)) {
+            return (phase, bodies);
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "no grips word for {}",
+            crew.counter()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The node of a kind starting `prefix` created by the entries numbered `entries`.
 fn created_by(w: &Seeded, entries: &[u64], prefix: &str) -> Id {
     use replica::effects::{Body, Change};
@@ -8020,8 +8046,18 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         walk_all(&mut souls, &[(0, f0), (other, f1)], "the frame to the bay").await;
         let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
+        // #5067: seated, its crew still holds it, each carrier on its grip; Soul 1's leave takes only its own hold.
+        let (a, b) = (body_of(&w, w.souls[0]), body_of(&w, w.souls[other]));
+        let held = grips_said(&w, c, |p, _| p == "souls:held");
+        assert_eq!(held.1, [a, b], "frame in {slot}: both hold it");
         let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
         assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
+        let held = grips_said(&w, c, |p, b| p == "souls:held" && b.len() == 1);
+        assert_eq!(
+            held.1,
+            [b],
+            "frame in {slot}: the other still holds its grip"
+        );
     }
 
     // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
@@ -8104,6 +8140,12 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             beam.counter()
         );
         assert_eq!(got.kind, 1, "beam seated in {slot}");
+        // #5067: a hold for each carrier, let go of as the beam is seated.
+        let (phase, holding) = grips_said(&w, c, |p, _| p == "souls:released");
+        assert_eq!(
+            (phase.as_str(), holding),
+            ("souls:released", crew_bodies.clone())
+        );
         for k in &members {
             let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
             assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);

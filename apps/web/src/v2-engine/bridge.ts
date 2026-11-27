@@ -247,7 +247,10 @@ export class V2Bridge {
     // samples of that body (its walk there), so the walk's last sample never draws a seated body standing again
     // A live part spans its time and its records are as at its end; a history bundle's state (history.ts) spans none:
     // its records are as at the moment it was read from, so a walker's is drawn there, before the bundle's motion.
-    const moved = this.nodesChanged(p.nodes, p.removed, p.from, p.to > p.from ? 'walk' : 'frame');
+    // Only a live part's nodes describe its end; a history bundle's nodes precede its motion.
+    const sampleTimes = p.to > p.from ? new Map<string, number>() : undefined;
+    if (sampleTimes) for (const [id, , , at] of p.samples) sampleTimes.set(id, Math.max(at, sampleTimes.get(id) ?? -Infinity));
+    const moved = this.nodesChanged(p.nodes, p.removed, p.from, p.to > p.from ? 'walk' : 'frame', sampleTimes);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
     for (const n of moved) this.sample(n.id, n.parent!, n.slot, Math.max(n.at ?? p.from, p.from, this.tracks.get(n.id)?.samples.at(-1)?.at ?? -Infinity), n.pos);
     // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then, and a held move
@@ -277,7 +280,7 @@ export class V2Bridge {
 
   /** `defer`: a body's record that changes its frame or slot ('frame'), or any place ('walk'), is returned, to be
    *  sampled after the part's motion samples. */
-  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer: 'frame' | 'walk' | null = null): NodeRec[] {
+  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer: 'frame' | 'walk' | null = null, sampleTimes?: ReadonlyMap<string, number>): NodeRec[] {
     const moved: NodeRec[] = [];
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
     // V5 (0.133): every record first, so a body listed before the seat or room it is in is placed in it (a history
@@ -314,7 +317,9 @@ export class V2Bridge {
         if (was && was.parent === n.parent && was.slot === null && n.slot === null && was.rot.some((v, i) => v !== n.rot[i])) {
           const up = this.world(n.parent);
           const yaw = (r: NodeRec['rot']) => { const q = mul(up!.q, [r[0] / Q, r[1] / Q, r[2] / Q, r[3] / Q]); return -2 * Math.atan2(q[2], q[0]); };
-          if (up) (t.turns ??= []).push({ at: Math.max(n.at ?? at, at), from: yaw(was.rot), to: yaw(n.rot) });
+          // A completed motion clears the node's `at`; its part still carries the actual final body sample.
+          // Using the overlapping part's start would put this turn before its last step, so takes would discard it.
+          if (up) (t.turns ??= []).push({ at: Math.max(n.at ?? sampleTimes?.get(n.id) ?? at, at), from: yaw(was.rot), to: yaw(n.rot) });
         }
         t.node = n; t.gone = null;
       }

@@ -1,18 +1,37 @@
-//! Standing orders on served bodies: the existing order skills, real town ground and seat-change notifications.
+//! Standing orders on served bodies: the existing order skills, real town ground and seat-change notifications. A
+//! queue walks to its spot by the town's supported route (B7c, #3593): the existing planner's corner for the body's
+//! admitted class, asked in the runner's own batch, never a straight line through furniture.
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+
 use crate::bodies::{Ask, Asked, Bodies};
 use replica::effects::{Actor, Part, Refusal};
 use replica::ids::Id;
 use replica::intents::{Intent, Target};
+use replica::kinds::sizes::Size;
 use replica::pose::Vec3;
 use replica::time::Micros;
+use sim::mover::Body as Moved;
 use sim::orders::{SlotAt, Where};
 use sim::slots::Slots;
 use sim::spots::Ground;
+use sim::walk::town::Plans;
+use skills::close::THERE;
 
 type R<T> = Result<T, Refusal>;
+
+/// A queueing body's way this tick: where it stood, the spot asked for, and the planner's corner toward it (none: the
+/// planner refused the route).
+struct Approach {
+    at: Vec3,
+    goal: Option<Vec3>,
+    corner: Option<Vec3>,
+}
+
 struct World<'a> {
     ground: &'a mut dyn Ground,
     slots: &'a Slots,
+    approaches: &'a BTreeMap<Id, Approach>,
 }
 impl Ground for World<'_> {
     fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
@@ -26,6 +45,15 @@ impl Ground for World<'_> {
     }
 }
 impl Where for World<'_> {
+    fn toward(&self, body: Id, to: Vec3) -> Option<Vec3> {
+        let a = self.approaches.get(&body)?;
+        if a.goal == Some(to) {
+            a.corner
+        } else {
+            // A seat change moved this body's spot during the tick: it stands until its new spot's way is asked.
+            Some(a.at)
+        }
+    }
     fn slot(&self, thing: Id) -> Option<SlotAt> {
         let p = self.slots.place(thing)?;
         Some(SlotAt {
@@ -58,6 +86,7 @@ pub fn accept(b: &mut Bodies, source: &Intent, body: Id, id: Id, now: Micros) ->
         let w = World {
             ground,
             slots: &b.slots,
+            approaches: &BTreeMap::new(),
         };
         b.orders
             .accept(&mut b.runner.controller, &w, &intent, id, now)?;
@@ -71,8 +100,56 @@ pub fn accept(b: &mut Bodies, source: &Intent, body: Id, id: Id, now: Micros) ->
     })
 }
 
-/// Seat events wake the queue; its skills run before this tick's one controller step.
-pub fn step(b: &mut Bodies, now: Micros) {
+/// The planner's corner toward each queueing body's spot, read as any walker's is (K18b): the line it found last
+/// tick, else the controller's dry run of the straight way, else asked of it now (the body stands this tick). Returns
+/// the lines asked, for this tick's planner batch.
+fn approaches(b: &mut Bodies, now: Micros) -> (BTreeMap<Id, Approach>, Vec<(Moved, Vec3)>) {
+    let c = &b.runner.controller;
+    let goals: Vec<(Moved, Size, Option<Vec3>)> = b
+        .orders
+        .approaches(c, now)
+        .map(|(body, goal)| {
+            let size = c.build(body.id).map_or(Size::Standard, |d| d.size);
+            (*body, size, goal)
+        })
+        .collect();
+    let asked = RefCell::new(Vec::new());
+    let mut out = BTreeMap::new();
+    for (body, size, goal) in goals {
+        let corner = goal.and_then(|to| {
+            // On its spot: the skill stands without asking, so the planner is not asked either.
+            let (dx, dz) = (to.x - body.pose.position.x, to.z - body.pose.position.z);
+            if i128::from(dx).pow(2) + i128::from(dz).pow(2) <= i128::from(THERE).pow(2) {
+                return Some(to);
+            }
+            let view = b.town.view_for_size(size).ok()?;
+            let plans = Plans {
+                found: &b.planned.lines,
+                asked: &asked,
+            };
+            let [x, z] = view.corner_planned(&body, to, &plans).ok()?;
+            Some(Vec3::new(
+                x,
+                if [x, z] == [to.x, to.z] { to.y } else { 0 },
+                z,
+            ))
+        });
+        out.insert(
+            body.id,
+            Approach {
+                at: body.pose.position,
+                goal,
+                corner,
+            },
+        );
+    }
+    (out, asked.into_inner())
+}
+
+/// Seat events wake the queue; its skills run before this tick's one controller step. Returns the lines its
+/// approaches asked of the planner.
+pub fn step(b: &mut Bodies, now: Micros) -> Vec<(Moved, Vec3)> {
+    let (approaches, asked) = approaches(b, now);
     let changed = b.slots.changes();
     // A climb out of a seat (E11d) is seen as the body's own motion; its record is not kept here.
     let _ = b.slots.climbs();
@@ -80,6 +157,7 @@ pub fn step(b: &mut Bodies, now: Micros) {
         let w = World {
             ground,
             slots: &b.slots,
+            approaches: &approaches,
         };
         for slot in changed {
             if available(&b.slots, slot) {
@@ -115,6 +193,7 @@ pub fn step(b: &mut Bodies, now: Micros) {
             },
         )]);
     }
+    asked
 }
 
 /// Restore the accepted order records in log order, after the bodies and seats have been restored.
@@ -123,6 +202,7 @@ pub fn resume(b: &mut Bodies, parts: &[Part], now: Micros) -> R<()> {
         let w = World {
             ground,
             slots: &b.slots,
+            approaches: &BTreeMap::new(),
         };
         b.orders.resume(&mut b.runner.controller, &w, parts, now)?;
         let slots: std::collections::BTreeSet<Id> = b

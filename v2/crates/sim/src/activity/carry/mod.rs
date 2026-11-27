@@ -86,6 +86,7 @@
 //! the group's node to the floor's frame as one transfer when it crosses the door (E23 rule 9: it stays a child of the
 //! open ground, whose frame holds the building).
 
+pub mod grips;
 #[cfg(test)]
 mod tests;
 pub mod turn;
