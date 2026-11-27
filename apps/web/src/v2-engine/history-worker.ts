@@ -131,7 +131,8 @@ async function seek(base: URL, seq: number, at: number, now: number, floor?: num
   if (under && under.from <= at && at < under.to) under.wanted = true;
   else if (under) under.stopped = true;
   header ??= get(new URL(headerKey(), base)).then((b) => b ?? Promise.reject(new Error('no header')));
-  // V4's walk (history-keys.ts), no day after the world's own today (`now`, the page's world time) nor before `floor`
+  // V4's walk (history-keys.ts): back over days with no index (a still world's) to the newest that has one, asking for
+  // no day after the world's own today (`now`, the page's world time) nor before its first (`floor`)
   const today = Math.floor(now / DAY_US), found = await walk(at, now, floor, (day) => dayIndex(base, day, today));
   if (!found) throw new Error(`no history in the year before ${at} µs`);
   if (under?.key === found.key) Object.assign(under, { stopped: false, wanted: true });

@@ -1158,6 +1158,119 @@ fn streamed_digest(state: &Value, enc: &[Vec<u8>], plan: Option<&Plan>) -> R<Vec
     Ok(h.finish().to_vec())
 }
 
+/// Read-only history observation state. It uses the stream reader's validated plans and row
+/// encodings, without inventing a stream part or relaxing the genuine history cursor checks.
+/// The current SHA-256 format still hashes every cached byte; unsupported deltas use whole validation.
+pub struct ProjectionReader<'a> {
+    header: &'a Header,
+    state: Value,
+    digest: Vec<u8>,
+    enc: Option<Vec<Vec<u8>>>,
+    ordered: bool,
+    frames: std::cell::RefCell<Option<Frames>>,
+    pub fast_rows: usize,
+    pub whole_rows: usize,
+}
+impl<'a> ProjectionReader<'a> {
+    pub fn new(header: &'a Header, state: Value) -> R<Self> {
+        validate(header, &state)?;
+        Ok(Self {
+            header,
+            digest: digest(&state)?,
+            ordered: Self::ordered(&state)?,
+            state,
+            enc: None,
+            frames: std::cell::RefCell::new(None),
+            fast_rows: 0,
+            whole_rows: 0,
+        })
+    }
+    // Legacy validated projections may retain unsorted array rows. Binary-search plans require
+    // sorted live/opaque ids; the whole path preserves acceptance and canonicalizes changed rows.
+    fn ordered(state: &Value) -> R<bool> {
+        for key in [2, 8] {
+            let mut previous = None;
+            for row in arr(field(map(state)?, key)?)? {
+                let id = read_id(&arr(row)?[0])?;
+                if previous.is_some_and(|p| p >= id) {
+                    return Ok(false);
+                }
+                previous = Some(id);
+            }
+        }
+        Ok(true)
+    }
+    pub fn state(&self) -> &Value {
+        &self.state
+    }
+    pub fn digest(&self) -> &[u8] {
+        &self.digest
+    }
+    /// Atomically accept an integrity-bound history row. Returns true for the cached plan path.
+    pub fn apply(&mut self, delta: &Value, before: &[u8], after: &[u8], sequence: u64) -> R<bool> {
+        if before != self.digest
+            || !matches!(map(&self.state)?.get(&1),Some(Value::Uint(v)) if *v<=sequence)
+            || !matches!(map(delta)?.get(&1),Some(Value::Uint(v)) if sequence.checked_add(1)==Some(*v))
+        {
+            return bad("history observation prior digest or sequence");
+        }
+        let plan = if self.ordered {
+            in_place(self.header, &self.state, map(delta)?, &self.frames)?
+        } else {
+            None
+        };
+        if let Some(mut plan) = plan {
+            if self.enc.is_none() {
+                self.enc = Some(
+                    arr(field(map(&self.state)?, 2)?)?
+                        .iter()
+                        .map(encoded)
+                        .collect::<R<_>>()?,
+                );
+            }
+            let actual = streamed_digest(
+                &self.state,
+                self.enc.as_deref().unwrap_or_default(),
+                Some(&plan),
+            )?;
+            if actual != after {
+                return bad("history observation result digest");
+            }
+            plan.swap(&mut self.state);
+            if let Err(e) = plan.encodings_after(self.enc.as_mut().expect("created"), &self.state) {
+                plan.swap(&mut self.state);
+                self.enc = None;
+                self.frames.replace(None);
+                return Err(e);
+            }
+            if let Some(f) = self.frames.borrow_mut().as_mut() {
+                for (id, to) in &plan.moved {
+                    f.reparent(*id, *to);
+                }
+                for (_, id, _) in &plan.removed {
+                    f.remove(*id);
+                }
+            }
+            self.digest = actual;
+            self.fast_rows += 1;
+            Ok(true)
+        } else {
+            let next = apply_observation(self.header, &self.state, delta)?;
+            let actual = digest(&next)?;
+            if actual != after {
+                return bad("history observation result digest");
+            }
+            self.ordered = Self::ordered(&next)?;
+            self.state = next;
+            self.digest = actual;
+            self.enc = None;
+            self.frames.replace(None);
+            self.whole_rows += 1;
+            Ok(false)
+        }
+    }
+}
+
 pub struct PublicPlayer {
     header: Header,
     baseline: Vec<u8>,
