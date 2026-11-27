@@ -40,13 +40,20 @@ fn without_roles(json: &str) -> String {
 }
 
 /// The construction and carpentry entries, loaded as a world with both would load them.
-struct Shade {
-    structure: Structure,
-    full: BTreeMap<&'static str, String>,
-    slots: BTreeMap<String, u64>,
+pub(super) struct Shade {
+    pub(super) structure: Structure,
+    pub(super) full: BTreeMap<&'static str, String>,
+    pub(super) slots: BTreeMap<String, u64>,
+    site: &'static str,
 }
 
 fn shade() -> Shade {
+    shade_with(&[], "mars:shade_site")
+}
+
+/// The same with `extra` entries (a plain kind name and its entry's JSON) loaded beside them, and `site` the kind
+/// whose slots the steps name.
+pub(super) fn shade_with(extra: &[(&'static str, &str)], site: &'static str) -> Shade {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let mut files: Vec<(String, String)> = Vec::new();
     for family in ["construction", "carpentry"] {
@@ -62,6 +69,12 @@ fn shade() -> Shade {
                 entry_to_kind(&without_roles(&json)).expect("an entry"),
             ));
         }
+    }
+    for (name, json) in extra {
+        files.push((
+            format!("test/{name}"),
+            entry_to_kind(&without_roles(json)).expect("an entry"),
+        ));
     }
     files.sort();
     let sources: Vec<(&str, &str)> = files
@@ -87,10 +100,11 @@ fn shade() -> Shade {
         "mars:rack_beam",
     ]
     .into_iter()
+    .chain(extra.iter().map(|(name, _)| *name))
     .map(|k| (k, full_of(k)))
     .collect();
     let slots = kinds
-        .get(&full["mars:shade_site"])
+        .get(&full[site])
         .unwrap()
         .slots
         .iter()
@@ -100,6 +114,7 @@ fn shade() -> Shade {
         structure: Structure::new(&kinds, &sources),
         full,
         slots,
+        site,
     }
 }
 
@@ -172,14 +187,14 @@ fn part(header: &Header, effects: &[Effect]) -> Part {
 }
 
 /// A world with the site in it, and the ids its steps use.
-struct World {
-    s: Shade,
+pub(super) struct World {
+    pub(super) s: Shade,
     live: Replica,
     mint: Minter,
     site: Id,
-    bents: [Id; 2],
-    rails: [Id; 2],
-    cloth: Id,
+    pub(super) bents: [Id; 2],
+    pub(super) rails: [Id; 2],
+    pub(super) cloth: Id,
     /// Each part's joints, (link, other end), as committed.
     joints: BTreeMap<Id, Vec<(Id, Id)>>,
     /// Each bent's hold: its activity and its members' links.
@@ -188,7 +203,11 @@ struct World {
 
 impl World {
     fn new() -> World {
-        let s = shade();
+        World::of(shade())
+    }
+
+    /// A world with `s`'s site in it.
+    pub(super) fn of(s: Shade) -> World {
         let mut mint = Minter::new(Scope([0x5a; 16]));
         let mut id = || mint.mint().expect("an id");
         let root = id();
@@ -204,7 +223,7 @@ impl World {
                 root,
                 vec![Change::Create {
                     node: site,
-                    kind: n(&s.full["mars:shade_site"]),
+                    kind: n(&s.full[s.site]),
                     pose: pose(root, None),
                     audience: Audience::Everyone,
                     fields: BTreeMap::new(),
@@ -225,7 +244,7 @@ impl World {
         }
     }
 
-    fn id(&mut self) -> Id {
+    pub(super) fn id(&mut self) -> Id {
         self.mint.mint().expect("an id")
     }
 
@@ -257,7 +276,13 @@ impl World {
     }
 
     /// `part` of `kind` put in the site's `slot`, joined to `to`.
-    fn put(&mut self, part: Id, kind: &str, slot: &str, to: &[Id]) -> Result<(), (String, String)> {
+    pub(super) fn put(
+        &mut self,
+        part: Id,
+        kind: &str,
+        slot: &str,
+        to: &[Id],
+    ) -> Result<(), (String, String)> {
         let mut changes = vec![Change::Create {
             node: part,
             kind: n(&self.s.full[kind]),
@@ -282,8 +307,35 @@ impl World {
         Ok(())
     }
 
+    /// Two parts put in the site's slots in one change, joined to each other.
+    pub(super) fn put_both(
+        &mut self,
+        x: (Id, &str, &str),
+        y: (Id, &str, &str),
+    ) -> Result<(), (String, String)> {
+        let mut changes = Vec::new();
+        for (part, kind, slot) in [x, y] {
+            changes.push(Change::Create {
+                node: part,
+                kind: n(&self.s.full[kind]),
+                pose: pose(self.site, Some(self.s.slots[slot])),
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            });
+        }
+        let link = self.id();
+        changes.push(Change::Link {
+            link,
+            ty: n(JOINT),
+            ends: [x.0, y.0],
+            owner: End::First,
+            audience: Audience::Everyone,
+        });
+        self.write(self.site, changes)
+    }
+
     /// A bent raised into `slot` and held by `crew` (a started hold under it, its members linked).
-    fn raise(&mut self, k: usize, slot: &str, crew: usize) -> Result<(), (String, String)> {
+    pub(super) fn raise(&mut self, k: usize, slot: &str, crew: usize) -> Result<(), (String, String)> {
         let bent = self.bents[k];
         let mut changes = vec![Change::Create {
             node: bent,
@@ -331,7 +383,7 @@ impl World {
     }
 
     /// Every holder of bent `k` lets go: its hold ends.
-    fn release(&mut self, k: usize) -> Result<(), (String, String)> {
+    pub(super) fn release(&mut self, k: usize) -> Result<(), (String, String)> {
         let (act, _) = self.holds[k].clone().expect("held");
         self.write(act, vec![Change::Remove { node: act }])?;
         self.holds[k] = None;
@@ -340,7 +392,7 @@ impl World {
 
     /// `part` taken out of the site: its joints undone (each by the part that owns it, the cloth's to a rail
     /// included) and the part removed, in one change.
-    fn take_out(&mut self, part: Id) -> Result<(), (String, String)> {
+    pub(super) fn take_out(&mut self, part: Id) -> Result<(), (String, String)> {
         let mut changes: Vec<Change> = Vec::new();
         for (owner, js) in &self.joints {
             for (link, other) in js {
@@ -374,7 +426,7 @@ impl World {
     }
 }
 
-fn refused(r: Result<(), (String, String)>, name: &str, says: &str, step: &str) {
+pub(super) fn refused(r: Result<(), (String, String)>, name: &str, says: &str, step: &str) {
     match r {
         Err((got, detail)) => {
             println!("{step}: refused {got}: {detail}");
@@ -385,7 +437,7 @@ fn refused(r: Result<(), (String, String)>, name: &str, says: &str, step: &str) 
     }
 }
 
-fn accepted(r: Result<(), (String, String)>, step: &str) {
+pub(super) fn accepted(r: Result<(), (String, String)>, step: &str) {
     println!("{step}: accepted");
     if let Err((name, detail)) = r {
         panic!("{step}: refused {name}: {detail}");
