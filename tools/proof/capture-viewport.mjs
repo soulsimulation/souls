@@ -81,6 +81,15 @@ export async function prepareCaptureViewport(page, { size, directory, signal, ti
       frame = await rawFrame(cdp, page, signal, timeoutMs); evidence.corrected = true;
       evidence.frames.push({ phase: 'after', metadata: frame.metadata });
     }
+    const residual = captureDeficit(size, frame.metadata);
+    if (residual.width || residual.height) {
+      // A browser window can clamp its minimum width. Resize its render surface, preserving the predeclared CSS viewport.
+      writeFileSync(join(directory, 'raw-window-corrected.jpg'), Buffer.from(frame.data, 'base64'), { flag: 'wx' });
+      evidence.surfaceCorrection = { method: 'Emulation.setVisibleSize', width: size.width, height: size.height, residual };
+      await cdp.send('Emulation.setVisibleSize', { width: size.width, height: size.height });
+      geometry(await css()); await waitCapturePresentation(page, { signal, timeoutMs });
+      frame = await rawFrame(cdp, page, signal, timeoutMs); evidence.frames.push({ phase: 'visible-surface', metadata: frame.metadata });
+    }
     const after = captureDeficit(size, frame.metadata); if (after.width || after.height) fail('raw-viewport-mismatch');
     const raw = join(directory, 'raw-verified.jpg'); writeFileSync(raw, Buffer.from(frame.data, 'base64'), { flag: 'wx' }); inspectCaptureFrame(raw, size);
     await page.screenshot({ path: join(directory, 'reference.png') });

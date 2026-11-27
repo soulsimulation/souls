@@ -27,3 +27,9 @@ test('presentation waits remain bounded when rendering stalls or the owner abort
   const wait = waitCapturePresentation(stalled, { signal: controller.signal, timeoutMs: 5000 });
   controller.abort(Error('owned-interruption')); await assert.rejects(wait, /owned-interruption/);
 });
+
+test('portrait minimum-window width remains a mismatch rather than an accepted padded recording', () => {
+  const size = { width: 390, height: 844 }, actual = { width: 500, height: 844 };
+  assert.deepEqual(captureDeficit(size, { deviceWidth: actual.width, deviceHeight: actual.height }), { width: -110, height: 0 });
+  assert.throws(() => checkCapturePixels(Buffer.alloc(actual.width * actual.height * 3), actual, size), /resolution-mismatch/);
+});
