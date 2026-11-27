@@ -41,15 +41,16 @@ let relay, arrivals, roots, rt;
 /**
  * A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile;
  * `refuse` closes each new connection at once; `stall(true)` moves no byte either way on any connection, new ones too,
- * and closes none (a stalled network), until `stall(false)` lets what waited through. While `held` is a list, what the
- * gateway sends is kept on it in order and not passed on; `release(n)` passes on its first `n` pieces; `onUp` is
- * called at the next bytes a client sends, once.
+ * and closes none (a stalled network), until `stall(false)` lets what waited through. `onUp` is called once, as the
+ * next frame of data a client sends passes; `hush()` drops what the gateway sends from then on to the connections
+ * there are (new ones hear it); `say(text)` gives each client a text frame of the relay's own, as if the gateway's.
  */
 function makeRelay(port) {
   const pairs = new Set();
   const r = {
-    deaf: false, refuse: false, stalled: false, port: 0, held: null, onUp: null,
-    release: (n) => { for (const [to, d] of r.held.splice(0, n)) to.write(d); },
+    deaf: false, refuse: false, stalled: false, port: 0, onUp: null,
+    hush: () => { for (const [down] of pairs) down.hushed = true; },
+    say: (text) => { for (const [down] of pairs) if (!down.destroyed) down.write(Buffer.concat([Buffer.from([0x81, text.length]), Buffer.from(text)])); },
     cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); },
     stall: (on) => { r.stalled = on; for (const pair of pairs) for (const s of pair) if (on) s.pause(); else s.resume(); },
   };
@@ -58,8 +59,8 @@ function makeRelay(port) {
     const up = createConnection(port, '127.0.0.1');
     pairs.add([down, up]);
     if (r.stalled) { down.pause(); up.pause(); }
-    down.on('data', (d) => { up.write(d); const f = r.onUp; r.onUp = null; f?.(); });
-    up.on('data', (d) => { if (r.held) r.held.push([down, d]); else if (!r.deaf) down.write(d); });
+    down.on('data', (d) => { up.write(d); if ((d[0] & 0x0f) === 2) { const f = r.onUp; r.onUp = null; f?.(); } }); // 2: binary
+    up.on('data', (d) => { if (!r.deaf && !down.hushed) down.write(d); });
     for (const s of [down, up]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); up.destroy(); }); }
   });
   r.server = server;
@@ -535,37 +536,33 @@ test('#4980: a socket given up over a stalled network is let go at once; an act 
   console.log(JSON.stringify({ issue: 4980, letGoMs, backMs: Math.round(backMs), givenUpAfter, finals: finals.length }));
 });
 
-test('#4980: frames heard just after a sync was asked, then a stalled network: let go 10 s after the last of them, never found slow by them', async () => {
+test('#4980: a frame heard just after a sync was asked, then nothing: the socket is let go 10 s after that frame, never found slow by it', async () => {
   await waitFor(async () => { const s = await status(); return s.connected && !s.syncing && s; });
   const said = () => readFileSync(rt.log, 'utf8').split('\n');
   const from = said().length;
-  let a, letGoMs;
-  // What the gateway sends is held from here: this act's answers wait in the relay, ahead of any sync's answer.
-  relay.held = [];
+  let t0 = null, letGoMs;
+  // As the sync's ask passes, the gateway is heard no more, but for one frame that was on its way: it reaches the daemon
+  // 100 ms after its ask (a text frame that says nothing to it). CI's failures were this order: a sync asked at
+  // sign-in, the subscription's frames just after it, and the test before this one stalling the network then. The
+  // frame after the ask had the socket found behind, as on a slow link, and kept for 60 s.
+  relay.onUp = () => { relay.hush(); t0 = performance.now(); setTimeout(() => relay.say('{}'), 100); };
   try {
-    a = await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP });
-    outputs.push(JSON.stringify(a));
-    assert.equal(a.sent, true, JSON.stringify(a).slice(0, 300));
-    await waitFor(() => relay.held.length > 0, 10_000);
-    await sleep(1500); // a look asks the world once the copy is over 1 s old
-    const before = relay.held.length;
-    // The look's sync is asked; as its ask passes, the act's answers are let through: frames heard just after the
-    // ask, as any that were on their way. The sync's own answer never comes: from here the network is stalled.
-    const passed = new Promise((ok) => { relay.onUp = () => { relay.release(before); ok(performance.now()); }; });
-    request(rt.socket, { op: 'look' }, 30_000).catch(() => {});
-    const t0 = await passed;
-    const heard = await waitFor(async () => { const s = await status(); return !s.unanswered.includes(a.sequence) && s; }, 5000);
-    assert.ok(heard.connected && heard.syncing, 'the act\'s answer was heard while the sync waits for its own');
+    // A look asks the world once the copy is over 1 s old: asked again until a sync's ask has passed.
+    for (let i = 0; t0 === null; i++) {
+      assert.ok(i < 1000, 'a look asked the world within 10 s');
+      if (i % 50 === 0) request(rt.socket, { op: 'look' }, 30_000).catch(() => {});
+      await sleep(10);
+    }
+    assert.equal((await status()).syncing, true, 'the sync waits for its answer');
     await waitFor(async () => !(await status()).connected, 20_000);
     letGoMs = Math.round(performance.now() - t0);
     assert.ok(letGoMs < 15_000, `let go ${letGoMs} ms after the last frame`);
   } finally {
     relay.onUp = null;
-    relay.held = null;
   }
   assert.equal(said().slice(from).filter((l) => /behind, not reconnecting/.test(l)).length, 0, 'never found slow');
   await waitFor(async () => (await status()).connected, 10_000);
-  console.log(JSON.stringify({ issue: 4980, framesAfterAsk: true, letGoMs }));
+  console.log(JSON.stringify({ issue: 4980, frameAfterAsk: true, letGoMs }));
 });
 
 test('#4977: a wait under way is told at once when the connection is lost, and when it is back with the gap', async () => {
