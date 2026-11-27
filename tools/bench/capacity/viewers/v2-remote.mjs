@@ -13,7 +13,12 @@
 //
 //   node tools/bench/capacity/viewers/v2-remote.mjs --base https://stream.example --stream /s/w/<world>/views/.../everyone/
 //        --pkg <replica wasm-bindgen pkg> --viewers 500 --arm even|uneven [--secs 240] [--procs 2] [--slow 0]
-//        [--encoding 'gzip, deflate, br, zstd'] [--headers browser|bare] [--start-at <unix ms>]
+//        [--encoding 'gzip, deflate, br, zstd'] [--headers browser|bare] [--start-at <unix ms>] [--arrive-secs <s>]
+//        [--stop-on-refusal]
+//
+// --arrive-secs s (even arm): each reader arrives at its own random moment within the first s seconds, as people do,
+// instead of all shares' readers at the same evenly spaced moments. --stop-on-refusal: the share prints its line and
+// ends at the first 403 or 429, so a test that the CDN starts refusing stops instead of repeating the refused reads.
 //
 // --headers browser (the default) sends what a desktop Chrome page's stream worker sends to the stream host: a Chrome
 // User-Agent, Accept, Accept-Language, Accept-Encoding, the client hints, the fetch metadata and the page's Origin and
@@ -24,7 +29,7 @@ import { fork } from 'node:child_process';
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
 const BASE = opt('base'), STREAM = opt('stream'), PKG = opt('pkg'), N = Number(opt('viewers', 0)), ARM = opt('arm', 'even');
 const SECS = Number(opt('secs', 240)), PROCS = Number(opt('procs', 2)), SLOW = Number(opt('slow', 0)), ENC = opt('encoding', 'gzip, deflate, br, zstd');
-const HEADERS = opt('headers', 'browser');
+const HEADERS = opt('headers', 'browser'), ARRIVE = opt('arrive-secs'), STOP_ON_REFUSAL = argv.includes('--stop-on-refusal');
 const START_AT = Number(opt('start-at', Date.now())), TAKE_MS = 10_000;
 if (!BASE || !STREAM || !PKG || !(N >= 0) || !['even', 'uneven'].includes(ARM) || !['browser', 'bare'].includes(HEADERS)) throw new Error('--base, --stream, --pkg, --viewers, --arm even|uneven and --headers browser|bare');
 const page = `https://${new URL(BASE).hostname.replace(/^stream\./, '')}`;
@@ -65,7 +70,13 @@ const take = async () => (await Promise.all(kids.map((k) => (k.dead ? null : new
 
 await sleep(START_AT - Date.now());
 const t0 = Date.now();
-each(N, (n) => ({ add: n, overMs: ARM === 'uneven' ? 5_000 : 30_000 }));
+if (ARM === 'even' && ARRIVE != null) {
+  // one reader at a time, each at its own random moment, on the drivers in turn
+  for (let v = 0; v < N; v++) {
+    const k = kids[v % PROCS];
+    setTimeout(() => !k.dead && k.send({ add: 1, overMs: 0 }), Math.random() * Number(ARRIVE) * 1000);
+  }
+} else each(N, (n) => ({ add: n, overMs: ARM === 'uneven' ? 5_000 : 30_000 }));
 let churned = false;
 for (let k = 1; (k - 1) * TAKE_MS < SECS * 1000; k++) {
   await sleep(t0 + k * TAKE_MS - Date.now());
@@ -94,6 +105,7 @@ for (let k = 1; (k - 1) * TAKE_MS < SECS * 1000; k++) {
     sum.loopMaxMs = Math.max(sum.loopMaxMs ?? 0, x.loopMaxMs);
   }
   console.log(JSON.stringify(sum));
+  if (STOP_ON_REFUSAL && Object.keys(sum.errors ?? {}).some((e) => / (403|429)\b/.test(e))) break;
 }
 kids.forEach((k) => !k.dead && k.send({ stop: true }));
 await sleep(1000);

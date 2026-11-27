@@ -155,7 +155,7 @@ async function run(world: World, newest: number, served: number, polls: number, 
       const body = files(new URL(String(input)).pathname);
       return body === null ? new Response(null, { status: 404 }) : new Response(body as BodyInit);
     }) as typeof fetch;
-    if(startup)globalThis.setTimeout=((fn:()=>void,ms?:number)=>{if(ms===250){startup.waits.push(ms);return before.setTimeout(fn,0);}return before.setTimeout(fn,ms);}) as typeof setTimeout;
+    if(startup)globalThis.setTimeout=((fn:()=>void,ms?:number)=>{if(ms===250||ms===500){startup.waits.push(ms);return before.setTimeout(fn,0);}return before.setTimeout(fn,ms);}) as typeof setTimeout;
     (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => (ticks.push(fn), 1);
     (globalThis as { self?: unknown }).self = { onmessage: null, postMessage: (m: Msg) => got.push(m) };
     await import(new URL(`./worker.ts?${tag}`, import.meta.url).href);
@@ -309,11 +309,13 @@ test('move and end envelopes retain run ownership, including legacy ends without
 
 const startupOf=(...replies:Startup['replies']):Startup=>({replies,asked:0,active:0,most:0,waits:[],timed:[]});
 test('startup retries missing and unavailable pointers and a transient request failure before normal playback',async()=>{
-  const startup=startupOf(404,503,'reject'),messages:Msg[]=[];
-  await run(new World(START,[{}]),0,0,1,m=>messages.push(...m),'startup-retry',undefined,startup);
+  // #5068 item 13: a missing pointer (404, a starting world) is read again at the poll's pace; an unavailable one and a
+  // failed request back off, here by their whole windows (250 ms after one, 500 ms after two in a row).
+  const startup=startupOf(404,503,'reject'),messages:Msg[]=[],random=Math.random;Math.random=()=>1;
+  try{await run(new World(START,[{}]),0,0,1,m=>messages.push(...m),'startup-retry',undefined,startup);}finally{Math.random=random;}
   assert.deepEqual(messages.filter(m=>m.t==='error'),[]);
   assert.equal(messages.filter(m=>m.t==='snapshot').length,1);assert.equal(messages.filter(m=>m.t==='part').length,1);
-  assert.deepEqual(startup.waits,[250,250,250],'failed first reads use the normal poll cadence');
+  assert.deepEqual(startup.waits,[250,250,500],'a missing pointer keeps the poll cadence; refused and failed first reads back off');
   assert.equal(startup.most,1,'first pointer requests never overlap');assert.ok(startup.timed.every(Boolean),'first and later pointer reads have a deadline');
 });
 test('startup gives up a hung first request and recovers, but malformed pointer bytes remain an error',async()=>{

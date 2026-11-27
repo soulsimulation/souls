@@ -1111,5 +1111,16 @@ fn node_in(v: Value, links: &mut BTreeMap<Id, LinkIn>) -> R<NodeIn> {
     if let Some(c) = m.remove(&10) {
         n.children = array(c)?.into_iter().map(hash_bytes).collect::<R<_>>()?;
     }
+    // A key this build does not read is refused, never dropped: a build from before #4713 read Eden's checkpoint,
+    // whose ground named its terrain by key 0, left the key out, and ran and checkpointed Eden without its terrain.
+    if let Some(k) = m.keys().next() {
+        return refuse(
+            "checkpoint-record",
+            format!(
+                "{} holds key {k}, which this build does not read",
+                show(n.id)
+            ),
+        );
+    }
     Ok(n)
 }

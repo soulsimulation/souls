@@ -52,6 +52,17 @@ configured issuer, the claims `sub`, `exp`, `iat`, `nbf`, `sid` and `azp` all pr
 parties. An email address or provider subject sent by a caller is never enough on its own. New accounts have ordinary
 rights; there is no email-based admin role and no merging of accounts across providers.
 
+The launcher checks a creator's session in a child process per check (`creator-auth.mjs`), with the auth env file by
+path and the token on stdin. Since #2839 that child is `verify-session.mjs`, which runs the same checks and the same
+registry binding with the launcher's own code (`clerk-session.mjs`, nothing from `apps/server`). A JWKS it cannot
+fetch or read refuses every token. For one release the old check, `verify-creator.mjs` (the old server's
+`auth.ts`), stays behind a switch file read on every check, so it can be brought back without a deploy or a restart:
+
+```sh
+echo old > <data>/creator-verifier    # the old server's check
+rm <data>/creator-verifier            # the launcher's own (the default)
+```
+
 `AUTH_PROVIDER` also accepts `none` (no provider tokens) and `privy` (the earlier provider, kept for compatibility);
 the stages always run `clerk`.
 

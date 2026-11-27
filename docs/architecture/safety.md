@@ -34,7 +34,7 @@ Account caps limit one identity; they do not prove that two accounts are two peo
 ## Uploads and moderation
 
 Every uploaded file (Soul body models, god models and images, profile photos) passes one gate
-(`apps/server/src/moderation/validate.ts`): format by magic bytes, size, triangle and texture budgets, malformed
+(`tools/body-authoring/admit/validate.ts`): format by magic bytes, size, triangle and texture budgets, malformed
 containers refused, metadata stripped (glTF `extras`, EXIF/XMP, PNG text chunks). A clean file comes back byte-identical,
 so its content address is stable. A classifier hook then allows, quarantines or rejects
 (`moderation/classifier.ts`; `SIM_UPLOAD_CLASSIFIER=heuristic` selects a local stub; a classifier error quarantines).

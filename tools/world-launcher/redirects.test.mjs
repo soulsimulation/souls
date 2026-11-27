@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { legacyWorldFor, parseRedirects, redirectSwitch, redirectTarget } from './redirects.mjs';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(3);
 
 test('root paths go where the laptop proxy sent them', () => {

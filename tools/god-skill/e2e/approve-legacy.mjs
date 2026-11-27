@@ -34,7 +34,7 @@ const report = { origin, steps: [], failures: [] };
 const check = (name, ok, detail = {}) => { report.steps.push({ name, ok: !!ok, ...detail }); if (!ok) report.failures.push(name); console.log(`${ok ? '✔' : '✖'} ${name} ${JSON.stringify(detail).slice(0, 400)}`); return !!ok; };
 
 // ---------- the launcher in Clerk mode (synthetic issuer)
-const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../../apps/server/test/clerk-fixture.ts');
+const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../lib/clerk-fixture.ts');
 const keys = await clerkKeys(origin);
 const dir = mkdtempSync(join(tmpdir(), 'approve-legacy-'));
 writeFileSync(join(dir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
@@ -44,7 +44,7 @@ const env = { ...process.env, WORLD_KEY: 'eden', WORLD_ID: 'eden-lap-1', ENGINE:
   WEB_DIR: resolve(args.web), MARS_WEB_DIR: resolve(args['mars-web']),
   AUTH_PROVIDER: 'clerk', ACCOUNT_AUTH_REQUIRED: '1', ACCOUNT_REGISTRY_PATH: join(dataDir, 'accounts.sqlite'),
   CLERK_PUBLISHABLE_KEY: PUBLISHABLE_KEY, CLERK_ISSUER_URL: ISSUER, CLERK_AUTHORIZED_PARTIES: origin,
-  SIM_TEST_JWKS_FILE: join(dir, 'jwks.json'), NODE_OPTIONS: `--import=${resolve(root, 'apps/server/test/clerk-jwks-preload.mjs')}` };
+  SIM_TEST_JWKS_FILE: join(dir, 'jwks.json'), NODE_OPTIONS: `--import=${resolve(root, 'tools/lib/clerk-jwks-preload.mjs')}` };
 delete env.DEV_AUTH;
 const launcher = spawn(process.execPath, ['apps/server/src/main.ts'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let launcherLog = ''; launcher.stdout.on('data', (d) => { launcherLog += d; }); launcher.stderr.on('data', (d) => { launcherLog += d; });
