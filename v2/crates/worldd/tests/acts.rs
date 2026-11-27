@@ -2196,6 +2196,15 @@ fn endings(run: &Run) -> Vec<String> {
     out
 }
 
+/// Whether the log holds a tick's record after its first `kept` records: a world started again on it has run a tick.
+fn ticked_after(run: &Run, kept: usize) -> bool {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    recover(&log).unwrap().records.iter().skip(kept).any(|rec| {
+        !sim::recorder::is_input(rec)
+            && Part::read(rec).is_ok_and(|p| p.rest.get(&answers::TICK).is_some())
+    })
+}
+
 /// N2 (0.133): a world stopped with a form's run open (a take, walking to its thing) and a gateway walk under way,
 /// then started again from its log. The open run is ended `restart` in the log in the first tick; each intent, sent
 /// again as the gateway sends the unanswered ones, starts afresh and ends with its receipt, well before its deadline.
@@ -2208,15 +2217,27 @@ fn n2_a_run_open_at_a_restart_ends_by_name_and_its_intent_starts_again() {
     let (run, mut a, mut b) = serve_on("n2a", store.clone());
     b.send("test:walk", Some(ground()), point(south(12_000_000)));
     b.started();
-    std::thread::sleep(Duration::from_millis(1500));
+    // Each wait is on the world, not on a time: here the walker's first step in the log, below the restarted world's
+    // first tick.
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while at(&run.replay(), w2()) == at2() && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     a.send("test:take", Some(vessel()), BTreeMap::new());
     a.started();
     let (take, walk) = (a.3.clone(), b.3.clone());
     assert_ne!(at(&run.replay(), w2()), at2(), "the walker was under way");
     run.world.stop();
+    let kept = recover(&store.0.lock().unwrap().bytes.clone())
+        .unwrap()
+        .records
+        .len();
 
     let (run, mut a, mut b) = serve_on("n2b", store);
-    std::thread::sleep(Duration::from_millis(300));
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while !ticked_after(&run, kept) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     assert_eq!(
         endings(&run),
         ["souls:restart"],
