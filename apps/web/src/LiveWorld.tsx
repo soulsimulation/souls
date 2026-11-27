@@ -396,6 +396,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // ranges and the slice moves with the camera (ridges seemed to rise and recede). Depth precision is set by near.
     const camera = (adopted?.camera as THREE.PerspectiveCamera|undefined) ?? new THREE.PerspectiveCamera(45, 1, 0.1, 2400);
     const followView=new WorldFollow();
+    const followQuery=new URLSearchParams(location.search),experimentalFollow=followQuery.get('camera-follow')==='experimental';
+    let followController:import('./cinematography/controller.ts').FollowController|null=null,experimentalFollowOwned=false;
+    if(experimentalFollow||followQuery.get('camera-follow-test')==='1')void import('./cinematography/controller.ts').then(({FollowController})=>{if(abort.signal.aborted)return;followController=new FollowController(experimentalFollow,followQuery.get('camera-follow-test')==='1');const probe=()=>followController!.read();Object.defineProperty(window,'__followExperiment',{configurable:true,value:probe});abort.signal.addEventListener('abort',()=>{experimentalFollowOwned=false;if((window as unknown as {__followExperiment?:unknown}).__followExperiment===probe)delete (window as unknown as {__followExperiment?:unknown}).__followExperiment;});}).catch(()=>{if(!abort.signal.aborted)console.error('[camera-follow] experimental-controller-load-failed; legacy remains active');});
     // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
     let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
     // #1963, 0.135 P3: ?track=<same-origin file> gives the camera a planned track (a recorded range, or a live take's); nothing loads without it.
@@ -405,7 +408,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,lifecycle:'',
-    },(before,after)=>followView.userInput(before,after));
+    },(before,after)=>{if(experimentalFollowOwned&&context.current.cameraMode==='follow')followController?.gesture(before,after);else followView.userInput(before,after);});
     let controls=newControls();
     navigation=new WorldNavigation(renderer.domElement,camera,()=>controls.target,()=>({
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,
@@ -595,7 +598,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const c=context.current,soul=c.sim.conn.replica.souls.get(soulId),p=soul?shown.current.entities[soul.entityId]?.p:null;
         if(!soul||!p||past.current||c.loading||c.graphicsUnavailable||!shown.current.take||(initialGate&&initialGate.snapshot().stage!=='ready'))return false;
         soulFlightChip=!!opts?.chip;  // #892: a touch's follow shows the bottom chip, not the card (same flight)
-        followView.reset();followed=null;  // #1316: Follow couples the camera again, whatever the mode was
+        followView.reset();experimentalFollowOwned=false;followed=null;  // #1316: Follow couples the camera again, whatever the mode was
         navigation?.release();rts.release();groupSelection.clear();c.onSelect(soulId,soulFlightChip?'chip':undefined);c.setThing(null);
         const target=new THREE.Vector3(p[0],p[1]+1,p[2]);
         if(reducedMotionQuery?.matches){soulFlight=null;c.cameraMode='follow';c.follow=true;c.setCameraMode('follow');hapticTick();return true;}
@@ -606,7 +609,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       move: delta => navigation?.move(delta) ?? false,
       inputOwned: () => navigation?.inputOwned ?? false,
       reset: () => {
-        navigation?.release(); broadcast.reset();followView.reset();followMotion.reset();followed=null;
+        navigation?.release(); broadcast.reset();followView.reset();followMotion.reset();followController?.reset();experimentalFollowOwned=false;followed=null;
         if(context.current.cameraMode==='broadcast')return true;
         if(context.current.cameraMode==='follow'){
           const c=context.current,id=c.selected?c.sim.conn.replica.souls.get(c.selected)?.entityId:c.thing;
@@ -729,7 +732,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       clearNewcomerMarkers();restMarkers?.dispose();restMarkers=null;publication=verifiedPublication??null;expansionSceneInfo=info;
       refreshCameraGround();
       people?.dispose();people=null;applied=null;
-      base=info.scene;nativeBoat=info.shore?.metadata.boat&&info.shore.appearance?{layout:info.shore.metadata.boat.layout,proposal:info.shore.appearance.boat}:undefined;dayTicks=info.clock?.dayTicks??null;dayOrigin=info.clock?.origin??null;broadcast.reset();followView.reset();followed=null;
+      base=info.scene;nativeBoat=info.shore?.metadata.boat&&info.shore.appearance?{layout:info.shore.metadata.boat.layout,proposal:info.shore.appearance.boat}:undefined;dayTicks=info.clock?.dayTicks??null;dayOrigin=info.clock?.origin??null;broadcast.reset();followView.reset();experimentalFollowOwned=false;followed=null;
       capturedPlatforms=info.platforms??null;
       geometry.dispose();geometry=new WorldGeometry(base,info.ground,info.commons,info.shore,info.assetRoot);scene.add(geometry.group);light.fit(geometry.bounds);light.setCommonsReadability(geometry.hasAuthoredCommons);dressForkLand(geometry.group);  // MARSLAND-FORK: layer 3 around the Mars fork
       // Cosmetic paths require the verified full public capture and exact Core
@@ -1042,6 +1045,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
 
       // names over Souls, the selection ring, follow
       const { selected: soulId, thing: thingId, follow: following, cameraMode: viewing } = context.current;
+      const followEligibilityStart=followController?performance.now():0;
+      const selectedBody=soulId?s.conn.replica.souls.get(soulId)?.entityId:null;
+      const experimentalFollowing=experimentalFollow&&!!followController&&viewing==='follow'&&!!selectedBody&&records[selectedBody]?.kind==='human'&&!eyes&&!shotMode&&!shotTrack;
+      experimentalFollowOwned=experimentalFollowing;
+      let followSetupMs=followController?performance.now()-followEligibilityStart:0;
       if(following||soulId&&!groupSelection.has(soulId))groupSelection.clear();
       if (viewing !== previousCameraMode) { broadcast.reset(); previousCameraMode = viewing; renderer.domElement.dataset.cameraShot=''; }
       renderer.domElement.dataset.cameraMode = viewing;
@@ -1136,11 +1144,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const q = thingId.startsWith('kin:') ? kin.view.object(thingId)?.position.toArray() : at.entities[thingId]?.p;
         if (q) focus = spot.set(q[0], q[1], q[2]);
       }
+      let legacyFollowMs=0;const legacyFollowStart=followController?performance.now():0;
       ring.visible = !!focus;
       if (!following) {followed = null;followView.reset();followMotion.reset();followTick=null;followEpoch=null;}
       if (focus) {
         ring.position.set(focus.x, markHeight(waterDetail.regions, focus.x, thingId?.startsWith('kin:') ? 0 : focus.y, focus.z) + 0.03, focus.z);  // on the water around a swimmer
-        if (following) {
+        if (following&&!experimentalFollowing) {
           const target = new THREE.Vector3(focus.x, (thingId?.startsWith('kin:') ? 0 : focus.y) + 1, focus.z);
           const offset = camera.position.clone().sub(controls.target);
           const focusId = soulId ?? thingId;
@@ -1163,6 +1172,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           if(focusRiding){followMotion.reset(target.toArray());controls.target.copy(target);}
         }
       }
+      if(followController)legacyFollowMs=performance.now()-legacyFollowStart;
       if(viewing==='follow' && at.take && !focus&&initialGate?.snapshot().stage==='ready'){navigation?.release();context.current.setCameraMode('manual');followed=null;}
       if(arrivalPending&&s.conn.welcome&&(s.conn.replica.souls.size||(arrivalWelcome??=now)<now-4000)){const framed=arrivalPending;arrivalPending=null;if(!s.conn.replica.souls.size&&context.current.cameraMode==='broadcast'){controls.target.fromArray(framed.target);camera.position.fromArray(framed.eye);camera.lookAt(controls.target);context.current.cameraMode='manual';context.current.setCameraMode('manual');autoFrame='pending';}}
       if(autoFrame&&context.current.cameraMode!=='manual')autoFrame=null;
@@ -1202,7 +1212,16 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       try{godLightning?.update(shown.current?.tick??NaN,camera,step,!!reducedMotionQuery?.matches);}catch{}
       if(controls.enabled)controls.update();
       rts.afterControls();  // B2: the head offset over the pivot (controls.update aims at the pivot)
-      if(context.current.cameraMode==='follow'&&focus){renderer.domElement.dataset.cameraShot='follow:'+(soulId?s.conn.replica.souls.get(soulId)?.entityId??'':thingId??'');followView.riding=focusRiding;followView.view={sun:light.sun.position.clone().sub(light.sun.target.position).normalize(),daylight:light.daylight,fov:camera.fov};const metered=camTrace?performance.now():0;const offset=followView.resolve(controls.target,camera.position.clone().sub(controls.target),visualObstructionRoots(),step);camTrace?.cost(performance.now()-metered,followView.rays);camera.position.copy(controls.target).add(offset);camera.lookAt(controls.target);}
+      if(context.current.cameraMode==='follow'&&focus&&!experimentalFollowing){const legacyResolveStart=followController?performance.now():0;renderer.domElement.dataset.cameraShot='follow:'+(soulId?s.conn.replica.souls.get(soulId)?.entityId??'':thingId??'');followView.riding=focusRiding;followView.view={sun:light.sun.position.clone().sub(light.sun.target.position).normalize(),daylight:light.daylight,fov:camera.fov};const metered=camTrace?performance.now():0;const offset=followView.resolve(controls.target,camera.position.clone().sub(controls.target),visualObstructionRoots(),step);camTrace?.cost(performance.now()-metered,followView.rays);camera.position.copy(controls.target).add(offset);camera.lookAt(controls.target);if(followController)legacyFollowMs+=performance.now()-legacyResolveStart;}
+      const followLookupStart=followController?performance.now():0;
+      const followId=soulId?s.conn.replica.souls.get(soulId)?.entityId??null:thingId;
+      const followVersion=followController?{world:String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),epoch:JSON.stringify([s.conn.welcome?.epoch,observationSeekGeneration.current,!!past.current]),revision:String(sceneKey??'draw')}:null;
+      const followInput=()=>({key:JSON.stringify([followVersion,followId,experimentalFollowing]),tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),at:performance.now(),mode:context.current.cameraMode,id:followId,camera,aim:controls.target});
+      let followGround:(x:number,z:number)=>number|null=()=>null,followGroundSource='unavailable';
+      if(experimentalFollow&&followController){followGroundSource=JSON.stringify({kind:'unavailable',entityLayer:entityLayer.active,history:!!past.current,expansion:!!expansion?.group.visible,selectedInfo:expansionSceneInfo===null?'null':'present',scene:expansionSceneInfo?.scene===null?'null':expansionSceneInfo?.scene===undefined?'undefined':'present',surfaces:expansionSceneInfo?.scene?.surfaces.length??null,terrain:!!expansionSceneInfo?.shore?.metadata.terrain});if(entityLayer.active){followGround=entityLayer.groundPeek;followGroundSource=past.current?'rendered-active-entity-peek:history-current-unbound':'rendered-active-entity-peek:live';}else if(!expansion?.group.visible){const selected=followController.selectedGround(expansionSceneInfo);if(selected){followGround=selected;followGroundSource='selected-rendered-publication';}}}
+      const followControlInput=experimentalFollow&&followController?{...followInput(),mode:experimentalFollowing?'follow':'inactive'}:null;
+      if(followController)followSetupMs+=performance.now()-followLookupStart;
+      if(experimentalFollow&&followController){if(experimentalFollowing)renderer.domElement.dataset.cameraShot='follow-experimental:'+(followId??'');followController.control(followControlInput!,step,()=>({roots:visualObstructionRoots(),revision:String(entityLayer.staticRevision)}),followGround,followGroundSource);}
       if(camTrace){const tracing=context.current.cameraMode==='follow'&&!!focus;camTrace.frame({mode:context.current.cameraMode,target:controls.target.toArray(),eye:camera.position.toArray(),desired:tracing?followView.desired?.toArray()??null:null,rule:tracing?followView.rule:null,dt:Math.round(step*1e5)/1e5});}  // #1317
       const area = visibleViewport(host.clientWidth, host.clientHeight, context.current.viewportInsets);
       // #3374: a box with no size waits quietly; panels that cover a sized box get the note, and the console names why once
@@ -1226,8 +1245,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         }
       }
       if(shotTrack&&shotPoseNow){const pose=shotPoseNow(shotTrack,past.current?.tick??null,now);if(pose){camera.position.fromArray(pose.position);controls.target.fromArray(pose.target);logicalFov=pose.fov;camera.up.set(0,1,0);camera.lookAt(controls.target);renderer.domElement.dataset.cameraShot='track:'+shotTrack.move;}}  // #1963: a planned camera
-      refreshCameraGround();
-      if(cameraGround.apply(camera,scene)>0&&!(viewing==='manual'&&context.current.manualNavigation==='free'))camera.lookAt(controls.target);  // never underground (Gene)
+      if(!experimentalFollowing){refreshCameraGround();
+      if(cameraGround.apply(camera,scene)>0&&!(viewing==='manual'&&context.current.manualNavigation==='free'))camera.lookAt(controls.target);}  // never underground (Gene); experimental Follow owns its bounded ground constraint
       if(context.current.cameraMode==='manual'&&expansion?.group.visible)constrainOfficeGuardCamera(camera,controls.target,officeGuardFrom,expansion.officeGuards);
       authoredBoundaries.bind(publication);if(context.current.cameraMode==='manual')authoredBoundaries.constrain(camera,controls.target,officeGuardFrom,at.tick);
       if(shotMode){const pin=shotPin();if(pin){controls.target.fromArray(pin.at);camera.position.fromArray(pin.eye);camera.up.set(0,1,0);camera.lookAt(controls.target);}}  // lookrace: a look's camera is held exactly until the capture
@@ -1267,6 +1286,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const costWitnessState=costMeter?()=>({tick:at.tick,history:!!past.current,seek:observationSeekGeneration.current,entities:at.entities,cameraWorld:camera.matrixWorld.toArray(),projection:camera.projectionMatrix.toArray(),holders:Object.keys(at.entities).filter(id=>records[id]?.kind==='human').map(id=>{const root=drawnRepresentation(people?.bodyObject(id),floaters.object(id),standIns.getObjectByName(id));return{id,represented:!!root,matrix:root?.matrixWorld.toArray()??null};})}):undefined;
       let costToken:ReturnType<ObservationCostRing['begin']>|undefined;try{costToken=costMeter&&!costMeter.failure?costMeter.begin({tick:at.tick,seconds:at.tick*(shown.current.take?.dt??dt),controllerClock:now/1000,controllerStep:step,callbackStart:costCallbackStart,shot:JSON.stringify([broadcast.comparisonKey,renderer.domElement.dataset.cameraShot??'']),cameraWorld:camera.matrixWorld.elements,projection:camera.projectionMatrix.elements,viewport:[host.clientWidth,host.clientHeight,renderer.domElement.width,renderer.domElement.height,renderer.getPixelRatio()],publicIdentity:[String(s.conn.welcome?.worldId??bootWorldId??'unavailable'),JSON.stringify([s.conn.welcome?.epoch??null,observationSeekGeneration.current,past.current?'history':'live']),String(sceneKey??'draw')],history:!!past.current,seek:observationSeekGeneration.current,takeStart:shown.current.take?.startTick??0,takeTicks:shown.current.take?.ticks??0,dt:shown.current.take?.dt??dt,mode:eyes?-1:context.current.cameraMode==='broadcast'?0:context.current.cameraMode==='follow'?1:2},costWitnessState):undefined;}catch{costMeter?.refuse('camera-cost-draw-invalid');}
       if(costToken)costSequence=costToken.seq;
+      if(followController&&!holdDraw){const followCompleteStart=performance.now();const e=followId?at.entities[followId]:null,human=followId?people?.bodyObject(followId)??null:null,root=followId?(drawnRepresentation(human)??drawnRepresentation(floaters.object(followId))):null;followController.completed(followInput(),followVersion!,followId&&e?{id:followId,root,forwardLocal:human&&root===human?[1,0,0]:null,activity:drawnTakeActivity(e.activity,e.state,shown.current.take)}:null,legacyFollowMs,followSetupMs+performance.now()-followCompleteStart);}
       let costStart=0,costEnd=0,costOutcome=0,costInvoked=false;
       try{if(cameraObserver&&!holdDraw){
         const started=performance.now();costStart=started;costOutcome=3;costInvoked=true;if(observationPast!==past.current||observationSeek!==observationSeekGeneration.current){observationPast=past.current;observationSeek=observationSeekGeneration.current;observationEpoch++;}
@@ -1352,7 +1372,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
         else speechVisibility.reset();
         emitState(viewerPresentation({room:context.current.edenExpansion?exploreRoom(camera.position.toArray(),EDEN_VIEWER_PLACES,s.conn.replica.souls,at.entities):null,assetDownloads:downloads.snapshot(),soulIds:[...groupSelection],
           drawnTick: drawnTick.current, history: !!past.current, playing: past.current?.playing ?? false,
-          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.turnedAway,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
+          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:!experimentalFollowing&&followView.turnedAway,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
           loading: initialGate?.snapshot().stage!=='ready'||context.current.loading || (!at.take && renderer.domElement.dataset.sceneBinding!=='unavailable'),
           unavailableReason: context.current.graphicsUnavailable ?? context.current.sim.streamNotice ?? sceneReason ?? (coveredNote || (brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null)),
           speechAnchors,
