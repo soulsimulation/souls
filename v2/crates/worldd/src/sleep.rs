@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use sim::log::Durable;
 use supervisor::sleep::{EXIT_ASLEEP, QUIET_US, awake_after, may_sleep, sleep};
-use worldd::answers::{Quiet, now};
+use worldd::answers::{Quiet, Real};
 
 /// How often the watch reads the clock's [`Quiet`].
 const LOOK: Duration = Duration::from_secs(1);
@@ -50,6 +50,7 @@ pub fn watch(
     socket: PathBuf,
     quiet: Arc<Quiet>,
     durable: Durable,
+    clock: Real,
     stream: Sender<Ask>,
     took_us: i64,
 ) {
@@ -61,7 +62,8 @@ pub fn watch(
             loop {
                 std::thread::sleep(LOOK);
                 let (still, next, records) = quiet.read();
-                let t = now();
+                // The world's time (O10): its due times are on it, not on the machine's clock.
+                let t = clock.now_us();
                 if !still {
                     since = None;
                     continue;

@@ -69,7 +69,9 @@ pub const F_WAITING: u64 = 41;
 pub const F_TURNS: u64 = 42;
 /// A field the world shows on a link taken in turns: the body its owner lets in now, if any (T9b A3).
 pub const F_GRANTED: u64 = 43;
-/// A field the world sets on a walker's body for N10's shoulder turn: 1 while no other body pushes it (T9c).
+/// A field the world sets on a walker's body for N10's shoulder turn, while no other body pushes it (T9c): the ids of
+/// the still bodies near it when the turn began, which it may squeeze past (E16). Every other body, and every carried
+/// load, keeps its whole space.
 pub const F_SHOULDER: u64 = 44;
 /// A field the world sets on a walker's body when it routes it again (N10, T9c): `[count, [leg, ...]]`, each leg
 /// `[x, y, z]` or `[x, y, z, link]` (µm, then the link crossed at its end); a higher count than the walk last took

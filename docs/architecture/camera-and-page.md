@@ -58,10 +58,13 @@ v2 adapter turns the engine's public stream into that frame's input.
    never moved.
 4. **Takes.** `apps/web/src/v2-engine/takes.ts` (`chunkOf`) turns those samples into one-second `mars-take/4`
    chunks, the format the old server streams. Each tick carries the body's position, its heading (from its motion),
-   its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A held thing is the hand
-   prop: the old renderer (`humans.ts`) carries it in one hand at the engine's carry point, standing and walking, a
-   book closed; a move at a book in the body's own hand (its `read` form) is the `read` pose, the book open in both
-   hands, until the run ends. A load two Souls carry is not a prop: it rides its carry (`take-parts.ts`), gripped.
+   its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A single-Soul held thing
+   has the body as its native parent; the adapter currently selects a stand-in prop from its kind name
+   (`take-bodies.ts`, `propOf`), rather than carrying the exact object's shape and hand-slot pose through the take.
+   A held book's `read` form selects the two-hand reading pose until its run ends. A crew-carried load has the
+   carry node as its native parent, in nobody's hand slot (`v2/crates/sim/src/activity/carry/mod.rs`).
+   `take-parts.ts` draws that load separately; `chunkOf` does not yet feed the carriers' hand targets or grip frames.
+   Neither parenting relationship alone proves final-draw contact.
    A chunk is built only once
    the world is past its end, so a body is never pushed past its newest sample.
    A thing on a course (a balloon, a punt) is in the chunks too (0.135 K4): a `vehicle` record with a `carrier`,
@@ -115,12 +118,13 @@ gets its state explicitly once. The layer's lights and glows go out for `on: fal
 the way today's world was captured: import-eden seeds each thing's entry fields from the exported state (a lamp that
 was on is on, a burning fire is lit), so the page does not darken an imported world.
 
-A load Souls carry rides its carry's node, which moves by motion samples, not by new records. `take-parts.ts` places
-the node where its samples have it at the time the page draws, and hands that to `creator-kinds.ts` and to
-`world-state.ts`, so a load the world was captured with moves with its carriers too. A load lifted or set down keeps
-its old record until the page's time reaches the end of the part that changed it, and a load carried off its feet (a
-6 m frame laid flat) is drawn tilted (the layer's `r: [yaw, x, z]`). The page's rewind does not draw a carry yet:
-history chunks carry bodies and things on a course only.
+A crew-carried load rides the carry node's motion samples. `take-parts.ts` samples its position for the requested
+page time and passes it through `creator-kinds.ts` and `world-state.ts`. This currently runs on the 200 ms poll in
+`use-v2-souls.ts`, followed by the entity layer's ordinary world-diff easing (`WorldEntityLayer.ts`); it is not yet a
+per-frame load pose on the bodies' clock. Its turn is inferred from travel rather than a consumed full sampled
+quaternion. A lifted or set-down load keeps its old record until the page reaches the end of that part. The page's
+rewind does not draw carries yet: history chunks carry bodies and things on a course only. Carrier hand targets,
+synchronized load drawing and final contact remain unfinished; the camera must not hide these gaps.
 
 ## What follows from the boundary
 

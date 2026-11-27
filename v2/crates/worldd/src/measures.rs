@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -361,6 +361,8 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        clock_json(&mut o);
+        DISK.json(&mut o);
         o.push_str(",\"sync\":");
         SYNCS.json(&mut o);
         o.push_str(",\"audit\":");
@@ -377,6 +379,119 @@ impl Measures {
         }
         o.push_str("}\n");
         o
+    }
+}
+
+/// How far the world's clock runs ahead of the machine's, ms (O10, #2806): set by a restart that found the machine's
+/// clock behind its last logged tick, and by the watchdog, which compares the two each second. Under a second either
+/// way is `steady`; past it, `stepped` (`clock` in `health.json`).
+pub static CLOCK_AHEAD_MS: AtomicI64 = AtomicI64::new(0);
+
+/// `,"clock":{"state":"steady"}`, or `stepped` with how far the world's clock is ahead of the machine's.
+fn clock_json(o: &mut String) {
+    let ahead = CLOCK_AHEAD_MS.load(Ordering::Relaxed);
+    if ahead.abs() < 1000 {
+        o.push_str(",\"clock\":{\"state\":\"steady\"}");
+    } else {
+        let _ = write!(
+            o,
+            ",\"clock\":{{\"state\":\"stepped\",\"ahead_ms\":{ahead}}}"
+        );
+    }
+}
+
+/// Free space under the world (`disk` in `health.json`, #2806 follow-up): `low` before the disk is full, so an
+/// operator hears of it while the world still writes. Written by the disk watch (`worldd serve`), read by the health
+/// writer and by the log's compactor, which gives back what the store already holds sooner while it is low.
+pub struct Disk {
+    /// Whether the disk has been read yet: no field before.
+    read: std::sync::atomic::AtomicBool,
+    low: std::sync::atomic::AtomicBool,
+    free: AtomicU64,
+    total: AtomicU64,
+    low_bytes: AtomicU64,
+    low_pct: AtomicU64,
+    /// Times the disk went low since the start.
+    went_low: AtomicU64,
+}
+
+/// This process's disk.
+pub static DISK: Disk = Disk {
+    read: std::sync::atomic::AtomicBool::new(false),
+    low: std::sync::atomic::AtomicBool::new(false),
+    free: AtomicU64::new(0),
+    total: AtomicU64::new(0),
+    low_bytes: AtomicU64::new(0),
+    low_pct: AtomicU64::new(0),
+    went_low: AtomicU64::new(0),
+};
+
+/// The default `disk.low` threshold: under 1 GiB free, or under 5 % of the disk free.
+pub const DISK_LOW_BYTES: u64 = 1 << 30;
+pub const DISK_LOW_PCT: u64 = 5;
+
+/// Whether a disk with `free` of `total` bytes free is low, given whether it `was` low: under either threshold is low;
+/// once low, it is cleared only past both by a tenth more, so a disk at the line is said once, not at each read.
+pub fn disk_low(free: u64, total: u64, low_bytes: u64, low_pct: u64, was: bool) -> bool {
+    let (bytes, pct) = if was {
+        (
+            low_bytes.saturating_add(low_bytes / 10),
+            low_pct.saturating_mul(11),
+        )
+    } else {
+        (low_bytes, low_pct.saturating_mul(10))
+    };
+    // Percent in tenths, so the tenth's margin holds for small percentages too.
+    let tenths = u128::from(free) * 1000 / u128::from(total.max(1));
+    free < bytes || tenths < u128::from(pct)
+}
+
+impl Disk {
+    /// A reading: `free` of `total` bytes, against the threshold. Whether the disk is low now, and whether that
+    /// changed with this reading.
+    pub fn reading(&self, free: u64, total: u64, low_bytes: u64, low_pct: u64) -> (bool, bool) {
+        let was = self.low.load(Ordering::Relaxed);
+        let low = disk_low(free, total, low_bytes, low_pct, was);
+        self.free.store(free, Ordering::Relaxed);
+        self.total.store(total, Ordering::Relaxed);
+        self.low_bytes.store(low_bytes, Ordering::Relaxed);
+        self.low_pct.store(low_pct, Ordering::Relaxed);
+        self.low.store(low, Ordering::Relaxed);
+        self.read.store(true, Ordering::Relaxed);
+        if low && !was {
+            self.went_low.fetch_add(1, Ordering::Relaxed);
+        }
+        (low, low != was)
+    }
+
+    /// Whether the disk is low.
+    pub fn is_low(&self) -> bool {
+        self.low.load(Ordering::Relaxed)
+    }
+
+    /// Free bytes at the last reading.
+    pub fn free(&self) -> u64 {
+        self.free.load(Ordering::Relaxed)
+    }
+
+    /// `,"disk":{"state":"ok"|"low","free_bytes":n,"total_bytes":n,"free_pct":n,"low_bytes":n,"low_pct":n,
+    /// "went_low":n}`, or nothing before the first reading. `free_pct` in whole percent, rounded down.
+    fn json(&self, o: &mut String) {
+        if !self.read.load(Ordering::Relaxed) {
+            return;
+        }
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (free, total) = (l(&self.free), l(&self.total));
+        let pct = u128::from(free) * 100 / u128::from(total.max(1));
+        let _ = write!(
+            o,
+            ",\"disk\":{{\"state\":\"{}\",\"free_bytes\":{free},\"total_bytes\":{total},\"free_pct\":{pct},\
+             \"low_bytes\":{},\"low_pct\":{},\"went_low\":{}}}",
+            if self.is_low() { "low" } else { "ok" },
+            l(&self.low_bytes),
+            l(&self.low_pct),
+            l(&self.went_low)
+        );
     }
 }
 
@@ -859,6 +974,71 @@ pub fn with_block(mut frame: Vec<u8>, parts: &[u64]) -> Vec<u8> {
 mod tests {
     use super::*;
     use replica::encode::{Value, decode};
+
+    #[test]
+    fn a_disk_is_low_under_either_threshold_and_cleared_past_both_with_a_margin() {
+        const G: u64 = 1 << 30;
+        // 100 GiB disk, 1 GiB and 5 %.
+        let low = |free: u64, was| disk_low(free, 100 * G, G, 5, was);
+        assert!(!low(10 * G, false), "10 % free is not low");
+        assert!(low(4 * G, false), "under 5 % is low");
+        assert!(!low(5 * G, false), "at 5 % is not low");
+        assert!(low(5 * G, true), "once low, 5 % is still low (the margin)");
+        assert!(!low(6 * G, true), "cleared past 5.5 %");
+        // A small disk: the bytes threshold binds first.
+        assert!(
+            disk_low(900 << 20, 10 * G, G, 5, false),
+            "900 MiB of 10 GiB is low"
+        );
+        assert!(
+            disk_low(1100 << 20, 10 * G, G, 5, true),
+            "under 1.1 GiB stays low"
+        );
+        assert!(
+            !disk_low(1200 << 20, 10 * G, G, 5, true),
+            "cleared past 1.1 GiB and 5.5 %"
+        );
+        // Zero thresholds never say low; an unread total is not a division by zero.
+        assert!(!disk_low(0, 0, 0, 0, false));
+    }
+
+    #[test]
+    fn the_disk_gauge_says_its_state_once_read() {
+        let d = Disk {
+            read: std::sync::atomic::AtomicBool::new(false),
+            low: std::sync::atomic::AtomicBool::new(false),
+            free: AtomicU64::new(0),
+            total: AtomicU64::new(0),
+            low_bytes: AtomicU64::new(0),
+            low_pct: AtomicU64::new(0),
+            went_low: AtomicU64::new(0),
+        };
+        let mut o = String::new();
+        d.json(&mut o);
+        assert_eq!(o, "", "no field before the first reading");
+        assert_eq!(d.reading(50, 100, 10, 20), (false, false));
+        assert_eq!(
+            d.reading(5, 100, 10, 20),
+            (true, true),
+            "entering is a change"
+        );
+        assert_eq!(
+            d.reading(5, 100, 10, 20),
+            (true, false),
+            "staying low is not"
+        );
+        d.json(&mut o);
+        assert_eq!(
+            o,
+            ",\"disk\":{\"state\":\"low\",\"free_bytes\":5,\"total_bytes\":100,\"free_pct\":5,\"low_bytes\":10,\
+             \"low_pct\":20,\"went_low\":1}"
+        );
+        assert_eq!(
+            d.reading(90, 100, 10, 20),
+            (false, true),
+            "leaving is a change"
+        );
+    }
 
     #[test]
     fn buckets_hold_their_values() {

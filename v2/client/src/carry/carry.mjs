@@ -27,8 +27,9 @@
 //   part put <crew id> <bay id> <slot name | number>   seats the crew's part in that slot
 //   part put <crew id> here | x,z     lays it on the open ground, under the crew or at that point
 //
-// Points are metres in the world's frame (x east, z south). The asked Soul's `wait` shows the offer:
-// `{"kind":"carry","what":"offered","offer":..,"from":..}`.
+// Points are metres in the world's frame (x east, z south). The asked Soul's `wait` shows the offer and how long it
+// has left: `{"kind":"carry","what":"offered","offer":..,"from":..,"open_s":60,"note":..}`; a crew offered to several
+// adds `each_accept_s` and `open_most_s`: each accept keeps it open that much more for the rest, never past the most.
 
 import { createHash } from 'node:crypto';
 import { isSpot, sideSpot, toSpot } from './spot.mjs';
@@ -465,11 +466,13 @@ export const OFFER_MOST = 5;
 
 /**
  * The crew offers to this Soul still open: each `offered` of kind carry it was told (`logged`, oldest first) whose crew
- * is still in the copy and does not hold this Soul yet. `mine`: this Soul's ids. → [{crew, from}], newest last.
+ * is still in the copy, does not hold this Soul yet and has not lapsed (a crew that formed stays in the copy after its
+ * offer lapses). `mine`: this Soul's ids. → [{crew, from}], newest last.
  */
 export function openCrewOffers(logged, rows, mine) {
   const seen = new Set(), out = [];
   for (const e of [...logged].reverse()) {
+    if (e.what === 'lapsed' && e.conversation) seen.add(e.conversation);
     if (e.kind !== 'carry' || e.what !== 'offered' || !e.offer || seen.has(e.offer)) continue;
     seen.add(e.offer);
     const r = rows.get(e.offer);

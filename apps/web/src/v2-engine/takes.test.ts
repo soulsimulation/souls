@@ -5,7 +5,7 @@ import { recordedTakeChunkSchema } from '@souls/protocol';
 import { TakePeople } from '../../../../mars/viewer/app/engine-view/take-replay.ts';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { chunkEnd, chunkOf, positionAt, TICKS, TICK_US, type Body } from './takes.ts';
+import { chunkEnd, chunkOf, motionAt, positionAt, TICKS, TICK_US, type Body } from './takes.ts';
 
 const FROM = 1000; // a chunk's first tick (aligned to TICKS)
 const t0 = FROM * TICK_US;
@@ -59,4 +59,19 @@ test('posture base changes preserve one-shot age and seated wave release in actu
   assert.ok(history([[0,id,'activity','nod'],[0,id,'baseActivity','sit'],[8,id,'baseActivity',null]],10,'nod').postureChange,'first retained activity still carries a base-only posture change');
   const wave=history([[0,id,'activity','sit'],[0,id,'baseActivity','sit'],[2,id,'activity','wave'],[8,id,'activity','sit']],9,'sit');
   assert.equal(wave.waveSamples?.length,1,'seated return keeps the original wave release sample');
+});
+
+
+test('standing retargets begin at the previous drawn heading, including immediate turns and fresh seeks', () => {
+  const samples = [{ at: t0, p: [0, 0, 0] as [number, number, number] }];
+  const turns = [{ at: t0 + 1e6, from: 0, to: Math.PI / 2 }, { at: t0 + 1.1e6, from: Math.PI / 2, to: -Math.PI / 2 },
+    { at: t0 + 1.1e6, from: -Math.PI / 2, to: Math.PI }];
+  const at = (t: number) => motionAt(samples, t0 + t * 1e6, 0, turns).heading;
+  assert.ok(Math.abs(at(1.1) - at(1.1 - .00001)) < .001, 'unfinished and same-time targets cannot replace the drawn origin');
+  assert.ok(at(1.1) > .4 && at(1.1) < .42, 'the first quarter turn was only partly drawn');
+  assert.ok(Math.abs(at(2) - Math.PI) < 1e-9, 'the final target is reached');
+  const chronological = [1, 1.1, 1.2, 1.4, 2].map(at);
+  for (const i of [4, 1, 3, 0, 2]) assert.equal(at([1, 1.1, 1.2, 1.4, 2][i]), chronological[i], 'seeks do not depend on previous draws');
+  assert.equal(motionAt([{ at: t0, p: [0, 0, 0] }, { at: t0 + 3e6, p: [3000, 0, 0] }], t0 + 2e6, 0, turns).heading, 0, 'ordinary walking owns its heading');
+  assert.equal(motionAt([{ at: t0, p: [0, 0, 0], seat: { height: 1, lie: false, heading: .7 } }], t0 + 2e6, 0, turns).heading, .7, 'a seat owns its heading');
 });

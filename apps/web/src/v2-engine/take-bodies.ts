@@ -3,6 +3,7 @@
 // takes.ts writes them into each chunk as the old server's changes (`activity`, `seatHeight`, `prop`).
 
 import { lookBody } from '../humanoid/look.ts';
+import type { BodySlot } from './source/kind-bounds.ts';
 
 /** A body's seat while it is in a slot: the slot's height above its thing's base (mm), and whether it lies there. */
 /** `heading` (radians, atan2(dz, dx)): the way a sitter faces, out of the seat (the slot's yaw turning the thing's +z),
@@ -12,9 +13,24 @@ export type Seat = { height: number; lie: boolean; ride?: true; heading?: number
 /** Things a body lies on rather than sits on, by kind name (`<pack>:<name>@<rev>`). */
 const LIE_ON = /(^|[:_-])(bed|bunk|cot|hammock|mattress|sleeping[_-]?(?:bag|mat)|futon)([_-]|@|$)/i;
 
-/** The seat a slot gives: `slot` is its row `[n, x, y, z, yaw mdeg, capacity]` (mm), `kind` its thing's kind. */
-export function seatOf(kind: string, slot: readonly number[] | undefined): Seat {
-  return { height: Math.max(0, slot?.[2] ?? 0), lie: LIE_ON.test(kind) };
+/** Body places declared by an entry. Their numbers follow the native entry order, including non-body slots. */
+export function bodySlotsOf(entry: unknown): BodySlot[] {
+  const e = entry as { owner?: unknown; slots?: Record<string, { admits?: unknown; at_mm?: unknown; posture?: unknown; yaw_mdeg?: unknown; most?: unknown }> } | null;
+  if (!e || e.owner !== 'thing' || !e.slots || typeof e.slots !== 'object') return [];
+  return Object.values(e.slots).flatMap((s, i) => {
+    if (s?.admits !== 'body' || !Array.isArray(s.at_mm) || s.at_mm.length !== 3 || !s.at_mm.every(Number.isSafeInteger)) return [];
+    const posture = s.posture === 'sit' || s.posture === 'lie' ? s.posture : 'stand';
+    return [{ row: [i + 1, ...s.at_mm, typeof s.yaw_mdeg === 'number' ? s.yaw_mdeg : 0, typeof s.most === 'number' ? s.most : 1], posture }];
+  });
+}
+
+/** A declared standing place keeps the recorded root (including its platform height). Only a declared seat/bed
+ *  lowers the take's root to the floor and supplies seatHeight. Legacy kinds without an entry keep their old rule. */
+export function seatOf(kind: string, slot: readonly number[] | undefined): Seat;
+export function seatOf(kind: string, slot: readonly number[] | undefined, declared: BodySlot | undefined): Seat | undefined;
+export function seatOf(kind: string, slot: readonly number[] | undefined, declared?: BodySlot): Seat | undefined {
+  if (declared?.posture === 'stand') return undefined;
+  return { height: Math.max(0, slot?.[2] ?? 0), lie: declared ? declared.posture === 'lie' : LIE_ON.test(kind) };
 }
 
 /** The old take's posture for a still body at `seat` (null: standing). K4 (0.135): in a ride's slot (a thing on a course,

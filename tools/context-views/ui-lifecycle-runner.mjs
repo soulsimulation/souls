@@ -116,7 +116,7 @@ export async function runUiLifecycleProof({ root, withFixtureSession, report, sa
     try {
       const { chromium } = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
       budget(); assert.ok(deadline - Date.now() >= 20000, 'enough work budget before browser launch');
-      browserServer = await chromium.launchServer({ executablePath: process.env.GOD_LOOK_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--ignore-gpu-blocklist'], timeout: 5000 });
+      browserServer = await chromium.launchServer({ ...(process.env.GOD_LOOK_CHROME ? { executablePath: process.env.GOD_LOOK_CHROME } : { channel: 'chromium' }), headless: true, args: ['--ignore-gpu-blocklist'], timeout: 5000 });
       await session.registerProcess(browserServer.process().pid);
       budget();
       browser = await chromium.connect(browserServer.wsEndpoint(), { timeout: 5000 });

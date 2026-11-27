@@ -6,13 +6,15 @@
 //   node tools/world-launcher/launcher.mjs [--port 4980] [--data <dir>] [--range 5101-5149]
 //        [--auth-env <clerk.env> --public-origin https://sim.eden.art] [--soul-skill <skill.md>] [--soul-instructions <instructions.md>]
 //        [--templates-dir <dir>]   genesis templates from another folder (default worlds/templates; a staged scene's own)
+//        [--new-engine-templates <dir>]  the new engine's published templates (SOULS_V2_TEMPLATES; default the directory's)
 //
 //   GET  /                       the web app (homepage: worlds + New world)
 //   GET  /changelog              the public changelog: CHANGELOG.md rendered into the web build (apps/web/changelog.html)
 //   GET  /robots.txt, /sitemap.xml  what crawlers are told (crawl.mjs): public pages and listed worlds only; an unlisted
 //                                world's every response is X-Robots-Tag noindex, as is every /__sim JSON answer
 //   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities; with the worlds that have only a new-engine route (D2)
-//   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain
+//   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain; where New world goes to
+//                                the new engine, its published templates instead (also worlds.json's `templates`)
 //   GET  /__sim/my-souls.json    my-souls/1 (#2466): the signed-in account's own Souls across these worlds (my-souls.mjs), read
 //                                from each world's store (a sleeping world stays asleep; a moved world's from the v2 directory); 401 signed out. GET /__sim/soul-photo/
 //                                <slug>/<soulId>/<sha256>.png: a live Soul's stored photo or portrait by its hash, immutable
@@ -50,6 +52,7 @@
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
 //   POST /__sim/worlds/<slug>/unlisted the world's owner (signed in, or their own agent's god token): {unlisted: true|false}
+//                                (a world with no old twin: its creator, signed in, set in the directory: routeOnlyUnlisted)
 //   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token) or a signed-in site owner: a 16:9 JPEG as
 //                                the body (thumbnail.mjs), or DELETE to fall back to the template's default; never wakes the world
 //   GET  /__sim/thumbs/<slug>/<sha>.jpg, /__sim/thumbs/_template/<sha>.jpg  the world list's pictures, immutable (#887)
@@ -126,12 +129,13 @@ import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constan
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
+import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, listNewEngineTemplates, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
-import { cutoverFence, routeOnlyId, searchText, withV2Stream } from './cutover.mjs';
+import { cutoverFence, routeOnlyId, searchPlaces, searchText, withV2Stream } from './cutover.mjs';
 import { movedAssets } from './moved-assets.mjs';
 import { placeShotKeeper, placeShots } from './place-shots.mjs';
+import { coverKeeper, worldCovers } from './world-covers.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -145,7 +149,7 @@ import { addressKey, forwardedAddress } from './address-key.mjs';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
-import { mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
+import { mcpGone, siteLlmsTxt } from './mcp-card.mjs';
 import { opSoul, opSetTest } from './op-souls.mjs';
 import { accountSouls, directorySouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
@@ -307,13 +311,30 @@ export async function openLauncher(cfg = {}) {
   const shots = placeShots({ dir: join(dataDir, 'place-shots'), log: (s) => log(s) });   // a moved world's kept Explore pictures (place-shots.mjs)
   const movedAsset = movedAssets({ root: resolve(cfg.coreAssetRoot ?? root), assetDir: resolve(cfg.assetDir ?? process.env.ASSET_DIR ?? join(dataDir, 'worlds', 'assets')) });
   const templateList = cachedTemplates(templatesDir);   // P2: never parse ~2 MB of templates per proxied request
+  // 27 Nov: where New world goes to the new engine (v2CreateOn), the dialog offers the directory's published templates
+  // (the folder DIRECTORYD_TEMPLATES names; souls-directory.service's by default), never the old engine's genesis files
+  const v2TemplatesDir = resolve(cfg.v2TemplatesDir ?? process.env.SOULS_V2_TEMPLATES ?? '/usr/local/lib/souls/templates');
+  let v2Templates = { at: -Infinity, list: [] };
+  const newEngineTemplates = () => {
+    if (Date.now() - v2Templates.at > 2000) v2Templates = { at: Date.now(), list: listNewEngineTemplates(v2TemplatesDir) };
+    return v2Templates.list;
+  };
+  const offeredTemplates = () => (v2CreateOn() ? newEngineTemplates() : templateList().map(({ file: _f, ...t }) => t));
   const defaultThumbs = templateThumbs(cfg.templateThumbsDir ?? join(templatesDir, 'thumbs'));   // #887: pulled from the asset CDN, may be absent
   // #887: the site admin's vetoes apply to thumbnails as to every upload. The site log is the one the worlds share: by
   // default <data>/worlds/assets/moderation-site.jsonl (each world's DATA_DIR/../assets), unless the environment names it.
   const vetoed = adminVetoes({ ttlMs: cfg.moderationVetoTtlMs, siteLog: cfg.moderationSiteLog ?? (process.env.SIM_MODERATION_SITE_LOG || process.env.ASSET_DIR ? defaultSiteLog() : join(dataDir, 'worlds', 'assets', 'moderation-site.jsonl')) });
   const worldModeration = (w) => (w ? { file: join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf(w) } : null);
-  // a world with neither picture shows its fullest kept Explore place picture (a moved world's, place-shots.mjs), never grey
-  const thumbView = (w) => { const t = thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) }), c = t.thumbnail || !moved(w) ? null : shots.cover(w.slug);
+  // the card's picture shows the world itself (27 Nov): its owner's, else the launcher's own drawing of it
+  // (world-covers.mjs), else its fullest kept Explore place picture (a moved world's, place-shots.mjs), and only then its
+  // template's default (the empty plain's is bare grass, whatever was built on it since); never grey when one exists
+  const covers = worldCovers({ dir: join(dataDir, 'covers') });
+  const thumbView = (w) => {
+    const t = thumbnailOf(w, { base: B, defaults: defaultThumbs, vetoed: (sha, x) => vetoed(sha, worldModeration(x)) });
+    if (t.thumbnailSource === 'owner') return t;
+    const own = covers.current(w.slug);
+    if (own && !vetoed(own.sha, worldModeration(w.routeOnly ? null : w))) return { thumbnail: `${B}/__sim/thumbs/${w.slug}/${own.sha}.jpg`, thumbnailSource: 'drawn' };
+    const c = moved(w) ? shots.cover(w.slug) : null;
     return c ? { thumbnail: `${wp(w.slug)}${c}`, thumbnailSource: 'place' } : t; };
   const marsWebDir = cfg.marsWebDir ?? (existsSync(join(root, '.lane/mars-web')) ? join(root, '.lane/mars-web') : undefined);
   const log = cfg.log ?? ((s) => console.log(`[launcher] ${s}`));
@@ -469,7 +490,7 @@ export async function openLauncher(cfg = {}) {
     await Promise.all([...registry.worlds.map(refreshStats), directory.at ? null : asked]);
     // each world's count once (the sort compares many times, and a moved world's is a read of the routes file)
     const all = [...registry.worlds, ...routeOnlyWorlds()], souls = new Map(all.map((w) => [w, soulsOf(w)]));
-    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(all, (w) => souls.get(w)).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: templateList().map(({ file: _f, ...t }) => t), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
+    return { contract: 'local-worlds/1', launcher: 'world-launcher/1', worlds: publicWorlds(all, (w) => souls.get(w)).map((w) => (w.routeOnly ? describeRouteOnly(w) : describe(w))), templates: offeredTemplates(), limits: { maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, childPorts: range }, auth: auth ? auth.public : { provider: 'dev' } };
   }
 
   /** A world the site admin marked not claimable, while it still has no god: nobody may claim it or mint for it. */
@@ -767,15 +788,55 @@ export async function openLauncher(cfg = {}) {
       json(res, 200, { accountId: body.account, issuer: claims.iss, subject: claims.sub }, { 'cache-control': 'no-store' });
     } catch { json(res, 503, { ok: false, code: 'directory.unreachable', message: 'Signing in is not possible just now; try again.' }, { 'retry-after': '5', 'cache-control': 'no-store' }); }
   }
+  /** A world with no old twin (a created world, D2): its owner lists or unlists it with the request an old world's owner
+   *  makes (`POST /__sim/worlds/<slug>/unlisted`, {unlisted}), answered before the fence (which refuses a routed world's
+   *  writes) by the directory, which owns its row (`POST /v1/worlds/settings`), asked with their own sign-in as
+   *  createOnNewEngine asks it (a local dev sign-in as its test person). Only its creator may: the directory says who
+   *  that is. The list here shows the change at once. Live, 26 Nov: this was 409 world.new-engine and it stayed listed. */
+  async function routeOnlyUnlisted(req, res, w) {
+    const answer = (status, body) => json(res, status, body, { 'cache-control': 'no-store' });
+    if (req.method !== 'POST') { answer(405, { ok: false, code: 'method', message: 'POST {unlisted: true|false}' }); return; }
+    const tok = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
+    if (!tok || (!auth && !/^dev:[^\s:]{1,36}$/.test(tok))) { answer(401, { ok: false, code: 'signin-required', message: 'Sign in as the world\'s creator first.' }); return; }
+    const chunks = []; let n = 0;
+    for await (const c of req) { n += c.length; if (n > 16_384) { answer(413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
+    let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { answer(400, { ok: false, code: 'bad-json' }); return; }
+    if (typeof body?.unlisted !== 'boolean') { answer(400, { ok: false, code: 'invalid', message: 'unlisted: true or false' }); return; }
+    let r, d;
+    try {
+      r = await fetch(`${directoryUrl}/v1/worlds/settings`, { method: 'POST', signal: AbortSignal.timeout(3000),
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${auth ? tok : `test:${tok.slice(4)}`}` }, body: JSON.stringify({ world: w.slug, unlisted: body.unlisted }) });
+      d = await r.json().catch(() => ({}));
+    } catch { answer(503, { ok: false, code: 'directory.unreachable', message: 'The world list cannot be changed just now; try again.' }); return; }
+    if (r.status !== 200 || typeof d?.world?.name !== 'string') {
+      const [status, code, message] = r.status === 403 ? [403, 'forbidden', "only this world's creator may list or unlist it"] : r.status === 401 ? [401, 'signin-required', 'Sign in as the world\'s creator first.']
+        : r.status === 404 ? [404, 'not-found', 'the directory has no world by that name'] : [503, 'directory.unavailable', 'The world list cannot be changed just now; try again.'];
+      answer(status, { ok: false, code, refused: d?.refused ?? null, message }); return;
+    }
+    // the list's copy: the answer's row, then a fresh ask that starts after the write (one already asked may predate it)
+    await directory.asking;
+    directory.rows.set(w.slug, { ...d.world, unlisted: body.unlisted });
+    directory.at = 0; await directoryWorlds();
+    log(`${w.slug} is ${body.unlisted ? 'unlisted' : 'listed'} (its creator, in the directory)`);
+    answer(200, { ok: true, slug: w.slug, unlisted: body.unlisted });
+  }
   // D2 (0.134): a world with no old twin, one the routes file routes to the new engine and no binding binds (cutover.mjs
   // withRouteOnly). It has no registry row and no old process: the launcher serves its page (routeOnlyPage) and lists it.
   // Its name, template and unlisted flag come from the directory's world list (`GET /v1/worlds`, asked at most every
-  // 10 s); while the directory has not answered, its slug names it.
-  const directory = { at: 0, rows: new Map(), asking: null };
+  // 10 s); while the directory has not answered, its slug names it. The list asked without a sign-in leaves an unlisted
+  // world out (directoryd list_for): once the directory has answered, a world it leaves out is not listed here either,
+  // under the name it last gave (26 Nov: such a world was listed again, under its slug).
+  const directory = { at: 0, rows: new Map(), asking: null, answered: false };
   function directoryWorlds() {
     if (Date.now() - directory.at > 10_000 && !directory.asking) {
       directory.asking = fetch(`${directoryUrl}/v1/worlds`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null))
-        .then((j) => { if (Array.isArray(j?.worlds)) directory.rows = new Map(j.worlds.filter((x) => typeof x?.name === 'string').map((x) => [x.name, x])); }, () => {})
+        .then((j) => {
+          if (!Array.isArray(j?.worlds)) return;
+          const was = directory.rows;
+          directory.rows = new Map(j.worlds.filter((x) => typeof x?.name === 'string').map((x) => [x.name, x]));
+          for (const [name, row] of was) if (!directory.rows.has(name)) directory.rows.set(name, { ...row, unlisted: true });
+          directory.answered = true;
+        }, () => {})
         .finally(() => { directory.at = Date.now(); directory.asking = null; });
     }
     return directory.asking ?? Promise.resolve();
@@ -786,7 +847,7 @@ export async function openLauncher(cfg = {}) {
     const row = directory.rows.get(slug), made = Number(row?.made);
     return { slug, worldId: routeOnlyId(slug), routeOnly: true, name: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : slug,
       template: typeof row?.template === 'string' ? row.template : null, createdAt: Number.isFinite(made) && made > 0 ? (made < 1e12 ? made * 1000 : made) : 0,
-      ...(typeof row?.unlisted === 'boolean' ? { unlisted: row.unlisted } : {}), god: typeof row?.creator === 'string' };   // unsaid: listing.mjs's rule
+      ...(typeof row?.unlisted === 'boolean' ? { unlisted: row.unlisted } : !row && directory.answered ? { unlisted: true } : {}), god: typeof row?.creator === 'string' };   // unsaid: listing.mjs's rule
   }
   const routeOnlyWorlds = () => (cutover?.routeOnly() ?? []).map(routeOnlyWorld).filter(Boolean);
   /** Whether a world is served without an old process: a world with no old twin, or (D2b, 0.134) a moved world, one its
@@ -855,7 +916,8 @@ export async function openLauncher(cfg = {}) {
       return true;
     }
     const q = searchText((url.searchParams.get('q') ?? '').trim()), ref = url.searchParams.get('ref'), cursor = url.searchParams.get('cursor');
-    const found = pub.places.filter((p) => (ref ? p.target.ref === ref : q ? p.text.includes(q) : p.shown)).map((p) => p.target);
+    // a search lists the places a newcomer means first (cutover.mjs searchPlaces)
+    const found = (ref ? pub.places.filter((p) => p.target.ref === ref) : q ? searchPlaces(pub.places, q) : pub.places.filter((p) => p.shown)).map((p) => p.target);
     const listing = createHash('sha256').update(JSON.stringify([worldIdOf(w), pub.seq, q, ref, found.map((t) => t.ref)])).digest('hex');
     const at = cursor ? /^([a-f0-9]{64}):(\d+)$/.exec(cursor) : null;
     if (cursor && at?.[1] !== listing) { json(res, 409, { ok: false, code: 'context.changed', message: 'Meaning or listing access changed; start a fresh context query' }, { 'cache-control': 'no-store' }); return true; }
@@ -1302,6 +1364,12 @@ export async function openLauncher(cfg = {}) {
   /** #897: the site's docs index (the build's llms.txt plus every listed world's reader, from the registry per request); null when the web app is not built. */
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
+  /** No MCP is served (mcp-card.mjs): the site's card and every world's /mcp answer 410 with a pointer to the For agents page. */
+  function mcpRetired(req, res) {
+    const body = Buffer.from(mcpGone({ origin: publicOrigin, base: B }));
+    res.writeHead(410, { 'content-type': 'text/plain; charset=utf-8', 'content-length': String(body.length), 'cache-control': 'no-cache', 'x-robots-tag': NOINDEX, link: `<${publicOrigin}${B}/docs/for-agents>; rel="help"` })
+      .end(req.method === 'HEAD' ? undefined : body);
+  }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
   function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep, pageStream = null, pageBodies = null } = {}) {
     if (clientGone(req, res)) return;
@@ -1732,12 +1800,16 @@ export async function openLauncher(cfg = {}) {
         catch (e) { json(res, 503, { ok: false, code: e.message }); }
         return;
       }
+      // no MCP is served (mcp-card.mjs): a world's /mcp, moved or not, answers the pointer before the fence below refuses it
+      if (/^\/w\/[^/]+\/mcp(?:\/|$)/.test(path)) { mcpRetired(req, res); return; }
       const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
       const cutoverWorld = cutoverSlug && cutover ? registry.get(registry.resolveSlug(cutoverSlug)) ?? routeOnlyWorld(cutoverSlug) : null;
       // before the fence, which refuses a moved world's writes: its agents' revoke is the directory's, not the old world's
       const agentsRest = cutoverSlug ? path.replace(/^\/(?:w|__sim\/worlds)\/[^/]+/, '') : '';
       if (cutoverWorld && /^\/v1\/account\/agents(?:\/[^/]{1,128}\/revoke)?$/.test(agentsRest) && cutover.v2Stream(cutoverWorld)) { await movedAgents(req, res, agentsRest); return; }
       if (cutoverWorld && agentsRest === '/v1/account/session' && cutover.v2Stream(cutoverWorld)) { await movedSession(req, res); return; }
+      // 26 Nov: and before it, a created world's owner lists or unlists it, in the directory (routeOnlyUnlisted)
+      if (cutoverWorld?.routeOnly && path === `/__sim/worlds/${cutoverWorld.slug}/unlisted`) { await routeOnlyUnlisted(req, res, cutoverWorld); return; }
       // 26 Nov: and before it, a world with no old twin answers its agents as the front door routes a moved world's: the
       // bootstrap they pair from, and its gateway's paths at its own gatewayd (cutover.mjs `agent`)
       const agent = cutoverWorld?.routeOnly ? cutover.agent(cutoverWorld.slug, agentsRest) : null;
@@ -1795,7 +1867,7 @@ export async function openLauncher(cfg = {}) {
         if (!bytes) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         res.writeHead(200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable', 'content-length': bytes.length }).end(req.method === 'HEAD' ? undefined : bytes); return;
       }
-      if (path === '/__sim/templates.json' && req.method === 'GET') { json(res, 200, { templates: templateList().map(({ file: _f, ...t }) => t) }); return; }
+      if (path === '/__sim/templates.json' && req.method === 'GET') { json(res, 200, { templates: offeredTemplates() }); return; }
       if (oldRoot && req.method === 'POST' && (path === '/__sim/worlds' || path === '/__sim/op/create-world')) {
         json(res, 403, { ok: false, code: 'creation.elsewhere', message: 'This server keeps the original worlds. Make new worlds at /worlds/.', url: '/worlds/' }); return;
       }
@@ -1896,7 +1968,7 @@ export async function openLauncher(cfg = {}) {
       const thumbGet = (req.method === 'GET' || req.method === 'HEAD') && path.match(THUMB_PATH);
       if (thumbGet) {
         const w = thumbGet[1] === '_template' ? null : registry.get(thumbGet[1]);
-        const file = vetoed(thumbGet[2], worldModeration(w)) ? null : thumbGet[1] === '_template' ? defaultThumbs.file(thumbGet[2]) : w && w.thumbnail?.sha === thumbGet[2] ? thumbnailFile(registry.worldDir(w.slug), thumbGet[2]) : null;   // a vetoed picture is gone
+        const file = vetoed(thumbGet[2], worldModeration(w)) ? null : thumbGet[1] === '_template' ? defaultThumbs.file(thumbGet[2]) : w && w.thumbnail?.sha === thumbGet[2] ? thumbnailFile(registry.worldDir(w.slug), thumbGet[2]) : covers.file(thumbGet[1], thumbGet[2]);   // a vetoed picture is gone; else the launcher's drawing of the world (world-covers.mjs)
         if (!file) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         res.setHeader('x-content-type-options', 'nosniff');
         if (serveFile(res, file, THUMB_CACHE, req)) return;
@@ -1962,7 +2034,7 @@ export async function openLauncher(cfg = {}) {
       }
       if (path === '/__sim/launcher' && req.method === 'GET') {
         if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
-        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), placeShots: shotKeeper?.status() ?? null, children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
+        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), placeShots: shotKeeper?.status() ?? null, covers: coverKeep?.status() ?? null, children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
       }
       // lane L7: Prometheus text for the worlds and the launcher (LOAD-CONTRACT §5), loopback only
       if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb(), ...launcherGauges() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), viewers: live.get(w.slug) ?? 0, refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
@@ -2023,7 +2095,7 @@ export async function openLauncher(cfg = {}) {
         // #897: the root llms.txt is the build's docs index plus every listed world's reader (registry, per request)
         if (path === '/llms.txt') { const idx = siteIndex();
           if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : idx); return; } }
-        if (path === '/.well-known/mcp/server.json') { json(res, 200, mcpServerJson({ origin: publicOrigin, base: B, version: BUILD }), { 'cache-control': 'public, max-age=3600', 'x-robots-tag': 'noindex' }); return; }
+        if (path === '/.well-known/mcp/server.json') { mcpRetired(req, res); return; }
         const doc = docFile(path, req.headers.accept), negotiated = /^\/docs(?:\.md$|\/|$)|^\/changelog(?:\/|\.md)?$/.test(path);
         if (negotiated) res.setHeader('vary', 'Accept');
         if (doc && serveFile(res, join(webDir, doc), 'no-cache', req)) return;
@@ -2177,6 +2249,12 @@ export async function openLauncher(cfg = {}) {
   const shotKeeper = cfg.placeShotsDraw ? placeShotKeeper({ shots, dir: join(dataDir, 'place-shots'), log,
     worlds: () => registry.worlds.filter((w) => moved(w)).flatMap((w) => { const p = cutover?.publishedPlaces(w); return p?.places?.length ? [{ slug: w.slug, places: p.places }] : []; }),
     page: (slug) => `${publicOrigin}${wp(slug)}/`, canStart: () => memAvailableMb() >= (prod.minFreeMb ?? 0) + 2048 }) : null;
+  // 27 Nov: the home page's picture of each listed world its owner gave none, drawn the same way (world-covers.mjs): one
+  // at a time, never while Explore's pictures are being drawn, redrawn daily so it shows what was built since
+  const coverKeep = cfg.placeShotsDraw ? coverKeeper({ covers, dir: join(dataDir, 'covers'), log, busy: () => !!shotKeeper?.status().running,
+    worlds: () => [...registry.worlds, ...routeOnlyWorlds()].filter((w) => !w.fork && !isUnlisted(w) && thumbView(w).thumbnailSource !== 'owner' && !closing.has(w.slug))
+      .map((w) => ({ slug: w.slug, targets: (w.routeOnly ? null : cutover?.publishedPlaces(w)?.places)?.map((p) => p.target) ?? [] })),
+    page: (slug) => `${publicOrigin}${wp(slug)}/`, canStart: () => memAvailableMb() >= (prod.minFreeMb ?? 0) + 2048 }) : null;
   const stillTimer = unloadStill ? setInterval(() => { if (unloading) return; unloading = true; unloadSweep().catch((e) => log(`unloading still worlds: ${e.message}`)).finally(() => { unloading = false; }); }, STILL.everyMs) : null;
   const alarmTimer = unloadStill ? setInterval(() => alarmScan(), STILL.alarmMs) : null;
   stillTimer?.unref(); alarmTimer?.unref();
@@ -2293,7 +2371,7 @@ export async function openLauncher(cfg = {}) {
      *  a held port every moment here is refused connections, so it stops at once, as before. After a handover (`gentle`)
      *  the keeper's port is served by the next launcher, so that exit is gentle too. */
     close: async ({ drainMs = 3_000, idleMs = 1_500, gentle = process.env.SIM_PORT_HELD === '1' } = {}) => {
-      if (closed) return; closed = true; shotKeeper?.close(); clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
+      if (closed) return; closed = true; shotKeeper?.close(); coverKeep?.close(); clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)
@@ -2363,7 +2441,7 @@ if (isMain(import.meta.url)) {
       publicOrigin: flag('public-origin'), clerkSatellite: flag('clerk-satellite'), clerkLegacySatellites: flag('clerk-legacy-satellites'), clerkSignInUrl: flag('clerk-sign-in-url'), authEnvFile: flag('auth-env') ?? flag('auth-env-file'), devAuth: argv.includes('--dev-auth') ? true : undefined,
       maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), worldsMemMb: num('worlds-mem-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), unloadStill: flag('unload-still') === undefined ? undefined : num('unload-still') === 1, loadParallel: num('load-parallel'), loadHoldMs: num('load-hold-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'), diskMinFreeMb: num('disk-min-free-mb'),
       maxWorldsPerAccount: num('max-worlds-per-account'), newAccountHours: num('new-account-hours'), newAccountWorldLimit: num('new-account-world-limit'), newAccountCreateLimit: num('new-account-create-limit'), newAccountWindowMinutes: num('new-account-window-minutes'),
-      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
+      marsWebDir: flag('mars-web'), templatesDir: flag('templates-dir'), v2TemplatesDir: flag('new-engine-templates'), cobuilders: argv.includes('--cobuilders') ? true : undefined, v2Create: argv.includes('--create-on-new-engine') ? true : argv.includes('--no-create-on-new-engine') ? false : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
       placeShotsDraw: process.env.SIM_PLACE_SHOTS_DRAW !== '0',
       ...(underKeeper ? { listen: false, adopt: process.env.SIM_ADOPT ? JSON.parse(process.env.SIM_ADOPT) : null } : {}) });
     let stopping = false;

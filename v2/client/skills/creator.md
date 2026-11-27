@@ -20,7 +20,8 @@ With the client a world serves (`<world url>/eden.mjs`), the command is `node ed
    (`kinds`: each kind and the kinds it `admits`). Read it before you build, and again whenever you are unsure.
 
 If the home has no creator yet, pair first: `node souls-god.mjs pair <world url> --creator <creator grant>`. It prints
-a link and a short code; the world's owner opens the link signed in and approves. Then run `status`.
+a link and a short code; the world's owner opens the link signed in and approves. Then run `status`: while the
+pairing is still collecting its approval it waits (up to 20 s), and if the owner has not approved yet it says so.
 
 On a large world, save `node souls-god.mjs describe > world.json` in your scratch folder. Inspect selected JSON with
 `jq '.kinds | keys' world.json` and `jq '.nodes[] | select(.kind == "eden:ground")' world.json`; filter other kinds or
@@ -168,13 +169,20 @@ the root, which `describe` shows), and from then on you place it like any other 
 ## Export and import
 
 - `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
-  default: kinds, places, fields and poses, and the world's public names.
+  default: kinds, places, fields and poses, the world's public names, and the words of its titles and calendar entries.
 - `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
   What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
   changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
   `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
   placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
   ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+- `node souls-god.mjs apply-batch <file> [--dry-run]` applies a reviewed fix written as a `souls-named-batch/1` file
+  (`worlds/patches/*/batch.json`), which names things by their template name (`<thing>` or `<building>/<thing>`), not
+  by id. Each name is found on your copy; one that matches nothing or several things, or a thing that stands neither
+  where the op says it was nor where it goes, is reported and skipped, never guessed. The rest go as ordinary edits
+  of at most 256 operations, and the world checks each. It prints one line per op (`ready`, `applied`, `already`,
+  `refused` with the code, `unresolved`, `ambiguous`, `moved-since`, ...), then the counts. Run `--dry-run` first;
+  a second run finds every op `already` and sends nothing. A thing moved off a roof to the ground gets a new id.
 
 ## Furnishing
 

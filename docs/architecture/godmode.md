@@ -18,7 +18,9 @@ agent, which edits it in validated batches. There are no co-builders. God mode i
   (mode 0600). A signed-in owner can also mint one directly (`POST /v1/god/mint`).
 - **Handing on.** The owner can give the world to another account or archive it (the god panel's **Forsake world**,
   served by the launcher; see [API](api.md#world-owner-api-served-by-the-launcher)). On handoff every earlier god token
-  is revoked.
+  is revoked. On a world the new engine runs, the same panel asks the world's directory instead, which holds its
+  creator: a one-use link the recipient accepts signed in, or archive (`/v1/worlds/handoff/*`, `/v1/worlds/archive`;
+  `apps/web/src/god-ui/v2-forsake.ts`). Nothing deletes a world; archived, it stops and is kept for an operator to restore.
 
 ## The god client (`tools/god-skill`)
 

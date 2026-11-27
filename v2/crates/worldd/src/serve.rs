@@ -176,6 +176,127 @@ fn stamp(stage: &str) {
         crate::progress();
     }
 }
+/// O10 (#2806): the room a start needs on its world's disk beyond a checkpoint (the largest one's size): the files it
+/// writes before it listens and the log's first ticks.
+const START_ROOM: u64 = 4 << 20;
+
+/// O10 (#2806): a start waits until its world's disk has room. A full disk ended the running world once
+/// (`disk-failed`, exit 87: nothing unwritten is acknowledged) and then every start, at its first write (exit 1), and
+/// the unit restarted it into the same full disk: 200 restarts in 36 s at its first delay, then one each 29 s, so a
+/// world came back up to 29 s after the disk cleared. Now the one start waits, says `disk.full` by name, tells its
+/// service manager it makes progress, and goes on within half a second of the room coming back; the world's time owed
+/// meanwhile is paid at its first ticks, exactly (K7's catch-up). A disk whose room cannot be read is not waited for.
+fn room_to_start(dir: &Path) {
+    let checkpoint = std::fs::read_dir(dir.join("checkpoints"))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok()?.metadata().ok())
+        .map(|m| m.len())
+        .max()
+        .unwrap_or(0);
+    let need = START_ROOM + checkpoint;
+    let mut said = false;
+    loop {
+        let Ok(s) = rustix::fs::statvfs(dir) else {
+            return;
+        };
+        let free = s.f_bavail.saturating_mul(s.f_frsize);
+        if free >= need {
+            if said {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "worldd: disk.full cleared: {free} bytes free, the start goes on"
+                );
+            }
+            return;
+        }
+        if !said {
+            let _ = writeln!(
+                std::io::stderr(),
+                "worldd: disk.full: {free} bytes free under the world, {need} to start; the start waits for room"
+            );
+            said = true;
+        }
+        for _ in 0..5 {
+            crate::progress();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+}
+
+/// How often the disk watch reads free space under the world.
+const DISK_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// `disk.low` (#2806 follow-up): the warning before `disk.full`. A thread of its own reads free space under the world
+/// each [`DISK_EVERY`] (one `statvfs`, nothing else) against `$WORLDD_DISK_LOW_BYTES` and `$WORLDD_DISK_LOW_PCT`
+/// (default 1 GiB and 5 %: under either is low), keeps it in `health.json` (`disk`), and says it once on entering
+/// (`worldd: disk.low: …`) and once on leaving (`worldd: disk.low cleared: …`). Nothing is refused: acts and ticks
+/// never read it. What is shed while low is the log's bytes a store already holds (the compactor, `sheds`); a world
+/// with no store sheds nothing, and says so. A disk whose room cannot be read is said once and read again each second.
+fn watch_disk(dir: PathBuf, sheds: bool) {
+    let env = |k: &str, d: u64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(d)
+    };
+    let low_bytes = env("WORLDD_DISK_LOW_BYTES", worldd::measures::DISK_LOW_BYTES);
+    let low_pct = env("WORLDD_DISK_LOW_PCT", worldd::measures::DISK_LOW_PCT).min(100);
+    let started = std::thread::Builder::new()
+        .name("disk-watch".into())
+        .spawn(move || {
+            let mut unread = false;
+            loop {
+                let s = match rustix::fs::statvfs(&dir) {
+                    Ok(s) => {
+                        unread = false;
+                        s
+                    }
+                    Err(e) => {
+                        // Said once; the last reading stays in `health.json`, and the watch tries again.
+                        if !unread {
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "worldd: the disk watch cannot read the room under the world: {e}; it tries again"
+                            );
+                            unread = true;
+                        }
+                        std::thread::sleep(DISK_EVERY);
+                        continue;
+                    }
+                };
+                let free = s.f_bavail.saturating_mul(s.f_frsize);
+                let total = s.f_blocks.saturating_mul(s.f_frsize);
+                let (low, changed) =
+                    worldd::measures::DISK.reading(free, total, low_bytes, low_pct);
+                if changed {
+                    let pct = u128::from(free) * 100 / u128::from(total.max(1));
+                    let shed = if sheds {
+                        "the log's bytes the store already holds are given back sooner"
+                    } else {
+                        "nothing is safe to shed here (no store holds this world's log); free space on the disk"
+                    };
+                    let line = if low {
+                        format!(
+                            "worldd: disk.low: {free} bytes free under the world ({pct} %), under {low_bytes} bytes \
+                             or {low_pct} %; the world runs on; {shed}"
+                        )
+                    } else {
+                        format!("worldd: disk.low cleared: {free} bytes free under the world ({pct} %)")
+                    };
+                    let _ = writeln!(std::io::stderr(), "{line}");
+                }
+                std::thread::sleep(DISK_EVERY);
+            }
+        });
+    if let Err(e) = started {
+        let _ = writeln!(
+            std::io::stderr(),
+            "worldd: the disk watch did not start: {e}"
+        );
+    }
+}
+
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// How long a world with no public pointer waits for its stream's first flush before it listens with the stream still
@@ -3405,6 +3526,7 @@ fn serve(args: &[String]) -> R<()> {
          [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>] \
          [--sleep <alarm socket> [--world-name <name>]]",
     )?);
+    room_to_start(&dir);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("WORLDD_SOCKET").map(PathBuf::from))
@@ -4036,6 +4158,7 @@ fn serve(args: &[String]) -> R<()> {
     // The log's compactor (#3837): the bytes every reader has passed go back to the disk.
     let stream_floor = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let (shipped, archive_floor) = off_floors.map_or((None, None), |(m, a)| (Some(m), a));
+    watch_disk(dir.clone(), shipped.is_some());
     crate::compactor::spawn(
         log_path.clone(),
         world.durable.clone(),
@@ -4062,11 +4185,7 @@ fn serve(args: &[String]) -> R<()> {
         }
     });
     worldd::directory::watch(told, world.events.clone(), answers);
-    crate::watchdog::watch(
-        world.beat.clone(),
-        crate::watchdog::Real::start(),
-        crate::watchdog::LIMIT_MS,
-    );
+    crate::watchdog::watch(world.beat.clone(), world.real, crate::watchdog::LIMIT_MS);
     let views_dir = views.clone();
     // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
     // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
@@ -4106,6 +4225,9 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| e.to_string())?;
     // The public stream recovers its history on its own thread, as it already follows the world there: on a restarted
     // full-Eden fork that replay takes seconds, and the world serves meanwhile; records wait in `stream_rx` (#3746).
+    // The world's clock, not the machine's: a step of the machine's clock, or one a restart carried (O10), never makes
+    // the stream cut a stretch early or hold one late.
+    let world_clock = world.real;
     std::thread::Builder::new()
         .name("public-stream".into())
         .spawn(move || {
@@ -4268,7 +4390,7 @@ fn serve(args: &[String]) -> R<()> {
                                 writer.push(record, &bytes)?;
                             }
                         }
-                        let slept = writer.sleep(answers::now(), due).map_err(refusal);
+                        let slept = writer.sleep(world_clock.now_us(), due).map_err(refusal);
                         let done = slept.is_ok();
                         // R15: before the world exits to sleep, its backup is given a little time to hold the spool's
                         // head, so a move finds the store current; best effort, and well inside the sleep watch's own
@@ -4284,7 +4406,7 @@ fn serve(args: &[String]) -> R<()> {
                             return Ok(());
                         }
                     }
-                    writer.idle(answers::now())?;
+                    writer.idle(world_clock.now_us())?;
                     published(&writer);
                 }
             })();
@@ -4340,6 +4462,7 @@ fn serve(args: &[String]) -> R<()> {
             PathBuf::from(alarms),
             Arc::clone(&world.quiet),
             world.durable.clone(),
+            world.real,
             sleep_tx,
             STARTED.get().map_or(0, |t| {
                 i64::try_from(t.elapsed().as_micros()).unwrap_or(i64::MAX)

@@ -22,7 +22,11 @@ export type AgentInbox = {
   now?: unknown;
   /** #1313: the owner view's act under way for the newest message, or thinking (read by `readDoing`). */
   doing?: unknown;
+  /** #1330: the world or the page's connection to it is down (a v2 world's box socket): nothing can be sent now. */
+  unavailable?: boolean;
 };
+/** #1330: the box's one line while the world is unavailable; what is typed stays in the box. */
+export const UNAVAILABLE_LINE = 'The world is unavailable right now, so this can\'t be sent. Your message stays here; send it when the world is back.';
 export type Doing = {phase: 'thinking'} | {phase: 'running' | 'done' | 'failed' | 'refused' | 'cut' | 'paused'; text: string; reason?: string; step?: {n: number; of: number}};
 const PHASES = ['running', 'done', 'failed', 'refused', 'cut', 'paused'] as const;
 const PHASE_WORD: Record<(typeof PHASES)[number], string> = {running: 'running', done: 'done', failed: 'failed', refused: 'refused', cut: 'cut short', paused: 'paused'};
@@ -113,16 +117,18 @@ export function AgentMessageBoxView({kind, name, inbox, prompt = '', text, sendi
   // D3c: until the result, the world's progress line (an act served an earlier step: "now: …; not resting yet")
   const answers = latest ? [latest.reply, latest.result ?? latest.progress].filter((x): x is string => !!x) : [];
   const receipt = latest ? [state, latest.text, ...answers].join(' · ') : '';
-  const hint = soul ? checkMessagesHint(inbox, name, now) : null;
-  return <div className="agent-message" data-agent-message={kind}>
+  const down = soul && inbox?.unavailable === true;
+  const hint = soul && !down ? checkMessagesHint(inbox, name, now) : null;
+  return <div className="agent-message" data-agent-message={kind} data-unavailable={down ? '1' : undefined}>
     {!soul && <div className="agent-message-presence" data-agent-presence={inbox?.presence ?? (inbox ? inbox.connected ? 'recent' : 'away' : 'unknown')}>
       <span>{presence ? presence.text : 'Agent status unavailable'}</span>
       {presence?.away && onCopy && <button type="button" onClick={onCopy} title={prompt}>{copied ? 'Copied' : 'Copy start prompt'}</button>}
     </div>}
     <form className="agent-message-form" onSubmit={onSend}>
       <input aria-label="Message your agent" placeholder="Message your agent…" value={text} onChange={e => onText(e.target.value)} maxLength={1000} disabled={sending} autoComplete="off"/>
-      <button type="submit" disabled={sending || !text.trim()}>{sending ? 'Sending…' : 'Send'}</button>
+      <button type="submit" disabled={sending || down || !text.trim()}>{sending ? 'Sending…' : 'Send'}</button>
     </form>
+    {down && <p className="agent-message-unavailable" role="status" data-world-unavailable="1">{UNAVAILABLE_LINE}</p>}
     {latest && <p className="agent-message-receipt" role="status" title={receipt} data-message-state={latest.state} data-thinking={thinking ? '1' : undefined}>
       <span className="agent-message-state">{state}</span><span aria-hidden="true"> · </span><span className="agent-message-text">{latest.text}</span>
       {answers.map((a, i) => <span key={i} className="agent-message-answer"><span aria-hidden="true"> · </span><span className="agent-message-reply">{a}</span></span>)}
@@ -193,9 +199,11 @@ export function SoulMessageBox({name, inbox, send, draftKey}: {name?: string; in
   const [text, setText] = useDraft(draftKey), [sending, setSending] = useState(false), [error, setError] = useState('');
   const mounted = useRef(true);
   useEffect(() => {mounted.current = true; return () => {mounted.current = false;};}, []);
+  // #1330: the outage's line says why it can't send; an earlier error is from before it
+  useEffect(() => {if (inbox?.unavailable) setError('');}, [inbox?.unavailable]);
   const onSend = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (sending || !text.trim()) return;
+    if (sending || inbox?.unavailable || !text.trim()) return;
     setSending(true); setError('');
     try {await send(text.trim()); writeDraft(draftKey, ''); if (mounted.current) setText('');}
     catch (e) {if (mounted.current) setError(e instanceof Error ? e.message : 'Message could not be sent. Try again.');}

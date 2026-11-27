@@ -28,7 +28,9 @@ export const LOOP_HOLD = 700_000;
 /** A gesture as the take draws it: world time µs, its end (planned or cut, `Infinity`-like for a held move), the old
  *  activity id (null for a hold); the body it is aimed at, if any, and (0.134 B1's aimed moves) where its target stood
  *  when it began, world x and z in mm; whether it holds that body's hand. */
-export type Gesture = { start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
+/** The existing humanoid resource names, with the move’s authoritative phase times in world µs. */
+export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
+export type Gesture = { press?: FormPress; start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
 export function gestureOf(move: string): string | null {
@@ -37,12 +39,15 @@ export function gestureOf(move: string): string | null {
 }
 
 /** A move record (start and phase ends, µs) as a gesture, or null when its move is not one. */
-export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null; run?: string }, toward?: [number, number] | null): Gesture | null {
+export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null; run?: string; limbs?: readonly string[] }, toward?: [number, number] | null): Gesture | null {
   const activity = gestureOf(move.name), last = move.ends[move.ends.length - 1];
   const hold = HOLDS.has(move.name.slice(move.name.indexOf(':') + 1).split('@')[0]);
   if (!(activity || hold) || !(last > move.start)) return null;
   const end = activity && LOOPS.has(activity) ? last + LOOP_HOLD : last;
-  return { start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}), ...(move.run ? { run: move.run } : {}) };
+  const hands = (move.limbs ?? []).filter(x => x === 'souls:hand-left' || x === 'souls:hand-right');
+  const press: FormPress | undefined = activity === 'operate' && hands.length === 1 && move.ends.length >= 2 && move.ends[0] > move.start && last > move.ends[0]
+    ? { hand: hands[0] === 'souls:hand-left' ? 'left' : 'right', start: move.start, contact: move.ends[0], end: last } : undefined;
+  return { ...(press ? { press } : {}), start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}), ...(move.run ? { run: move.run } : {}) };
 }
 /** How long a reading is drawn at most when its run's end never reaches the page, µs. */
 export const READ_LONGEST = 600_000_000;
@@ -82,4 +87,19 @@ export function towardAt(gestures: readonly Gesture[] | undefined, t: number): [
 /** The activity of the gesture playing at world time t, or null (none, or a hand hold). */
 export function gestureAt(gestures: readonly Gesture[] | undefined, t: number): string | null {
   return gestureNow(gestures, t)?.activity ?? null;
+}
+
+/** Keep only the recorded free-hand recovery after an early run end; never extend the activity itself. */
+export function pressAt(gestures: readonly Gesture[] | undefined, t: number): FormPress[] | null {
+  const out: FormPress[] = [];
+  const latest = (gestures ?? []).filter(g=>g.start<=t).at(-1);
+  for (const g of gestures ?? []) {
+    const p = g.press; if (!p || g.start > t) continue;
+    const cut = g.end < p.end ? g.end : undefined;
+    // Retain a zero-weight normal endpoint through the renderer's 0.3s generic fade window.
+    // This is metadata only: gestureAt still ends at the native end.
+    const end = cut === undefined ? p.end + 300_000 : cut + Math.max(300_000,p.end-p.contact);
+    if (t < end) out.push({ ...p, current:g===latest, ...(cut === undefined ? {} : { cut }) });
+  }
+  return out.length ? out : null;
 }

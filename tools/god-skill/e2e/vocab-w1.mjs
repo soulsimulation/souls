@@ -7,7 +7,7 @@
 //   Soul ANA sees the door, the fire and the phone box with their state in `observe`, is offered their actuators as
 //   capabilities, opens the door by words ("open the blue door"), is refused locking an open door, closes and locks it,
 //   is refused opening it locked, puts out the fire; each change is in the world (GET /v1/world/entities/<id>);
-//   the VIEWER (real Chrome, GPU) draws it: the open door, the fire out, stretch/warp/condition looks (screenshots).
+//   the VIEWER (Chromium, GPU) draws it: the open door, the fire out, stretch/warp/condition looks (screenshots).
 //
 //   node tools/god-skill/e2e/vocab-mech.mjs [--port 5574] [--keep] [--dpr 1,2] [--no-viewer]
 //
@@ -122,7 +122,7 @@ try {
   if (chromium && !args['no-viewer']) for (const dpr of dprs) {
     const release = await chromeLease('vocab-w1-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

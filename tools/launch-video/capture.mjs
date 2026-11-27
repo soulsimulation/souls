@@ -58,7 +58,7 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
   let pacing = null, gpu = null; const errors = [];
   try {
     const args = ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'];
-    const browser = await chromium.launch({ channel: 'chrome', headless: !headed, args }).catch(() => chromium.launch({ headless: !headed, args }));
+    const browser = await chromium.launch({ channel: 'chromium', headless: !headed, args }).catch(() => chromium.launch({ headless: !headed, args }));
     try {
       const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })).newPage();
       page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)));

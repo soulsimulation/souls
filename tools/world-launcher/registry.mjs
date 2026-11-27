@@ -129,6 +129,28 @@ export function listTemplates(dir, { all = false } = {}) {
   return [...out, ...found];
 }
 
+/** 27 Nov: the plain titles the New world dialog shows for the new engine's published templates. A template's manifest
+ *  (`<dir>/<id>/template`) names only its id, lineage, zone and hash, and its genesis file's title is a maker's
+ *  ("Eden 2026"), so a newcomer reads these. A template not here is shown by its id in words. */
+export const NEW_ENGINE_TITLES = {
+  'eden-2026': { name: 'Eden village', description: 'Homes, libraries, a cafe and a campus around a pond, with gardens, canals and hills.' },
+  'mars-camp': { name: 'Mars camp', description: 'A desert camp: a kitchen, a living room, a bunk house and stock piles to build with.' },
+};
+const wordsOf = (id) => { const s = id.replace(/[-_]+/g, ' ').trim(); return s.charAt(0).toUpperCase() + s.slice(1); };
+
+/**
+ * 27 Nov: the templates a world may be made from on the new engine: the published templates folder the directory and
+ * placement read (`DIRECTORYD_TEMPLATES`; each subfolder holding a `template` manifest is one, the rule of directoryd's
+ * `from_env`), sorted by id, with no empty plain (the new engine has none unless it is published). The page offers
+ * only these, so every choice is one the directory can make. Never throws: an unreadable folder is no templates.
+ */
+export function listNewEngineTemplates(dir) {
+  let names = [];
+  try { names = readdirSync(dir).sort(); } catch { return []; }
+  return names.filter((id) => SLUG_RE.test(id) && existsSync(join(dir, id, 'template')))
+    .map((id) => ({ id, ...(NEW_ENGINE_TITLES[id] ?? { name: wordsOf(id), description: '' }), batches: 0, engine: 'new' }));
+}
+
 /**
  * listTemplates, parsed again only when the folder or a template file changes (looked at no more than every `everyMs`).
  * Every proxied request builds its world's environment (the genesis file), and parsing every template (~2 MB of JSON;

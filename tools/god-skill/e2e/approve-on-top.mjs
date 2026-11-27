@@ -163,7 +163,7 @@ try {
   // lane AU (hotfix 2026-10-20): 3.57 handed <origin>/#approve/<id> (the site root's world) for a /worlds/w/<slug> world
   if (report.approvalURL !== `${base}/#approve/${id}`) throw new Error(`approvalURL lost the world's base: ${report.approvalURL} (want ${base}/#approve/${id})`);
   release = await chromeLease('approve-on-top');
-  browser = await chromium.launch({ channel: 'chrome', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: !args.headed, args: ['--ignore-gpu-blocklist'] });
   const desk = { width: 1352, height: 780 }, phone = { width: 390, height: 844 };
   for (const sc of [
     { name: 'desktop-dpr1-returning-god', viewport: desk, dpr: 1, introSeen: true },

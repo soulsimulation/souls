@@ -33,12 +33,17 @@ const SLICE_MS = 8;
 
 // the event itself, not its data: its data is read (structured-clone deserialised, a whole world's nodes in a snapshot)
 // only when it is delivered, so nothing is spent on it while the page's first phase draws its poster
-type Got = { event: MessageEvent } | { error: string };
+type Got = { event: MessageEvent; message?: MessageEvent } | { error: string };
 type WorkerLike = Pick<Worker, 'postMessage' | 'terminate' | 'addEventListener'>;
 
 /** A reader worker started before its bridge: to the bridge and its watchers it is the Worker (their `message`
  *  listeners, `onmessage`, `onerror`, `postMessage`, `terminate`). Until the bridge asks it for the same stream, what the
- *  worker posts is held; then it is delivered in order, a slice a task, and what comes after it passes straight on. */
+ *  worker posts is held; then it is delivered in order, a slice a task, and what comes after it passes straight on.
+ *  Phone arrival: the world's snapshot costs each watcher hundreds of ms on a 4x phone (the core library, the stream's
+ *  scene, the world's state), and handed to all of them in one task it made the page's longest (1.7 s), with the bridge
+ *  last. Now the bridge (`onmessage`, `onerror`) has everything held first, and what comes while the watchers catch up
+ *  at once; then each held message goes to each `message` listener in turn, a listener a task when it is slow. Each
+ *  still has every message in order, and the watchers each message before the next. */
 export class EarlyReader extends EventTarget {
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: ErrorEvent) => void) | null = null;
@@ -46,6 +51,11 @@ export class EarlyReader extends EventTarget {
   readonly replica: string;
   private readonly worker: WorkerLike;
   private held: Got[] = [];
+  /** The `message` listeners, in the order they were added: a held message is handed to each in turn. */
+  private readonly listeners: EventListenerOrEventListenerObject[] = [];
+  /** How many held messages the bridge has had (the first ones); how many listeners have had the first held message. */
+  private bridged = 0;
+  private handed = 0;
   private started = false;
   private replaying = false;
   private stopped = false;
@@ -56,7 +66,7 @@ export class EarlyReader extends EventTarget {
     worker.addEventListener('error', (e) => this.got({ error: (e as ErrorEvent).message || 'the v2 reader stopped' }));
     worker.postMessage({ stream });
   }
-  /** Held: messages the worker posted that nobody has had yet. */
+  /** Held: messages the worker posted that not everyone has had yet. */
   get pending(): number { return this.held.length; }
   postMessage(m: unknown): void {
     // the bridge's start: the stream this worker already reads, so it is not asked twice
@@ -64,19 +74,50 @@ export class EarlyReader extends EventTarget {
     this.worker.postMessage(m);
   }
   terminate(): void { this.stopped = true; this.held = []; this.worker.terminate(); }
+  addEventListener(type: string, fn: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
+    super.addEventListener(type, fn, options);
+    if (type === 'message' && fn && !this.listeners.includes(fn)) this.listeners.push(fn);
+  }
+  removeEventListener(type: string, fn: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void {
+    super.removeEventListener(type, fn, options);
+    const i = type === 'message' && fn ? this.listeners.indexOf(fn) : -1;
+    if (i >= 0) { this.listeners.splice(i, 1); if (i < this.handed) this.handed--; }
+  }
   private got(x: Got) {
     if (this.stopped) return;
-    if (this.started && !this.replaying) this.deliver(x); else this.held.push(x);
+    if (this.started && !this.replaying) { this.deliver(x); return; }
+    // while the watchers catch up, a bridge that has had all that was held has this at once
+    const caughtUp = this.replaying && this.bridged === this.held.length;
+    this.held.push(x);
+    if (caughtUp) { this.bridged++; this.toBridge(x); }
   }
   private replay() {
     this.replaying = true; arrivalMark('stream-claimed');
     const step = () => {
       const until = performance.now() + SLICE_MS;
-      while (this.held.length && !this.stopped) { this.deliver(this.held.shift()!); if (performance.now() >= until) break; }
+      while (this.held.length && !this.stopped) {
+        if (this.bridged < this.held.length) this.toBridge(this.held[this.bridged++]!); else this.handOne();
+        if (performance.now() >= until) break;
+      }
       if (this.held.length && !this.stopped) { setTimeout(step, 0); return; }
       this.replaying = false; arrivalMark('stream-replayed');
     };
     setTimeout(step, 0);
+  }
+  private toBridge(x: Got) {
+    try {
+      if ('error' in x) this.onerror?.(errorEvent(x.error));
+      else this.onmessage?.(x.message ??= new MessageEvent('message', { data: x.event.data }));
+    } catch (error) { report(error); }   // as a worker's listener's would be: reported, and the next message still delivered
+  }
+  /** The first held message (the bridge has had it) to its next listener; once all have it, it is done. */
+  private handOne() {
+    const x = this.held[0]!, fn = 'error' in x ? undefined : this.listeners[this.handed++];
+    if (!fn) { this.held.shift(); this.bridged--; this.handed = 0; }
+    try {
+      if ('error' in x) this.dispatchEvent(errorEvent(x.error));
+      else if (fn) { const e = x.message ??= new MessageEvent('message', { data: x.event.data }); if (typeof fn === 'function') fn.call(this, e); else fn.handleEvent(e); }
+    } catch (error) { report(error); }
   }
   private deliver(x: Got) {
     try {

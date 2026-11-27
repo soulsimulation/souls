@@ -70,12 +70,19 @@ test('through the launcher: robots and sitemap answered without a world, a liste
   r = await api('/w/garden/v1/config'); assert.equal(r.status, 200); assert.equal(r.headers.get('x-robots-tag'), null, 'a listed world passes its own headers');
   r = await api('/w/hidden-garden/v1/config'); assert.equal(r.status, 200); assert.equal(r.headers.get('x-robots-tag'), NOINDEX, 'an unlisted world is noindex');
   r = await api('/w/hidden-garden/v1/world/snapshot'); assert.equal(r.headers.get('x-robots-tag'), NOINDEX);
-  // #897: the root llms.txt lists listed worlds' readers; an unlisted world has none; the MCP card is served
+  // #897: the root llms.txt lists listed worlds' readers; an unlisted world has none
   const llms = await (await api('/llms.txt')).text();
   assert.ok(llms.includes(`(http://127.0.0.1:${PORT}/w/garden/llms.txt)`) && !llms.includes('hidden-garden'), llms);
   for (const p of ['/w/hidden-garden/llms.txt', '/w/hidden-garden/llms%2Etxt', '/w/hidden-garden/%6Clms.txt']) { r = await api(p); assert.equal(r.status, 404, p); assert.equal((await r.json()).code, 'world.unlisted', p); }
   r = await api('/w/garden/llms.txt'); assert.notEqual((await r.text()).includes('world.unlisted'), true, 'a listed world answers its own reader');
-  r = await api('/.well-known/mcp/server.json'); assert.equal(r.status, 200); assert.equal((await r.json()).remotes[0].url, `http://127.0.0.1:${PORT}/w/{world}/mcp`);
+  // no MCP is served: the site's card and a world's /mcp (any method, the token form too) answer 410 with the For agents
+  // page, from the launcher, without asking a world
+  for (const [p, o] of [['/.well-known/mcp/server.json'], ['/w/garden/mcp'], ['/w/garden/mcp', { method: 'POST', body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}' }], ['/w/garden/mcp/soul-x'], ['/w/no-such-world/mcp']]) {
+    r = await api(p, o);
+    assert.equal(r.status, 410, p); assert.match(r.headers.get('content-type'), /^text\/plain/, p);
+    assert.equal(r.headers.get('link'), `<http://127.0.0.1:${PORT}/docs/for-agents>; rel="help"`, p);
+    assert.equal(await r.text(), `Souls does not serve MCP. To run a Soul, use the client each world serves, eden.mjs. Start here: http://127.0.0.1:${PORT}/docs/for-agents\n`, p);
+  }
   // a root path a world answers (whichever runs, maybe the unlisted one) is never indexable under the site root
   for (const p of ['/skill.md', '/v1/world/snapshot']) { r = await api(p); assert.equal(r.headers.get('x-robots-tag'), NOINDEX, p); }
 

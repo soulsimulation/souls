@@ -116,7 +116,8 @@ ignores the same. The modelled store refuses the stale writer.
     - **The answers** leave only after both. The tick's parts reach the views and the follower once its words are
       on the disk. A failed sync of either file is final (`sim::log` rule 6): nothing more is answered, and a world
       process ends with `disk-failed` (exit 87, `answers::EXIT_DISK_FAILED`), so its unit starts it again from its
-      log rather than leave a world that ticks and answers nothing.
+      log rather than leave a world that ticks and answers nothing. A start whose disk has no room waits for it,
+      `disk.full`, rather than exit at its first write and be restarted into the same full disk (O10, #2806).
     - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
       are all on the disk.
 

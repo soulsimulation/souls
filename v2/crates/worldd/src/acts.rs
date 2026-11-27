@@ -39,7 +39,9 @@
 //!
 //! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
 //!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
-//!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
+//!   timer ([`Acts::fired`]); its needs are decided then, on the world's state at its due time, and a refusal is
+//!   written by name as a [`TIMER_REFUSED`] entry on the thing (#3991). Those the tree holds at a start (a restart, a sleeping world woken) go back on the list
+//!   at the first tick (#3991). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
 //!   ([`sim::walk::stall::Watch`]) against the corner its line aims at and that line's leg's end (never the walk's
@@ -217,11 +219,51 @@ fn selects_body_slot(f: &Json, key: &str) -> bool {
         }))
 }
 
+/// The event of the entry a form's timer the world refused writes (#3991): on the timer's thing, at its due time,
+/// changing nothing. Its fields: 1 the timer, 2 the refusal's name (a need's reason, `thing-missing`, a binder's),
+/// 3 the form, 4 the refusal's detail.
+pub const TIMER_REFUSED: &str = "souls:timer-refused";
+
+fn timer_refused(t: &Timer, node: Id, form: &str, e: &Refusal) -> Effect {
+    let text = |s: &str| replica::encode::Value::Bytes(s.as_bytes().to_vec());
+    Effect {
+        envelope: replica::effects::Envelope {
+            sequence: 0,
+            at: t.due,
+            cause: replica::effects::Cause::World,
+            actor: Actor::World,
+            audience: replica::world_model::Audience::Everyone,
+            node,
+        },
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![replica::effects::Event {
+            name: Name::new(TIMER_REFUSED).unwrap_or_else(|| unreachable!("a name")),
+            fields: BTreeMap::from([
+                (1, t.id.to_value()),
+                (2, text(e.name)),
+                (3, text(form)),
+                (4, text(&e.detail)),
+            ]),
+            changes: Vec::new(),
+            rest: replica::effects::Rest::new(),
+        }]),
+        rest: replica::effects::Rest::new(),
+    }
+}
+
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
         name,
         detail: detail.into(),
     }
+}
+
+/// `place.none-free` for the places `key` names, with its next step (E16): the only seat, taken, is not a dead end.
+fn none_free_refusal(key: &str) -> Refusal {
+    refusal(
+        sim::commit::bind::NONE_FREE,
+        format!("{key}; next: wait until one is free, or ask for another place"),
+    )
 }
 
 /// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
@@ -404,6 +446,9 @@ impl Sight<'_> {
                     at.y + p.position.y,
                     at.z + p.position.z,
                 );
+            }
+            if let Some(s) = slot_at(self.tree, &n) {
+                at = at.plus(s).ok()?;
             }
             match n.parent() {
                 Some(p) => id = p,
@@ -1107,9 +1152,22 @@ impl Geometry for Sight<'_> {
     }
 
     /// A body where the controller has it; a seated, lying or riding one at its slot's point in the frame of the thing
-    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin.
+    /// it is in ([`sim::reach::body_at`], 0.135 E21), so a walk to it goes to its seat, not to the thing's origin. A
+    /// thing in a slot its holder gives a point likewise at that point (#4120: a walk to a thing just made into a
+    /// bench's slot goes to the slot); any other thing is read from the tree by the host.
     fn read(&self, node: Id) -> Option<Seen> {
-        let b = self.bodies.get(&node)?;
+        let Some(b) = self.bodies.get(&node) else {
+            let n = self.tree.node(self.tree.handle(node)?)?;
+            let slot = slot_at(self.tree, &n)?;
+            let at = n.place().map_or(Vec3::ZERO, |p| p.position);
+            return Some(Seen {
+                id: node,
+                kind: n.kind().clone(),
+                parent: n.parent(),
+                position: at.plus(slot).ok()?,
+                fields: n.fields().clone(),
+            });
+        };
         let mut fields = BTreeMap::new();
         if self.carrying.contains(&node) {
             fields.insert(F_CROSSING, replica::encode::Value::Uint(1));
@@ -1200,19 +1258,36 @@ impl Sight<'_> {
         p: Vec3,
         keep: &dyn Fn(Id) -> bool,
     ) -> Option<(Id, Vec3)> {
-        if let Some((f, at, _)) = view.on_floor(target, p).filter(|(f, ..)| keep(*f)) {
-            return Some((f, at));
+        if let Some(found) = self.on_floor(view, target, p).filter(|(f, _)| keep(*f)) {
+            return Some(found);
         }
         let n = self.tree.node(self.tree.handle(target)?)?;
-        let place = n.place()?;
-        let up = place
-            .position
-            .plus(place.orientation.rotate(p).ok()?)
-            .ok()?;
-        if let Some((f, at, _)) = view.on_floor(n.parent()?, up).filter(|(f, ..)| keep(*f)) {
-            return Some((f, at));
+        let (parent, up) = up_one(self.tree, &n, p)?;
+        if let Some(found) = self.on_floor(view, parent, up).filter(|(f, _)| keep(*f)) {
+            return Some(found);
         }
-        self.floor_of(n.parent()?, up).filter(|(f, _)| keep(*f))
+        self.floor_of(parent, up).filter(|(f, _)| keep(*f))
+    }
+
+    /// Point `at` of node `node`'s frame carried up the tree to the first node the view has a surface for (the open
+    /// ground, or a building's floor), each slot's point included ([`up_one`]). #4120: up the world's own tree, which
+    /// holds every part committed, not the town's: the town takes only parts that change its ground, so a take, a
+    /// thing made into a slot, or a thing set down that walkers do not go round never reach it, and a take right
+    /// after one was measured to where the thing had been (or to its holder's origin). The town's tree is read only
+    /// for a node the world's does not hold.
+    fn on_floor(&self, view: &View<'_>, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
+        let surfaces = view.surfaces();
+        let (mut on, mut p) = (node, at);
+        for _ in 0..64 {
+            if surfaces.contains_key(&on) {
+                return Some((on, p));
+            }
+            let Some(n) = self.tree.handle(on).and_then(|h| self.tree.node(h)) else {
+                break;
+            };
+            (on, p) = up_one(self.tree, &n, p)?;
+        }
+        view.on_floor(node, at).map(|(f, p, _)| (f, p))
     }
 
     /// The entry of the thing `node` is.
@@ -1330,6 +1405,24 @@ impl Reach for Sight<'_> {
             up = n.parent();
         }
         Some(thing)
+    }
+
+    /// #5063: a thing is seen from afar when it stands on the body's own floor, found where it is ([`Sight::carry`]),
+    /// not by what holds it in the tree (a bench placed by a cottage's door is on the open ground): a body on the open
+    /// ground sees what stands on the open ground, one on a building's floor what that floor carries. A thing on
+    /// another building's floor, or a storey up or down, is behind a wall. Ground cover's floors (a lawn, a path) are
+    /// the open ground's.
+    fn seen(&self, body: Id, thing: Id) -> bool {
+        let Some(me) = self.bodies.get(&body) else {
+            return false;
+        };
+        let floor = self.body_on_floor(body, me).0;
+        if let Some(b) = self.bodies.get(&thing) {
+            return self.body_on_floor(body, b).0 == floor;
+        }
+        self.with_view(body, |v| self.carry(v, thing, Vec3::ZERO, &|_| true))
+            .flatten()
+            .is_some_and(|(f, _)| f == floor)
     }
 }
 
@@ -1485,7 +1578,12 @@ pub struct Acts {
     toward: BTreeMap<Id, Id>,
     /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
     timers: BTreeMap<Id, (Id, Name)>,
-    /// Each form a timer started since the last call, by the timer's id: its run, or its refusal by name (C24).
+    /// Each timer's run still going, by the timer's id: the timer and its form, so entries of the run the world
+    /// refuses to write are named on its thing ([`Acts::timer_unwritten`]).
+    timer_runs: BTreeMap<Id, (Timer, String)>,
+    /// Each form a timer started in the last tick, by the timer's id: its run, or its refusal by name (C24). Emptied at
+    /// each tick's start (#3991), so it holds one tick's timers however long the world runs; a refusal is also written
+    /// to the log as a [`TIMER_REFUSED`] entry on the timer's thing, where Souls and the page read it.
     pub fired: Vec<(Id, R<Asked>)>,
     /// The form's walks watched for progress (C21).
     watch: Watch,
@@ -1509,6 +1607,8 @@ pub struct Acts {
     ties: BTreeMap<Id, Tie>,
     /// Whether [`Acts::ties`] was read from the world as it stands (a restart's seated bodies), once.
     tied: bool,
+    /// Whether the forms' timers the tree holds were put back on the due list (#3991), once, at the first tick.
+    timed: bool,
     /// The world's stocked containers (#4837, [`crate::stock`]): given again to forms read back at a restart.
     stocks: Arc<sim::forms::Stocks>,
 }
@@ -1616,19 +1716,20 @@ pub const HERE_REACH_MM: i64 = 20_000;
 /// How near a body stands to a thing to be within a form's reach of it, mm, beyond the thing's own half size.
 const NEAR_MM: i64 = 1_500;
 
-/// A node's place in the zone's frame, µm: its position carried up the tree through each parent's place, turns
-/// included.
+/// A node's place in the zone's frame, µm: its position from its slot's point ([`slot_at`]), carried up the tree
+/// through each parent's place, turns included.
 pub(crate) fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
     let n = tree.node(tree.handle(node)?)?;
-    carried(
-        tree,
-        n.parent(),
-        n.place().map_or(Vec3::ZERO, |p| p.position),
-    )
+    let at = n.place().map_or(Vec3::ZERO, |p| p.position);
+    let at = match slot_at(tree, &n) {
+        Some(s) => at.plus(s).ok()?,
+        None => at,
+    };
+    carried(tree, n.parent(), at)
 }
 
-/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included
-/// (a seated body's controller pose is in its seat's frame).
+/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included,
+/// and the point of each slot a node stands in ([`slot_at`]) (a seated body's controller pose is in its seat's frame).
 fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
     let mut at = local;
     let mut up = frame;
@@ -1638,9 +1739,36 @@ fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
         if let Some(pp) = pn.place() {
             at = pp.orientation.rotate(at).ok()?.plus(pp.position).ok()?;
         }
+        if let Some(s) = slot_at(tree, &pn) {
+            at = at.plus(s).ok()?;
+        }
         up = pn.parent();
     }
     None
+}
+
+/// The point, in its parent's frame, of the slot node `n` stands in (`F_SLOTS`, as [`xform_to`] carries it): a thing
+/// in a slot stands from its slot's point, and a thing a form makes or puts into one stands at its zero (#4120).
+/// `None` outside a slot, or in one its parent gives no point (a hand).
+fn slot_at(tree: &Tree, n: &replica::tree::NodeRef<'_>) -> Option<Vec3> {
+    sim::ground::scene::slot_point(tree, tree.handle(n.parent()?)?, n.slot()?)
+}
+
+/// Point `p` of node `n`'s frame in its parent's frame, with the parent: turned and moved by its place, from its
+/// slot's point ([`slot_at`]).
+fn up_one(tree: &Tree, n: &replica::tree::NodeRef<'_>, p: Vec3) -> Option<(Id, Vec3)> {
+    let place = n.place()?;
+    let at = place
+        .orientation
+        .rotate(p)
+        .ok()?
+        .plus(place.position)
+        .ok()?;
+    let at = match slot_at(tree, n) {
+        Some(s) => at.plus(s).ok()?,
+        None => at,
+    };
+    Some((n.parent()?, at))
 }
 
 /// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
@@ -1943,7 +2071,7 @@ fn other_seat(
         None => open.len().checked_sub(1),
     };
     let Some(at) = at else {
-        return Some(Err(refusal(sim::commit::bind::NONE_FREE, key)));
+        return Some(Err(none_free_refusal(key)));
     };
     let far = open[at].0;
     let mut even: Vec<&Open> = open
@@ -2034,6 +2162,19 @@ fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
 }
 
 impl Acts {
+    /// Whether slot `slot` of `thing` is not `body`'s to pick now, as a form's own pick skips it: held, or another run
+    /// on its way to it (#4575), or its cabin away from its stop (N14). A sit by kind binds by it (#3178).
+    pub(crate) fn seat_reserved(
+        &self,
+        b: &Bodies,
+        thing: Id,
+        slot: u64,
+        body: Id,
+        now: Micros,
+    ) -> bool {
+        self.forms.seat_taken(&b.slots, thing, slot, body) || !b.slots.at_own_stop(thing, slot, now)
+    }
+
     /// A bare fixture sit or lie uses its actual entry's approach (a lie in a bed walks to it first, as its sleep does);
     /// explicit arguments and selectors keep their path.
     pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
@@ -2081,6 +2222,7 @@ impl Acts {
             toward: BTreeMap::new(),
             timers: BTreeMap::new(),
             fired: Vec::new(),
+            timer_runs: BTreeMap::new(),
             watch: Watch::new(),
             made_way: BTreeSet::new(),
             beside: BTreeMap::new(),
@@ -2091,6 +2233,7 @@ impl Acts {
             held: None,
             ties: BTreeMap::new(),
             tied: false,
+            timed: false,
             stocks: Arc::default(),
         }
     }
@@ -2587,9 +2730,7 @@ impl Acts {
                         });
                     free.and_then(|_| b.slots.boardable_seat(*node, now).err())
                 });
-                first.get_or_insert(
-                    away.unwrap_or_else(|| refusal(sim::commit::bind::NONE_FREE, key)),
-                );
+                first.get_or_insert(away.unwrap_or_else(|| none_free_refusal(&key)));
                 continue;
             }
             if let Some(e) = other {
@@ -2855,6 +2996,11 @@ impl Acts {
     /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
     /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
+        self.fired.clear();
+        if !self.timed {
+            self.timed = true;
+            self.timers_from_state(tree);
+        }
         let mut bodies = bodies;
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
@@ -2950,12 +3096,66 @@ impl Acts {
         }
     }
 
+    /// The forms' timers the tree holds (#3991): each pending timer whose node's entry has the form it names goes on
+    /// the due list, as [`Acts::out`] puts one there when it is written. The tree carries them over a restart (a
+    /// deploy, a sleeping world woken, effects.md rule 15) and the due list did not, so a timer pending then never fired
+    /// and its thing stayed as it was (a bell ringing, a lamp lit). One already due fires in the first tick, at its
+    /// due time. The sky's and the loose things' timers name no form of their node and are left to their own lists.
+    fn timers_from_state(&mut self, tree: &Tree) {
+        for (id, t) in tree.timers() {
+            if self.timers.contains_key(id) {
+                continue;
+            }
+            let Some((ns, form)) = t.name.as_str().split_once(':') else {
+                continue;
+            };
+            let named = tree
+                .handle(t.node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| entry_in(&self.kinds, tree, &n))
+                .is_some_and(|e| {
+                    let kind = e
+                        .get("kind")
+                        .and_then(Json::str)
+                        .and_then(|k| k.split_once(':'));
+                    kind.map_or("souls", |(k, _)| k) == ns
+                        && e.get("forms").and_then(|fs| fs.get(form)).is_some()
+                });
+            if !named {
+                continue;
+            }
+            let timer = Timer {
+                node: t.node,
+                id: *id,
+                due: t.due,
+                name: t.name.clone(),
+            };
+            if self.due.set(timer).is_ok() {
+                self.timers.insert(*id, (t.node, t.name.clone()));
+            }
+        }
+    }
+
+    /// The earliest due time on the forms' due list (#3991): their timers, and their runs' moves and pauses. The world
+    /// counts it with its other due lists, so it neither sleeps past a form's timer nor says it is still until later.
+    pub fn next_due(&self) -> Option<Micros> {
+        self.due.next_due()
+    }
+
     /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as
-    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`].
+    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`]. Its needs are decided at
+    /// its due time on the world's state then, as an act's are at commit (#3991): a bell already hushed is not faded
+    /// again. A refusal is written as a [`TIMER_REFUSED`] entry on the thing, so why the thing never changed is seen.
     fn timer_fired(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, t: &Timer, tick: u64) {
         let Some((node, form)) = self.timers.remove(&t.id) else {
             return;
         };
+        // A timer the tree no longer holds went with its thing (a removal drops its timers) or was never written: it
+        // has nothing to clear and no thing to write on, and an entry on a node gone would sink the tick's other world
+        // entries with it.
+        if !tree.timers().contains_key(&t.id) || tree.handle(node).is_none() {
+            return;
+        }
         self.forms.out.push(Effect {
             envelope: replica::effects::Envelope {
                 sequence: 0,
@@ -2988,15 +3188,34 @@ impl Acts {
                         &replica::encode::encode(&t.id.to_value()).unwrap_or_default(),
                     ),
                 };
-                self.with(tree, bodies, tick, |forms, w| {
-                    let steps = skills::form_runner::bind(&entry, name)?;
-                    let effects = skills::form_runner::bind_effects(&entry, name)?;
-                    forms.start(w, node, node, intent, steps, effects, limits(), t.due)
-                })
+                let none = skills::form_runner::Args::new();
+                match crate::needs::check(
+                    tree,
+                    bodies.as_deref(),
+                    &self.kinds,
+                    node,
+                    node,
+                    &entry,
+                    name,
+                    &none,
+                    t.due,
+                ) {
+                    Err(e) => Err(e),
+                    Ok(()) => self.with(tree, bodies, tick, |forms, w| {
+                        let steps = skills::form_runner::bind(&entry, name)?;
+                        let effects = skills::form_runner::bind_effects(&entry, name)?;
+                        forms.start(w, node, node, intent, steps, effects, limits(), t.due)
+                    }),
+                }
             }
         };
-        if let Ok(Asked::Started(run) | Asked::Running(run)) = &asked {
-            self.runs.insert(*run, t.id);
+        match &asked {
+            Ok(Asked::Started(run) | Asked::Running(run)) => {
+                self.runs.insert(*run, t.id);
+                self.timer_runs.insert(t.id, (t.clone(), name.to_owned()));
+            }
+            Ok(_) => {}
+            Err(e) => self.forms.out.push(timer_refused(t, node, name, e)),
         }
         self.fired.push((t.id, asked));
     }
@@ -3062,9 +3281,20 @@ impl Acts {
             .filter_map(|e| {
                 let why = self.blocked.remove(&e.body);
                 let why = why.filter(|_| e.how.as_str() == BLOCKED).or(e.why);
-                Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
+                let id = self.runs.remove(&e.run)?;
+                self.timer_runs.remove(&id);
+                Some((id, e.how.as_str().to_owned(), why))
             })
             .collect()
+    }
+
+    /// A timer's run whose entries the world refused to write at `at` (#3991): the [`TIMER_REFUSED`] entry naming why,
+    /// on its thing, when `id` is a timer's run still going; none for any other.
+    pub fn timer_unwritten(&self, id: Id, e: &Refusal, at: Micros) -> Option<Effect> {
+        let (t, form) = self.timer_runs.get(&id)?;
+        let mut entry = timer_refused(t, t.node, form, e);
+        entry.envelope.at = at;
+        Some(entry)
     }
 }
 

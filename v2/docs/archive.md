@@ -80,7 +80,7 @@ a store path inside a value is a byte string, since text in v2 is always a name.
 | `archive/day/<day>` | A **manifest**: `{1: format, 2: world day, 3: [[key, epoch, first record, records, SHA-256], ...], 4: previous day's manifest}` | Each time its day gains an object, over the version it read (`If-Match`) |
 | `archive/head` | The **head**: `{1: format, 2: root id, 3: root kind, 4: newest manifest}` | When a new day's first object is written |
 | `bundles/<day>/<start µs>` | A **bundle**, deflated (RFC 1951): `{1: format, 2: header hash, 3: start µs, 4: length µs, 5: snapshot, 6: view}` | Once, create-only, when its window closes |
-| `bundles/<day>/index` | A **day index**: `{1: format, 2: day, 3: [[start µs, key, SHA-256 before deflate], ...]}` | When the day closes, and at shutdown |
+| `bundles/<day>/index` | A **day index**: `{1: format, 2: day, 3: [[start µs, key, SHA-256 before deflate], ...]}` | When the day closes, and at shutdown; empty, ahead of its first bundle, when the day before is first written, so the day after a day with a bundle has an index from its first minute, still or not. A day after a still day has none until its first bundle |
 | `history/everyone/events/<day>` | A **day of the event index** (V4): `{1: format, 2: day, 4: [kind, ...], 5: [[at µs, kind number, node, actor], ...], 6: [split hour, ...]}`, the rows of its hours that have no object of their own | When a later day's event arrives, and at shutdown |
 | `history/everyone/events/<day>/<hour>` | An **hour of the event index** (V4), an hour of 1,000 events or more: as a day's, with `3: hour` | When a later hour's event arrives, and at shutdown |
 | `history/everyone/counts/day/<day>` | A **day's counts** (V4): `{1: format, 2: 1, 3: day, 4: [kind, ...], 5: [[ten-minute slot, kind number, count], ...]}` | When a later day's event arrives, and at shutdown |
@@ -124,7 +124,8 @@ a store path inside a value is a byte string, since text in v2 is always a name.
 
 8. **A seek** (`archive::seek`, applied by `replica::history::seek::state_at`, which builds for WASM) gives the public
    state at world time `t`: it reads the day's bundle index, takes the last bundle that starts at or before `t` (a
-   day with none sends it to the day before, back to a year), inflates it, checks it by the SHA-256 the index names,
+   day with none, or with no index after a still day, sends it to the day before, back to the newest day that has
+   one: a year at most, never before day 0), inflates it, checks it by the SHA-256 the index names,
    and applies the bundle's records up to `t` on its snapshot. Two requests, nothing kept between seeks. The state is
    the history level's: motion samples less than a second apart are thinned (rule 5).
 9. **The event index** is a view, keyed by audience; only the public audience's (`everyone`) is built. Each public
@@ -132,7 +133,11 @@ a store path inside a value is a byte string, since text in v2 is always a name.
    `[2, creator]` (a principal id, never an account id) or `[3]` the world. No fields, so no text reference and no
    words. An effect for another audience, or whose node or actor is redacted, gives no row. It is split by hour: an
    hour of 1,000 events or more is an object of its own, and a day's object holds the rest and names those hours, so
-   a quiet world writes one object a day for it and a busy one an object an hour.
+   a quiet world writes one object a day for it and a busy one an object an hour. A creator's edit names what it did
+   (`sim::edit` `events_of`, #5006 row 14): `souls:placed` one a thing (its row's node the parent it was placed in),
+   `souls:moved`, `souls:changed` and `souls:removed`; an undo `souls:undone` and a redo `souls:redone`. With the actor
+   `[2, creator]` they are the rows God Mode's edit log reads (`apps/web/src/v2-engine/edit-log.ts`), only the days
+   and split hours whose counts (rule 10) count one of them.
 10. **The coarse levels** count those events by kind: per ten minutes for a day (144 slots) and per day for a year of
     365 world days. A day's timeline is drawn from its counts; scrubbing reads them while the handle moves and seeks
     on release (V9).

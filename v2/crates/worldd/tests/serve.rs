@@ -3219,3 +3219,120 @@ fn rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over() {
     drop(deployed);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// 0.143.0's move (26 Nov): a world created through New world is a fork of a published template (seed, publish-template,
+/// `worldd fork --template`), and a fork is served from its `boot` and its checkpoint, never from an import's part. The
+/// deploy's scratch copy carried neither, so the new build exited at start (`<scratch>: No such file or directory`),
+/// the rehearsal refused `rehearsal.no-start` and the release stopped there. Here such a world, served once, is
+/// rehearsed as a release's deploy rehearses it (its last 200 records) and served again, as the deploy's restart
+/// serves it.
+#[test]
+fn a_world_made_from_a_template_is_rehearsed_and_served_again_as_a_deploy_moves_it() {
+    let d = scratch("fk");
+    let facts = d.join("facts.json");
+    // A rack bay and an upright on the ground: v2/tools/templates/publish.test.mjs's world.
+    std::fs::write(
+        &facts,
+        r#"{"format":"souls/import-eden/1","kinds":[{"ref":"t-bay@1","hash":"aa","name":"mars:rack_bay","form":"point"},
+{"ref":"t-upright@1","hash":"bb","name":"mars:rack_upright","form":"point"}],"things":[{"id":"e_bay","def":"t-bay@1",
+"ref":"t-bay@1","parent":null,"pose":[0,0,0,0],"world":[0,0,0,0],"scale_ppm":1000000},{"id":"e_upright","def":"t-upright@1",
+"ref":"t-upright@1","parent":null,"pose":[3000,0,0,0],"world":[3000,0,0,0],"scale_ppm":1000000}],"doors":[],"places":[],
+"ground":{"tileM":2,"tiles":[{"tx":0,"tz":0,"heights":"AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA","classes":"AAECAw=="}]},
+"bake":{"things":2},"byRef":{"t-bay@1":1,"t-upright@1":1}}"#,
+    )
+    .expect("facts");
+    let kinds = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).expect("entries");
+    for e in std::fs::read_dir(kinds.join("construction"))
+        .expect("construction kinds")
+        .flatten()
+    {
+        std::fs::copy(e.path(), entries.join(e.file_name())).expect("an entry");
+    }
+    std::fs::copy(
+        kinds.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .expect("humanoid");
+    let run = |args: &[&std::ffi::OsStr]| {
+        let out = worldd().args(args).output().expect("worldd runs");
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let (support, out, dir) = (d.join("support"), d.join("out"), d.join("w"));
+    run(&[
+        "seed".as_ref(),
+        "--facts".as_ref(),
+        facts.as_ref(),
+        "--entries".as_ref(),
+        entries.as_ref(),
+        "--souls".as_ref(),
+        "0".as_ref(),
+        "--at".as_ref(),
+        "0,0".as_ref(),
+        "--dir".as_ref(),
+        support.as_ref(),
+    ]);
+    templates::publish_facts(
+        &std::fs::read_to_string(&facts).expect("facts"),
+        &out,
+        "yard",
+        Some(&support),
+        Scope([0x5a; 16]),
+        vec![7; 32],
+        1_795_000_000_000_000,
+    )
+    .expect("the template is published");
+    let template = out.join("yard");
+    let through = format!("{}:1", "ab".repeat(16));
+    let scope = "cd".repeat(16);
+    run(&[
+        "fork".as_ref(),
+        "--from".as_ref(),
+        template.join("ckpt").as_ref(),
+        "--template".as_ref(),
+        template.as_ref(),
+        "--to".as_ref(),
+        dir.as_ref(),
+        "--through".as_ref(),
+        through.as_ref(),
+        "--scope".as_ref(),
+        scope.as_ref(),
+    ]);
+    let socket = d.join("s");
+    // The created world as it is served: placed, started and stopped.
+    let live = serve(&dir, &socket);
+    live.line("listening");
+    live.kill();
+    let canary = supervisor::deploy::Canary {
+        window: Duration::from_millis(100),
+        start_within: Duration::from_secs(60),
+        answer_within: Duration::from_secs(5),
+        every: Duration::from_millis(50),
+    };
+    // The root-sync probe: a release's operator probe is born at the world's entry, and this world's one ground tile
+    // has no surface there (`birth-off-surface`).
+    let mut probe = supervisor::deploy::Probe::Ask(0);
+    let r = supervisor::deploy::rehearse(
+        Path::new(env!("CARGO_BIN_EXE_worldd")),
+        &dir,
+        &d.join("r"),
+        200,
+        &canary,
+        &mut probe,
+    )
+    .unwrap_or_else(|e| {
+        let said = std::fs::read_to_string(d.join("r/worldd.err")).unwrap_or_default();
+        panic!("the fork's rehearsal: {e}\nthe build said: {said}")
+    });
+    assert!(r.served_kept && r.copied > 0, "{r:?}");
+    // The deploy's restart after it: the live folder, untouched by the rehearsal, serves again.
+    let deployed = serve(&dir, &socket);
+    deployed.line("listening");
+    drop(deployed);
+    let _ = std::fs::remove_dir_all(&d);
+}

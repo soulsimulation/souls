@@ -827,3 +827,114 @@ fn the_souls_in_each_world_come_from_its_health_file() {
     assert_eq!(at(t + 2 * SOULS_EVERY), None, "a stale file gives no count");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// One HTTP request to a served directory: its status and JSON answer.
+fn call(addr: &str, method: &str, path: &str, bearer: Option<&str>, body: &Json) -> (u16, Json) {
+    use std::io::{Read, Write};
+    let body = if method == "GET" {
+        String::new()
+    } else {
+        body.to_string()
+    };
+    let auth = bearer.map_or(String::new(), |b| format!("authorization: Bearer {b}\r\n"));
+    let mut s = std::net::TcpStream::connect(addr).expect("connects");
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nhost: {addr}\r\n{auth}content-length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    (
+        out[9..12].parse().unwrap(),
+        serde_json::from_str(out.split("\r\n\r\n").nth(1).unwrap()).unwrap_or_default(),
+    )
+}
+
+/// 26 Nov (my-mars-lab-2): a world made by New world (the directory's create, as the launcher asks it) is unlisted
+/// and listed again by its creator over HTTP (`POST /v1/worlds/settings`, the request the launcher's owner route
+/// passes on), and by nobody else. Unlisted, the list asked with no sign-in leaves it out (what the launcher's list
+/// follows), and its creator's own list keeps it, marked.
+#[test]
+fn a_created_world_is_unlisted_and_listed_by_its_creator_over_http() {
+    use crate::accounts::serve::{App, run};
+    let store: &'static (dyn Store + Send + Sync) = Box::leak(Box::new(Memory::default()));
+    let mut templates = BTreeMap::new();
+    templates.insert(
+        "mars-camp".to_owned(),
+        Template {
+            dir: "mars-camp".into(),
+            lineage: [0xe0; 16],
+            zone: Id::new(Scope([0xe0; 16]), 1).expect("an id"),
+        },
+    );
+    let app = Arc::new(App {
+        store: crate::accounts::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: None,
+        origin: None,
+        mailbox_key: None,
+        pairing: None,
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: Some(Worlds::new(
+            Directory::new(store, Name::new("m1").expect("a name")),
+            templates,
+            Box::new(|_| Ok(())),
+        )),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    std::thread::spawn(move || run(listener, app));
+
+    let ask = json!({"key": "click-1", "name": "my-mars-lab-2", "template": "mars-camp", "label": "My Mars Lab"});
+    let (status, made) = call(&addr, "POST", "/v1/worlds", Some("test:Ada"), &ask);
+    assert_eq!(status, 200, "{made}");
+    let public = || {
+        let (status, list) = call(&addr, "GET", "/v1/worlds", None, &Json::Null);
+        assert_eq!(status, 200, "{list}");
+        list["worlds"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter_map(|r| r["name"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let set = |who: Option<&str>, world: &str, unlisted: bool| {
+        call(
+            &addr,
+            "POST",
+            "/v1/worlds/settings",
+            who,
+            &json!({"world": world, "unlisted": unlisted}),
+        )
+    };
+    assert_eq!(public(), ["my-mars-lab-2"]);
+    // Nobody signed in, someone else, or a world that is not there: refused, and it stays listed.
+    assert_eq!(
+        set(None, "my-mars-lab-2", true),
+        (401, json!({"refused": "token-missing"}))
+    );
+    assert_eq!(
+        set(Some("test:Bea"), "my-mars-lab-2", true),
+        (403, json!({"refused": "not-the-creator"}))
+    );
+    assert_eq!(
+        set(Some("test:Ada"), "nowhere", true),
+        (404, json!({"refused": "world-missing"}))
+    );
+    assert_eq!(public(), ["my-mars-lab-2"]);
+    // Its creator: off the public list, still on her own, marked.
+    let (status, row) = set(Some("test:Ada"), "my-mars-lab-2", true);
+    assert_eq!(status, 200, "{row}");
+    assert_eq!(row["world"]["name"], "my-mars-lab-2");
+    assert_eq!(row["world"]["unlisted"], true);
+    assert!(public().is_empty(), "off the public list");
+    let (_, own) = call(&addr, "GET", "/v1/worlds", Some("test:Ada"), &Json::Null);
+    assert_eq!(own["worlds"][0]["name"], "my-mars-lab-2");
+    assert_eq!(own["worlds"][0]["unlisted"], true);
+    // And back on it.
+    assert_eq!(set(Some("test:Ada"), "my-mars-lab-2", false).0, 200);
+    assert_eq!(public(), ["my-mars-lab-2"]);
+}

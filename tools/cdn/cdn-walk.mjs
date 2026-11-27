@@ -39,7 +39,7 @@ const { chromium } = findPlaywright();
 const release = await chromeLease('cdn-walk');
 const rows = []; let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] });
   for (const url of urls) for (const dev of DEVICES) {
     const phone = dev.startsWith('phone'), dpr = Number(dev.slice(-1));
     const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });

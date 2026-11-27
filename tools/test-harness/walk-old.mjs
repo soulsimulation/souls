@@ -16,7 +16,7 @@ const ui=()=>{const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&
 const cam=()=>globalThis.__soulsCamera??null;
 const moved=(a,b,k)=>!!(a&&b)&&a[k].some((v,i)=>Math.abs(v-b[k][i])>0.01);
 const release=await chromeLease('rec-old-worlds');const report=[];
-try{for(const dpr of [1,2]){const browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+try{for(const dpr of [1,2]){const browser=await chromium.launch({channel:'chromium',headless:true,args:['--ignore-gpu-blocklist']});
  try{for(const world of worlds)for(const [build,port0] of Object.entries(builds)){
   const port=port0+worlds.indexOf(world),tag=`${world}-dpr${dpr}-${build}`;const ctx=await browser.newContext({viewport:{width:W,height:H},deviceScaleFactor:dpr});const page=await ctx.newPage();
   const errors=[],requests=[];page.on('pageerror',e=>errors.push(String(e).slice(0,200)));page.on('request',r=>{const u=new URL(r.url());if(u.port===String(port))requests.push(u.pathname.replace(/\/assets\/.*/,'/assets/*'));});

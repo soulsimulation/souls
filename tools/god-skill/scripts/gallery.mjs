@@ -14,6 +14,11 @@
 //   --title <text>  the sheet's title line
 //   --frames <n>    creatures: one row of n stride phases each (judge the walk cycle)
 //   --serve <port>  start an own small studio world (240 m, fresh) for --world and stop it after
+//   --deadline <min> a run still going after this many minutes (default 45) closes its browser and exits 124
+//
+// Pixels come from Playwright's own Chromium (channel chromium: new headless, hardware GPU), never the installed Google
+// Chrome: a stuck run holding a headless copy of Chrome.app makes macOS treat Chrome as open, so the user's own Chrome
+// shows no window. Make both runs of a --compare with the same Playwright version.
 //
 // Writes <out>/sheet.png (+ sheet-walk rows with --walk), <out>/gallery.json (defs, tris, errors),
 // and with --world <out>/world-overview.png. Without --token it mints one with the dev owner.
@@ -118,10 +123,20 @@ writeFileSync(resolve(out, 'gallery-input.json'), JSON.stringify(defs));
 writeFileSync(resolve(out, 'studio.html'), `<!doctype html><meta charset=utf-8><style>body{margin:0;background:#efe9dc;font:12px system-ui;color:#2a2622}h1{font:600 15px system-ui;margin:0;padding:10px 12px}#sheet{position:relative}.lbl{position:absolute;box-sizing:border-box;padding:3px 7px;background:#f8f5ee;border-top:1px solid #e2dccd;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.lbl b{font-weight:600;margin-right:6px}.lbl i{color:#8a8278;font-style:normal;font-size:11px}</style><h1 id=title></h1><div id=sheet></div><script src="./studio.js"></script>`);
 if (has('bundle-only')) { console.log(`studio bundle: ${resolve(out, 'studio.js')} (pixels not rendered)`); process.exit(0); }
 const { chromeLease } = await import(pathToFileURL(resolve(root, 'tools/god-skill/lib/chrome-lease.mjs')).href);
+const launch = (args) => chromium.launch({ channel: 'chromium', headless: true, args });
+// Watchdog: page.evaluate has no timeout, so a wedged render would otherwise keep this process (and its browser) alive
+// for good. Exiting is enough: Playwright kills the browsers it launched when the process exits.
+const deadlineMin = Number(flag('deadline', 45));
+if (!(deadlineMin > 0)) throw new Error('--deadline must be a positive number of minutes');
+setTimeout(() => {
+  console.error(`gallery: still running after ${deadlineMin} min; closing the browser and exiting (raise --deadline for a longer run)`);
+  try { release?.(); } catch { /* already released */ }
+  process.exit(124);
+}, deadlineMin * 60_000).unref();
 let release = await chromeLease('L4-gallery');
 let browser;
 try {
-browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--allow-file-access-from-files', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-first-run'] });
+browser = await launch(['--ignore-gpu-blocklist', '--allow-file-access-from-files', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-first-run']);
 const page = await browser.newPage({ viewport: { width: cols * cw, height: 800 } }); page.setDefaultTimeout(600000);
 await page.route(/^https?:/, (route) => { const u = new URL(route.request().url()); return u.hostname === '127.0.0.1' && u.port && Number(u.port) > 0 && !((Number(u.port) >= 4930) && (Number(u.port) <= 4970)) ? route.continue() : route.abort(); });
 const errors = []; page.on('pageerror', (e) => errors.push(String(e).slice(0, 300))); page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
@@ -190,7 +205,9 @@ if (!has('world') || !base) process.exit(process.exitCode ?? 0);
 // ---- the grid in the world, from the viewer
 {
 release = await chromeLease('L4-gallery-world');
-const browser2 = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+let browser2;
+try {
+browser2 = await launch(['--ignore-gpu-blocklist']);
 const ctx = await browser2.newContext({ viewport: { width: 960, height: 600 } });
 const page = await ctx.newPage(); page.setDefaultTimeout(180000);
 const werrors = []; page.on('pageerror', (e) => werrors.push(String(e).slice(0, 200)));
@@ -204,6 +221,6 @@ const look = (eye, at) => page.evaluate(([e, a]) => { const w = window.__soulsEn
 await look([0, Math.max(30, (z - z0) * 0.9), z0 - (z - z0) * 0.35], [0, 0, zm]);
 await page.waitForTimeout(2500);
 await page.screenshot({ path: resolve(out, 'world-overview.png') });
-await browser2.close(); release();
 console.log(`world overview: ${resolve(out, 'world-overview.png')}`);
+} finally { await browser2?.close(); release(); }
 }

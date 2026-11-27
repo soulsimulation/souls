@@ -110,7 +110,11 @@ Broadcast menu, the sound switch, Explore, its places, following a Soul from
 Explore (a world whose Explore lists no Soul passes that step with "no Soul listed in Explore: nothing to follow"),
 New Soul (the dialog opens; nothing is submitted) and Sign in (a sign-in form must appear). A world fails on a
 failed step, any console error, or any 4xx/5xx answered by the page's own origin; the `ALLOW` list in the script is the
-only exception and is empty. A world whose `load` step fails has nothing to click: its remaining steps are not run and
+only exception and is empty. A world still for days has no history index for those days, and the page's walk asks for each on its way back to
+the newest day that has one (v2/docs/archive.md rule 8): such a 404 passes when the page found an index on the nearest
+day it read below it with every day between read, the day is not after the world's own today, and the world had no
+public event that day (its `history/everyone/events/<day>` is not there). A day index missing for a day with public
+events, past the world's first day (no index found below) or after its today still fails (`walkBackMiss`). A world whose `load` step fails has nothing to click: its remaining steps are not run and
 are reported as `skipped-after-load-failure`, which fails the world as a failed step does. Site probes: `POST /v1/account/view-token` with no token is 401, `GET /w/<slug>/v1/me` is
 401, `/mars-assets/static-manifest.json` is 200. It only clicks: it never submits a form or signs in, so run it against
 production any time:
@@ -184,6 +188,16 @@ runs and authors them. Rendering diagnostics for camera follow and temporal stab
 holds the camera still and fails on any region that flips between frames (#1265).
 The engine's own browser tests are in `mars/viewer/e2e/`.
 
+### Browser channel
+
+Scripts launch Playwright's own Chromium with `channel: 'chromium'` (the full build in new headless mode), never the
+installed Google Chrome (`channel: 'chrome'` or an `executablePath` into Chrome.app). On macOS it draws WebGL on the
+hardware GPU (ANGLE Metal); the bare default, the headless shell, falls back to SwiftShader, so always name the
+channel. A run that hangs on real Chrome leaves a headless copy of Chrome.app alive; macOS then treats the user's
+Chrome as open and shows no window. Install once per Playwright version in use:
+`pnpm --filter mars-campus-viewer exec playwright install chromium`. `tools/test-harness/browser-channel.test.mjs`
+fails on any new real-Chrome launch outside its short allowlist (renderers whose last fallback is Chrome).
+
 ## CI window
 
 Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci` once, with no label**:
@@ -218,7 +232,7 @@ Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
 `AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
 bundle). It runs `repo`, `soul-tools` (the one launcher test that reads `content/kinds`, among others), `kinds` (the
-entry tests and the form-rules tests) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
+entry tests and the form-rules tests). A change under `packages/form-rules/src/` also
 keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
 and the usual path map decides; a changelog fragment beside other files selects nothing itself (since 21 Nov; before,
 it read as an unmapped path and every PR with a fragment ran every job). `content/kinds` and `content/moves` also run

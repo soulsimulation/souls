@@ -31,7 +31,9 @@
 #                                  once per release. Before the deploys, `bodies worlds`; after the page, `bodies binding`.
 #                                  Just before each world's deploy, `entries stage` for that world: its deploy rehearses
 #                                  the new build on them and swaps them in between the pin and the restart, so only the
-#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged
+#                                  new build reads them (supervisor deploy.rs); a failed deploy leaves none staged.
+#                                  A world other than the canary whose rehearsal fails keeps its build and the other
+#                                  worlds move; the move then refuses before the gateway, and a rerun deploys only it
 #   entries plan|stage <sha> [<world>...]   each world's library entries (<world>/entries, which worldd reads at
 #                                  start and a seed wrote once) brought up to this release's (reseed/kinds: content/kinds
 #                                  at its commit) by this release's `worldd entries`, every world when none is named:
@@ -468,7 +470,7 @@ bodies() {
 }
 
 move() {
-  local sha=$1 canary=${2:-} rel=$DATA/releases/$1 worldd gw page client w order=() all
+  local sha=$1 canary=${2:-} rel=$DATA/releases/$1 worldd gw page client w order=() all kept=()
   [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
   worldd=$(artifact "$rel/manifest.json" worldd) gw=$(artifact "$rel/manifest.json" gatewayd)
   page=$(artifact "$rel/manifest.json" page.tar) client=$(artifact "$rel/manifest.json" client.tar)
@@ -496,14 +498,24 @@ move() {
     # restart; a refused or failed stage stages none, and the world deploys on its own entries
     entries_world stage "$rel" "$w" || true
     echo "move: deploy $w$([ "$w" = "$canary" ] && echo ' (the canary)')"
-    if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}"; then
+    # deploy's last line is how it ended (supervisor deploy.rs `Ended`)
+    if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}" | tee "$rel/deploy.out"; then
       touch "$rel/moved/$w"
     else
       # never left for a later deploy to take
       rm -rf "$WORLDS_ROOT/worlds/$w/entries.next"
+      # A world other than the canary whose rehearsal failed was never pinned or restarted: it keeps its build and
+      # serves, and the other worlds move. Any other failure, and the canary's, stops the move here.
+      if [ "$w" != "$canary" ] && grep -q '^NotDeployed { why: "rehearsal\.' <(tail -n 1 "$rel/deploy.out"); then
+        echo "move: $w keeps its build: its rehearsal failed; the other worlds move"
+        kept+=("$w")
+        continue
+      fi
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
     fi
   done
+  # Every world moved before the gateway, the page and the services do: a rerun moves those that kept their build.
+  [ ${#kept[@]} -eq 0 ] || refuse "release.deploy-failed: ${kept[*]} kept their build (rehearsal failed); every other world moved"
   # The owner's messages (R13): the key and the flags, when missing, before the gateways and the directory restart on
   # the release below and read them. A rerun of a release whose gateways or directory had moved restarts what changed.
   local mb changed

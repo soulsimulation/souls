@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSyn
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
-import { bindingId, cutoverFence, withV2Stream } from './cutover.mjs';
+import { bindingId, cutoverFence, searchPlaces, snapshotPlaces, withV2Stream } from './cutover.mjs';
 import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
@@ -160,6 +160,29 @@ test('a mutation waiting for actual child boot is fenced again after activation 
   const r = await pending;
   assert.equal(r.status, 409); assert.equal((await r.json()).code, 'world.new-engine');
   assert.doesNotMatch(readFileSync(hits, 'utf8'), /\/v1\/edge\/act/, 'only startup health probes reached the old process');
+});
+
+test('first day: a search lists the places a newcomer means first, and small things after them', () => {
+  // Eden's "park" (27 Nov): 51 things in id order, "Park pond lilies 3" first and Town Park 26th
+  const thing = (id, name, about) => ({ id, def: 'core-thing@1', in: { parent: 'world' }, name, p: [0, 0, 0], r: 0, ...(about ? { about } : {}) });
+  const entities = [thing('e_01', 'park-pond-lilies-3'), thing('e_02', 'park-drinking-water'), thing('e_03', 'park-gazebo', { title: 'Park Gazebo', what: 'The sheltered pavilion in Town Park.' }),
+    thing('e_04', 'farm-hamlet', { title: 'Farm Hamlet', what: 'The small farming settlement west of Town Park.' }), thing('e_05', 'park-pond', { title: 'Park Pond', what: 'The pond within Town Park.' }),
+    thing('e_06', 'park-slide'), thing('e_07', 'park-pond-jetty', { title: 'Park Pond Jetty', what: 'The small jetty over Park Pond.' }), thing('e_08', 'trees-south-park-canopy'),
+    thing('e_09', 'town-park', { title: 'Town Park', what: 'A public green with a pond and a gazebo.' }), thing('e_10', 'sparkle-fountain', { title: 'Sparkle Fountain', what: 'A fountain.' }),
+    thing('e_11', 'cafe', { title: 'Café', what: 'Coffee.', aliases: ['park cafe'] }), thing('e_12', 'park', { title: 'Park', what: 'The lawn.' })];
+  const places = snapshotPlaces({ defs: [], entities });
+  const titles = (q) => searchPlaces(places, q).map((p) => p.target.title);
+  assert.deepEqual(titles('park'), [
+    'Park', 'Town Park',                                   // the title itself, then a title that ends with it: a park
+    'Park Pond', 'Park Gazebo', 'Park Pond Jetty',         // a word of the title, shorter first
+    'Sparkle Fountain',                                    // inside a word
+    'Café', 'Farm Hamlet',                                 // only its alias or its description
+    'Park slide', 'Park pond lilies 3', 'Park drinking water', 'Trees south park canopy',   // no authored meaning: after every place
+  ]);
+  assert.deepEqual(titles('town park'), ['Town Park', 'Park Pond', 'Farm Hamlet', 'Park Gazebo'], 'a phrase, the same way');
+  assert.deepEqual(titles('drinking water'), ['Park drinking water'], 'a small thing is still found by its name');
+  assert.deepEqual(titles('lilies'), ['Park pond lilies 3']);
+  assert.deepEqual(titles('(park'), [], 'a query is text, never a pattern');
 });
 
 test('#4177: withV2Stream writes the stream into the inline config and leaves a page without one alone', () => {
@@ -477,9 +500,12 @@ test('D2b: a moved world never gets an old process: page, views, reads, Explore,
   assert.equal(page.status, 200); assert.equal(page.headers.get('x-souls-engine'), 'new');
   const bot = await get('/', { accept: 'text/html', 'user-agent': 'Googlebot/2.1' });
   assert.equal(bot.status, 200, 'a crawler gets the same page'); assert.equal(bot.headers.get('x-souls-engine'), 'new');
-  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls', '/mcp']) {
+  for (const path of ['/v1/world/snapshot?defs=ref&cols=1', '/v1/scene', '/v1/kernel', '/v1/items', '/v1/world/souls']) {
     const r = await get(path); assert.equal(r.status, 404, path); assert.equal((await r.json()).code, 'world.new-engine', path);
   }
+  // no MCP: a plain 410 that points to the For agents page, never the old world's endpoint
+  const mcp = await fetch(`${base}/w/eden/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(mcp.status, 410); assert.match(await mcp.text(), /^Souls does not serve MCP\..*\/docs\/for-agents\n$/);
   // the page's polled reads are never a 404, with nothing published either (the release walk fails on any same-origin 404)
   for (const path of ['/v1/world/visitors', '/v1/world/context', '/v1/world/context?q=pond']) assert.equal((await get(path)).status, 200, path);
   const seq = await get('/v1/world/seq'); assert.equal(seq.status, 200); assert.deepEqual(await seq.json(), { seq: 0, entities: 0 }, 'nothing published: seq 0');

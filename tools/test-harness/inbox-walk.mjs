@@ -33,7 +33,7 @@ const stop = async child => {
 process.on('exit', () => {for (const child of running) child.kill('SIGTERM');});
 const release = await chromeLease('inbox');
 try {
-  browser = await chromium.launch({channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist']});
+  browser = await chromium.launch({channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist']});
   for (const dpr of [1, 2]) {
     const runDir = resolve(out, `dpr${dpr}`); mkdirSync(runDir, {recursive: true});
     const slug = `inbox-proof-${dpr}`;

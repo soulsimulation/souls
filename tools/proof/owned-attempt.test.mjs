@@ -448,3 +448,64 @@ test('an undeclared abort not in flight at a driver navigation still fails, as d
     assert.equal(report.status,'FAIL',name);assert.match(report.error,/unexpected-network-error/,name);assert.equal(network[0].expected,false,name);
   }
 });
+
+test('native customer page owns finite commands and service groups without qualifying injected proof', async t => {
+  const services = []; let verified = false;
+  const f = setup(t, { boot: async o => {
+    const finite = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }); o.onSpawn(finite, { transient: true, processGroup: true }); finite.exitCode = 0; finite.emit('exit', 0);
+    for (let i = 0; i < 3; i++) { const c = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }); services.push(c); o.onSpawn(c, { processGroup: true }); }
+    return { child: services[0], children: services, base: `https://example.com:${o.port}`, viewer: `https://example.com:${o.port}/w/fixture/`, dataDir: o.data, recipe: { verify() { verified = true; } } };
+  } });
+  f.o.world.kind = 'native-page'; const report = await f.runner(f.o);
+  assert.equal(report.status, 'PASS'); assert.equal(report.qualified, false); assert.equal(verified, true);
+  assert.equal(report.teardown.children.length, 4); assert.ok(report.teardown.children.every(c => c.exited));
+});
+test('native customer-page partial startup closes registered services before a browser can exist', async t => {
+  const f = setup(t, { boot: async o => {
+    for (let i = 0; i < 2; i++) { const c = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }); o.onSpawn(c, { processGroup: true }); }
+    throw Error('native-page startup failure');
+  } });
+  f.o.world.kind = 'native-page'; const report = await f.runner(f.o);
+  assert.equal(report.status, 'BOOT_ABORT'); assert.equal(report.browserStarted, false);
+  assert.equal(report.teardown.children.length, 2); assert.ok(report.teardown.children.every(c => c.exited)); assert.equal(report.qualified, false);
+});
+
+test('browser ownership and observation count survive calibration rejection, including failed close', async t => {
+  for (const closeFails of [false, true]) {
+    let closeCalls = 0;
+    const f = setup(t, { browser: async o => {
+      o.onOpened({ close: async () => { closeCalls++; if (closeFails) throw Error('context-close-failed'); } });
+      throw Error('capture-calibration-failed');
+    } });
+    const report = await f.runner(f.o);
+    assert.equal(report.status, closeFails ? 'CLEANUP_FAIL' : 'BOOT_ABORT');
+    assert.equal(report.browserObservationStarted, true); assert.equal(report.browserStarted, false);
+    assert.equal(report.captureOrdinal, 1); assert.equal(f.ledger().captures, 1); assert.equal(closeCalls, 1);
+    assert.equal(report.teardown.browserClosed, closeFails ? undefined : true);
+    assert.equal(report.teardown.worldStopped, true); assert.equal(report.qualified, false);
+    if (closeFails) assert.match(report.teardown.browserError, /context-close-failed/);
+  }
+});
+
+test('late onOpened then setup rejection closes the real context without rewriting frozen evidence', async t => {
+  for (const closeFails of [false, true]) {
+    const controller = new AbortController(); let onOpened, rejectSetup, closes = 0;
+    const f = setup(t, { browser: async o => {
+      onOpened = o.onOpened; setTimeout(() => controller.abort(Error('launch interrupted')), 1);
+      return await new Promise((_, reject) => { rejectSetup = reject; });
+    } });
+    f.o.signal = controller.signal;
+    const report = await f.runner(f.o);
+    assert.equal(report.status, 'CLEANUP_FAIL'); assert.equal(report.teardown.browserClosed, false);
+    const original = readFileSync(join(report.paths.dir, 'report.json')), ledger = readFileSync(f.o.ledger);
+    onOpened({ close: async () => { closes++; if (closeFails) throw Error('late-close-failed'); } });
+    rejectSetup(Error('calibration-aborted-after-open'));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(closes, 1); assert.deepEqual(readFileSync(join(report.paths.dir, 'report.json')), original);
+    assert.deepEqual(readFileSync(f.o.ledger), ledger); assert.equal(report.browserObservationStarted, undefined);
+    const evidence = JSON.parse(readFileSync(join(report.paths.dir, 'late-browser-cleanup.json')));
+    assert.equal(evidence.browserOpenedAfterAbort, true); assert.equal(evidence.closed, !closeFails);
+    assert.match(evidence.setupError, /calibration-aborted-after-open/);
+    if (closeFails) assert.match(evidence.error, /late-close-failed/);
+  }
+});

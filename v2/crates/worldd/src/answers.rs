@@ -149,9 +149,10 @@ use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
+use replica::selector::{FREE_SLOT, Selector};
 use replica::sky::{self, Sky};
 use replica::sync::Records;
-use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
+use replica::time::{Line, Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 use sim::audit::{Auditor, Fault};
@@ -1085,6 +1086,10 @@ pub struct World {
     pub durable: Durable,
     /// Still and next due, for sleep (O2).
     pub quiet: Arc<Quiet>,
+    /// The world's real clock (K7's: the machine's wall clock read once, carried on by the steady clock), carried
+    /// ahead of the machine's by the step a restart found (`clock.stepped`, O10): what every thread beside the clock
+    /// thread reads as real time (the watchdog, the public stream, the sleep watch), so none sees another time.
+    pub real: Real,
     handover: Arc<crate::handover::Handover>,
     clock: Option<JoinHandle<()>>,
 }
@@ -1113,6 +1118,21 @@ pub fn now() -> Micros {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+        .saturating_add(test_step())
+}
+
+/// O10 (#2806): a test's step of the machine's clock, µs, read from the file `$WORLDD_TEST_CLOCK_STEP` names at each
+/// reading, so a test steps it while the world runs or before it starts (`tests/host_faults.rs`); a debug build's
+/// only.
+fn test_step() -> Micros {
+    #[cfg(debug_assertions)]
+    if let Some(f) = std::env::var_os("WORLDD_TEST_CLOCK_STEP") {
+        return std::fs::read_to_string(f)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+    }
+    0
 }
 
 /// The wall clock read once, at start, carried on by the monotonic clock (K7): µs from the Unix epoch, never a step.
@@ -1130,11 +1150,26 @@ impl Real {
             mono0: Instant::now(),
         }
     }
+
+    /// This clock carried `by` µs ahead: a world's whose restart found the machine's clock behind it ([`World::real`]).
+    pub fn ahead(self, by: Micros) -> Real {
+        Real {
+            wall0: self.wall0.saturating_add(by),
+            ..self
+        }
+    }
+}
+
+impl Real {
+    /// The world's real time now, µs from the Unix epoch.
+    pub fn now_us(&self) -> Micros {
+        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+    }
 }
 
 impl Pace for Real {
     fn now(&mut self) -> Micros {
-        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+        self.now_us()
     }
 
     fn sleep_until(&mut self, t: Micros) {
@@ -1142,6 +1177,23 @@ impl Pace for Real {
         if wait > 0 {
             std::thread::sleep(Duration::from_micros(wait as u64));
         }
+    }
+}
+
+/// A clock carried `by` µs ahead of another (O10, #2806): a restart's, when the machine's clock is behind the last
+/// logged tick (`clock.stepped`).
+struct Ahead {
+    pace: Box<dyn Pace + Send>,
+    by: Micros,
+}
+
+impl Pace for Ahead {
+    fn now(&mut self) -> Micros {
+        self.pace.now().saturating_add(self.by)
+    }
+
+    fn sleep_until(&mut self, t: Micros) {
+        self.pace.sleep_until(t.saturating_sub(self.by));
     }
 }
 
@@ -1277,6 +1329,8 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
     away_next: Option<u64>,
+    /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
+    words_next: Option<String>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1307,6 +1361,8 @@ struct Clock {
     /// the next through the form runner when the world has bodies.
     forms: Acts,
     forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
+    /// The sits by kind among them (#3178): each one's selector and its intent, bound to a seat when its form starts.
+    by_kind: BTreeMap<Id, (Selector, Intent)>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -1560,6 +1616,18 @@ impl Heavens {
     }
 }
 
+/// Whether `part` sets one of the creator's weather fields or E6's next weather change (`sim::edit::weather::FIELDS`,
+/// `sky::F_WEATHER_NEXT`): an undo or redo of a creator's weather, after which E6 takes the weather back.
+fn sets_weather(part: &Part) -> bool {
+    part.effects.iter().any(|e| match &e.body {
+        Body::Changes(cs) => cs.iter().any(|c| {
+            matches!(&c.change, Change::Set { field, .. }
+                if *field == sky::F_WEATHER_NEXT || sim::edit::weather::FIELDS.contains(field))
+        }),
+        _ => false,
+    })
+}
+
 /// Reserves only existing creator name counters at recorded intake; the live counter never rewinds. `parts` more are
 /// reserved for the parts placed buildings bring, which the edit checker adds to the edit (#5006,
 /// `buildsafe::with_buildings`, at most `buildsafe::parts_ids`), so no later intent or edit is given one of them.
@@ -1713,7 +1781,8 @@ fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
     Ok(args)
 }
 
-/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
+/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name; 8, a done act's
+/// words when its move was made from afar (#5063).
 pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -1889,6 +1958,18 @@ fn spot_of(
             })),
         })
     }))
+}
+
+/// A sit by kind (#3178): a sit (`eden:sit`) aimed at I5's free-slot selector (selector 1, any free slot of a kind in
+/// a node). `None` for any other intent, else the selector or its refusal by name (`selector-not-a-record`, ...).
+fn kind_sit(intent: &Intent) -> Option<Result<Selector, &'static str>> {
+    let target @ Target::Selector(FREE_SLOT, _) = intent.target.as_ref()? else {
+        return None;
+    };
+    match intent.verb.as_str().split_once(':') {
+        Some((ns, "sit")) if ns != "souls" => Some(Selector::read(target).map_err(|r| r.name)),
+        _ => None,
+    }
 }
 
 /// Binds a resolved spot once, at commit (`sim::commit::spot`): a slot is sat in (or walked to), a thing or a point
@@ -2380,8 +2461,14 @@ impl Clock {
                 (vec![reply], stamps),
             );
         }
+        // A sit by kind (#3178) is a seat's own form, its seat bound when it starts.
+        let mut by_kind = match self.bodies {
+            Some(_) => kind_sit(&intent),
+            None => None,
+        };
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
+            Some(_) if by_kind.is_some() => None,
             Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
@@ -2399,6 +2486,20 @@ impl Clock {
         };
         let verb = engine::Verb::of(intent.verb.as_str());
         let taken = match (spotted, moved, verb, intent.kind()) {
+            _ if by_kind.is_some() => match by_kind.as_ref().map(Result::as_ref) {
+                Some(Err(r)) => Err(*r),
+                _ => self.body_of(&intent).map(|body| {
+                    Taken::Form(Act {
+                        id: self.next_intent,
+                        cause: Cause::Intent(id),
+                        actor,
+                        body,
+                        candidates: Vec::new(),
+                        recheck: None,
+                        spot: None,
+                    })
+                }),
+            },
             (Some(a), _, _, _) => a.map(Taken::Form),
             (None, Some(m), _, _) => m.map(Taken::Move),
             // The engine's own acts (C2): activities, offers and carrying, by verb.
@@ -2549,6 +2650,9 @@ impl Clock {
             Taken::Move(m) => self.moving.push((id, m)),
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
+                if let Some(Ok(selector)) = by_kind.take() {
+                    self.by_kind.insert(id, (selector, intent.clone()));
+                }
                 let i = acts::intent(id, intent.expiry, actor, bytes);
                 self.forming.push((id, act, i, form_args));
             }
@@ -2976,7 +3080,11 @@ impl Clock {
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
+                    let weather = sets_weather(&c.part);
                     self.parts.push(c.part);
+                    if weather {
+                        self.weather_back(now);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -3104,12 +3212,14 @@ impl Clock {
             let step = self.steps.remove(&id);
             match committed {
                 Ok((c, mine, places, before)) => {
-                    self.history.record(&before, &self.replica, &c.part, step);
-                    if let Some(b) = &mut self.bodies
-                        && let Err(e) = places.install(&mut b.slots, &c.names)
-                    {
-                        self.faults += 1;
-                        eprintln!("worldd: edit places {}", e.name);
+                    let part = Arc::clone(&c.part);
+                    if let Some(b) = &mut self.bodies {
+                        if let Err(e) = places.install(&mut b.slots, &c.names) {
+                            self.faults += 1;
+                            eprintln!("worldd: edit places {}", e.name);
+                        }
+                        // A seat the edit made is found by a sit by kind too (#3178).
+                        b.file_seats(self.replica.tree(), c.names.values().copied());
                     }
                     self.unsealed = true;
                     // The edit checker's town installs the ground prepared for this edit (#3743), or is built again
@@ -3123,6 +3233,9 @@ impl Clock {
                     if let Some(w) = weather {
                         self.put_weather(now, w);
                     }
+                    // Kept for its undo after E6's write, so its inverse sets the weather's next change back too and
+                    // the world node's hash it left is the one that write left (#5073 follow-up).
+                    self.history.record(&before, &self.replica, &part, step);
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -4003,6 +4116,9 @@ impl Clock {
         if let Some(mm) = self.away_next.take() {
             fields.insert(7, Value::Uint(mm));
         }
+        if let Some(w) = self.words_next.take() {
+            fields.insert(8, Value::Bytes(w.into_bytes()));
+        }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
                 u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
@@ -4217,6 +4333,54 @@ impl Clock {
         }
         sim::edit::weather::check(asked.levels, now, asked.until)?;
         Ok(Some(asked))
+    }
+
+    /// After an undo or redo that set the weather back (#5073 follow-up): E6 takes the world node's weather as it now
+    /// stands, its creator's end (none at 0) and its weather timer due at the next change the node holds (at once, if
+    /// that has passed). The fields are the undo's; only the timer is written, so the node's hash stays the one the undo
+    /// left and its redo is not refused as a conflict.
+    fn weather_back(&mut self, now: Micros) {
+        let tree = self.replica.tree();
+        let Some(f) = tree.node(tree.root()).map(|n| n.fields().clone()) else {
+            return;
+        };
+        let Some(h) = self.sky.as_mut() else { return };
+        let Some(next) = f.get(&sky::F_WEATHER_NEXT).and_then(sky::as_int) else {
+            return;
+        };
+        h.daylight.cfg.until = f.get(&sky::F_WEATHER_UNTIL).and_then(sky::as_int);
+        let Ok(id) = h.mint.mint() else {
+            eprintln!("worldd: the sky's timer ids are spent");
+            return;
+        };
+        let (world, name) = (
+            h.daylight.world,
+            Name::new(sky::T_WEATHER).expect("a constant name"),
+        );
+        let due = next.max(now);
+        let mut recs = Vec::new();
+        if let Some(old) = h.timers.insert(name.clone(), id) {
+            let _ = h.due.clear(world, old);
+            recs.push(TimerRec::Clear { timer: old });
+        }
+        recs.push(TimerRec::Set {
+            timer: id,
+            due,
+            name: name.clone(),
+        });
+        let _ = h.due.set(Timer {
+            node: world,
+            id,
+            due,
+            name,
+        });
+        let timers = Effect {
+            envelope: Clock::own(world, now),
+            body: Body::Timers(recs),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write_own(vec![timers], "the sky's weather timer");
     }
 
     /// After the creator's batch commits: E6's weather write (its event, and the weather timer set for its end).
@@ -4450,6 +4614,10 @@ impl Clock {
     /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
     fn step_bodies(&mut self, now: Micros) {
         let Some(b) = self.bodies.as_mut() else {
+            // A world with no bodies still fires its forms' timers (#3991): a form with no steps there sets one (a
+            // bell's fade), and one never fired stayed due, so the world never slept and the thing stayed as it was.
+            let tick = u64::try_from(self.tick).unwrap_or(0);
+            self.forms.tick(self.replica.tree(), None, tick, now);
             return;
         };
         // The loads being carried, where their last samples have them: walkers keep apart from each (moving-group rule
@@ -4540,6 +4708,80 @@ impl Clock {
         }
     }
 
+    /// The seat a sit by kind takes as its form starts (#3178), on the clock thread, one sit at a time: the thing of the
+    /// selector's kind in its node, whose own sit form (a walk to its nearest free slot, then the sit) a named sit runs,
+    /// with the free slot nearest the body ([`Bodies::seat_by_kind`]); a seat another run is on its way to and a thing
+    /// private to another are not free. Its form then takes the slot as for a named sit, so a burst of sits fills
+    /// every seat. None free is refused `place.none-free`, naming the next step: the nearest free seat of another
+    /// kind there, else to wait for a seat to be left; no seat of the kind there at all, `place.none-of-kind`, which
+    /// waiting never clears.
+    fn seat_by_kind(
+        &self,
+        selector: &Selector,
+        asked: &Intent,
+        body: Id,
+        now: Micros,
+    ) -> Result<(Id, String), Refusal> {
+        let Selector::FreeSlot { kind, node, .. } = selector;
+        let kind = kind.as_str();
+        let (tree, room) = (self.replica.tree(), replica::world_model::show(*node));
+        let refused = |name, detail: String| Err(Refusal { name, detail });
+        let Some(b) = self.bodies.as_ref() else {
+            return refused("bodies-off", "the world has no bodies".into());
+        };
+        if b.runner.controller.body(body).is_none() {
+            return refused("body-unknown", replica::world_model::show(body));
+        }
+        let soul = match asked.actor {
+            Actor::Soul(s) => s,
+            _ => body,
+        };
+        // The seat's own sit form, read as a named sit's: the intent aimed at the thing, with no arguments.
+        let probe = std::cell::RefCell::new(Intent {
+            parameters: BTreeMap::new(),
+            ..asked.clone()
+        });
+        let fits = |t: Id| {
+            probe.borrow_mut().target = Some(Target::Node(t));
+            replica::who_may::private_to(tree, t, soul).is_none()
+                && self.forms.fixture_sit(tree, &probe.borrow())
+        };
+        let taken = |t: Id, s: u64| self.forms.seat_reserved(b, t, s, body, now);
+        if let Some(t) = b.seat_by_kind(*node, Some(kind), body, &fits, &taken) {
+            let form = asked.verb.as_str().split_once(':').map_or("sit", |f| f.1);
+            return Ok((t, form.to_owned()));
+        }
+        // The next step: the nearest free seat of any kind there, else to wait (only where a seat of the kind is).
+        let other = b.seat_by_kind(*node, None, body, &fits, &taken).map(|t| {
+            let of = tree
+                .handle(t)
+                .and_then(|h| tree.node(h))
+                .map_or(String::new(), |n| {
+                    replica::world_model::plain(n.kind().as_str()).to_owned()
+                });
+            format!(
+                "the nearest free place to sit there is {} ({of}): sit on it",
+                replica::world_model::show(t)
+            )
+        });
+        if !b.has_kind(*node, kind) {
+            return refused(
+                "place.none-of-kind",
+                format!(
+                    "no {kind} to sit on in {room}{}",
+                    other.map_or(String::new(), |o| format!("; {o}"))
+                ),
+            );
+        }
+        refused(
+            sim::commit::bind::NONE_FREE,
+            match other {
+                Some(o) => format!("no {kind} free in {room}; {o}, or wait for one to be left"),
+                None => format!("every place to sit in {room} is held: wait for one to be left"),
+            },
+        )
+    }
+
     /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
     /// going for its intent, gets its first receipt again, or is refused by name.
     fn start_forms(&mut self, now: Micros) {
@@ -4547,6 +4789,7 @@ impl Clock {
         // One snapshot of the bodies for all of this tick's starts: none of them moves a body (S10).
         self.forms.hold_sight();
         for (id, act, intent, args) in std::mem::take(&mut self.forming) {
+            let by_kind = self.by_kind.remove(&id);
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -4555,11 +4798,26 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let candidates: Vec<(Id, String)> = act
+            let mut candidates: Vec<(Id, String)> = act
                 .candidates
                 .iter()
                 .map(|c| (c.this, c.form.clone()))
                 .collect();
+            // A sit by kind names no seat by its arguments: its form's own pick takes the chosen thing's free slot.
+            let args = if by_kind.is_some() {
+                acts::Args::default()
+            } else {
+                args
+            };
+            if let Some((selector, asked)) = by_kind {
+                match self.seat_by_kind(&selector, &asked, act.body, now) {
+                    Ok(c) => candidates = vec![c],
+                    Err(r) => {
+                        self.end(id, |c| c.refused(actor, sequence, &r));
+                        continue;
+                    }
+                }
+            }
             let r = self.forms.start(
                 self.replica.tree(),
                 self.bodies.as_mut(),
@@ -4589,6 +4847,9 @@ impl Clock {
                 }
                 acts.extend(e.way_back(ask, way));
             }
+            // #5067: acts held while a carry's lift or set-down ran, whose track has ended: run again, answered now.
+            acts.extend(e.reruns());
+            self.engine_done.extend(e.answered());
         }
         // The way thread ended: every lift still waiting for a way is refused by name, and none waits again.
         if std::mem::take(&mut self.ways_gone) {
@@ -4687,6 +4948,13 @@ impl Clock {
                     continue;
                 };
                 eprintln!("worldd: a form's entries were not written: {r}");
+                // A timer's run has no intent to answer (#3991): its refusal is written on its thing, by name.
+                let at = group.first().map_or(now, |e| e.envelope.at);
+                if let Some(e) = of.and_then(|id| self.forms.timer_unwritten(id, &r, at))
+                    && let Err(e) = self.commit_forms(vec![e])
+                {
+                    eprintln!("worldd: a refused timer's entry was not written: {e}");
+                }
                 // A run that ended with them still ends (0.133 F1b): its end, which unlinks its reservation, goes in a
                 // part of its own and names the refusal, so a refused effect never leaves its thing reserved.
                 let (ends, group) = refused_ends(group, r.name, self.replica.tree());
@@ -4804,6 +5072,8 @@ impl Clock {
             Some(w) if how == acts::BLOCKED => format!("{how}: {w}"),
             _ => how.clone(),
         };
+        // #5063: a done act whose move was made from afar says so on its end (field 8), which its receipt names.
+        self.words_next = why.clone().filter(|_| how == "done");
         self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
@@ -5686,13 +5956,14 @@ impl Clock {
     }
 
     /// The earliest due time over the world's due lists (O2): the sky's, the bodies' (moves and the wind-down), the
-    /// activities' and the loose things' ends.
+    /// activities', the loose things' ends and the forms' timers (#3991: a bell's fade, a planter's next stage).
     fn next_due(&self) -> Option<Micros> {
         [
             self.sky.as_ref().and_then(|h| h.due.next_due()),
             self.bodies.as_ref().and_then(Bodies::next_due),
             self.engine.as_ref().and_then(Engine::next_due),
             self.loose.next_due(),
+            self.forms.next_due(),
         ]
         .into_iter()
         .flatten()
@@ -6008,6 +6279,14 @@ type Publish = (Vec<Mapping>, Mapping);
 /// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
 /// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
 /// mappings this start applies, and the one in force, when either is new or the root's fields do not hold it.
+/// The last mapping the world logged (E7b), if any.
+fn logged_mapping(world: &Replica) -> Option<Mapping> {
+    world.tree().time().iter().rev().find_map(|t| match t {
+        TimeEffect::Mapping(m) => Some(*m),
+        _ => None,
+    })
+}
+
 fn timeline(
     world: &Replica,
     rate: Option<(i64, i64)>,
@@ -6268,12 +6547,42 @@ pub fn start<S: Storage + 'static>(
         });
     }
     let shared = Arc::new(Mutex::new(0));
+    // The machine's clock as the world reads it: the threads beside the clock thread read it as [`World::real`].
+    let mut real = Real::start();
     let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
         (true, _) => Box::new(Stepped(Arc::clone(&shared))),
         (false, Some(c)) => c,
-        (false, None) => Box::new(Real::start()),
+        (false, None) => Box::new(real),
     };
-    let real0 = pace.now();
+    let mut real0 = pace.now();
+    // O10 (#2806): a restart whose machine clock went back while it was down (a step) finds its last logged tick in
+    // the clock's future, and once waited, ticking nothing, until the clock came round to it: a frozen world. It is
+    // `clock.stepped`: its clock is carried ahead of the machine's by the step, so world time goes on from the last
+    // tick logged, never back and never waiting, and the step is said by name and in `health.json`. The step is
+    // measured on the logged time line, before a new rate's mapping is made at the start's real time.
+    if let (Some(n), false) = (last, cfg.lockstep) {
+        let logged_rate = cfg.rate.and_then(|_| {
+            let rate = logged_mapping(&world)?.rate();
+            Some((i64::from(rate.num()), i64::from(rate.den())))
+        });
+        let (line, mapping, _) = timeline(&world, logged_rate.or(cfg.rate), real0, tick_us)?;
+        let logged = line.tick_start(n).map_err(time)?;
+        let on = Line::new(mapping.real_us, mapping.world_us, mapping.rate());
+        let behind = on.x_of(logged).map_err(time)? - real0;
+        if behind > 0 {
+            let ahead = behind;
+            pace = Box::new(Ahead { pace, by: ahead });
+            real = real.ahead(ahead);
+            real0 = pace.now();
+            measures::CLOCK_AHEAD_MS.store(ahead / 1000, std::sync::atomic::Ordering::Relaxed);
+            eprintln!(
+                "worldd: clock.stepped: the machine's clock is {} ms behind the last logged tick; world time goes on \
+                 from it, {} ms ahead of the machine's clock",
+                ahead / 1000,
+                ahead / 1000
+            );
+        }
+    }
     // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
     // mappings follow, and the configured rate's (E7b).
     let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
@@ -6610,6 +6919,7 @@ pub fn start<S: Storage + 'static>(
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
+        words_next: None,
         edits,
         editing,
         set_down: Vec::new(),
@@ -6631,6 +6941,7 @@ pub fn start<S: Storage + 'static>(
             acts
         },
         forming: Vec::new(),
+        by_kind: BTreeMap::new(),
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
@@ -6937,6 +7248,7 @@ pub fn start<S: Storage + 'static>(
         restart,
         durable: world_durable,
         quiet,
+        real,
         handover: Arc::default(),
         clock: Some(clock),
     })
@@ -8443,6 +8755,253 @@ mod tests {
             events.last().map(|(_, n)| n.as_str()),
             Some(sky::EV_WEATHER),
             "E6's weather event follows the creator's record"
+        );
+    }
+
+    /// #5073 follow-up: a creator's weather (the panel's Lightning: with a strike) is undone to the weather before it,
+    /// through the same served undo the page and the agent send: the kind, its levels and E6's next change as they
+    /// were, the creator's end and the strike read as none (0 and [], as T6 has no unset), and E6's weather timer due
+    /// where it was. The edit log names the undo (`souls:undone`) and the redo (`souls:redone`) by the creator, and
+    /// the redo gives the storm and its end back.
+    #[test]
+    fn a_creators_weather_is_undone_to_the_weather_before_it_and_redone() {
+        use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        // One-second ticks (the longest a tick may be), so the run reaches the weather's next change after the undo.
+        cfg.tick = Duration::from_secs(1);
+        let tick_us: i64 = 1_000_000;
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let until: i64 = 40 * 3_600_000_000;
+        let storm: Vec<Op> = [
+            (
+                sky::F_WEATHER,
+                Value::Text(Name::new("souls:storm").unwrap()),
+            ),
+            (sky::F_CLOUD, int(100)),
+            (sky::F_RAIN, int(90)),
+            (sky::F_WIND, int(80)),
+            (sky::F_WEATHER_UNTIL, int(until)),
+            // The panel's Lightning: the storm and one strike, in one batch (#5006 row 13).
+            (
+                sky::F_STRIKE,
+                Value::Array(vec![int(1_000), int(2_000), int(0)]),
+            ),
+        ]
+        .into_iter()
+        .map(|(field, to)| Op::Set {
+            node: Ref::Node(root),
+            field,
+            to,
+        })
+        .collect();
+        let intent = |sequence: u64, planned: u64, parameters| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters,
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let run = |i: Intent, tick: i64| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, _, now) = run(intent(1, 0, parameters(&storm)), 2);
+        assert_eq!(kind, 2, "stale");
+        let (kind, reason, now) = run(intent(2, now, parameters(&storm)), 4);
+        assert_eq!(kind, 1, "the storm is set: {reason:?}");
+        let (kind, reason, now) = run(intent(3, now, parameters_of(&Asked::Undo)), 6);
+        assert_eq!(kind, 1, "the storm is undone: {reason:?}");
+        let (kind, reason, now) = run(intent(4, now, parameters_of(&Asked::Redo)), 8);
+        assert_eq!(kind, 1, "and redone: {reason:?}");
+        let (kind, reason, _) = run(intent(5, now, parameters_of(&Asked::Undo)), 10);
+        assert_eq!(kind, 1, "and undone again: {reason:?}");
+        // Then the clock runs on past the weather's next change before the storm (read below from the log).
+        let run_to = |tick: i64| {
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+        };
+        run_to(12 * 3_600_000_000 / tick_us);
+        world.stop();
+        // The world node's fields and E6's weather timer: before the storm, after its undo, after the redo.
+        let at = |live: &Replica| {
+            let tree = live.tree();
+            let f = tree.node(tree.root()).unwrap().fields().clone();
+            let due: Vec<i64> = tree
+                .timers()
+                .iter()
+                .filter(|(_, t)| t.name.as_str() == sky::T_WEATHER)
+                .map(|(_, t)| t.due)
+                .collect();
+            (f, due)
+        };
+        let mut live = initial;
+        let mut snaps = Vec::new();
+        let mut log = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = replica::effects::Part::read(&bytes).unwrap();
+            let named: Vec<(Actor, String, i64)> = part
+                .effects
+                .iter()
+                .flat_map(|e| {
+                    e.events.iter().flatten().map(move |ev| {
+                        (e.envelope.actor, ev.name.as_str().to_owned(), e.envelope.at)
+                    })
+                })
+                .collect();
+            // Snapshots just before the storm's part, the undo's and the redo's (each by the creator).
+            if part
+                .effects
+                .first()
+                .is_some_and(|e| e.envelope.actor == Actor::Creator(creator))
+            {
+                snaps.push(at(&live));
+            }
+            log.extend(named);
+            live.apply(&part).unwrap();
+        }
+        snaps.push(at(&live));
+        let [before, stormy, undone, redone, _] = &snaps[..] else {
+            panic!(
+                "the storm, its undo and its redo: {} snapshots",
+                snaps.len()
+            )
+        };
+        let weather = [
+            sky::F_WEATHER,
+            sky::F_CLOUD,
+            sky::F_RAIN,
+            sky::F_WIND,
+            sky::F_WEATHER_NEXT,
+        ];
+        let of = |f: &BTreeMap<u64, Value>| weather.map(|k| f.get(&k).cloned());
+        assert_ne!(
+            of(&before.0),
+            of(&stormy.0),
+            "the storm changed the weather"
+        );
+        assert_eq!(
+            of(&undone.0),
+            of(&before.0),
+            "the undo gives the weather before the storm back"
+        );
+        assert_eq!(before.0.get(&sky::F_WEATHER_UNTIL), None);
+        assert_eq!(
+            undone.0.get(&sky::F_WEATHER_UNTIL),
+            Some(&Value::Uint(0)),
+            "the creator's end reads as none"
+        );
+        assert_eq!(
+            undone.0.get(&sky::F_STRIKE),
+            Some(&Value::Array(Vec::new())),
+            "no strike"
+        );
+        let mut same = undone.0.clone();
+        same.remove(&sky::F_WEATHER_UNTIL);
+        same.remove(&sky::F_STRIKE);
+        assert_eq!(same, before.0, "nothing else on the world node moved");
+        assert_eq!(undone.1, before.1, "E6's weather timer is due where it was");
+        assert_eq!(
+            of(&redone.0),
+            of(&stormy.0),
+            "the redo gives the storm back"
+        );
+        assert_eq!(redone.0.get(&sky::F_WEATHER_UNTIL), Some(&int(until)));
+        assert_eq!(
+            redone.1,
+            [until],
+            "the storm's timer is due at its end again"
+        );
+        let mine: Vec<&str> = log
+            .iter()
+            .filter(|(a, ..)| *a == Actor::Creator(creator))
+            .map(|(_, n, _)| n.as_str())
+            .collect();
+        assert!(
+            mine.contains(&sim::edit::undo::EV_UNDONE)
+                && mine.contains(&sim::edit::undo::EV_REDONE),
+            "the edit log names the undo and the redo: {mine:?}"
+        );
+        let first = |e: &str| mine.iter().position(|n| *n == e);
+        assert!(
+            first(sim::edit::undo::EV_UNDONE) < first(sim::edit::undo::EV_REDONE),
+            "the undo before the redo: {mine:?}"
+        );
+        // Live, after the second undo: E6's table resumes at the next change it held before the storm, and nothing
+        // fires at the storm's end.
+        let next = sky::as_int(&before.0[&sky::F_WEATHER_NEXT]).unwrap();
+        assert!(
+            10 * tick_us < next && next < 12 * 3_600_000_000 && next < until,
+            "the run passes the old next change {next} µs, before the storm's end"
+        );
+        let fires: Vec<i64> = log
+            .iter()
+            .filter(|(a, n, _)| *a == Actor::World && n == sky::EV_WEATHER)
+            .map(|(.., at)| *at)
+            .collect();
+        assert!(
+            fires.contains(&next),
+            "the table resumes at {next}: {fires:?}"
+        );
+        assert!(
+            !fires.contains(&until),
+            "nothing at the storm's end: {fires:?}"
+        );
+        let (f, _) = snaps.last().expect("the end");
+        assert_ne!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap())),
+            "no storm"
         );
     }
 

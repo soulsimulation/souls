@@ -144,6 +144,32 @@ fn follow() -> ActivityKind {
     k
 }
 
+/// A standing group (#423): up to eight members, no moves, nowhere to stand.
+fn group() -> ActivityKind {
+    let mut k = ActivityKind {
+        most: 8,
+        ..touch(GROUP, 60_000_000, "souls:none")
+    };
+    for r in &mut k.roles {
+        r.mv = None;
+    }
+    k
+}
+
+/// [`group`] whose members stand on [`dance_at`]'s ring, walked there only from within 0.5 m of its middle.
+fn group_at() -> ActivityKind {
+    let ring = dance_at();
+    let mut k = ActivityKind {
+        name: name(&full(GROUP_AT)),
+        ..group()
+    };
+    for (r, from) in k.roles.iter_mut().zip(ring.roles) {
+        r.stands = from.stands;
+        r.within = Some(500_000);
+    }
+    k
+}
+
 /// A conversation: two members and no moves, as content's.
 fn talk() -> ActivityKind {
     let mut k = touch(TALK, 60_000_000, "souls:none");
@@ -168,6 +194,10 @@ const DANCE_AT: &str = "test:dance_at";
 const DANCE_NEAR: &str = "test:dance_near";
 /// A conversation, by the name the activities hold apart (E26): a Soul in one does one other activity at once.
 const TALK: &str = "souls:conversation";
+/// A standing group of up to eight with no moves (#423): one whose roles say nowhere to stand, and one whose members
+/// stand on [`dance_at`]'s 1 m ring, walked there only from within 0.5 m of its middle.
+const GROUP: &str = "test:group";
+const GROUP_AT: &str = "test:group_at";
 /// Content's handshake, hug, high-five and holding hands, standing where their entries place them (0.134 item 5).
 const W_HANDSHAKE: &str = "test:w_handshake";
 const W_HUG: &str = "test:w_hug";
@@ -213,6 +243,8 @@ fn kinds() -> Vec<(&'static str, String)> {
         (INTRO, pinned(INTRO, 19)),
         (DANCE_NEAR, pinned(DANCE_NEAR, 20)),
         (TALK, pinned(TALK, 21)),
+        (GROUP, pinned(GROUP, 22)),
+        (GROUP_AT, pinned(GROUP_AT, 23)),
     ]
 }
 
@@ -447,6 +479,8 @@ fn tree_rules() -> TreeRules {
                         INTRO,
                         DANCE_NEAR,
                         TALK,
+                        GROUP,
+                        GROUP_AT,
                     ],
                 ),
             ),
@@ -470,6 +504,8 @@ fn tree_rules() -> TreeRules {
             (full(INTRO), k("activity", &[])),
             (full(DANCE_NEAR), k("activity", &[])),
             (full(TALK), k("activity", &[])),
+            (full(GROUP), k("activity", &[])),
+            (full(GROUP_AT), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -699,6 +735,8 @@ fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
             dance_at(),
             dance_near(),
             talk(),
+            group(),
+            group_at(),
             content_touch(W_HANDSHAKE, "handshake", "souls:handshake"),
             content_touch(W_HUG, "hug", "souls:hug"),
             content_touch(W_HIGH_FIVE, "high_five", "souls:high_five"),
@@ -774,6 +812,8 @@ impl Run {
                             INTRO,
                             DANCE_NEAR,
                             TALK,
+                            GROUP,
+                            GROUP_AT,
                         ]
                         .iter()
                         .any(|k| kind.as_str() == full(k))
@@ -2283,5 +2323,91 @@ fn trial_a_follower_who_begins_to_talk_goes_on_following() {
         apart < 3_000_000,
         "the follower ended behind: {follower:?} {leader:?}"
     );
+    run.stop();
+}
+
+/// How far `q`, the facing of a body at `from`, turns from `to`, degrees (0 facing it).
+fn off(q: Quat, from: Vec3, to: Vec3) -> f64 {
+    let (f, d) = (ahead(q), (to.x - from.x, to.z - from.z));
+    let len = ((i128::from(d.0).pow(2) + i128::from(d.1).pow(2)).isqrt()) as f64;
+    let cos = (i128::from(f.0) * i128::from(d.0) + i128::from(f.1) * i128::from(d.1)) as f64
+        / (len * 1e6);
+    cos.clamp(-1.0, 1.0).acos().to_degrees()
+}
+
+/// Offers `kind` from Soul 1 to Souls 2, 3 and 4 at once, a group's offer.
+fn offer_to_three(c: &mut Client, kind: &str) -> Vec<u64> {
+    let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
+    c.act(
+        "activity:offer",
+        Some(ground()),
+        &[
+            (1, Value::Text(name(&full(kind)))),
+            (2, Value::Text(name(GIVER))),
+            (3, asked),
+        ],
+    )
+    .expect("offered to three")
+}
+
+/// #423: a standing group faces its middle. Soul 1 offers a group with nowhere to stand to Souls 2, 3 and 4, who
+/// accept one after another: as it begins the first two face each other, and as each later one joins, every member
+/// turns to the new middle, each within 5 degrees of it (Souls 1 to 3 stand in a row, Soul 4 1.5 m north of it).
+#[test]
+fn a_standing_group_faces_its_middle_as_it_begins_and_as_each_joins() {
+    let run = serve("group-middle");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let group = run.created(&offer_to_three(&mut c[0], GROUP));
+    for (k, member) in c.iter_mut().enumerate().skip(1) {
+        member
+            .act("activity:accept", Some(group), &[])
+            .expect("accepted");
+        std::thread::sleep(Duration::from_millis(500));
+        let poses: Vec<(Vec3, Quat)> = (1..=k as u64 + 1).map(|n| run.last(n)).collect();
+        let n = poses.len() as i64;
+        let middle = Vec3::new(
+            poses.iter().map(|p| p.0.x).sum::<i64>() / n,
+            0,
+            poses.iter().map(|p| p.0.z).sum::<i64>() / n,
+        );
+        let offs: Vec<f64> = poses.iter().map(|(p, q)| off(*q, *p, middle)).collect();
+        println!("#423: a group of {n}, each off its middle by {offs:.1?} degrees");
+        assert!(
+            offs.iter().all(|d| *d <= 5.0),
+            "a group of {n} faces its middle: {offs:.1?}"
+        );
+    }
+    run.stop();
+}
+
+/// #423: a member of a group with places that is left where it stands faces the group's middle. The group's members
+/// stand on a 1 m ring, walked there from within 0.5 m of its middle: Souls 1 and 2, 0.3 m either side of it as the
+/// group begins, walk to their places; Souls 3 and 4, who join from 2.3 m and 2.0 m off, stay where they stand and
+/// each turns to the middle, within 5 degrees of it. Soul 3 already faces it (+x, the facing it starts with), so Soul 4,
+/// 49 degrees off it before the change, is the one that shows the turn (review).
+#[test]
+fn a_member_left_where_it_stands_faces_its_groups_middle() {
+    let run = serve("group-left");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let group = run.created(&offer_to_three(&mut c[0], GROUP_AT));
+    let middle = Vec3::new((at(1).x + at(2).x) / 2, 0, at(1).z);
+    for member in c.iter_mut().skip(1) {
+        member
+            .act("activity:accept", Some(group), &[])
+            .expect("accepted");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    for n in [3, 4] {
+        let (p, q) = run.last(n);
+        let d = off(q, p, middle);
+        println!("#423: Soul {n}, left where it stands, is off the middle by {d:.1} degrees");
+        assert_eq!(
+            (p.x, p.z),
+            (at(n).x, at(n).z),
+            "Soul {n} stays where it stands"
+        );
+        assert!(d <= 5.0, "Soul {n} faces the middle: {d:.1} degrees off");
+    }
     run.stop();
 }

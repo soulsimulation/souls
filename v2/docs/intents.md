@@ -34,6 +34,11 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    (`replica::select`, E2): a pick among things or free slots, or a point on one node's shape, in ten relations.
    A walk or a sit aimed at a described spot is resolved by a checker on its copy, the client's answer at that
    version, and bound once when the act commits; a spot with no answer is refused by its name (`spot.no-front`).
+   A sit aimed at the first (`eden:sit` on any free `eden:chair` in a room, #3178) is bound when its form starts, on
+   the clock, one sit at a time: the thing of that kind in the room whose free seat is nearest the body, skipping a
+   seat another run is on its way to, then that seat's own sit runs as a sit naming it would. None free is refused
+   `place.none-free`, its detail the next step: the nearest free seat of another kind there, or to wait; a room
+   with no seat of that kind at all is refused `place.none-of-kind`.
    Resources are T9's claims (`{1: 1 all, 2 one or 3 named, 2: class or name}`). Parameters are the form's arguments;
    none may be a time or a condition, the one exception being a move's next beat (rule 9).
 4. **An intent's kind is its verb.** A form's verb (`namespace:form`) is a checked act. The engine's own verbs are
@@ -69,7 +74,10 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    edit, the operation that failed by its place in the batch (7 left out when none), and the refusal's own words
    (8: UTF-8 bytes, at most 240, left out when it has none; `together.too-far`'s say how far apart and how far the
    move reaches, and a form whose move is out of reach says how far its thing is and the move's reach, `look: 31200 mm
-   to <id>, reach 20000 mm`). A client acts on the reason; the detail is for reading. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
+   to <id>, reach 20000 mm`; an aimed move at a thing it does not see adds `, not in sight`, or past 60 m `, sight 60000
+   mm`). An aimed move at a thing seen beyond its reach, within 60 m, is made from afar (#5063): its act's end
+   (`souls:act-ended`, which the receipt names) carries its words in field 8, `look: from afar, 31200 mm to <id>, reach
+   20000 mm`. A client acts on the reason; the detail is for reading. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's. A form's act is due by its run's start plus its steps' own time (its
    walk, moves and pauses, C20), a walk's by its planned route's time from when it is planned (C29), and a sit's, a
    lie's or a rise's by a form's move step's time from when its move starts. Each is answered in progress in the tick

@@ -256,6 +256,17 @@ pub const THING_GONE: &str = "souls:thing-gone";
 /// Why: it did not start before it expired, and no offer or pair waits on it (or its offer did not survive a restart).
 pub const EXPIRED: &str = "souls:activity-expired";
 
+/// Who turns to face its activity's middle (#423, [`Activities::turns`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Turn {
+    /// The bodies that turn.
+    pub bodies: Vec<Id>,
+    /// Every member of the activity: whose middle they face.
+    pub members: Vec<Id>,
+    /// The middle when the world set it (an activity with places): the node its members stand on and the point there.
+    pub middle: Option<(Id, Vec3)>,
+}
+
 /// A body that left while in a move: it is let go when the timer fires or the move ends first.
 struct Leaving {
     body: Id,
@@ -298,6 +309,11 @@ pub struct Activities {
     stands: BTreeMap<Id, BTreeMap<Id, usize>>,
     /// The member leading each hold that walks hand in hand (0.135 R1), by activity.
     leaders: BTreeMap<Id, Id>,
+    /// Activities started, or another joined after they started (a group's later accept), since [`Activities::turns`]
+    /// last ran, and members of placed activities left where they stand ([`Activities::pending_places`]), by
+    /// (activity, body): who turns to face its activity's middle (#423). Each is read once.
+    to_face: Vec<Id>,
+    unplaced: Vec<(Id, Id)>,
 }
 
 impl Activities {
@@ -323,6 +339,8 @@ impl Activities {
             frames: BTreeMap::new(),
             stands: BTreeMap::new(),
             leaders: BTreeMap::new(),
+            to_face: Vec::new(),
+            unplaced: Vec::new(),
         }
     }
 
@@ -949,6 +967,7 @@ impl Activities {
             l.drivers = drivers;
         }
         self.begun.push(activity);
+        self.to_face.push(activity);
         self.mark_places(activity, None);
         Ok(())
     }
@@ -1109,6 +1128,38 @@ impl Activities {
         )
     }
 
+    /// The world's word of who holds which grip of `activity`'s load, and the same kept on its node (#5067:
+    /// [`carry::grips`]): `souls:carry-grips` with `holds`' fields, and its field [`carry::grips::F_GRIPS`] set to them,
+    /// in one effect at the activity's node, to its audience, acted and caused as `by` says.
+    pub fn carry_grips(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        holds: &carry::grips::Holds,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        let fields = holds.fields(activity)?;
+        let set = Change::Set {
+            node: activity,
+            field: carry::grips::F_GRIPS,
+            to: Value::Map(fields.clone()),
+            by: None,
+        };
+        self.emit(
+            tree,
+            activity,
+            audience,
+            by,
+            carry::grips::GRIPS,
+            fields,
+            vec![set],
+        )
+    }
+
     /// The world's word that `load`, held by `activity`, was kept as it stands, and `why` (0.135 A2: its last holder
     /// left and setting it down would leave a joined part hanging): `souls:hold-kept`, `{1: activity, 2: load, 3: why}`,
     /// as [`Activities::carry_set_down`] says it.
@@ -1194,6 +1245,54 @@ impl Activities {
         self.emit(tree, node, audience, by, event, fields, Vec::new())
     }
 
+    /// The world's word of a lift's or a set-down's track on `activity`'s node (#5067, [`carry::Hoist`]):
+    /// `souls:carry-track`, `{1: activity, 2: load, 3: phase, 4: t0, 5: t1, 6: why}`, said at the node. `phase` is
+    /// `souls:lift` (the track begins at t0 and ends at t1), `souls:lifted` (it ended: the load in its carriers'
+    /// hands), `souls:lift-cancelled` (it ended before t1, `why` naming the cause; a set-down back to where the load
+    /// lay begins at once), `souls:set-down` (a set-down's track begins, `why` naming a carry that broke off) or
+    /// `souls:released` (it ended: the load at rest, out of the crew's slot). Times are µs of world time.
+    #[allow(clippy::too_many_arguments)]
+    pub fn carry_track(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        phase: &'static str,
+        (t0, t1): (Micros, Micros),
+        why: Option<&'static str>,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        let time = |t: Micros| Value::Uint(u64::try_from(t).unwrap_or(0));
+        let mut fields = BTreeMap::from([
+            (1, activity.to_value()),
+            (2, load.to_value()),
+            (3, Value::Text(name(phase))),
+            (4, time(t0)),
+            (5, time(t1)),
+        ]);
+        if let Some(why) = why {
+            fields.insert(6, Value::Text(name(why)));
+        }
+        let node = if tree.handle(activity).is_some() {
+            activity
+        } else {
+            load
+        };
+        self.emit(
+            tree,
+            node,
+            audience,
+            by,
+            "souls:carry-track",
+            fields,
+            Vec::new(),
+        )
+    }
+
     /// The bodies of the activities started since [`Activities::begin_moves`] last ran: whom their moves reach.
     pub fn beginning(&self) -> Vec<Id> {
         self.begun
@@ -1204,23 +1303,50 @@ impl Activities {
             .collect()
     }
 
-    /// The two members of each activity of two started since [`Activities::begin_moves`] last ran whose roles say
-    /// nowhere to stand (a conversation, a follow, a touch with no places): the world turns each to face the other as
-    /// it begins (trial of 25 Nov: two Souls talking faced different ways). Members given places face as their stands
-    /// say (0.135 G3).
-    pub fn facing_pairs(&self) -> Vec<[Id; 2]> {
-        self.begun
-            .iter()
-            .filter_map(|a| self.live.get(a))
-            .filter(|l| {
-                let kind = &self.kinds[&l.kind];
-                kind.follows.is_none() && kind.roles.iter().all(|r| r.stands.is_empty())
-            })
-            .filter_map(|l| match l.node.members.as_slice() {
-                [a, b] => Some([a.body, b.body]),
-                _ => None,
-            })
-            .collect()
+    /// Who turns to face its activity's middle (#423), read once. The members of an activity whose
+    /// roles say nowhere to stand (a conversation; a follow and a crew apart) turn as it begins, and again whenever
+    /// another joins it (a group's later accept), so two face each other (trial of 25 Nov: two Souls talking faced
+    /// different ways) and a group of three or more faces its middle. A member of an activity with places that is left
+    /// where it stands ([`Activities::pending_places`]) faces the activity's middle. Members given places face as their
+    /// stands say (0.135 G3), and a crew's carriers as their carry says.
+    pub fn turns(&mut self) -> Vec<Turn> {
+        let to_face = std::mem::take(&mut self.to_face);
+        let unplaced = std::mem::take(&mut self.unplaced);
+        let bodies = |l: &Live| -> Vec<Id> { l.node.members.iter().map(|m| m.body).collect() };
+        let mut seen = BTreeSet::new();
+        let mut out = Vec::new();
+        for a in &to_face {
+            let Some(l) = self.live.get(a).filter(|_| seen.insert(*a)) else {
+                continue;
+            };
+            let kind = &self.kinds[&l.kind];
+            if kind.follows.is_none()
+                && offer::several(kind).is_none()
+                && kind.roles.iter().all(|r| r.stands.is_empty())
+                && l.node.members.len() > 1
+            {
+                out.push(Turn {
+                    bodies: bodies(l),
+                    members: bodies(l),
+                    middle: None,
+                });
+            }
+        }
+        for (a, body) in unplaced {
+            if let Some(l) = self
+                .live
+                .get(&a)
+                .filter(|l| offer::several(&self.kinds[&l.kind]).is_none())
+            {
+                let middle = self.frames.get(&a).copied().flatten();
+                out.push(Turn {
+                    bodies: vec![body],
+                    members: bodies(l),
+                    middle: middle.map(|(n, f)| (n, f.origin)),
+                });
+            }
+        }
+        out
     }
 
     /// The started activities whose moves go on the beat (0.134 T3).
@@ -1547,6 +1673,7 @@ impl Activities {
         }
         for (a, b) in none {
             self.placed(a, b);
+            self.unplaced.push((a, b));
         }
         out
     }

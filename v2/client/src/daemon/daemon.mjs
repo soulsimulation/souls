@@ -176,7 +176,9 @@ import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
 import { BARE, bareAct } from '../check/bare.mjs';
+import { sitByKind } from '../check/by-kind.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
+import { afarFor, afarOf } from './afar.mjs';
 import { definedIn, kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { folderStamp, keptKinds, keptOne } from '../check/kept.mjs';
 import { actWords, isGesture, nearestIds, nearestOffers, offerNamed, offersOf, repeatsOf } from '../check/offers.mjs';
@@ -1027,6 +1029,8 @@ function remember(entries) {
 const stuckSeen = [];
 /** 0.133: my walks' ends that say how far from their target they stood, newest last ({sequence, mm}). */
 const MOVE_ENDED = 'souls:move-ended', awayEnded = [];
+/** #5063: my acts' ends made from afar (a look or a point past its reach), newest last ({sequence, words}). */
+const afarEnded = [];
 /** 0.133: the newest entry sequence this daemon has seen, and the receipts waiting for an entry. */
 let entrySeq = -1;
 const entryWaiters = [];
@@ -1044,6 +1048,11 @@ function onEntry(e) {
     const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
     if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
   }
+  // #5063: an act of mine made from afar (its end's field 8), for that act's receipt (`from_afar`)
+  for (const ev of events) {
+    const words = ev.fields?.[8] != null ? afarOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
+    if (words) { afarEnded.push({ sequence: Number(e.sequence), words }); if (afarEnded.length > 20) afarEnded.shift(); }
+  }
   for (const w of entryWaiters.splice(0)) w();
   // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
   for (const ev of events) {
@@ -1057,7 +1066,7 @@ function onEntry(e) {
     const rows = rowsOf(copy), mine = mineIn(rows), body = mine[1] ?? ME;
     keepKinds(rows);
     for (const ev of offers) {
-      const n = offerNote(ev, body);
+      const n = offerNote(ev, body, e.at);
       // Who declined, or did not answer (the event's field 3), for the offerer. One asked is told its offer's `from`,
       // and the offer's word from the offer it was told of (its node may never have been in this Soul's copy).
       const was = n?.from ? logged.findLast((x) => (x.what === 'offered' ? x.offer : x.what === 'invited' ? x.conversation : null) === n.conversation) : null;
@@ -1538,7 +1547,8 @@ function actsOf(words) {
   };
   // a thing's forms, or null when its kind is not in the copy (then nothing is read as the body's in its place)
   const formsOf = (id) => { kinds ??= heldKinds(); rows ??= rowsOf(copy); const k = kinds[rows.get(id)?.entry ?? rows.get(id)?.kind]; return k ? k.forms ?? {} : null; };
-  const list = words.map(String);
+  const list = words.map(String), kindSits = new Map();
+  const by = (w) => (kindSits.has(w) ? kindSits : kindSits.set(w, sitByKind(w, { rows: rows ??= rowsOf(copy), me: ME, ns: NS }))).get(w);
   for (let i = 0; i < list.length; i++) {
     const w = list[i];
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
@@ -1568,6 +1578,8 @@ function actsOf(words) {
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
     } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    // #3178: `sit:<kind>` (sit:bench, sit:chair) is any free one of that kind where the Soul is, nearest it
+    else if (/^sit:/.test(w) && by(w)) out.push(by(w));
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
     else if (k > 0 && ID.test(tail)) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
@@ -1755,7 +1767,8 @@ async function clonePlan(w) {
   const made = cloneFile(target.nodes, w.ref, { at, step, count, yaw, width, ...lifted });
   if (made.ok === false) return made;
   let plan;
-  try { plan = importOf(made.file, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+  // #5006 row 33: a copy keeps its titles and calendar words, as an import of an export does
+  try { plan = importOf({ ...made.file, words: target.words }, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
   return { plan, says: made.says, copies: made.file.nodes.filter((n) => n.parent === src.parent && n.id.startsWith('clone-')).map((n) => n.id) };
 }
 
@@ -2084,7 +2097,8 @@ async function answer(req, conn = null) {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
       return {
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
+      // #5006 row 17: `name` only for a thing's own name (a title, a body's name), never its kind and counter
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.titled ? { name: r.name } : {}), ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });
@@ -2269,13 +2283,18 @@ async function answer(req, conn = null) {
       // version after an entry is its sequence and one). That entry can trail the receipt: it is waited for until the
       // entries seen reach the receipt's version, at most a second.
       const walked = done && r.verbs.some((v) => /:walk$/.test(v));
+      // #5063: a look or a point made from afar says so, from its end's entry, which can trail the receipt as a walk's
+      const aimed = done && r.verbs.some((v) => /:(look_at|point)$/.test(v));
       const after = entriesAt.get(r.sequence) ?? -1, version = r.answers.at(-1)?.version, before = version ? sequenceOf(version) : Infinity;
       const endOf = () => awayEnded.findLast((a) => a.sequence > after && a.sequence < before);
-      for (const until = Date.now() + 1000; walked && !endOf() && entrySeq < before - 1 && Date.now() < until;) {
+      const afar = () => afarFor(afarEnded, after, before);
+      for (const until = Date.now() + 1000; ((walked && !endOf()) || (aimed && !afar())) && entrySeq < before - 1 && Date.now() < until;) {
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); entryWaiters.push(() => { clearTimeout(t); ok(); }); });
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
+      const far = done ? afar() : null;
+      if (far) got.receipt.from_afar = readableDetail(far, rowsOf(copy).values());
       // What this Soul's body holds once the act is done (a book a shelf's `take` put in its hand): its id for the next act.
       const refused = r.answers.at(-1)?.answer === 'refused';
       return closing(got, done || refused ? (rows) => {

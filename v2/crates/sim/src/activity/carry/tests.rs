@@ -483,12 +483,24 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
         s.rules.clone(),
     );
     let lift = s.mint.mint().expect("an id");
+    // #5067: the lift's track starts where the board lies.
+    let lay = {
+        let t = &s.town.tree;
+        let at = xform_to(
+            t,
+            t.handle(s.board).expect("the board"),
+            t.handle(ground).expect("the ground"),
+        )
+        .expect("on the ground");
+        (at.pos, at.rot)
+    };
     carry
         .lift(
             &mut s.town.tree,
             0,
             lb.pose.position,
             fb.pose.position,
+            lay,
             lift,
         )
         .expect("lifted");
@@ -599,16 +611,28 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
     assert_eq!(lf.pose.frame.node, s.door.floor, "the leader is inside");
     assert_eq!(ff.pose.frame.node, s.door.floor, "the follower is inside");
     let down = s.mint.mint().expect("an id");
-    carry
+    // #5067: the set-down's track, a sample a tick, the board on the floor at its end.
+    let (t0, t1) = carry
         .set_down(
-            &mut s.town.tree,
+            &s.town.tree,
             (tick + 1) * TICK,
             s.door.floor,
             lf.pose.position,
             ff.pose.position,
+            None,
             down,
         )
         .expect("set down");
+    let mut lowered = 0;
+    for k in 1..=(t1 - t0) / TICK {
+        lowered += 1;
+        let done = carry
+            .lower(&mut s.town.tree, t0 + k * TICK, || {
+                unreachable!("its own id")
+            })
+            .expect("lowered");
+        assert_eq!(done, t0 + k * TICK >= t1);
+    }
     assert_eq!(parent(&s.town.tree, s.board), s.door.floor);
     let spans: Vec<i64> = grips
         .iter()
@@ -654,7 +678,7 @@ fn a1_a2_a4_two_souls_carry_a_board_100_m_through_a_door() {
         "A2: the board's track in the log: {samples} samples of the carry's node, {} overlap fixed geometry",
         clips.len()
     );
-    assert_eq!(samples, tick as usize + 1);
+    assert_eq!(samples, tick as usize + 1 + lowered as usize);
     assert!(clips.is_empty(), "the board overlaps at {clips:?}");
 
     if let Ok(out) = std::env::var("CARRY_TRACE") {

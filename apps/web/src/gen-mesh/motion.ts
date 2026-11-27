@@ -181,20 +181,45 @@ function paletteNight(model: WorldModel): number {
 }
 
 type Box = { c: [number, number]; half: [number, number]; yaw: number; y0: number; y1: number };
+/** #1563: a solid's first footprint bakes its def's physics (a kit or a building: on a 4x phone, the solids near Eden's
+ *  first creatures took ~0.19 s of baking in one frame). Creatures build their obstacle lists over frames, within this
+ *  much time per frame shared by all of them; a creature whose list is not complete holds still. */
+const OBSTACLE_FRAME_MS = 8;
+let obstacleFrame = NaN, obstacleSpent = 0;
 /** Solid footprints near a point, cached per model change (entity count) and refreshed every 8 s. */
 class Obstacles {
-  private boxes: Box[] = []; private key = ''; private at = -1e9;
+  private boxes: Box[] = []; private key = ''; private at = -1e9; private done = false;
+  private job: NearJob | null = null; private jobKey = ''; private jobAt = 0;
   private model: WorldModel; private cx: number; private cz: number; private reach: number; private skip: Set<string>;
   constructor(model: WorldModel, cx: number, cz: number, reach: number, skip: Set<string>) { this.model = model; this.cx = cx; this.cz = cz; this.reach = reach; this.skip = skip; }
+  /** Build or refresh the list within this frame's share of OBSTACLE_FRAME_MS. False while there is no complete list for
+   *  the model as it is now (the creature then holds still; it never moves with part of its obstacles). A refresh keeps
+   *  the last complete list until the new one is complete. */
+  ready(t: number): boolean {
+    const k = `${this.model.entities.size}`;
+    if (!this.done || k !== this.key || t - this.at >= 8) {
+      if (!this.job || this.jobKey !== k) { this.job = { scan: null, near: [this.cx, this.cz, this.reach], i: 0, out: [] }; this.jobKey = k; this.jobAt = t; }
+      if (t !== obstacleFrame) { obstacleFrame = t; obstacleSpent = 0; }
+      if (obstacleSpent < OBSTACLE_FRAME_MS) {
+        const t0 = performance.now(), finished = nearStep(this.model, this.job, t0 + OBSTACLE_FRAME_MS - obstacleSpent);
+        obstacleSpent += performance.now() - t0;
+        if (finished) { this.keep(this.job.out, k, this.jobAt); this.job = null; }
+      }
+    }
+    return this.done && this.key === k;
+  }
   list(t: number): Box[] {
     const k = `${this.model.entities.size}`;
-    if (k === this.key && t - this.at < 8) return this.boxes;
-    this.key = k; this.at = t; this.boxes = [];
-    for (const { id, fp } of solidFootprints(this.model, [this.cx, this.cz, this.reach])) {
+    if (this.done && k === this.key && (this.job || t - this.at < 8)) return this.boxes;
+    this.job = null; this.keep(solidFootprints(this.model, [this.cx, this.cz, this.reach]), k, t);
+    return this.boxes;
+  }
+  private keep(solids: readonly { id: string; fp: readonly Box[] }[], k: string, t: number) {
+    this.key = k; this.at = t; this.done = true; this.boxes = [];
+    for (const { id, fp } of solids) {
       if (this.skip.has(id)) continue;
       for (const b of fp) if (Math.hypot(b.c[0] - this.cx, b.c[1] - this.cz) < this.reach + Math.hypot(b.half[0], b.half[1]) && b.y1 - b.y0 > 0.12) this.boxes.push(b);
     }
-    return this.boxes;
   }
 }
 /** Every solid's world footprint in entity order, scanned once per synchronous task and shared by all the creatures that
@@ -235,8 +260,8 @@ const footprintOf = (c: NonNullable<typeof solidScan>, model: WorldModel, e: Ent
 /** Every solid's world footprint in entity order. `near` ([x, z, reach]) rejects only provably distant boxes;
  * uncertain bounds always retain the original exhaustive semantics. Obstacles applies the exact final test. */
 export function solidFootprints(model: WorldModel, near?: readonly [number, number, number]): readonly { id: string; fp: readonly Box[] }[] {
-  const c = solidScanFor(model);
   if (!near) {
+    const c = solidScanFor(model);
     if (c.solids) return c.solids;
     const solids: { id: string; fp: Box[] }[] = [];
     model.readPass(() => { for (const e of model.entities.values()) {
@@ -245,6 +270,17 @@ export function solidFootprints(model: WorldModel, near?: readonly [number, numb
     } });
     c.solids = solids; return solids;
   }
+  const job: NearJob = { scan: null, near, i: 0, out: [] };
+  nearStep(model, job, Infinity);
+  return job.out;
+}
+/** A near-footprint list built over several calls: the same entries in the same order as solidFootprints(model, near). */
+type NearJob = { scan: object | null; near: readonly [number, number, number]; i: number; out: { id: string; fp: Box[] }[] };
+/** Continue `job` until performance.now() passes `until` after a footprint not yet in the scan; true when complete.
+ *  A new shared scan (an edit, or the 2 s bound) starts the list again; the model keeps every bake made so far. */
+function nearStep(model: WorldModel, job: NearJob, until: number): boolean {
+  const c = solidScanFor(model);
+  if (job.scan !== c) { job.scan = c; job.i = 0; job.out = []; }
   if (!c.anchors) {
     const anchors: NonNullable<NonNullable<typeof solidScan>['anchors']> = [];
     for (const e of model.entities.values()) {
@@ -253,12 +289,16 @@ export function solidFootprints(model: WorldModel, near?: readonly [number, numb
     }
     c.anchors = anchors;
   }
-  const [x, z, reach] = near, out: { id: string; fp: Box[] }[] = [];
-  model.readPass(() => { for (const a of c.anchors!) {
-    if (a.bound && Math.hypot(a.bound.x - x, a.bound.z - z) > reach + a.bound.radius) continue;
-    const fp = footprintOf(c, model, a.e, a.d); if (fp) out.push({ id: a.e.id, fp });
-  } });
-  return out;
+  const [x, z, reach] = job.near, anchors = c.anchors;
+  return model.readPass(() => {
+    while (job.i < anchors.length) {
+      const a = anchors[job.i++];
+      if (a.bound && Math.hypot(a.bound.x - x, a.bound.z - z) > reach + a.bound.radius) continue;
+      const known = c.fps.has(a.e.id), fp = footprintOf(c, model, a.e, a.d); if (fp) job.out.push({ id: a.e.id, fp });
+      if (!known && job.i < anchors.length && performance.now() >= until) return false;
+    }
+    return true;
+  });
 }
 export function surroundings(model: WorldModel, home: V2, reach: number, medium: 'land' | 'water', skip: Set<string>, area?: V2[]): Surroundings & { obstacles: Obstacles; t: number } {
   const obstacles = new Obstacles(model, home[0], home[1], reach + 4, skip);
@@ -338,6 +378,8 @@ export function creatureStep(obj: THREE.Object3D, rig: Rig, entity: Entity | nul
     rig.cache = new RouteCache();
   }
   rig.world!.t = t;
+  // #1563: until its obstacle list is complete a creature holds still (at home if it has not moved yet)
+  if (!rig.world!.obstacles.ready(t)) { if (!rig.planned) gait(obj, rig, idlePose(hx, hz, base.yaw), t, s, 0); return; }
   // night: diurnal animals sleep at home; fish and flyers keep going
   const night = nightOf(model);
   let kind = rig.kind;

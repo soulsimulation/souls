@@ -178,9 +178,9 @@ type Label = { obj: CSS2DObject; head: THREE.Vector3; /** The speech bubble, anc
    *  bubble holds a shown pop-up or speaking dot. Page FPS: a faded-out tag and an empty bubble are not CSS2D-drawn. */
   live: boolean; ahead: boolean; bubbleBusy: boolean };  // obj sits under the body (C2); head is where speech anchors
 
-async function fetchChunks(from: number, to: number, limit: number, signal: AbortSignal): Promise<Chunk[]> {
-  const v2 = v2History(); // R2: a world the new engine runs answers its past from its history export
-  if (v2) return validChunks(await v2.chunks(from, to, Math.min(MAX_PAST_CHUNKS, limit), signal) as Chunk[]);
+async function fetchChunks(from: number, to: number, limit: number, signal: AbortSignal, now?: number | null): Promise<Chunk[]> {
+  const v2 = v2History(); // R2: a world the new engine runs answers its past from its history export (`now`: the live head)
+  if (v2) return validChunks(await v2.chunks(from, to, Math.min(MAX_PAST_CHUNKS, limit), signal, now) as Chunk[]);
   let out: Chunk[] = [], cursor = from;
   for (let page = 0; page < 4 && out.length < limit; page++) {
     const res = await fetch(apiPath(historyTakePath(cursor,to,limit-out.length)), { signal });
@@ -872,7 +872,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
           p.extending = true;
-          void fetchChunks(end.toTick, end.toTick + 60 * playSpeed() / dt, 60 * playSpeed(), abort.signal).then((got) => {
+          void fetchChunks(end.toTick, end.toTick + 60 * playSpeed() / dt, 60 * playSpeed(), abort.signal, liveHead).then((got) => {
             if (past.current !== p) return;
             const before = p.chunks.at(-1)!.toTick;
             p.chunks = mergeWindow(p.chunks, got, p.tick);
@@ -1469,7 +1469,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
     setLoading(true); setNote(null);
     try {
       const { from, to } = rewindWindow(tick, 1 / dts);
-      const got = await fetchChunks(from, to, MAX_PAST_CHUNKS, ctl.signal);
+      const got = await fetchChunks(from, to, MAX_PAST_CHUNKS, ctl.signal, at);
       if (ctl.signal.aborted) return;
       if (!got.length) { setNote('Nothing was recorded at that moment. Try a later time.'); return; }
       past.current = { tick: Math.max(got[0].fromTick, Math.min(got.at(-1)!.toTick, tick)), playing: cur?.playing ?? true, chunks: got, extending: false, retryAt: 0, ended: false };

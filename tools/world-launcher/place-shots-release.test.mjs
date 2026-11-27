@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -49,6 +49,14 @@ console.log(JSON.stringify({ places: 1, drawn: missing }));
     const again = await run('bash', [SCRIPT, '--slugs', 'eden', '--dest', dest], { env: { ...env, PLACE_SHOTS_CACHE: join(tmp, 'cache2') } });
     assert.match(again.stdout, /0 to draw/);
     assert.deepEqual(readFileSync(draws, 'utf8').trim().split('\n').map((l) => l.split(' ')[1]), ['1', '1', '0']);
+    // pictures drawn on another machine and copied into the cache are not undone by the host's own, emptier index
+    writeFileSync(join(dest, 'eden', 'index.json'), JSON.stringify({ schema: 'place-shots/1', shots: {} }));
+    const cache3 = join(tmp, 'cache3'); mkdirSync(join(cache3, 'eden'), { recursive: true });
+    writeFileSync(join(cache3, 'eden', 'b'.repeat(64) + '.webp'), 'RIFF');
+    writeFileSync(join(cache3, 'eden', 'index.json'), JSON.stringify({ schema: 'place-shots/1', shots: { e_1: { target: 't', sha: 'b'.repeat(64), bytes: 4 } } }));
+    assert.match((await run('bash', [SCRIPT, '--slugs', 'eden', '--dest', dest], { env: { ...env, PLACE_SHOTS_CACHE: cache3 } })).stdout, /0 to draw/);
+    assert.equal(JSON.parse(readFileSync(join(dest, 'eden', 'index.json'), 'utf8')).shots.e_1.sha, 'b'.repeat(64), 'the copied pictures stay named on the host');
+    assert.equal(existsSync(join(dest, 'eden', 'host-index.tmp')), false);
     await assert.rejects(run('bash', [SCRIPT, '--slugs', 'Bad Slug', '--dest', dest], { env }), /--slugs/);
   } finally { server.close(); }
 });

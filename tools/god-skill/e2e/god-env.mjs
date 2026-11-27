@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // GOD-ENV acceptance: the god controls time, weather and the land, and a Soul lives through it. One fresh world; the
 // harness plays the god (eden-god CLI: time, weather, strike, land) and a Soul (the unchanged Soul CLI); the viewer is
-// real Chrome (GPU, Chrome lease) at dpr 1 and 2 with a real click (which also lets the thunder sound).
+// Chromium (GPU, Chrome lease) at dpr 1 and 2 with a real click (which also lets the thunder sound).
 //
 // The story (Gene's): the god makes a thunderstorm at dusk, raises a mountain and extends the world east; the Soul sees
 // and hears the storm, finds the mountain and the new land on her map, and walks onto the new land.
@@ -176,11 +176,11 @@ try {
     let h; for (let i = 0; i < 600; i++) { h = await hereOf(); if (h?.me?.pos?.[0] > 280 && h?.me?.activity?.kind !== 'walk') break; await sleep(1000); }
     return { pos: h?.me?.pos, place: h?.me?.place, placePath: h?.me?.placePath, activity: h?.me?.activity };
   }, (r) => r.pos && r.pos[0] > 200 && (r.placePath ?? []).some((p) => /new land to the east|meadow|east meadow/i.test(p)));
-  // ---------- the viewer: real Chrome, dpr 1 and 2
+  // ---------- the viewer: Chromium, dpr 1 and 2
   if (chromium) for (const dpr of dprs) {
     const release = await chromeLease('god-env-e2e').catch(() => null);
     if (!release) { log('  (Chrome lease busy: viewer steps skipped)'); break; }
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=user-gesture-required'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist', '--autoplay-policy=user-gesture-required'] });
     try {
       const ctx = await browser.newContext({ viewport: { width: 1352, height: 780 }, deviceScaleFactor: dpr });
       await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'gene'); });

@@ -49,7 +49,11 @@
 //!     its words. The public writer ([`PublicWriter`]) given the importer's name dictionary also writes the words of
 //!     the place names its public nodes reference (import-eden's field 4, a SHA-256 of the words; #3574) as
 //!     `[hash, words]` rows: the baseline's for its state, a part's for the nodes its records create, each checked
-//!     against its hash (#3571's rule).
+//!     against its hash (#3571's rule). A text file is derived from the store, not exact (W7, #2826): a removal after
+//!     it was written takes the removed references' rows out of it ([`purge_text`], `worldd::removal`), and a text
+//!     file written again from the recovery chain on a start is written without them, replacing what the disk holds
+//!     when it differs ([`PublicWriter`]'s `text_again`), so a restart never brings removed words back and never
+//!     refuses a purged file as `stream-immutable`. Parts, baselines and their recovery objects are never changed.
 //! 11. **A still world says so** (V5b, #3460). [`follow`] is handed the world's clock and tells the writer the world's
 //!     time now ([`Writer::idle`]) after each frame, and at least every 20 ms without one. Once a stretch's time has
 //!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
@@ -312,6 +316,30 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> R<()> {
     f.sync_all().map_err(io)?;
     drop(f);
     fs::rename(&tmp, path).map_err(io)
+}
+
+/// A text file (rule 10) without the rows of the references `redactions` names (W7, #2826), or `None` when it holds
+/// none of them. A place name's row, keyed by its hash, is kept.
+pub fn purge_text(bytes: &[u8], redactions: &Redactions) -> R<Option<Vec<u8>>> {
+    let Value::Array(rows) = decode(bytes)
+        .map_err(|e| fault("stream-words", e.to_string()))?
+        .value
+    else {
+        return Err(fault("stream-words", "a text file is a list"));
+    };
+    let held = rows.len();
+    let removed = |row: &Value| match row {
+        Value::Array(p) => p
+            .first()
+            .and_then(|k| replica::effects::read_id(k).ok())
+            .is_some_and(|r| redactions.contains(r)),
+        _ => false,
+    };
+    let kept: Vec<Value> = rows.into_iter().filter(|row| !removed(row)).collect();
+    if kept.len() == held {
+        return Ok(None);
+    }
+    wire(Value::Array(kept)).map(Some)
 }
 
 /// What a writer has written.
@@ -1953,7 +1981,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         immutable(&w.root.join(stream::header_path(header)), header.stored())?;
         immutable(&w.generation_dir().join("baseline"), &w.baseline)?;
-        immutable(
+        w.text_again(
             &w.generation_dir().join("baseline.text"),
             &w.get(&w.baseline_text)?,
         )?;
@@ -2296,7 +2324,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.closed.insert(0, (record, closed_at));
         self.next_generation(baseline, text, switch)?;
         immutable(&self.generation_dir().join("baseline"), &self.baseline)?;
-        immutable(&self.generation_dir().join("baseline.text"), &words)?;
+        self.text_again(&self.generation_dir().join("baseline.text"), &words)?;
         self.prune();
         self.prune_store();
         Ok(())
@@ -2844,7 +2872,12 @@ impl<S: ObjectStore> PublicWriter<S> {
                 if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(fault("stream-recovery", "invalid legacy file name"));
                 }
-                immutable(&self.dir.join(name.as_str()), &self.get(hash)?)?;
+                let path = self.dir.join(name.as_str());
+                if name.as_str().ends_with(".text") {
+                    self.text_again(&path, &self.get(hash)?)?;
+                } else {
+                    immutable(&path, &self.get(hash)?)?;
+                }
                 self.live.insert(hash.clone());
             }
         }
@@ -2951,9 +2984,31 @@ impl<S: ObjectStore> PublicWriter<S> {
             return Err(fault("stream-recovery", "canonical projection differs"));
         }
         for (name, bytes) in files {
-            immutable(&self.generation_dir().join(name), &bytes)?;
+            let path = self.generation_dir().join(&name);
+            if name.ends_with(".text") {
+                self.text_again(&path, &bytes)?;
+            } else {
+                immutable(&path, &bytes)?;
+            }
         }
         Ok(())
+    }
+    /// Writes a text file again (rule 10, W7 #2826): `recovered` without the rows of references removed since it was
+    /// published, written whole when the disk holds other bytes (a purge, or a hidden reference since restored). With
+    /// no store the file is exact, as a part is.
+    fn text_again(&self, path: &Path, recovered: &[u8]) -> R<()> {
+        let Some(store) = &self.text else {
+            return immutable(path, recovered);
+        };
+        let purged = purge_text(recovered, &store.redactions())?;
+        let bytes = purged.as_deref().unwrap_or(recovered);
+        if fs::read(path).is_ok_and(|on_disk| on_disk == bytes) {
+            return Ok(());
+        }
+        if let Some(p) = path.parent() {
+            fs::create_dir_all(p).map_err(io)?;
+        }
+        write_whole(path, bytes)
     }
     /// A node is a row of the public projection when it is live in `t` and public (#3667).
     fn visible(&self, t: &replica::tree::Tree, id: Id) -> bool {
@@ -3929,7 +3984,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
-        let real = crate::answers::now();
+        // The anchor pairs the world's time with the machine's wall clock, which viewers compare with their own: the
+        // world's clock runs ahead of the machine's by a step (O10, `measures::CLOCK_AHEAD_MS`).
+        let wall = crate::answers::now();
+        let ahead = crate::measures::CLOCK_AHEAD_MS.load(std::sync::atomic::Ordering::Relaxed);
+        let real = wall.saturating_add(ahead.saturating_mul(1000));
         let world =
             mapped_now(self.canonical.tree().time(), self.clock_seed, real).or_else(|_| {
                 if self.canonical.tree().time().is_empty() {
@@ -3944,7 +4003,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             header: self.header.hash().to_bytes(),
             newest_to: self.last_to,
             anchor_world: world,
-            anchor_wall_ms: u64::try_from(real.div_euclid(1000))
+            anchor_wall_ms: u64::try_from(wall.div_euclid(1000))
                 .map_err(|_| fault("stream-clock", "negative wall time"))?,
             quiet_until: quiet,
         };

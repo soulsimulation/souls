@@ -2298,3 +2298,8 @@ async fn group_a_passer_by_walks_round_a_carried_load() {
         broke(&dir)
     );
 }
+
+#[path = "carry_served/grips.rs"]
+mod grips;
+#[path = "carry_served/hoist.rs"]
+mod hoist;

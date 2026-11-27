@@ -77,7 +77,7 @@ if (!args['no-shots']) try { chromium = createRequire(resolve(root, 'mars/viewer
 let browser = null, page = null, releaseChrome = () => {};
 async function shot(name, { eye, at, wait = 6000 } = {}) {
   if (!chromium) return;
-  if (!browser) { try { releaseChrome = await chromeLease('e2e-' + slug); browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] }); const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); }); page = await ctx.newPage(); page.setDefaultTimeout(120000); } catch (e) { log('  (Chrome unavailable: ' + e.message.split('\n')[0] + ')'); chromium = null; return; } }
+  if (!browser) { try { releaseChrome = await chromeLease('e2e-' + slug); browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--ignore-gpu-blocklist'] }); const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addInitScript(() => { localStorage.setItem('sim.dev', 'admin'); }); page = await ctx.newPage(); page.setDefaultTimeout(120000); } catch (e) { log('  (Chrome unavailable: ' + e.message.split('\n')[0] + ')'); chromium = null; return; } }
   const q = new URLSearchParams({ dev: '1' }); if (eye) q.set('eye', eye.join(',')); if (at) q.set('at', at.join(','));
   const t0 = t();
   if (!page.url().startsWith(base)) { await page.goto(`${base}?${q}`, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(Math.max(wait, 20000)); }
