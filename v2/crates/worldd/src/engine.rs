@@ -158,6 +158,7 @@ type Taking = (
     Vec<(Id, [i64; 2])>,
     (Vec3, replica::pose::Quat),
     (Vec3, replica::pose::Quat),
+    bool,
 );
 
 /// A carrying ground's fixed geometry and what it was read at (0.135 C7, [`Engine`]'s `fixed`): the walkers' ground
@@ -1333,7 +1334,16 @@ impl Engine {
                         .collect::<Vec<_>>();
                     self.taking.insert(
                         activity,
-                        (ground, at, turn, apart(f, k), sides, taken.from, taken.lay),
+                        (
+                            ground,
+                            at,
+                            turn,
+                            apart(f, k),
+                            sides,
+                            taken.from,
+                            taken.lay,
+                            taken.rested,
+                        ),
                     );
                 }
             }
@@ -3460,7 +3470,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let Some((ground, at, turn, span, sides, from, lay)) = taking else {
+        let Some((ground, at, turn, span, sides, from, lay, rested)) = taking else {
             return;
         };
         let part = self
@@ -3500,6 +3510,9 @@ impl Engine {
                 if let Some(l) = self.held_load(live, part) {
                     carry.load = l;
                 }
+                // A take broken off on its track sets the part back only where it rested on the ground; one taken out
+                // of a slot or a stand, already unjoined, goes straight down from where it is.
+                carry.back = rested;
                 let mut tree = live.frozen();
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
                 // #5067: the take is a track from where the part was into its carriers' hands, said as a lift's is; its

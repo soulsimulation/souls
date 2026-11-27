@@ -262,6 +262,9 @@ pub struct Taken {
     pub to: (Vec3, Quat),
     pub lay: (Vec3, Quat),
     pub carriers: Vec<Carrier>,
+    /// Whether the part rested on the crew's ground itself (not in a bay's slot or a stand's): where a take broken off
+    /// on its track may set it back.
+    pub rested: bool,
 }
 
 /// A carrier where it stands (#5067): its body, its feet on the crew's ground (µm) and its standing reach (µm).
@@ -493,6 +496,7 @@ impl Assembly {
             _ => {}
         }
         let at = xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
+        let rested = tree.node(ph).and_then(|n| n.parent()) == Some(ground);
         let middle = Vec3::new(
             (front.x + back.x) / 2,
             (front.y + back.y) / 2,
@@ -568,6 +572,7 @@ impl Assembly {
             to: (frame, turn),
             lay: (at.pos, at.rot),
             carriers,
+            rested,
         })
     }
 
