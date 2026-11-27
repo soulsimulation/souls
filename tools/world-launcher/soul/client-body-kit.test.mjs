@@ -8,14 +8,14 @@ import {bodyKit,parseKitArgs,rigidStarterGLB,keepClips,KIT_FILES,HUMANOID_SOURCE
 
 const root=new URL('../../../',import.meta.url);
 const src={'SKILL.md':'tools/body-authoring/SKILL.md','validate.mjs':'tools/body-authoring/validate.mjs','upload.mjs':'tools/body-authoring/upload.mjs','example.json':'tools/body-authoring/example.json',
- 'admission.ts':'apps/server/src/edge/body/admission.ts','rig.ts':'apps/server/src/edge/body/rig.ts','upload-validation.ts':'apps/server/src/moderation/validate.ts',
+ 'admission.ts':'tools/body-authoring/admit/admission.ts','rig.ts':'tools/body-authoring/admit/rig.ts','upload-validation.ts':'tools/body-authoring/admit/validate.ts',
  'action-profile.ts':'mars/viewer/engine/bodies/action-profile.ts','motion.ts':'mars/viewer/engine/bodies/motion.ts'};
 const TOKEN='secret-soul-token-0123456789';
 /** The served kit: the same text substitutions the world's /body-authoring/ route makes. */
 function served(file){
  if(file==='contract.json')return Buffer.from(JSON.stringify({contract:'body-authoring/1',types:['humanoid','ceramic','floater'],profiles:{rigid:{otherPhysical:{supported:false,reason:'This profile has no hands, seat, swim or ride adaptations.'}}}}));
  let t=readFileSync(new URL(src[file],root),'utf8');
- if(file==='admission.ts')t=t.replace('../../../../../mars/viewer/engine/bodies/motion.ts','./motion.ts').replace('../../../../../mars/viewer/engine/bodies/action-profile.ts','./action-profile.ts');
+ if(file==='admission.ts')t=t.replace('../../../mars/viewer/engine/bodies/motion.ts','./motion.ts').replace('../../../mars/viewer/engine/bodies/action-profile.ts','./action-profile.ts');
  return Buffer.from(t);
 }
 function world({types=['humanoid','ceramic','floater'],humanoid=null,pip=null}={}){
