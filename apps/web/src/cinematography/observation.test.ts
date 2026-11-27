@@ -69,3 +69,7 @@ test('real take coverage bounds activity freshness in live and history without a
 test('wide hierarchies decline detail before enqueueing children or allocating bone envelopes',()=>{
  const body=root();for(let i=0;i<300;i++)body.add(root());const grant={remaining:1000};assert.equal(new DrawGeometry().inspect(body,new Vector3(),new Quaternion(),false,grant).bounds,null);assert.equal(grant.remaining,1000);
 });
+
+test('morph target geometry declines detail and inverse-bind edits invalidate cached envelopes',()=>{
+ const body=root(),mesh=new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());body.add(mesh);body.updateMatrixWorld(true);mesh.geometry.morphAttributes.position=[mesh.geometry.attributes.position.clone()];assert.equal(new DrawGeometry().inspect(body,new Vector3(),new Quaternion(),false,{remaining:1000}).bounds,null);
+});

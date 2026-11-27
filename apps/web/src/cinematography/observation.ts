@@ -22,8 +22,9 @@ export class DrawGeometry {
       const object=pending.pop()!;if(object.children.length>256-visited-pending.length)return {bounds:null,head:null};
       for(const child of object.children)pending.push(child);
       const mesh=object as SkinnedMesh;if(!mesh.isMesh||!mesh.geometry?.attributes.position)continue;
-      if(mesh.isSkinnedMesh&&mesh.skeleton.bones.length>128)return {bounds:null,head:null};
+      if(mesh.geometry.morphAttributes.position?.length||mesh.isSkinnedMesh&&mesh.skeleton.bones.length>128)return {bounds:null,head:null};
       meshes.push(mesh);signature.push(mesh,mesh.geometry,mesh.skeleton,...mesh.bindMatrix?.elements??[]);
+      if(mesh.isSkinnedMesh)for(let i=0;i<mesh.skeleton.bones.length;i++)signature.push(mesh.skeleton.bones[i],...mesh.skeleton.boneInverses[i].elements);
       for(const key of ['position','skinIndex','skinWeight']) { const a=mesh.geometry.attributes[key];signature.push(a,a && ('version' in a?a.version:a.data.version),a?.count); }
     }
     if(pending.length) return {bounds:null,head:null}; // oversized representations decline detail, never scan without a bound
