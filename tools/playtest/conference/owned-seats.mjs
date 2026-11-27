@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { accessSync, constants, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { lastJson, pairArgs, seatEnv } from '../arena/new-engine/seat.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -15,6 +15,21 @@ export function requireConferenceRecipe(recipe) {
   assert.equal(typeof recipe.registerClient, 'function', 'conference-proof requires native-page registerClient');
   assert.equal(typeof recipe.registerCommand, 'function', 'conference-proof requires native-page registerCommand');
   for (const name of ['replica.js', 'replica_bg.wasm']) assert(existsSync(join(recipe.pkg, name)), `conference-proof missing pinned ${name}`);
+}
+
+/** The family caller checks capture prerequisites before spending an owned native boot. No cache discovery. */
+export function conferenceCaptureResources({ browserCache, browserExecutable, ffmpegExecutable, browserSHA256, ffmpegSHA256 }) {
+  assert([browserCache, browserExecutable, ffmpegExecutable].every(p => typeof p === 'string' && isAbsolute(p)), 'conference-proof explicit capture paths required');
+  for (const [role, file, expected] of [['browser', browserExecutable, browserSHA256], ['ffmpeg', ffmpegExecutable, ffmpegSHA256]]) {
+    const rel = relative(resolve(browserCache), resolve(file));
+    assert(rel && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel), `conference-proof ${role} outside explicit cache`);
+    assert(/^[a-f0-9]{64}$/.test(expected ?? ''), `conference-proof ${role} pinned SHA256 required`);
+    try { accessSync(file, constants.R_OK | constants.X_OK); }
+    catch { assert.fail(`conference-proof ${role} executable missing or unreadable`); }
+    assert.equal(hash(readFileSync(file)), expected, `conference-proof ${role} SHA256 mismatch`);
+  }
+  assert.equal(relative(resolve(browserCache), resolve(ffmpegExecutable)), 'ffmpeg-1013/ffmpeg-mac', 'conference-proof recorder must match Playwright 1.64.1 cache layout');
+  return { browserCache, browserExecutable, ffmpegExecutable, browserSHA256, ffmpegSHA256 };
 }
 
 /** Register before waiting; retain exit/signal truth even when a failed command prints success-looking JSON. */

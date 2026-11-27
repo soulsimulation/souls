@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
-import { conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident } from './owned-seats.mjs';
+import { conferenceCaptureResources, conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident } from './owned-seats.mjs';
 
 const scratch = resolve(import.meta.dirname, '../../../.local'); mkdirSync(scratch, { recursive: true });
 const directory = mkdtempSync(join(scratch, 'conference-owned-seat-tests-'));
@@ -92,4 +93,18 @@ test('ordinary world discovery rejects ambiguity and a route leaving its owned o
     worlds = [{ ...worlds[0], url: 'https://example.invalid/w/conference/' }];
     await assert.rejects(conferenceWorldPage({ base, signal: controller.signal }), /owned origin/);
   } finally { await new Promise((ok, no) => server.close(error => error ? no(error) : ok())); }
+});
+
+test('capture preflight refuses missing recorder and changed bytes before any owned boot', () => {
+  const cache = join(directory, 'capture-cache'), browser = join(cache, 'chrome'), ffmpeg = join(cache, 'ffmpeg-1013/ffmpeg-mac');
+  mkdirSync(join(cache, 'ffmpeg-1013'), { recursive: true });
+  const bytes = '#!/bin/sh\nexit 0\n', digest = value => createHash('sha256').update(value).digest('hex');
+  writeFileSync(browser, bytes, { mode: 0o700 });
+  const inputs = { browserCache: cache, browserExecutable: browser, ffmpegExecutable: ffmpeg, browserSHA256: digest(bytes), ffmpegSHA256: digest(bytes) };
+  assert.throws(() => conferenceCaptureResources(inputs), /ffmpeg executable missing/);
+  writeFileSync(ffmpeg, bytes, { mode: 0o700 });
+  assert.deepEqual(conferenceCaptureResources(inputs), inputs);
+  writeFileSync(ffmpeg, bytes + '# changed\n');
+  assert.throws(() => conferenceCaptureResources(inputs), /ffmpeg SHA256 mismatch/);
+  assert.throws(() => conferenceCaptureResources({ ...inputs, browserExecutable: join(directory, 'elsewhere') }), /browser outside explicit cache/);
 });
