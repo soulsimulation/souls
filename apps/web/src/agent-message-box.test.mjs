@@ -195,3 +195,25 @@ test('#3378 a message unanswered past 10 s suggests "check your messages", whate
   // A god overlay is not a Soul's box.
   assert.equal(render(h(AgentMessageBoxView, {...props, kind: 'god', inbox: sent(), now: at + 60_000})).includes('data-check-messages'), false);
 });
+
+test('first-day 27 Nov: a Soul\'s unread message says plainly when its agent is not connected or not listening, and until when it waits', () => {
+  const at = new Date(2026, 10, 27, 14, 2).getTime(), sent = {id: 'm', text: 'Hi! Could you walk Juniper over to the pond?', state: 'sent', sentAt: at};
+  const link = (state, reason) => ({state, reason, since: null, holder: null});
+  const box = (inbox, now = at + 90_000) => render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Juniper', inbox: {connected: true, lastSeenAt: null, queued: 1, latest: sent, ...inbox}, now}));
+  const asleep = box({link: link('connected', 'asleep'), waitsMs: 15 * 60_000});
+  assert.match(asleep, /data-not-reading="asleep"/); assert.match(asleep, />Waiting</);
+  assert.match(asleep, /Your agent is connected but not listening now \(asleep\)\. Your message waits for it until 14:17\./);
+  assert.doesNotMatch(asleep, /Thinking|Not picked up|listening now</);
+  const away = box({connected: false, link: link('disconnected', 'stopped-listening'), waitsMs: 15 * 60_000});
+  assert.match(away, /data-not-reading="disconnected"/); assert.match(away, /Your agent isn&#x27;t connected\. Your message waits for it until 14:17\./);
+  assert.match(box({link: link('disconnected', 'stopped-listening')}), /Your agent isn&#x27;t connected\. Your message waits until it is back\./, 'no known lapse: no time');
+  assert.match(box({link: link('connected', 'asleep'), waitsMs: 15 * 60_000}, at + 16 * 60_000), /waited until 14:17 and was not read: send it again when your agent is back/);
+  // Listening, unknown, read, or the world down: no such line (the receipt says Sent, Thinking… or the outage)
+  const listening = box({link: link('connected', 'listening'), waitsMs: 15 * 60_000});
+  assert.doesNotMatch(listening, /data-not-reading/); assert.match(listening, /Not picked up yet/);
+  assert.doesNotMatch(box({}), /data-not-reading/, 'not told: no claim');
+  const read = box({link: link('connected', 'asleep'), latest: {...sent, state: 'delivered'}, doing: {phase: 'thinking'}});
+  assert.doesNotMatch(read, /data-not-reading/); assert.match(read, />Thinking…</);
+  assert.doesNotMatch(box({link: link('disconnected', 'stopped-listening'), unavailable: true}), /data-not-reading/);
+  assert.doesNotMatch(render(h(AgentMessageBoxView, {...props, kind: 'god', inbox: {connected: false, lastSeenAt: null, latest: sent, link: link('disconnected', 'never')}, now: at + 90_000})), /data-not-reading/, 'the god box is unchanged');
+});

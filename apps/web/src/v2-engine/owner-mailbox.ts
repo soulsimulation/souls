@@ -57,16 +57,19 @@ export function mailboxPlace(href: string, cfg: { v2Stream?: unknown; v2Gateway?
 }
 
 /** The card's one owner state from the gateway's `{"agent"}` frame: whether a socket is signed in for the Soul (its
- *  agent's client is connected now); null until the gateway said. */
-export function linkOf(agent: boolean | null): AgentInbox['link'] {
+ *  agent's client is connected now), and whether that client said a reader of its messages is open (first-day 27 Nov:
+ *  a client connected with nobody reading is `asleep`, never `listening`); null until the gateway said. */
+export function linkOf(agent: boolean | null, listening = false): AgentInbox['link'] {
   if (agent === null) return undefined;
-  return agent ? { state: 'connected', reason: 'listening', since: null, holder: null } : { state: 'disconnected', reason: 'stopped-listening', since: null, holder: null };
+  return agent ? { state: 'connected', reason: listening ? 'listening' : 'asleep', since: null, holder: null } : { state: 'disconnected', reason: 'stopped-listening', since: null, holder: null };
 }
+/** How long the directory keeps a message open for its agent (directoryd's mailbox `OPEN_MOST_S`): then it expires. */
+export const KEPT_MS = 15 * 60_000;
 
 /** The old box's inbox for the v2 box's messages: the newest one (refusals are thrown at send, not kept). `agent` is
  *  whether the Soul's agent is connected (null: not told yet), which the card's status line shows. */
-export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<BoxMessage, number>, agent: boolean | null): AgentInbox {
-  const connected = agent === true, link = linkOf(agent), linked = link ? { link } : {};
+export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<BoxMessage, number>, agent: boolean | null, listening = false): AgentInbox {
+  const connected = agent === true, link = linkOf(agent, listening), linked = { ...(link ? { link } : {}), waitsMs: KEPT_MS };
   const shown = messages.filter((m) => m.state !== 'refused');
   const m = shown.at(-1);
   if (!m) return { connected, lastSeenAt: null, latest: null, queued: 0, ...linked };
@@ -103,7 +106,10 @@ export class MailBox {
   readonly messages: BoxMessage[] = [];
   /** Whether each grant's agent is connected, as the gateway last said (`{"agent": {"grant", "connected"}}`). */
   readonly agents = new Map<string, boolean>();
-  private readonly picked = new Set<string>();
+  /** Whether each grant's client said a reader of its messages is open (the same frame's `listening`). */
+  readonly listening = new Map<string, boolean>();
+  /** Ids the agent read before the put's answer came. */
+  private readonly read = new Set<string>();
   onChange: () => void = () => {};
 
   /** The frame that puts `words` for `grant`; null for empty or long words. */
@@ -126,16 +132,18 @@ export class MailBox {
       const grant = str(f.agent.grant);
       if (!grant || typeof f.agent.connected !== 'boolean') return true;
       this.agents.set(grant, f.agent.connected);
+      this.listening.set(grant, f.agent.connected === true && f.agent.listening === true);
     } else if (f.sent) {
       const m = this.messages.find((x) => x.state === 'sending');
       if (!m) return true;
       const id = str(f.sent.id);
-      if (id) { m.id = id; m.state = this.picked.delete(id) ? 'thinking' : 'waiting'; }
+      if (id) { m.id = id; m.state = this.read.delete(id) ? 'thinking' : 'waiting'; }
       else { m.state = 'refused'; m.outcome = str(f.sent.refused) ?? 'refused'; }
     } else if (f.mail) {
-      if (f.mail.state !== 'picked') return true;
+      // first-day 27 Nov: `picked` is only its client given it; the agent has it once the client says it read it
+      if (f.mail.state !== 'read') return true;
       const m = byId(f.mail.id);
-      if (!m) this.picked.add(String(f.mail.id)); // picked up before the put's answer came
+      if (!m) this.read.add(String(f.mail.id)); // read before the put's answer came
       else if (m.state === 'waiting') m.state = 'thinking';
     } else if (f.doing) {
       // an act the agent began after it picked up a message: the newest open message's
@@ -160,7 +168,7 @@ export class MailBox {
   }
 }
 
-type Box = Pick<MailBox, 'messages' | 'agents' | 'onChange' | 'put' | 'text'>;
+type Box = Pick<MailBox, 'messages' | 'agents' | 'listening' | 'onChange' | 'put' | 'text'>;
 /** `onOpen`: told true once the socket is signed in, false when it drops (#1330). */
 type Sock = { onText: ((t: string) => void) | null; onOpen?: ((open: boolean) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
 /** #1330: how long the box's socket stays down (the gateway or its world gone, or the page's network) before the card
@@ -201,13 +209,15 @@ export class V2OwnerMailbox {
 
   /** Whether the Soul's agent is connected now, as the gateway said; null until it did. */
   private agent(): boolean | null { return this.box!.agents.get(this.grant!) ?? null; }
+  /** Whether its client said a reader of its messages is open now. */
+  private listens(): boolean { return this.box!.listening.get(this.grant!) === true; }
 
   /** The box as the old card reads it; throws while the mailbox cannot be reached (the card then shows nothing). While
    *  the world is unavailable (#1330) it says so, and nothing of the agent: the last word on it is from before. */
   async read(): Promise<AgentInbox> {
     await this.ready;
     if (this.unavailable()) return { ...inboxOf(this.box!.messages, this.sentAt, null), unavailable: true };
-    return inboxOf(this.box!.messages, this.sentAt, this.agent());
+    return inboxOf(this.box!.messages, this.sentAt, this.agent(), this.listens());
   }
 
   /** Puts `text` for the Soul's agent; resolves once the mailbox took it, throws if it was refused. */
@@ -232,7 +242,7 @@ export class V2OwnerMailbox {
       m.state = 'refused'; m.outcome = 'no-answer';
       throw new Error('The mailbox did not answer. Try again.');
     }
-    return inboxOf(box.messages, this.sentAt, this.agent());
+    return inboxOf(box.messages, this.sentAt, this.agent(), this.listens());
   }
 
   stop(): void { this.sock?.stop(); }
