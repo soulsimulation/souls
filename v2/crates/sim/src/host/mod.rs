@@ -1622,6 +1622,8 @@ impl Runner {
             self.threads,
         );
         refused.extend(stepped.refused);
+        // Read again for whatever plans before the next tick (#3225): a body that landed across a shore stands there.
+        town.water.grounds = self.controller.grounds();
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {
             if self.running(*who) {

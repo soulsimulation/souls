@@ -155,7 +155,8 @@ impl Water {
 
     /// Where a shore crossing lands a body (#3225): [`IN`] from the middle of the edge, square to it, into the far
     /// piece, or that piece's nearest point to there; then the nearest point of the far ground's surface (`dry`, the
-    /// open ground's, for dry ground). So the carry lasts more than the tick it starts in, and the walk sees it.
+    /// open ground's, for dry ground). So the carry lasts more than the tick it starts in (at a gait's speed, three
+    /// ticks of 50 ms), and the walk sees it. `None` when the far piece's side of the edge cannot be told.
     pub fn landing(&self, map: &Map, dry: &Surface, shore: &Shore) -> Option<Vec3> {
         let far = std::slice::from_ref(map.piece(shore.far));
         let [a, b] = shore.edge;
@@ -169,13 +170,19 @@ impl Water {
                 m.z + ex * k / len.max(1),
             )
         };
-        // The side of the edge the far piece lies on.
-        let side = if exits::piece_of(far, out(-PROBE)).is_some() && exits::piece_of(far, out(PROBE)).is_none() {
-            -1
-        } else {
-            1
+        // The side of the edge the far piece lies on; none told (a sliver of a piece, a corner): no landing.
+        if len == 0 {
+            return None;
+        }
+        let side = match (
+            exits::piece_of(far, out(PROBE)).is_some(),
+            exits::piece_of(far, out(-PROBE)).is_some(),
+        ) {
+            (true, false) => 1,
+            (false, true) => -1,
+            _ => return None,
         };
-        let target = if len == 0 { m } else { out(side * IN) };
+        let target = out(side * IN);
         let (_, p) = exits::nearest(far, target)?;
         let s = match shore.ground {
             Ground::Dry => dry,
@@ -185,7 +192,8 @@ impl Water {
     }
 }
 
-/// How far into the far piece a shore crossing lands a body, µm: more than a tick's walk at any gait.
+/// How far into the far piece a shore crossing lands a body, µm: more than a tick's walk at any gait (a landing
+/// nearer than half of it is refused, `walk::town`).
 pub const IN: i64 = 150_000;
 /// How far off the edge its far side is looked for, µm.
 const PROBE: i64 = 20_000;

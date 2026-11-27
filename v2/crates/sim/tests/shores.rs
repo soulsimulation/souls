@@ -645,6 +645,7 @@ fn most(g: Ground) -> i64 {
 /// fastest of the grounds it began and ended the tick on (within 2 %, the mover's walk again for a slope), and never
 /// on ground the body may not stand on.
 fn run(r: &mut Runner, t: &mut Town, who: Id, has: Mask, ticks: usize) -> Walked {
+    let tick = r.tick;
     let mut w = Walked {
         grounds: Vec::new(),
         steps: Vec::new(),
@@ -658,7 +659,7 @@ fn run(r: &mut Runner, t: &mut Town, who: Id, has: Mask, ticks: usize) -> Walked
         let (now, g1) = (at(r), r.controller.ground(who));
         let d = common::dist(was, now);
         assert!(
-            d <= most(g0).max(most(g1)) * TICK / 1_000_000 * 102 / 100 + 1,
+            d <= most(g0).max(most(g1)) * tick / 1_000_000 * 102 / 100 + 1,
             "no jump: {d} µm in a tick from {g0:?} to {g1:?}"
         );
         assert!(sim::routes::may_stand(g1, has), "{g1:?} with {has}");
@@ -673,10 +674,10 @@ fn run(r: &mut Runner, t: &mut Town, who: Id, has: Mask, ticks: usize) -> Walked
     w
 }
 
-/// A town and a runner on `im`.
-fn walkers(im: Import) -> (Town, Runner) {
+/// A town and a runner on `im`, ticks of `tick` µs.
+fn walkers(im: Import, tick: i64) -> (Town, Runner) {
     let (t, _) = common::town_of(im, b"souls/shores-walk/1");
-    (t, Runner::new(TICK))
+    (t, Runner::new(tick))
 }
 
 /// `who` stood at `from` (µm) on the open ground, with abilities `has`, walks to `to`: planned by the town (or given
@@ -689,13 +690,26 @@ fn cross(
     to: Vec3,
     legs: Option<&[sim::walk::Leg]>,
 ) -> (Walked, Vec<sim::walk::Leg>, Town) {
-    let (mut t, mut r) = walkers(im);
+    cross_ticked(im, who, has, from, to, legs, TICK)
+}
+
+/// [`cross`] with ticks of `tick` µs.
+fn cross_ticked(
+    im: Import,
+    who: Id,
+    has: Mask,
+    from: Vec3,
+    to: Vec3,
+    legs: Option<&[sim::walk::Leg]>,
+    tick: i64,
+) -> (Walked, Vec<sim::walk::Leg>, Town) {
+    let (mut t, mut r) = walkers(im, tick);
     let ground = t.ground;
     t.allow(who, has);
     let body = common::stand(&t, who, ground, from);
     let legs = match legs {
         Some(l) => {
-            r.add(common::humanoid(), body, common::route(l, WALK, TICK))
+            r.add(common::humanoid(), body, common::route(l, WALK, tick))
                 .expect("a walker");
             l.to_vec()
         }
@@ -902,4 +916,47 @@ fn walkers_cross_eden_waters() {
             assert_eq!(d.end, Some(Progress::Done));
         }
     }
+}
+
+/// The review's two cases (#3225): a shore crossed with ticks twice as long still lands where the walk sees it (no
+/// crossing back and forth), and a body in the water is found again on the water's surface (an edit's regrounding),
+/// not on dry ground.
+#[test]
+fn a_swimmer_with_long_ticks_and_found_again_in_the_water() {
+    let (from, to) = (
+        Vec3::new(1_500_000, 0, 8_000_000),
+        Vec3::new(14_500_000, 0, 8_000_000),
+    );
+    let (w, _, _) = cross_ticked(world(Pond::Bowl), common::id(3), ALL, from, to, None, 100_000);
+    println!("100 ms ticks: grounds {:?}; ended {:?}", w.path(), w.end);
+    assert_eq!(
+        w.path(),
+        [
+            Ground::Dry,
+            Ground::Wading,
+            Ground::Water,
+            Ground::Wading,
+            Ground::Dry
+        ]
+    );
+    assert_eq!(w.end, Some(Progress::Done));
+
+    let (mut t, _) = walkers(world(Pond::Bowl), TICK);
+    let (who, ground) = (common::id(4), t.ground);
+    t.allow(who, ALL);
+    let water = t
+        .surfaces_on(replica::kinds::sizes::Size::Standard, Ground::Water)
+        .expect("the water's surface")[&ground]
+        .clone();
+    let frame = replica::pose::Frame {
+        node: ground,
+        slot: None,
+    };
+    let b = water
+        .place(who, frame, Vec3::new(8_000_000, 0, 8_000_000), replica::pose::Quat::IDENTITY)
+        .expect("afloat");
+    t.water.grounds.insert(who, Ground::Water);
+    let again = t.relocate(&b).expect("found again in the water");
+    assert_eq!(again.pose.position, b.pose.position);
+    assert_eq!(water.pieces()[again.piece as usize].ground, Ground::Water);
 }

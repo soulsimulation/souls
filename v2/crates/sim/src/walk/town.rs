@@ -1720,8 +1720,9 @@ impl Town {
     /// kept; refused when it stands on none (`off-ground`).
     pub fn relocate(&self, body: &Body) -> Result<Body, Refusal> {
         let node = node_of(body);
+        // On the ground it stands on (#3225): a body in the water is found again on the water's surface.
         let mut b = self
-            .surfaces_for(self.size_of(body.id))
+            .surfaces_on(self.size_of(body.id), self.water.ground(body.id))
             .ok_or_else(|| refusal("body-class-unprepared", "no prepared geometry"))?
             .get(&node)
             .ok_or_else(|| refusal("no-surface", show(node)))?
@@ -3055,9 +3056,11 @@ fn plan_on(
     }
     let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
     for h in &route.hops {
-        let Hop::Link { id, .. } = h else { continue };
+        let Hop::Link { id, kind } = h else { continue };
         // A shore (#3225): its near end is the middle of the edge the two grounds share, on the open ground.
-        if let Some((_, _, a, b)) = map.get().shore(*id) {
+        if matches!(kind, Kind::Wade | Kind::Swim)
+            && let Some((_, _, a, b)) = map.get().shore(*id)
+        {
             at = Vec3::new((a[0] + b[0]) * 500, 0, (a[1] + b[1]) * 500);
             on = open;
             legs.push(Leg {
@@ -3828,7 +3831,8 @@ impl Town {
     /// by name into water the body may not use, and from further than [`REACH`] off the near end. `None` for any
     /// other link.
     fn shore_track(&mut self, body: &Body, link: Id, speed: i64) -> Option<Result<Track, Refusal>> {
-        if self.size_of(body.id) != Size::Standard {
+        // A link of a building (a doorway, a stair, a step) is no shore: no search of the map's links for it.
+        if self.size_of(body.id) != Size::Standard || self.link_at.contains_key(&link) {
             return None;
         }
         let shore = match self.water.shore(&self.map, body.id, link)? {
@@ -3860,6 +3864,11 @@ impl Town {
             Some(Err(r)) => return Some(Err(r)),
             None => return Some(Err(refusal("no-surface", show(ground)))),
         };
+        // A carry shorter than a tick's walk would end in the tick it starts, unseen by the walk, which would ask to
+        // cross again and be carried back: a landing that near is refused, and the walk ends by name where it stands.
+        if flat2(stand, p) < i128::from(super::water::IN / 2).pow(2) {
+            return Some(Err(refusal("link-end-off-ground", show(link))));
+        }
         if shore.ground != crate::gaits::Ground::Dry {
             self.water.lands.insert(body.id, shore.ground);
         }
