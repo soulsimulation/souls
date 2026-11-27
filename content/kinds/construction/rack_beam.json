@@ -57,11 +57,11 @@
   },
   "grip_l": {
    "role": "grip",
-   "at_mm": [0, 51, -1097]
+   "at_mm": [0, 51, -1197]
   },
   "grip_r": {
    "role": "grip",
-   "at_mm": [0, 51, 1097]
+   "at_mm": [0, 51, 1197]
   }
  },
  "geometry": {

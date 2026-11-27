@@ -9,7 +9,7 @@
 //   carry accept|decline <offer id>   joins the crew, or declines; carry leave <crew id> lets go (always taken)
 //   carry grip <thing id> front|back|left|right|side <n> [--from <m>] [--out <m>]   walks to that end of a load (its
 //                                     grip's place, from its entry; a part that stands and is seated by crews (a
-//                                     frame, a bent): 0.45 m beyond the edge it is held by, along its wider
+//                                     frame, a bent): 0.35 m beyond the edge it is held by, along its wider
 //                                     side, where `part take` and `carry lift` both admit it), beside it along its
 //                                     own x (1.2 m), or to the n-th side carrier's place, beside a grip between its
 //                                     ends; front or back --out <m>: that far off its line, away from the middle of what
@@ -46,11 +46,12 @@ export const REACH = 350_000;
 export const SIDE_REACH = 450_000;
 /** How far beyond the edge it holds each of the two carriers of a part that stands upright (no long axis on the plan)
  * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges on the line its
- * carriers stand on (a rack frame's posts, a timber bent's), 1.2 m and 1.6 m above the ground, and refuses a carrier
- * more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.45 m is within a standing body's arm's reach of both
- * hands there, and where it can stand: 1.06 m from the middle of a 1.22 m rack frame, just clear of a frame stand's
- * walk box (1.05 m) and 0.11 m clear of the frame's own columns in a bay (0.95 m). It was 2.2 m off its faces. */
-export const STANDING_OFF = 450_000;
+ * carriers stand on (a rack frame's posts, a timber bent's), its hands 1.0 m and 1.3 m above the ground, and refuses a
+ * carrier more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.35 m is where a standing body holds both
+ * without squatting: 0.96 m from the middle of a 1.22 m rack frame, 10 mm clear of the ground the frame's own columns
+ * take in a bay (0.95 m). A frame stand's walk box (1.05 m) is further out: there the walk ends as near as it can.
+ * It was 2.2 m off its faces. */
+export const STANDING_OFF = 350_000;
 /** Where a crew stands from a thing of no entry, as from a part standing, µm. */
 export const STANDING_FROM = 2_200_000;
 /** Where a holder stands beside a part, along its own x, µm: 0.135 A3's change of crew. */
@@ -116,7 +117,12 @@ export function loadOf(entry) {
   // grips::assign: a frame's post, a bent's); and whether it is a part crews seat (it has joints)
   const hold = b[wide] * 500;
   const joins = Object.values(entry.points ?? {}).some((p) => p?.role === 'joint');
-  return { axis, long, halfLength: b[axis] * 500, halfWidth, wide, hold, joins, inner, middle: [0, b[1] * 500, 0], places: [along[0] - REACH, along.at(-1) + REACH] };
+  // how far beyond its end grip an end carrier stands (sim's Load::reach): REACH for a load that blocks a walker where
+  // it is set down; for one too low to (220 mm or less as it lies), as near as 0.25 m, never nearer than 75 mm beyond
+  // the load's end
+  const up = (axis === 1 ? b[2] : b[1]) * 1000, over = b[axis] * 500 - Math.max(-along[0], along.at(-1));
+  const reach = up > 0 && up <= 220_000 ? Math.min(Math.max(over + 75_000, 250_000), REACH) : REACH;
+  return { axis, long, halfLength: b[axis] * 500, halfWidth, wide, hold, joins, inner, middle: [0, b[1] * 500, 0], reach, places: [along[0] - reach, along.at(-1) + reach] };
 }
 
 /** `v` turned by the quaternion `q` ([w, x, y, z], any scale), as the copy's poses hold it. */
@@ -378,7 +384,7 @@ export function carryIntents(req, ctx) {
 }
 
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
-export const HEIGHT = 900_000;
+export const HEIGHT = 1_000_000;
 /** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
 export const GO_MOST_MS = 20_000;
 

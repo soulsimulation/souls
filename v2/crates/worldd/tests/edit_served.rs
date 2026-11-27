@@ -5969,12 +5969,14 @@ struct Site<'a> {
 }
 
 /// From a standing frame's middle to each of its two carriers, along its own x (its width), µm: beside its edges,
-/// 0.45 m from the edge each holds (#5067: a frame taken standing is held at its edges along its carriers' line, its
-/// posts, so each carrier is within arm's reach of its hold from there, and not from 2.2 m off its faces), 0.11 m
-/// clear of the frame's own columns once it stands in a bay. The client's `carry grip <frame> front|back`.
-const FRAME_FROM: i64 = 1_060_000;
-/// From a beam's middle to each of its end carriers along it, µm: `sim::activity::carry::REACH` beyond its end grips.
-const BEAM_END: i64 = 1_097_000 + 350_000;
+/// 0.37 m from the edge each holds (#5067: a frame taken standing is held at its edges along its carriers' line, its
+/// posts, so each carrier is within arm's reach of its hold from there, and not from 2.2 m off its faces), 30 mm clear
+/// of the ground the frame's own columns take once it stands in a bay. The client's `carry grip <frame> front|back`
+/// stands 0.35 m from the edge.
+const FRAME_FROM: i64 = 980_000;
+/// From a beam's middle to each of its end carriers along it, µm: 0.25 m beyond its end grips
+/// (`sim::activity::carry::Load::reach`), 75 mm beyond its ends.
+const BEAM_END: i64 = 1_197_000 + 250_000;
 /// How far off a bay's beam slot's line a beam's crew stands to put it in or take it out, on the slot's own side of
 /// the bay (its mouth), µm: no carrier can stand on that line within reach of an end grip (the frames' columns stand on
 /// it), so the beam is set in from here on the world's straight track, each end carrier 0.57 m from its grip then.

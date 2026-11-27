@@ -123,8 +123,13 @@ pub const HALF_WIDTH: i64 = 150_000;
 pub const REACH: i64 = 350_000;
 /// Between the two carriers' centres, µm.
 pub const SPAN: i64 = 2 * (HALF_LENGTH + REACH);
-/// The board's height above its carriers' feet while carried, µm.
-pub const HEIGHT: i64 = 900_000;
+/// The board's height above its carriers' feet while carried, µm (#5067: 1 m, where a standing body holds a load in
+/// front of it with its arms down and bent; at 0.9 m no hold let it stand upright).
+pub const HEIGHT: i64 = 1_000_000;
+/// The nearest a carrier's place is to its end grip along a low load, µm, and how far beyond the load's end it is
+/// then at least ([`Load::reach`]).
+pub const REACH_NEAR: i64 = 250_000;
+pub const END_CLEAR: i64 = 75_000;
 /// The sweep's step along the route, µm.
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
@@ -492,9 +497,23 @@ impl Load {
         ((along - grips::HAND_HALF).clamp(-h, h) + (along + grips::HAND_HALF).clamp(-h, h)) / 2
     }
 
-    /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
+    /// How far beyond its end grip each end carrier stands, µm (#5067). [`REACH`] for a load that blocks a walking body
+    /// where it is set down (a body's ground keeps 0.34 m from it: nearer, its own carriers would stand on none). For
+    /// one too low to block (a beam, a rail, a cloth, a frame laid flat): as near as [`REACH_NEAR`], so its far hand is
+    /// 0.35 m ahead of it and it stands upright, but never nearer the load's end than [`END_CLEAR`] beyond it (the
+    /// load is not carried through its carrier). B9's board, of no entry, keeps [`REACH`].
+    pub fn reach(&self) -> i64 {
+        let low = self.rest > 0 && 2 * self.rest <= crate::ground::BODY_LOW * 1000;
+        if !low {
+            return REACH;
+        }
+        let over = self.half_length - self.grips[1].max(-self.grips[0]);
+        (over + END_CLEAR).clamp(REACH_NEAR, REACH)
+    }
+
+    /// Where its back and front carriers stand along the carry, from its middle: [`Load::reach`] beyond each grip.
     pub fn places(&self) -> [i64; 2] {
-        [self.grips[0] - REACH, self.grips[1] + REACH]
+        [self.grips[0] - self.reach(), self.grips[1] + self.reach()]
     }
 
     /// How many carriers it takes at most (0.135 C5): one at each grip.

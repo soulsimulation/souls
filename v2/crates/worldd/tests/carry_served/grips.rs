@@ -794,7 +794,7 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
 /// #5067 (admission at the take, the initially unreachable frame): two Souls stand 2.2 m off the faces of the loose
 /// 2.4 m rack frame (where the client's approach used to send them), 2.16 m from the edge each would hold, and ask to
 /// take it: refused `part.grip-out-of-reach`, naming a carrier, before anything is written (the frame stands where it
-/// stood, no holds are said). They walk to beside its edges (its own x, 0.45 m beyond each: an ordinary walk, the
+/// stood, no holds are said). They walk to beside its edges (its own x, 0.35 m beyond each: an ordinary walk, the
 /// authoritative way there) and the same crew takes it, each hold within reach.
 #[tokio::test(flavor = "multi_thread")]
 async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_from_beside_its_edges()
@@ -840,8 +840,8 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
         before,
         "the frame did not move"
     );
-    // Beside its edges: its own x, 0.45 m beyond its half width.
-    let edge = l.half_width + 450_000;
+    // Beside its edges: its own x, 0.35 m beyond its half width.
+    let edge = l.half_width + 350_000;
     let near = [spot(at, edge, false), spot(at, -edge, false)];
     for (k, p) in near.iter().enumerate() {
         souls[k].send("eden:walk", ground, point(*p)).await;
@@ -857,7 +857,7 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     let h = word_that(&dir, carry, "taken", |h| h.phase == grips::CARRY).await;
     assert_eq!(h.holds.len(), 2, "each carrier holds its edge");
     // The take moved nothing in one step: the crew's node was first set where the frame stood (the frame in its slot
-    // exactly there), then went into its carriers' hands, 0.9 m up, a sample a tick, none more than 0.1 m from the last.
+    // exactly there), then went into its carriers' hands, 1 m up, a sample a tick, none more than 0.1 m from the last.
     tokio::time::sleep(Duration::from_millis(1500)).await;
     let track: Vec<Vec3> = effects(&dir)
         .into_iter()
@@ -898,7 +898,7 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     );
     let last = track.last().copied().unwrap();
     assert!(
-        (last.y - 900_000).abs() <= 5_000,
+        (last.y - sim::activity::carry::HEIGHT).abs() <= 5_000,
         "in its carriers' hands: {last:?}"
     );
     // Each carrier turned to face its hold (the back walked past the frame and stood with its back to it): its
