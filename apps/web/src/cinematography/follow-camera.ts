@@ -12,7 +12,7 @@ import type {CameraSubject} from '../../../../packages/camera/src/observation.ts
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
 export function publishedFollowGround(info:Pick<SceneInfo,'scene'|'shore'>|null){return !info||(info.scene?.surfaces.length??0)>256?undefined:cameraGroundSampler(info);}
 export type Sight='clear'|'blocked'|'unknown';
-export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,blocks:4096,blockVisits:4096,blockTriangles:64,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8});
+export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,blocks:4096,blockVisits:4096,blockTriangles:64,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8,orbitRate:Math.PI/9,orbitSeconds:6});
 /** Orientation-independent envelope of the actual near plane, including a pending
  * final viewport projection. Its capsule covers every intermediate eye rotation.
  * Surface clearance is NOT proof that an arbitrary closed solid does not contain it. */
@@ -130,9 +130,12 @@ function approach(value:Vector3,velocity:Vector3,goal:Vector3,dt:number,speed:nu
 export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number;motion:{groundY:number|null;sweep:Sight|null;unknown:string|null;unknownMesh:Record<string,unknown>|null;radius:number|null;surfaceStartOverlap:boolean;containment:'unproved'}|null};
 /** Persistent world-space viewpoints let the subject turn inside a portrait dead/soft zone. */
 export class FollowCamera{
- private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;
- reset(eye?:Vector3,aim?:Vector3){this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(eye:Vector3,aim:Vector3){if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;private orbit:{target:Vector3;until:number;referenceEye:Vector3;referenceVelocity:Vector3;referenceOffset:Vector3}|null=null;
+ reset(eye?:Vector3,aim?:Vector3){this.orbit=null;this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
+ // The reference separates current root-follow lag from residual orbit motion.
+ // It is a private desired-motion calculation, never a second applied camera pose.
+ private cancelOrbit(manual=true){if(!this.orbit)return;this.offset.copy(this.eye).add(this.orbit.referenceOffset).sub(this.orbit.referenceEye);if(manual)this.velocity.copy(this.orbit.referenceVelocity);this.orbit=null;}
+ gesture(eye:Vector3,aim:Vector3){this.cancelOrbit();if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
  step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport,projection?:FollowProjection):FollowResult{
   if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
@@ -151,11 +154,15 @@ export class FollowCamera{
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
-  let reason='tracking';
+  let reason='tracking';if(this.orbit){approach(this.orbit.referenceEye,this.orbit.referenceVelocity,root.clone().add(this.orbit.referenceOffset),dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);if(this.clock>=this.orbit.until){this.cancelOrbit(false);this.heldUntil=this.clock+2;reason='viewpoint-plan-expired';}}
   if(geometry.stats.complete){
-  const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
+  // Advance the local orbit instead of cutting a chord directly to a distant
+  // viewpoint. The actual damped eye still requires its own swept clearance.
+  const nextOffset=this.offset.clone();let orbitDone=false;
+  if(this.orbit){const a=Math.atan2(this.offset.x,this.offset.z),b=Math.atan2(this.orbit.target.x,this.orbit.target.z),delta=Math.atan2(Math.sin(b-a),Math.cos(b-a)),step=Math.min(Math.abs(delta),FOLLOW_LIMITS.orbitRate*dt);nextOffset.applyAxisAngle(new Vector3(0,1,0),Math.sign(delta)*step);orbitDone=step>=Math.abs(delta)-1e-9;if(orbitDone)nextOffset.copy(this.orbit.target);}
+  const goal=root.clone().add(nextOffset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
   const radius=followClearanceRadius(camera,projection,next);if(radius===null){this.velocity.set(0,0,0);return result('clearance-projection-unavailable');}
-  const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next,radius);motion={groundY,sweep,radius,surfaceStartOverlap:geometry.stats.surfaceStartOverlap,containment:'unproved',unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?(geometry.stats.surfaceStartOverlap?'camera-envelope-overlap':'motion-obstructed'):'motion-unknown';}
+  const groundY=ground(next.x,next.z),sweep=geometry.segment(this.eye,next,radius);motion={groundY,sweep,radius,surfaceStartOverlap:geometry.stats.surfaceStartOverlap,containment:'unproved',unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);this.offset.copy(nextOffset);if(orbitDone&&this.orbit&&this.eye.clone().sub(this.orbit.referenceEye).sub(this.offset).add(this.orbit.referenceOffset).length()<.03&&this.velocity.distanceTo(this.orbit.referenceVelocity)<.03){this.orbit=null;this.heldUntil=this.clock+2;}}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?(geometry.stats.surfaceStartOverlap?'camera-envelope-overlap':'motion-obstructed'):'motion-unknown';}
   if(motion.surfaceStartOverlap){this.aimVelocity.set(0,0,0);return result(manual?'user-hold:camera-envelope-overlap':'camera-envelope-overlap',screen);}
   // A Follow gesture changes its orbit/zoom, not the subject's world translation.
   // Carry eye and aim together so orientation stays exactly the user's, while the
@@ -163,10 +170,10 @@ export class FollowCamera{
   if(manualEye){this.aim.add(this.eye.clone().sub(manualEye));return result(reason==='tracking'?'user-hold':'user-hold:'+reason,screen);}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
-  if(!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
+  if(!this.orbit&&!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
    const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,Math.max(radius,passageRadius));
-   if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
+   if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.orbit={target:offset,until:this.clock+FOLLOW_LIMITS.orbitSeconds,referenceEye:this.eye.clone(),referenceVelocity:this.velocity.clone(),referenceOffset:this.offset.clone()};this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
   }
   }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
   // Unavailable obstruction geometry forbids eye movement/search, not a bounded
@@ -190,12 +197,12 @@ export class FollowCamera{
    const view=camera.view,shifted=view?.enabled&&(view.offsetX!==0||view.offsetY!==0||view.width!==view.fullWidth||view.height!==view.fullHeight);
    if(!area||shifted)return result('framing-unavailable',screen,tested);
    const safe={left:2*area.left/viewport.width-1,right:2*(area.left+area.width)/viewport.width-1,bottom:1-2*(area.top+area.height)/viewport.height,top:1-2*area.top/viewport.height};
-   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,whole=true;
    for(let i=0;i<8;i++){
     const corner=new Vector3();
     corner.set(i&1?bounds!.max[0]:bounds!.min[0],i&2?bounds!.max[1]:bounds!.min[1],i&4?bounds!.max[2]:bounds!.min[2]).applyQuaternion(q).add(root);
-    if(corner.clone().sub(camera.position).dot(forward)<=camera.near)return result('framing-unavailable',screen,tested);
-    corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1)return result('framing-unavailable',screen,tested);
+    if(corner.clone().sub(camera.position).dot(forward)<=camera.near){whole=false;break;}
+    corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1){whole=false;break;}
     minX=Math.min(minX,corner.x);maxX=Math.max(maxX,corner.x);minY=Math.min(minY,corner.y);maxY=Math.max(maxY,corner.y);
    }
    const choose=(current:number,low:number,high:number,centre:number,slack:number)=>{
@@ -203,9 +210,18 @@ export class FollowCamera{
     const a=Math.max(low,centre-slack),b=Math.min(high,centre+slack);
     return a<=b?Math.max(a,Math.min(b,current)):Math.max(low,Math.min(high,centre));
    };
-   const desiredX=choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14);
-   const desiredY=choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10);
-   if(desiredX===null||desiredY===null)return result('framing-unavailable',screen,tested);
+   let desiredX=whole?choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14):null;
+   let desiredY=whole?choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10):null;
+   if(desiredX===null||desiredY===null){
+    // An infeasible full-body rectangle must not cancel useful reacquisition.
+    // These are observed head and bounds-centre targets, not anatomical volumes.
+    const head=subject.anchors.slice(0,8).find(a=>a.role==='head'),focus=[centre];if(head)focus.push(new Vector3().fromArray(head.localM).applyQuaternion(q).add(root));
+    minX=Infinity;maxX=-Infinity;minY=Infinity;maxY=-Infinity;
+    for(const point of focus){const corner=point.clone();if(corner.clone().sub(camera.position).dot(forward)<=camera.near)return result('framing-unavailable',screen,tested);corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1)return result('framing-unavailable',screen,tested);minX=Math.min(minX,corner.x);maxX=Math.max(maxX,corner.x);minY=Math.min(minY,corner.y);maxY=Math.max(maxY,corner.y);}
+    desiredX=choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14)??(safe.left+safe.right)/2;
+    desiredY=choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10)??(safe.bottom+safe.top)/2;
+    reason=reason==='tracking'?'framing-core-fallback':reason+':framing-core-fallback';
+   }
    targetX=desiredX;targetY=desiredY;
   }
   const aimGoal=centre.clone().addScaledVector(right,-targetX*vertical*camera.aspect).addScaledVector(up,-targetY*vertical);
