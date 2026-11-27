@@ -10393,7 +10393,7 @@ mod state_hash_kept_tests {
         let ground = id(1);
         let mut kept = PoseRows::new();
         let mut bodies: Vec<(Id, Pose)> = (10..30).map(|n| (id(n), pose(ground, n as i64))).collect();
-        let tree = vec![
+        let tree = [
             (Audience::Everyone, Hash::of(Purpose::Fixture, b"a")),
             (Audience::Of(id(2)), Hash::of(Purpose::Fixture, b"b")),
         ];
