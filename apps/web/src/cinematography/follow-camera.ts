@@ -12,7 +12,7 @@ import type {CameraSubject} from '../../../../packages/camera/src/observation.ts
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
 export function publishedFollowGround(info:Pick<SceneInfo,'scene'|'shore'>|null){return !info||(info.scene?.surfaces.length??0)>256?undefined:cameraGroundSampler(info);}
 export type Sight='clear'|'blocked'|'unknown';
-export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,blocks:4096,blockVisits:4096,blockTriangles:64,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8});
+export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,blocks:4096,blockVisits:4096,blockTriangles:64,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8,previewSeconds:1.5,previewDistance:2,previewStableSeconds:.3,previewMaxSpeed:4});
 /** Orientation-independent envelope of the actual near plane, including a pending
  * final viewport projection. Its capsule covers every intermediate eye rotation.
  * Surface clearance is NOT proof that an arbitrary closed solid does not contain it. */
@@ -127,22 +127,28 @@ export class FollowGeometry{
 function approach(value:Vector3,velocity:Vector3,goal:Vector3,dt:number,speed:number,acceleration:number,tau:number){
  const desired=goal.clone().sub(value).multiplyScalar(1/tau).clampLength(0,speed),change=desired.sub(velocity).clampLength(0,acceleration*dt);velocity.add(change);value.addScaledVector(velocity,dt);
 }
-export type FollowResult={eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number;motion:{groundY:number|null;sweep:Sight|null;unknown:string|null;unknownMesh:Record<string,unknown>|null;radius:number|null;surfaceStartOverlap:boolean;containment:'unproved'}|null};
+export type FollowPreview={status:string;shift:number[];current:number|null;alternative:number|null;selected:boolean};
+export type FollowResult={preview:FollowPreview;eye:Vector3;aim:Vector3;reason:string;candidate:number;screen:[number,number];candidates:number;motion:{groundY:number|null;sweep:Sight|null;unknown:string|null;unknownMesh:Record<string,unknown>|null;radius:number|null;surfaceStartOverlap:boolean;containment:'unproved'}|null};
 /** Persistent world-space viewpoints let the subject turn inside a portrait dead/soft zone. */
 export class FollowCamera{
- private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;
- reset(eye?:Vector3,aim?:Vector3){this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(eye:Vector3,aim:Vector3){if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;private travel=new Vector3();private travelAge=0;
+ reset(eye?:Vector3,aim?:Vector3){this.travel.set(0,0,0);this.travelAge=0;this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
+ gesture(eye:Vector3,aim:Vector3){this.travel.set(0,0,0);this.travelAge=0;if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
  step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport,projection?:FollowProjection):FollowResult{
   if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
-  let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
-  if(invalidStep){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
-  if(!centre||(!geometry.stats.complete&&manual)){this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
+  const preview:FollowPreview={status:'unavailable',shift:[0,0,0],current:null,alternative:null,selected:false};let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({preview,eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
+  if(invalidStep){this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
+  if(!centre||(!geometry.stats.complete&&manual)){this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
+  // A small visibility cue from stable past depicted travel, never a promised
+  // future actor pose. Stops, reversals and implausible steps disable it at once.
+  const travel=subject.travelMps,observed=travel?.value,valid=!!travel&&Number.isFinite(travel.confidence)&&travel.confidence>=.5&&observed?.length===3&&observed.every(Number.isFinite),direction=valid?new Vector3(observed![0],0,observed![2]):null,speed=direction?.length()??0;
+  if(manual||!direction||speed<.1||speed>FOLLOW_LIMITS.previewMaxSpeed){this.travel.set(0,0,0);this.travelAge=0;preview.status=manual?'manual':!direction?'unavailable':speed<.1?'stopped':'discontinuity';}
+  else{if(this.travelAge===0||this.travel.clone().normalize().dot(direction.clone().normalize())<.8){this.travel.copy(direction);this.travelAge=0;}else this.travel.lerp(direction,1-Math.exp(-dt/.3));this.travelAge+=dt;preview.status=this.travelAge>=FOLLOW_LIMITS.previewStableSeconds?'stable':'stabilizing';if(preview.status==='stable')preview.shift=this.travel.clone().multiplyScalar(FOLLOW_LIMITS.previewSeconds).clampLength(0,FOLLOW_LIMITS.previewDistance).toArray();}
   const projected=centre.clone().project(camera);if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y))return result('projection-unavailable');
   if(!manual&&centre.clone().sub(camera.position).dot(new Vector3(0,0,-1).applyQuaternion(camera.quaternion))<=camera.near)return result('subject-behind-view');
   if(!manual&&projected.z>1)return result('projection-unavailable');
@@ -150,7 +156,7 @@ export class FollowCamera{
   const manualEye=manual?this.eye.clone():null;
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
-  const query=(eye:Vector3):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of points){const s=geometry.segment(eye,p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/points.length;};
+  const query=(eye:Vector3,shift?:Vector3,coreOnly=false):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of coreOnly?[centre]:points){const s=geometry.segment(eye,shift?p.clone().add(shift):p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/(coreOnly?1:points.length);};
   let reason='tracking';
   if(geometry.stats.complete){
   const goal=root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
@@ -166,7 +172,13 @@ export class FollowCamera{
   if(!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
    const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segment(this.eye,eye,Math.max(radius,passageRadius));
-   if(current!==null&&alternative!==null&&alternative>current+.25&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';}
+   if(preview.status==='stable'&&current!==null&&alternative!==null&&alternative>=current&&passage==='clear'){
+    // Future centre visibility is only a cue; both present-time anchors remain required.
+    // A maximal or unknown incumbent cannot justify extra alternative preview work.
+    const shift=new Vector3().fromArray(preview.shift);preview.current=query(root.clone().add(this.offset).add(shift),shift,true);if(preview.current!==null&&preview.current<1)preview.alternative=query(eye.clone().add(shift),shift,true);if(preview.current===null||preview.current<1&&preview.alternative===null)preview.status='query-unknown';
+   }
+   const anticipated=preview.current===0&&preview.alternative===1;
+   if(current!==null&&alternative!==null&&alternative>=current&&(alternative>current+.25||anticipated)&&passage==='clear'&&this.clock>=this.heldUntil){this.offset.copy(offset);this.index=i+1;this.heldUntil=this.clock+2;reason='viewpoint-change';preview.selected=anticipated&&alternative<=current+.25;}
   }
   }else{this.velocity.set(0,0,0);reason=geometry.stats.unknown??'geometry-unknown';}
   // Unavailable obstruction geometry forbids eye movement/search, not a bounded
@@ -190,12 +202,12 @@ export class FollowCamera{
    const view=camera.view,shifted=view?.enabled&&(view.offsetX!==0||view.offsetY!==0||view.width!==view.fullWidth||view.height!==view.fullHeight);
    if(!area||shifted)return result('framing-unavailable',screen,tested);
    const safe={left:2*area.left/viewport.width-1,right:2*(area.left+area.width)/viewport.width-1,bottom:1-2*(area.top+area.height)/viewport.height,top:1-2*area.top/viewport.height};
-   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,whole=true;
    for(let i=0;i<8;i++){
     const corner=new Vector3();
     corner.set(i&1?bounds!.max[0]:bounds!.min[0],i&2?bounds!.max[1]:bounds!.min[1],i&4?bounds!.max[2]:bounds!.min[2]).applyQuaternion(q).add(root);
-    if(corner.clone().sub(camera.position).dot(forward)<=camera.near)return result('framing-unavailable',screen,tested);
-    corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1)return result('framing-unavailable',screen,tested);
+    if(corner.clone().sub(camera.position).dot(forward)<=camera.near){whole=false;break;}
+    corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1){whole=false;break;}
     minX=Math.min(minX,corner.x);maxX=Math.max(maxX,corner.x);minY=Math.min(minY,corner.y);maxY=Math.max(maxY,corner.y);
    }
    const choose=(current:number,low:number,high:number,centre:number,slack:number)=>{
@@ -203,9 +215,18 @@ export class FollowCamera{
     const a=Math.max(low,centre-slack),b=Math.min(high,centre+slack);
     return a<=b?Math.max(a,Math.min(b,current)):Math.max(low,Math.min(high,centre));
    };
-   const desiredX=choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14);
-   const desiredY=choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10);
-   if(desiredX===null||desiredY===null)return result('framing-unavailable',screen,tested);
+   let desiredX=whole?choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14):null;
+   let desiredY=whole?choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10):null;
+   if(desiredX===null||desiredY===null){
+    // An infeasible full-body rectangle must not cancel useful reacquisition.
+    // These are observed head and bounds-centre targets, not anatomical volumes.
+    const head=subject.anchors.slice(0,8).find(a=>a.role==='head'),focus=[centre];if(head)focus.push(new Vector3().fromArray(head.localM).applyQuaternion(q).add(root));
+    minX=Infinity;maxX=-Infinity;minY=Infinity;maxY=-Infinity;
+    for(const point of focus){const corner=point.clone();if(corner.clone().sub(camera.position).dot(forward)<=camera.near)return result('framing-unavailable',screen,tested);corner.project(camera);if(![corner.x,corner.y,corner.z].every(Number.isFinite)||corner.z>1)return result('framing-unavailable',screen,tested);minX=Math.min(minX,corner.x);maxX=Math.max(maxX,corner.x);minY=Math.min(minY,corner.y);maxY=Math.max(maxY,corner.y);}
+    desiredX=choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14)??(safe.left+safe.right)/2;
+    desiredY=choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10)??(safe.bottom+safe.top)/2;
+    reason=reason==='tracking'?'framing-core-fallback':reason+':framing-core-fallback';
+   }
    targetX=desiredX;targetY=desiredY;
   }
   const aimGoal=centre.clone().addScaledVector(right,-targetX*vertical*camera.aspect).addScaledVector(up,-targetY*vertical);
