@@ -80,7 +80,9 @@ export async function prepare({ paths, recipe, signal }) {
     const until = Date.now() + 10000;
     while (!state.bodies[who]) { state.bodies[who] = (await cli(state, who, 'status')).body; if (Date.now() > until) throw Error('carry-proof.body-admission'); if (!state.bodies[who]) await delay(50, signal); }
   }));
-  state.grips = Promise.all([cli(state, 'ada', 'carry', 'grip', SCENE.load, 'front'), cli(state, 'bo', 'carry', 'grip', SCENE.load, 'back')]).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  // Each carrier comes to its end along the load's own line (first 2.2 m out, then in): the page draws a body facing
+  // the way it last walked, and the world does not turn a carrier to its load (attempt 8: Ada lifted with her back to it).
+  state.grips = Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   return { dir: paths.dir };
 }
 async function offer(state) {
@@ -92,12 +94,18 @@ async function offer(state) {
   state.load = (query.answers ?? []).flatMap(a => a.found ?? []).find(n => n.name === SCENE.load && n.kind.split('@')[0] === SCENE.kind);
   if (!state.load) throw Error('carry-proof.load');
 }
+/** What the observer has counted so far, kept as each part of the journey ends, so a failing part is known by name. */
+async function phase(state, page, name) {
+  const seen = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: { ...o.counts }, maxima: structuredClone(o.maxima), total: o.total } : null; });
+  if (seen) (state.phases ??= []).push({ phase: name, ...seen });
+}
 /** The front's ordinary `carry to` for each leg, its walk waited out, with one still as the leg ends. */
 async function walk(state, page, paths, signal) {
   for (const [i, [to, ms]] of SCENE.legs.entries()) {
     await cli(state, 'ada', 'carry', 'to', state.crew, to);
     await delay(ms, signal);
     await page.screenshot({ path: join(paths.dir, `carry-leg-${i + 1}.png`) });
+    await phase(state, page, 'leg-' + (i + 1));
   }
 }
 const diagnostic = (state, stage, detail = {}) => {
@@ -247,22 +255,26 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   let checking = false;
   const monitor = setInterval(async () => {
     if (checking || abort.signal.aborted) return; checking = true;
-    try { const o = await page.evaluate(() => { const o = window.__carryContactObserver; return o && { counts: o.counts, failures: o.failures, failedWitnesses: o.failedWitnesses }; }); if (wholeRunFailure(o, state.pageErrors)) abort.abort(Error('carry-proof.final-draw-measurement-failure')); }
+    try { const o = await page.evaluate(() => { const o = window.__carryContactObserver; return o && { counts: o.counts, failures: o.failures, failedWitnesses: o.failedWitnesses }; }); // A failing frame fails the run at its end; the journey goes on, so one attempt shows every part that fails.
+      if (wholeRunFailure(o, state.pageErrors) && !state.firstFailure) { state.firstFailure = { at: new Date().toISOString(), counts: o?.counts ?? null, pageErrors: state.pageErrors.length }; await page.screenshot({ path: join(paths.dir, 'first-failure.png') }); } }
     catch (error) { abort.abort(error); } finally { checking = false; }
   }, 50);
   const wait = async (predicate, ms) => { const until = Date.now() + ms; while (!await page.evaluate(predicate)) { journeySignal.throwIfAborted(); if (Date.now() > until) throw Error('carry-proof.draw-timeout'); await delay(50, journeySignal); } journeySignal.throwIfAborted(); };
   try {
     await cli(state, 'ada', 'carry', 'lift', state.crew, SCENE.load);
-    await wait(() => window.__carryContactObserver.counts['passed-native-pair'] > 0, 10000);
+    await wait(() => { const c = window.__carryContactObserver.counts; return c['passed-native-pair'] > 0 || c['failed-native-pair'] > 0; }, 10000);
     await delay(SCENE.liftMs, journeySignal);
     await page.screenshot({ path: join(paths.dir, 'first-lift.png') }); console.log('FIRST_CONTACT ' + paths.dir);
+    await phase(state, page, 'lift');
     // Two short legs keep both carriers whole in the reviewed view; loading, seating and larger crews remain separate.
     await walk(state, page, paths, journeySignal);
     await cli(state, 'ada', 'carry', 'set-down', state.crew);
     await wait(() => window.__carryContactObserver.samples.some(s => s.result.releaseComplete), 10000);
+    await page.screenshot({ path: join(paths.dir, 'set-down.png') });
+    await phase(state, page, 'set-down');
     await Promise.all(['ada', 'bo'].map(who => cli(state, who, 'carry', 'leave', state.crew)));
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return { counts: o.counts, failures: o.failures, failedWitnesses: o.failedWitnesses }; });
     check('complete-contact-lifecycle', !wholeRunFailure(observer, state.pageErrors), JSON.stringify(observer));
     check('native-active-contacts-observed', observer.counts['passed-native-pair'] > 0);
-  } finally { clearInterval(monitor); state.signal = signal; }
+  } finally { clearInterval(monitor); state.signal = signal; save(state, 'carry-phases.json', { firstFailure: state.firstFailure ?? null, phases: state.phases ?? [] }); }
 }
