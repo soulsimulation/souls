@@ -266,17 +266,24 @@ export async function drain(config) {
   const inbox = await beneath(config.placement, join(config.placement, 'requests'));
   const retained = await beneath(config.placement, join(config.placement, 'attempts'));
   // systemd serializes this finite unit. Move each inbox entry out first, so malformed/stale entries cannot
-  // retrigger a failure loop or block another valid request. No tree is recursively deleted.
+  // retrigger a failure loop or block another valid request. No tree is recursively deleted. A request is kept under
+  // its own name, each new attempt replacing the last, so the retained attempts are one per request (27 Nov: a page
+  // retrying one failing create left 120 nameless ones); only a malformed entry gets a name of its own.
+  let refused = 0;
   for (const request of await readdir(inbox)) {
-    const path = join(inbox, request), kept = join(retained, randomUUID());
+    const path = join(inbox, request), kept = join(retained, REQUEST.test(request) ? request : `invalid-${randomUUID()}`);
     try {
       await rename(path, kept);
       if (!(await lstat(kept)).isFile() || !REQUEST.test(request)) fail('placement-request-invalid');
       const { archiveRequest } = await import('./archive-world.mjs');
       if (!await archiveRequest(config, request)) await placeRequest(config, request);
-    } catch (error) { console.error(`placement: request refused (${error?.message ?? error}); retained identity-bound status and world data`); }
+    } catch (error) { refused++; console.error(`placement: request refused (${error?.message ?? error}); retained identity-bound status and world data`); }
   }
+  // A refused run lasts at least REFUSED_PAUSE_MS: a page asking again for the same failing create starts this unit at
+  // most a few times in systemd's start limit (5 in 10 s), which would otherwise fail souls-place.path for good.
+  if (refused) await pause(REFUSED_PAUSE_MS);
 }
+export const REFUSED_PAUSE_MS = Number(process.env.SOULS_PLACE_REFUSED_PAUSE_MS ?? 3000);
 
 // No top-level await: drain imports archive-world.mjs, which imports this module, so an entry module still awaiting its
 // own evaluation would never settle that import (Node exits 13, every request set aside unplaced; 26 Nov).

@@ -885,6 +885,12 @@ placement() {
   # renamed under its fork would leave that world half made), and the directory, which takes a create under the lineage
   # it read at its start, is down until it reads the new catalogue (a create under the old lineage is refused for good).
   quiet souls-place.path || true
+  # A path unit failed by systemd's start limit (26 Nov: placed nothing after that until someone noticed) is cleared
+  # here and started again with the others, so each release leaves New world placing.
+  if systemctl is-failed --quiet souls-place.path 2> /dev/null; then
+    systemctl reset-failed souls-place.path souls-place.service || true
+    STOPPED+=(souls-place.path)
+  fi
   s=$((SECONDS + ${RELEASE_PLACE_WAIT_S:-300}))
   while systemctl is-active --quiet souls-place.service 2> /dev/null; do
     if [ "$SECONDS" -ge "$s" ]; then

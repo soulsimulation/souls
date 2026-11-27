@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir } from 'node:
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { placeRequest, drain, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed, command } from './place-created-world.mjs';
+import { placeRequest, drain, REFUSED_PAUSE_MS, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed, command } from './place-created-world.mjs';
 
 // Canonical T0 fixture data, independent of the initializer's decoder. Actual native proof uses Rust's real records.
 const cbor = value => {
@@ -81,6 +81,22 @@ test('mismatched owner and symlinked input refuse before privileged configuratio
     await assert.rejects(placeRequest(f.config,f.request),/placement-symlink/);
     await mkdir(join(f.config.placement,'requests','invalid-directory'));await writeFile(join(f.config.placement,'requests','invalid-file'),'untrusted data');
     await drain(f.config);assert.deepEqual(await readdir(join(f.config.placement,'requests')),[]);assert.equal((await readdir(join(f.config.placement,'attempts'))).length,2);
+  } finally {await rm(f.dir,{recursive:true,force:true});}
+});
+
+// 27 Nov: a page retrying one failing create left 120 nameless attempts, and fast refused runs hit systemd's start limit,
+// which failed souls-place.path for good. A request is kept under its own name, and a refused run takes its pause.
+test('a request refused again and again keeps one attempt, and a refused run takes its pause',async()=>{
+  const f=await fixture();
+  try {
+    const request='c'.repeat(64),inbox=join(f.config.placement,'requests'),attempts=join(f.config.placement,'attempts');
+    for(let i=0;i<3;i++){
+      await writeFile(join(inbox,request),'');
+      const at=Date.now();await drain(f.config);
+      assert.ok(Date.now()-at>=REFUSED_PAUSE_MS,'a refused run lasts its pause');
+    }
+    assert.deepEqual(await readdir(inbox),[]);
+    assert.deepEqual(await readdir(attempts),[request],'one attempt, under the request it was');
   } finally {await rm(f.dir,{recursive:true,force:true});}
 });
 
