@@ -906,6 +906,37 @@ impl Yard {
     }
 }
 
+/// The phases crew `crew`'s tracks were said in (`souls:carry-track` field 3), in order.
+fn track_phases(w: &Seeded, crew: Id) -> Vec<String> {
+    logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| {
+            ev.name.as_str() == "souls:carry-track" && ev.fields.get(&1) == Some(&crew.to_value())
+        })
+        .filter_map(|ev| match ev.fields.get(&3) {
+            Some(Value::Text(t)) => Some(t.as_str().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Waits (at most 20 s) until crew `crew`'s tracks have been said in `phase` (the world's end of a step), and fails
+/// otherwise: a test's next command waits on the world, never on a clock.
+fn track_said(w: &Seeded, crew: Id, phase: &str) {
+    let end = Instant::now() + Duration::from_secs(20);
+    while !track_phases(w, crew).iter().any(|p| p == phase) {
+        assert!(
+            Instant::now() < end,
+            "no {phase} of {}: {:?}",
+            crew.counter(),
+            track_phases(w, crew)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The turn of `node` in the open ground's frame.
 fn turn_on_ground(w: &Seeded, node: Id) -> Quat {
     let (copy, _) = served_copy(w);
@@ -984,14 +1015,8 @@ fn deck_a_frame_lowered_out_of_its_slot_is_refused_while_a_beam_braces_it_then_l
     );
     let (phase, _) = grips_said(&y.w, hold, |p, _| p == "souls:released");
     println!("frame 1's crew's grips: {phase}");
-    let tracks: Vec<String> = logged(&y.w)
-        .iter()
-        .flat_map(|p| p.effects.iter())
-        .flat_map(|e| e.events.iter().flatten())
-        .filter(|ev| ev.fields.get(&1) == Some(&hold.to_value()))
-        .map(|ev| ev.name.as_str().to_owned())
-        .collect();
-    println!("frame 1's crew's words: {tracks:?}");
+    let tracks = track_phases(&y.w, hold);
+    println!("frame 1's crew's tracks: {tracks:?}");
     assert!(
         tracks.iter().any(|n| n == "souls:lowered"),
         "laid down on its track, ended `souls:lowered`: {tracks:?}"
@@ -1017,6 +1042,8 @@ fn deck_a_carried_beam_turned_into_a_standing_frame_is_refused_before_anything_m
     let mut y = Yard::serve("deckturnblock", 6);
     y.frames_held();
     let beams = y.low_beam_taken();
+    // The take lifts it on a track: the turn is asked once the world has it lifted (else `carry-lifting`).
+    track_said(&y.w, beams, "souls:lifted");
     let beam = y.id("deck-beam-low-l");
     let bodies = [body_of(&y.w, y.w.souls[0]), body_of(&y.w, y.w.souls[5])];
     let feet = |y: &Yard| bodies.map(|b| body_at(&y.w, b));
