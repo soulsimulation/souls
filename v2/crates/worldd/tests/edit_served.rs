@@ -6555,16 +6555,17 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
             // walk then closes on it.
             if led {
                 let x = souls[a].act("eden:walk", g, heading_walk(pa, pb)).await;
-                assert_eq!(x.kind, 1, "{what}: {x:?}");
+                walked(w, souls[a].soul, &x, pa, what);
                 settled(w, souls[b].soul, pb, what);
                 let y = souls[b].act("eden:walk", g, p(pb)).await;
-                assert_eq!(y.kind, 1, "{what}: {y:?}");
+                walked(w, souls[b].soul, &y, pb, what);
                 continue;
             }
             souls[a].send("eden:walk", g, p(pa)).await;
             souls[b].send("eden:walk", g, p(pb)).await;
             let (x, y) = (souls[a].end().await, souls[b].end().await);
-            assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+            walked(w, souls[a].soul, &x, pa, what);
+            walked(w, souls[b].soul, &y, pb, what);
         }
     }
     let crew_kind = pinned_activity(&w, "mars:carry_activity");
@@ -7292,6 +7293,21 @@ fn heading_walk(front: Vec3, back: Vec3) -> BTreeMap<u64, Value> {
             Value::Array(vec![int(front.x - back.x), int(front.z - back.z)]),
         ),
     ])
+}
+
+/// A walk's end as Soul `soul`'s gateway answered it (`got`): its receipt, or, when the answer is the gateway's own
+/// `act.timed-out` (its wall clock: 10 s with no word from a world slowed by a busy machine, FOR-FABLE 24), the world
+/// showing the body at `at` ([`settled`]). Any other answer fails.
+fn walked(w: &Seeded, soul: Id, got: &Got, at: Vec3, what: &str) {
+    if got.kind == 1 {
+        return;
+    }
+    assert!(
+        got.kind == 2 && got.reason == "act.timed-out",
+        "{what}: {got:?}"
+    );
+    println!("{what}: the gateway timed the walk out; waiting on the world: {got:?}");
+    settled(w, soul, at, what);
 }
 
 /// Waits until Soul `soul`, kept in its place by the world as its crew's front walks ([`heading_walk`]), stands within
