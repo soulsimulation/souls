@@ -1033,44 +1033,97 @@ fn deck_a_frame_lowered_out_of_its_slot_is_refused_while_a_beam_braces_it_then_l
     assert!(up.y.abs() < 100_000, "it lies: its up axis level, {up:?}");
 }
 
-/// N4 item 4, `carry-turn-blocked`, in a served world by Souls' intents: frames 1 and 2 stand in their slots, held;
-/// Souls 1 and 6 hold the left 0.5 m beam lifted between the frames' columns, along the bay. Turned toward east, a
-/// quarter turn, its swept load (or a carrier's way round it) meets a standing frame: refused `carry-turn-blocked`
-/// before anything moves, saying what it meets; the beam and both carriers stand where they were.
+/// N4 item 4, `carry-turn-blocked`, in a served world by Souls' intents: a creator stands a wall (1 m long, 2.5 m
+/// tall) 0.9 m north of the plywood sheet lying 5 m east of the bay. Souls 2 and 3 take the sheet from its ends and,
+/// once the world has it lifted, ask a quarter turn: its swept load (or a carrier's way round it) meets the wall, so
+/// it is refused `carry-turn-blocked` before anything moves, saying what it meets; the crew's node and both carriers
+/// stand where they were.
 #[test]
-fn deck_a_carried_beam_turned_into_a_standing_frame_is_refused_before_anything_moves() {
-    let mut y = Yard::serve("deckturnblock", 6);
-    y.frames_held();
-    let beams = y.low_beam_taken();
-    // The take lifts it on a track: the turn is asked once the world has it lifted (else `carry-lifting`).
-    track_said(&y.w, beams, "souls:lifted");
-    let beam = y.id("deck-beam-low-l");
-    let bodies = [body_of(&y.w, y.w.souls[0]), body_of(&y.w, y.w.souls[5])];
-    let feet = |y: &Yard| bodies.map(|b| body_at(&y.w, b));
-    let (before, at) = (feet(&y), where_is(&y.w, beams).2);
-    let got = y.act(
-        0,
-        "carry:turn",
-        beams,
-        BTreeMap::from([(3, Value::Array(vec![int(1_000_000), int(0), int(0)]))]),
-        "the beam turned toward east",
+fn deck_a_carried_sheet_turned_into_a_wall_is_refused_before_anything_moves() {
+    let d = scratch("deckturnblock");
+    let (facts, _) = deck_world(&d);
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        3,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
     );
+    let (creator_id, creator_actor) = creator(0xd8);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let bytes = edit_intent(
+        &w,
+        creator_actor,
+        1,
+        0,
+        wall(&w, (x + 5_000) * 1000, (z - 900) * 1000),
+    );
+    world
+        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    world.write_all(&bytes).unwrap();
+    let got = socket_answer(&mut world);
+    assert_eq!(got.kind, 1, "the wall commits: {got:?}");
+    let sheet = import_eden::load(&facts).unwrap().nodes["plywood-sheet"];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    for (k, dx) in [(1, -1_264), (2, 1_264)] {
+        hands[k].walk_to(g, v3((x + 5_000 + dx) * 1000, 0, z * 1000));
+    }
+    for k in [1, 2] {
+        let got = socket_end(&mut hands[k].s);
+        assert_eq!(got.kind, 1, "Soul {} at the sheet's end: {got:?}", k + 1);
+    }
+    let body = body_of(&w, w.souls[2]);
+    let got = hands[1].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    let got = hands[2].act("activity:accept", crew, BTreeMap::new());
+    assert_eq!(got.kind, 1, "accepted: {got:?}");
+    let got = hands[1].act("part:take", crew, BTreeMap::from([(1, sheet.to_value())]));
+    assert_eq!(got.kind, 1, "the sheet taken: {got:?}");
+    // The take lifts it on a track: the turn is asked once the world has it lifted (else `carry-lifting`).
+    track_said(&w, crew, "souls:lifted");
+    let bodies = [body_of(&w, w.souls[1]), body];
+    let feet = || bodies.map(|b| body_at(&w, b));
+    let (before, at) = (feet(), where_is(&w, crew).2);
+    let got = hands[1].act(
+        "carry:turn",
+        crew,
+        BTreeMap::from([(3, Value::Array(vec![int(0), int(0), int(-1_000_000)]))]),
+    );
+    println!("the sheet turned a quarter, toward north: {got:?}");
     assert_eq!(
         (got.kind, got.reason.as_str()),
         (2, "carry-turn-blocked"),
         "{got:?}"
     );
     assert!(got.detail.contains("meets"), "says what it meets: {got:?}");
-    std::thread::sleep(Duration::from_millis(1_000));
     assert_eq!(
-        where_is(&y.w, beams).2,
+        where_is(&w, crew).2,
         at,
-        "the crew's node (the beam rides it) where it was"
+        "the crew's node (the sheet rides it) where it was"
     );
     assert_eq!(
-        where_is(&y.w, beam).0,
-        Some(beams),
-        "the beam still in its crew's hands"
+        where_is(&w, sheet).0,
+        Some(crew),
+        "the sheet still in its crew's hands"
     );
-    assert_eq!(feet(&y), before, "both carriers where they were");
+    assert_eq!(feet(), before, "both carriers where they were");
 }
