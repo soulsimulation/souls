@@ -574,6 +574,15 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
     let c = k.crew_at((0, 1), SHEET_ENDS, "Souls 1 and 2 to the sheet's ends");
     done(k.take(0, c, sheet), "Souls 1 and 2 take the sheet");
     dump(&k.w, &[k.sheet, k.deck]);
+    let named = format!("{:?}", k.deck);
+    for p in logged(&k.w) {
+        for e in &p.effects {
+            let text = format!("{:?}", e.body);
+            if text.contains(&named) {
+                println!("names the deck: {:?} by {:?}: {}", e.envelope.cause, e.envelope.actor, &text[..text.len().min(600)]);
+            }
+        }
+    }
     done(
         k.put(0, c, "sheet", Some(&[jb, jf])),
         "the sheet on both joists",
