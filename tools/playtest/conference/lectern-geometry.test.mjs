@@ -95,7 +95,7 @@ test('named point and immutable clap return clear wood on complete production sk
   setHumanGround(()=>0);
   try{for(const name of ['casual','punk','woman'])await t.test(name,async()=>{
     const source=await template(name),take=returnTake(name),people=new TakePeople(take),id='lectern-return-'+name;
-    people.setTemplates([source]);const views=people.humans,root=metre(entry.slots.lectern.at_mm),worldRoot=[-root[0],root[1],4-root[2]];
+    people.setTemplates([source]);const views=people.humans,root=metre(entry.slots.lectern.at_mm),worldRoot=[root[0]===0?0:-root[0],root[1],4-root[2]];
     let sampled;const set=views.setFrame.bind(views);views.setFrame=(samples,...args)=>{sampled=samples[0];return set(samples,...args);};
     const draw=(time,player=people)=>{player.show(time,EPOCH+time);return player.humans.meshPoints(id,1);};
     const priorTop=structuredClone(entry.looks.shape.shapes[3]);priorTop.at[2]=60;
