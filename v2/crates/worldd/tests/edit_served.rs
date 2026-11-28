@@ -7415,7 +7415,11 @@ async fn walk_two(
     let legs = frame_legs(crew_now(s.w, a.soul, b.soul), (pa, pb));
     let led = legs.len() > 1;
     for (pa, pb) in legs {
-        println!("N9DBG {:?} {what}: to {pa:?} {pb:?} from {:?}", std::time::SystemTime::now(), crew_now(s.w, a.soul, b.soul));
+        println!(
+            "N9DBG {:?} {what}: to {pa:?} {pb:?} from {:?}",
+            std::time::SystemTime::now(),
+            crew_now(s.w, a.soul, b.soul)
+        );
         // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
         // walk then closes on it.
         if led {
@@ -7606,8 +7610,19 @@ async fn frame_home(
     let got = a.act("part:unseat", c, part_of(f)).await;
     println!("{what}: {got:?}");
     assert_eq!(got.kind, 1, "{what}: out");
+    // Its crew took it from behind its posts, 1.143 m apart, and the world keeps that span: the two carry it that far
+    // apart, straight from place to place.
+    let (pa, pb) = crew_now(s.w, a.soul, b.soul).expect("its crew carries it");
+    let half = (pa.x - pb.x) / 2;
     for at in via.iter().chain([&home]) {
-        walk_two(s, a, b, frame_ends(*at), what).await;
+        walk_two(
+            s,
+            a,
+            b,
+            (v3(at.x + half, 0, at.z), v3(at.x - half, 0, at.z)),
+            what,
+        )
+        .await;
     }
     let got = put_part(a, c, into_slot(stand, k)).await;
     assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
@@ -7766,10 +7781,6 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
     // Build. The middle bay: team 1 (Souls 1, 2) carries frame A into `upright_a` and stays to hold it, while team 2
     // (Souls 4, 5) carries its frame from the east yard to wait 3 m south of it; then it steps up to 0.4 m short of
     // the slot, from where each of its carriers still reaches its hold where the frame would go (#5067).
-    for at in [v3(80_000_000, 0, -20_000_000), v3(90_000_000, 0, -20_000_000), v3(90_000_000, 0, -24_150_000), v3(88_980_000, 0, -24_150_000)] {
-        let got = s4.act("eden:walk", g, to_point(at)).await;
-        println!("N9DBG probe to {at:?}: now {:?}: {got:?}", body_at(&w, body_of(&w, s4.soul)));
-    }
     let wait_a = v3(m_a.x, 0, m_a.z - 400_000);
     let far_a = v3(m_a.x, 0, m_a.z - 3_000_000);
     let (to_ma, to_wait) = ([m_a], [far_a]);
@@ -7784,15 +7795,32 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
             into_slot(bm, ua),
             "team 1 seats frame A in the middle bay and holds it"
         ),
-        take_along(
-            &s,
-            s4,
-            s5,
-            mb,
-            frame_ends,
-            &to_wait,
-            "team 2 brings frame B to the middle bay"
-        ),
+        async {
+            // Team 2 comes to its stand's east carrier place from the east: walked to straight from the west yard's
+            // side, it stopped 0.7 m short of it (from the south) or was not answered in 30 s (from the north).
+            for at in [
+                (
+                    v3(90_000_000, 0, -20_000_000),
+                    v3(86_000_000, 0, -20_000_000),
+                ),
+                (
+                    v3(90_000_000, 0, -24_150_000),
+                    v3(86_000_000, 0, -22_000_000),
+                ),
+            ] {
+                walk_two(&s, s4, s5, at, "team 2 to the east stand").await;
+            }
+            take_along(
+                &s,
+                s4,
+                s5,
+                mb,
+                frame_ends,
+                &to_wait,
+                "team 2 brings frame B to the middle bay",
+            )
+            .await
+        },
     );
     walk_two(&s, s4, s5, frame_ends(wait_a), "team 2 up to upright_a").await;
     let was = where_is(&w, crew_mb);
