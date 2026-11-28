@@ -91,7 +91,12 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    its nearest bank, and only a target with none within 15 m is refused `spot-none-near` (0.133). A done walk's
    `souls:move-ended` carries field 7: how far from its target the body ended, mm (0 on or inside its area; to a body,
    from that body), which the client gives as `away_m` on the walk's receipt. A walk that ends any other way
-   (refused, stopped, replaced, timed out) carries none.
+   (refused, stopped, replaced, timed out) carries none. **A goal in a doorway or on a stair (#5254).** A point within
+   0.7 m of a doorway's or a stair's end, or of its width along its line, is no place a walker stops; a walk sent to
+   one is granted the nearest point clear of the passage itself by the body's radius and margin (0.34 m for a
+   standard body), never further, and ends `walk.goal-moved`: field 7 how far, mm, field 9 the thing the passage
+   belongs to, field 10 its kind (`doorway`, `stairs`, `ramp`, `ladder` or `step`). A walk to a point off the ground
+   ends `walk.goal-moved` when it stands within 0.4 m of it, else `walk.stopped-short`.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it). A body is logged where it stands, never mid-crossing: while it is carried across a
