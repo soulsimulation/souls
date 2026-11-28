@@ -1480,18 +1480,26 @@ mod each_step {
         let lay = (ground, slot.0, q);
         let mut rested = carry();
         rested.take_up(0, slot, hands, 2 * M, lay).unwrap();
-        rested.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        rested
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
         let h = rested.hoist.expect("its way back");
         assert_eq!((h.to, h.rest), (slot, lay), "back where it lay");
         let mut seated = carry();
         seated.back = false;
         seated.take_up(0, slot, hands, 2 * M, lay).unwrap();
-        seated.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        seated
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
         let h = seated.hoist.expect("a set-down's track");
         assert_eq!(h.phase, Phase::Release("souls:test"));
         assert_eq!(h.from, slot, "from where the node is");
         assert_eq!((h.to.0.x, h.to.0.z), (slot.0.x, slot.0.z), "straight down");
-        assert_eq!((h.rest.0, h.rest.1.y), (ground, frame().rest), "to rest on the ground");
+        assert_eq!(
+            (h.rest.0, h.rest.1.y),
+            (ground, frame().rest),
+            "to rest on the ground"
+        );
         assert_eq!(h.to.0.y, frame().rest);
     }
 }
