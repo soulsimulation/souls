@@ -397,8 +397,8 @@ fn floors_of(w: &Seeded, part: Id) -> Vec<(Id, i64, bool)> {
 
 /// Lane C: a creator-placed bay is walked as a seeded one is. Its parts bring the floors and the stair and ladder
 /// rows their kinds declare (as the import gives a seeded thing), so after the creator places the whole deck bay in
-/// one batch, a Soul walks from the open ground up the stair onto the first sheet's top, and another climbs frame 1's
-/// outer ladder onto it.
+/// one batch, a Soul walks from the open ground up the stair onto the first sheet's top, and another climbs frame 2's
+/// outer ladder onto the second's.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_frame() {
     let mut site = Site::serve_souls("creator-bay-walk", 2).await;
@@ -440,57 +440,24 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[0]));
     assert_eq!((on, p.y), (deck, 19_000), "on the sheet's top");
 
-    // Soul 2 climbs frame 1's outer ladder (frame 1 stands at the bay's -z end) onto the first sheet's deck, 0.3 m in
-    // from its north edge (N14: a frame has no standing place of its own; its ladder's top lands on the deck).
-    hands[1].walk_to(g, at(0, -3_900));
+    // Soul 2 climbs frame 2's outer ladder (frame 2 stands at the bay's +z end) onto the second sheet's deck, 0.3 m in
+    // from its south edge, clear of Soul 1 (N14: a frame has no standing place of its own; its ladder's top lands on
+    // the deck).
+    let deck2 = floors_of(&site.w, part(12))
+        .iter()
+        .find(|f| f.1 == 1)
+        .expect("the second sheet's top, a floor")
+        .0;
+    hands[1].walk_to(g, at(0, 3_900));
     let e = socket_end(&mut hands[1].s);
-    assert_eq!(e.kind, 1, "Soul 2 outside frame 1: {e:?}");
-    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(19_000), int(-288_000)]))]);
-    hands[1].send("eden:walk", deck, to);
+    assert_eq!(e.kind, 1, "Soul 2 outside frame 2: {e:?}");
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(19_000), int(288_000)]))]);
+    hands[1].send("eden:walk", deck2, to);
     let e = socket_end(&mut hands[1].s);
-    println!("Soul 2 climbs frame 1 onto the deck: {e:?}");
-    {
-        let b2 = body_of(&site.w, site.w.souls[1]);
-        for r in sim::log::recover(&std::fs::read(site.w.dir.join("log")).unwrap()).unwrap().records {
-            if sim::recorder::is_input(&r) {
-                continue;
-            }
-            let p = replica::effects::Part::read(&r).unwrap();
-            if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
-                for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
-                    if b == b2 {
-                        println!("N14DBG row on {:?} at {:?}", pose.frame.node.counter(), pose.position);
-                    }
-                }
-            }
-        }
-        let (copy, rules) = served_copy(&site.w);
-        let root = copy.tree().node(copy.tree().handle(g).unwrap()).unwrap().parent().unwrap();
-        let tree = copy.tree().frozen();
-        let header = import_eden::header(root, &rules).unwrap();
-        let next = tree.to_state().next;
-        let mut town = sim::walk::town::Town::new_on(tree, g, sim::links::Doors::new(header, rules.clone(), next), 4).unwrap();
-        let v = town.view();
-        for (k, name) in [(0usize, "frame-1"), (1, "frame-2"), (11, "s1"), (12, "s2"), (13, "stair")] {
-            println!("N14DBG reached from {name}: {:?}", v.floors_reached(part(k)).iter().map(|f| replica::world_model::show(*f)).collect::<Vec<_>>());
-        }
-        println!("N14DBG deck {}", replica::world_model::show(deck));
-        for p in logged(&site.w) {
-            for e in &p.effects {
-                for ev in e.events.iter().flatten() {
-                    if ev.name.as_str() == "souls:move-ended" && ev.fields.get(&1) == Some(&b2.to_value()) {
-                        println!("N14DBG move-ended {:?}", ev.fields);
-                    }
-                }
-            }
-        }
-        for l in site._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
-            println!("N14DBG {l}");
-        }
-    }
+    println!("Soul 2 climbs frame 2 onto the deck: {e:?}");
     assert_eq!(e.kind, 1, "the climb ends on the deck: {e:?}");
     let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[1]));
-    assert_eq!((on, p.y), (deck, 19_000), "on the sheet's top");
+    assert_eq!((on, p.y), (deck2, 19_000), "on the second sheet's top");
 }
 
 /// Lane C: nothing is placed onto a Soul. A stair flight placed on the open ground with a Soul standing in its tread
