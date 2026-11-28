@@ -8,6 +8,7 @@ import { DT, TICK_US } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 import { setCarryHeading } from './carry-heading.ts';
 import { Quaternion, Vector3 } from 'three';
+import { readFileSync } from 'node:fs';
 
 /** The body's take entity: its id with the letter that gives it the v2 page's default look (take-bodies.ts). */
 const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
@@ -24,22 +25,23 @@ const part = (n: number, samples: [string, string, number | null, number, number
   ({ t: 'part' as const, p: { number: n, from: T0 + n * 500_000, to: T0 + (n + 1) * 500_000, nodes: [], removed: [], samples, ...extra } });
 
 // Real bridge -> recorded chunk -> ordinary take replay, with the worker's native parent/slot/local-Q records.
-function standingSlotProjection({ cold = false, posture = 'stand', known = true, updates = false, aimed = false, reenter = false, leaveToSeat = false, centered = false, parentPitch = 0, localRoll = 0 } = {}) {
+function standingSlotProjection({ cold = false, posture = 'stand', known = true, updates = false, aimed = false, reenter = false, leaveToSeat = false, centered = false, parentPitch = 0, localRoll = 0, nestedYaw = 0, slotYaw = 83000 } = {}) {
   const bridge = new V2Bridge({ rulesVersion: 'test/1' });
   const yaw = (r: number) => [Math.cos(r / 2) * Q, 0, Math.sin(r / 2) * Q, 0] as [number, number, number, number];
   const kind = 'fixture:platform@1', parentYaw = Math.PI / 2, localYaw = Math.PI / 6;
   const slotZ = centered ? 0 : -350, occupiedX = centered ? 3_000_000 : 2_650_000;
   const parentQ = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), parentYaw).multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), parentPitch));
+  const outerQ = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), nestedYaw), worldQ = outerQ.clone().multiply(parentQ);
   const localQ = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), localYaw).multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), localRoll));
   const wireQ = (q: Quaternion) => [q.w * Q, q.x * Q, q.y * Q, q.z * Q] as [number, number, number, number];
-  const platform = node('p.1', 'w.0', [3_000_000, 0, 1_000_000], { kind, rot: wireQ(parentQ), slots: [[1, 0, 100, slotZ, 83000, 1]] });
+  const platform = node('p.1', 'outer.1', [3_000_000, 0, 1_000_000], { kind, rot: wireQ(parentQ), slots: [[1, 0, 100, slotZ, slotYaw, 1]] });
   const entry = node('k.1', null, [0, 0, 0], { kind: 'souls:kind@1', defines: kind,
     entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { place: { admits: 'body', at_mm: [0, 100, slotZ], posture, yaw_mdeg: 83000 } } })) });
   const approach = node('b.7', 'w.0', [5_000_000, 0, 1_000_000], { kind: 'souls:body@1', soul: 'soul-abc-7', at: T0 });
   const occupied = { ...approach, parent: 'p.1', slot: 1, pos: [0, 0, 0] as [number, number, number], rot: wireQ(localQ), at: T0 + 1_000_000 };
   const chair = node('c.2', 'w.0', [8_000_000, 0, 1_000_000], { kind: 'fixture:chair@1', slots: [[1, 0, 470, 0, 0, 1]] });
   const chairEntry = { ...entry, id: 'k.2', defines: 'fixture:chair@1', entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { seat: { admits: 'body', at_mm: [0, 470, 0], posture: 'sit' } } })) };
-  bridge.receive({ t: 'snapshot', s: { nodes: [world, platform, ...(known ? [entry] : []), ...(leaveToSeat ? [chair, chairEntry] : []), cold ? { ...occupied, at: T0 } : approach], removed: [] } });
+  bridge.receive({ t: 'snapshot', s: { nodes: [world, node('outer.1', 'w.0', [0, 0, 0], { rot: wireQ(outerQ) }), platform, ...(known ? [entry] : []), ...(leaveToSeat ? [chair, chairEntry] : []), cold ? { ...occupied, at: T0 } : approach], removed: [] } });
   let oldChunk = '';
   for (let n = 0; n < 17; n++) {
     const samples: [string, string, number | null, number, number, number, number][] = !cold && n < 2
@@ -58,12 +60,39 @@ function standingSlotProjection({ cold = false, posture = 'stand', known = true,
     assert(c, `published chunk at ${seconds}`);
     return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
   };
-  const forward = new Vector3(1, 0, 0).applyQuaternion(parentQ.clone().multiply(localQ));
-  const point = new Vector3(0, .1, slotZ / 1000).applyQuaternion(parentQ).add(new Vector3(3, 0, 1));
+  const forward = new Vector3(0, 0, 1).applyQuaternion(worldQ.clone().multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), slotYaw / 1000 * Math.PI / 180)));
+  const point = new Vector3(0, .1, slotZ / 1000).applyQuaternion(parentQ).add(new Vector3(3, 0, 1)).applyQuaternion(outerQ);
   return { bridge, at, oldChunk, expected: Math.atan2(forward.z, forward.x), expectedPoint: point.toArray() };
 }
 
-test('standing slot keeps authoritative parent/local facing, platform height and cold/backward/adjacent replay', () => {
+test('the actual lecture slot faces through its authored lectern front toward the conference benches', () => {
+  const entry = JSON.parse(readFileSync(new URL('../../../../content/kinds/hall/lecture.json', import.meta.url), 'utf8'));
+  // Retained conference-rehearsal layout: lectern [0,0,4], yaw pi; benches [-1.4,0,0] and [1.4,0,0].
+  // Native slot admission records identity local Q. Neither geometry nor audience is an implementation input.
+  const parentQ = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI);
+  const slot = entry.slots.lectern, position = new Vector3(0, 0, 4), b = new V2Bridge({ rulesVersion: 'test/1' });
+  const kind = `${entry.kind}@fixture`, lecture = node('lecture.1', 'w.0', [0, 0, 4_000_000], { kind, rot: [0, 0, Q, 0] });
+  b.receive({ t: 'snapshot', s: { nodes: [world, lecture,
+    node('lecture.kind', null, [0, 0, 0], { kind: 'souls:kind@1', defines: kind, entry: new TextEncoder().encode(JSON.stringify(entry)) }),
+    node('b.7', lecture.id, [0, 0, 0], { kind: 'souls:body@1', soul: 'fixture-presenter', slot: 1, at: T0 })], removed: [] } });
+  for (let n = 0; n < 17; n++) b.receive(part(n, []));
+  const shaft = entry.looks.shape.shapes.find((s: { size: number[] }) => s.size[1] === 980);
+  assert(shaft, 'actual authored lectern shaft');
+  const authoredFront = new Vector3(shaft.at[0] - slot.at_mm[0], 0, shaft.at[2] - slot.at_mm[2]).normalize().applyQuaternion(parentQ);
+  const root = new Vector3(...slot.at_mm as [number, number, number]).multiplyScalar(.001).applyQuaternion(parentQ).add(position);
+  const audienceDirection = new Vector3().addVectors(new Vector3(-1.4, 0, 0), new Vector3(1.4, 0, 0)).multiplyScalar(.5).sub(root).setY(0).normalize();
+  assert(authoredFront.dot(audienceDirection) > .999, 'independent authored geometry front agrees with the retained room layout');
+  for (const seconds of [3, 2.45, 2.5, .8, 4, 2]) {
+    const tick = T0 / TICK_US + seconds / DT, c = b.view.takes.chunks.find(c => c.fromTick <= tick && tick < c.toTick)!;
+    const e = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+    const front = new Vector3(Math.cos(e.yaw), 0, Math.sin(e.yaw));
+    assert(front.dot(authoredFront) > .999, `actual lecture front at ${seconds}; +X would face sideways`);
+    assert(front.dot(audienceDirection) > .999, 'audience direction independently excludes sideways facing');
+    e.p.forEach((v, i) => assert(Math.abs(v - root.toArray()[i]) < .001, 'native occupied root and height stay exact'));
+  }
+});
+
+test('standing slot keeps its declared front, platform height and cold/backward/adjacent replay', () => {
   for (const cold of [false, true]) {
     const f = standingSlotProjection({ cold });
     for (const seconds of [4, 2, 3.5, 2.45, 2.5, 0.8, 3]) {
@@ -73,7 +102,7 @@ test('standing slot keeps authoritative parent/local facing, platform height and
       assert.deepEqual(e.p, [2.65, .1, 1], 'slot and height retain their recorded position');
       assert.equal(e.activity, 'idle'); assert.equal(e.state.seatHeight, undefined);
     }
-    assert.notEqual(f.at(2).yaw, -(Math.PI / 2 + 83000 / 1000 * Math.PI / 180), 'slot yaw is not an extra child transform');
+    assert.ok(Math.abs(f.at(2).yaw + 83000 / 1000 * Math.PI / 180) < .002, 'slot yaw turns the occupant front, without moving its root');
   }
 });
 
@@ -85,19 +114,20 @@ test('a published release and reentry fifty milliseconds later retain the attain
   assert(angle(f.at(5.025).yaw, f.at(5.5).yaw) > .01, 'reentry returns to the authoritative composed facing');
 });
 
-test('standing facing composes full parent/local quaternions before projecting yaw', () => {
-  const f = standingSlotProjection({ cold: true, parentPitch: .4, localRoll: .2 });
+test('standing slot front composes nested parent and public slot yaw, independently of body-local rotation', () => {
+  const f = standingSlotProjection({ cold: true, parentPitch: .4, localRoll: .2, nestedYaw: .3, slotYaw: 47000 });
   const e = f.at(3);
-  assert.ok(Math.abs(e.yaw - f.expected) < .002, 'noncommuting native rotations agree with independent quaternion composition');
+  assert.ok(Math.abs(e.yaw - f.expected) < .002, 'parent transforms and public row yaw turn +Z; contradictory local body Q does not override the slot owner');
   e.p.forEach((v, i) => assert.ok(Math.abs(v - f.expectedPoint[i]) <= .001, 'facing preserves the existing native slot transform'));
 });
 
 test('standing facing follows timestamped parent changes, releases on a native cut, and never rewrites a published take', () => {
   const f = standingSlotProjection({ updates: true, aimed: true, centered: true });
   const before = f.at(2.5), after = f.at(4), cut = f.at(5.5);
+  assert.equal(before.activity, 'point', 'the aimed action remains present; slot ownership does not prove its target-directed arm depiction');
   assert.ok(Math.abs(before.yaw - f.expected) < .002, 'later parent and aimed move do not overwrite earlier native facing');
   assert.ok(Math.abs(f.at(3.2).yaw - f.expected) < .002, 'a later parent pose cannot lend its final quaternion to an earlier body sample in the same part');
-  const delta = ((after.yaw + Math.PI + Math.PI / 6) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+  const delta = Math.atan2(Math.sin(after.yaw - (Math.PI / 2 - Math.PI - 83000 / 1000 * Math.PI / 180)), Math.cos(after.yaw - (Math.PI / 2 - Math.PI - 83000 / 1000 * Math.PI / 180)));
   assert.ok(Math.abs(delta) < .002, `parent turn composed at its own time: ${after.yaw}`);
   assert.deepEqual(before.p, after.p, 'facing adds no movement path');
   assert.equal(cut.activity, 'walk'); assert.ok(Math.abs(f.at(5.9).yaw) < .002, 'after turning out, ordinary movement owns facing');

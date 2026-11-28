@@ -467,7 +467,9 @@ export class V2Bridge {
     if (!free && this.declaredSlot(this.nodes.get(n.parent ?? ''), n.slot)?.posture === 'stand' && !this.onCourseFrame(n.parent, n.slot)) {
       // Final node poses in a part may be newer than an earlier sample within that same part.
       for (let p: NodeRec | undefined = n, depth = 0; p && depth <= 32; p = this.nodes.get(p.parent ?? ''), depth++) if (p.at !== null && p.at > at) return;
-      const w = this.world(id), forward = w && rotate(w.q, [1, 0, 0]);
+      // Occupying a slot resets body-local Q; its declared front is +Z turned by slot yaw, as for a seat.
+      const frame = this.world(n.parent), half = (this.slotRow(this.nodes.get(n.parent ?? ''), n.slot)?.[4] ?? 0) / 1000 * Math.PI / 360;
+      const forward = frame && rotate(mul(frame.q, [Math.cos(half), 0, Math.sin(half), 0]), [0, 0, 1]);
       if (forward && Math.hypot(forward[0], forward[2]) > 1e-9) heading = Math.atan2(forward[2], forward[0]);
     }
     const last = t.standing?.at(-1);

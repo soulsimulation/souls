@@ -27,7 +27,7 @@ const WALKING = 0.05;
 export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat; on?: (t: number) => [number, number, number] | null };
 /** The world turned a standing body at world time `at` (µs), from one heading to another (radians, atan2(dz, dx)). */
 export type Turn = { at: number; from: number; to: number };
-/** A declared standing slot's composed native facing at world time µs; null releases that authority. */
+/** A declared standing slot's front in its native parent frame at world time µs; null releases that authority. */
 export type StandingFacing = { at: number; heading: number | null; from: number };
 /** One Soul's body as the chunks need it. */
 export type Body = {
@@ -230,7 +230,8 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       const walking = m.speed >= WALKING;
       // 0.134 B4: a gesture aimed at another body faces it and names it the partner (the old paired poses meet it); a
       // held hand is the old renderer's hand hold with it. An aimed gesture at a thing (B1) turns the standing body
-      // toward where its target stood. The drawing turns; the body in the world does not.
+      // toward where its target stood, unless a declared standing slot owns its front. The drawing turns; the body
+      // in the world does not. A fixed slot front alone does not establish target-directed arm depiction.
       const g = walking ? null : gestureNow(b.gestures, t), other = g?.target && g.target !== b.node ? byNode.get(g.target) : undefined;
       const op = other ? positionAt(other.samples, t) : null;
       const aim: [number, number] | null = op && !g?.hold ? [op[0], op[2]] : g?.toward && !seatAt(b.samples, t) ? g.toward : null;
