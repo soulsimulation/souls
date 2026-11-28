@@ -5,7 +5,7 @@ import {windowCode} from './god-ui/join-api.ts';
 import {clockAt,reportAgentPresence,withLink} from './agent-presence.ts';
 import {readLink} from './soul-state.ts';
 import {pollInbox} from './inbox-poll.ts';
-import {v2OwnerMailbox} from './v2-engine/owner-mailbox.ts';
+import {v2OwnerMailbox,watchV2OwnerMailbox} from './v2-engine/owner-mailbox.ts';
 import './AgentMessageBox.css';
 
 export type AgentInbox = {
@@ -222,8 +222,14 @@ export function useSoulInbox(api: Api, soulId: string) {
   const revision = useRef(0);
   useEffect(() => {
     setInbox(null);
-    return pollInbox(() => request(), setInbox, () => revision.current);
-  }, [request]);
+    const stop = pollInbox(() => request(), setInbox, () => revision.current);
+    // first day (28 Nov): a v2 box's change (its agent connected) is read at once, not at the next poll
+    const stopWatch = v2OwnerMailbox(soulId) ? watchV2OwnerMailbox(soulId, () => {
+      const at = revision.current;
+      void request().then(v => {if (at === revision.current) setInbox(v);}, () => {});
+    }) : null;
+    return () => {stop(); stopWatch?.();};
+  }, [request, soulId]);
   const send = useCallback(async (text: string) => {
     revision.current++;
     try {const result = await request(text); setInbox(result); return result;}
