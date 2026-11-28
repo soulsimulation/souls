@@ -1057,7 +1057,17 @@ impl Kinds {
         let socket = d.join("s");
         let s = serve_with(&w, &socket, None);
         s.line("listening ", 120);
-        let nodes = import_eden::load(&facts)
+        // The import with the entries, as the world's (`worldd seed --entries`): the 12 ft frames' ladders and floors
+        // and the sheets' floors are nodes too, so each name finds the node the served world gave it.
+        let texts: Vec<(String, String)> = std::fs::read_dir(d.join("entries"))
+            .unwrap()
+            .map(|f| f.unwrap().path())
+            .map(|p| {
+                let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read_to_string(&p).unwrap())
+            })
+            .collect();
+        let nodes = import_eden::load_with(&facts, &texts)
             .unwrap()
             .nodes
             .into_iter()
