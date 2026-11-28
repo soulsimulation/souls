@@ -253,22 +253,39 @@ pub fn with_buildings(
 }
 
 /// The most new ids each building kind's place can mint with its parts, by entry name
-/// (`import_eden::placed::ids_most`): what the world reserves for each such place when it takes an edit in.
+/// (`import_eden::placed::ids_most`): what the world reserves for each such place when it takes an edit in. A kind
+/// that declares a link (a part that joins: a beam, a joist, a sheet) may be placed into a bay's slot, where the
+/// world adds a joint to each part it rests on ([`crate::edit_joins`]): at most one per other slot of the bay, so as
+/// many as the most slots any kind's entry names kinds for.
 pub fn ids_most(entries: &Json) -> BTreeMap<String, u64> {
-    entries
-        .obj()
-        .unwrap_or(&[])
+    let all = entries.obj().unwrap_or(&[]);
+    let bay_slots = all
         .iter()
-        .filter_map(|(k, e)| Some((k.clone(), import_eden::placed::ids_most(e)?)))
+        .filter_map(|(_, e)| e.get("slots").and_then(Json::obj))
+        .filter(|s| s.iter().any(|(_, x)| x.get("kinds").is_some()))
+        .map(|s| s.len() as u64)
+        .max()
+        .unwrap_or(0);
+    all.iter()
+        .filter_map(|(k, e)| {
+            let joins = e
+                .get("links")
+                .and_then(Json::obj)
+                .is_some_and(|l| !l.is_empty());
+            let parts = import_eden::placed::ids_most(e);
+            match (parts, joins) {
+                (None, false) => None,
+                (p, j) => Some((k.clone(), p.unwrap_or(0) + if j { bay_slots } else { 0 })),
+            }
+        })
         .collect()
 }
 
 /// How many ids `edit`'s places of building kinds may mint with their parts beyond its own operations' ([`ids_most`]),
-/// as [`with_buildings`] would add them.
+/// as [`with_buildings`] would add them, and its places of parts the joints [`crate::edit_joins`] adds. Under a build
+/// claim no building brings parts, but a part placed into a bay's slot is still joined: the count is the same, at most
+/// a few ids more than are minted.
 pub fn parts_ids(edit: &replica::edit::Edit, most: &BTreeMap<String, u64>) -> u64 {
-    if edit.claim.is_some() {
-        return 0;
-    }
     edit.ops
         .iter()
         .filter_map(|op| match op {
