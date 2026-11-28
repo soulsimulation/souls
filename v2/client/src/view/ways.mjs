@@ -20,8 +20,15 @@ function turn(q = [ONE, 0, 0, 0], v) {
   const t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
   return [v[0] + w * t[0] + y * t[2] - z * t[1], v[1] + w * t[1] + z * t[0] - x * t[2], v[2] + w * t[2] + x * t[1] - y * t[0]];
 }
-/** Point `p` (µm, in `row`'s frame) in the frame of `row`'s parent. */
-const up = (row, p) => turn(row.rot, p).map((c, k) => c + (row.pos?.[k] ?? 0));
+/** Point `p` (µm, in `row`'s frame) in the frame of `row`'s parent. A node in a slot is posed in that slot's frame:
+ *  the slot's point and yaw in its parent (the parent's slots field, `[n, x, y, z, yaw mdeg, ...]` mm). */
+function up(row, p, rows) {
+  const q = turn(row.rot, p).map((c, k) => c + (row.pos?.[k] ?? 0));
+  const s = row.slot !== undefined ? rows?.get(row.parent)?.slots?.find((r) => r[0] === row.slot) : null;
+  if (!s) return q;
+  const half = ((s[4] ?? 0) / 1000) * (Math.PI / 360);
+  return turn([Math.cos(half), 0, Math.sin(half), 0], q).map((c, k) => c + s[k + 1] * 1000);
+}
 
 const metres = (mm) => `${(Math.round(mm / 100) / 10).toFixed(1)} m`;
 const faceOf = (z) => (z < 0 ? 'back' : z > 0 ? 'front' : null);
@@ -40,11 +47,11 @@ function kidsOf(rows) {
 }
 
 /** A floor's rectangle in its part's parent, `[x0, z0, x1, z1]` µm, and its top, µm; null with no surfaces. */
-function planOf(floor, part) {
+function planOf(rows, floor, part) {
   let bb = [Infinity, Infinity, -Infinity, -Infinity], top = null;
   for (const [y, ring] of floor.surfaces ?? []) {
     for (const [x, z] of ring ?? []) {
-      const q = up(part, [x * 1000, y * 1000, z * 1000]);
+      const q = up(part, [x * 1000, y * 1000, z * 1000], rows);
       bb = [Math.min(bb[0], q[0]), Math.min(bb[1], q[2]), Math.max(bb[2], q[0]), Math.max(bb[3], q[2])];
       top = Math.max(top ?? -Infinity, q[1]);
     }
@@ -58,27 +65,27 @@ export function braced(rows, floor, part, kids = kidsOf(rows)) {
   if (y === undefined || !part.parent) return false;
   const siblings = (kids.get(part.parent) ?? []).filter((r) => r.id !== part.id);
   // Joined at its height: a linked part in a slot of the same parent, within half its own height.
-  const level = up(part, [0, y * 1000, 0])[1];
+  const level = up(part, [0, y * 1000, 0], rows)[1];
   const joined = siblings.some((o) => {
     if (o.slot === undefined || !((part.links ?? []).includes(o.id) || (o.links ?? []).includes(part.id))) return false;
     const half = Math.max(0, ...(o.solids ?? []).map((b) => (b[6] - b[5]) * 1000)) / 2;
-    return Math.abs((o.pos?.[1] ?? 0) - level) <= half;
+    return Math.abs(up(o, [0, 0, 0], rows)[1] - level) <= half;
   });
   if (!joined) return false;
   // Headroom: nothing else in the parent over it within a standing body's height.
-  const plan = planOf(floor, part);
+  const plan = planOf(rows, floor, part);
   if (!plan) return false;
   const over = (r, y0) => y0 > plan.top && y0 < plan.top + BODY_HIGH_UM && r[0] < plan.bb[2] && r[2] > plan.bb[0] && r[1] < plan.bb[3] && r[3] > plan.bb[1];
   for (const s of siblings) {
     for (const [cx, cz, hx, hz, yaw, y0] of s.solids ?? []) {
       const a = (Number(yaw) / 1000) * (Math.PI / 180), c = Math.cos(a), sn = Math.sin(a);
-      const pts = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) => up(s, [(cx + u * c + v * sn) * 1000, 0, (cz - u * sn + v * c) * 1000]));
+      const pts = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) => up(s, [(cx + u * c + v * sn) * 1000, 0, (cz - u * sn + v * c) * 1000], rows));
       const r = [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[2])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[2]))];
       if (over(r, y0 * 1000 + pts[0][1])) return false;
     }
     for (const f of kids.get(s.id) ?? []) {
       if (f.kind !== 'eden:floor') continue;
-      const p = planOf(f, s);
+      const p = planOf(rows, f, s);
       if (p && over(p.bb, p.top)) return false;
     }
   }

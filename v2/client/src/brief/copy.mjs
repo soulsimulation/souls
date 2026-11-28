@@ -389,7 +389,7 @@ function nodeOf(copy, d, path, own) {
   // #5006 row 17: the name is the thing's own (a title, a name given it), not its kind and counter (not enumerable)
   if (given != null) Object.defineProperty(row, 'titled', { value: true });
   // A part's ways (`../view/ways.mjs`): a floor's level (5) and surfaces (14, mm in its thing's frame), a node's slot
-  // (record key 4), its boxes (12, mm) and the other ends of the links it owns (key 9) (not enumerable: never printed)
+  // (record key 4), its boxes (12, mm), its slots (13: [n, x, y, z, yaw mdeg, ...] mm) and the other ends of the links it owns (key 9) (not enumerable: never printed)
   const num = (n) => fields.get(n) ?? fields.get(BigInt(n)), nums = (v) => (Array.isArray(v) ? v.map(nums) : Number(v));
   if (kind === 'eden:floor') {
     Object.defineProperty(row, 'level', { value: Number(num(5)) });
@@ -397,6 +397,7 @@ function nodeOf(copy, d, path, own) {
   }
   if (m.has(4)) Object.defineProperty(row, 'slot', { value: Number(m.get(4)) });
   if (Array.isArray(num(12))) Object.defineProperty(row, 'solids', { value: nums(num(12)) });
+  if (Array.isArray(num(13))) Object.defineProperty(row, 'slots', { value: nums(num(13)) });
   const ends = (m.get(9) ?? []).map(([, l]) => l).filter((l) => l instanceof Map && plainKind(l.get(1)) !== 'souls:body-of' && Array.isArray(l.get(2)));
   if (ends.length) Object.defineProperty(row, 'links', { value: ends.flatMap((l) => l.get(2).map(idText)).filter((e) => e !== id) });
   return { d, ref, row, children, under: [...path, name] };

@@ -22,26 +22,28 @@ const FLIGHT = { kind: 'mars:stair_flight', geometry: { stairs: [{ from_mm: [-12
 const kinds = { [FRAME.kind]: FRAME, [SHEET.kind]: SHEET, [FLIGHT.kind]: FLIGHT };
 
 /** A built bay on the ground: frame 1 at its -z end, a high beam joined to it at 1.8 m, and (with `sheet`) a sheet
- *  seated at 1.8 m over the frame's inner face. `beam`: the beam's height, mm, or null for none. */
+ *  seated at 1.8 m over the frame's inner face. `beam`: the beam's height, mm, or null for none. As the copy holds
+ *  them, a seated part's pose is in its slot's frame (zero), its place the bay's slot's. */
 function bay({ beam = 1800, sheet = true, linked = true } = {}) {
   const rows = new Map();
   const add = (r) => rows.set(r.id, { path: [], children: 0, ...r });
   add({ id: 'g-1', name: 'ground 1', kind: 'eden:ground', parent: null });
-  add({ id: 'b-2', name: 'bay', kind: 'mars:deck_bay', parent: 'g-1', pos: [0, 0, 0], rot: [ONE, 0, 0, 0] });
-  add({ id: 'f-3', name: 'frame-1', kind: FRAME.kind, parent: 'b-2', pos: [0, 0, -1_448_000], rot: [ONE, 0, 0, 0], slot: 1, solids: [[0, 0, 572, 38, 0, 0, 3658]], ...(linked ? {} : {}) });
+  add({ id: 'b-2', name: 'bay', kind: 'mars:deck_bay', parent: 'g-1', pos: [65_000_000, 0, -24_000_000], rot: [ONE, 0, 0, 0],
+    slots: [[1, 0, 0, -1448, 0, 1], [3, -572, 500, 0, 0, 1], [5, -572, 1800, 0, 0, 1], [11, 0, 1800, -612, 0, 1]] });
+  add({ id: 'f-3', name: 'frame-1', kind: FRAME.kind, parent: 'b-2', pos: [0, 0, 0], rot: [ONE, 0, 0, 0], slot: 1, solids: [[0, 0, 572, 38, 0, 0, 3658]] });
   for (const [n, id] of [[0, 'f-4'], [1, 'f-5'], [2, 'f-6'], [3, 'f-7'], [4, 'f-8']]) {
     const f = FRAME.geometry.floors[n - 1];
     add({ id, name: `floor ${id.slice(2)}`, kind: 'eden:floor', parent: 'f-3', level: n, ...(f ? { surfaces: rect(f.top_mm, f.at_mm, f.size_mm) } : {}) });
   }
-  if (beam !== null) add({ id: 'm-9', name: 'beam-high-l', kind: 'mars:deck_beam', parent: 'b-2', pos: [-1_072_000, beam * 1000, 0], rot: [ONE, 0, 0, 0], slot: 3, solids: [[0, 0, 38, 1448, 0, -70, 70]], ...(linked ? { links: ['f-3'] } : {}) });
+  if (beam !== null) add({ id: 'm-9', name: 'beam-high-l', kind: 'mars:deck_beam', parent: 'b-2', pos: [0, 0, 0], rot: [ONE, 0, 0, 0], slot: beam === 500 ? 3 : 5, solids: [[0, 0, 38, 1448, 0, -70, 70]], ...(linked ? { links: ['f-3'] } : {}) });
   if (sheet) {
-    add({ id: 's-10', name: 'sheet-1', kind: SHEET.kind, parent: 'b-2', pos: [0, 1_800_000, -612_000], rot: [ONE, 0, 0, 0], slot: 8 });
+    add({ id: 's-10', name: 'sheet-1', kind: SHEET.kind, parent: 'b-2', pos: [0, 0, 0], rot: [ONE, 0, 0, 0], slot: 11 });
     add({ id: 's-11', name: 'floor 11', kind: 'eden:floor', parent: 's-10', level: 1, surfaces: rect(19, [0, 0], [1829, 1219]) });
   }
-  add({ id: 't-12', name: 'flight', kind: FLIGHT.kind, parent: 'g-1', pos: [-3_000_000, 0, -572_000], rot: [ONE, 0, 0, 0] });
+  add({ id: 't-12', name: 'flight', kind: FLIGHT.kind, parent: 'g-1', pos: [62_000_000, 0, -24_572_000], rot: [ONE, 0, 0, 0] });
   add({ id: 't-13', name: 'floor 13', kind: 'eden:floor', parent: 't-12', level: 0 });
   add({ id: 't-14', name: 'floor 14', kind: 'eden:floor', parent: 't-12', level: 1, surfaces: rect(2010, [1500, 0], [500, 900]) });
-  add({ id: 'me-15', name: 'Oriel', kind: 'souls:body', parent: 'g-1', pos: [0, 0, -4_000_000], soul: 'soul-1' });
+  add({ id: 'me-15', name: 'Oriel', kind: 'souls:body', parent: 'g-1', pos: [65_000_000, 0, -28_000_000], soul: 'soul-1' });
   return rows;
 }
 

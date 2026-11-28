@@ -47,7 +47,7 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
   const base = mkdtempSync(join(scratch, 'run-')), children = [], home = join(base, 'home');
   mkdirSync(home, { mode: 0o700 });
   const run = (path, args, ready = null, env = {}) => new Promise((ok, fail) => {
-    const p = spawn(path, args, { cwd: base, env: { ...process.env, ...env, BRAIN_MODE: 'fake', SOULS_WAYS_DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(path, args, { cwd: base, env: { ...process.env, ...env, BRAIN_MODE: 'fake' }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.push(p);
     let text = '';
     const take = (b) => { text += b; writeFileSync(join(base, `child-${children.indexOf(p)}.log`), b, { flag: 'a' }); const m = ready instanceof RegExp ? ready.exec(text) : null; if (m) ok({ p, m }); };
