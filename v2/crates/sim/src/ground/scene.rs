@@ -26,6 +26,9 @@ pub const F_PLACE_OF: u64 = 20;
 pub const F_DOORWAYS: u64 = 22;
 pub const F_TILE_SIZE: u64 = 24;
 pub const F_TILES: u64 = 25;
+/// A floor that is ground only while a part joined to its thing sits at its height (racks T6: a frame's standing place,
+/// there while a beam braces the frame at that level; [`braced`]). Import-eden's `F_WHILE_JOINED`.
+pub const F_WHILE_JOINED: u64 = 28;
 
 pub const GROUND: &str = "eden:ground";
 pub const FLOOR: &str = "eden:floor";
@@ -594,8 +597,73 @@ fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64;
     Some((bb, y0, top))
 }
 
-/// A floor's surfaces (N1's `F_SURFACES`, in the frame of the floor's thing), moved by `x`.
+/// Whether floor `floor` is ground now: every floor is, but one marked [`F_WHILE_JOINED`] only while a part linked
+/// to its thing, beside it in the same parent (a beam beside a frame in its bay, joined to it), sits at the floor's
+/// height in the thing's frame, within half that part's own height (its walk boxes', none: exactly). A frame's
+/// standing place is there while a beam braces the frame at that level, and gone once the beam comes out.
+pub fn braced(tree: &Tree, floor: Handle) -> bool {
+    let Some(n) = tree.node(floor) else {
+        return false;
+    };
+    if !n.fields().contains_key(&F_WHILE_JOINED) {
+        return true;
+    }
+    let Some(y) = n
+        .fields()
+        .get(&F_SURFACES)
+        .and_then(|v| row(v).first())
+        .and_then(|s| row(s).first())
+        .and_then(um)
+    else {
+        return false;
+    };
+    let Some((thing, th)) = n.parent().and_then(|p| Some((p, tree.handle(p)?))) else {
+        return false;
+    };
+    let parent = tree.node(th).and_then(|t| t.parent());
+    tree.links_at(thing).iter().any(|e| {
+        let Some((_, ends, ..)) = tree.link(e.link) else {
+            return false;
+        };
+        let other = if ends[0] == thing { ends[1] } else { ends[0] };
+        let Some(oh) = tree.handle(other) else {
+            return false;
+        };
+        let Some(o) = tree.node(oh) else {
+            return false;
+        };
+        if o.parent() != parent || o.slot().is_none() || parent.is_none() {
+            return false;
+        }
+        let Ok(at) = xform_to(tree, oh, th) else {
+            return false;
+        };
+        // Half the part's own height, from its walk boxes ([cx, cz, hx, hz, yaw, y0, y1, ...] mm).
+        let half = o
+            .fields()
+            .get(&F_SOLIDS)
+            .map(|v| {
+                row(v)
+                    .iter()
+                    .filter_map(|b| match row(b) {
+                        [_, _, _, _, _, y0, y1, ..] => Some(um(y1)? - um(y0)?),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    / 2
+            })
+            .unwrap_or(0);
+        (at.pos.y - y).abs() <= half
+    })
+}
+
+/// A floor's surfaces (N1's `F_SURFACES`, in the frame of the floor's thing), moved by `x`: none while it is not
+/// [`braced`].
 fn surfaces_of(tree: &Tree, floor: Handle, x: &Xform) -> Result<Vec<Surface>, String> {
+    if !braced(tree, floor) {
+        return Ok(Vec::new());
+    }
     let Some(v) = tree
         .node(floor)
         .and_then(|n| n.fields().get(&F_SURFACES).cloned())

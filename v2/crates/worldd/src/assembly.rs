@@ -630,7 +630,10 @@ impl Assembly {
         let turn = yaw_toward([front.x - back.x, front.z - back.z])?;
         let inside = conj(turn)?
             .then(at.rot)
-            .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
+            .map_err(|e| {
+                eprintln!("worldd: DEBUG take {}: rot {:?} turn {:?} front {front:?} back {back:?}", show(part), at.rot, turn);
+                refusal("part-pose", format!("{e:?}"))
+            })?;
         let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
         // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
         // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
