@@ -141,6 +141,24 @@ fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
     (f.to_json(), numbers)
 }
 
+/// The served world's node ids by name: the import with the entries, as the world's (the kinds' floors and ladders
+/// are nodes too, so the ids differ from the facts' alone).
+fn served_nodes(d: &Path, facts: &str) -> BTreeMap<String, Id> {
+    let texts: Vec<(String, String)> = std::fs::read_dir(d.join("entries"))
+        .unwrap()
+        .map(|f| f.unwrap().path())
+        .map(|p| {
+            let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read_to_string(&p).unwrap())
+        })
+        .collect();
+    import_eden::load_with(facts, &texts)
+        .unwrap()
+        .nodes
+        .into_iter()
+        .collect()
+}
+
 /// A served deck world (`deck_world`) and a hand for each of its Souls.
 struct Yard {
     w: Seeded,
@@ -173,20 +191,7 @@ impl Yard {
         let socket = d.join("s");
         let s = serve_with(&w, &socket, None);
         s.line("listening ", 120);
-        // The import with the entries, as the world's: the kinds' floors and ladders are nodes too.
-        let texts: Vec<(String, String)> = std::fs::read_dir(d.join("entries"))
-            .unwrap()
-            .map(|f| f.unwrap().path())
-            .map(|p| {
-                let name = p.file_stem().unwrap().to_string_lossy().into_owned();
-                (name, std::fs::read_to_string(&p).unwrap())
-            })
-            .collect();
-        let nodes = import_eden::load_with(&facts, &texts)
-            .unwrap()
-            .nodes
-            .into_iter()
-            .collect();
+        let nodes = served_nodes(&d, &facts);
         let hands = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
         Yard {
             w,
@@ -1081,7 +1086,7 @@ fn deck_a_carried_sheet_turned_into_a_wall_is_refused_before_anything_moves() {
     world.write_all(&bytes).unwrap();
     let got = socket_answer(&mut world);
     assert_eq!(got.kind, 1, "the wall commits: {got:?}");
-    let sheet = import_eden::load(&facts).unwrap().nodes["plywood-sheet"];
+    let sheet = served_nodes(&d, &facts)["plywood-sheet"];
     let g = w.ground;
     let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
     for (k, dx) in [(1, -1_264), (2, 1_264)] {
