@@ -148,13 +148,20 @@ export function roomOf(rows, me) {
  * is what my body is doing (a line), `holding` what is in its hands, `metres(row)` how far a row is from my body
  * (undefined when the copy does not place it): then the room's things go nearest first, each `<name> (<id>, <n> m)`.
  */
-export function brief(rows, { me, changes = [], heard = [], doing = [], souls = [], work = [], now, holding, metres, ageMs = 0, version, most = BRIEF_MOST } = {}) {
+export function brief(rows, { me, places, changes = [], heard = [], doing = [], souls = [], work = [], now, holding, metres, ageMs = 0, version, most = BRIEF_MOST } = {}) {
   const at = whereOf(rows, me), room = roomOf(rows, me), mine = at?.body.id ?? me;
   const said = heard.length ? { heard: heardBlock(heard) } : {};
   if (!room) return { room: null, note: 'The copy holds nothing yet.', ...said, age: ageText(ageMs), changed: changedBlock(changes) };
   // Standing on a floor, the room's things and what else stands on the floor in that room (other bodies, a thing set down).
   const floor = at?.floor, inFloor = (r) => r.parent === floor.id && !/:room$/.test(r.kind) && roomOnFloor(rows, floor, r) === room;
   const inRoom = [...rows.values()].filter((r) => (r.parent === room.id || (floor && inFloor(r))) && r.id !== mine && r.id !== at?.seat?.id);
+  // A part's places that exist now (`../view/ways.mjs`: a frame's standing place, a sheet's deck), of a part in the
+  // room or in a thing there (a frame in its bay), each by its own name, as a thing in the room is.
+  const roomIds = new Set(inRoom.map((r) => r.id));
+  for (const p of places?.values() ?? []) {
+    const part = rows.get(p.of);
+    if (part && p.id !== at?.body.parent && (roomIds.has(part.id) || roomIds.has(part.parent))) inRoom.push({ ...rows.get(p.id), name: p.name });
+  }
   const bodies = inRoom.filter((r) => BODY.test(r.kind)).length;
   // Nearest first where the copy places them (a world's open ground holds thousands: what is near is what matters),
   // then by name; with no distances, by name alone.
@@ -169,7 +176,7 @@ export function brief(rows, { me, changes = [], heard = [], doing = [], souls = 
     .filter(Boolean).slice(0, CARDS_SHOWN).map((r) => ({ name: r.name, kind: r.kind }));
   const out = {
     ...(version !== undefined ? { at: version } : {}),
-    room: { name: room.name, kind: room.kind, ...(room.path.length ? { in: room.path.slice(-2).reverse().join(', ') } : {}) },
+    room: { name: places?.get(room.id)?.name ?? room.name, kind: room.kind, ...(room.path.length ? { in: room.path.slice(-2).reverse().join(', ') } : {}) },
     ...(at?.seat ? { seat: { name: at.seat.name, kind: at.seat.kind, id: at.seat.id } } : {}),
     ...(now ? { doing: now } : {}),
     ...(holding ? { holding: holding.length ? holding : 'nothing' } : {}),
