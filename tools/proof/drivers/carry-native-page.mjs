@@ -76,6 +76,24 @@ const SCENES = {
       beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], more: [['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'],
         ['deck-beam-3', ['-25.022,23.372'], 'beam_high_l'], ['deck-beam-4', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_high_r']],
       climb: { who: 'bo', frame: 'deck-frame-1' } } },
+  // The take-down without the deck (N5, attempt 25; CARRY_SCENE=teardown): the 12 ft bay built as in attempt 21 (frames
+  // carried lying, turned and raised into deck_bay, four deck beams, the holders let go), then taken down by the same
+  // Souls' ordinary commands in reverse: two holders take each frame beside its posts (`carry grip <frame> left|right`,
+  // `carry offer <name> --on <frame>`); the beam crew unseats the 1.8 m beams, then the 0.5 m ones, from 0.45 m outside
+  // the bay (`carry grip <beam> back|front --out 0.45`, `part unseat`), and carries each back to where it lay by the
+  // build's ways reversed; each frame's holders go to the raise crew's places (`carry grip <frame> top|foot`) and lower
+  // it out of its slot away from the bay (`part lower`); each frame is carried back lying by its build's steps reversed.
+  teardown: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_upright_12ft', entry: 'content/kinds/construction/rack_upright_12ft.json',
+    view: 'post=0&hour=12:00&eye=-17.5,5.2,31&at=-25,1.2,22',
+    third: { bay: 'deck-bay', frames: [['deck-frame-1', 'ada', 'bo', ['to -26,17', 'turn -90', 'to -24,20.095'], null, 'upright_a'],
+      ['deck-frame-2', 'di', 'cy', ['to -26,30', 'turn 90', 'to -24,26.649'], null, 'upright_b']],
+      beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], more: [['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'],
+        ['deck-beam-3', ['-25.022,23.372'], 'beam_high_l'], ['deck-beam-4', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_high_r']],
+      // each beam from its mouth north clear of the frames, west, then south along its own length onto the pile (each
+      // pile place west of the ones already back, rehearsal t2); each frame by its build's steps reversed to its pile
+      teardown: { beams: [['deck-beam-4', ['-22.978,17', '-26.95,17', '-26.95,20.5']], ['deck-beam-3', ['-25.022,17', '-27.3,17', '-27.3,20.5']],
+        ['deck-beam-2', ['-22.978,17', '-27.65,17', '-27.65,20.5']], ['deck-beam-1', ['-25.022,17', '-28,17', '-28,20.5']]],
+        frames: [['to -26,17', 'turn 90', 'to -31.829,19'], ['to -26,30', 'turn -90', 'to -31.829,21.5']] } } },
   // The deck walk (B5, attempt 24; CARRY_SCENE=deckwalk; #5284's creator-placed ways): the world's creator places the
   // finished deck bay in one `souls-god.mjs batch`, a part of each slot's kind into each of deck_bay's slots in the
   // entry's order (frames, four beams, five joists, two sheets, the stair); then Ada walks up the stair onto the first
@@ -474,6 +492,46 @@ async function climbed(state, page, who, frame, bay, tag) {
   record.upStep = biggestStep(record.upSamples); record.downStep = biggestStep(record.downSamples);
   return record;
 }
+/** The take-down (attempt 25), each step one Soul's ordinary command, a refusal for a moment asked again: two holders
+ *  to each frame; the beams out, high then low, each carried back to where it lay; each frame lowered out of its slot
+ *  from the raise crew's places and carried back lying. Returns each step's answer. */
+async function takeDown({ state, page, T, bay, frames, bc, wait, shot }) {
+  const D = T.teardown, [, back, front] = T.beam, out = { holds: [], beams: [], lowered: [], frames: [] };
+  const hc = [];
+  for (const [k, [, lift, foot]] of T.frames.entries()) {
+    const f = frames[k];
+    await Promise.all([gripAt(state, lift, f.id, 'left'), gripAt(state, foot, f.id, 'right')]);
+    const crew = (await retried(state, lift, 'carry', 'offer', state.bodies[foot], '--on', f.id)).crew;
+    await cli(state, foot, 'carry', 'accept', crew); hc.push(crew); out.holds.push(crew);
+  }
+  await wait(3000); await shot('holders-hold-the-frames'); await phase(state, page, 'held-for-the-take-down');
+  for (const [name, ways] of D.beams) {
+    const beam = await find(state, name);
+    await Promise.all([[back, 'back'], [front, 'front']].map(([w, end]) => retried(state, w, 'carry', 'grip', beam.id, end, '--out', '0.45')));
+    await retried(state, back, 'part', 'unseat', bc, beam.id); await wait(1500); await shot(`${name}-unseated`);
+    for (const w of ways) { await retried(state, back, 'carry', 'to', bc, w); await wait(D.legMs ?? 6000); }
+    await retried(state, back, 'carry', 'set-down', bc); await wait(2500); await shot(`${name}-where-it-lay`);
+    out.beams.push(name);
+  }
+  for (const [k, [name, lift, foot]] of T.frames.entries()) {
+    const f = frames[k];
+    await Promise.all([gripAt(state, lift, f.id, 'top'), gripAt(state, foot, f.id, 'foot')]); await wait(800);
+    await retried(state, lift, 'part', 'lower', hc[k], f.id); await wait(4000); await shot(`${name}-lowering`); await wait(8000); await shot(`${name}-laid-down`);
+    out.lowered.push(name);
+  }
+  for (const [k, [name, lift, foot]] of T.frames.entries()) {
+    const f = frames[k];
+    await gripEnds(state, f.id, lift, foot);
+    await retried(state, lift, 'part', 'take', hc[k], f.id); await wait(1500);
+    for (const step of D.frames[k]) { const [verb, ...rest] = step.split(' '); await retried(state, lift, 'carry', verb, hc[k], ...rest); await wait(7000); }
+    await retried(state, lift, 'carry', 'set-down', hc[k]); await wait(3000); await shot(`${name}-where-it-lay`);
+    for (const w of [lift, foot]) await asked(state, w, 'carry', 'leave', hc[k]);
+    out.frames.push(name);
+  }
+  for (const w of [back, front]) await asked(state, w, 'carry', 'leave', bc);
+  await wait(2000); await shot('taken-down');
+  return out;
+}
 /** The first third on the page (all of it after the setup gate). Its checks: every command but the beam's put accepted (a
  *  refusal for a moment asked again), no page error; the put's answer and the oracle on the first frame's crew are measured. */
 async function firstThird({ state, page, paths, signal, check, arm, root }) {
@@ -562,6 +620,7 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
       if (put2?.ok === true) {
         for (const [k, [, lift, foot]] of T.frames.entries()) for (const who of [lift, foot]) leaves.push({ who, ...(await asked(state, who, 'carry', 'leave', crews[k])) });
         await wait(3000); await shot('holders-let-go'); await wait(3000); await shot('bay-stands');
+        if (T.teardown && leaves.every(l => l.ok === true)) state.takeDown = await takeDown({ state, page, T, bay, frames, bc, wait, shot });
         if (T.climb && leaves.every(l => l.ok === true)) state.climbs = [await climbed(state, page, T.climb.who, frames.find(f => f.name === T.climb.frame).id, bay, 'climb')];
         // the joists across the high beams, by three crews at once, each a few seconds behind the one before
         if (T.joists && leaves.every(l => l.ok === true)) {
@@ -586,7 +645,7 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
     save(state, 'survey-measurement.json', { note: 'The contact oracle on the first frame\'s crew, and the beam put\'s answer: measurements, not checks of this scene.', observer, watch: state.watch ?? null, beamPut: { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null },
-      shortWalks: state.shortWalks ?? [], puts, joistPuts: state.joistPuts ?? [], beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [], climbs: state.climbs ?? [] });
+      shortWalks: state.shortWalks ?? [], puts, joistPuts: state.joistPuts ?? [], beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [], climbs: state.climbs ?? [], takeDown: state.takeDown ?? null });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
 /** `who` walks to `target` (`act <id> --wait`), four shots on the way, its drawn position sampled; where it ends. */
