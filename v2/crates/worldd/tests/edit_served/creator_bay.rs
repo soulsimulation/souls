@@ -12,13 +12,10 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
     std::fs::create_dir_all(&entries).unwrap();
-    let fx = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sim/src/structure/fixtures");
-    for dir in [root.join("construction"), fx.clone()] {
-        for f in std::fs::read_dir(dir).unwrap() {
-            let p = f.unwrap().path();
-            if p.extension().is_some_and(|x| x == "json") {
-                std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
-            }
+    for f in std::fs::read_dir(root.join("construction")).unwrap() {
+        let p = f.unwrap().path();
+        if p.extension().is_some_and(|x| x == "json") {
+            std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
         }
     }
     std::fs::copy(
@@ -26,7 +23,7 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
         entries.join("humanoid.json"),
     )
     .unwrap();
-    let text = std::fs::read_to_string(if std::env::var_os("CPJ_FIXTURE").is_some() { fx.join("test_deck_bay.json") } else { root.join("construction/deck_bay.json") }).unwrap();
+    let text = std::fs::read_to_string(root.join("construction/deck_bay.json")).unwrap();
     let kind = replica::kinds::entry::entry_to_kind(&text).unwrap();
     let mut kinds = replica::kinds::Kinds::default();
     kinds.load(&[("deck_bay", kind.as_str())]);
@@ -36,7 +33,7 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
         .find_map(|k| {
             kinds
                 .get(&k)
-                .filter(|d| d.name.as_str().starts_with(if std::env::var_os("CPJ_FIXTURE").is_some() { "mars:test_deck_bay@" } else { "mars:deck_bay@" }))
+                .filter(|d| d.name.as_str().starts_with("mars:deck_bay@"))
         })
         .expect("the deck bay's kind");
     let slots: Vec<(u64, String, [i64; 3])> = def
@@ -58,17 +55,12 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
     let num = |v: i64| json::Value::Int(i128::from(v));
     let ints = |v: &[i64]| json::Value::Arr(v.iter().map(|&x| num(x)).collect());
     let refs = [
-        ("testworld-deck-bay@1", if std::env::var_os("CPJ_FIXTURE").is_some() { "mars:test_deck_bay" } else { "mars:deck_bay" }),
+        ("testworld-deck-bay@1", "mars:deck_bay"),
         ("testworld-frame-12ft@1", "mars:rack_upright_12ft"),
         ("testworld-deck-beam@1", "mars:deck_beam"),
         ("testworld-two-by-four@1", "mars:two_by_four"),
         ("testworld-plywood-sheet@1", "mars:plywood_sheet"),
         ("testworld-stair-flight@1", "mars:stair_flight"),
-        ("testworld-tf@1", "mars:test_deck_frame"),
-        ("testworld-tb@1", "mars:test_deck_beam"),
-        ("testworld-tj@1", "mars:test_two_by_four"),
-        ("testworld-tp@1", "mars:test_plywood"),
-        ("testworld-ts@1", "mars:test_stair_flight"),
     ];
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     for (k, v) in top.iter_mut() {
@@ -177,18 +169,7 @@ impl Site {
             .kinds
             .keys()
             .filter_map(|k| {
-                let mut plain = replica::world_model::plain(k).to_owned();
-                if std::env::var_os("CPJ_FIXTURE").is_some() {
-                    plain = match plain.as_str() {
-                        "mars:test_deck_frame" => "mars:rack_upright_12ft",
-                        "mars:test_deck_beam" => "mars:deck_beam",
-                        "mars:test_two_by_four" => "mars:two_by_four",
-                        "mars:test_plywood" => "mars:plywood_sheet",
-                        "mars:test_stair_flight" => "mars:stair_flight",
-                        _ => "-",
-                    }
-                    .to_owned();
-                }
+                let plain = replica::world_model::plain(k).to_owned();
                 BUILT
                     .iter()
                     .any(|(b, _)| *b == plain)
@@ -426,11 +407,17 @@ fn floors_of(w: &Seeded, part: Id) -> Vec<(Id, i64, bool)> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_frame() {
     let mut site = Site::serve_souls("creator-bay-walk", 2).await;
-    let ops: Vec<Op> = BUILT
+    let mut ops: Vec<Op> = BUILT
         .iter()
         .enumerate()
         .map(|(k, (kind, slot))| site.place(k as u64 + 1, kind, slot))
         .collect();
+    // The creator turns the flight a half turn in its slot, its top to the sheets' east edge: a slot's point gives
+    // a part its place, not its turn (`sim::ground::scene::xform_to`), so `deck_bay`'s `yaw_mdeg` on the stair slot
+    // turns nothing.
+    if let Some(Op::Place { at, .. }) = ops.last_mut() {
+        at.orientation = Quat::from_yaw_mdeg(180_000).unwrap();
+    }
     let got = site.edit(1, ops).await;
     assert_eq!(got.kind, 1, "the built bay is accepted: {got:?}");
     let part = |k: usize| got.names[&(k as u64 + 1)];
@@ -447,32 +434,6 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
         .expect("the sheet's top, a floor")
         .0;
     let g = site.w.ground;
-    {
-        // A town built afresh from the served tree stands a body on the sheet's top (the tree holds the way).
-        let (copy, rules) = served_copy(&site.w);
-        let tree = copy.tree().frozen();
-        let header = import_eden::header(site.w.root, &rules).unwrap();
-        let next = tree.to_state().next;
-        let mut town = sim::walk::town::Town::new_on(
-            tree,
-            g,
-            sim::links::Doors::new(header, rules.clone(), next),
-            4,
-        )
-        .unwrap();
-        let fresh = town.view().stand_near(deck, v3(-400_000, 19_000, 0), 0, None);
-        println!("a fresh town on the deck: {fresh:?}");
-        let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
-        let foot = v3((x + 4_500) * 1000, 0, (z - 622) * 1000);
-        let flights = floors_of(&site.w, flight);
-        let view = town.view();
-        println!("fresh: reached deck {:?}", view.stand_reached(deck, v3(-400_000, 19_000, 0), (g, foot)));
-        for (f, lv, _) in &flights {
-            let p = if *lv == 0 { v3(-1_000_000, 0, 0) } else { v3(1_500_000, 2_010_000, 0) };
-            println!("fresh: flight floor {lv} stand {:?} reached {:?}", view.stand_near(*f, p, 0, None), view.stand_reached(*f, p, (g, foot)));
-        }
-        println!("fresh: floors reached from the flight {:?}", view.floors_reached(flight));
-    }
     let mut hands: Vec<Hand> = site
         .w
         .souls
@@ -482,8 +443,7 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     let at = |dx: i64, dz: i64| v3((x + dx) * 1000, 0, (z + dz) * 1000);
 
-    // Soul 1 to the flight's foot (east of the bay: its slot turns it a half turn, its top at the sheets' east edge),
-    // then up onto the first sheet's top, past the stair's top.
+    // Soul 1 to the flight's foot (east of the bay), then up onto the first sheet's top, past the stair's top.
     hands[0].walk_to(g, at(4_500, -622));
     let e = socket_end(&mut hands[0].s);
     assert_eq!(e.kind, 1, "Soul 1 to the flight's foot: {e:?}");
