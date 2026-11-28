@@ -170,6 +170,8 @@ type Taking = (
     (Vec3, replica::pose::Quat),
     (Vec3, replica::pose::Quat),
     bool,
+    /// An unseat (`part:unseat`): its way out of the slot goes at a set-in's pace (#5067).
+    bool,
 );
 
 /// A carrying ground's fixed geometry and what it was read at (0.135 C7, [`Engine`]'s `fixed`): the walkers' ground
@@ -1353,7 +1355,8 @@ impl Engine {
                     // Each carrier faces its hold as the part is set in.
                     face_holds(c, &carriers, from);
                     self.push(effects, Some(by));
-                    // #5067: its holds on the set-in track, until it ends.
+                    // #5067: the set-in is a track as a lift's is, said `souls:seat` from now to its end; the holds stay
+                    // carried on it, until the part is seated (`souls:seated`, then held or let go).
                     let until = self.asm.as_ref().and_then(|s| {
                         s.tracks(now)
                             .into_iter()
@@ -1361,15 +1364,20 @@ impl Engine {
                             .map(|t| t.until)
                     });
                     let word = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
-                    if let Err(r) = regrip(
-                        &mut self.activities,
-                        &mut tree,
-                        activity,
-                        grips::SET_IN,
-                        until,
-                        word,
-                    ) {
-                        eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
+                    let part = holds_on(&tree, activity).map(|h| h.load);
+                    if let (Some(t1), Some(part)) = (until, part) {
+                        self.activities.next = tree.next();
+                        if let Err(r) = self.activities.carry_track(
+                            &mut tree,
+                            activity,
+                            part,
+                            "souls:seat",
+                            (now, t1),
+                            None,
+                            word,
+                        ) {
+                            eprintln!("worldd: a set-in's track was not said: {r}");
+                        }
                     }
                 } else {
                     if self.carries.contains_key(&activity) {
@@ -1456,6 +1464,7 @@ impl Engine {
                             taken.from,
                             taken.lay,
                             taken.rested,
+                            a.verb == Verb::Unseat,
                         ),
                     );
                 }
@@ -2417,6 +2426,14 @@ impl Engine {
         // and the part goes back, as a refused seating's does, to where the set-in started; there its carry goes on, or
         // breaks off when its carriers have gone (`Engine::came_back`). The way back only returns the part toward where
         // every carrier who stood could reach it.
+        // #5067 item 3: each crew's node on its set-in track or its way back, one sample a tick.
+        if let Some(s) = self.asm.as_mut()
+            && s.setting_in()
+        {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            let samples = s.step(tr, now);
+            self.send(samples);
+        }
         if self.asm.as_ref().is_some_and(|s| s.setting_in()) {
             let tr = tree.get_or_insert_with(|| live.frozen());
             let tracks: Vec<_> = self
@@ -3602,9 +3619,16 @@ impl Engine {
             return;
         }
         let taking = self.taking.remove(&r.activity);
+        // #5067: a set-in's track, said ended as its part is seated.
+        let seat = self
+            .asm
+            .as_ref()
+            .and_then(|a| a.set_in_times(r.activity))
+            .filter(|_| written && r.step == crate::assembly::Step::Seated);
         if let Some(asm) = self.asm.as_mut() {
             asm.written(r.activity, r.step, written);
         }
+
         if r.step == crate::assembly::Step::Retired {
             self.retried.remove(&r.activity);
             // A retiring holder's structure set down (its kept hold's node gone with it) is forgotten here; refused
@@ -3637,6 +3661,20 @@ impl Engine {
             if r.step == crate::assembly::Step::Seated && written {
                 self.set_sides.remove(&r.activity);
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
+                if let Some((part, t0, t1)) = seat {
+                    self.activities.next = tree.next();
+                    if let Err(e) = self.activities.carry_track(
+                        &mut tree,
+                        r.activity,
+                        part,
+                        "souls:seated",
+                        (t0, t1),
+                        None,
+                        word,
+                    ) {
+                        eprintln!("worldd: a set-in's end was not said: {e}");
+                    }
+                }
                 let holds = holds_on(&tree, r.activity).map(|h| h.load);
                 let under = tree
                     .handle(r.activity)
@@ -3668,7 +3706,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let Some((ground, at, turn, span, sides, from, lay, rested)) = taking else {
+        let Some((ground, at, turn, span, sides, from, lay, rested, unseat)) = taking else {
             return;
         };
         let part = self
@@ -3718,7 +3756,22 @@ impl Engine {
                 // Who holds which grip is said as it is true (#5067): `souls:lift` while the part is on its way into
                 // their hands, `souls:carry` once it is there (`souls:lifted`, or at once with no track).
                 let mut phase = grips::CARRY;
-                match carry.take_up(now, from, (at, turn), span, (ground, lay.0, lay.1)) {
+                let took = carry
+                    .take_up(now, from, (at, turn), span, (ground, lay.0, lay.1))
+                    .map(|times| {
+                        // An unseat's way out of its slot at a set-in's pace (#5067): `distance / 0.4 m/s`, 0.6 s at least.
+                        match carry.hoist.as_mut().filter(|_| unseat) {
+                            Some(h) => {
+                                let d = |a: i64, b: i64| i128::from(a - b).pow(2);
+                                let far = (d(h.to.0.x, h.from.0.x) + d(h.to.0.y, h.from.0.y) + d(h.to.0.z, h.from.0.z))
+                                    .isqrt();
+                                h.t1 = now + crate::assembly::set_in_time(i64::try_from(far).unwrap_or(i64::MAX));
+                                (times.0, h.t1)
+                            }
+                            None => times,
+                        }
+                    });
+                match took {
                     Ok(times) => {
                         phase = grips::LIFT;
                         self.take_lifting.insert(r.activity);

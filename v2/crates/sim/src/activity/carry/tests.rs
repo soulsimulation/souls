@@ -816,7 +816,7 @@ mod from_entry {
                 half_length: 1_219_000,
                 half_width: 609_500,
                 grips: [-780_000, 780_000],
-                crew: 1,
+                crew: 2,
                 ..upright
             }
         );

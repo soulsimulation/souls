@@ -73,13 +73,13 @@ use std::collections::BTreeMap;
 use replica::effects::{Actor, Cause, Effect, Header, Refusal};
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Track, Vec3};
+use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, show};
 use sim::activity::Activities;
 use sim::activity::carry::grips::{self, Grip};
-use sim::activity::carry::{Carry, GRIP_REACH, HEIGHT, Load, yaw_toward};
+use sim::activity::carry::{Carry, GRIP_REACH, HEIGHT, Load, between, yaw_toward};
 use sim::activity::seating::{Seating, Target};
 use sim::ground::scene::{slot_points, xform_to};
 use sim::structure::Structure;
@@ -105,10 +105,24 @@ pub const WALK_LEAST: i64 = 50_000;
 /// How long before its set-in track ends a carrier walking beside the part is where it stands at the end, µs: two
 /// ticks, so the seating's commit finds every body at rest.
 const WALK_EARLY: Micros = 100_000;
-/// The set-in track's pace, µm a second, and its shortest and longest time.
-const SET_IN_PACE: i64 = 500_000;
-const SET_IN_LEAST: Micros = 1_000_000;
-const SET_IN_MOST: Micros = 4_000_000;
+/// The set-in track's pace, µm a second, and its shortest time (#5067: a part set in, or unseated out of its slot, at
+/// a crew's pace, never in a quarter of a second): `distance / 0.4 m/s`, at least 0.6 s, in whole ticks.
+pub const SET_IN_PACE: i64 = 400_000;
+pub const SET_IN_LEAST: Micros = 600_000;
+
+/// How long a set-in (or an unseat's way out, or a set-in's way back) that moves its crew's node `far` µm takes, µs:
+/// at [`SET_IN_PACE`], at least [`SET_IN_LEAST`], in whole ticks.
+pub fn set_in_time(far: i64) -> Micros {
+    let tick = i128::from(sim::activity::carry::HOIST_TICK);
+    let us = (i128::from(far.max(0)) * 1_000_000 / i128::from(SET_IN_PACE)).max(i128::from(SET_IN_LEAST));
+    i64::try_from((us + tick - 1) / tick * tick).unwrap_or(Micros::MAX)
+}
+
+/// How far apart two points are, µm.
+fn dist(a: Vec3, b: Vec3) -> i64 {
+    let d = |p: i64, q: i64| i128::from(p - q).pow(2);
+    i64::try_from((d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt()).unwrap_or(i64::MAX)
+}
 
 /// Which step a part of entries is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,11 +189,11 @@ pub struct Setting {
     pub by: (Id, Id),
     pub ground: Id,
     reach: i64,
-    track: Owner,
-    /// Where the set-in track started (the crew's node between its carriers), when, and its velocity, µm a second.
+    /// Where the set-in track started (the crew's node between its carriers) and when, and where it ends: the node's
+    /// pose that has the part, in its slot as it is held, exactly where it is seated (#5067). Its samples go from one to
+    /// the other a tick at a time, the position in a straight line and the turn blended (`carry::between`).
     pub start: (Vec3, Quat),
     t0: Micros,
-    velocity: Vec3,
     pub end: (Vec3, Quat),
     /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
     pub span: i64,
@@ -205,8 +219,9 @@ pub struct Assembly {
     pub stopped: Vec<(Id, Setting)>,
     /// Entries written at a track's end (the node at rest at the slot), by intent and Soul, for the engine to send.
     pub moved: Vec<((Id, Id), Vec<Effect>)>,
-    /// Crews' nodes going back along a track to where their set-in started, and when each gets there.
-    returning: BTreeMap<Id, (Setting, Micros, Owner)>,
+    /// Crews' nodes going back to where their set-in started: the setting, when each gets there, and where and when
+    /// its way back began.
+    returning: BTreeMap<Id, (Setting, Micros, (Vec3, Quat), Micros)>,
 }
 
 fn kind_of(tree: &Tree, id: Id) -> R<Name> {
@@ -871,6 +886,20 @@ impl Assembly {
                 ),
             ));
         }
+        // #5067: where the set-in's track ends, the crew's node posed so the part, in its slot as it is held, is
+        // exactly where it is seated (at `at`, turned as `to` is): it is never moved or turned at the commit.
+        let end = {
+            let pose = |e| refusal("part-pose", format!("{e:?}"));
+            let held = tree
+                .handle(part)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.place())
+                .ok_or_else(|| refusal("part.not-held", show(part)))?;
+            let x = xform_to(tree, th, gh).map_err(|e| refusal("part-pose", e))?;
+            let q = x.rot.then(conj(held.orientation)?).map_err(pose)?;
+            let o = q.rotate(held.position).map_err(pose)?;
+            (Vec3::new(at.x - o.x, at.y - o.y, at.z - o.z), q)
+        };
         // #5067: every carrier is within reach of its hold where the set-in starts, and to its end stands within reach
         // or walks beside the part. One who can do neither is refused by name, never named as holding.
         let holding = carriers.to_vec();
@@ -878,7 +907,7 @@ impl Assembly {
             Some([f, b, ..]) => [f.body, b.body],
             _ => return Err(refusal("crew.size", show(activity))),
         };
-        let mut walks = ways(carriers, ends, from.0, at, from.1, walkable)?;
+        let mut walks = ways(carriers, ends, from.0, end.0, from.1, walkable)?;
         // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
         // (its rails), which it rests on.
         let rests = s.rests(pk.as_str());
@@ -940,22 +969,13 @@ impl Assembly {
             &target,
         )?;
         self.seating.parts.clear();
-        let (dx, dy, dz) = (
-            i128::from(at.x - from.0.x),
-            i128::from(at.y - from.0.y),
-            i128::from(at.z - from.0.z),
-        );
-        let far = i64::try_from((dx * dx + dy * dy + dz * dz).isqrt()).unwrap_or(i64::MAX);
-        let span = (far / SET_IN_PACE * 1_000_000).clamp(SET_IN_LEAST, SET_IN_MOST);
-        self.seating
-            .set_in(tree, acts, activity, now, from.0, from.1, at, now + span)?;
-        let effects = self.seating.parts.drain(..).flatten().collect();
+        // #5067: a track as a lift's is, its node's samples written a tick at a time ([`Assembly::step`]) from here,
+        // where the carry's last sample has it.
+        let span = set_in_time(dist(from.0, end.0));
+        let effects = Vec::new();
         for w in &mut walks {
             w.speed = pace(w.from, w.to, span);
         }
-        // The track as `Seating::set_in` writes it, to hand the node back from it if the seating is refused.
-        let v = |a: i64, b: i64| (i128::from(b - a) * 1_000_000 / i128::from(span)) as i64;
-        let velocity = Vec3::new(v(from.0.x, at.x), v(from.0.y, at.y), v(from.0.z, at.z));
         self.setting.insert(
             activity,
             Setting {
@@ -965,11 +985,9 @@ impl Assembly {
                 by,
                 ground,
                 reach,
-                track: Owner::Track(Track::Straight { t0: now, velocity }),
                 start: from,
                 t0: now,
-                velocity,
-                end: (at, from.1),
+                end,
                 span: apart,
                 holding: holding.iter().map(|c| c.body).collect(),
                 walks: walks.clone(),
@@ -980,36 +998,64 @@ impl Assembly {
 
     /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3).
     pub fn tracks(&self, now: Micros) -> Vec<OnTrack<'_>> {
-        let at = |p: Vec3, v: Vec3, dt: Micros| {
-            let m = |a: i64, v: i64| a + (i128::from(v) * i128::from(dt) / 1_000_000) as i64;
-            Vec3::new(m(p.x, v.x), m(p.y, v.y), m(p.z, v.z))
-        };
-        let going = self.setting.iter().map(|(a, s)| {
-            let dt = now.clamp(s.t0, s.due) - s.t0;
-            OnTrack {
-                activity: *a,
-                node: (at(s.start.0, s.velocity, dt), s.start.1),
-                until: s.due,
-                back: false,
-                holding: &s.holding,
-            }
+        let on = |from, to, times| between(from, to, times, now).unwrap_or(to);
+        let going = self.setting.iter().map(|(a, s)| OnTrack {
+            activity: *a,
+            node: on(s.start, s.end, (s.t0, s.due)),
+            until: s.due,
+            back: false,
+            holding: &s.holding,
         });
-        let back = self.returning.iter().map(|(a, (s, end, track))| {
-            // It gets to where its set-in started at `end`: back from there by the time left.
-            let v = match track {
-                Owner::Track(Track::Straight { velocity, .. }) => *velocity,
-                _ => Vec3::ZERO,
-            };
-            let left = -(end.saturating_sub(now).max(0));
-            OnTrack {
+        let back = self
+            .returning
+            .iter()
+            .map(|(a, (s, end, from, t0))| OnTrack {
                 activity: *a,
-                node: (at(s.start.0, v, left), s.end.1),
+                node: on(*from, s.start, (*t0, *end)),
                 until: *end,
                 back: true,
                 holding: &s.holding,
-            }
-        });
+            });
         going.chain(back).collect()
+    }
+
+    /// One tick `now` of every crew's set-in track and way back (#5067 item 3): one motion sample of each crew's node
+    /// where its track has it, written on `tree`, by the put's intent and Soul. A track's last sample is written at its
+    /// end ([`Assembly::due`], [`Assembly::returned`]).
+    pub fn step(&mut self, tree: &mut Tree, now: Micros) -> Vec<((Id, Id), Vec<Effect>)> {
+        let on: Vec<(Id, (Id, Id), Id, (Vec3, Quat))> = self
+            .tracks(now)
+            .into_iter()
+            .filter(|t| now < t.until)
+            .filter_map(|t| {
+                let s = self
+                    .setting
+                    .get(&t.activity)
+                    .or_else(|| self.returning.get(&t.activity).map(|r| &r.0))?;
+                Some((t.activity, s.by, s.ground, t.node))
+            })
+            .collect();
+        let mut out = Vec::new();
+        for (activity, by, ground, node) in on {
+            match self.hand_off(
+                tree,
+                now,
+                activity,
+                ground,
+                (Owner::Mover, Owner::Mover),
+                node,
+                Vec3::ZERO,
+            ) {
+                Ok(e) => out.push((by, e)),
+                Err(r) => eprintln!("worldd: a set-in's sample was not written: {r}"),
+            }
+        }
+        out
+    }
+
+    /// When crew `activity`'s set-in track began and ended, while its seating waits for its commit (#5067).
+    pub fn set_in_times(&self, activity: Id) -> Option<(Id, Micros, Micros)> {
+        self.committing.get(&activity).map(|s| (s.part, s.t0, s.due))
     }
 
     /// Stops crew `activity`'s set-in by `why` (#5067 item 3: a carrier out of reach of its grip): refused to the put's
@@ -1047,21 +1093,18 @@ impl Assembly {
             let Some(mut s) = self.setting.remove(&activity) else {
                 continue;
             };
-            // The node stops at the slot as its track ends, whatever its seating's fate: no track runs on past it.
-            let rest = Owner::Track(Track::Rest);
+            // The node's last sample at its track's end, the part exactly where it is seated, whatever its seating's
+            // fate: no track runs on past it.
             match self.hand_off(
                 tree,
                 s.due,
                 activity,
                 s.ground,
-                (s.track, rest),
+                (Owner::Mover, Owner::Mover),
                 s.end,
                 Vec3::ZERO,
             ) {
-                Ok(effects) => {
-                    self.moved.push((s.by, effects));
-                    s.track = rest;
-                }
+                Ok(effects) => self.moved.push((s.by, effects)),
                 Err(r) => eprintln!("worldd: a set-in track was not ended: {r}"),
             }
             // Checked again as the world is now: another crew may have filled the slot, or a Soul stepped in.
@@ -1170,36 +1213,19 @@ impl Assembly {
         activity: Id,
         s: Setting,
     ) -> R<Vec<Effect>> {
-        let gone = i128::from(now.min(s.due).saturating_sub(s.t0));
-        let at = |a: i64, v: i64| a + (i128::from(v) * gone / 1_000_000) as i64;
-        let here = Vec3::new(
-            at(s.start.0.x, s.velocity.x),
-            at(s.start.0.y, s.velocity.y),
-            at(s.start.0.z, s.velocity.z),
-        );
-        let (dx, dy, dz) = (
-            i128::from(s.start.0.x - here.x),
-            i128::from(s.start.0.y - here.y),
-            i128::from(s.start.0.z - here.z),
-        );
-        let far = i64::try_from((dx * dx + dy * dy + dz * dz).isqrt()).unwrap_or(i64::MAX);
-        let span = (far / SET_IN_PACE * 1_000_000).clamp(SET_IN_LEAST, SET_IN_MOST);
-        let v = |d: i128| (d * 1_000_000 / i128::from(span)) as i64;
-        let back = Vec3::new(v(dx), v(dy), v(dz));
-        let track = Owner::Track(Track::Straight {
-            t0: now,
-            velocity: back,
-        });
+        // From where its track has it now, back to where it started, a sample a tick (#5067: blended as the set-in is).
+        let here = between(s.start, s.end, (s.t0, s.due), now.min(s.due))?;
+        let span = set_in_time(dist(here.0, s.start.0));
         let effects = self.hand_off(
             tree,
             now,
             activity,
             s.ground,
-            (s.track, track),
-            (here, s.end.1),
-            back,
+            (Owner::Mover, Owner::Mover),
+            here,
+            Vec3::ZERO,
         )?;
-        self.returning.insert(activity, (s, now + span, track));
+        self.returning.insert(activity, (s, now + span, here, now));
         Ok(effects)
     }
 
@@ -1209,12 +1235,12 @@ impl Assembly {
         let due: Vec<Id> = self
             .returning
             .iter()
-            .filter(|(_, (_, at, _))| *at <= now)
+            .filter(|(_, (_, at, _, _))| *at <= now)
             .map(|(a, _)| *a)
             .collect();
         let mut out = Vec::new();
         for activity in due {
-            let Some((s, at, track)) = self.returning.remove(&activity) else {
+            let Some((s, at, _, _)) = self.returning.remove(&activity) else {
                 continue;
             };
             match self.hand_off(
@@ -1222,7 +1248,7 @@ impl Assembly {
                 at,
                 activity,
                 s.ground,
-                (track, Owner::Mover),
+                (Owner::Mover, Owner::Mover),
                 s.start,
                 Vec3::ZERO,
             ) {

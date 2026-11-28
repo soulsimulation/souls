@@ -314,6 +314,23 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     let g = grips_said(&dir, carry);
     assert!(g.contains(&("souls:raise".to_owned(), 2)), "{g:?}");
     assert_eq!(g.last(), Some(&("souls:held".to_owned(), 2)), "{g:?}");
+    // #5067 item 2: each holder's two hands on its own post's outer face, 1.05 m and 1.35 m above the frame's foot
+    // (on the ground): where a standing body holds it upright, not at the foot or overhead.
+    let held = effects(&dir)
+        .iter()
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == grips::GRIPS)
+        .filter(|ev| ev.fields.get(&1) == Some(&carry.to_value()))
+        .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+        .next_back()
+        .expect("the held word");
+    let posts: Vec<i64> = held.holds.iter().map(|h| h.hands[0].x).collect();
+    println!("held: {:?}", held.holds);
+    assert!(posts[0] == -posts[1] && posts[0].abs() == 609_500, "one on each post's outer face: {posts:?}");
+    for h in &held.holds {
+        assert_eq!([h.hands[0].y, h.hands[1].y], grips::HOLD_HANDS, "{h:?}");
+        assert_eq!(h.hands[0].x, h.hands[1].x);
+    }
     // The lifter came to the base, beside its post; the footer stood.
     let feet = stood(&dir);
     for (b, p) in bodies.iter().zip([on(beside, 0), stations[1]]) {
