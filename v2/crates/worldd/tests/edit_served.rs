@@ -5393,7 +5393,6 @@ fn a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way() {
 /// along x. Two Souls lift it, turn it a quarter turn in their hands (`carry:turn`), carry it to the bay and set it down
 /// with its foot at `upright_a` and its length outward, its base line along the bay's x; then raise it into the slot.
 #[test]
-#[ignore = "#5254 (lane agent/5254-walk-goal): the crew's walk to the bay beside a placed bay ends short; the turn is proved by carry_served turn_two_souls_..., the raise into a slot by a_frame_is_raised_into_..."]
 fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_it() {
     use sim::activity::carry::grips::{GRIPS, HELD, Holds};
     use sim::activity::carry::raise::{SIDE, Spec};
@@ -5430,7 +5429,9 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
         audience: Audience::Everyone,
         fields: BTreeMap::new(),
     };
-    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -30 * M), Quat::IDENTITY));
+    // 2 m north of the pile's line: the frame's middle, set down south of upright_a, stays on the test world's ground
+    // (cut only in its 16 m squares that hold something: it ends at z -32 m).
+    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -28 * M), Quat::IDENTITY));
     assert_eq!(got.kind, 1, "a bay: {got:?}");
     let bay = got.names[&1];
     let (copy, _) = served_copy(&w);
