@@ -37,6 +37,18 @@ Both stages ship from the same commit in the same release. A `staging` stage (lo
 in `release.sh`; ship.sh does not use it. See [operations](operations.md) for the services themselves and
 [the runbook](operations/runbook.md) for day-to-day commands.
 
+## When to release
+
+Only for a significant upgrade, or for a critical fix: a core path broken on the live site (a world won't draw,
+sign-in fails, a new person can't get a Soul at all, data is lost or corrupted). Everything else (first-day polish,
+timing, wording, tests) merges to main and waits for the next real release, about once a day, in the morning EST.
+Prove a fix on the real address or a production-like setup before releasing it.
+
+A release costs about two hours: about 50 minutes of build and deploy, about 20 minutes of checks on soul.game, and a
+45-minute first-day walk that uses real usage. So never release just because a lane finished, and release at most once
+a night unless a core path is broken, saying why in the morning report. The reasons:
+[release cadence](process/development-coordinator.md#release-cadence).
+
 ## Release order
 
 0. **Client stamp.** The client is stamped on main, before a release head is picked (0.133 R13): after each push that
