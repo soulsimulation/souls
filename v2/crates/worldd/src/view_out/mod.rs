@@ -122,6 +122,84 @@ mod trace {
     }
 }
 
+/// What the public stream's thread, and the threads it writes beside it, write and sync (#2803 follow-up): bytes, files
+/// synced, the waits for them and parts published, counted always (`stream_io` in `health.json`, the served check of
+/// how many syncs a part costs) and the syncs timed with `STREAM_PROFILE=1`. A thread counts once [`io::count_here`]
+/// is called on it, and the threads [`beside`] starts from one: the views' writers and other threads are not counted.
+pub mod io {
+    // The sync time is wall time, off unless the profile asks for it (K7 allows it, as in `measures`).
+    #![allow(clippy::disallowed_methods)]
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    /// 1 on the stream's thread, 2 on a thread writing beside it, 0 elsewhere.
+    thread_local!(static HERE: Cell<u8> = const { Cell::new(0) });
+    /// On the stream's thread, inside [`stage`]: its syncs are one wait, counted when it ends.
+    thread_local!(static STAGED: Cell<u32> = const { Cell::new(0) });
+    /// Bytes written, files synced, sync waits and parts published, in that order.
+    static COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+    /// Nanoseconds spent in syncs, summed over the threads that synced (profile only).
+    static SYNC_NS: AtomicU64 = AtomicU64::new(0);
+    /// Counts what this thread writes and syncs from now on: the stream's own thread.
+    pub fn count_here() {
+        HERE.set(1);
+    }
+    /// What a thread started from this one to write beside it is counted as.
+    pub(super) fn kind() -> u8 {
+        HERE.get().min(1) * 2
+    }
+    pub(super) fn set_kind(k: u8) {
+        HERE.set(k);
+    }
+    pub(super) fn wrote(n: usize) {
+        if HERE.get() > 0 {
+            COUNTS[0].fetch_add(n as u64, Relaxed);
+        }
+    }
+    /// A file's sync, counted, and a wait of the stream's own unless inside a [`stage`]; timed when the profile is on.
+    pub(super) fn sync(f: &std::fs::File) -> std::io::Result<()> {
+        let here = HERE.get();
+        if here == 0 {
+            return f.sync_all();
+        }
+        COUNTS[1].fetch_add(1, Relaxed);
+        if here == 1 && STAGED.get() == 0 {
+            COUNTS[2].fetch_add(1, Relaxed);
+        }
+        let t = super::prof::on().then(std::time::Instant::now);
+        let done = f.sync_all();
+        if let Some(t) = t {
+            SYNC_NS.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
+        }
+        done
+    }
+    /// `write`, whose syncs (here and on threads beside it, joined in it) the stream's thread waits for as one.
+    pub(super) fn stage<T>(write: impl FnOnce() -> T) -> T {
+        if HERE.get() != 1 {
+            return write();
+        }
+        let before = COUNTS[1].load(Relaxed);
+        STAGED.set(STAGED.get() + 1);
+        let done = write();
+        STAGED.set(STAGED.get() - 1);
+        if STAGED.get() == 0 && COUNTS[1].load(Relaxed) > before {
+            COUNTS[2].fetch_add(1, Relaxed);
+        }
+        done
+    }
+    pub(super) fn part() {
+        if HERE.get() == 1 {
+            COUNTS[3].fetch_add(1, Relaxed);
+        }
+    }
+    /// `[bytes, syncs, waits, parts]` so far, and the syncs' time (ns, profile only).
+    pub fn totals() -> ([u64; 4], u64) {
+        (
+            std::array::from_fn(|i| COUNTS[i].load(Relaxed)),
+            SYNC_NS.load(Relaxed),
+        )
+    }
+}
+
 mod prof {
     // A profile is wall time on the writer's thread, off unless asked for (K7 allows it, as in `measures`).
     #![allow(clippy::disallowed_methods)]
@@ -144,6 +222,8 @@ mod prof {
     ];
     struct P {
         ns: [u128; 13],
+        /// Per stage: bytes written, files synced, sync waits and the syncs' time (ns), from [`super::io`].
+        io: [[u64; 4]; 13],
         records: u64,
         parts: u64,
         whole: u64,
@@ -152,7 +232,7 @@ mod prof {
         causes: std::collections::BTreeMap<&'static str, u64>,
     }
     thread_local!(static P_: RefCell<Option<P>> = const { RefCell::new(None) });
-    fn on() -> bool {
+    pub(super) fn on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ON.get_or_init(|| std::env::var("STREAM_PROFILE").is_ok_and(|v| v == "1"))
     }
@@ -165,20 +245,26 @@ mod prof {
             })
             .unwrap_or(0)
     }
-    pub struct Lap(Option<Instant>);
+    pub struct Lap(Option<(Instant, [u64; 4])>);
+    fn io_now() -> [u64; 4] {
+        let ([bytes, syncs, waits, _], ns) = super::io::totals();
+        [bytes, syncs, waits, ns]
+    }
     impl Lap {
         pub fn start() -> Lap {
-            Lap(on().then(Instant::now))
+            Lap(on().then(|| (Instant::now(), io_now())))
         }
         pub fn mark(&mut self, stage: usize) {
-            let Some(t) = self.0 else { return };
+            let Some((t, io0)) = self.0 else { return };
             let now = Instant::now();
             let d = now.duration_since(t).as_nanos();
-            self.0 = Some(now);
+            let io1 = io_now();
+            self.0 = Some((now, io1));
             P_.with(|p| {
                 let mut p = p.borrow_mut();
                 let p = p.get_or_insert_with(|| P {
                     ns: [0; 13],
+                    io: [[0; 4]; 13],
                     records: 0,
                     parts: 0,
                     whole: 0,
@@ -187,6 +273,9 @@ mod prof {
                     causes: Default::default(),
                 });
                 p.ns[stage] += d;
+                for (k, v) in p.io[stage].iter_mut().enumerate() {
+                    *v += io1[k].saturating_sub(io0[k]);
+                }
             });
         }
     }
@@ -220,6 +309,14 @@ mod prof {
             );
             for (i, n) in NAMES.iter().enumerate() { line += &format!(" {n} {:.0}ms", ms(p.ns[i])); }
             line += &format!(" structural-by {:?}", p.causes);
+            // Per stage that wrote: bytes, files synced, waits, and the syncs' summed time (beside threads overlap).
+            line += " io";
+            for (i, n) in NAMES.iter().enumerate() {
+                let [b, s, w, t] = p.io[i];
+                if b + s + w > 0 {
+                    line += &format!(" {n} {b}B {s}syncs {w}waits {:.0}ms", t as f64 / 1e6);
+                }
+            }
             eprintln!("{line}");
             *g = None;
         });
@@ -329,8 +426,9 @@ pub fn write_text(path: &Path, bytes: &[u8]) -> R<()> {
 fn whole_via(path: &Path, tmp: &Path, bytes: &[u8]) -> R<()> {
     let mut f = fs::File::create(tmp).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
+    self::io::wrote(bytes.len());
     // Synced before the rename (B1-7): after a power cut the name holds the old bytes or the new, never a short file.
-    f.sync_all().map_err(io)?;
+    self::io::sync(&f).map_err(io)?;
     drop(f);
     fs::rename(tmp, path).map_err(io)
 }
@@ -1436,7 +1534,11 @@ fn beside<'scope, T: Send + 'scope>(
     if tests::NO_THREADS.get() {
         return Beside::Here(write());
     }
-    match std::thread::Builder::new().spawn_scoped(s, write) {
+    let kind = self::io::kind();
+    match std::thread::Builder::new().spawn_scoped(s, move || {
+        self::io::set_kind(kind);
+        write()
+    }) {
         Ok(h) => Beside::Thread(h),
         Err(_) => Beside::Here(write()),
     }
@@ -1473,7 +1575,11 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     let written =
-        fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all()));
+        fs::File::create(&tmp).and_then(|mut f| {
+            f.write_all(bytes)?;
+            self::io::wrote(bytes.len());
+            self::io::sync(&f)
+        });
     if let Err(e) = written {
         let _ = fs::remove_file(&tmp);
         return Err(io(e));
@@ -3995,7 +4101,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         // The part's objects are named by their hashes and wait on nothing but their own bytes: each is written and
         // synced beside the others, so a part waits on one sync there, not four (on a busy disk the writer fell a
         // part behind each period, and the page held after each activity accept).
-        self.put_all(&[&chunk, &bytes, &text, &manifest])?;
+        self::io::stage(|| self.put_all(&[&chunk, &bytes, &text, &manifest]))?;
         lap.mark(4);
         self.player.play(&bytes)?;
         lap.mark(6);
@@ -4015,7 +4121,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             Some(list) => purge_text(&text, list)?,
             None => None,
         };
-        let (part_written, text_written) = std::thread::scope(|s| {
+        let (part_written, text_written) = self::io::stage(|| std::thread::scope(|s| {
             let text = beside(s, || match &derived {
                 Some(purged) => derive(&text_file, purged),
                 None => immutable(&text_file, &text),
@@ -4024,7 +4130,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 immutable(&part_file, &bytes),
                 text.join("the text file's writer panicked"),
             )
-        });
+        }));
         part_written?;
         text_written?;
         if let (Some(store), Some(list)) = (&self.text, list) {
@@ -4065,6 +4171,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.delete_some(DELETES_PER_PART);
         lap.mark(9);
         prof::count(0, 1, 0);
+        self::io::part();
         Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {

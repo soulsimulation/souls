@@ -4480,6 +4480,7 @@ fn serve(args: &[String]) -> R<()> {
     std::thread::Builder::new()
         .name("public-stream".into())
         .spawn(move || {
+            view_out::io::count_here();
             let result = (|| -> Result<(), Refusal> {
                 let recover = || -> Result<_, Refusal> {
                     let start = view_out::PublicStart {
