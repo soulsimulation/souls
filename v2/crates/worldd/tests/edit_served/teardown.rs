@@ -48,11 +48,6 @@ fn crew_of_all(w: &Seeded, hands: &mut [Hand], a: usize, others: &[usize]) -> Id
     made
 }
 
-pub(super) fn done(got: Got, what: &str) {
-    println!("{what}: {got:?}");
-    assert_eq!(got.kind, 1, "{what}");
-}
-
 fn refused_as(got: &Got, name: &str, what: &str) {
     println!("{what}: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, name), "{what}");
