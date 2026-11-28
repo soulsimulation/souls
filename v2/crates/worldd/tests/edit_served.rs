@@ -3042,7 +3042,11 @@ fn a2_parts_rest_at_the_grounds_height() {
     let s = serve_with(&w, &socket, None);
     s.line("listening ", 120);
     let im = import_eden::load(&facts).unwrap();
-    let (bay, fa) = (im.nodes["site-bay"], im.nodes["yard-frame-1"]);
+    let (bay, fa, fb) = (
+        im.nodes["site-bay"],
+        im.nodes["yard-frame-1"],
+        im.nodes["yard-frame-2"],
+    );
     let g = w.ground;
     {
         let (copy, _) = served_copy(&w);
@@ -3118,7 +3122,7 @@ fn a2_parts_rest_at_the_grounds_height() {
     let ends = frame_ends;
     // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` retires (it leaves
     // the world): Soul `ab.1` keeps the hold alone (a seated frame's holder may not just let go).
-    let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
+    let seat = |hands: &mut [Hand], ab: (usize, usize), fa: Id, what: &str| {
         let (p, q) = frame_ends_of(&w, fa);
         println!(
             "{what}: frame A at {:?}, its ends {p:?} {q:?}",
@@ -3161,7 +3165,7 @@ fn a2_parts_rest_at_the_grounds_height() {
     };
 
     // A lone holder's lay-down.
-    let c = seat(&mut hands, (0, 1), "frame A in");
+    let c = seat(&mut hands, (0, 1), fa, "frame A in");
     one(
         &mut hands,
         1,
@@ -3176,28 +3180,8 @@ fn a2_parts_rest_at_the_grounds_height() {
     on_ground("laid down beside the bay", mid);
     assert_eq!(hands[1].act("activity:leave", c, BTreeMap::new()).kind, 1);
 
-    // A retiring last holder out of reach: laid flat where it stands.
-    seat(&mut hands, (1, 2), "frame A in again");
-    one(
-        &mut hands,
-        2,
-        v3(ua.x + 2_000_000, 0, ua.z),
-        "Soul 3 2 m off",
-    );
-    hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
-    let got = socket_end(&mut hands[2].s);
-    assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
-    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
-    assert!(
-        why.contains(&(fa, "souls:holder-left-flat".into())),
-        "{why:?}"
-    );
-    let (_, mid, lying) = rest_of(&w, fa, 1_219);
-    assert!(lying, "laid flat");
-    on_ground("laid flat where it stood", mid);
-
-    // With Soul 6 standing where it would lie: left standing on its base.
-    seat(&mut hands, (3, 4), "frame A in a third time");
+    // Frame B (frame A lies beside the bay now), with Soul 6 standing where it would lie: left standing on its base.
+    seat(&mut hands, (3, 4), fb, "frame B in");
     one(
         &mut hands,
         5,
@@ -3222,10 +3206,10 @@ fn a2_parts_rest_at_the_grounds_height() {
     );
     let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
     assert!(
-        why.contains(&(fa, "souls:holder-left-standing".into())),
+        why.contains(&(fb, "souls:holder-left-standing".into())),
         "{why:?}"
     );
-    let (base, _, lying) = rest_of(&w, fa, 1_219);
+    let (base, _, lying) = rest_of(&w, fb, 1_219);
     println!(
         "left standing: its base {} mm above the raised ground",
         (base - RAISE) / 1000
@@ -3235,6 +3219,31 @@ fn a2_parts_rest_at_the_grounds_height() {
         (base - RAISE).abs() <= 1_000,
         "on its base, with no jump: {base} µm"
     );
+
+    // A retiring last holder out of reach: frame B laid flat where it stands.
+    seat(
+        &mut hands,
+        (1, 2),
+        fb,
+        "frame B in again, from where it stands",
+    );
+    one(
+        &mut hands,
+        2,
+        v3(ua.x + 2_000_000, 0, ua.z),
+        "Soul 3 2 m off",
+    );
+    hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[2].s);
+    assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
+    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
+    assert!(
+        why.contains(&(fb, "souls:holder-left-flat".into())),
+        "{why:?}"
+    );
+    let (_, mid, lying) = rest_of(&w, fb, 1_219);
+    assert!(lying, "laid flat");
+    on_ground("laid flat where it stood", mid);
 }
 
 /// B20 A1 and A2 (#3356): a world served from N2's test world with its yard and a bay at the site reads the
