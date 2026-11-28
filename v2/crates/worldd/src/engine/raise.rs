@@ -149,9 +149,31 @@ impl Engine {
             .handle(activity)
             .and_then(|h| tree.node(h))
             .and_then(|n| n.parent());
+        // A lowering with no part named lowers the one its crew holds: the standing part its node is under, else the one
+        // in its slot.
+        let holds = || {
+            let under = held.filter(|p| {
+                tree.handle(*p)
+                    .and_then(|h| tree.node(h))
+                    .is_some_and(|n| self.raise_specs.contains_key(plain(n.kind().as_str())))
+            });
+            let carried = || {
+                tree.handle(activity)
+                    .and_then(|h| tree.children(h))
+                    .and_then(|c| c.first().copied())
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.id())
+            };
+            under.or_else(carried).ok_or_else(|| {
+                refusal(
+                    "raise-needs-a-part",
+                    format!("{} holds no part; next: name the part (part lower <crew> <part>)", show(activity)),
+                )
+            })
+        };
         let part = match (a.params.contains_key(&1), up) {
             (true, _) => param_id(&a.params, 1, "raise-needs-a-part")?,
-            (false, false) => held.ok_or_else(|| refusal("raise-needs-a-part", "parameter 1"))?,
+            (false, false) => holds()?,
             (false, true) => return Err(refusal("raise-needs-a-part", "parameter 1: a part")),
         };
         let node = tree

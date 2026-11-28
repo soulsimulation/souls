@@ -3507,8 +3507,9 @@ impl Engine {
         Ok(())
     }
 
-    /// A retiring holder's set-down `r` whose walkers' maps went stale before its commit (its own body left meanwhile,
-    /// 0.135 A2): checked again, at most [`RETRIES`] times; `false` when it has been, and it is refused.
+    /// A part `r` (not a take) whose walkers' maps went stale before its commit (0.135 A2: a retiring holder's body
+    /// left meanwhile; #5067: a raise's or a seating's end while bodies walk): prepared again from the world as it is
+    /// then, at most [`RETRIES`] times; `false` when it has been, and it is refused.
     pub fn retry(&mut self, r: crate::assembly::Ready) -> bool {
         let n = self.retried.entry(r.activity).or_insert(0);
         *n += 1;
@@ -3552,6 +3553,8 @@ impl Engine {
         now: Micros,
         live: &Tree,
     ) {
+        // Written or refused for good: its retries of stale maps are over.
+        self.retried.remove(&r.activity);
         // #5067: a raise's or a lowering's own commits.
         if self.raising.contains_key(&r.activity)
             && matches!(
