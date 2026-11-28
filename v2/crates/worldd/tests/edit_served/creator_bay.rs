@@ -12,10 +12,13 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
     std::fs::create_dir_all(&entries).unwrap();
-    for f in std::fs::read_dir(root.join("construction")).unwrap() {
-        let p = f.unwrap().path();
-        if p.extension().is_some_and(|x| x == "json") {
-            std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
+    let fx = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sim/src/structure/fixtures");
+    for dir in [root.join("construction"), fx.clone()] {
+        for f in std::fs::read_dir(dir).unwrap() {
+            let p = f.unwrap().path();
+            if p.extension().is_some_and(|x| x == "json") {
+                std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
+            }
         }
     }
     std::fs::copy(
@@ -23,7 +26,7 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
         entries.join("humanoid.json"),
     )
     .unwrap();
-    let text = std::fs::read_to_string(root.join("construction/deck_bay.json")).unwrap();
+    let text = std::fs::read_to_string(if std::env::var_os("CPJ_FIXTURE").is_some() { fx.join("test_deck_bay.json") } else { root.join("construction/deck_bay.json") }).unwrap();
     let kind = replica::kinds::entry::entry_to_kind(&text).unwrap();
     let mut kinds = replica::kinds::Kinds::default();
     kinds.load(&[("deck_bay", kind.as_str())]);
@@ -33,7 +36,7 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
         .find_map(|k| {
             kinds
                 .get(&k)
-                .filter(|d| d.name.as_str().starts_with("mars:deck_bay@"))
+                .filter(|d| d.name.as_str().starts_with(if std::env::var_os("CPJ_FIXTURE").is_some() { "mars:test_deck_bay@" } else { "mars:deck_bay@" }))
         })
         .expect("the deck bay's kind");
     let slots: Vec<(u64, String, [i64; 3])> = def
@@ -55,12 +58,17 @@ fn bay_only(d: &Path) -> (String, BTreeMap<String, u64>) {
     let num = |v: i64| json::Value::Int(i128::from(v));
     let ints = |v: &[i64]| json::Value::Arr(v.iter().map(|&x| num(x)).collect());
     let refs = [
-        ("testworld-deck-bay@1", "mars:deck_bay"),
+        ("testworld-deck-bay@1", if std::env::var_os("CPJ_FIXTURE").is_some() { "mars:test_deck_bay" } else { "mars:deck_bay" }),
         ("testworld-frame-12ft@1", "mars:rack_upright_12ft"),
         ("testworld-deck-beam@1", "mars:deck_beam"),
         ("testworld-two-by-four@1", "mars:two_by_four"),
         ("testworld-plywood-sheet@1", "mars:plywood_sheet"),
         ("testworld-stair-flight@1", "mars:stair_flight"),
+        ("testworld-tf@1", "mars:test_deck_frame"),
+        ("testworld-tb@1", "mars:test_deck_beam"),
+        ("testworld-tj@1", "mars:test_two_by_four"),
+        ("testworld-tp@1", "mars:test_plywood"),
+        ("testworld-ts@1", "mars:test_stair_flight"),
     ];
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     for (k, v) in top.iter_mut() {
@@ -169,7 +177,18 @@ impl Site {
             .kinds
             .keys()
             .filter_map(|k| {
-                let plain = replica::world_model::plain(k).to_owned();
+                let mut plain = replica::world_model::plain(k).to_owned();
+                if std::env::var_os("CPJ_FIXTURE").is_some() {
+                    plain = match plain.as_str() {
+                        "mars:test_deck_frame" => "mars:rack_upright_12ft",
+                        "mars:test_deck_beam" => "mars:deck_beam",
+                        "mars:test_two_by_four" => "mars:two_by_four",
+                        "mars:test_plywood" => "mars:plywood_sheet",
+                        "mars:test_stair_flight" => "mars:stair_flight",
+                        _ => "-",
+                    }
+                    .to_owned();
+                }
                 BUILT
                     .iter()
                     .any(|(b, _)| *b == plain)
