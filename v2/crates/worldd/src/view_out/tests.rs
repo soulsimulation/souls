@@ -5256,7 +5256,7 @@ fn i5282_a_fixed_seed_writes_the_parts_main_wrote() {
 }
 
 /// The SHA-256 of [`i5282_run`]'s files on main (e72df671e), before #5282.
-const I5282_MAIN: &str = "unset";
+const I5282_MAIN: &str = "5814de01682d80159cd868fc758fb4a33f7601dfd335c363073a7102bb31dcf1";
 
 fn i5282_run() -> (Vec<u8>, u64, u64) {
     let h = header();
