@@ -5,9 +5,11 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageRecipe } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageRecipe, nativePageBodyPackage } from './native-page-fixture.mjs';
+import { fileURLToPath } from 'node:url';
+import { oldPageBodyArgs } from '../playtest/arena/new-engine/old-page.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
-import { runOwnedCommand, addresses, WORLD } from '../playtest/arena/new-engine/world.mjs';
+import { runOwnedCommand, runArgs, addresses, WORLD } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(t) {
@@ -77,4 +79,25 @@ test('owned group cleanup kills descendants even after its direct leader has exi
     await stopOwnedChild(leader, { processGroup: true });
     assert.throws(() => process.kill(-leader.pid, 0), { code: 'ESRCH' });
   } finally { try { process.kill(-leader.pid, 'SIGKILL'); } catch {} }
+});
+
+
+test('the existing page body option forwards one catalogue to native seed and launcher, with unchanged defaults', () => {
+  const dir=resolve(parent,'declared-bodies'),option=oldPageBodyArgs(dir);
+  assert.deepEqual(option,{world:{bodies:join(dir,'bodies.json')},launcher:['--bodies',dir]});
+  assert.deepEqual(runArgs({dir:'owned',port:19120,facts:'facts.json',...option.world}),['--port','19120','--dir','owned','--facts','facts.json','--bodies',join(dir,'bodies.json')]);
+  assert.deepEqual(oldPageBodyArgs(null),{world:{},launcher:[]});
+  assert.deepEqual(runArgs({dir:'owned',port:19120,facts:'facts.json'}),['--port','19120','--dir','owned','--facts','facts.json']);
+});
+test('body receipt evaluates the selected clean product normal consumer, not an ambient fallback', t => {
+  const f=fixture(t);
+  for(const file of ['v2/web/body-assets.ts','mars/viewer/engine/bodies/models.ts','mars/viewer/engine/bodies/creatures.ts'])f.write(file,readFileSync(fileURLToPath(new URL('../../'+file,import.meta.url))));
+  execFileSync('git',['-C',f.root,'add','.']);execFileSync('git',['-C',f.root,'-c','user.name=Fixture','-c','user.email=fixture@example.com','commit','-qm','consumer']);
+  mkdirSync(join(f.root,'.local/body-package'));
+  assert.throws(()=>nativePageBodyPackage(f.root,'.local/body-package'),/ENOENT/,'selected real consumer refuses a missing manifest');
+  f.write('.local/body-package/body-assets.json',JSON.stringify({format:'wrong',files:[]}));
+  assert.throws(()=>nativePageBodyPackage(f.root,'.local/body-package'),/body.assets-manifest/,'normal consumer owns admission refusal');
+  assert.throws(()=>nativePageBodyPackage(f.root,'.local/body-package',{consumer:{}}),/body-consumer/,'consumer receipt mismatch refuses before evaluation');
+  f.write('v2/web/body-assets.ts',readFileSync(join(f.root,'v2/web/body-assets.ts'),'utf8')+'\n// drift');
+  assert.throws(()=>nativePageBodyPackage(f.root,'.local/body-package'),/body-consumer/,'changed consumer cannot be silently reused from module cache');
 });

@@ -81,11 +81,11 @@ export function addresses(port, host = '127.0.0.1') {
 }
 
 /** run.sh's arguments for a world folder, a page port and a facts file. */
-export const runArgs = ({ dir, port, facts }) => ['--port', String(port), '--dir', dir, ...(facts ? ['--facts', facts] : [])];
+export const runArgs = ({ dir, port, facts, bodies }) => ['--port', String(port), '--dir', dir, ...(facts ? ['--facts', facts] : []), ...(bodies ? ['--bodies', resolve(bodies)] : [])];
 
 /** Starts run.sh and waits for its `ready` line. The world's folder is `dir` (run.sh's --dir, under an ignored .local/).
  *  `template` names the genesis; `facts` an already exported one; neither seeds N2's test world. */
-export async function startWorld({ template = null, facts = null, dir, port = null, readyMs = 900_000, log = null, env = {}, history = false, checkout = REPO_ROOT, onSpawn, onCommand, signal } = {}) {
+export async function startWorld({ template = null, facts = null, bodies = null, dir, port = null, readyMs = 900_000, log = null, env = {}, history = false, checkout = REPO_ROOT, onSpawn, onCommand, signal } = {}) {
   if (!dir) throw new Error('startWorld: dir is required');
   const until = Date.now() + readyMs;
   const remaining = () => { signal?.throwIfAborted(); const ms = until - Date.now(); if (ms <= 0) throw Error('startWorld: startup timeout'); return ms; };
@@ -109,7 +109,7 @@ export async function startWorld({ template = null, facts = null, dir, port = nu
   // run.sh in its own process group: stopWorld signals the group, so nothing it started outlives the run.
   remaining();
   let child, out;
-  try { out = openSync(log ?? join(dir, 'run.log'), 'a'); child = spawn('bash', [join(checkout, 'v2/tools/dev/run.sh'), ...runArgs({ dir: runDir, port, facts })], { cwd: checkout, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', out], detached: true }); } finally { if (out !== undefined) closeSync(out); }
+  try { out = openSync(log ?? join(dir, 'run.log'), 'a'); child = spawn('bash', [join(checkout, 'v2/tools/dev/run.sh'), ...runArgs({ dir: runDir, port, facts, bodies })], { cwd: checkout, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', out], detached: true }); } finally { if (out !== undefined) closeSync(out); }
   if (link) child.on('exit', () => { try { unlinkSync(link); } catch { /* gone */ } });
   let spawnError; child.once('error', e => { spawnError = e; });
   try { onSpawn?.(child, { processGroup: true }); } catch (error) { await stopWorld({ pid: child.pid, graceMs: 1000 }); throw error; }
