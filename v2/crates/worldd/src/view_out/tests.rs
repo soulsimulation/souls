@@ -5335,6 +5335,7 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                     .write(format!("words of {s} at {record}").as_bytes(), audience, node)
                     .unwrap();
                 effects.push(change(seq, node, audience, set(node, 5, said.to_value())));
+                seq += 1;
                 live[s as usize] = true;
             } else {
                 let audience = if s % 5 == 4 { Audience::Of(node) } else { everyone };
