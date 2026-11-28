@@ -415,7 +415,7 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let got = site.edit(1, ops).await;
     assert_eq!(got.kind, 1, "the built bay is accepted: {got:?}");
     let part = |k: usize| got.names[&(k as u64 + 1)];
-    let (frame, sheet, flight) = (part(0), part(11), part(13));
+    let (frame, sheet, _flight) = (part(0), part(11), part(13));
     let deck = floors_of(&site.w, sheet);
     let deck = deck
         .iter()
