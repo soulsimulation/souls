@@ -14,3 +14,19 @@ test('two-hand transport follows recorded native pose until persisted arrival, t
  delete frame.body.state.grip;a.drawn.get('load').to.p.set(3,1.8,2);frame.load.roll=0;layer.transportPoses(frame,['body']);assert.equal(a.overrideRoll.has('load'),false);assert.equal(obj.rotation.z,0,'as the entity is');
  layer.dispose();
 });
+
+test('full native world quaternion wins over legacy ride/easing for both actual instance matrices and object roots',async()=>{
+ const index=new URL('./gen-mesh/index.ts',import.meta.url).href,h=registerHooks({load(url,c,next){return url===index?{format:'module',shortCircuit:true,source:"export {meshFor} from './registry.ts';"}:next(url,c);}});
+ const {WorldEntityLayer}=await import('./WorldEntityLayer.ts').finally(()=>h.deregister());
+ for(const instanced of [false,true]){const layer=new WorldEntityLayer(p=>p);layer.active=true;const a=layer as any,obj=new THREE.Group(),zero=new THREE.Vector3();a.thingsGroup.add(obj);
+  a.model={entities:new Map([['load',{id:'load',in:{parent:'world'}}]]),resolvedDef:()=>({}),ground:()=>({extent:[0,0,0,0]})};
+  const proto=new THREE.Group();proto.add(new THREE.Mesh(new THREE.BoxGeometry(1,2,3),new THREE.MeshStandardMaterial()));if(instanced)a.instancer.ensure('native',proto);
+  a.drawn.set('load',{obj,from:{p:zero,s:1},to:{p:new THREE.Vector3(99,0,99),s:1},t0:0,dur:10,defHash:'load',world:true,settled:true,...(instanced?{inst:'native'}:{})});
+  a.overrides.set('load',new THREE.Vector3(77,0,77));a.overrideYaw.set('load',.9);
+  for(const angle of [0,.8,1.5]){const q=new THREE.Quaternion().setFromEuler(new THREE.Euler(.4,angle,-.7,'XYZ')),p:[number,number,number]=[1,.8,2];layer.nativeTransportPoses({load:{p,q:[q.w,q.x,q.y,q.z]}});layer.update(.016,31000+angle*1000);
+   const matrix=instanced?(()=>{const m=new THREE.Matrix4(),pool=a.instancer.pools.get('native');pool.meshes[0].getMatrixAt(pool.slots.get('load'),m);return m;})():(obj.updateMatrixWorld(true),obj.matrixWorld);
+   const expected=new THREE.Matrix4().compose(new THREE.Vector3(...p),q,new THREE.Vector3(1,1,1));assert(Math.max(...matrix.elements.map((n,i)=>Math.abs(n-expected.elements[i])))<1e-6,`${instanced?'instance':'root'} retains all quaternion axes`);
+  }
+  layer.nativeTransportPoses({});a.overrides.clear();a.overrideYaw.clear();a.drawn.get('load').to.p.set(5,0,6);a.drawn.get('load').from.p.set(5,0,6);layer.update(.016,51000);assert.deepEqual(obj.position.toArray(),[5,0,6],'removing native observation releases ownership');layer.dispose();
+ }
+});

@@ -1492,6 +1492,23 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
+        // A take of a thing in another body's hand is refused before any step, naming the holder (#5275): nothing
+        // walks or reaches for it. Where the thing is counts this tick's entries (a take earlier in the tick). Its
+        // effect asks again at contact (`amounts`), as every take into a hand does.
+        for e in &effects {
+            if let form_runner::Effect::Take { what } = e {
+                let thing = match what {
+                    form_runner::Of::This => node,
+                    form_runner::Of::Node(id) => *id,
+                };
+                let at = amounts::View {
+                    tree: w.tree,
+                    out: &self.out,
+                }
+                .at(thing);
+                hands::not_held_by_another(w.controller, at, body, thing)?;
+            }
+        }
         let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
@@ -1913,6 +1930,7 @@ impl Forms {
                     _ => fr.body,
                 },
                 hands: &hands,
+                controller,
                 node: fr.node,
                 reserved: &reserved,
                 now: at,
