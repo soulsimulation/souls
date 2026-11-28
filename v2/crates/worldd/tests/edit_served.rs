@@ -6437,22 +6437,22 @@ fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
     );
 }
 
-/// 0.135 A3 (#3342's X17, narrowed): four Souls build one rack bay from the yard and take it down, each step its own
-/// intent on its own gateway connection, in a served world (N2's test world, a bay at the build site, the construction
-/// entries). A body plays in one activity at a time, and a crew of two starts it.
+/// 0.135 A3 (#3342's X17, narrowed), under the two-holder rule (N4 item 5): six Souls build one rack bay from the yard
+/// and take it down, each step its own intent on its own gateway connection, in a served world (N2's test world, a
+/// bay at the build site, the construction entries). A body plays in one activity at a time, and a crew of two starts
+/// it.
 ///
 /// - Build: crew A (Souls 1, 2) takes frame A off the stand, carries it 25 m and seats it in `upright_a`; crew B
-///   (Souls 1, 3) does frame B into `upright_b`, each frame then held by one of its crew. **The change of crew**, while
-///   frame A is held in its slot: Soul 4 takes Soul 2's place as its holder (a hold crew of Souls 4 and 1 on the
-///   frame, Soul 1 goes, then Soul 2 leaves crew A). Crew C (Souls 1, 2) seats beam 1 in `beam_low_l` and beam 2 in
-///   `beam_low_r`, each joined to both frames. Then every holder lets go: the bay stands on its joints, nobody holds it.
-/// - Take down, in reverse: two hold crews take the frames again; crew D (Souls 2, 4) takes the beams out, `beam_low_r`
-///   first, and lays each where it lay in the yard; then a crew of two takes each frame out (frame B, then frame A)
-///   and stands it back in its slot on the stand.
+///   (Souls 3, 4) does frame B into `upright_b`; each crew of two stays to hold its frame (a 12 ft frame needs two until
+///   beams brace it). **The change of crew**, while frame A is held in its slot: a new crew of two (Souls 5, 6) on the
+///   frame before the old two leave. Crew C (Souls 1, 2) seats beam 1 in `beam_low_l` and beam 2 in `beam_low_r`,
+///   each joined to both frames. Then every holder lets go: the bay stands on its joints, nobody holds it.
+/// - Take down, in reverse: two hold each frame again (Souls 3, 4 on frame A and Souls 5, 6 on frame B, behind its
+///   posts) while crew D (Souls 1, 2) takes the beams out, `beam_low_r` first, and lays each where it lay in the yard;
+///   then each hold crew takes its frame out (frame B, then frame A) and stands it back in its slot on the stand.
 /// - Every part ends where it started, under the same id, and every node of the world as built is still there. The
 ///   checks read the world as its log replays from the start, so the history plays back.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "N4 item 5: rewritten for six Souls and two holders; the build passes on the farm; the take-down's walk of frame B's hold crew to behind its posts stops 0.7 m short (to be finished)"]
 async fn a3_four_souls_build_a_bay_and_take_it_down() {
     const H: i64 = 1_200_000;
     let d = scratch("a3bay");
