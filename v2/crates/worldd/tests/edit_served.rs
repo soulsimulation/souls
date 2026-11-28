@@ -7428,7 +7428,13 @@ async fn walk_two(
         a.send("eden:walk", s.g, to_point(pa)).await;
         b.send("eden:walk", s.g, to_point(pb)).await;
         let (x, y) = (a.end().await, b.end().await);
-        assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+        assert_eq!(
+            (x.kind, y.kind),
+            (1, 1),
+            "{what}: sent to {pa:?} and {pb:?}, at {:?} and {:?}: {x:?} {y:?}",
+            body_at(s.w, body_of(s.w, a.soul)),
+            body_at(s.w, body_of(s.w, b.soul))
+        );
     }
 }
 
