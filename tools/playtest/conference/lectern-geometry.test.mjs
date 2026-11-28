@@ -12,6 +12,7 @@ import {hashKinds} from '../../entry/format.mjs';
 import {provenCases} from '../../entry/prove.mjs';
 import {chunkOf,TICK_US} from '../../../apps/web/src/v2-engine/takes.ts';
 import {TakePeople} from '../../../mars/viewer/app/engine-view/take-replay.ts';
+import {idPhase} from '../../../mars/viewer/app/engine-view/activity-poses.ts';
 
 const entry=JSON.parse(await readFile(new URL('../../../content/kinds/hall/lecture.json',import.meta.url),'utf8'));
 const rigDir=process.env.HUMAN_RIG_DIR??fileURLToPath(new URL('../../../mars/viewer/public/modular/environment/',import.meta.url));
@@ -36,7 +37,6 @@ test('the current entry advances its content reference without editing an immuta
 
 async function template(name){
   const wire=CHARACTER_WIRE[name],loader=new GLTFLoader();
-  loader.register(()=>({name:'lectern-test-material',loadMaterial:async()=>new THREE.MeshStandardMaterial()}));
   const load=async(file,sha)=>{const bytes=await readFile(rigDir+'/'+file);assert.equal(createHash('sha256').update(bytes).digest('hex'),sha,'production asset must match CHARACTER_WIRE');return loader.parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');};
   const mesh=await load(wire.mesh,wire.meshSHA256),clips=await load(wire.clips,CHARACTER_CLIPS[wire.clips].sha256);mesh.animations=clips.animations;return templateFromGltf(name,mesh);
 }
@@ -80,6 +80,58 @@ test('representative production shoes clear the lectern base and stay over the a
     assert.equal(maxBodyInside,0,'standing/story skin clears all authored wooden parts');
     t.diagnostic(JSON.stringify({name,footCount,oldInside,newInside,minRear,minSide,maxBodyInside}));
     }finally{views.clear();}
+  });}finally{setHumanGround(null);}
+});
+
+// A completed ordinary tell_story lasts4s. Keep its observed return phase explicit while the
+// public fixture uses synthetic identities; no recorded Soul/body identifier belongs in a test.
+// The production casual fit supplies its normal .9549596 scale; no model/pose override is used.
+const STORY_END=4.8,STORY_END_PHASE=.07647228240966797;
+function storyReturnTake(id){
+  const epoch=1000,at=s=>(epoch+s)*1e6,root=metre(entry.slots.lectern.at_mm),p=[-root[0]*1000,root[1]*1000,(4-root[2])*1000];
+  return chunkOf([{entity:id,soul:'synthetic-story-presenter',name:'Presenter',heading:-Math.PI/2,
+    standing:[{at:at(0),heading:-Math.PI/2,from:-Math.PI/2}],samples:[{at:at(0),p},{at:at(6),p}],
+    gestures:[{start:at(.8),end:at(STORY_END),activity:'tell-story'}]}],epoch*1e6/TICK_US,{rulesVersion:'story-return/1',datetime:null},120).take;
+}
+function submittedArmSkin(views,id){
+  const rows=[],root=views.bodyObject(id);root.updateMatrixWorld(true);
+  let draws=0;
+  root.traverse(mesh=>{
+    if(!mesh.isSkinnedMesh||!mesh.userData.bodyDraw)return;
+    assert(mesh.visible,'the measured production body is submitted');draws++;
+    const geometry=mesh.geometry,index=geometry.index,si=geometry.attributes.skinIndex,sw=geometry.attributes.skinWeight;
+    assert(index&&si&&sw,'production draw has indexed, attributed skin');
+    const refs=new Set();for(let n=geometry.drawRange.start;n<Math.min(index.count,geometry.drawRange.start+geometry.drawRange.count);n++)refs.add(index.getX(n));
+    for(const i of refs){
+      let k=0;for(let n=1;n<4;n++)if(sw.getComponent(i,n)>sw.getComponent(i,k))k=n;
+      const bone=mesh.skeleton.bones[si.getComponent(i,k)].name;
+      if(!/^(LowerArm|Wrist|Index|Middle|Ring|Pinky|Thumb)/.test(bone))continue;
+      rows.push({index:i,bone,p:mesh.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(mesh.matrixWorld).toArray()});
+    }
+  });
+  assert.equal(draws,1,'measure the actual merged production bodyDraw');
+  for(const side of ['L','R'])assert(rows.filter(p=>p.bone.endsWith(side)).length>100,'both full hands/forearms have nonempty submitted skin');
+  return rows;
+}
+
+test('immutable story return keeps complete submitted hands and forearms outside the unchanged top',async t=>{
+  setHumanGround(()=>0);
+  try{for(const name of ['casual','punk','woman'])await t.test(name,async()=>{
+    const id='synthetic-story-return-'+name,source=await template(name),take=storyReturnTake(id),people=new TakePeople(take);people.setTemplates([source]);
+    // activityFrame's .23Hz three-phrase clock; an explicit phase, not a searched pose amplitude.
+    const clockEnd=300/23*100+STORY_END_PHASE/.23-idPhase(id)*7;
+    let sampled;const set=people.humans.setFrame.bind(people.humans);people.humans.setFrame=(samples,...args)=>{sampled=samples[0];return set(samples,...args);};
+    let maxInside=0,worst=null;
+    try{for(const age of [0,...Array.from({length:18},(_,i)=>(i+1)*.02),.35]){
+      people.show(STORY_END+age,clockEnd+age);
+      assert.equal(sampled.activity,'idle');assert.equal(sampled.prevActivity,'tell-story');
+      assert(Math.abs(sampled.activityAge-age)<1e-5,'native return age is preserved');
+      assert.deepEqual(sampled.p,[0,.1,4.52],'the authored native root is unchanged');
+      const skin=submittedArmSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
+      if(hits.length>maxInside){maxInside=hits.length;worst={age,point:hits[0]};}
+    }
+    t.diagnostic(JSON.stringify({name,maxInside,worst}));assert.equal(maxInside,0,'every complete story-return hand/forearm draw clears the unchanged tabletop');
+    }finally{people.dispose();}
   });}finally{setHumanGround(null);}
 });
 
