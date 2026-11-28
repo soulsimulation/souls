@@ -236,6 +236,7 @@ texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A re
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.checker-busy` | the world is still checking 8 edits sent before this one: wait for their answers, then send it again |
 | `edit.too-large` | the fields the batch sets come to over 16 MB: split it, or the field has grown as large as it can |
 | `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
 | `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |

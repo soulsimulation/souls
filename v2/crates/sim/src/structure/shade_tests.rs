@@ -257,11 +257,7 @@ impl World {
     }
 
     /// Commits `changes` through the rule (`write_guarded`); a refusal changes nothing.
-    pub(super) fn write(
-        &mut self,
-        node: Id,
-        changes: Vec<Change>,
-    ) -> Result<(), (String, String)> {
+    pub(super) fn write(&mut self, node: Id, changes: Vec<Change>) -> Result<(), (String, String)> {
         self.write_all(vec![(node, changes)])
     }
 
@@ -347,7 +343,12 @@ impl World {
     }
 
     /// A bent raised into `slot` and held by `crew` (a started hold under it, its members linked).
-    pub(super) fn raise(&mut self, k: usize, slot: &str, crew: usize) -> Result<(), (String, String)> {
+    pub(super) fn raise(
+        &mut self,
+        k: usize,
+        slot: &str,
+        crew: usize,
+    ) -> Result<(), (String, String)> {
         let bent = self.bents[k];
         let mut changes = vec![Change::Create {
             node: bent,

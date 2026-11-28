@@ -1014,11 +1014,19 @@ fn with_declared_ways(text: &str, entries: &[(String, String)]) -> R<Option<Stri
             for (k, fl) in w.floors.iter().enumerate() {
                 let [hx, hz] = [fl.size[0] / 2, fl.size[1] / 2];
                 let [x, z] = fl.at;
-                let ring = [[x - hx, z - hz], [x + hx, z - hz], [x + hx, z + hz], [x - hx, z + hz]];
+                let ring = [
+                    [x - hx, z - hz],
+                    [x + hx, z - hz],
+                    [x + hx, z + hz],
+                    [x - hx, z + hz],
+                ];
                 let mut row = vec![
                     ("level".to_owned(), n(k as i64 + 1)),
                     ("y".to_owned(), n(fl.top)),
-                    ("polygon".to_owned(), J::Arr(ring.into_iter().map(pt).collect())),
+                    (
+                        "polygon".to_owned(),
+                        J::Arr(ring.into_iter().map(pt).collect()),
+                    ),
                 ];
                 if fl.while_joined {
                     row.push(("while_joined".to_owned(), J::Bool(true)));
@@ -1045,19 +1053,23 @@ fn with_declared_ways(text: &str, entries: &[(String, String)]) -> R<Option<Stri
                 }
             };
             let mut stairs = Vec::new();
-            let mut row = |kind: &str, path: [[i64; 2]; 2], bottom: i64, top: i64, width: i64, to: i64| {
-                let k = stairs.len();
-                stairs.push(J::Obj(vec![
-                    ("id".to_owned(), J::s(&format!("{id}-{kind}-{k}"))),
-                    ("kind".to_owned(), J::s(kind)),
-                    ("from".to_owned(), n(0)),
-                    ("to".to_owned(), n(to)),
-                    ("path".to_owned(), J::Arr(path.into_iter().map(pt).collect())),
-                    ("width".to_owned(), n(width)),
-                    ("y0".to_owned(), n(bottom)),
-                    ("y1".to_owned(), n(top)),
-                ]));
-            };
+            let mut row =
+                |kind: &str, path: [[i64; 2]; 2], bottom: i64, top: i64, width: i64, to: i64| {
+                    let k = stairs.len();
+                    stairs.push(J::Obj(vec![
+                        ("id".to_owned(), J::s(&format!("{id}-{kind}-{k}"))),
+                        ("kind".to_owned(), J::s(kind)),
+                        ("from".to_owned(), n(0)),
+                        ("to".to_owned(), n(to)),
+                        (
+                            "path".to_owned(),
+                            J::Arr(path.into_iter().map(pt).collect()),
+                        ),
+                        ("width".to_owned(), n(width)),
+                        ("y0".to_owned(), n(bottom)),
+                        ("y1".to_owned(), n(top)),
+                    ]));
+                };
             for s in &w.stairs {
                 let to = level_at(s.top, s.to);
                 row("stairs", [s.from, s.to], s.bottom, s.top, s.width, to);
@@ -1467,10 +1479,15 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
                 ff.insert(F_SURFACES, Value::Array(surfaces));
             }
             // A standing place (racks T6): ground only while a part joined to the thing sits at its height.
-            if need(t, "floors").map(Json::arr).unwrap_or(&[]).iter().any(|fl| {
-                int(fl, "level").ok() == Some(lv)
-                    && matches!(fl.get("while_joined"), Some(Json::Bool(true)))
-            }) {
+            if need(t, "floors")
+                .map(Json::arr)
+                .unwrap_or(&[])
+                .iter()
+                .any(|fl| {
+                    int(fl, "level").ok() == Some(lv)
+                        && matches!(fl.get("while_joined"), Some(Json::Bool(true)))
+                })
+            {
                 ff.insert(F_WHILE_JOINED, Value::Uint(1));
             }
             b.add(

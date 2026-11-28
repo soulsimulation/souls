@@ -18,8 +18,10 @@ use std::fmt::Write;
 /// the spot tables' walk is measured as a body could walk it (`Map::walked`). Of 1,237 answers, 47 route lines differ
 /// only by the new field (none once it is left out) and 12 walks measure 0.5 m to 6.5 m shorter (157.7 m to 151.2 m,
 /// the most); no spot, passage or place to stand changed. With that one walk measure taken out the 47 route lines are
-/// the whole remaining difference (8156e31a...).
-const BEFORE: &str = "fd54ebed7707ebccc38171abe053aca9199f669e6990f3270ae5f601405f88c3";
+/// the whole remaining difference (8156e31a...). Re-pinned by #5256: a walking body climbs (`HANDS | CLIMB`); one walk of
+/// 1,237 answers changed, from a point 6 m up (node 20) to node 18's ground, `None` to 37.586 m; with the walk's mask
+/// back to `HANDS` the hash is fd54ebed... again.
+const BEFORE: &str = "6a62e0d1104b9a436c28b665b95cd8a338f61149b639ee2f8c649260bb3b4ffc";
 
 #[test]
 fn s7_the_planner_answers_the_same_questions_the_same_way() {

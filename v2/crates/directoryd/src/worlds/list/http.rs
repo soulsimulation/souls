@@ -155,6 +155,11 @@ pub fn route(req: &Request, app: &App) -> Answer {
             if app.store.own(&account.account, &grant, None).is_err() {
                 return refuse(503, "store");
             }
+            // Placed (an answer here is a ready world): its tokens file names its creator now, so the creator's page
+            // is given God Mode on arrival (27 Nov: none was until the directory restarted).
+            if let Some(pairing) = &app.pairing {
+                pairing.publish_placed(&ask.name);
+            }
             (200, v, note)
         }
         Err(e) if e.name.starts_with("world-limit") => {

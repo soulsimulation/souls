@@ -1486,18 +1486,26 @@ mod each_step {
         let lay = (ground, slot.0, q);
         let mut rested = carry();
         rested.take_up(0, slot, hands, 2 * M, lay).unwrap();
-        rested.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        rested
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
         let h = rested.hoist.expect("its way back");
         assert_eq!((h.to, h.rest), (slot, lay), "back where it lay");
         let mut seated = carry();
         seated.back = false;
         seated.take_up(0, slot, hands, 2 * M, lay).unwrap();
-        seated.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        seated
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
         let h = seated.hoist.expect("a set-down's track");
         assert_eq!(h.phase, Phase::Release("souls:test"));
         assert_eq!(h.from, slot, "from where the node is");
         assert_eq!((h.to.0.x, h.to.0.z), (slot.0.x, slot.0.z), "straight down");
-        assert_eq!((h.rest.0, h.rest.1.y), (ground, frame().rest), "to rest on the ground");
+        assert_eq!(
+            (h.rest.0, h.rest.1.y),
+            (ground, frame().rest),
+            "to rest on the ground"
+        );
         assert_eq!(h.to.0.y, frame().rest);
     }
 
@@ -1527,8 +1535,12 @@ mod each_step {
         let q = Quat::IDENTITY;
         let slot = (Vec3::new(-60 * M, 100_000, 60 * M), q);
         let hands = (Vec3::new(-60 * M, STAND_LIFT, 60 * M), q);
-        carry.take_up(0, slot, hands, 2 * M, (ground, slot.0, q)).unwrap();
-        carry.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        carry
+            .take_up(0, slot, hands, 2 * M, (ground, slot.0, q))
+            .unwrap();
+        carry
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
         let h = carry.hoist.expect("a set-down's track");
         assert_eq!(h.to.0.y, 0, "its foot onto the floor: {:?}", h.to);
         assert_eq!(h.rest.1.y, 0, "at rest on the floor: {:?}", h.rest);
@@ -1571,12 +1583,21 @@ mod each_step {
         let at = Vec3::new(-60 * M, STAND_LIFT, 60 * M);
         carry.track.push((0, at, Quat::IDENTITY));
         let under = Vec3::new(at.x, 0, at.z);
-        assert_eq!(carry.rests_on(tree, ground, under, Quat::IDENTITY).unwrap(), 0);
-        carry.release(tree, 50_000, ground, None, "souls:test").unwrap();
+        assert_eq!(
+            carry.rests_on(tree, ground, under, Quat::IDENTITY).unwrap(),
+            0
+        );
+        carry
+            .release(tree, 50_000, ground, None, "souls:test")
+            .unwrap();
         let h = carry.hoist.expect("a set-down's track");
         assert_eq!(h.from.0.y, STAND_LIFT, "from where it is held");
         assert_eq!(h.to.0.y, 0, "its foot straight down to the floor");
-        assert_eq!(h.rest.1, Vec3::new(at.x, 0, at.z), "put where the track ends");
+        assert_eq!(
+            h.rest.1,
+            Vec3::new(at.x, 0, at.z),
+            "put where the track ends"
+        );
         // A beam taken where its origin is (its underside, 51 mm under its middle) comes down the same way.
         let beam = super::turning::beam();
         let taken = beam.held_at(Vec3::ZERO, beam.turn).unwrap();
@@ -1584,8 +1605,12 @@ mod each_step {
         assert!((taken.above - 51_000).abs() <= 2, "{}", taken.above);
         carry.load = taken;
         carry.hoist = None;
-        carry.track.push((60_000, Vec3::new(at.x, HEIGHT, at.z), Quat::IDENTITY));
-        carry.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        carry
+            .track
+            .push((60_000, Vec3::new(at.x, HEIGHT, at.z), Quat::IDENTITY));
+        carry
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
         let end = carry.hoist.expect("a track").to.0.y;
         assert!(end.abs() <= 2, "its underside on the floor: {end}");
     }

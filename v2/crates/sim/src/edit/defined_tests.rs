@@ -285,7 +285,7 @@ fn each_check_at_commit_refuses_by_name() {
         r#"{"format":"souls-entry/2","kind":"gene:x","owner":"thing"}"#,
         r#"{"format":"souls-entry/1","kind":"gene:x","owner":"thing","roles":{}}"#,
         r#"{"format":"souls-entry/1","kind":"gene:x","owner":"thing","geometry":{"bounds_mm":[0.5,1,1]}}"#,
-        r#"{"format":"souls-entry/1","kind":"gene:x","owner":"thing","state":{"on":{"n":1,"type":"nonsense"}}}"#,
+        r#"{"format":"souls-entry/1","kind":"gene:x","owner":"thing","state":{"on":{"n":28,"type":"nonsense"}}}"#,
         r#"{"format":"souls-entry/1","kind":"x","owner":"thing"}"#,
     ] {
         assert_eq!(
@@ -313,8 +313,18 @@ fn each_check_at_commit_refuses_by_name() {
             "{ns}"
         );
     }
-    // kind.field-reserved: a state field numbered like one the engine keeps on things (the marks, a tint).
-    for n in [143, 144, 145] {
+    // kind.field-reserved: a state field numbered like one the engine keeps on things (the marks, a tint), or like one
+    // of the import's (27 names the entry a thing borrows), or past a u64.
+    for n in [
+        "143",
+        "144",
+        "145",
+        "27",
+        "1",
+        "0",
+        "-1",
+        "18446744073709551643",
+    ] {
         let r = format!(
             r#"{{"format":"souls-entry/1","kind":"gene:x","owner":"thing","state":{{"hue":{{"n":{n},"type":"int","default":0}}}}}}"#
         );
@@ -679,6 +689,7 @@ fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
             body: room,
             soul: room,
             hands: &[],
+            controller: &crate::controller::Controller::new(),
             node,
             reserved: &[],
             now: 0,

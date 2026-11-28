@@ -502,7 +502,11 @@ export function carryIntents(req, ctx) {
           return [heading(walk(ns, ground, [dest[0] + sz[0] * d, dest[1] + sz[1] * d]), [sz[0] * side, sz[1] * side])];
         }
         const end = ends.ids.includes(me);
-        const along = end ? Math.hypot(...off) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
+        // #5067: an end carrier stops no further from the load's middle than its own place (its grip and 0.35 m) and
+        // END_SPARE more: 50 mm inside its 0.7 m reach of its grip at the slot, so the put is admitted from there.
+        const held = ctx.heldBy?.(req.crew), places = held ? loadOf(kinds[kindOf(held)])?.places : null;
+        const most = end && Array.isArray(places) ? Math.max(...places.map(Math.abs)) + END_SPARE : Infinity;
+        const along = end ? Math.min(Math.hypot(...off), most) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
         return [heading(walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across]), u)];
       }
       if (turnTo !== null) {
@@ -567,6 +571,10 @@ export function goTime(word, now = Date.now()) {
 /** How far outside a bay's bounds a load lined up on its slot stops, µm: within worldd's PUT_REACH (1 m) of the slot,
  *  however short of its goal a walk ends (0.3 m). */
 export const MOUTH_CLEAR = 200_000;
+
+/** How much further than its own place (its grip and 0.35 m) an end carrier carrying into a slot may stand, µm: 0.3 m,
+ *  so 50 mm inside its 0.7 m reach of its grip there (worldd's `part.grip-out-of-reach`). */
+export const END_SPARE = 300_000;
 
 /** The part a crew holds and its half extents as it is held now (its turn in the copy): `ext` [x, up, z], the heights
  *  it spans as carried (`band`), and its half length and half width on the plan. Null when the copy cannot say. */

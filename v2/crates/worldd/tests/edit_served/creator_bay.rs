@@ -240,25 +240,20 @@ async fn a_creators_batch_places_the_whole_deck_bay_joined_as_a_crew_builds_it()
             .collect()
     };
     let frames = BTreeSet::from([part(0), part(1)]);
-    for k in 2..6 {
-        assert_eq!(joined(k), frames, "{} joins both frames", BUILT[k].1);
+    for (k, built) in BUILT.iter().enumerate().take(6).skip(2) {
+        assert_eq!(joined(k), frames, "{} joins both frames", built.1);
     }
     let high = BTreeSet::from([part(4), part(5)]);
-    for k in 6..11 {
-        assert_eq!(
-            joined(k),
-            high,
-            "{} rests on the two 1.8 m beams",
-            BUILT[k].1
-        );
+    for (k, built) in BUILT.iter().enumerate().take(11).skip(6) {
+        assert_eq!(joined(k), high, "{} rests on the two 1.8 m beams", built.1);
     }
     let joists: BTreeSet<Id> = (6..11).map(part).collect();
-    for k in 11..13 {
+    for (k, built) in BUILT.iter().enumerate().take(13).skip(11) {
         assert_eq!(
             joined(k),
             joists,
             "{} rests on the joists at its level",
-            BUILT[k].1
+            built.1
         );
     }
     let beams: BTreeSet<Id> = (2..6).map(part).collect();
@@ -341,7 +336,11 @@ async fn a_creators_named_joins_are_kept_unfiltered_and_checked_as_a_puts() {
         .filter(|(ty, ends, ..)| ty.as_str() == "mars:joint" && ends[0] == joist)
         .map(|(_, ends, ..)| ends[1])
         .collect();
-    assert_eq!(on, BTreeSet::from([got.names[&3], got.names[&4]]), "on the low beams, unfiltered");
+    assert_eq!(
+        on,
+        BTreeSet::from([got.names[&3], got.names[&4]]),
+        "on the low beams, unfiltered"
+    );
     drop(copy);
 
     // A beam named onto another beam: their connectors do not mate.

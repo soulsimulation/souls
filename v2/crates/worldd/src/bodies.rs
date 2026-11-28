@@ -2134,7 +2134,8 @@ impl Bodies {
                 if how.is_ok()
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(g) = self.runner.granted.get(&body).copied()
-                    && let (Some(asked), Some(there)) = (self.gap_to(body, t, p), self.gap_to(body, t, g))
+                    && let (Some(asked), Some(there)) =
+                        (self.gap_to(body, t, p), self.gap_to(body, t, g))
                     && asked > 50
                     && asked <= STOPPED_SHORT_MM
                     && there <= 50
@@ -2160,7 +2161,10 @@ impl Bodies {
                         self.walked_again.insert(id, n + 1);
                         let goal = self.goal(body, t, Some(p));
                         let walk = Box::new(Route::sent(WALK, self.runner.tick));
-                        if goal.and_then(|g| self.runner.send(body, walk, g, id)).is_ok() {
+                        if goal
+                            .and_then(|g| self.runner.send(body, walk, g, id))
+                            .is_ok()
+                        {
                             self.short.remove(&id);
                             continue;
                         }

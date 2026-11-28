@@ -369,12 +369,28 @@ impl Measures {
         AUDIT.json(&mut o);
         STREAM.json("stream", &mut o);
         let _ = write!(o, ",\"stream_queue\":{{{}}}", STREAM_QUEUE.fields());
+        let shown = STREAM_SHOWN_WALL_MS.load(Ordering::Relaxed);
+        if shown != i64::MIN {
+            let now = i64::try_from(unix_ms).unwrap_or(i64::MAX);
+            let _ = write!(
+                o,
+                ",\"stream_behind_ms\":{}",
+                now.saturating_sub(shown).max(0)
+            );
+        }
+        let ([bytes, syncs, waits, parts, part_syncs, part_waits], _) =
+            crate::view_out::io::totals();
+        let _ = write!(
+            o,
+            ",\"stream_io\":{{\"parts\":{parts},\"part_syncs\":{part_syncs},\"part_waits\":{part_waits},\"syncs\":{syncs},\"waits\":{waits},\"bytes\":{bytes}}}"
+        );
         BACKUP.json("stream_backup", &mut o);
         CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
         ARCHIVE.json_with("archive", &ARCHIVE_QUEUE.fields(), &mut o);
         HISTORY_EXPORT.json(&mut o);
         CREATOR.json("creator", &mut o);
+        EDIT_CHECKS.json(&mut o);
         if let Some(n) = self.souls.load(Ordering::Relaxed).checked_sub(1) {
             let _ = write!(o, ",\"souls\":{n}");
         }
@@ -542,6 +558,164 @@ impl Stalls {
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
         );
+    }
+}
+
+/// The edit checker's stages (#5216), in order: the bodies and the published copy it waits for (`basis`), the edit's
+/// check, the checker's town brought up to the copy, the plan with G2's guard (BUILDSAFE), the places and the Souls
+/// judged, and the walkers' maps.
+pub const EDIT_STAGES: [&str; 6] = ["basis", "check", "town", "plan", "places", "maps"];
+pub const EDIT_BASIS: usize = 0;
+pub const EDIT_CHECK: usize = 1;
+pub const EDIT_TOWN: usize = 2;
+pub const EDIT_PLAN: usize = 3;
+pub const EDIT_PLACES: usize = 4;
+pub const EDIT_MAPS: usize = 5;
+
+/// One edit's check on the checker's thread: its time by stage (each [`EditStages::end`] closes the stage named, from
+/// the end of the one before; a stage never reached, the edit refused before it, stays 0), and the ground its maps
+/// were prepared from ([`EditStages::ground`]).
+pub struct EditStages {
+    at: std::cell::Cell<u64>,
+    us: [std::cell::Cell<u64>; 6],
+    ground: std::cell::Cell<Option<EditGround>>,
+}
+
+/// The ground built for one edit: whether the whole open ground was built again (and why), else how many of its
+/// squares were cut again and how many buildings read again. The work an edit's check does, whatever the machine.
+#[derive(Clone, Copy)]
+struct EditGround {
+    whole: bool,
+    why: Option<&'static str>,
+    squares: usize,
+    buildings: usize,
+}
+
+impl EditStages {
+    pub fn start() -> EditStages {
+        EditStages {
+            at: std::cell::Cell::new(steady_us()),
+            us: Default::default(),
+            ground: std::cell::Cell::new(None),
+        }
+    }
+
+    pub fn end(&self, stage: usize) {
+        let now = steady_us();
+        self.us[stage].set(now.saturating_sub(self.at.get()));
+        self.at.set(now);
+    }
+
+    /// The ground the edit's maps were prepared from.
+    pub fn ground(&self, whole: bool, why: Option<&'static str>, squares: usize, buildings: usize) {
+        self.ground.set(Some(EditGround {
+            whole,
+            why,
+            squares,
+            buildings,
+        }));
+    }
+}
+
+/// The edit checker's thread (#5216): the edits on it now (waiting or being checked) against the most it takes, the
+/// edits refused because it was full, the edits it has checked, the last one's time by stage and its ground (the
+/// squares cut again and the buildings read again, or the whole), the longest check, and the edits whose ground was
+/// built whole with the last one's reason. One per process, written by the clock (the line) and the checker's thread
+/// (the rest) and read by `health.json`'s writer (`edit_check`).
+pub struct EditChecks {
+    waiting: AtomicU64,
+    most: AtomicU64,
+    refused: AtomicU64,
+    checked: AtomicU64,
+    last_us: [AtomicU64; 6],
+    longest_us: AtomicU64,
+    /// The last edit's ground, and the last reason a whole ground was built.
+    last: Mutex<(Option<EditGround>, Option<&'static str>)>,
+    wholes: AtomicU64,
+}
+
+/// This process's edit checks.
+pub static EDIT_CHECKS: EditChecks = EditChecks {
+    waiting: AtomicU64::new(0),
+    most: AtomicU64::new(0),
+    refused: AtomicU64::new(0),
+    checked: AtomicU64::new(0),
+    last_us: [const { AtomicU64::new(0) }; 6],
+    longest_us: AtomicU64::new(0),
+    last: Mutex::new((None, None)),
+    wholes: AtomicU64::new(0),
+};
+
+impl EditChecks {
+    /// Clock thread: `n` edits are on the checker's thread, which takes at most `most`.
+    pub fn waiting(&self, n: usize, most: usize) {
+        self.waiting.store(n as u64, Ordering::Relaxed);
+        self.most.store(most as u64, Ordering::Relaxed);
+    }
+
+    /// Clock thread: an edit was refused because the checker's thread was full.
+    pub fn refused(&self) {
+        self.refused.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The checker's thread: an edit's check ended, committed or refused.
+    pub fn checked(&self, stages: &EditStages) {
+        let mut total = 0;
+        for (last, us) in self.last_us.iter().zip(&stages.us) {
+            last.store(us.get(), Ordering::Relaxed);
+            total += us.get();
+        }
+        self.longest_us.fetch_max(total, Ordering::Relaxed);
+        let ground = stages.ground.get();
+        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        last.0 = ground;
+        if let Some(g) = ground.filter(|g| g.whole) {
+            self.wholes.fetch_add(1, Ordering::Relaxed);
+            last.1 = Some(g.why.unwrap_or("a building that cannot be read alone"));
+        }
+        drop(last);
+        self.checked.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `,"edit_check":{"waiting":n,"most":n,"refused_busy":n,"checked":n,"longest_us":n,"last_us":{<stage>:n,...},
+    /// "last_ground":{"whole":false,"squares":n,"buildings":n},"whole":{"count":n,"why":"..."}}`; `last_ground` only
+    /// when the last edit had its maps prepared, `why` once a whole ground was built.
+    pub fn json(&self, o: &mut String) {
+        let _ = write!(
+            o,
+            ",\"edit_check\":{{\"waiting\":{},\"most\":{},\"refused_busy\":{},\"checked\":{},\"longest_us\":{},\"last_us\":{{",
+            self.waiting.load(Ordering::Relaxed),
+            self.most.load(Ordering::Relaxed),
+            self.refused.load(Ordering::Relaxed),
+            self.checked.load(Ordering::Relaxed),
+            self.longest_us.load(Ordering::Relaxed)
+        );
+        for (i, name) in EDIT_STAGES.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "," };
+            let _ = write!(
+                o,
+                "{sep}\"{name}\":{}",
+                self.last_us[i].load(Ordering::Relaxed)
+            );
+        }
+        o.push('}');
+        let (ground, why) = *self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(g) = ground {
+            let _ = write!(
+                o,
+                ",\"last_ground\":{{\"whole\":{},\"squares\":{},\"buildings\":{}}}",
+                g.whole, g.squares, g.buildings
+            );
+        }
+        let _ = write!(
+            o,
+            ",\"whole\":{{\"count\":{}",
+            self.wholes.load(Ordering::Relaxed)
+        );
+        if let Some(why) = why {
+            let _ = write!(o, ",\"why\":\"{why}\"");
+        }
+        o.push_str("}}");
     }
 }
 
@@ -804,6 +978,12 @@ pub static ARCHIVE_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
 /// #2803): the records waiting in its channel and their bytes (at most its window), and the records past them left in
 /// the log for it to read. `in_log` that stays above 0 is a stream behind the world.
 pub static STREAM_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
+
+/// How far the public stream is behind the world (`stream_behind_ms` in `health.json`): the wall time at which the
+/// newest world time its pointer names fell, set by `worldd serve`'s stream thread after each write
+/// ([`crate::view_out::PublicWriter::shown_wall_ms`]); `i64::MIN`, no field, before its first. The health writer
+/// reports the wall time now less this, so a stream that has stopped writing shows ever further behind.
+pub static STREAM_SHOWN_WALL_MS: AtomicI64 = AtomicI64::new(i64::MIN);
 
 impl Backlog {
     /// The backlog as it stands now.

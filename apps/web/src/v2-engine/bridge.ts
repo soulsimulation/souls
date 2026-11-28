@@ -30,7 +30,7 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   /** N14: the courses of a ride's seats that move with their cabins (field 88), by slot, for `courseAt`. */
   seats?: Record<number, Uint8Array> };
 export type { CourseAt };
-type SampleRec = [string, string, number | null, number, number, number, number];
+type SampleRec = [string, string, number | null, number, number, number, number, [number,number,number,number]?];
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
@@ -500,6 +500,7 @@ export class V2Bridge {
     t.samples.push({ at, p, ...(seat ? { seat } : {}), ...(on ? { on } : {}) });
   }
 
+  nativeBodies:ReadonlyMap<string,string>=new Map();
   private bodies(): (Body & { node: string; description: string })[] {
     const out: (Body & { node: string; description: string })[] = [];
     for (const [id, t] of this.tracks) {
@@ -515,6 +516,7 @@ export class V2Bridge {
       out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, ...(t.turns ? { turns: t.turns } : {}), held: t.held, said: t.said, gestures: t.gestures,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
+    this.nativeBodies=new Map(out.map(b=>[b.node,b.entity]));
     return out;
   }
 
