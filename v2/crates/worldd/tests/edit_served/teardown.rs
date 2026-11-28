@@ -553,8 +553,9 @@ impl Bay {
                 (3, Value::Array(vec![body_of(&self.w, self.w.souls[b]).to_value()])),
             ]),
         );
-        self.ok(got.clone(), "a holder's crew offered on the frame");
-        let made = created_by(&self.w, &got.entries, "mars:carry_activity@");
+        let entries = got.entries.clone();
+        self.ok(got, "a holder's crew offered on the frame");
+        let made = created_by(&self.w, &entries, "mars:carry_activity@");
         let got = self.hands[b].act("activity:accept", made, BTreeMap::new());
         self.ok(got, "the other holder accepts");
         made
