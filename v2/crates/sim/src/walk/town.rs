@@ -3429,6 +3429,97 @@ impl<'a> View<'a> {
         (!passage && self.map.may_reach(start.piece, to.piece)).then_some(p)
     }
 
+    /// Where `body` would stand at point `p` of the open ground (µm, the ground's frame; its height is not read): of
+    /// the ground a body may stand on at that point on the plan, the open ground's own (at its terrain's height) and
+    /// each floor's (a deck's top, a frame's standing place, a room), the one whose height is nearest the body's own
+    /// level, of those its walk may reach. The node and the point in its frame, or `None` when no ground a body may
+    /// stand on lies there (a walk to a point, FOR-FABLE 14).
+    pub fn level_under(&self, body: &Body, p: Vec3) -> Option<(Id, Vec3)> {
+        let ground = self.tree.handle(self.ground)?;
+        let height = |node: Id, at: Vec3| -> Option<i64> {
+            let x = xform_to(self.tree, self.tree.handle(node)?, ground).ok()?;
+            Some(x.point(at).ok()?.y)
+        };
+        let own = height(node_of(body), body.pose.position)?;
+        let (has, _) = self.wet(body);
+        // Where its walk leaves from: a level the map joins to it by no portal or link is not one it walks to.
+        let start = self
+            .map
+            .spot_near(node_of(body), body.pose.position, AT_EDGE);
+        let joined = |s: &Spot| start.is_none_or(|a| self.map.may_reach(a.piece, s.piece));
+        let mut best: Option<(i64, Id, Vec3)> = None;
+        let mut keep = |node: Id, s: Spot, y: i64| {
+            let gap = (y - own).abs();
+            let at = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+            if best.is_none_or(|(g, ..)| gap < g) {
+                best = Some((gap, node, at));
+            }
+        };
+        if let Some(s) = self
+            .map
+            .spot_for(self.ground, Vec3::new(p.x, 0, p.z), has)
+            .filter(|s| joined(s))
+        {
+            // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
+            let at = Vec3::new(s.at[0] * 1000, 0, s.at[2] * 1000);
+            let frame = Frame {
+                node: self.ground,
+                slot: None,
+            };
+            let y = self
+                .surfaces
+                .get(&self.ground)
+                .and_then(|g| g.place(body.id, frame, at, body.pose.orientation).ok())
+                .map_or(0, |b| b.pose.position.y);
+            keep(self.ground, s, y);
+        }
+        for &node in self.surfaces.keys() {
+            if node == self.ground || !self.map.is_floor(node) {
+                continue;
+            }
+            let Some(x) = self
+                .tree
+                .handle(node)
+                .and_then(|h| xform_to(self.tree, h, ground).ok())
+            else {
+                continue;
+            };
+            // The point in the floor's frame: the inverse of its move to the ground's frame.
+            let [w, qx, qy, qz] = x.rot.parts();
+            let Some(local) = Quat::new(w, -qx, -qy, -qz)
+                .or_else(|_| Quat::new(-w, qx, qy, qz))
+                .ok()
+                .and_then(|back| back.rotate(Vec3::new(p.x, 0, p.z).minus(x.pos).ok()?).ok())
+            else {
+                continue;
+            };
+            if let Some(s) = self.map.spot(node, local).filter(|s| joined(s)) {
+                keep(node, s, self.map.world(s.piece, s.at)[1] * 1000);
+            }
+        }
+        best.map(|(_, node, at)| (node, at))
+    }
+
+    /// The nearest point of the open ground's plan (µm, the ground's frame) round `p` where `body` would stand
+    /// ([`View::level_under`]), on rings `pitch` apart out to `out`, `⌊2πk⌋` points on ring `k` (at least six), as the
+    /// spot tables lay theirs (`crate::spots`): the first ring with one, its first point. Map lookups only, no route
+    /// search. `None` with none.
+    pub fn standable_near(&self, body: &Body, p: Vec3, pitch: i64, out: i64) -> Option<Vec3> {
+        for k in 1..=out / pitch.max(1) {
+            let n = (6_283 * k / 1_000).max(6);
+            for j in 0..n {
+                let off = Quat::from_yaw_mdeg(j * 360_000 / n)
+                    .and_then(|q| q.rotate(Vec3::new(0, 0, k * pitch)))
+                    .ok()?;
+                let q = Vec3::new(p.x + off.x, 0, p.z + off.z);
+                if self.level_under(body, q).is_some() {
+                    return Some(q);
+                }
+            }
+        }
+        None
+    }
+
     /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
     /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
     pub fn stand_near_door(

@@ -25,6 +25,10 @@
 //                                             gait=walk|jog|run sets its pace (0.135 G1). An activity (dance, yoga,
 //                                             push_ups...) goes on unbroken until the next act or `stop`; for=<s>
 //                                             (90s, 2m, 1h) sets its time, and keeps a gesture (wave, clap) up that long
+//   souls.mjs walk <x>,<z> [--wait]           walks to that point (metres, x east and z south): onto the ground there,
+//                                             or the floor there nearest the Soul's own level (down off a ladder);
+//                                             `act walk:<x>,<z>` is the same; off any ground, walk.no-ground-there
+//                                             names the nearest point to stand on
 //   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
 //                                             reason, resolved) or, after 60 s (a declared for=, up to 5 min), a
 //                                             still-running line saying how to check; at once, with when the world
@@ -307,6 +311,11 @@ export function requestOf(argv) {
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
   }
   if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
+  // FOR-FABLE 14: `walk <x>,<z> [<fallback>...]` is `act walk:<x>,<z> ...`: a walk to that point, metres.
+  if (args[0] === 'walk') {
+    if (!/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(String(args[1] ?? ''))) return { refused: 'walk-usage', detail: 'walk <x>,<z> [--wait]: a point in metres, x east and z south' };
+    args.splice(0, 2, 'act', `walk:${args[1]}`);
+  }
   // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd). A carry's or a part's step
   // always waits: the next step needs its end (0.135 C, A).
   const waits = (args[0] === 'act' && args.includes('--wait')) || (['carry', 'part'].includes(args[0]) && args[1] !== 'list')

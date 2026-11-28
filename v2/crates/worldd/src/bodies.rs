@@ -1473,11 +1473,61 @@ impl Bodies {
         }
     }
 
+    /// A walk to point `p` of the open ground (FOR-FABLE 14, `walk x,z`): to the ground a body may stand on at that
+    /// point on the plan, the open ground's or a floor's, whichever is nearest the walker's own level (a Soul on a
+    /// frame's standing place sent to a point 2 m from its foot climbs down; one on a deck sent to a point on it stays
+    /// up). A point in a doorway's or a stair's clearance is walked to as before (#5254: moved out to a walker's
+    /// clearance, ended `walk.goal-moved`), and so is one with no ground under it within a walker's goal tolerance
+    /// of ground a body stands on ([`STOPPED_SHORT_MM`]); farther, it is refused `walk.no-ground-there`, naming the
+    /// nearest point the walker may stand on and reach on the spot tables' rings out to 7 m (map lookups only).
+    fn ground_point(&mut self, body: Id, p: Vec3) -> R<Target> {
+        let ground = self.town.ground;
+        let Some(b) = self.runner.controller.body(body).cloned() else {
+            return Ok(Target::new(ground, p));
+        };
+        // A point in a passage's clearance on the open ground (#5254) as before: the spot tables move it out. One on
+        // a floor above the ground goes to that floor (the top of a frame's ladder is in the ladder's clearance).
+        let passage = self.town.passage_at(ground, p).is_some();
+        let view = self.town.view_for(body)?;
+        match view.level_under(&b, p) {
+            Some((node, at)) if node != ground || !passage => return Ok(Target::new(node, at)),
+            _ if passage => return Ok(Target::new(ground, p)),
+            _ => {}
+        }
+        let near = i64::try_from(STOPPED_SHORT_MM).unwrap_or(0) * 1000;
+        if view
+            .standable_near(&b, p, sim::spots::REACH_PITCH, near)
+            .is_some()
+        {
+            return Ok(Target::new(ground, p));
+        }
+        let (pitch, far) = (sim::spots::PITCH, sim::spots::PITCH * sim::spots::RINGS);
+        let nearest = match view.standable_near(&b, p, pitch, far) {
+            Some(s) => format!(
+                "the nearest point to stand on: x={} z={} mm",
+                s.x / 1000,
+                s.z / 1000
+            ),
+            None => format!("no point to stand on within {} m of it", far / 1_000_000),
+        };
+        Err(Refusal {
+            name: "walk.no-ground-there",
+            detail: format!(
+                "no ground to stand on at x={} z={} mm; {nearest}",
+                p.x / 1000,
+                p.z / 1000
+            ),
+        })
+    }
+
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
     fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
+            if node == self.town.ground {
+                return self.ground_point(body, p);
+            }
             return Ok(Target::new(node, p));
         }
         // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
@@ -1814,6 +1864,11 @@ impl Bodies {
             match ask {
                 Ask::Walk { node, point, gait } => {
                     let goal = self.goal(a.body, node, point);
+                    // A point on the open ground walked to on a floor above it (FOR-FABLE 14) is that floor's point:
+                    // how far from it the walk ends, and its resends, are read there.
+                    if let (Ok(g), Some(_)) = (&goal, point) {
+                        self.walked_to.insert(id, (g.node, Some(g.point())));
+                    }
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(speed(gait), self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));

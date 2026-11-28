@@ -96,7 +96,16 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    one is granted the nearest point 0.7 m clear of the passage, so no Soul stands where it narrows a doorway or a stair
    for others (others sent there take the next nearest, a body's room apart), and ends `walk.goal-moved`: field 7 how far, mm, field 9 the thing the passage
    belongs to, field 10 its kind (`doorway`, `stairs`, `ramp`, `ladder` or `step`). A walk to a point off the ground
-   ends `walk.goal-moved` when it stands within 0.4 m of it, else `walk.stopped-short`.
+   ends `walk.goal-moved` when it stands within 0.4 m of it, else `walk.stopped-short` (on the open ground, a point
+   with no ground within 0.4 m is refused at the start, below). **A point on the open ground
+   (FOR-FABLE 14, the client's `walk x,z`).** A walk to a point of the open ground, its height not read, goes to the
+   ground a body may stand on at that point on the plan, the open ground's own (at its terrain's height) or a floor's
+   (a deck's top, a frame's standing place, a room), whichever is nearest the walker's own level of those its walk
+   may reach: a Soul on a frame's standing place sent to a
+   point beside the frame's foot climbs down to it; one on a deck sent to a point on it stays up. A point with no such
+   ground under it and none within 0.4 m is refused `walk.no-ground-there`, naming the nearest point the walker may
+   stand on and reach on the spot tables' rings out to 7 m, or that there is none; a point in a doorway's or a
+   stair's clearance is moved out of it as above.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it). A body is logged where it stands, never mid-crossing: while it is carried across a
