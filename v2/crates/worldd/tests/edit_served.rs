@@ -3040,8 +3040,9 @@ fn act(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, verb: &str, targ
 /// 0.135 A2, review round seven: parts rest at the ground's height. On ground raised 1 m (terrain tiles, as Eden's),
 /// a frame set down as a holder leaves the world rests on the raised ground, not 1 m under it. Under the two-holder
 /// rule and the coordinator's decision of 28 Nov (N4), a frame is put in its slot by two, and when one of them
-/// retires it leaves the crew and the other, who alone does not hold it up, lays it down beside the bay: frame A so;
-/// frame B so with a Soul standing beside the bay, lying or left standing on its base, with no jump.
+/// retires it leaves the crew and the other, who alone does not hold it up, lays it down beside the bay (frame A);
+/// with no side to lay it on, the other holds it on with the retired share kept, and when it retires too the frame is
+/// set down on the raised ground, laid flat or left standing on its base, with no jump (frame B).
 #[test]
 fn a2_parts_rest_at_the_grounds_height() {
     const RAISE: i64 = 1_000_000;
@@ -3208,8 +3209,10 @@ fn a2_parts_rest_at_the_grounds_height() {
         "Soul 2 steps away",
     );
 
-    // Frame B, with Soul 6 standing beside the bay where frame A was laid on the other side: laid down at Soul 4's
-    // retire by Soul 5, on the raised ground (lying, its middle 38 mm up; or standing, its base on it), with no jump.
+    // Frame B, with frame A lying on one side of the bay and Soul 6 standing on the other: at Soul 4's retire Soul 5 has
+    // no side to lay it on, so it holds it on in its slot with Soul 4's share kept (`souls:hold-kept`), standing on
+    // its base on the raised ground. Soul 6 walks off and Soul 5 retires too: frame B, its last holder gone, is set down
+    // (laid flat, or left standing where it stands), on the raised ground, with no jump.
     one(
         &mut hands,
         5,
@@ -3217,22 +3220,60 @@ fn a2_parts_rest_at_the_grounds_height() {
         "Soul 6 beside the bay",
     );
     let c = seat(&mut hands, (3, 4), fb, "frame B in");
-    wait_on_ground(fb, "frame B set down at Soul 4's retire");
-    let (base, mid, lying) = rest_of(&w, fb, 1_219);
-    println!(
-        "frame B at Soul 4's retire: {}, its base {} mm and its middle {} mm above the raised ground",
-        if lying { "lying" } else { "standing" },
-        (base - RAISE) / 1000,
-        (mid - RAISE) / 1000
-    );
-    match lying {
-        true => on_ground("frame B laid down", mid),
-        false => assert!(
-            (base - RAISE).abs() <= 1_000,
-            "on its base, with no jump: {base} µm"
-        ),
+    let end = Instant::now() + Duration::from_secs(30);
+    while !logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .any(|ev| ev.name.as_str() == "souls:hold-kept" && ev.fields.get(&1) == Some(&c.to_value()))
+    {
+        assert!(
+            Instant::now() < end,
+            "frame B held on at Soul 4's retire: no souls:hold-kept"
+        );
+        std::thread::sleep(Duration::from_millis(200));
     }
-    assert_eq!(hands[4].act("activity:leave", c, BTreeMap::new()).kind, 1);
+    assert_eq!(where_is(&w, fb).0, Some(bay), "frame B still in its slot");
+    let (base, _, lying) = rest_of(&w, fb, 1_219);
+    assert!(
+        !lying && (base - RAISE).abs() <= 1_000,
+        "standing on its base: {base} µm"
+    );
+    one(
+        &mut hands,
+        5,
+        v3(ua.x + 6_000_000, 0, ua.z),
+        "Soul 6 walks off",
+    );
+    hands[4].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[4].s);
+    assert_eq!(got.kind, 1, "Soul 5 retires: {got:?}");
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (base, mid, lying) = rest_of(&w, fb, 1_219);
+        let down = where_is(&w, fb).0 == Some(g);
+        if down {
+            println!(
+                "frame B set down at its last holder's retire: {}, base {} mm, middle {} mm above the raised ground",
+                if lying { "lying" } else { "standing" },
+                (base - RAISE) / 1000,
+                (mid - RAISE) / 1000
+            );
+            match lying {
+                true => on_ground("frame B laid flat", mid),
+                false => assert!(
+                    (base - RAISE).abs() <= 1_000,
+                    "on its base, with no jump: {base} µm"
+                ),
+            }
+            break;
+        }
+        assert!(
+            Instant::now() < end,
+            "frame B set down at its last holder's retire"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// B20 A1 and A2 (#3356): a world served from N2's test world with its yard and a bay at the site reads the
