@@ -1733,6 +1733,32 @@ impl Drop for Group<'_> {
         }
     }
 }
+
+/// A writer killed during a [`Group`] leaves up to one temporary file a file of the group, and an object's re-cut may
+/// never write that name again: the writer removes them as it opens, before it writes. Only the group's own names
+/// (`<hex or number>.tmp`, `<number>.text.tmp`, `head.tmp`, the pointer's), never a text write's
+/// (`<name>.<pid>-<n>.tmp`, [`write_text`]), which a removal may be writing at once.
+fn sweep_temporaries(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".tmp")) else {
+            continue;
+        };
+        let ours = hex(stem)
+            || stem == "head"
+            || stem == POINTER
+            || stem
+                .strip_suffix(".text")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if ours && e.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
 pub struct PublicStart<'a> {
     pub root: &'a Path,
     pub header: &'a Header,
@@ -2098,6 +2124,19 @@ impl<S: ObjectStore> PublicWriter<S> {
             fresh_at: 0,
             poisoned: None,
         };
+        // What a part's group killed midway left (#2803 follow-up): its recovery objects and head in the spool, its
+        // pointer and its generations' part files.
+        if let Some(spool) = &w.spool {
+            let base = spool.dir.join(&w.prefix);
+            sweep_temporaries(&base);
+            sweep_temporaries(&base.join("objects"));
+        }
+        sweep_temporaries(&w.dir);
+        if let Ok(generations) = fs::read_dir(w.dir.join("g")) {
+            for g in generations.flatten() {
+                sweep_temporaries(&g.path());
+            }
+        }
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
         let (head, from_store) = match w.spool.as_ref().and_then(|s| s.read(&head_key)) {

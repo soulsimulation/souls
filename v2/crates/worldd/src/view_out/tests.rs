@@ -5119,3 +5119,119 @@ fn w7_a_text_file_written_as_a_removal_lands_is_settled_without_its_words() {
     words.close();
     fs::remove_dir_all(&d).unwrap();
 }
+
+/// A part's group (#2803 follow-up, review finding 4) names its files in the order they were added, each synced
+/// first, and the pointer (`last`) only once every other is named. A rename refused part way leaves the files before
+/// it named, none after it, and no temporary file at all.
+#[test]
+fn a_group_names_its_files_in_order_and_a_refused_one_leaves_no_temporary() {
+    NO_THREADS.set(true);
+    let d = scratch("group-order");
+    let (a, b, c, p) = (d.join("a"), d.join("b"), d.join("c"), d.join("pointer"));
+    let mut g = Group::default();
+    g.whole(&a, b"a").unwrap();
+    g.immutable(&b, b"b").unwrap();
+    g.whole(&c, b"c").unwrap();
+    g.last(&p, b"p").unwrap();
+    g.sync().unwrap();
+    for f in [&a, &b, &c, &p] {
+        assert!(!f.exists(), "{f:?} named before the group is");
+    }
+    g.name().unwrap();
+    assert_eq!(fs::read(&a).unwrap(), b"a");
+    assert_eq!(fs::read(&b).unwrap(), b"b");
+    assert_eq!(fs::read(&c).unwrap(), b"c");
+    assert!(!p.exists(), "the pointer named with the others");
+    g.name_last().unwrap();
+    assert_eq!(fs::read(&p).unwrap(), b"p");
+    drop(g);
+    // The second file's name is a folder holding a file, so its rename is refused.
+    let (x, y, z, q) = (d.join("x"), d.join("y"), d.join("z"), d.join("q"));
+    fs::create_dir_all(y.join("in")).unwrap();
+    let mut g = Group::default();
+    g.whole(&x, b"x").unwrap();
+    g.whole(&y, b"y").unwrap();
+    g.whole(&z, b"z").unwrap();
+    g.last(&q, b"q").unwrap();
+    g.sync().unwrap();
+    assert!(g.name().is_err(), "a folder is not renamed over");
+    drop(g);
+    NO_THREADS.set(false);
+    assert_eq!(fs::read(&x).unwrap(), b"x", "the file before it is named");
+    assert!(y.is_dir() && !z.exists() && !q.exists(), "none after it is");
+    let left: Vec<_> = fs::read_dir(&d)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.ends_with(".tmp"))
+        .collect();
+    assert!(left.is_empty(), "temporary files left: {left:?}");
+    fs::remove_dir_all(&d).unwrap();
+}
+
+/// A writer killed during a part's group (#2803 follow-up, review finding 6) leaves up to one temporary file a file of
+/// the group: the next open removes them, in the spool and in the views, and leaves a text write's own, which a
+/// removal may be writing at once.
+#[test]
+fn a_writer_opening_removes_what_a_killed_group_left() {
+    use directoryd::directory::store::Memory;
+    let h = header();
+    let d = scratch("group-temporaries");
+    let (views, spool) = (d.join("views"), d.join("spool"));
+    let store = Memory::default();
+    let start = |initial, record, checkpoint| PublicStart {
+        root: &views,
+        header: &h,
+        key: key(&h),
+        initial,
+        record,
+        checkpoint,
+        text: None,
+        names: None,
+        clock_seed: None,
+        history: None,
+    };
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open_spooled(
+        start(actual.frozen(), 0, None),
+        &store,
+        Closed::default(),
+        Some((spool.clone(), "store".to_owned())),
+    )
+    .unwrap();
+    let body = Id::new(Scope([73; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    let base = spool.join(&out.prefix);
+    let (stream_dir, generation) = (out.dir.clone(), out.generation_dir());
+    drop(out);
+    let left = [
+        base.join("objects").join(format!("{}.tmp", "ab".repeat(32))),
+        base.join("head.tmp"),
+        stream_dir.join(format!("{POINTER}.tmp")),
+        generation.join("7.tmp"),
+        generation.join("7.text.tmp"),
+    ];
+    let text_write = generation.join("7.text.123-0.tmp");
+    for f in left.iter().chain([&text_write]) {
+        fs::write(f, b"torn").unwrap();
+    }
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 1);
+    let again = PublicWriter::open_spooled(
+        start(actual.frozen(), 1, Some(cp)),
+        &store,
+        Closed::default(),
+        Some((spool.clone(), "store".to_owned())),
+    )
+    .unwrap();
+    drop(again);
+    for f in &left {
+        assert!(!f.exists(), "{f:?} is left");
+    }
+    assert!(text_write.exists(), "a text write's temporary is not the group's");
+    fs::remove_dir_all(&d).unwrap();
+}
