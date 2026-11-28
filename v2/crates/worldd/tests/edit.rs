@@ -1324,6 +1324,7 @@ fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
         field: 21,
         row: vec![Value::Uint(1)],
         door: door.map(Ref::Node),
+        bare: false,
     };
     // Two rooms at x 3 and 7 mm (inside the claim to come), two at x 30 and 40 mm (outside it), and a link the lead
     // makes from the first, before any claim: what an undo of it, or a redo, would write.
@@ -1428,6 +1429,7 @@ fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
         field: 22,
         row: vec![Value::Uint(1)],
         door: None,
+        bare: false,
     };
     let r = w
         .edit(w.creator(), v, vec![doorway])
@@ -1446,6 +1448,7 @@ fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
         field,
         row,
         door: None,
+        bare: false,
     };
     let r = w
         .edit(w.creator(), v, vec![first(21, vec![Value::Uint(1); 6])])
@@ -1828,6 +1831,7 @@ fn rows_or_a_link_into_the_worlds_arrival_are_refused_by_name() {
                 field: F_ARRIVAL,
                 row: vec![Value::Uint(7)],
                 door: None,
+                bare: false,
             }],
         )
         .expect_err("a link into the arrival");
@@ -1908,6 +1912,7 @@ fn r4_a_recolour_is_the_creators_alone_logged_streamed_and_kept_across_a_restart
                 field: F_TINT,
                 row: vec![Value::Uint(7)],
                 door: None,
+                bare: false,
             }],
         )
         .expect_err("a link into the tint");

@@ -12,6 +12,8 @@
 //                                                things, roads and zones, each with its centre and size in metres (R8d)
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--title '<name>'] [--field n=v ...]   a new thing;
 //                                                metres in the parent; --title is the name Souls see it by ("rack frame 1")
+//   souls-god.mjs place <part> --in <bay> --slot n [--joins a,b]   a part into a bay's slot makes the joints a Soul's
+//                                                put there makes, or those named (ids, or earlier names in a batch)
 //   souls-god.mjs place <kind> --path '[[x,z],...]' [--width m] | --area '[[x,z],...]' | --rect cx,cz,w,d
 //                         | --circle cx,cz,r [--in <id>] [--field n=v ...]   a road or an area laid on the open ground
 //                                                (metres), as today's place by a shape
@@ -29,7 +31,8 @@
 //                                                its opening hours, the whole schedule at once (field 81, E7)
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number; a place's
-//                                                "title" is the name Souls see it by, words (field 4, as about --title)
+//                                                "title" is the name Souls see it by, words (field 4, as about --title);
+//                                                a place's "joins" names its joints, as place --joins
 //   souls-god.mjs weather [--kind clear|cloudy|rain|wind|fog|storm] [--clouds 0..1] [--rain 0..1] [--wind 0..1]
 //                         [--minutes 5..360]       the world's weather until then; E6's own weather resumes after
 //   souls-god.mjs sky --palette <name>           the sky's palette (today's names: clear-day, dusk, mars-desert, ...)
@@ -262,9 +265,13 @@ export const FIX = {
   'edit.child-not-admitted': 'put it in something whose kind admits it: describe shows each kind\'s admits',
   'edit.node-missing': 'that id is not there now: describe again and use an id it lists',
   'edit.name-unknown': 'a later op names an earlier place by that place\'s "name" number',
+  'joint-undeclared': 'joins are named only for a part whose kind declares a joint (its entry\'s links): place a part of such a kind, or leave --joins out',
+  'connectors-do-not-mate': 'join a part only to parts its connectors mate with: a beam to frames, a joist to beams, a sheet to joists',
+  'support.none': 'place what it stands on or rests on first, in the order a crew builds (frames, beams, joists, sheets), or name its joins',
   'edit.name-twice': 'give each place in a batch its own "name" number',
   'edit.root': 'the world\'s root is never moved or removed',
   'edit.stale': 'something you changed was changed by someone else first: describe, then send again',
+  'edit.checker-busy': 'the world is still checking 8 edits sent before this one: wait for their answers, then send it again',
   'edit.too-many-operations': 'split the batch: at most 256 operations',
   'edit.too-many-nodes': 'remove less at once',
   'edit.batch': 'see the usage: souls-god.mjs with no arguments; a field\'s plain string is a name (namespace:name): give a placed thing the name Souls see it by as "title": "rack frame 1"',
@@ -427,11 +434,13 @@ export function opsOf(verb, words, { related = false } = {}) {
     const on = takeOpt(args, '--on');
     const into = takeOpt(args, '--in') ?? on, at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
     const row = takeOpt(args, '--row'), grid = takeOpt(args, '--grid'), gap = takeOpt(args, '--gap'), along = takeOpt(args, '--along');
-    const title = takeOpt(args, '--title');
+    const title = takeOpt(args, '--title'), joins = takeOpt(args, '--joins');
     const fields = Object.fromEntries(takeAll(args, '--field').map((f) => { const [n, v] = f.split('='); return [n, valueOf(v)]; }));
     if (!args[0] || into === undefined) throw usage('place <kind> --in <id> [--at x,y,z] [--slot n] [--title \'<name>\'] [--field n=v]');
     const one = titled({ op: 'place', kind: args[0], in: node(into), ...(slot !== undefined ? { slot: Number(slot) } : {}), ...(Object.keys(fields).length ? { fields } : {}), ...(title !== undefined ? { title } : {}) });
-    if (row === undefined && grid === undefined && gap === undefined && along === undefined) return [{ ...one, name: 1, ...(at ? { at: xyz(at) } : {}) }];
+    const joined = joins === undefined ? {} : { joins: joins.split(',').filter(Boolean).map(node) };
+    if (row === undefined && grid === undefined && gap === undefined && along === undefined) return [{ ...one, ...joined, name: 1, ...(at ? { at: xyz(at) } : {}) }];
+    if (joins !== undefined) throw usage('--joins names one part\'s joints: place it alone, not in a row or a grid');
     return spotsOf(at, row, grid, gap, along).map((p, i) => ({ ...one, name: i + 1, at: p }));
   }
   if (verb === 'move') {
@@ -495,6 +504,32 @@ export function eventOf(words) {
   const us = /^(\d+)us$/.exec(when), hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(when);
   if (!us && !hm) throw usage(how);
   return { into: args[0], words: args[1].trim(), ...(us ? { start: Number(us[1]) } : { when }), minutes, ...(at ? { at: xyz(at) } : {}) };
+}
+
+/**
+ * The batch with each place's `joins` (place --joins, a batch op's "joins") as its joints (racks, lane C): one bare link
+ * from the placed part to each part named, of the joint type its kind declares (the entry's link, named
+ * `<namespace>:<link>` as the world names it), as a Soul's `part put --joins` makes them. `entries` are the home's kind
+ * entries by plain name. Places without `joins` are left for the world, which joins a part placed into a bay's slot
+ * as a Soul's put into it does.
+ */
+export function withJoins(ops, entries) {
+  if (!Array.isArray(ops) || !ops.some((o) => o?.op === 'place' && o.joins !== undefined)) return ops;
+  let next = Math.max(0, ...ops.map((o) => (Number.isInteger(o?.name) ? o.name : 0)));
+  const out = [], links = [];
+  for (const o of ops) {
+    if (o?.op !== 'place' || o.joins === undefined) { out.push(o); continue; }
+    const { joins, ...place } = o;
+    const plain = String(o.kind).replace(/@.*$/, '');
+    const declared = Object.keys(entries?.[plain]?.links ?? {})[0];
+    if (!Array.isArray(joins) || !joins.length) throw usage('joins: a list of the parts it joins (ids, or earlier names in the batch)');
+    if (!Number.isInteger(o.name)) throw usage('a place with joins has a "name" number, its joints\' first end');
+    if (!declared) throw Object.assign(new Error(`${plain} declares no joint: its joins cannot be named`), { code: 'joint-undeclared' });
+    const type = `${plain.split(':')[0]}:${declared}`;
+    out.push(place);
+    for (const j of joins) links.push({ op: 'link', name: ++next, type, ends: [o.name, j], owner: 0, bare: true });
+  }
+  return [...out, ...links];
 }
 
 /** A place's title and aliases (`brief/copy.mjs` F_TITLE, F_ALIASES): the words, or false to clear. */
@@ -1155,6 +1190,10 @@ if (isMain(import.meta.url)) {
     const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' || req.world?.verb === 'clone' ? 3_600_000 : req.op === 'export' ? 120_000 : ['land', 'expand'].includes(req.world?.verb) ? 130_000 : ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
     let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
+    // A place's named joins as its joints, of the type its kind declares (racks, lane C).
+    if (req?.ops) {
+      try { req = { ...req, ops: withJoins(req.ops, kindsIn(join(home, 'kinds'))) }; } catch (e) { out(withFix({ ok: false, code: e.code ?? 'edit.batch', detail: e.message })); process.exit(1); }
+    }
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };

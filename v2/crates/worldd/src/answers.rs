@@ -1428,8 +1428,12 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
     away_next: Option<u64>,
+    /// The passage a walk's goal was moved off, for the next note (fields 9 and 10, #5254).
+    passage_next: Option<(Id, sim::links::Kind)>,
     /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
     words_next: Option<String>,
+    /// The other body nearest a crowded walk's point, for the next note (field 11, A2-4).
+    held_next: Option<Id>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1540,7 +1544,18 @@ struct EditQueue {
     offered: std::cell::Cell<u64>,
     /// Lockstep, in a world with bodies: the tick running (or last run, between ticks). `None` otherwise.
     running: Option<std::cell::Cell<u64>>,
+    /// The edits on the checker's thread, waiting or being checked (#5216): at most [`EDITS_WAITING_MOST`].
+    waiting: std::cell::Cell<usize>,
 }
+
+/// The most creator's edits that may be on the edit checker's thread at once, waiting or being checked (#5216). The
+/// checker is one thread, and an act is kept open [`Config::deadline`] (10 s): a longer line could not all be
+/// answered in time when one check is slow, and each would end `act.timed-out` only after its 10 s. An edit sent
+/// while that many wait is refused at once, by [`EDIT_BUSY`], and is sent again. `edit_check` in `health.json` has the
+/// line's length, this limit and the edits refused by it.
+const EDITS_WAITING_MOST: usize = 8;
+/// An edit sent while [`EDITS_WAITING_MOST`] edits are on the checker's thread (#5216).
+const EDIT_BUSY: &str = "edit.checker-busy";
 
 impl Drop for EditQueue {
     fn drop(&mut self) {
@@ -1563,9 +1578,31 @@ impl EditQueue {
             .running
             .as_ref()
             .map_or(self.offered.get(), std::cell::Cell::get);
-        self.tx
-            .send((need, job))
-            .map_err(|e| std::sync::mpsc::SendError(e.0.1))
+        // Each of these comes back as one `Event::Edited` ([`EditQueue::back`]).
+        let edit = matches!(job, CheckJob::Edit(..) | CheckJob::Reprepare(_));
+        self.tx.send((need, job)).map_err(|e| {
+            // The checker's thread is gone: nothing waits on it, and the next edit is refused by that name, not
+            // by the line's (review).
+            self.waiting.set(0);
+            measures::EDIT_CHECKS.waiting(0, EDITS_WAITING_MOST);
+            std::sync::mpsc::SendError(e.0.1)
+        })?;
+        if edit {
+            self.waiting.set(self.waiting.get() + 1);
+            measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
+        }
+        Ok(())
+    }
+
+    /// An edit's check came back from the checker's thread.
+    fn back(&self) {
+        self.waiting.set(self.waiting.get().saturating_sub(1));
+        measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
+    }
+
+    /// Whether the checker's thread has as many edits as it may ([`EDITS_WAITING_MOST`]).
+    fn full(&self) -> bool {
+        self.waiting.get() >= EDITS_WAITING_MOST
     }
 }
 
@@ -1917,8 +1954,27 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 pub const TIMED_OUT: &str = "act.timed-out";
 /// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
 pub const STOPPED: &str = "act.stopped";
-/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
+/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done. Its
+/// end says how far from its point it stood (field 7, mm) and the other body nearest that point there (field 11).
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
+/// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance (moved
+/// only as far as clears the passage itself) or off the ground a body stands on, as near as stands clear (#5254): said
+/// as its end's word, with how far (field 7, mm) and, for a passage, the thing it belongs to (field 9) and its kind
+/// (field 10: `doorway`, `stairs`, `ramp`, `ladder` or `step`).
+pub const GOAL_MOVED: &str = "walk.goal-moved";
+
+/// A passage's kind as a walk's end names it (field 10, [`GOAL_MOVED`]).
+fn passage_word(kind: sim::links::Kind) -> &'static str {
+    use sim::links::Kind;
+    match kind {
+        Kind::Doorway => "doorway",
+        Kind::Stairs => "stairs",
+        Kind::Ramp => "ramp",
+        Kind::Ladder => "ladder",
+        Kind::Step => "step",
+        _ => "passage",
+    }
+}
 
 /// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
 /// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
@@ -2783,6 +2839,18 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
+            // #5216: the checker's line has its own limit; past it an edit is refused by name, never left to wait.
+            Taken::Edit(_) if self.edits.as_ref().is_some_and(EditQueue::full) => {
+                measures::EDIT_CHECKS.refused();
+                let r = Refused {
+                    op: None,
+                    name: EDIT_BUSY,
+                    detail: format!(
+                        "{EDITS_WAITING_MOST} edits are waiting to be checked: send it again"
+                    ),
+                };
+                self.end(id, |c| c.edit_refusal(actor, sequence, &r));
+            }
             Taken::Edit(e) => match reserve_edit(
                 &e,
                 self.lineage,
@@ -3063,13 +3131,16 @@ impl Clock {
                         })
                     })
             });
-            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
-            if r.step == crate::assembly::Step::Retired
+            // A part whose walkers' maps went stale before its commit is prepared again from the world as it is then
+            // (0.135 A2: a retiring holder's set-down, its body leaving; #5067: a raise's or a seating's end, bodies
+            // walking meanwhile), never refused for it: at most `RETRIES` times, a raise's or a set-in's end for the
+            // world's seat wait (`Engine::retry`, FOR-FABLE 15).
+            if r.step != crate::assembly::Step::Taken
                 && done
                     .as_ref()
                     .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
                 && let Some(e) = self.engine.as_mut()
-                && e.retry(r.clone())
+                && e.retry(r.clone(), now, self.replica.tree())
             {
                 continue;
             }
@@ -4244,6 +4315,13 @@ impl Clock {
         }
         if let Some(w) = self.words_next.take() {
             fields.insert(8, Value::Bytes(w.into_bytes()));
+        }
+        if let Some(by) = self.held_next.take() {
+            fields.insert(11, by.to_value());
+        }
+        if let Some((thing, kind)) = self.passage_next.take() {
+            fields.insert(9, thing.to_value());
+            fields.insert(10, Value::Bytes(passage_word(kind).as_bytes().to_vec()));
         }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
@@ -5740,15 +5818,48 @@ impl Clock {
         let short = self.bodies.as_mut().is_some_and(|b| b.short.remove(&id));
         // 0.133: how far from its target a done walk ended, mm, taken however the move ends
         let away = self.bodies.as_mut().and_then(|b| b.away(id));
+        // #5254: a walk to a point that ended short of it, sent again while bodies moved, never answers as arrived.
+        let stopped = self
+            .bodies
+            .as_mut()
+            .and_then(|b| b.stopped_short.remove(&id));
+        // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
+        let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id));
+        let held = self.bodies.as_mut().and_then(|b| b.held_off_by.remove(&id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
             false => how,
         };
+        let stopped_refusal;
+        // A walk held off its goal by a crowd standing at it ends done as near as the crowd allows (A2-4, after being
+        // sent again while the crowd might move); one with no way nearer is a named stop.
+        let (how, said) = match (how, stopped) {
+            (Ok(()), Some((mm, false))) => {
+                stopped_refusal = Refusal {
+                    name: "walk.stopped-short",
+                    detail: format!(
+                        "stopped {mm} mm short of the point it was sent to: no way nearer it that this body can \
+                         walk (ground it cannot stand on, or bodies in the way); next: walk there again, or choose a \
+                         point beside it"
+                    ),
+                };
+                (Err("walk.stopped-short".to_owned()), Some(&stopped_refusal))
+            }
+            (how, _) => (how, said),
+        };
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
-                let done = if short { DONE_SHORT } else { "done" };
+                let done = if let Some((_, why)) = moved {
+                    self.passage_next = why;
+                    GOAL_MOVED
+                } else if short {
+                    self.held_next = held;
+                    DONE_SHORT
+                } else {
+                    "done"
+                };
                 // 0.133: how far from its target the walk ended, mm, as field 7 of its end (a fact, never a label)
                 self.note_away(id, MOVE_ENDED, Some(done), away, now);
                 self.end(id, |c| Answer::Receipt {
@@ -6971,6 +7082,7 @@ pub fn start<S: Storage + 'static>(
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
                 running: (cfg.lockstep && (make.is_some() || make_built.is_some()))
                     .then(|| std::cell::Cell::new(0)),
+                waiting: std::cell::Cell::new(0),
             })
         })
         .transpose()?;
@@ -7092,7 +7204,9 @@ pub fn start<S: Storage + 'static>(
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
+        passage_next: None,
         words_next: None,
+        held_next: None,
         edits,
         editing,
         set_down: Vec::new(),
@@ -7271,6 +7385,9 @@ pub fn start<S: Storage + 'static>(
                     }
                     Event::Edited(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
+                        if let Some(q) = &c.edits {
+                            q.back();
+                        }
                         c.edited.push(*k);
                     }
                     Event::Worn(k) => {
@@ -7793,6 +7910,8 @@ fn edit_checker(
                         continue;
                     }
                 };
+                // Where the check's time goes, by stage (#5216): `edit_check` in `health.json`.
+                let stages = measures::EditStages::start();
                 let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                     Ok(s) => (s, false),
                     Err(s) => (s, true),
@@ -7804,6 +7923,7 @@ fn edit_checker(
                     .max(e.planned);
                 let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
+                stages.end(measures::EDIT_BASIS);
                 let Some(world) = world.as_mut() else {
                     let r = Err(Refused {
                         op: None,
@@ -7837,6 +7957,10 @@ fn edit_checker(
                             buildsafe::with_buildings(&mut e, &entries, &world.kinds)
                                 .and_then(|parts| {
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
+                                    crate::edit_joins::with_joins(
+                                        &mut e, &copy, world, &structure,
+                                    )?;
                                     edit::check(e, &copy, world)
                                 })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
@@ -7847,6 +7971,7 @@ fn edit_checker(
                             detail: "the world's record names no creator".into(),
                         }),
                     };
+                    stages.end(measures::EDIT_CHECK);
                     checked
                         .and_then(|c| {
                             let t = town.on(&copy, ground, false);
@@ -7855,15 +7980,18 @@ fn edit_checker(
                                 arrival_stands(&copy, t, from, set)?;
                             }
                             let known = t.map(|t| Known::of(t));
+                            stages.end(measures::EDIT_TOWN);
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
-                            sim::edit::plan_classes(
+                            let planned = sim::edit::plan_classes(
                                 c,
                                 &copy,
                                 ground,
                                 known.as_ref(),
                                 snapshot.classes.values().copied(),
                                 reserved.clone(),
-                            )
+                            );
+                            stages.end(measures::EDIT_PLAN);
+                            planned
                         })
                         .and_then(|mut p| {
                             let kept = p.take_map();
@@ -7871,6 +7999,7 @@ fn edit_checker(
                                 crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                             let tree = buildsafe::souls(&copy, &world.kinds);
                             let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            stages.end(measures::EDIT_PLACES);
                             let maps = source
                                 .map(|source| {
                                     buildsafe::PreparedMaps::prepare_classes(
@@ -7885,6 +8014,16 @@ fn edit_checker(
                                     )
                                 })
                                 .transpose()?;
+                            stages.end(measures::EDIT_MAPS);
+                            if let Some(m) = &maps {
+                                let classes = m.live.whole_classes();
+                                stages.ground(
+                                    m.live.whole() || !classes.is_empty(),
+                                    m.live.why.or_else(|| classes.iter().find_map(|(_, w)| *w)),
+                                    m.live.squares(),
+                                    m.live.buildings(),
+                                );
+                            }
                             Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
                         })
                 }))
@@ -7896,6 +8035,7 @@ fn edit_checker(
                         detail: panic_text(p.as_ref()),
                     })
                 });
+                measures::EDIT_CHECKS.checked(&stages);
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }
@@ -8105,6 +8245,7 @@ mod tests {
             field: 22,
             row: Vec::new(),
             door: None,
+            bare: false,
         };
         let e = Edit {
             intent: id(9),
@@ -9367,6 +9508,7 @@ mod tests {
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),
+            waiting: std::cell::Cell::new(0),
         };
         thread::sleep(Duration::from_millis(20));
         drop(queue);

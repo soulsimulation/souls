@@ -2308,5 +2308,9 @@ async fn group_a_passer_by_walks_round_a_carried_load() {
 mod grips;
 #[path = "carry_served/hoist.rs"]
 mod hoist;
+#[path = "carry_served/raise.rs"]
+mod raise;
 #[path = "carry_served/slot_points.rs"]
 mod slot_points;
+#[path = "carry_served/walk_goal.rs"]
+mod walk_goal;

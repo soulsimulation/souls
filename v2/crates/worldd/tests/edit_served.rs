@@ -215,7 +215,13 @@ fn static_creator(w: &Seeded, creator: Id) {
 }
 
 fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
+    serve_env(w, socket, bucket, &[])
+}
+
+/// [`serve_with`], the served world given `envs` (a test world's shortened clocks).
+fn serve_env(w: &Seeded, socket: &Path, bucket: Option<&Path>, envs: &[(&str, &str)]) -> Served {
     let mut command = Command::new(env!("CARGO_BIN_EXE_worldd"));
+    command.envs(envs.iter().copied());
     command
         .args(["serve", "--dir"])
         .arg(&w.dir)
@@ -2343,11 +2349,19 @@ mod shade;
 #[path = "edit_served/deck.rs"]
 mod deck;
 
+#[path = "edit_served/creator_bay.rs"]
+mod creator_bay;
+
 #[path = "edit_served/sit_by_kind.rs"]
 mod sit_by_kind;
 
 #[path = "edit_served/six_beam.rs"]
 mod six_beam;
+#[path = "edit_served/slow_edit.rs"]
+mod slow_edit;
+
+#[path = "edit_served/teardown.rs"]
+mod teardown;
 
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
@@ -5007,6 +5021,1192 @@ fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_ba
         "frame A in the bay: {:?}",
         where_is(&w, fa)
     );
+}
+
+/// #5067 (raise into a slot): a creator places a rack bay and a rack frame lying with its foot 80 mm from the bay's
+/// `upright_a`, its length outward. Raised with no slot named it would stand on the ground; raised into `upright_a` it
+/// stands, slides the 80 mm into the slot a sample a tick, and is seated there, held by both: its holders' hands on its
+/// posts' outward faces at 1.05 and 1.35 m, on the side away from `upright_b`, and they walk round to stand behind its
+/// posts. A raise into `upright_b`, 2.9 m off, is refused `raise.not-at-slot` before anything moves.
+#[test]
+fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() {
+    use replica::effects::{Body, Change};
+    use sim::activity::carry::grips::{GRIPS, HELD, HOLD_HANDS, Holds};
+    use sim::activity::carry::raise::{SIDE, Spec};
+    let d = scratch("raiseinto");
+    let (facts, slots) = yard_world(&d);
+    // Two raise it; two more walk past the bay all through the raise and its end (the camp's walkers: its standing
+    // commit was refused `edit.body-stale` while bodies moved, #5067).
+    let w = seed_entries(&d, &facts, 4, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa8);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let kind = |prefix: &str| {
+        Name::new(rules.kinds.keys().find(|k| k.starts_with(prefix)).unwrap()).unwrap()
+    };
+    let place = |prefix: &str, at: Vec3, q: Quat| Op::Place {
+        name: 1,
+        kind: kind(prefix),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: at,
+            orientation: q,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let got = creator_edit(place(
+        "mars:rack_bay@",
+        Vec3::new(56 * M, 0, -24 * M),
+        Quat::IDENTITY,
+    ));
+    assert_eq!(got.kind, 1, "a bay: {got:?}");
+    let bay = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let points =
+        sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap()).unwrap();
+    let at = |k: u64| points.iter().find(|(n, _)| *n == k).unwrap().1;
+    let (ua, ub) = (at(slots["upright_a"]), at(slots["upright_b"]));
+    drop(copy);
+    // Lying on its face, its length along -z from its foot (outward from the bay), 80 mm east of upright_a.
+    let spec = Spec::of(
+        &json::parse(&std::fs::read_to_string(d.join("entries/rack_upright.json")).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let half = 759_250_125;
+    let lie = Quat::new(half, -half, 0, 0).unwrap();
+    let foot = Vec3::new(ua.x + 80_000, spec.half_thick, ua.z);
+    let got = creator_edit(place("mars:rack_upright@", foot, lie));
+    assert_eq!(got.kind, 1, "a frame lying: {got:?}");
+    let frame = got.names[&1];
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    // The lifter beside its top end, the footer beside its base on the other side.
+    let beside = spec.half_width + SIDE;
+    let stations = [
+        v3(foot.x + beside, 0, foot.z - spec.height),
+        v3(foot.x - beside, 0, foot.z),
+    ];
+    for (k, p) in stations.iter().enumerate() {
+        hands[k].walk_to(g, *p);
+    }
+    for h in hands[..2].iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "to its raise station: {e:?}");
+    }
+    // The two bystanders to their lanes' starts, 3 m west of the bay.
+    let lanes = [
+        (v3(53 * M, 0, -20 * M), v3(53 * M, 0, -30 * M)),
+        (v3(52 * M, 0, -30 * M), v3(52 * M, 0, -20 * M)),
+    ];
+    for (k, (a, _)) in lanes.iter().enumerate() {
+        hands[2 + k].walk_to(g, *a);
+    }
+    for h in hands[2..].iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "a bystander to its lane: {e:?}");
+    }
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    assert_eq!(
+        hands[1].act("activity:accept", crew, BTreeMap::new()).kind,
+        1
+    );
+    let into = |k: u64| {
+        BTreeMap::from([
+            (1, frame.to_value()),
+            (4, bay.to_value()),
+            (5, Value::Uint(k)),
+        ])
+    };
+    // Its foot 2.9 m from upright_b: refused by name, nothing moves.
+    let far = hands[0].act("part:raise", crew, into(slots["upright_b"]));
+    println!(
+        "raised into upright_b, {} mm off: {far:?}",
+        apart_mm(foot, ub)
+    );
+    assert_eq!(
+        (far.kind, far.reason.as_str()),
+        (2, "raise.not-at-slot"),
+        "{far:?}"
+    );
+    let got = hands[0].act("part:raise", crew, into(slots["upright_a"]));
+    println!("raised into upright_a: {got:?}");
+    assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    // The two walk to and fro 3 m west of the bay while it is raised, slid and seated (each was born at its lane's
+    // start before the raise).
+    let mut leg = [0usize; 2];
+    for (k, (_, z)) in lanes.iter().enumerate() {
+        hands[2 + k].walk_to(g, *z);
+        leg[k] = 1;
+    }
+    // Raised, slid and seated, held by both.
+    let t0 = std::time::Instant::now();
+    let held = loop {
+        let h = logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back();
+        if let Some(h) = h.filter(|h| h.phase == HELD) {
+            break h;
+        }
+        // A bystander whose walk has ended sets off along its lane the other way.
+        for k in 0..2 {
+            let b = body_at(&w, body_of(&w, w.souls[2 + k]));
+            let (a, z) = lanes[k];
+            let goal = if leg[k] % 2 == 0 { a } else { z };
+            if apart_mm(b, goal) < 400 {
+                leg[k] += 1;
+                let _ = socket_end(&mut hands[2 + k].s);
+                hands[2 + k].walk_to(g, if leg[k] % 2 == 0 { a } else { z });
+            }
+        }
+        if t0.elapsed() > Duration::from_secs(40) {
+            while let Ok(l) = s.lines.try_recv() {
+                if l.contains("worldd:") {
+                    println!("served: {l}");
+                }
+            }
+            let words: Vec<String> = logged(&w)
+                .iter()
+                .flat_map(|p| p.effects.iter())
+                .flat_map(|e| e.events.iter().flatten())
+                .filter(|ev| ev.fields.get(&1) == Some(&crew.to_value()))
+                .map(|ev| format!("{} {:?}", ev.name.as_str(), ev.fields.get(&3)))
+                .collect();
+            panic!(
+                "never held: {:?}; the crew's words {words:?}",
+                where_is(&w, frame)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let (parent, slot, pos) = where_is(&w, frame);
+    println!(
+        "seated: {parent:?} slot {slot:?} at {pos:?}, the bystanders walking {leg:?} legs; held {:?}",
+        held.holds
+    );
+    assert_eq!(
+        (parent, slot),
+        (Some(bay), Some(slots["upright_a"])),
+        "in upright_a"
+    );
+    assert!(apart_mm(pos, ua) <= 2, "where the slot is: {pos:?} {ua:?}");
+    // Held from outside the bay: away from upright_b, which is at the bay's +z of upright_a, so the frame's own -z.
+    assert_eq!(held.holds.len(), 2);
+    for h in &held.holds {
+        assert_eq!([h.hands[0].y, h.hands[1].y], HOLD_HANDS, "{h:?}");
+        assert!(h.hands[0].z < 0, "on the outer face: {h:?}");
+    }
+    assert!(
+        held.holds[0].hands[0].x == -held.holds[1].hands[0].x,
+        "one on each post"
+    );
+    // The track: no sample of the crew's node more than 0.1 m from the last, the slide included.
+    let samples: Vec<Vec3> = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            Body::Changes(cs) => cs.iter().find_map(|c| match &c.change {
+                Change::Motion(h) if h.node == crew => Some(h.pose.position),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+    let jump = samples
+        .windows(2)
+        .map(|p| apart_mm(p[0], p[1]))
+        .max()
+        .unwrap_or(0);
+    println!(
+        "{} samples of the crew's node, at most {jump} mm apart",
+        samples.len()
+    );
+    assert!(jump <= 100, "no jump: {jump} mm");
+    // The holders walk round behind its posts: each 0.35 m off its outer face, outside the bay.
+    let t0 = std::time::Instant::now();
+    loop {
+        let z: Vec<i64> = w.souls[..2]
+            .iter()
+            .map(|s| body_at(&w, body_of(&w, *s)).z)
+            .collect();
+        if z.iter().all(|z| *z < ua.z - 300_000) {
+            println!("the holders stand outside the bay, z {z:?} mm off {}", ua.z);
+            hands_on_the_face_held_from(&w, crew, frame);
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(20),
+            "holders behind its posts: {z:?} {}",
+            ua.z
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// FOR-FABLE 15 (#5067, `edit.body-stale`): a raise into a slot is never turned back by another body's change. Crew A
+/// raises a rack frame into the bay's `upright_a`; 4 s later crew B, in the same square of the ground 7 m west, raises
+/// a 12 ft frame on the open ground: B's lifter is on its walking track (9 s at the raise's pace), then on its stance
+/// walk, all through A's end, so the walkers' maps A's seating was prepared with go stale every time it is tried. A waits and is seated in its slot, held,
+/// and no word of crew A says it was turned back (`souls:raise-refused`).
+#[test]
+fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
+    raise_beside_a_walking_crew(false);
+}
+
+/// FOR-FABLE 15, past the world's seat wait (shortened to 3 s here, `WORLDD_SEAT_WAIT_S`): crew B's lifter walks on
+/// through A's end for longer than A's seating may wait, so A stops held where it stands, its crew holding it
+/// (`souls:raise-held`, why `souls:map-busy`), never turned back; once B's crew stands still, A's lifter asks again and
+/// it is seated in `upright_a`.
+#[test]
+fn a_raise_into_a_slot_past_the_seat_wait_stops_held_and_is_seated_when_asked_again() {
+    raise_beside_a_walking_crew(true);
+}
+
+/// The two crews of the FOR-FABLE 15 cases; `busy`: the seat wait shortened to 3 s, so A's end outlasts it.
+fn raise_beside_a_walking_crew(busy: bool) {
+    use sim::activity::carry::grips::{GRIPS, HELD, Holds};
+    use sim::activity::carry::raise::{SIDE, Spec};
+    let d = scratch(if busy { "raisebusy" } else { "raisestale" });
+    let (facts, slots) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 4, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xab);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let envs: &[(&str, &str)] = if busy {
+        &[("WORLDD_SEAT_WAIT_S", "3")]
+    } else {
+        &[]
+    };
+    let s = serve_env(&w, &socket, None, envs);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let kind = |prefix: &str| {
+        Name::new(rules.kinds.keys().find(|k| k.starts_with(prefix)).unwrap()).unwrap()
+    };
+    let place = |prefix: &str, at: Vec3, q: Quat| Op::Place {
+        name: 1,
+        kind: kind(prefix),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: at,
+            orientation: q,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let got = creator_edit(place(
+        "mars:rack_bay@",
+        Vec3::new(56 * M, 0, -24 * M),
+        Quat::IDENTITY,
+    ));
+    assert_eq!(got.kind, 1, "a bay: {got:?}");
+    let bay = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let points =
+        sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap()).unwrap();
+    let ua = points
+        .iter()
+        .find(|(n, _)| *n == slots["upright_a"])
+        .unwrap()
+        .1;
+    drop(copy);
+    let spec_of = |file: &str| {
+        Spec::of(
+            &json::parse(&std::fs::read_to_string(d.join("entries").join(file)).unwrap()).unwrap(),
+        )
+        .unwrap()
+    };
+    let (spec, long) = (
+        spec_of("rack_upright.json"),
+        spec_of("rack_upright_12ft.json"),
+    );
+    // Both lying on their faces, their lengths along -z from their feet.
+    let half = 759_250_125;
+    let lie = Quat::new(half, -half, 0, 0).unwrap();
+    let foot = Vec3::new(ua.x + 80_000, spec.half_thick, ua.z);
+    let got = creator_edit(place("mars:rack_upright@", foot, lie));
+    assert_eq!(got.kind, 1, "frame A lying: {got:?}");
+    let frame = got.names[&1];
+    let foot_b = Vec3::new(49 * M, long.half_thick, -21 * M);
+    let got = creator_edit(place("mars:rack_upright_12ft@", foot_b, lie));
+    assert_eq!(got.kind, 1, "the long frame lying: {got:?}");
+    let frame_b = got.names[&1];
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let stations = [
+        v3(foot.x + spec.half_width + SIDE, 0, foot.z - spec.height),
+        v3(foot.x - spec.half_width - SIDE, 0, foot.z),
+        v3(foot_b.x + long.half_width + SIDE, 0, foot_b.z - long.height),
+        v3(foot_b.x - long.half_width - SIDE, 0, foot_b.z),
+    ];
+    for (k, p) in stations.iter().enumerate() {
+        hands[k].walk_to(g, *p);
+    }
+    for h in hands.iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "to its raise station: {e:?}");
+    }
+    let mut crews = Vec::new();
+    for (lifter, footer) in [(0usize, 1usize), (2, 3)] {
+        let body = body_of(&w, w.souls[footer]);
+        let got = hands[lifter].act(
+            "activity:offer",
+            g,
+            BTreeMap::from([
+                (1, pinned_activity(&w, "mars:carry_activity")),
+                (2, Value::Text(Name::new("mars:front").unwrap())),
+                (3, Value::Array(vec![body.to_value()])),
+            ]),
+        );
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+        assert_eq!(
+            hands[footer]
+                .act("activity:accept", crew, BTreeMap::new())
+                .kind,
+            1
+        );
+        crews.push(crew);
+    }
+    let (crew, crew_b) = (crews[0], crews[1]);
+    let got = hands[0].act(
+        "part:raise",
+        crew,
+        BTreeMap::from([
+            (1, frame.to_value()),
+            (4, bay.to_value()),
+            (5, Value::Uint(slots["upright_a"])),
+        ]),
+    );
+    println!("frame A raised into upright_a: {got:?}");
+    assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    // The long frame 4 s later, on the open ground: its lifter walks beside it for 9 s, past A's end.
+    std::thread::sleep(Duration::from_secs(4));
+    let got = hands[2].act(
+        "part:raise",
+        crew_b,
+        BTreeMap::from([(1, frame_b.to_value())]),
+    );
+    println!("the 12 ft frame raised: {got:?}");
+    assert_eq!(got.kind, 1, "the long raise begins: {got:?}");
+    let words = |crew: Id| -> Vec<String> {
+        logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.fields.get(&1) == Some(&crew.to_value()))
+            .map(|ev| {
+                format!(
+                    "{} {:?} {:?}",
+                    ev.name.as_str(),
+                    ev.fields.get(&3),
+                    ev.fields.get(&6)
+                )
+            })
+            .collect()
+    };
+    let grips_of = |crew: Id| {
+        logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back()
+    };
+    let t0 = std::time::Instant::now();
+    loop {
+        let said = words(crew);
+        if busy && said.iter().any(|s| s.contains("souls:map-busy")) {
+            break;
+        }
+        if !busy && grips_of(crew).is_some_and(|h| h.phase == HELD) {
+            break;
+        }
+        if t0.elapsed() > Duration::from_secs(60)
+            || said.iter().any(|s| s.contains("raise-refused"))
+        {
+            while let Ok(l) = s.lines.try_recv() {
+                if l.contains("worldd:") {
+                    println!("served: {l}");
+                }
+            }
+            panic!(
+                "frame A neither held in its slot nor stopped held: {:?}; crew A's words {said:?}; crew B's {:?}",
+                where_is(&w, frame),
+                words(crew_b)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    if busy {
+        // Stopped held where it stands, beside its slot, not in it; its crew holding it; never turned back.
+        let said = words(crew);
+        println!(
+            "frame A stopped held after {:?}: {:?}; crew A's words {said:?}",
+            t0.elapsed(),
+            where_is(&w, frame)
+        );
+        assert!(
+            said.last().is_some_and(|s| s.contains("souls:held")),
+            "its crew holds it: {said:?}"
+        );
+        assert!(
+            said.iter().any(|s| s.contains("souls:raise-held")),
+            "said stopped held: {said:?}"
+        );
+        assert!(
+            !said
+                .iter()
+                .any(|s| s.contains("raise-refused") || s.contains("souls:lower")),
+            "never turned back: {said:?}"
+        );
+        assert_ne!(where_is(&w, frame).0, Some(bay), "not seated yet");
+        // Once crew B is still (its raise and its holders' stance walk over), A's lifter asks again.
+        let bodies = [body_of(&w, w.souls[2]), body_of(&w, w.souls[3])];
+        let t1 = std::time::Instant::now();
+        let mut last = bodies.map(|b| body_at(&w, b));
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = bodies.map(|b| body_at(&w, b));
+            let still = now == last && grips_of(crew_b).is_some_and(|h| h.phase == HELD);
+            last = now;
+            if still {
+                break;
+            }
+            assert!(
+                t1.elapsed() < Duration::from_secs(60),
+                "crew B never stood still: {:?}",
+                words(crew_b)
+            );
+        }
+        // Another slot named is refused by name, and it stays held where it stands.
+        let other = hands[0].act(
+            "part:raise",
+            crew,
+            BTreeMap::from([
+                (1, frame.to_value()),
+                (4, bay.to_value()),
+                (5, Value::Uint(slots["upright_b"])),
+            ]),
+        );
+        assert_eq!(
+            (other.kind, other.reason.as_str()),
+            (2, "raise.not-at-slot"),
+            "{other:?}"
+        );
+        let got = hands[0].act(
+            "part:raise",
+            crew,
+            BTreeMap::from([
+                (1, frame.to_value()),
+                (4, bay.to_value()),
+                (5, Value::Uint(slots["upright_a"])),
+            ]),
+        );
+        println!("frame A raised again: {got:?}");
+        assert_eq!(got.kind, 1, "seated when asked again: {got:?}");
+    }
+    let (parent, slot, pos) = where_is(&w, frame);
+    println!(
+        "frame A seated: {parent:?} slot {slot:?} at {pos:?} after {:?}; crew A's words {:?}; crew B's {:?}",
+        t0.elapsed(),
+        words(crew),
+        words(crew_b)
+    );
+    assert_eq!(
+        (parent, slot),
+        (Some(bay), Some(slots["upright_a"])),
+        "in upright_a"
+    );
+    assert!(apart_mm(pos, ua) <= 2, "where the slot is: {pos:?} {ua:?}");
+    assert!(
+        grips_of(crew).is_some_and(|h| h.phase == HELD),
+        "held by its crew"
+    );
+    assert!(
+        !words(crew).iter().any(|s| s.contains("raise-refused")),
+        "never turned back"
+    );
+}
+
+/// #5067 (a part the same either way, `symmetry` `front_back`): a creator places a deck bay and a 12 ft frame lying at
+/// its `upright_b`, its top away from the bay and turned so that, stood up, it faces opposite to the slot. Raised into
+/// `upright_b` it is admitted (the slot's turn or a half turn from it, the nearer), slides in, and is seated there,
+/// held by both from outside the bay.
+#[test]
+fn a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way() {
+    use replica::effects::{Body, Change};
+    use sim::activity::carry::grips::{GRIPS, HELD, HOLD_HANDS, Holds};
+    use sim::activity::carry::raise::{SIDE, Spec};
+    let d = scratch("raiseintob");
+    let (facts, _) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xaa);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let kind = |prefix: &str| {
+        Name::new(rules.kinds.keys().find(|k| k.starts_with(prefix)).unwrap()).unwrap()
+    };
+    let place = |prefix: &str, at: Vec3, q: Quat| Op::Place {
+        name: 1,
+        kind: kind(prefix),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: at,
+            orientation: q,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let got = creator_edit(place(
+        "mars:deck_bay@",
+        Vec3::new(56 * M, 0, -24 * M),
+        Quat::IDENTITY,
+    ));
+    assert_eq!(got.kind, 1, "a deck bay: {got:?}");
+    // Its slots by number, in its entry's order.
+    let deck: BTreeMap<String, u64> =
+        match json::parse(&std::fs::read_to_string(d.join("entries/deck_bay.json")).unwrap())
+            .unwrap()
+            .get("slots")
+        {
+            Some(json::Value::Obj(o)) => o
+                .iter()
+                .enumerate()
+                .map(|(k, (n, _))| (n.clone(), k as u64 + 1))
+                .collect(),
+            _ => panic!("its slots"),
+        };
+    let slots = deck;
+    let bay = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let points =
+        sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap()).unwrap();
+    let at = |k: u64| points.iter().find(|(n, _)| *n == k).unwrap().1;
+    let ub = at(slots["upright_b"]);
+    drop(copy);
+    // Lying on its face at upright_b, its length along +z from its foot (outward from the bay), turned so its own x runs
+    // along -x: stood up, it faces opposite to the slot (#5067: the 12 ft frame raised with its top away from the bay).
+    let spec = Spec::of(
+        &json::parse(&std::fs::read_to_string(d.join("entries/rack_upright_12ft.json")).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let half = 759_250_125;
+    let lie = Quat::from_yaw_mdeg(180_000)
+        .unwrap()
+        .then(Quat::new(half, -half, 0, 0).unwrap())
+        .unwrap();
+    let foot = Vec3::new(ub.x + 80_000, spec.half_thick, ub.z);
+    let got = creator_edit(place("mars:rack_upright_12ft@", foot, lie));
+    assert_eq!(got.kind, 1, "a frame lying: {got:?}");
+    let frame = got.names[&1];
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    // The lifter beside its top end, the footer beside its base on the other side.
+    let beside = spec.half_width + SIDE;
+    let stations = [
+        v3(foot.x - beside, 0, foot.z + spec.height),
+        v3(foot.x + beside, 0, foot.z),
+    ];
+    for (k, p) in stations.iter().enumerate() {
+        hands[k].walk_to(g, *p);
+    }
+    for h in hands.iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "to its raise station: {e:?}");
+    }
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    assert_eq!(
+        hands[1].act("activity:accept", crew, BTreeMap::new()).kind,
+        1
+    );
+    let into = |k: u64| {
+        BTreeMap::from([
+            (1, frame.to_value()),
+            (4, bay.to_value()),
+            (5, Value::Uint(k)),
+        ])
+    };
+    let got = hands[0].act("part:raise", crew, into(slots["upright_b"]));
+    println!("raised into upright_b, turned a half turn from it: {got:?}");
+    assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    // Raised, slid and seated, held by both.
+    let t0 = std::time::Instant::now();
+    let held = loop {
+        let h = logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back();
+        if let Some(h) = h.filter(|h| h.phase == HELD) {
+            break h;
+        }
+        if t0.elapsed() > Duration::from_secs(40) {
+            while let Ok(l) = s.lines.try_recv() {
+                if l.contains("worldd:") {
+                    println!("served: {l}");
+                }
+            }
+            let words: Vec<String> = logged(&w)
+                .iter()
+                .flat_map(|p| p.effects.iter())
+                .flat_map(|e| e.events.iter().flatten())
+                .filter(|ev| ev.fields.get(&1) == Some(&crew.to_value()))
+                .map(|ev| format!("{} {:?}", ev.name.as_str(), ev.fields.get(&3)))
+                .collect();
+            panic!(
+                "never held: {:?}; the crew's words {words:?}",
+                where_is(&w, frame)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let (parent, slot, pos) = where_is(&w, frame);
+    println!(
+        "seated: {parent:?} slot {slot:?} at {pos:?}; held {:?}",
+        held.holds
+    );
+    assert_eq!(
+        (parent, slot),
+        (Some(bay), Some(slots["upright_b"])),
+        "in upright_b"
+    );
+    assert!(apart_mm(pos, ub) <= 2, "where the slot is: {pos:?} {ub:?}");
+    assert_eq!(held.holds.len(), 2);
+    for h in &held.holds {
+        assert_eq!([h.hands[0].y, h.hands[1].y], HOLD_HANDS, "{h:?}");
+    }
+    assert!(
+        held.holds[0].hands[0].x == -held.holds[1].hands[0].x,
+        "one on each post"
+    );
+    // The track: no sample of the crew's node more than 0.1 m from the last, the slide included.
+    let samples: Vec<Vec3> = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            Body::Changes(cs) => cs.iter().find_map(|c| match &c.change {
+                Change::Motion(h) if h.node == crew => Some(h.pose.position),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+    let jump = samples
+        .windows(2)
+        .map(|p| apart_mm(p[0], p[1]))
+        .max()
+        .unwrap_or(0);
+    println!(
+        "{} samples of the crew's node, at most {jump} mm apart",
+        samples.len()
+    );
+    assert!(jump <= 100, "no jump: {jump} mm");
+    // The holders walk round behind its posts: each 0.35 m off its outer face, outside the bay.
+    let t0 = std::time::Instant::now();
+    loop {
+        let z: Vec<i64> = w
+            .souls
+            .iter()
+            .map(|s| body_at(&w, body_of(&w, *s)).z)
+            .collect();
+        if z.iter().all(|z| *z > ub.z + 300_000) {
+            println!("the holders stand outside the bay, z {z:?} mm off {}", ub.z);
+            hands_on_the_face_held_from(&w, crew, frame);
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(20),
+            "holders behind its posts: {z:?} {}",
+            ub.z
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// #5067 (orienting, the first third of the build): a rack frame lies on the pile 6 m east of a placed bay, its length
+/// along x. Two Souls lift it, turn it a quarter turn in their hands (`carry:turn`), carry it to the bay and set it down
+/// with its foot at `upright_a` and its length outward, its base line along the bay's x; then raise it into the slot.
+#[test]
+fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_it() {
+    use sim::activity::carry::grips::{GRIPS, HELD, Holds};
+    use sim::activity::carry::raise::{SIDE, Spec};
+    let d = scratch("turninto");
+    let (facts, slots) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa9);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let kind = |prefix: &str| {
+        Name::new(rules.kinds.keys().find(|k| k.starts_with(prefix)).unwrap()).unwrap()
+    };
+    let place = |prefix: &str, at: Vec3, q: Quat| Op::Place {
+        name: 1,
+        kind: kind(prefix),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: at,
+            orientation: q,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    // 2 m north of the pile's line: the frame's middle, set down south of upright_a, stays on the test world's ground
+    // (cut only in its 16 m squares that hold something: it ends at z -32 m).
+    let got = creator_edit(place(
+        "mars:rack_bay@",
+        Vec3::new(56 * M, 0, -28 * M),
+        Quat::IDENTITY,
+    ));
+    assert_eq!(got.kind, 1, "a bay: {got:?}");
+    let bay = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let ua = sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+        .unwrap()
+        .into_iter()
+        .find(|(n, _)| *n == slots["upright_a"])
+        .unwrap()
+        .1;
+    drop(copy);
+    let spec = Spec::of(
+        &json::parse(&std::fs::read_to_string(d.join("entries/rack_upright.json")).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    // On the pile: lying on its face, its length along +x (its own y turned to +x), 6 m east of the bay.
+    let half = 759_250_125;
+    let face_up = Quat::new(half, -half, 0, 0).unwrap();
+    let lie = Quat::from_yaw_mdeg(90_000).unwrap().then(face_up).unwrap();
+    let pile = Vec3::new(62 * M, spec.half_thick, -30 * M);
+    let got = creator_edit(place("mars:rack_upright@", pile, lie));
+    assert_eq!(got.kind, 1, "a frame on the pile: {got:?}");
+    let frame = got.names[&1];
+    let (pos, rot) = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let x = sim::ground::scene::xform_to(t, t.handle(frame).unwrap(), t.handle(g).unwrap())
+            .unwrap();
+        (x.pos, x.rot)
+    };
+    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
+    println!("on the pile: its foot at {pos:?}, its length {len:?}");
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let both = |hands: &mut [Hand], ps: [Vec3; 2], what: &str| {
+        for (k, p) in ps.iter().enumerate() {
+            hands[k].walk_to(g, *p);
+        }
+        for h in hands.iter_mut() {
+            let e = socket_end(&mut h.s);
+            assert_eq!(e.kind, 1, "{what}: {e:?}");
+        }
+    };
+    // Lifted from beside its ends, along its length.
+    let mid = Vec3::new(
+        pos.x + len.x * spec.height / 2 / M,
+        0,
+        pos.z + len.z * spec.height / 2 / M,
+    );
+    // Beyond its ends (its grips 0.78 m from its middle), off the ground it lay on.
+    let reach = 1_300_000;
+    both(
+        &mut hands,
+        [v3(mid.x + reach, 0, mid.z), v3(mid.x - reach, 0, mid.z)],
+        "to its ends",
+    );
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    assert_eq!(
+        hands[1].act("activity:accept", crew, BTreeMap::new()).kind,
+        1
+    );
+    let got = hands[0].act("carry:lift", crew, BTreeMap::from([(1, frame.to_value())]));
+    assert_eq!(got.kind, 1, "lifted: {got:?}");
+    std::thread::sleep(Duration::from_secs(2));
+    let pose_of = |id: Id| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let h = t.handle(id).unwrap();
+        if let Ok(x) = sim::ground::scene::xform_to(t, h, t.handle(g).unwrap()) {
+            return (x.pos, x.rot);
+        }
+        // Riding the crew's slot (no slot of its fields): the crew's node's pose times its place there.
+        let n = t.node(h).unwrap();
+        let place = n.place().unwrap();
+        let ph = t.handle(n.parent().unwrap()).unwrap();
+        let x = sim::ground::scene::xform_to(t, ph, t.handle(g).unwrap()).unwrap();
+        let o = x.rot.rotate(place.position).unwrap();
+        (
+            Vec3::new(x.pos.x + o.x, x.pos.y + o.y, x.pos.z + o.z),
+            x.rot.then(place.orientation).unwrap(),
+        )
+    };
+    // Carried along its length to the bay, led by its front, its heading kept ([`heading_walk`]: the world keeps the
+    // back in its place), its middle to where it is to turn: its foot will come down at upright_a once its length
+    // points outward (-z), half its length south of there. Again for what a walk's end leaves.
+    let target = v3(ua.x, 0, ua.z - spec.height / 2);
+    for leg in 0..3 {
+        let (n, _) = pose_of(crew);
+        let (dx, dz) = (target.x - n.x, target.z - n.z);
+        if leg > 0 && (dx.abs() + dz.abs()) <= 60_000 {
+            break;
+        }
+        let feet: Vec<Vec3> = w
+            .souls
+            .iter()
+            .map(|s| body_at(&w, body_of(&w, *s)))
+            .collect();
+        let (f1, b1) = (
+            v3(feet[0].x + dx, 0, feet[0].z + dz),
+            v3(feet[1].x + dx, 0, feet[1].z + dz),
+        );
+        hands[0].send("eden:walk", g, heading_walk(f1, b1));
+        let e = socket_end(&mut hands[0].s);
+        assert_eq!(e.kind, 1, "the front to the bay: {e:?}");
+        settled(&w, hands[1].soul, b1, "to the bay");
+        hands[1].walk_to(g, b1);
+        let e = socket_end(&mut hands[1].s);
+        assert_eq!(e.kind, 1, "the back to the bay: {e:?}");
+        std::thread::sleep(Duration::from_millis(500));
+        println!(
+            "leg {leg}: its middle {} mm from where it turns",
+            apart_mm(pose_of(crew).0, target)
+        );
+    }
+    // Turned in their hands so its length points outward from the bay (-z): a quarter turn.
+    let (_, rot) = pose_of(frame);
+    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
+    let (n0, nq) = pose_of(crew);
+    let h0 = nq.rotate(Vec3::new(M, 0, 0)).unwrap();
+    // The turn that takes its length to -z, applied to the carry's heading, the shorter way round.
+    let a = (-(len.z as f64)).atan2(len.x as f64);
+    let want = std::f64::consts::FRAC_PI_2;
+    let turn =
+        (want - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let (c, sn) = (turn.cos(), turn.sin());
+    let heading = [
+        (h0.x as f64 * c + h0.z as f64 * sn) as i64,
+        (-(h0.x as f64) * sn + h0.z as f64 * c) as i64,
+    ];
+    let got = hands[1].act(
+        "carry:turn",
+        crew,
+        BTreeMap::from([(
+            3,
+            Value::Array(vec![int(heading[0]), int(0), int(heading[1])]),
+        )]),
+    );
+    println!("turned {} degrees: {got:?}", (turn.to_degrees()).round());
+    assert_eq!(got.kind, 1, "the turn: {got:?}");
+    std::thread::sleep(Duration::from_secs(5));
+    let (_, rot) = pose_of(frame);
+    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
+    let (n1, _) = pose_of(crew);
+    println!("turned: its length {len:?}, the crew's node from {n0:?} to {n1:?}");
+    assert!(len.z < -990_000, "its length outward, along -z: {len:?}");
+    let got = hands[0].act("carry:set-down", crew, BTreeMap::new());
+    assert_eq!(got.kind, 1, "set down: {got:?}");
+    std::thread::sleep(Duration::from_secs(2));
+    let (foot, rot) = pose_of(frame);
+    println!(
+        "set down: its foot at {foot:?}, {} mm from upright_a",
+        apart_mm(foot, ua)
+    );
+    assert!(
+        apart_mm(foot, ua) <= 150,
+        "its foot at upright_a: {} mm",
+        apart_mm(foot, ua)
+    );
+    let base = rot.rotate(Vec3::new(M, 0, 0)).unwrap();
+    assert!(base.x.abs() > 990_000, "its base line along x: {base:?}");
+    // Raised into upright_a from its raise stations.
+    let beside = spec.half_width + SIDE;
+    let side = if base.x > 0 { 1 } else { -1 };
+    both(
+        &mut hands,
+        [
+            v3(foot.x + side * beside, 0, foot.z - spec.height),
+            v3(foot.x - side * beside, 0, foot.z),
+        ],
+        "to the raise stations",
+    );
+    let got = hands[0].act(
+        "part:raise",
+        crew,
+        BTreeMap::from([
+            (1, frame.to_value()),
+            (4, bay.to_value()),
+            (5, Value::Uint(slots["upright_a"])),
+        ]),
+    );
+    println!("raised into upright_a: {got:?}");
+    assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    let t0 = std::time::Instant::now();
+    loop {
+        let held = logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back()
+            .is_some_and(|h| h.phase == HELD);
+        if held {
+            break;
+        }
+        if t0.elapsed() > Duration::from_secs(40) {
+            while let Ok(l) = s.lines.try_recv() {
+                if l.contains("worldd:") {
+                    println!("served: {l}");
+                }
+            }
+            panic!("never held: {:?}", where_is(&w, frame));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let (parent, slot, _) = where_is(&w, frame);
+    assert_eq!(
+        (parent, slot),
+        (Some(bay), Some(slots["upright_a"])),
+        "raised into upright_a"
+    );
+}
+
+/// #5067: each holder of crew `crew`'s standing `part` has its hands on the face it stands at: the hands' side of the
+/// part's plane (its own z, as it is seated) is the side its feet are on, and its hands are on that face.
+fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
+    use sim::activity::carry::grips::{GRIPS, Holds};
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let x = sim::ground::scene::xform_to(t, t.handle(part).unwrap(), t.handle(w.ground).unwrap())
+        .unwrap();
+    drop(copy);
+    let h = logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+        .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+        .next_back()
+        .expect("its holds");
+    let n = x.rot.rotate(Vec3::new(0, 0, M)).unwrap();
+    let side = |p: Vec3| {
+        (i128::from(p.x - x.pos.x) * i128::from(n.x) + i128::from(p.z - x.pos.z) * i128::from(n.z))
+            .signum()
+    };
+    for hold in &h.holds {
+        let hand = x.point(hold.hands[0]).unwrap();
+        let feet = body_at(w, hold.body);
+        println!(
+            "{} holds at {hand:?} (its face {}), stands at {feet:?} (side {})",
+            hold.grip,
+            side(hand),
+            side(feet)
+        );
+        assert_eq!(
+            side(hand),
+            side(feet),
+            "{}'s hands on the face it stands at: {hold:?}",
+            hold.grip
+        );
+        assert_ne!(side(hand), 0, "on a face, not in the frame's plane");
+    }
+}
+
+/// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` has come to its stance behind its post
+/// (`grips::stance`): within 100 mm of it on the plan (a holder's hands sit on its post, a little off the stance's
+/// own line on a frame not centred on its slot), and standing still there across two reads of the world. Fails
+/// otherwise, naming how far.
+fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
+    use sim::activity::carry::grips::{GRIPS, Holds, stance};
+    let end = Instant::now() + Duration::from_secs(60);
+    let mut last: Option<Vec<Vec3>> = None;
+    loop {
+        let (copy, _) = served_copy(w);
+        let t = copy.tree();
+        let x =
+            sim::ground::scene::xform_to(t, t.handle(part).unwrap(), t.handle(w.ground).unwrap())
+                .unwrap();
+        drop(copy);
+        let h = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back()
+            .expect("its holds");
+        let feet: Vec<Vec3> = h.holds.iter().map(|hold| body_at(w, hold.body)).collect();
+        let offs: Vec<i64> = h
+            .holds
+            .iter()
+            .zip(&feet)
+            .map(|(hold, f)| apart_mm(*f, x.point(stance(hold, Vec3::ZERO).0).unwrap()))
+            .collect();
+        if offs.iter().all(|o| *o <= 100) && last.as_ref() == Some(&feet) {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "{what}: the holders not at their stances, mm off {offs:?}"
+        );
+        last = Some(feet);
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
+fn apart_mm(a: Vec3, b: Vec3) -> i64 {
+    ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt() / 1000) as i64
 }
 
 /// A frame a creator places live stands on its two posts, as a seeded one does (its import's solids, one box a post),
@@ -8383,7 +9583,7 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         }
     }
     std::fs::write(&p, e.to_json()).unwrap();
-    let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 8, (36, -20), Some(&d.join("entries")));
     let socket = d.join("s");
     let s = serve_with(&w, &socket, None);
     s.line("listening ", 120);
@@ -8492,35 +9692,50 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         }
     };
 
-    // The frames, each by a crew of two whose two walks are sent by both (A3's): Soul 1 lets go, the other holds.
-    for (frame, slot, other) in [(fa, "upright_a", 1), (fb, "upright_b", 2)] {
+    // The frames, each by a crew of two whose two walks are sent by both (A3's), Souls 7 and 2, then 8 and 3: both
+    // hold it on, one on each post, until beams brace it (#5067: two holders keep an unbraced frame standing).
+    for (frame, slot, front, other) in [(fa, "upright_a", 6, 1), (fb, "upright_b", 7, 2)] {
         let (f0, f1) = frame_ends(where_is(&w, frame).2);
-        walk_all(&mut souls, &[(0, f0), (other, f1)], "to the frame").await;
-        let c = crew(&mut souls, &[0, other]).await;
-        let got = souls[0].act("part:take", c, part(frame)).await;
+        walk_all(&mut souls, &[(front, f0), (other, f1)], "to the frame").await;
+        let c = crew(&mut souls, &[front, other]).await;
+        let got = souls[front].act("part:take", c, part(frame)).await;
         assert_eq!(got.kind, 1, "frame taken: {got:?}");
-        let now = crew_now(&w, w.souls[0], w.souls[other]);
+        let now = crew_now(&w, w.souls[front], w.souls[other]);
         for (f0, f1) in frame_legs(now, frame_ends(slot_of(bay, slots[slot]))) {
             // Led by its front ([`heading_walk`]); the world keeps the other in its place.
-            let got = souls[0].act("eden:walk", g, heading_walk(f0, f1)).await;
+            let got = souls[front].act("eden:walk", g, heading_walk(f0, f1)).await;
             assert_eq!(got.kind, 1, "the frame to the bay, its front: {got:?}");
             settled(&w, w.souls[other], f1, "the frame to the bay");
             walk_all(&mut souls, &[(other, f1)], "the frame to the bay").await;
         }
-        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        let got = souls[front]
+            .act("part:put", c, in_slot(bay, slots[slot]))
+            .await;
         assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
-        // #5067: seated, its crew still holds it, each carrier on its grip; Soul 1's leave takes only its own hold.
-        let (a, b) = (body_of(&w, w.souls[0]), body_of(&w, w.souls[other]));
+        // #5067: seated, its crew still holds it, each carrier on its grip; neither may let go while it is unbraced.
+        let (a, b) = (body_of(&w, w.souls[front]), body_of(&w, w.souls[other]));
         let held = grips_said(&w, c, |p, _| p == "souls:held");
         assert_eq!(held.1, [a, b], "frame in {slot}: both hold it");
-        let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
-        assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
-        let held = grips_said(&w, c, |p, b| p == "souls:held" && b.len() == 1);
+        let got = souls[front].act("activity:leave", c, BTreeMap::new()).await;
+        println!("one of frame {slot}'s two holders lets go: {got:?}");
         assert_eq!(
-            held.1,
-            [b],
-            "frame in {slot}: the other still holds its grip"
+            (got.kind, got.reason.as_str()),
+            (2, "support.holders"),
+            "refused: {got:?}"
         );
+        // A refused leave changes nothing: the crew's last word of who holds it still names both.
+        std::thread::sleep(Duration::from_millis(500));
+        let last = grips_said(&w, c, |_, _| true);
+        assert_eq!(
+            last,
+            ("souls:held".to_owned(), vec![a, b]),
+            "frame in {slot}: both still hold it"
+        );
+        // Each holder walks round to behind its post, its hands on that face. The beams' puts wait for the world to
+        // have ended those walks: a holder still on its way round stood where a beam is set in (`site.occupied`, a load
+        // race on a busy runner).
+        at_stances(&w, c, frame, slot);
+        hands_on_the_face_held_from(&w, c, frame);
     }
 
     // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle

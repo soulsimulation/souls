@@ -53,7 +53,7 @@ use super::water::Water;
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::open::Index;
-use crate::ground::scene::xform_to;
+use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::{
     HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
 };
@@ -73,7 +73,7 @@ use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
-use replica::world_model::show;
+use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -340,6 +340,18 @@ fn reach(b: &Building) -> Option<[i64; 4]> {
     })
 }
 
+/// Whether `thing` is a building in `tree`, as a whole build lists them (`Map::build_cut`): there, with a floor among
+/// its children. A thing whose last floor was removed (#5216: a deck whose one floor went) is one no longer.
+fn is_building(tree: &Tree, thing: Id) -> bool {
+    let floor = |&c| {
+        tree.node(c)
+            .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
+    };
+    tree.handle(thing)
+        .and_then(|h| tree.children(h))
+        .is_some_and(|kids| kids.iter().any(floor))
+}
+
 /// Whether boxes `a` and `b` meet.
 fn overlap(a: [i64; 4], b: [i64; 4]) -> bool {
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
@@ -494,6 +506,14 @@ impl Rebuilt {
         match &self.fresh {
             Fresh::Squares(sq, ..) => sq.len(),
             _ => 0,
+        }
+    }
+
+    /// How many buildings were read again alone: 0 when the whole was built.
+    pub fn buildings(&self) -> usize {
+        match &self.fresh {
+            Fresh::Squares(_, _, bs) | Fresh::Buildings(bs) => bs.len(),
+            Fresh::Whole(_) => 0,
         }
     }
 }
@@ -678,11 +698,23 @@ impl Installing<'_> {
                         next += n;
                     }
                 }
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions);
+                put_buildings(
+                    self.map,
+                    self.surfaces,
+                    self.buildings,
+                    (tree, ground),
+                    bs,
+                    versions,
+                );
             }
-            Fresh::Buildings(bs) => {
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions)
-            }
+            Fresh::Buildings(bs) => put_buildings(
+                self.map,
+                self.surfaces,
+                self.buildings,
+                (tree, ground),
+                bs,
+                versions,
+            ),
         }
         *self.basis = after;
         *self.link_at = link_index(self.buildings);
@@ -690,12 +722,13 @@ impl Installing<'_> {
     }
 }
 
-/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it.
+/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it, and
+/// its open ground (whose gates are a building of its own, never one that left).
 fn put_buildings(
     map: &mut Map,
     surfaces: &mut BTreeMap<Id, Surface>,
     buildings: &mut Vec<Building>,
-    tree: &Tree,
+    (tree, ground): (&Tree, Id),
     bs: Vec<(Building, BTreeMap<Id, Surface>)>,
     versions: &Versions,
 ) {
@@ -704,8 +737,8 @@ fn put_buildings(
         map.replace(&b, &|n| versions.of(n));
         surfaces.extend(floors);
         let at = buildings.iter().position(|o| o.thing == b.thing);
-        // A building removed (S13): it leaves the list, with its floors' surfaces.
-        if tree.handle(b.thing).is_none() {
+        // A building removed (S13), or left with no floor (#5216): it leaves the list, with its floors' surfaces.
+        if b.thing != ground && !is_building(tree, b.thing) {
             if let Some(i) = at {
                 for f in buildings.remove(i).floors.keys() {
                     surfaces.remove(f);
@@ -1070,7 +1103,7 @@ impl Town {
                     for (id, surface) in surfaces {
                         floors.insert(*id, Arc::new(surface.clone()));
                     }
-                    if building.thing != ground && base.handle(building.thing).is_none() {
+                    if building.thing != ground && !is_building(base, building.thing) {
                         known.remove(&building.thing);
                         reaches.remove(&building.thing);
                     } else if building.thing != ground {
@@ -1318,8 +1351,9 @@ impl Town {
                 return None;
             }
             // A building removed with the squares it stood on cut again (S13): a building of nothing, whose floors
-            // and links leave the map, when its links met the open ground on those squares only.
-            if cut.is_some() && after.handle(thing).is_none() {
+            // and links leave the map, when its links met the open ground on those squares only. So is a thing left
+            // with no floor (#5216: a deck whose one floor was removed): a whole build lists it no longer.
+            if cut.is_some() && thing != ground && !is_building(after, thing) {
                 let elsewhere = |l: &Id| {
                     open.meets
                         .iter()
@@ -1726,6 +1760,20 @@ impl Town {
     pub fn cut_off(&self, from: (Id, Vec3), node: Id, at: Vec3, size: Size) -> bool {
         self.geometry(size)
             .is_ok_and(|(m, ..)| sealed_on(m, Some(from), node, at))
+    }
+
+    /// The doorway or stair whose passage `p` (µm, `node`'s frame) lies in, as the spot tables keep walkers out of it
+    /// ([`passage_named`] with [`CLEAR`]): the thing it belongs to and the link's kind (#5254).
+    pub fn passage_at(&self, node: Id, p: Vec3) -> Option<(Id, Kind)> {
+        passage_named(
+            &self.buildings,
+            &self.passages,
+            self.ground,
+            node,
+            p,
+            None,
+            CLEAR,
+        )
     }
 
     /// The world's entry as [`Town::set_entry`] took it, on dry ground: where the main ground is judged from. `None`:
@@ -2475,7 +2523,7 @@ pub fn in_passage_but(
         }
         b.links
             .iter()
-            .any(|l| link_passage(b, l, ground, node, p, door, false) != Lies::Clear)
+            .any(|l| link_passage(b, l, ground, node, p, door, false, CLEARS) != Lies::Clear)
     })
 }
 
@@ -2536,12 +2584,52 @@ fn passage_indexed(
             p,
             door,
             mouths,
+            CLEARS,
         ));
         if most == Lies::In {
             break;
         }
     }
     most
+}
+
+/// The passage's clearances [`in_passage_but`] tests (µm): [`CLEAR`] round a link's end on a floor, and half
+/// [`CLEAR`] past its width along its line.
+const CLEARS: (i64, i64) = (CLEAR, CLEAR / 2);
+
+/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with clearance `clear` (µm)
+/// round its ends and past its width instead of [`CLEAR`] (#5254): the thing it belongs to and the link's kind. With
+/// [`CLEAR`] it is the passage [`in_passage_indexed`] finds (its band then half [`CLEAR`]); with a body's radius and
+/// margin it is the passage itself, which a body standing there would be in.
+pub fn passage_named(
+    buildings: &[Building],
+    passages: &Passages,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+    clear: i64,
+) -> Option<(Id, Kind)> {
+    let clears = if clear == CLEAR {
+        CLEARS
+    } else {
+        (clear, clear)
+    };
+    for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
+        let i = bi as usize;
+        if node == ground
+            && let Some(bx) = passages.boxes.get(i)
+            && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
+        {
+            continue;
+        }
+        let b = &buildings[i];
+        let l = &b.links[li as usize];
+        if link_passage(b, l, ground, node, p, door, false, clears) != Lies::Clear {
+            return Some((b.thing, l.kind));
+        }
+    }
+    None
 }
 
 /// How a point lies in one link's passage ([`link_passage`]): clear of it, only at its mouth (a doorway's, on the
@@ -2554,7 +2642,9 @@ enum Lies {
 }
 
 /// How `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`). With `mouths`
-/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line.
+/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line. `(end, band)` is how far round
+/// its ends and past its width along its line it reaches, µm: [`CLEARS`] for a walker's passage (#5254).
+#[allow(clippy::too_many_arguments)]
 fn link_passage(
     b: &Building,
     l: &crate::links::Link,
@@ -2563,6 +2653,7 @@ fn link_passage(
     p: Vec3,
     door: Option<Id>,
     mouths: bool,
+    (end, band): (i64, i64),
 ) -> Lies {
     if door.is_some() && l.door == door {
         return Lies::Clear;
@@ -2586,7 +2677,7 @@ fn link_passage(
     let (mut on, mut at_end) = (false, false);
     for e in ends {
         on = true;
-        if to_segment(p, e.a, e.b) < CLEAR {
+        if to_segment(p, e.a, e.b) < end {
             if !(mouths && doorway) {
                 return Lies::In;
             }
@@ -2619,13 +2710,13 @@ fn link_passage(
     // Between a doorway's ends its band is as wide as they are (the passage where it meets each floor), and half CLEAR;
     // past them only half CLEAR, so an opening's width is no disc round its ends.
     let reach = match l.kind {
-        Kind::Step => CLEAR / 2,
+        Kind::Step => band,
         Kind::Doorway if between => {
             let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
-            held.unwrap_or(0) + CLEAR / 2
+            held.unwrap_or(0) + band
         }
-        Kind::Doorway => CLEAR / 2,
-        _ => l.width / 2 + CLEAR / 2,
+        Kind::Doorway => band,
+        _ => l.width / 2 + band,
     };
     let on_line = read
         && l.line.windows(2).any(|s| {
@@ -2724,6 +2815,11 @@ impl ClassGround for ClassGrounds<'_> {
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool {
         self.0.get(&size).is_none_or(|g| g.passage(node, p))
     }
+    fn in_passage_itself(&self, size: Size, node: Id, p: Vec3) -> bool {
+        self.0
+            .get(&size)
+            .is_none_or(|g| g.passage_within(node, p, size))
+    }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.0.get_mut(&size)?.walk(an, a, bn, b)
     }
@@ -2738,6 +2834,25 @@ impl ClassGround for ClassGrounds<'_> {
     }
     fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         self.0.get(&size)?.start(node, p)
+    }
+}
+
+impl Grounds<'_> {
+    /// Whether a body of class `size` standing at `p` (µm, `node`'s frame) would be in a doorway or on a stair: within
+    /// [`CLEAR`] of a link's end or of its width along its line, as a walker is kept (A3: no standing place narrows a
+    /// doorway or a stair for others; #5254).
+    fn passage_within(&self, node: Id, p: Vec3, _size: Size) -> bool {
+        let clear = CLEAR;
+        passage_named(
+            self.buildings,
+            self.passages,
+            self.ground,
+            node,
+            p,
+            self.door,
+            clear,
+        )
+        .is_some()
     }
 }
 
@@ -2771,6 +2886,10 @@ impl Ground for Grounds<'_> {
             p,
             self.door,
         )
+    }
+
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.passage_within(node, p, Size::Standard)
     }
 
     fn mouth(&self, node: Id, p: Vec3) -> bool {

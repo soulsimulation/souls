@@ -291,7 +291,7 @@ impl Deck {
         let [ba, bb] = self.bents;
         let rails = self.rails;
         self.walk(
-            &[(0, Deck::at(1_350, -1_500)), (1, Deck::at(-1_350, -1_500))],
+            &[(0, Deck::at(1_250, -1_500)), (1, Deck::at(-1_250, -1_500))],
             "Souls 1 and 2 beside bent 1's edges",
         );
         let hold_a = self.crew(0, &[1]);
@@ -302,7 +302,7 @@ impl Deck {
         let got = self.leave(0, hold_a);
         self.ok(got, "Soul 1 lets go of bent 1");
         self.walk(
-            &[(0, Deck::at(1_350, 1_500)), (2, Deck::at(-1_350, 1_500))],
+            &[(0, Deck::at(1_250, 1_500)), (2, Deck::at(-1_250, 1_500))],
             "Souls 1 and 3 beside bent 2's edges",
         );
         let hold_b = self.crew(0, &[2]);
@@ -1089,7 +1089,9 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     // Frame 1's back face is its outer one (it stands at the bay's -z end).
     let perch = k.places[0][0];
     let walker = {
-        k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
+        // #5268 (#5254): a walk whose goal a body cannot stand at ends `walk.stopped-short`. 3.2 m out (0.3 m beyond
+        // the ladder's 1.4 m run from the face) ended 0.7 m short; 3.9 m out is clear.
+        k.walk(&[(4, Bay::at(0, -3_900))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
     assert!(
@@ -1163,7 +1165,7 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     k.leave(1, c);
 
     // Down again.
-    let down = Bay::at(0, -3_500);
+    let down = Bay::at(0, -3_900);
     let to = BTreeMap::from([(1, Value::Array(vec![int(down.x), int(0), int(down.z)]))]);
     k.hands[4].send("eden:walk", g, to);
     let got = socket_end(&mut k.hands[4].s);
