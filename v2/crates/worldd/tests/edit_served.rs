@@ -7603,29 +7603,26 @@ async fn frame_home(
     b: &mut GwSoul,
     c: Id,
     f: Id,
-    via: &[Vec3],
     (stand, k, home): (Id, u64, Vec3),
     what: &str,
 ) {
     let got = a.act("part:unseat", c, part_of(f)).await;
     println!("{what}: {got:?}");
     assert_eq!(got.kind, 1, "{what}: out");
-    // As A3's hold crews carry theirs: each carrier sent on its own walk to its place beside the frame's edges where it
-    // goes, not led ([`heading_walk`]): the crew took it from behind its posts, 1.143 m apart, and a led walk keeps
-    // that span, which puts the one behind on the stand.
-    for at in via.iter().chain([&home]) {
-        let (pa, pb) = frame_ends(*at);
-        a.send("eden:walk", s.g, to_point(pa)).await;
-        b.send("eden:walk", s.g, to_point(pb)).await;
-        let (x, y) = (a.end().await, b.end().await);
-        assert_eq!(
-            (x.kind, y.kind),
-            (1, 1),
-            "{what}: sent to {pa:?} and {pb:?}, at {:?} and {:?}: {x:?} {y:?}",
-            body_at(s.w, body_of(s.w, a.soul)),
-            body_at(s.w, body_of(s.w, b.soul))
-        );
-    }
+    // As A3's hold crews carry theirs, straight from the bay to beside the frame's edges at its stand, each carrier on
+    // its own walk ([`frame_legs`] of a crew behind a frame's posts): the crew took it from behind its posts, 1.143 m
+    // apart, so a led walk to its carriers' places would keep the one behind on the stand.
+    let (pa, pb) = frame_ends(home);
+    a.send("eden:walk", s.g, to_point(pa)).await;
+    b.send("eden:walk", s.g, to_point(pb)).await;
+    let (x, y) = (a.end().await, b.end().await);
+    assert_eq!(
+        (x.kind, y.kind),
+        (1, 1),
+        "{what}: sent to {pa:?} and {pb:?}, at {:?} and {:?}: {x:?} {y:?}",
+        body_at(s.w, body_of(s.w, a.soul)),
+        body_at(s.w, body_of(s.w, b.soul))
+    );
     let got = put_part(a, c, into_slot(stand, k)).await;
     assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
     leave_crew(a, c, what).await;
@@ -8043,7 +8040,6 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         s6,
         hold_wb,
         wb,
-        &[v3(w_b.x - 3_000_000, 0, w_b.z)],
         (stand_w2, 1, home(3)),
         "Souls 3 and 6 take west frame B home",
     )
@@ -8054,7 +8050,6 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         s2,
         hold_wa,
         wa,
-        &[],
         (stand, 2, home(2)),
         "team 1 takes west frame A home",
     )
@@ -8097,7 +8092,6 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         s6,
         hold_eb,
         eb,
-        &[v3(e_b.x + 3_000_000, 0, e_b.z)],
         (stand_e2, 1, home(5)),
         "Souls 3 and 6 take east frame B home",
     )
@@ -8108,7 +8102,6 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         s5,
         hold_ea,
         ea,
-        &[],
         (stand_e, 2, home(4)),
         "team 2 takes east frame A home",
     )
@@ -8137,25 +8130,12 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         "Souls 3 and 6 take beam 1 out of the middle bay",
     )
     .await;
-    // Each frame leaves the row between the bays and goes home with its carriers either side of the bays' middle line,
-    // as the beams do.
-    let a_out = [
-        v3(m_a.x - 2_000_000, 0, m_a.z),
-        v3(m_a.x - 2_000_000, 0, -24_000_000),
-        v3(m_a.x - 7_000_000, 0, -24_000_000),
-    ];
-    let b_out = [
-        v3(m_b.x + 2_000_000, 0, m_b.z),
-        v3(m_b.x + 2_000_000, 0, -24_000_000),
-        v3(m_b.x + 7_000_000, 0, -24_000_000),
-    ];
     frame_home(
         &s,
         s1,
         s2,
         hold_ma,
         ma,
-        &a_out,
         (stand, 1, home(0)),
         "team 1 takes frame A home",
     )
@@ -8166,7 +8146,6 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
         s5,
         hold_mb,
         mb,
-        &b_out,
         (stand_e, 1, home(1)),
         "team 2 takes frame B home",
     )
