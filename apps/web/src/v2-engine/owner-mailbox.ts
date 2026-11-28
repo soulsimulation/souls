@@ -189,6 +189,8 @@ export class V2OwnerMailbox {
   /** Settles once the box is attached; rejects when it never can be (the page's v2OwnerMailbox then asks again). */
   readonly ready: Promise<void>;
   private changed: Array<() => void> = [];
+  /** First day (28 Nov): told on each frame the box takes, so the card hears the agent connect at once. */
+  private readonly watchers = new Set<() => void>();
   /** #1330: since when the box's socket has been down (null while it is open or still making its first connection); a
    *  first connection that fails counts, so a page opened during an outage says so too. */
   private downSince: number | null = null;
@@ -201,11 +203,15 @@ export class V2OwnerMailbox {
   /** Called once the view token is held: the box, its socket and the Soul's grant. */
   attach(box: Box, sock: Sock, grant: string): void {
     this.box = box; this.sock = sock; this.grant = grant;
-    box.onChange = () => { for (const f of this.changed) f(); };
+    box.onChange = () => { for (const f of this.changed) f(); for (const f of this.watchers) f(); };
     sock.onText = (t) => void box.text(t);
     sock.onOpen = (open) => { this.downSince = open ? null : this.downSince ?? this.now(); };
     sock.start();
   }
+
+  /** First day (28 Nov): `f` is told each time the box changes (the gateway said whether the agent is connected, a
+   *  message moved), so the card reads it then rather than at its next poll; the card said Checking… until then. */
+  watch(f: () => void): () => void { this.watchers.add(f); return () => { this.watchers.delete(f); }; }
 
   /** #1330: whether the world is unavailable to this box: its socket has been down for `OUTAGE_MS` or more. */
   unavailable(): boolean { return this.downSince !== null && this.now() - this.downSince >= OUTAGE_MS; }
@@ -463,6 +469,15 @@ export function useV2AccountSouls(world: string | null = v2WorldName()): readonl
 export const OWNED_CHANGED_EVENT = 'sim:v2-owned-changed';
 
 const boxes = new Map<string, V2OwnerMailbox>();
+/** What watches each Soul's box (`watchV2OwnerMailbox`): kept by Soul, so a box made again after a failed start tells
+ *  them too. */
+const boxWatchers = new Map<string, Set<() => void>>();
+/** First day (28 Nov): `f` is told whenever `soulId`'s box on this page changes. → stop watching */
+export function watchV2OwnerMailbox(soulId: string, f: () => void): () => void {
+  const set = boxWatchers.get(soulId) ?? new Set<() => void>();
+  boxWatchers.set(soulId, set); set.add(f);
+  return () => { set.delete(f); if (!set.size && boxWatchers.get(soulId) === set) boxWatchers.delete(soulId); };
+}
 /** The page's box for `soulId` on this v2 world (one per Soul a page), or null on an old-engine world. */
 export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
   if (typeof window === 'undefined') return null;
@@ -481,6 +496,7 @@ export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
     if (!own) throw new Error('This Soul is not yours on this world.');
     self.attach(new MailBox(), new BoxSocket(place.gateway, g, renew), own.grant);
   });
+  mb.watch(() => { for (const f of boxWatchers.get(soulId) ?? []) f(); });
   boxes.set(key, mb);
   // a box that could not start (the directory unreachable for its view token) is asked for again on the next read,
   // never kept failed for the page's life (#1330)

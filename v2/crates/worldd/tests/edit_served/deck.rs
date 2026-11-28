@@ -506,7 +506,7 @@ fn deck_joists_on_rails_take_a_sheet_and_a_joist_under_it_stays_until_the_sheet_
 }
 
 /// Where body `body` last was, as the log's body rows have it: the node it stands on and its place there.
-fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
+pub(super) fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
     let mut at = None;
     for p in logged(w) {
         if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {

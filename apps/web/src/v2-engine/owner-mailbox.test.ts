@@ -97,6 +97,22 @@ test('the card is told whether the Soul\'s agent is connected (the gateway\'s {"
   assert.equal(((await mb.read()).link as { state?: string } | undefined)?.state, 'disconnected');
 });
 
+test('first day (28 Nov): the card hears the agent connect when the gateway says so, not at its next poll', async () => {
+  const sock = fakeSocket(() => null);
+  const mb = new V2OwnerMailbox(async (self) => self.attach(new OwnerBox(), sock, GRANT));
+  // the card's first read comes as the box starts, before its socket has signed in: nothing said yet (Checking…)
+  assert.equal((await mb.read()).link, undefined);
+  const told: string[] = [];
+  const stop = mb.watch(() => void mb.read().then((i) => told.push((i.link as { state?: string } | undefined)?.state ?? 'none')));
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: true, listening: true } }));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(told, ['connected'], 'the gateway\'s word reaches the card at once');
+  stop();
+  sock.onText!(JSON.stringify({ agent: { grant: GRANT, connected: false } }));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(told, ['connected'], 'nothing once it stopped watching');
+});
+
 test('#1330: the box socket down for OUTAGE_MS → unavailable, nothing of the agent; reconnect → normal; a send in between keeps its words', async () => {
   const { OUTAGE_MS, UNAVAILABLE_SEND } = await import('./owner-mailbox.ts');
   let t = 1_000_000, up = true;
