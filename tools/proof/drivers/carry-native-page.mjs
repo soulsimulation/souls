@@ -40,7 +40,8 @@ const SCENES = {
   // records the answer.
   third: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_upright', entry: 'content/kinds/construction/rack_upright.json',
     view: 'post=0&hour=12:00&eye=-1,4.6,29&at=4,.9,19.5',
-    third: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', '6,18.552'], ['rack-frame-2', 'di', 'cy', '6,21.448']], beam: ['rack-beam-1', 'ed', 'fi', '4.978,20', 'beam_low_l'] } },
+    third: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', '6,18.552', '6,14', 'upright_a'], ['rack-frame-2', 'di', 'cy', '6,21.448', '6,26', 'upright_b']],
+      beam: ['rack-beam-1', 'ed', 'fi', '4.978,20', 'beam_low_l'], beam2: ['rack-beam-2', ['4,16', '8,16', '7.022,20'], 'beam_low_r'] } },
   // A plywood sheet carried by two (B4 item 5, attempt 17; CARRY_SCENE=sheet; the deck yard of #5258): taken from the
   // sheet pile, carried east then south, set down by the deck bay.
   sheet: { who: ['ada', 'bo'], kind: 'mars:plywood_sheet', entry: 'content/kinds/construction/plywood_sheet.json',
@@ -363,6 +364,8 @@ async function raiseSurvey({ state, page, paths, signal, check, arm, root }) {
  *  refusal for a moment asked again), no page error; the put's answer and the oracle on the first frame's crew are measured. */
 async function firstThird({ state, page, paths, signal, check, arm, root }) {
   const T = SCENE.third, wait = ms => delay(ms, signal);
+  // a put refused for a moment (edit.body-stale, then part.not-held, attempt 13's rehearsal) is asked again; any other answer is kept
+  const putAsked = async (...words) => { let a; for (let i = 0; i < 5; i++) { a = await asked(state, ...words); if (a.ok === true || !/^(edit\.body-stale|part\.not-held)$/.test(a.code ?? '')) return a; await wait(1500); } return a; };
   const shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
   check('candidate-arm', arm === 'candidate');
   const manifest = await verifyAssets(state, check);
@@ -372,7 +375,7 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
   check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
   try {
     let leave; const left = new Promise(ok => { leave = ok; }); const crews = [];
-    await Promise.all(T.frames.map(async ([name, lift, foot, place], k) => {
+    await Promise.all(T.frames.map(async ([name, lift, foot, place, away, slot], k) => {
       const frame = frames[k];
       await gripEnds(state, frame.id, lift, foot);
       // attempt 16: the second pair, at its ends before the first left, was out of reach of its grips at the take; it
@@ -385,19 +388,40 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
       await retried(state, lift, 'carry', 'set-down', crew); await wait(2500); if (k) await shot('frames-set-down-at-their-places');
       const stations = () => Promise.all([cli(state, lift, 'carry', 'grip', frame.id, 'top'), cli(state, foot, 'carry', 'grip', frame.id, 'foot')]);
       await stations(); await wait(800);
-      await retried(state, lift, 'part', 'lower', crew, frame.id); await wait(9000); if (k) await shot('frames-laid-down');
-      await stations(); await wait(800);
-      await retried(state, lift, 'part', 'raise', crew, frame.id); await wait(3000); await shot(`${name}-raise-part-way`); await wait(6000);
+      await retried(state, lift, 'part', 'lower', crew, frame.id, ...(slot ? ['toward', away] : [])); await wait(9000); if (k) await shot('frames-laid-down');
+      // raised into its slot (#5268); a raise the world turns back lies again and is asked again, at most three times
+      for (let n = 1; n <= 3; n++) {
+        await stations(); await wait(800);
+        await retried(state, lift, 'part', 'raise', crew, frame.id, ...(slot ? [bay, slot] : [])); await wait(3000); await shot(`${name}-raise-${n}-part-way`); await wait(6500);
+        if (!slot) break;
+        const again = await asked(state, lift, 'part', 'raise', crew, frame.id, bay, slot);
+        (state.raises ??= []).push({ name, n, again: again.ok === true ? 'accepted: it had turned back' : again.code ?? 'refused' });
+        if (again.ok !== true) break;
+        await wait(9500); break;
+      }
     }));
     await shot('frames-raised-and-held'); await phase(state, page, 'frames-held');
     const [, back, front, mouth, slot] = T.beam, bc = await crewOf(state, back, front);
     await gripEnds(state, beam.id, back, front);
     await retried(state, back, 'part', 'take', bc, beam.id); await wait(1000); await shot('beam-taken');
     await retried(state, back, 'carry', 'to', bc, mouth); await wait(1500); await shot('beam-at-the-mouth');
-    const put = await asked(state, back, 'part', 'put', bc, bay, slot); await wait(2500); await shot('beam-put-answered');
+    const put = await putAsked(back, 'part', 'put', bc, bay, slot); await wait(2500); await shot('beam-put-answered');
+    let put2 = null, leaves = [];
+    if (T.beam2 && put.ok === true) {
+      const [name2, ways, slot2] = T.beam2, beam2 = await find(state, name2);
+      await gripEnds(state, beam2.id, back, front);
+      await retried(state, back, 'part', 'take', bc, beam2.id); await wait(1000); await shot('beam-2-taken');
+      for (const w of ways) await retried(state, back, 'carry', 'to', bc, w);
+      put2 = await putAsked(back, 'part', 'put', bc, bay, slot2); await wait(2500); await shot('beam-2-put-answered');
+      if (put2.ok === true) {
+        for (const [k, [, lift, foot]] of T.frames.entries()) for (const who of [lift, foot]) leaves.push({ who, ...(await asked(state, who, 'carry', 'leave', crews[k])) });
+        await wait(3000); await shot('holders-let-go'); await wait(3000); await shot('bay-stands');
+      }
+    }
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
-    save(state, 'survey-measurement.json', { note: 'The contact oracle on the first frame\'s crew, and the beam put\'s answer: measurements, not checks of this scene.', observer, watch: state.watch ?? null, beamPut: { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null } });
+    save(state, 'survey-measurement.json', { note: 'The contact oracle on the first frame\'s crew, and the beam put\'s answer: measurements, not checks of this scene.', observer, watch: state.watch ?? null, beamPut: { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null },
+      beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [] });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
