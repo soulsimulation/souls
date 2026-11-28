@@ -73,7 +73,7 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
   copyFileSync(join(content, 'body/humanoid.json'), join(entries, 'humanoid.json'));
   await run(bin('worldd'), ['seed', '--facts', facts, '--dir', 'world', '--souls', '0', '--at', `${(SITE_X - 4_000) / 1000},${(YARD_Z - 5_000) / 1000}`, '--entries', entries]);
   await run(bin('worldd'), ['serve', '--dir', 'world'], /listening /);
-  const gw = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', 'world/gateway.sock', '--tokens', 'world/tokens', '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  const gw = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', 'world/gateway.sock', '--tokens', 'world/tokens', '--entries', 'world/entries', '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   const dir = await run(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1', '--store', join(base, 'accounts.sqlite'), '--test-sign-in', '--pairing', join(base, 'pairing.sqlite'), '--gateway-tokens', join(base, 'world/tokens')], /listening on (\S+)\n/);
   const origin = `http://${dir.m[1]}`, gateway = `ws://${gw.m[1]}/v2/ws`;
 
