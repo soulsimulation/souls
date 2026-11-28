@@ -433,12 +433,28 @@ test('#5067 item 4: a put refused out of reach with where it is admitted carries
   const req = { op: 'carry', kind: 'part', do: 'put', crew: 'c', into: 'b', slot: '5' };
   const refused = { ok: false, code: 'part.grip-out-of-reach', detail };
   const asked = [];
-  const ok = await putFromAdmitted(refused, req, async (r) => { asked.push(r); return { ok: true }; });
-  assert.deepEqual(asked, [{ op: 'carry', do: 'to', crew: 'c', where: '12.35,-4.8' }, req]);
+  const list = (holds) => ({ ok: true, crews: [{ id: 'c', holds: holds ? [{ id: 'p' }] : [] }] });
+  const ok = await putFromAdmitted(refused, req, async (r) => { asked.push(r); return r.do === 'list' ? list(true) : { ok: true }; });
+  assert.deepEqual(asked, [{ op: 'carry', do: 'list' }, { op: 'carry', do: 'to', crew: 'c', where: '12.35,-4.8' }, req]);
   assert.equal(ok.moved, PUT_MOVED);
-  // refused again: that refusal is shown; no place named, or another refusal: nothing is asked.
+  // FOR-FABLE 7: refused again, the crew is left as it was before the first ask, and the refusal says so. Held lifted
+  // before: it still holds its load, nothing more is sent.
   const again = { ok: false, code: 'part.grip-out-of-reach', detail: 'still' };
-  assert.equal(await putFromAdmitted(refused, req, async (r) => (r.do === 'to' ? { ok: true } : again)), again);
+  const held = [];
+  const stillHolding = await putFromAdmitted(refused, req, async (r) => { held.push(r); return r.do === 'list' ? list(true) : r.do === 'to' ? { ok: true } : again; });
+  assert.deepEqual(stillHolding, { ...again, retried: 'moved to 12.35,-4.8 and asked again; refused again: part.grip-out-of-reach; still holding' });
+  assert.deepEqual(held.map((r) => r.do), ['list', 'to', 'put']);
+  // Set down before (it held nothing), and holding after the walk there: set down again by the ordinary command.
+  const down = [];
+  let lists = 0;
+  const setDown = await putFromAdmitted(refused, req, async (r) => {
+    down.push(r);
+    if (r.do === 'list') return list(lists++ > 0);
+    return r.do === 'to' || r.do === 'set-down' ? { ok: true } : again;
+  });
+  assert.deepEqual(setDown.retried, 'moved to 12.35,-4.8 and asked again; refused again: part.grip-out-of-reach; set down again');
+  assert.deepEqual(down.map((r) => r.do), ['list', 'to', 'put', 'list', 'set-down']);
+  assert.deepEqual(down.at(-1), { op: 'carry', do: 'set-down', crew: 'c' });
   let n = 0;
   const unnamed = { ok: false, code: 'part.grip-out-of-reach', detail: 'x' };
   assert.equal(await putFromAdmitted(unnamed, req, async () => { n++; }), unnamed);
