@@ -407,17 +407,11 @@ fn floors_of(w: &Seeded, part: Id) -> Vec<(Id, i64, bool)> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_frame() {
     let mut site = Site::serve_souls("creator-bay-walk", 2).await;
-    let mut ops: Vec<Op> = BUILT
+    let ops: Vec<Op> = BUILT
         .iter()
         .enumerate()
         .map(|(k, (kind, slot))| site.place(k as u64 + 1, kind, slot))
         .collect();
-    // The creator turns the flight a half turn in its slot, its top to the sheets' east edge: a slot's point gives
-    // a part its place, not its turn (`sim::ground::scene::xform_to`), so `deck_bay`'s `yaw_mdeg` on the stair slot
-    // turns nothing.
-    if let Some(Op::Place { at, .. }) = ops.last_mut() {
-        at.orientation = Quat::from_yaw_mdeg(180_000).unwrap();
-    }
     let got = site.edit(1, ops).await;
     assert_eq!(got.kind, 1, "the built bay is accepted: {got:?}");
     let part = |k: usize| got.names[&(k as u64 + 1)];
@@ -443,11 +437,12 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     let at = |dx: i64, dz: i64| v3((x + dx) * 1000, 0, (z + dz) * 1000);
 
-    // Soul 1 to the flight's foot (east of the bay), then up onto the first sheet's top, past the stair's top.
-    hands[0].walk_to(g, at(4_500, -622));
+    // Soul 1 to the flight's foot (west of the bay, its top at the sheets' west edge), then up onto the first sheet's
+    // top, past the stair's top.
+    hands[0].walk_to(g, at(-4_500, -717));
     let e = socket_end(&mut hands[0].s);
     assert_eq!(e.kind, 1, "Soul 1 to the flight's foot: {e:?}");
-    let to = BTreeMap::from([(1, Value::Array(vec![int(-400_000), int(19_000), int(0)]))]);
+    let to = BTreeMap::from([(1, Value::Array(vec![int(400_000), int(19_000), int(0)]))]);
     hands[0].send("eden:walk", deck, to);
     let e = socket_end(&mut hands[0].s);
     println!("Soul 1 up the stair onto the deck: {e:?}");
