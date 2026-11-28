@@ -451,6 +451,8 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     hands[1].walk_to(g, at(0, 3_900));
     let e = socket_end(&mut hands[1].s);
     assert_eq!(e.kind, 1, "Soul 2 outside frame 2: {e:?}");
+    let climber = body_of(&site.w, site.w.souls[1]);
+    let before = rows_of(&site.w, climber).len();
     let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(19_000), int(288_000)]))]);
     hands[1].send("eden:walk", deck2, to);
     let e = socket_end(&mut hands[1].s);
@@ -458,6 +460,29 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     assert_eq!(e.kind, 1, "the climb ends on the deck: {e:?}");
     let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[1]));
     assert_eq!((on, p.y), (deck2, 19_000), "on the second sheet's top");
+    // Its way was frame 2's ladder, not the stair: on the way up it is on the rung line, 0.37 m out from the frame's
+    // rung plane (z +1448 in the bay), between its posts.
+    let (copy, _) = served_copy(&site.w);
+    let t = copy.tree();
+    let gh = t.handle(g).unwrap();
+    let rising: Vec<Vec3> = rows_of(&site.w, climber)[before..]
+        .iter()
+        .map(|(node, p)| {
+            sim::ground::scene::xform_to(t, t.handle(*node).unwrap(), gh)
+                .unwrap()
+                .point(*p)
+                .unwrap()
+        })
+        .filter(|w| w.y > 0 && w.y < 1_800_000)
+        .collect();
+    assert!(rising.len() > 10, "rows on the rungs: {}", rising.len());
+    for w in &rising {
+        let (dx, dz) = (w.x - x * 1000, w.z - (z + 1_448 + 38 + 330) * 1000);
+        assert!(
+            dz.abs() <= 30_000 && dx.abs() <= 534_000,
+            "on frame 2's rung line: {w:?}"
+        );
+    }
 }
 
 /// Lane C: nothing is placed onto a Soul. A stair flight placed on the open ground with a Soul standing in its tread
@@ -511,4 +536,26 @@ async fn a_flight_placed_where_a_soul_stands_in_its_tread_lane_is_refused() {
             .is_empty(),
         "nothing placed"
     );
+}
+
+/// Every row of body `body` in the log, in order: the node it was on and its place there.
+fn rows_of(w: &Seeded, body: Id) -> Vec<(Id, Vec3)> {
+    let mut out = Vec::new();
+    for r in sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+    {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let p = replica::effects::Part::read(&r).unwrap();
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == body {
+                    out.push((pose.frame.node, pose.position));
+                }
+            }
+        }
+    }
+    out
 }
