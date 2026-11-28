@@ -141,9 +141,10 @@ const production = { source, changed: (root, from, to) => git(root, 'diff', '--n
   lineChanged: (root, from, to, path, line) => [...git(root, 'diff', '--unified=0', from, to, '--', path).matchAll(/^@@ .*\+(\d+)(?:,(\d+))? @@/gm)].some(m => line >= Number(m[1]) && line < Number(m[1]) + Number(m[2] ?? 1)),
   boot: o => o.kind === 'native-page' ? startNativePageFixture(o) : o.kind === 'v2-bodies' ? startV2BodyFixture(o) : o.kind === 'v2-account' ? startV2AccountFixture(o) : (requireThat(o.kind === undefined, 'unknown-fixture-kind'), startWorld(o)), browser: openBrowser, stop: stopOwnedChild, portFree, now: () => Date.now(), test: false };
 
-/** The journey's cap, and its video's: 90 s, or 300 s for a survey cycle (an id starting `survey-`), which records where
- * a long build stands rather than passing or failing one step. */
-export const journeyCap = o => typeof o.cycle?.id === 'string' && o.cycle.id.startsWith('survey-') ? 300000 : 90000;
+/** The journey's cap, and its video's: 90 s, or 600 s for a survey cycle (an id starting `survey-`), which records where
+ * a long build stands rather than passing or failing one step. 600 s: the bay's lower build through its joists is one
+ * continuous take of about 5 to 6 minutes (attempt 22). */
+export const journeyCap = o => typeof o.cycle?.id === 'string' && o.cycle.id.startsWith('survey-') ? 600000 : 90000;
 
 /** Exactly one invocation = one fresh owned lifecycle. A failed slot cannot be replaced by another sample id.
  * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot's repair loop is capped3.
