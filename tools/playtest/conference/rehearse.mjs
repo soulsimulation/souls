@@ -149,6 +149,14 @@ export async function explainConference({ speaker, lecture, question, record = (
   return { interrupted: Boolean(interrupted), storyActions: storyRepeats };
 }
 
+/** Current ordinary look: body motion is `doing`; native activity membership lines are `in`. */
+export function conferenceMemberships(look) {
+  assert.equal(look.ok, true, 'conference activity read succeeds');
+  assert(look.room && typeof look.room === 'object', 'conference activity copy unavailable');
+  assert(look.in === undefined || Array.isArray(look.in) && look.in.every(line => typeof line === 'string'), 'conference activity membership lines malformed');
+  return look.in ?? [];
+}
+
 export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false, interruptFirstOnly = false, observe = async () => {} }) {
   assert.equal(seats.length, 5, 'one speaker and four listeners');
   const [presenter, next] = seats;
@@ -242,7 +250,7 @@ export async function performConference({ seats, lecture, benches, question, rec
   // Observe its actual end, including the walk to its places, before attempting the next activity.
   for (const until = Date.now() + 30000;;) {
     const look = await command(next, 'look');
-    if (!(look.doing ?? []).some((line) => line.includes('speaker-introduction'))) break;
+    if (!conferenceMemberships(look).some((line) => line.includes('speaker-introduction'))) break;
     assert(Date.now() < until, 'the introduction must finish before the next presentation');
     await sleep(200);
   }
@@ -259,7 +267,7 @@ export async function performConference({ seats, lecture, benches, question, rec
   for (const seat of seats) {
     const look = await command(seat, 'look');
     assert.equal(look.ok, true, 'conference cleanup read succeeds');
-    assert(!(look.doing ?? []).some(line => /hall-lecture|speaker-introduction|round-of-applause/.test(line)),
+    assert(!conferenceMemberships(look).some(line => /hall-lecture|speaker-introduction|round-of-applause/.test(line)),
       'conference activities must end after all participants leave');
   }
   await observe('conference-clean', { seats });

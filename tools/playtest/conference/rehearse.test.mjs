@@ -1,7 +1,35 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { completed, discoverConference, performConference, rehearsalTemplate } from './rehearse.mjs';
+import { completed, discoverConference, performConference, rehearsalTemplate, conferenceMemberships } from './rehearse.mjs';
+
+import { brief } from '../../../v2/client/src/brief/brief.mjs';
+import { doingLines } from '../../../v2/client/src/together/members.mjs';
+
+// The same current client projection that the daemon uses for ordinary `look`.
+function projectedLook(words = []) {
+  const rows = new Map([
+    ['world', { id: 'world', name: 'World', kind: 'souls:place', parent: null, path: [], children: 1 }],
+    ['room', { id: 'room', name: 'Room', kind: 'souls:room', parent: 'world', path: ['World'], children: 2 }],
+    ['body', { id: 'body', name: 'Reader', kind: 'souls:body', soul: 'reader', parent: 'room', path: ['World', 'Room'], children: 0 }],
+    ['other', { id: 'other', name: 'Partner', kind: 'souls:body', parent: 'room', path: ['World', 'Room'], children: 0 }],
+  ]);
+  for (const [i, word] of words.entries()) rows.set(`group${i}`, { id: `group${i}`, name: word,
+    kind: `eden:${word.replaceAll('-', '_')}_activity`, parent: 'room', path: ['World', 'Room'], children: 0, started: true,
+    members: [{ body: 'body', soul: 'reader', role: 'eden:first' }, { body: 'other', role: 'eden:second' }] });
+  return { ok: true, ...brief(rows, { me: 'body', now: 'standing', doing: doingLines(rows, ['reader', 'body']) }) };
+}
+
+test('current client look separates standing body state from active native memberships and omits cleared memberships', () => {
+  const active = projectedLook(['speaker-introduction']);
+  assert.equal(active.doing, 'standing'); assert(Array.isArray(active.in));
+  assert(conferenceMemberships(active).some(line => line.includes('speaker-introduction')), 'standing does not mean introduction ended');
+  const clear = projectedLook(); assert.equal(clear.doing, 'standing'); assert.equal(Object.hasOwn(clear, 'in'), false);
+  assert.deepEqual(conferenceMemberships(clear), []);
+  assert(conferenceMemberships(projectedLook(['round-of-applause'])).some(line => line.includes('round-of-applause')));
+  for (const bad of [{ ...clear, ok: false }, { ...clear, room: null }, { ...clear, in: 'speaker-introduction' }, { ...clear, in: [null] }])
+    assert.throws(() => conferenceMemberships(bad), /activity/);
+});
 
 const receipt = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
@@ -70,7 +98,7 @@ function meetingCast({ refusal = 'already_linked', can = 'unknown', current = tr
       if (verb === 'inspect') return form === 'question'
         ? { ok: true, id: wrongReadID ? 'another-stand' : form, kind: 'eden:conference_question', state: { ...question } }
         : { ok: true, parent: parents[index] };
-      if (verb === 'look') return { ok: true, doing: stuckActivity ? ['round-of-applause'] : [] };
+      if (verb === 'look') return projectedLook(stuckActivity ? ['round-of-applause'] : []);
       if (verb === 'can') return { ok: true, can, current, ...(can === 'unknown' ? { why: 'not-seen:already_linked' } : can === 'no' ? { reason: refusal } : {}) };
       if (verb === 'receipt') {
         const replaced = interrupted.get(Number(form));
@@ -157,7 +185,7 @@ test('question proof rejects missing native refusal, overwritten original, wrong
 test('cleanup cannot pass when an ordinary look still reports the activity', async () => {
   const cast = meetingCast(); let looks = 0;
   // The introduction's first look ends it; subsequent final cleanup read must reject a lingering activity.
-  for (const seat of cast.seats) { const cli = seat.cli; seat.cli = async (...words) => words[0] === 'look' && ++looks > 1 ? { ok: true, doing: ['round-of-applause'] } : cli(...words); }
+  for (const seat of cast.seats) { const cli = seat.cli; seat.cli = async (...words) => words[0] === 'look' && ++looks > 1 ? projectedLook(['round-of-applause']) : cli(...words); }
   await assert.rejects(performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'] }), /activities must end/);
   assert(!cast.events.some(e => e.endsWith(':conference-clean')));
 });
