@@ -15,7 +15,7 @@ import { worldKey, worldPath } from '../world-path.ts';
 import { requestFollowSoul, soulPresent } from '../follow-soul-request.ts';
 import { closeApproval, closedApprovals, WINDOW_POLL_MS } from './window-approvals.ts';
 import { countPairing } from '../visitor-counts.ts';
-import { OWNED_CHANGED_EVENT, v2WorldName } from '../v2-engine/owner-mailbox.ts';
+import { v2Approved, v2WorldName } from '../v2-engine/owner-mailbox.ts';
 import { v2Creator } from './god-api.ts';
 import './approval-card.css';
 
@@ -132,7 +132,7 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
           if (!n?.ok) setSaid('The name was not kept; its agent can set one.');
         }
         setSoul(soulIdOf(body.soul));
-        window.dispatchEvent(new Event(OWNED_CHANGED_EVENT));   // the navbar lists it as arriving at once
+        v2Approved(soulIdOf(body.soul));   // the navbar lists it as arriving at once; its card's box starts now
       } else setSaid(!r ? 'Sign in first.' : `Not approved: ${body?.refused ?? r.status}${body?.device ? ` (connected to ${clip(body.device, 'a device')})` : ''}`);
     } catch { setSaid('The directory could not be reached. Try again.'); } finally { setBusy(false); }
   };
