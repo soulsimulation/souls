@@ -258,6 +258,9 @@ pub struct Bodies {
     away_of: BTreeMap<Id, u64>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Where each body crossing a link was last written in a tick's record (FOR-FABLE 8): `logged` keeps where it
+    /// last stood, for a restart.
+    crossed: BTreeMap<Id, Pose>,
     /// Each body's motion as the world last wrote it to its node ([`Bodies::motion`]); read from the tree when absent.
     shown: BTreeMap<Id, Shown>,
     /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
@@ -350,9 +353,9 @@ fn file(rooms: &mut Rooms, tree: &Tree, thing: Id, floor: Id) {
 /// K18c, #3176). What a restart builds its bodies at.
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
 
-/// The bodies whose pose changed since the tick's record last read them, a seated one with its stance
-/// ([`Bodies::moved`]).
-pub type MovedRows = Vec<(Id, Pose, Option<Stance>)>;
+/// The bodies whose pose changed since the tick's record last read them, a seated one with its stance, one on a link
+/// (a stair, a ladder) with the link and how far along it, in millionths (FOR-FABLE 8) ([`Bodies::moved`]).
+pub type MovedRows = Vec<(Id, Pose, Option<Stance>, Option<(Id, u32)>)>;
 
 /// About how often a moving body's motion is written while nothing else about it changes (#3799): 200 ms of world
 /// time, counted in whole ticks.
@@ -417,7 +420,8 @@ fn turned(a: Vec3, b: Vec3) -> bool {
 }
 
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
-/// (1 sit, 2 lie, 3 stand in a standing slot, #3598).
+/// (1 sit, 2 lie, 3 stand in a standing slot, #3598), or `[body, pose, [link, along]]` while it is carried across a
+/// link (FOR-FABLE 8: a stair, a ladder): its place on the link's line, the link, and how far along it, in millionths.
 pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
     let mut r = vec![body.to_value(), pose.to_value()];
     match stance {
@@ -427,6 +431,30 @@ pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
         None => {}
     }
     Value::Array(r)
+}
+
+/// A body's row while it is carried across `link`, `along` millionths of the way ([`row`]).
+pub fn row_on(body: Id, pose: &Pose, (link, along): (Id, u32)) -> Value {
+    Value::Array(vec![
+        body.to_value(),
+        pose.to_value(),
+        Value::Array(vec![link.to_value(), Value::Uint(u64::from(along))]),
+    ])
+}
+
+/// The link and how far along it a row names, when it is a body's on a link ([`row_on`]).
+pub fn read_link(v: &Value) -> Option<(Id, u32)> {
+    let Value::Array(p) = v else { return None };
+    let [_, _, Value::Array(on)] = p.as_slice() else {
+        return None;
+    };
+    let [link, Value::Uint(along)] = on.as_slice() else {
+        return None;
+    };
+    Some((
+        replica::effects::read_id(link).ok()?,
+        u32::try_from(*along).ok()?,
+    ))
 }
 
 /// A row read back: the body, its pose and its stance in a seat.
@@ -519,6 +547,7 @@ impl Bodies {
             walked_to: BTreeMap::new(),
             away_of: BTreeMap::new(),
             logged: BTreeMap::new(),
+            crossed: BTreeMap::new(),
             shown: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
@@ -1261,14 +1290,28 @@ impl Bodies {
         let every = self.every();
         let mut out = Vec::new();
         let mut poses = Vec::with_capacity(every.len());
+        let c = &self.runner.controller;
         for (id, (pose, stance)) in every {
             poses.push((id, pose));
             if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
                 continue;
             }
+            // FOR-FABLE 8: a body carried across a link (a stair, a ladder) writes its place on the link's line every
+            // tick it moves, with the link and how far along it, as a walk writes its own; `logged` keeps where it
+            // last stood, so a restart (which reads no row on a link) stands it there.
+            if let Some(on) = c.crossing(id)
+                && let Some(now) = c.body(id).map(|b| b.pose)
+            {
+                if self.crossed.get(&id) != Some(&now) {
+                    self.crossed.insert(id, now);
+                    out.push((id, now, None, Some(on)));
+                }
+                continue;
+            }
+            self.crossed.remove(&id);
             if self.logged.get(&id) != Some(&pose) {
                 self.logged.insert(id, pose);
-                out.push((id, pose, stance));
+                out.push((id, pose, stance, None));
             }
         }
         (out, poses)

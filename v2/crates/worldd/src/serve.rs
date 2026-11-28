@@ -8014,7 +8014,23 @@ mod s10c_lockstep {
             "the body moved along the carry"
         );
         assert!(b.runner.controller.carried(body), "still crossing");
-        assert!(b.moved().is_empty(), "nothing logged mid-crossing");
+        // FOR-FABLE 8: its row mid-crossing is its place on the link, naming the link and how far along it.
+        let rows = b.moved();
+        assert_eq!(rows.len(), 1, "one row mid-crossing: {rows:?}");
+        assert_eq!(
+            (rows[0].0, rows[0].1),
+            (body, now),
+            "where it is on the link"
+        );
+        let (on, along) = rows[0].3.expect("the link it is on");
+        assert_eq!(on, link, "the link it crosses");
+        assert!(along > 0 && along < 1_000_000, "part way along: {along}");
+        let written = crate::bodies::row_on(body, &now, (on, along));
+        assert_eq!(
+            crate::bodies::read_link(&written),
+            Some((on, along)),
+            "read back"
+        );
         assert_eq!(
             b.placed()[&body].0,
             recorded,

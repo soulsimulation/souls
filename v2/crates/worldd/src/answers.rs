@@ -6046,7 +6046,10 @@ impl Clock {
                         Value::Array(
                             moved
                                 .iter()
-                                .map(|(id, p, s)| bodies::row(*id, p, *s))
+                                .map(|(id, p, s, on)| match on {
+                                    Some(on) => bodies::row_on(*id, p, *on),
+                                    None => bodies::row(*id, p, *s),
+                                })
                                 .collect(),
                         ),
                     ),
@@ -6468,7 +6471,13 @@ fn answer_loop<S: Storage + 'static>(
 /// What a restart reads back from the log besides the tree: each body's last pose and the last tick logged.
 fn read_back(part: &Part, placed: &mut Placed, last: &mut Option<i64>) {
     if let Some(Value::Array(rows)) = part.rest.get(&BODIES) {
-        for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+        // A row on a link (FOR-FABLE 8) is where a body was on a stair or a ladder: a restart stands it where its last
+        // row off the link has it.
+        for (id, pose, stance) in rows
+            .iter()
+            .filter(|r| bodies::read_link(r).is_none())
+            .filter_map(bodies::read_row)
+        {
             placed.insert(id, (pose, stance));
         }
     }
