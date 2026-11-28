@@ -523,7 +523,21 @@ pub struct OnTrack<'a> {
 /// The conjugate of a unit quaternion: its inverse turn.
 fn conj(q: Quat) -> R<Quat> {
     let [w, x, y, z] = q.parts();
-    Quat::new(w, -x, -y, -z).map_err(|e| refusal("part-pose", format!("{e:?}")))
+    // A half turn (w 0) is written with its other sign, its one byte form (as the deck lane's #5256 has it).
+    Quat::new(w, -x, -y, -z)
+        .or_else(|_| Quat::new(-w, x, y, z))
+        .map_err(|e| refusal("part-pose", format!("{e:?}")))
+}
+
+/// Whether a part of `kind` is the same turned a half turn about its upright (`state.symmetry` `front_back`, #5067):
+/// seated in a slot turned either way, the nearer.
+fn symmetric(rules: &replica::tree::Rules, kind: &str) -> bool {
+    rules.kinds.get(kind).is_some_and(|k| {
+        k.state.values().any(|f| {
+            f.name.as_str() == "symmetry"
+                && matches!(&f.default, replica::encode::Value::Text(t) if t.as_str().ends_with("front_back"))
+        })
+    })
 }
 
 impl Assembly {
@@ -904,18 +918,29 @@ impl Assembly {
         by: (Id, Id),
         activity: Id,
         part: Id,
-        (bay, k, at): (Id, u64, Vec3),
+        (bay, k, at, turned): (Id, u64, Vec3, Quat),
         ground: Id,
         reach: i64,
     ) -> R<()> {
         self.aim(tree, activity, ground)?;
+        // Turned as the slot, or a half turn from it for a part the same either way (`turned`: its pose on the ground).
+        let turn = {
+            let (bh, gh) = tree
+                .handle(bay)
+                .zip(tree.handle(ground))
+                .ok_or_else(|| refusal("part-nowhere", show(bay)))?;
+            let x = xform_to(tree, bh, gh).map_err(|e| refusal("part-pose", e))?;
+            conj(x.rot)?
+                .then(turned)
+                .map_err(|e| refusal("part-pose", format!("{e:?}")))?
+        };
         let target = Target {
             to: Frame {
                 node: bay,
                 slot: Some(k),
             },
             place: Vec3::ZERO,
-            turn: Quat::IDENTITY,
+            turn,
             at,
             joins: Vec::new(),
             hold: true,
@@ -1001,15 +1026,36 @@ impl Assembly {
         }
         // #5067: where the set-in's track ends, the crew's node posed so the part, in its slot as it is held, is
         // exactly where it is seated (at `at`, turned as `to` is): it is never moved or turned at the commit.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let held = tree
+            .handle(part)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| n.place())
+            .ok_or_else(|| refusal("part.not-held", show(part)))?;
+        let x = xform_to(tree, th, gh).map_err(|e| refusal("part-pose", e))?;
+        // A part the same turned a half turn about its upright is seated turned the nearer way to how it is held now
+        // (#5067: `symmetry` `front_back`).
+        let half = Quat::from_yaw_mdeg(180_000).map_err(pose)?;
+        let seat_turn = match slot.is_some() && symmetric(&self.seating.rules, pk.as_str()) {
+            true => {
+                let now = from.1.then(held.orientation).map_err(pose)?;
+                let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose);
+                let (a, b) = (ax(now)?, ax(x.rot)?);
+                if i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z) < 0 {
+                    half
+                } else {
+                    Quat::IDENTITY
+                }
+            }
+            false => Quat::IDENTITY,
+        };
         let end = {
-            let pose = |e| refusal("part-pose", format!("{e:?}"));
-            let held = tree
-                .handle(part)
-                .and_then(|h| tree.node(h))
-                .and_then(|n| n.place())
-                .ok_or_else(|| refusal("part.not-held", show(part)))?;
-            let x = xform_to(tree, th, gh).map_err(|e| refusal("part-pose", e))?;
-            let q = x.rot.then(conj(held.orientation)?).map_err(pose)?;
+            let q = x
+                .rot
+                .then(seat_turn)
+                .map_err(pose)?
+                .then(conj(held.orientation)?)
+                .map_err(pose)?;
             let o = q.rotate(held.position).map_err(pose)?;
             (Vec3::new(at.x - o.x, at.y - o.y, at.z - o.z), q)
         };
@@ -1070,7 +1116,7 @@ impl Assembly {
         let target = Target {
             to: Frame { node: to, slot },
             place,
-            turn: Quat::IDENTITY,
+            turn: seat_turn,
             at,
             joins: joined,
             hold: bay && s.stands(pk.as_str()),

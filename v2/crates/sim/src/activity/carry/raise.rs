@@ -53,6 +53,9 @@ pub struct Spec {
     pub half_width: i64,
     pub half_thick: i64,
     pub crew: u64,
+    /// Whether it is the same turned a half turn about its upright (`state.symmetry` `front_back`, #5067): raised
+    /// into a slot turned either way.
+    pub symmetric: bool,
 }
 
 impl Spec {
@@ -85,11 +88,18 @@ impl Spec {
             Some(Json::Int(n)) => u64::try_from(*n).ok()?,
             _ => 2,
         };
+        let symmetric = entry
+            .get("state")
+            .and_then(|s| s.get("symmetry"))
+            .and_then(|c| c.get("default"))
+            .and_then(Json::str)
+            == Some("front_back");
         Some(Spec {
             height: h * 1000,
             half_width: w * 500,
             half_thick: d * 500,
             crew,
+            symmetric,
         })
     }
 
@@ -348,7 +358,8 @@ mod tests {
                 height: 2_438_000,
                 half_width: 609_500,
                 half_thick: 38_000,
-                crew: 2
+                crew: 2,
+                symmetric: true
             }
         );
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
