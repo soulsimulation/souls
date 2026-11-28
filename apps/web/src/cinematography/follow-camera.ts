@@ -193,14 +193,20 @@ export class FollowCamera{
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3,shift?:Vector3,coreOnly=false):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of coreOnly?[centre]:points){const s=geometry.segment(eye,shift?p.clone().add(shift):p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/(coreOnly?1:points.length);};
-  const interiorGoal=this.interior.sync(context,manual,geometry.generation),interiorActive=!manual&&context?.status==='enclosed';
+  let viewContext=context;const nearby=context?.nearby;
+  if(nearby&&valid&&new Vector3().fromArray(observed!).length()<=4){
+   const opening=nearby.openingProposals[0],m=new Matrix4().fromArray(nearby.worldMatrix),toOpening=opening?new Vector3(opening.at[0],nearby.canonical[1],opening.at[1]).applyMatrix4(m).sub(root):null;if(toOpening)toOpening.y=0;
+   const proposedContext={...context!,...nearby,status:'approaching',nearby:null},same=this.interior.sameApproach(proposedContext,geometry.generation),closing=!!toOpening&&toOpening.lengthSq()>1e-8&&direction!.dot(toOpening.normalize())>(same?.05:.25);
+   if(closing||speed<.1&&same)viewContext=proposedContext;
+  }
+  const interiorGoal=this.interior.sync(viewContext,manual,geometry.generation),interiorActive=!manual&&(viewContext?.status==='enclosed'||viewContext?.status==='approaching');
   // Ordinary exit resumes the retained outdoor desired offset through the same
   // bounded sweep. Manual cancellation instead adopts the actual user view.
   if(this.wasInterior&&!interiorActive&&manual)this.offset.copy(this.eye).sub(root);this.wasInterior=interiorActive;
   const segment=(from:Vector3,to:Vector3,radius=0)=>geometry.segmentAuthored(from,to,radius);
   let reason='tracking';
   if(geometry.stats.complete){
-  const goal=interiorActive?(interiorGoal??this.eye):root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
+  const goal=interiorActive?(interiorGoal??(viewContext?.status==='approaching'?root.clone().add(this.offset):this.eye)):root.clone().add(this.offset),next=this.eye.clone(),nextVelocity=this.velocity.clone();approach(next,nextVelocity,goal,dt,FOLLOW_LIMITS.speed,FOLLOW_LIMITS.acceleration,.8);
   const radius=followClearanceRadius(camera,projection,next);if(radius===null){this.cuts.refuse('cut-projection-invalid');this.velocity.set(0,0,0);return result('clearance-projection-unavailable');}
   const groundY=ground(next.x,next.z),sweep=segment(this.eye,next,radius);motion={groundY,sweep,radius,surfaceStartOverlap:geometry.stats.surfaceStartOverlap,containment:'unproved',unknown:sweep==='unknown'?geometry.stats.unknown:null,unknownMesh:sweep==='unknown'?geometry.stats.unknownMesh:null};if(groundY!==null&&Number.isFinite(groundY)&&next.y>=groundY+1.2&&sweep==='clear'){this.eye.copy(next);this.velocity.copy(nextVelocity);}else{this.velocity.set(0,0,0);reason=groundY===null||!Number.isFinite(groundY)?'ground-unavailable':next.y<groundY+1.2?'below-ground-margin':sweep==='blocked'?(geometry.stats.surfaceStartOverlap?'camera-envelope-overlap':'motion-obstructed'):'motion-unknown';}
   if(motion.surfaceStartOverlap){this.cuts.refuse('cut-envelope-overlap');this.aimVelocity.set(0,0,0);return result(manual?'user-hold:camera-envelope-overlap':'camera-envelope-overlap',screen);}
@@ -212,7 +218,7 @@ export class FollowCamera{
   // consume a whole candidate fan before the safety sweep has run.
   const retreatChecked=interiorActive&&this.interior.prepareRetreat(this.clock,subject,camera,this.eye,viewport,projection,{geometry,points,radius:eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground});
   const cutDue=!!cutReadiness?.ready&&interiorActive&&!!this.interior.destination()&&this.clock>=this.nextCutCheck;
-  if(interiorActive&&!cutDue&&!retreatChecked){this.interior.search(this.clock,this.eye,points,geometry,eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground);}
+  if(interiorActive&&!cutDue&&!retreatChecked){this.interior.search(this.clock,this.eye,points,geometry,eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground,eye=>!!prepareCutFrame(subject,camera,eye,viewport,projection));}
   const destination=this.interior.destination();
   if(!cutReadiness?.ready)this.cuts.refuse(cutReadiness?.reason??'cut-source-readiness-unknown');
   else if(!interiorActive||manual||!destination)this.cuts.refuse('cut-no-preparation');
