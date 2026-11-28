@@ -2397,7 +2397,7 @@ export function clerkAuth(envFile, dataDir, publicOrigin, cfg = {}) {
   let issuer; try { issuer = new URL(i); } catch {}
   if (!/^pk_(live|test)_[A-Za-z0-9+/=_-]+$/.test(k) || issuer?.protocol !== 'https:' || issuer.origin !== i || issuer.username || issuer.password || !/^[a-z0-9.-]+$/.test(issuer.hostname)) throw new Error('launcher: the --auth-env file must set CLERK_PUBLISHABLE_KEY and CLERK_ISSUER_URL (https origin)');
   return {
-    child: { ...(authorizedParties === undefined ? {} : { authorizedParties }), envFile: file, registryPath: join(resolve(dataDir), 'accounts.sqlite'), ...(satellite ? { satellite } : {}) },
+    child: { ...(authorizedParties === undefined ? {} : { authorizedParties }), envFile: file, registryPath: join(resolve(dataDir), 'accounts.sqlite'), verifierSwitch: join(resolve(dataDir), 'creator-verifier'),...(satellite ? { satellite } : {}) },
     public: { provider: 'clerk', clerkPublishableKey: k, clerkIssuer: i, authenticationOrigin: publicOrigin, ...(satellite ? { clerkSatellite: satellite } : {}) },
   };
 }

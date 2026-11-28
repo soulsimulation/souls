@@ -237,7 +237,7 @@ impl Activities {
         let changes = match given {
             Some(_) => Vec::new(),
             None => vec![
-                create(id, kind, place, audience, &node),
+                create(&self.rules, id, kind, place, audience, &node),
                 Change::Link {
                     link,
                     ty: name(MEMBER),
@@ -429,7 +429,7 @@ impl Activities {
                 ],
             };
             let changes = vec![
-                create(pair, &o.kind, o.place, o.audience, &node),
+                create(&self.rules, pair, &o.kind, o.place, o.audience, &node),
                 Change::Link {
                     link: asker_link,
                     ty: name(MEMBER),

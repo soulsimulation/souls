@@ -393,7 +393,7 @@ fn apply(world: &Path, store: &Store, flags: &[String]) -> Result<String, String
     } = parse(flags)?;
     let log = log_records(&world.join("log")).map_err(said)?;
     let checkpoint = match world.join("checkpoints").is_dir() {
-        true => sim::checkpoint::restore(&world.join("checkpoints")).map_err(said)?,
+        true => crate::answers::restore(&world.join("checkpoints")).map_err(said)?,
         false => None,
     };
     let after = match &checkpoint {

@@ -73,15 +73,15 @@ function kit(): string {
   const dir = mkdtempSync(join(root, 'kit-'));
   const files: [string, string][] = [
     ['validate.mjs', 'tools/body-authoring/validate.mjs'],
-    ['rig.ts', 'apps/server/src/edge/body/rig.ts'],
-    ['upload-validation.ts', 'apps/server/src/moderation/validate.ts'],
+    ['rig.ts', 'tools/body-authoring/admit/rig.ts'],
+    ['upload-validation.ts', 'tools/body-authoring/admit/validate.ts'],
     ['action-profile.ts', 'mars/viewer/engine/bodies/action-profile.ts'],
     ['motion.ts', 'mars/viewer/engine/bodies/motion.ts'],
   ];
   for (const [to, from] of files) copyFileSync(join(REPO, from), join(dir, to));
-  const admission = readFileSync(join(REPO, 'apps/server/src/edge/body/admission.ts'), 'utf8')
-    .replace('../../../../../mars/viewer/engine/bodies/motion.ts', './motion.ts')
-    .replace('../../../../../mars/viewer/engine/bodies/action-profile.ts', './action-profile.ts');
+  const admission = readFileSync(join(REPO, 'tools/body-authoring/admit/admission.ts'), 'utf8')
+    .replace('../../../mars/viewer/engine/bodies/motion.ts', './motion.ts')
+    .replace('../../../mars/viewer/engine/bodies/action-profile.ts', './action-profile.ts');
   writeFileSync(join(dir, 'admission.ts'), admission);
   return dir;
 }
