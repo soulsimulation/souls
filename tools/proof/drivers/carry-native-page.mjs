@@ -329,8 +329,9 @@ async function raiseSurvey({ state, page, paths, signal, check, arm, root }) {
     for (let k = 1; ; k++) {
       await stations(); await wait(1000);
       await retried(state, lift, 'part', 'raise', state.crew, frame.id); await wait(3000); await shot(`raise-${k}-part-way`); await wait(3200); await shot(`raise-${k}-top`);
-      await wait(4000); await shot(`raise-${k}-after`); await phase(state, page, `raise-${k}`);
-      const lowered = await asked(state, lift, 'part', 'lower', state.crew, frame.id);
+      await wait(4000); await shot(`raise-${k}-held`); await phase(state, page, `raise-${k}`);
+      // a part the crew holds standing: `part lower <crew>` lowers it (#5264)
+      const lowered = await asked(state, lift, 'part', 'lower', state.crew);
       (state.raises ??= []).push({ k, lower: lowered.ok === true ? 'accepted' : lowered.code ?? 'refused' });
       if (lowered.ok === true) { await wait(3500); await shot('lowering'); await wait(5500); await shot('lowered'); await phase(state, page, 'lowered'); break; }
       if (k >= 3 || lowered.code !== 'raise.not-standing') break;
