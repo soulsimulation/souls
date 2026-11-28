@@ -77,6 +77,7 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 pub const F_TILES: u64 = 25;
 pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
 pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
+pub const F_WHILE_JOINED: u64 = 104; // a floor: ground only while a part joined to its thing sits at its height (racks T6)
 /// The defs the world defines itself (a template's `define`, not the core library's), on the open ground, once each:
 /// `[[ref, def] …]`, each def today's stored def as JSON text (bytes), so a page drawing from the stream alone draws
 /// them as today's page does (a hall's roof). On the ground, never on a thing of the def, so removing any thing keeps
@@ -943,9 +944,147 @@ fn without_bodies(all: &[Json]) -> R<Residents> {
 /// link type, or slots naming the kinds they admit: a rack bay, a beam, a frame stand) takes its slots from its entry,
 /// numbered and admitting as the entry says, beside any slot only its things have. Every other kind is the facts'.
 /// Those kinds' names (their hashes) follow their entries, so a world seeded with such entries before is seeded again.
+/// The facts with each thing's floors, stairs and ladders as its kind's entry declares them (racks T9, T6:
+/// `geometry.floors`, `geometry.stairs`, `geometry.ladders`, [`replica::kinds::ways`]), written as a building's own
+/// are in the facts (`floors`, `stairs`), so the import makes them exactly as it makes those: a floor node per level, a
+/// stair or ladder row from level 0 (the ground's) to the level of the floor at its top, or to a level of its own with
+/// no floor (a flight's top then lands on the floor it meets at its height). A thing whose facts give its own floors
+/// or stairs keeps them. None when no entry declares any.
+fn with_declared_ways(text: &str, entries: &[(String, String)]) -> R<Option<String>> {
+    use replica::kinds::ways::Ways;
+    use replica::rules::json::{Value as J, parse};
+    let mut by_kind: BTreeMap<String, (Ways, i64)> = BTreeMap::new();
+    for (_, e) in entries {
+        let Ok(v) = parse(e) else { continue };
+        let w = Ways::read(&v).map_err(|w| format!("an entry's ways: {w}"))?;
+        let (Some(kind), false) = (v.get("kind").and_then(J::str), w.is_empty()) else {
+            continue;
+        };
+        let depth = v
+            .get("geometry")
+            .and_then(|g| g.get("bounds_mm"))
+            .and_then(J::arr)
+            .and_then(|b| match b.get(2) {
+                Some(J::Int(d)) => i64::try_from(*d).ok(),
+                _ => None,
+            })
+            .unwrap_or(0);
+        by_kind.insert(plain(kind).to_owned(), (w, depth / 2));
+    }
+    if by_kind.is_empty() {
+        return Ok(None);
+    }
+    let mut f = parse(text)?;
+    let names: BTreeMap<String, String> = f
+        .get("kinds")
+        .and_then(J::arr)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?.to_owned(),
+                plain(k.get("name")?.str()?).to_owned(),
+            ))
+        })
+        .collect();
+    let n = |v: i64| J::Int(i128::from(v));
+    let pt = |p: [i64; 2]| J::Arr(vec![n(p[0]), n(p[1])]);
+    let J::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    let mut changed = false;
+    for (k, v) in top.iter_mut() {
+        let (true, J::Arr(things)) = (k == "things", v) else {
+            continue;
+        };
+        for t in things.iter_mut() {
+            let Some((w, half)) = t
+                .get("ref")
+                .and_then(J::str)
+                .and_then(|r| names.get(r))
+                .and_then(|k| by_kind.get(k))
+            else {
+                continue;
+            };
+            if t.get("floors").is_some() || t.get("stairs").is_some() {
+                continue;
+            }
+            let id = t.get("id").and_then(J::str).unwrap_or("thing").to_owned();
+            let mut floors = Vec::new();
+            for (k, fl) in w.floors.iter().enumerate() {
+                let [hx, hz] = [fl.size[0] / 2, fl.size[1] / 2];
+                let [x, z] = fl.at;
+                let ring = [[x - hx, z - hz], [x + hx, z - hz], [x + hx, z + hz], [x - hx, z + hz]];
+                let mut row = vec![
+                    ("level".to_owned(), n(k as i64 + 1)),
+                    ("y".to_owned(), n(fl.top)),
+                    ("polygon".to_owned(), J::Arr(ring.into_iter().map(pt).collect())),
+                ];
+                if fl.while_joined {
+                    row.push(("while_joined".to_owned(), J::Bool(true)));
+                }
+                floors.push(J::Obj(row));
+            }
+            // A row's top level: the floor at its height nearest its top (a ladder's own face's), else one of its
+            // own past the floors.
+            let mut next = w.floors.len() as i64 + 1;
+            let mut level_at = |y: i64, p: [i64; 2]| {
+                let far = |f: &replica::kinds::ways::Floor| {
+                    let d = |a: i64, c: i64, h: i64| (a - c).abs().saturating_sub(h);
+                    d(p[0], f.at[0], f.size[0] / 2).max(d(p[1], f.at[1], f.size[1] / 2))
+                };
+                match (0..w.floors.len())
+                    .filter(|k| w.floors[*k].top == y)
+                    .min_by_key(|k| far(&w.floors[*k]))
+                {
+                    Some(k) => k as i64 + 1,
+                    None => {
+                        next += 1;
+                        next - 1
+                    }
+                }
+            };
+            let mut stairs = Vec::new();
+            let mut row = |kind: &str, path: [[i64; 2]; 2], bottom: i64, top: i64, width: i64, to: i64| {
+                let k = stairs.len();
+                stairs.push(J::Obj(vec![
+                    ("id".to_owned(), J::s(&format!("{id}-{kind}-{k}"))),
+                    ("kind".to_owned(), J::s(kind)),
+                    ("from".to_owned(), n(0)),
+                    ("to".to_owned(), n(to)),
+                    ("path".to_owned(), J::Arr(path.into_iter().map(pt).collect())),
+                    ("width".to_owned(), n(width)),
+                    ("y0".to_owned(), n(bottom)),
+                    ("y1".to_owned(), n(top)),
+                ]));
+            };
+            for s in &w.stairs {
+                let to = level_at(s.top, s.to);
+                row("stairs", [s.from, s.to], s.bottom, s.top, s.width, to);
+            }
+            for l in &w.ladders {
+                let path = l.path(*half);
+                let to = level_at(l.top, path[1]);
+                row("ladder", path, l.bottom, l.top, l.width, to);
+            }
+            let J::Obj(o) = t else { continue };
+            if !floors.is_empty() {
+                o.push(("floors".to_owned(), J::Arr(floors)));
+            }
+            if !stairs.is_empty() {
+                o.push(("stairs".to_owned(), J::Arr(stairs)));
+            }
+            changed = true;
+        }
+    }
+    Ok(changed.then(|| f.to_json()))
+}
+
 pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
     let joining = joining_slots(entries);
     let states = entry_states(entries);
+    let declared = with_declared_ways(text, entries)?;
+    let text = declared.as_deref().unwrap_or(text);
     let f = json::parse(text)?;
     if s(&f, "format")? != "souls/import-eden/1" {
         return Err("not a souls/import-eden/1 file".into());
@@ -1326,6 +1465,13 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             ff.insert(F_LEVEL, i(lv));
             if !surfaces.is_empty() {
                 ff.insert(F_SURFACES, Value::Array(surfaces));
+            }
+            // A standing place (racks T6): ground only while a part joined to the thing sits at its height.
+            if need(t, "floors").map(Json::arr).unwrap_or(&[]).iter().any(|fl| {
+                int(fl, "level").ok() == Some(lv)
+                    && matches!(fl.get("while_joined"), Some(Json::Bool(true)))
+            }) {
+                ff.insert(F_WHILE_JOINED, Value::Uint(1));
             }
             b.add(
                 &format!("{id}/floor-{lv}"),

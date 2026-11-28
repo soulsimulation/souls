@@ -847,8 +847,15 @@ impl Building {
                 let k = line.len();
                 let patch = |f: Id| floors.get(&f).map(|(_, p)| p);
                 let lo = patch(nodes[0]).map(|p| apron(p, line[0], unit(line[1], line[0])));
-                let hi =
-                    patch(nodes[1]).map(|p| apron(p, line[k - 1], unit(line[k - 2], line[k - 1])));
+                // A ladder's top against a face lands on the floor it leans over (a frame's standing place, racks T6):
+                // its apron is looked for back along it when there is none past its top.
+                let hi = patch(nodes[1]).map(|p| {
+                    apron(p, line[k - 1], unit(line[k - 2], line[k - 1])).or_else(|| {
+                        (kind == Kind::Ladder)
+                            .then(|| apron(p, line[k - 1], unit(line[k - 1], line[k - 2])))
+                            .flatten()
+                    })
+                });
                 let half = (width / 2 - (radius + MARGIN) * 1000).max(0);
                 let end = |f: Id, at: Vec3, d: [i64; 2]| End {
                     floor: f,
@@ -921,6 +928,17 @@ impl Building {
                             line.push(b);
                         }
                         ([Some(a), Some(end(nodes[1], b, db))], None)
+                    }
+                    // A ladder up to a standing place that is not there now (no beam braces it, or a deck lies over
+                    // it: `scene::braced`) leads nowhere: it lands on nothing else (racks T6).
+                    (Some(_), None)
+                        if tree
+                            .handle(nodes[1])
+                            .and_then(|h| tree.node(h))
+                            .is_some_and(|n| n.fields().contains_key(&crate::ground::scene::F_WHILE_JOINED)) =>
+                    {
+                        line.clear();
+                        ([None, None], Some("link-end-off-ground"))
                     }
                     // A flight whose top meets nothing of its own floor (a landing too small to stand on) may land on
                     // another thing's floor at its height (the roof it leads to): kept loose for [`floor_joins`].
