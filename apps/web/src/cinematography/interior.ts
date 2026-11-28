@@ -7,6 +7,7 @@ export class InteriorView{
  private key='';private region:EnclosureResult['region']=null;private anchor:Vector3|null=null;private proposals:Vector3[]=[];private cursor=0;private next=0;private retried=false;
  diagnostic:InteriorDiagnostic=this.blank();
  private blank():InteriorDiagnostic{return{status:'inactive',key:null,anchor:null,proposal:null,visibility:null,passage:null,tested:0,validation:'full-authored-building-surfaces-and-current-obstacles',containment:'unproved'};}
+ destination(){return this.anchor?{eye:this.anchor.clone(),key:this.key}:null;}
  reset(){this.key='';this.region=null;this.anchor=null;this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.diagnostic=this.blank();}
  sync(context:EnclosureResult|null|undefined,manual:boolean,generation:number){
   if(manual||context?.status!=='enclosed'||!context.region||!context.worldMatrix){this.reset();this.diagnostic.status=manual?'manual':'inactive';return null;}
