@@ -1089,8 +1089,8 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     // Frame 1's back face is its outer one (it stands at the bay's -z end).
     let perch = k.places[0][0];
     let walker = {
-        // #5268 (#5254): a walk whose goal a body cannot stand at ends `walk.stopped-short`; 3.2 m out ended 0.7 m
-        // short (the ladder's run, 1.4 m from the face, and its holders now standing behind the posts), so 3.9 m.
+        // #5268 (#5254): a walk whose goal a body cannot stand at ends `walk.stopped-short`. 3.2 m out (0.3 m beyond
+        // the ladder's 1.4 m run from the face) ended 0.7 m short; 3.9 m out is clear.
         k.walk(&[(4, Bay::at(0, -3_900))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
