@@ -1,3 +1,5 @@
+import {HELD_ARM_EASE,heldArmBinding,type HeldArmOrigin} from './held-arm-origin.ts';
+import { heldProjections, heldBackExtent, heldGripBounds, placeHeld, type HeldPicture, type HeldPictureFactory, type NativeHands } from './held-projection.ts';
 import {wavePose,WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 import {actuatorHand,handActuatorFrame,posterLocal,strokeWork,twoHanded,HAND_REACH_SECONDS,HAND_RELEASE_SECONDS,type HandActuatorMotion} from '../../engine/social/hand-actuator.ts';
 import {insidePoint,itemPoseOf,ITEM_RECOVERY_SECONDS,type ItemPoseView} from '../../engine/items/presentation.ts';
@@ -31,6 +33,8 @@ import {BODY_MODEL as ENGINE_BODY} from '../../engine/body/model.ts';
 // All of it is a pure function of (world history, entity id): no randomness.
 import * as THREE from 'three';
 import { hashId, humanGroundAt, humanGroundSampler, setHumanGround, templateNameFor } from './people-light.ts';
+import { seatedFootWeight, seatedSupportY } from './seated-ground.ts';
+import { seatTransition } from './seat-transition.ts';
 import type { Entity, Pose, WorldState } from '../../engine/world/types.ts';
 import type { Vec3 } from '../../engine/core/math.ts';
 import type { Link } from '../../engine/spatial/types.ts';
@@ -66,6 +70,7 @@ import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, CARRY_HAND, GESTURE_RETURN, GROUND_SEAT, RETURNS, LYING, PIANO_FADE, SING_LET_GO, activityFrame, carriedProp, carrySide, gameArmBlend, makeProp, placeProp, propFor, formPresses, pressWeight, type FormPress, type ActivityFrame, type PropKind } from './activity-poses.ts';
+import type { HeldSet, ConsumeMove } from './held-entry.ts';
 import { accompanistOf } from './piano-score.ts';
 import { ACT_BLEND, ACT_HISTORY, OWN_FADE, blendFrames, postureKind, postureNow, posturePhaseEnds, type PostureChange, type PostureNow } from './posture-transition.ts';
 import {posePianoHand} from './piano-hands.ts';
@@ -79,6 +84,17 @@ import {PLAY_MOTION, playSeatAt, rideSeat} from './play-motion.ts';
 import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './bicycle.ts';
 
 type Hands = { left?: Vec3; right?: Vec3 };
+/** Cosmetic point bearing, never a native hand endpoint. Coordinates are world metres; times are world µs. */
+export type PointAim = { target: string; at: [number, number]; hand: 'left' | 'right'; start: number; ends: number[]; cut?: number; contact?: string; run?: string };
+export function pointAimOf(value: unknown): PointAim | undefined {
+  const p = value as PointAim | null;
+  if (!p || typeof p.target !== 'string' || !p.target || !['left','right'].includes(p.hand)
+    || !Array.isArray(p.at) || p.at.length !== 2 || !p.at.every(Number.isFinite) || !Number.isFinite(p.start)
+    || !Array.isArray(p.ends) || !p.ends.length || !p.ends.every((n,i) => Number.isFinite(n) && n > (i ? p.ends[i-1] : p.start))
+    || p.cut !== undefined && (!Number.isFinite(p.cut) || p.cut < p.start || p.cut > p.ends.at(-1)!)) return undefined;
+  return { target:p.target, at:[...p.at], hand:p.hand, start:p.start, ends:[...p.ends], ...(p.cut === undefined ? {} : {cut:p.cut}),
+    ...(typeof p.contact === 'string' ? {contact:p.contact} : {}), ...(typeof p.run === 'string' ? {run:p.run} : {}) };
+}
 type Snap = { p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
 const POSTURE_ORIGINS = new Set(['idle','pushups','situps','stargaze','lie','jumping-jacks','stretch','yoga']);
 export type ClipOrigin = {
@@ -90,7 +106,7 @@ export type ClipOrigin = {
   /** Internal collapsed pose, used only by the isolated iterative evaluator. */
   drawn?: DrawnOrigin;
 };
-type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion };
+export type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion; feet?: THREE.Vector3[]; arms?: { name: string; p: THREE.Vector3; q: THREE.Quaternion }[] };
 function poseBones(model:THREE.Object3D) {
   const joints:THREE.Object3D[]=[];model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});return joints;
 }
@@ -102,11 +118,44 @@ function blendDrawn(holder:THREE.Object3D,joints:THREE.Object3D[],target:{bones:
   holder.position.copy(root).add(origin.offset.clone().lerp(target.p.clone().sub(root).applyQuaternion(nativeQ.clone().invert()),k).applyQuaternion(nativeQ));
   holder.quaternion.copy(nativeQ).multiply(origin.q.clone().slerp(nativeQ.clone().invert().multiply(target.q),k));holder.updateMatrixWorld(true);
 }
+/** Root-sibling feet retain the authored shin-end offset during a seated pose blend. */
+function seatFootOffsets(v: View) {
+  v.rig.holder.updateMatrixWorld(true);
+  return v.legs.map((leg, i) => leg.foot.getWorldPosition(V()).sub(leg.lower.localToWorld(v.ankle[i].clone())));
+}
+function armBases(v: View, hands?: ReadonlySet<'left'|'right'>) {
+  return v.arms.flatMap((a,i) => hands&&!hands.has(armSide(v,i))?[]:[...(a.shoulder ? [a.shoulder] : []), a.upper, a.lower, a.hand, ...a.fingers, ...a.thumb]).map(o => ({ name: o.name, p: o.position.clone(), q: o.quaternion.clone() }));
+}
+const _seatArmFrom=new THREE.Quaternion(),_seatArmTo=new THREE.Quaternion();
+/** Interpolate rotation without normalizing the actual attained skin endpoint at the first blend frame. */
+function blendSeatArmQuaternion(out:THREE.Quaternion,from:THREE.Quaternion,to:THREE.Quaternion,k:number){
+  const a=from.length(),b=to.length();if(!(a>0&&b>0&&Number.isFinite(a+b)))return;
+  _seatArmFrom.copy(from).normalize();_seatArmTo.copy(to).normalize();
+  out.copy(_seatArmFrom).slerp(_seatArmTo,k);const magnitude=a+(b-a)*k;
+  out.set(out.x*magnitude,out.y*magnitude,out.z*magnitude,out.w*magnitude);
+}
+function blendSeatDrawn(v: View, joints: THREE.Object3D[], target: { bones: DrawnOrigin['bones']; p: THREE.Vector3; q: THREE.Quaternion }, origin: DrawnOrigin, k: number, root: THREE.Vector3, nativeQ: THREE.Quaternion) {
+  const offsets = seatFootOffsets(v);
+  const arms = v.cur.hands.left || v.cur.hands.right || v.formPress?.length || v.heldArmOwner ? new Map(origin.arms?.map(b => [b.name, b])) : null;
+  const input = arms?.size ? { ...origin, bones: origin.bones.map((b, i) => arms.get(joints[i].name) ?? b) } : origin;
+  blendDrawn(v.rig.holder, joints, target, input, k, root, nativeQ);
+  if(v.heldArmOwner&&arms?.size){
+    target.bones.forEach((bone,i)=>{const before=arms.get(joints[i].name);if(before)blendSeatArmQuaternion(joints[i].quaternion,before.q,bone.q,k);});
+    v.rig.holder.updateMatrixWorld(true);
+  }
+  if (origin.feet) v.legs.forEach((leg, i) => place(leg.foot, leg.lower.localToWorld(v.ankle[i].clone()).add(origin.feet![i].clone().lerp(offsets[i], k))));
+}
 type View = {
   postureOrigins?: Map<string, DrawnOrigin>;
   clipOrigins?: Map<string, DrawnOrigin>;
   clipContext?: object;
   clipOrigin?: ClipOrigin;
+  seatSample?: SampledHuman;
+  seatPlan?: ReturnType<typeof seatTransition>;
+  seatOrigins?: Map<string, DrawnOrigin>;
+  ownerArmBase?: NonNullable<DrawnOrigin['arms']>;
+  /** This pose has a free canonical held/releasing arm above its attained seat base. */
+  heldArmOwner?: boolean;
   clipReference?: {o:THREE.Object3D;p:THREE.Vector3;q:THREE.Quaternion;s:THREE.Vector3}[];
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
@@ -200,8 +249,17 @@ type View = {
   gaze?: { prev: number; cur: number };
   /** Body activity layer (activity-poses.ts): the engine's prop, sitting on the ground, running, and the prop mesh. */
   propWanted?: string;
+  /** Native public observation, retained separately from the legacy visual/contact owner. */
+  heldEntries?: HeldSet;
+  nativeHands?: NativeHands;
+  /** Native consume observations only; pose code does not read this field. */
+  consumeMove?: ConsumeMove;
   /** Take time (s) the body began to carry its prop in one hand (the carry pose eases in from it). */
   carrySince?: number;
+  heldArmOrigin?:HeldArmOrigin;
+  heldArmKnown?:boolean;
+  heldArmCache?:Map<string,DrawnOrigin>;
+  heldArmContext?:object;
   instrument?:string;
   game?:RecordedGame;
   gameTick?:number;
@@ -219,6 +277,8 @@ type View = {
    *  and base before it (crossfade), the paired-gesture partner and where it is, metres walked, speaking now. */
   since?: number;
   formPress?: readonly FormPress[];
+  pointAim?: PointAim;
+  pointAimTime?: number;
   prevAct?: string;
   /** posture-transition.ts: the latest change of posture (activity before it, its base, the activity after) and its age. */
   postureChange?: PostureChange;
@@ -288,6 +348,11 @@ const CARRY_EASE = 0.4;
  * function of take time: clip seconds = metres / clip ground speed (feet speed-matched).
  */
 export type SampledHuman = {
+  /** Native held metadata; absent on legacy takes, entries:[] only after observing no held things. */
+  heldEntries?: HeldSet;
+  nativeHands?: NativeHands;
+  /** Native consume observations only; pose code does not read this field. */
+  consumeMove?: ConsumeMove;
   /** Public recorded Soul association, never inferred from a display name/id. */
   publicSoulKey?:string;
   bodyModel?:string;
@@ -357,8 +422,14 @@ export type SampledHuman = {
   activityAge?: number;
   /** Immutable prior drawn context at the newest activity boundary, including any still-visible origin. */
   clipOrigin?: ClipOrigin;
+  /** Recorded seat before departure, retained separately from the current (now absent) seat. */
+  seatOrigin?: { height?: number; tick?: number; phase?: number; sample?: SampledHuman };
+  heldArmOrigin?:HeldArmOrigin;
+  heldArmKnown?:boolean;
   /** Existing v2 press record, including its native hand and phase clock. */
   formPress?: readonly FormPress[];
+  pointAim?: PointAim;
+  pointAimTime?: number;
   /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
    *  the activity it went into and its age (s); absent when there was none in the last second or so. */
   postureChange?: PostureChange;
@@ -569,6 +640,11 @@ export class HumanViews {
   private readingActors = new Set<string>();
   private climbs: { id: string; path: [number, number, number][] }[] = [];
 
+  private heldPictureFactory?: HeldPictureFactory;
+  private readonly heldPictures = new Map<string, Map<string, {key:string; picture:HeldPicture; hand:'left'|'right'}>>();
+  setHeldPictureFactory(factory: HeldPictureFactory | undefined) { this.clearHeldPictures(); this.heldPictureFactory = factory; }
+  private clearHeldPictures(id?: string) { for (const [actor, pictures] of this.heldPictures) if (id === undefined || id === actor) { for (const p of pictures.values()) p.picture.dispose(); this.heldPictures.delete(actor); } }
+
   private readonly humanPresets: boolean;
   constructor(humanPresets = false) {
     this.humanPresets = humanPresets;
@@ -619,6 +695,7 @@ export class HumanViews {
   }
 
   clear() {
+    this.clearHeldPictures();
     for (const v of this.views.values()) {
       v.appearance?.retire();
       v.rig.mixer.stopAllAction();
@@ -702,6 +779,7 @@ export class HumanViews {
         v.prevAct = v.activity; v.prevBase = v.base; v.prevDuration=(v.age+1)*DT;v.prevInstrument=v.instrument;
       }
       v.age = act === v.activity ? v.age + 1 : 0;
+      v.pointAim = undefined; v.pointAimTime = undefined;
       v.since = v.age * DT;
       if(v.waveEvents){
         const human=e.human,owner=human.hands?.left||human.hands?.right||human.grip||human.handHold||human.rps||human.heldItemsV1?.left||human.heldItemsV1?.right||human.on;
@@ -729,6 +807,9 @@ export class HumanViews {
       v.sleepPose = e.human?.sleepPose;
       v.base = base;
       v.propWanted = (e.human as { prop?: string }).prop;
+      v.nativeHands = undefined;
+      v.heldEntries = undefined; // old tick input makes no claim about native held metadata
+      v.consumeMove = undefined;
       v.instrument=(e.human as {instrument?:string}).instrument;v.game=recordedGame((e.human as {game?:unknown}).game)??undefined;v.gameTick=world.tick;v.gameDt=DT;
       v.gait = chooseGait(v.gait, v.speed, world.tick * DT, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.grip = e.human.grip?.entity;
@@ -783,7 +864,7 @@ export class HumanViews {
         v.appearance?.retire();
         disposeSkeletons(v.rig.model);
         this.group.remove(v.rig.holder); if (v.bike) this.group.remove(v.bike);
-        this.views.delete(id);
+        this.views.delete(id);this.clearHeldPictures(id);
       }
     this.trackParts((id) => world.entities[id]);
   }
@@ -944,7 +1025,8 @@ export class HumanViews {
       if(f.bodyModel?!this.bodyTemplates.has(f.bodyModel):!templateFor(f.id,this.templates))continue;
       seen.add(f.id);
       // a record that goes straight between standing and a seat draws the old engine's own sit-down / stand-up phase
-      const pc = f.postureChange, seatMove = pc ? postureNow(pc, f.activity ?? 'idle', f.baseActivity) : null;
+      const pc = f.postureChange, seatPlan = seatTransition(pc, f.activity ?? 'idle', f.baseActivity);
+      const seatMove = seatPlan ? pc!.age < seatPlan.end ? seatPlan : null : pc ? postureNow(pc, f.activity ?? 'idle', f.baseActivity) : null;
       const act = seatMove?.activity ?? f.activity ?? 'idle';
       const base = baseOf(act, seatMove?.activity ?? f.baseActivity);
       let v = this.views.get(f.id);
@@ -952,7 +1034,7 @@ export class HumanViews {
       // A live arrival can finish many unique templates together. Defer only new rigs, keeping every existing actor
       // on the current sample (and its old body until a replacement can be made). No pose is queued across frames.
       if((!v||v.rig.template!==wanted)&&(!rigBudget||rigBudget.remaining>0)){
-        if(v){v.rig.mixer.stopAllAction();v.rig.mixer.uncacheRoot(v.rig.model);v.appearance?.retire();disposeSkeletons(v.rig.model);v.rig.holder.removeFromParent();this.views.delete(f.id);}
+        if(v){v.rig.mixer.stopAllAction();v.rig.mixer.uncacheRoot(v.rig.model);v.appearance?.retire();disposeSkeletons(v.rig.model);v.rig.holder.removeFromParent();this.views.delete(f.id);this.clearHeldPictures(f.id);}
         v=this.make(f.id, { p: [...f.p], yaw: f.yaw, walkW: 0, walkT: 0, idleT: 0, sitW: 0, warmW: 0, expressionT: t, pose: NEUTRAL, hands: {}, pr: null }, act,f.publicSoulKey,f.bodyModel);if(rigBudget)rigBudget.remaining--;
       }
       if(!v)continue;
@@ -961,7 +1043,7 @@ export class HumanViews {
       v.activity = act;
       if(v.handActuator&&!f.handActuator)v.lastHandActuator=v.handActuator;else if(f.handActuator)v.lastHandActuator=undefined;
       v.handActuator=f.handActuator;v.handActuatorTime=f.handActuatorTime;v.watering=f.watering;v.wateringTime=f.wateringTime;v.letGo=f.letGo;v.letGoTime=f.letGoTime;v.cup=f.cup;v.cupTime=f.cupTime;v.transfer=f.transfer;v.transferTime=f.transferTime;
-      v.itemPose=f.itemPose; v.formPress=formPresses(f.formPress);
+      v.itemPose=f.itemPose; v.formPress=formPresses(f.formPress); v.pointAim=pointAimOf(f.pointAim); v.pointAimTime=f.pointAimTime;
       v.sleepPose = f.sleepPose;
       v.shore = f.shore;
       v.shoreTime = f.shoreTime;
@@ -972,20 +1054,26 @@ export class HumanViews {
       v.carryWeight = f.carryWeight;
       v.on = f.on;
       v.frame = frameCtx(f.on, act, (id) => parts[id], this.climbs);
-      v.seat = act==='cycle'?BIKE_SADDLE:SEATED.has(base)&&!f.on&&!f.grip&&!f.hands?.left&&!f.hands?.right&&typeof f.seatHeight==='number'&&Number.isFinite(f.seatHeight)&&f.seatHeight>0&&f.seatHeight<=1.2?f.seatHeight:SEAT_DEFAULT;
+      const seatHeight = seatPlan?.activity === 'stand-up' ? f.seatOrigin?.height ?? f.seatHeight : f.seatHeight;
+      v.seat = act==='cycle'?BIKE_SADDLE:SEATED.has(base)&&!f.on&&!f.grip&&typeof seatHeight==='number'&&Number.isFinite(seatHeight)&&seatHeight>0&&seatHeight<=1.2?seatHeight:SEAT_DEFAULT;
       v.bench = LYING.has(act)||act==='bench-press'?(typeof f.seatHeight==='number'&&Number.isFinite(f.seatHeight)&&f.seatHeight>0&&f.seatHeight<=1.2?f.seatHeight:0):0;
       v.groundSeat = onGround(act, f.baseActivity);
       if (v.groundSeat) v.seat = GROUND_SEAT;
-      v.propWanted = f.prop;
+      v.propWanted = f.heldEntries?.entries.length===0 ? undefined : f.prop;
+      v.heldEntries = f.heldEntries;
+      v.nativeHands = f.nativeHands;
+      v.consumeMove = f.consumeMove;
       v.instrument=f.instrument;v.game=f.game;v.gameTick=f.gameTick;v.gameDt=f.gameDt;
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
       v.gait = chooseGait(v.gait, v.speed, t, act === 'jog' || act === 'run'); v.running = v.gait.running;
       v.since = seatMove?.activity ? seatMove.since : f.activityAge;
       v.clipOrigin = f.clipOrigin;
-      v.postureChange = seatMove?.activity ? undefined : f.postureChange;
-      if (f.restAge !== undefined) v.restFrom = t - f.restAge;
-      else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
-      v.restAge = v.restFrom !== undefined && t >= v.restFrom ? t - v.restFrom : undefined;
+      v.seatSample = seatPlan || SEATED.has(base) || f.clipOrigin && SEATED.has(baseOf(f.clipOrigin.sample.activity ?? 'idle', f.clipOrigin.sample.baseActivity)) ? f : undefined;
+      v.seatPlan = seatPlan;
+      v.heldArmOrigin=f.heldArmOrigin;v.heldArmKnown=f.heldArmKnown;
+      v.postureChange = f.postureChange;
+      v.restFrom = f.restAge === undefined ? undefined : t - f.restAge;
+      v.restAge = f.restAge;
       v.walkAge = f.walkAge;
       v.restAgeAtWalk = f.restAgeAtWalk;
       v.prevAct = f.prevActivity;v.prevDuration=f.prevActivityDuration;v.prevInstrument=f.prevInstrument;
@@ -1025,7 +1113,7 @@ export class HumanViews {
         v.appearance?.retire();
         disposeSkeletons(v.rig.model);
         this.group.remove(v.rig.holder); if (v.bike) this.group.remove(v.bike);
-        this.views.delete(id);
+        this.views.delete(id);this.clearHeldPictures(id);
       }
     for (const f of frame) { const v = this.views.get(f.id); if (v?.partner) { const q = frame.find((g) => g.id === v.partner); v.partnerP = q ? new THREE.Vector3(...q.p) : undefined; } }
     // entry 35: the hand partner's drawn root (both bodies draw their joined hands to one point between them)
@@ -1050,6 +1138,7 @@ export class HumanViews {
       // A resumed pose needs fresh matrices throughout reconstruction, including ground fitting.
       if (due) { v.held = false; this.pose(v, alpha, reach); v.posedOnce = true; st.posed++; } else st.skipped++;
       v.held = !due && !v.shown; if (v.held) st.held++;
+      for (const item of this.heldPictures.get(v.rig.holder.name)?.values() ?? []) item.picture.object.visible = v.rig.holder.visible;
     }
     // the dock shows one bicycle fewer for each one out under a rider (decorative-motion 'dock-bike')
     let out = 0; for (const v of this.views.values()) if (v.bike?.visible) out++; PLAY_MOTION.value.w = out;
@@ -1062,9 +1151,11 @@ export class HumanViews {
     // Transition layouts change the lowest torso vertex; a prior-pose shortlist is not a valid contact sample.
     if(v.postureChange)v.restCache=undefined;
     const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
+    const pointFree=!!v.pointAim&&!nativeHandOwner&&!v.formPress?.length&&!v.itemPose&&!v.handActuator&&!v.lastHandActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.handHold&&!v.rps&&!v.propWanted&&!v.prop?.obj.visible&&!v.instrument&&!v.grip&&!v.on;
     const clipHistoryReset=!!v.clipOrigin&&!v.speaking&&!v.instrument&&!v.propWanted&&!v.prop?.obj.visible&&!v.itemPose&&!v.handActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.lastHandActuator&&!v.handHold&&!v.rps&&!v.grip&&!v.on&&!v.formPress?.length&&v.cur.walkW<.01&&v.cur.sitW===0&&postureKind(v.activity,v.base)==='stand'&&postureKind(v.clipOrigin.sample.activity??'idle',v.clipOrigin.sample.baseActivity)==='stand';
-    const plainIdle=v.activity==='idle'&&!v.postureChange&&!clipHistoryReset;
-    if(!nativeHandOwner && !plainIdle){
+    const plainIdle=v.activity==='idle'&&!pointFree&&!v.postureChange&&!clipHistoryReset&&!(v.heldArmKnown!==undefined&&(heldArmBinding(v)!==undefined||v.heldEntries===undefined));
+    const seatReset=!!v.seatSample&&!v.itemPose&&!v.handActuator&&(SEATED.has(v.base)||!!v.seatPlan&&v.seatSample.postureChange!.age<v.seatPlan.end+ACT_BLEND);
+    if((!nativeHandOwner || seatReset) && !plainIdle){
       v.rig.mixer.stopAllAction();
       for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
       v.rig.idle.play();v.rig.walk.play();v.layered=false;
@@ -1120,12 +1211,18 @@ export class HumanViews {
     const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
     if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
     const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
+    const point = v.pointAim, pointNow = v.pointAimTime;
+    const pointEnd = point ? Math.min(point.ends.at(-1)!, point.cut ?? Infinity) : 0;
+    const pointOwned = pointFree && point && pointNow !== undefined && Number.isFinite(pointNow) && pointNow >= point.start && pointNow < pointEnd + GESTURE_RETURN * 1e6
+      && ['point','idle','sit'].includes(v.activity);
+    const pointFrame = pointOwned ? activityFrame('point',v.base,tSec,h.name,{since:(pointNow-point.start)/1e6,
+      ...(pointNow >= pointEnd ? {released:(pointNow-pointEnd)/1e6,priorAge:(pointEnd-point.start)/1e6} : {})}) : null;
     const act0: ActivityFrame | null = !(recordedPress && v.activity === 'operate') && freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep && lib.rise === undefined
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
+      : pointFrame ?? (gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) })) : null;
     // posture-transition.ts: over a change of posture a face-down plank tilts up from (down to) the feet; after getting up
     // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
     const pn = lib.posture;
@@ -1319,13 +1416,23 @@ export class HumanViews {
     const waterOrigins=!lib.water&&!hasHands&&!gripping&&!v.grip&&!v.on&&!gait&&!fp&&proneW===0&&sitW===0&&warmW===0&&!posed&&v.waterTransition&&v.waterTransition.weight<1?v.waterTransition.origins:[];
     const waterFrom=waterOrigins.some(x=>x.pose!==null);
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
-    const propKind = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    const heldArmBlocked=!!(hasHands || gripping || v.grip || v.on || v.itemPose || v.handActuator || v.transfer || v.watering || v.cup || v.letGo || v.lastHandActuator || v.instrument || v.handHold || v.rps || v.partner || v.formPress?.length || proneW || lib.sleep || fp || v.sleepPose);
+    const canonicalHeld = this.prepareHeld(v,heldArmBlocked);
+    // An observed empty native hand set cannot be replaced by a generic activity-default plate/book/tool.
+    // Explicit instrument owners are independent; legacy worlds without a held observation keep their defaults.
+    const propActivity=act || clipBody || lib.cur ? v.activity : '';
+    const propKind = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute'
+      : v.heldEntries?.entries.length===0&&!v.instrument ? null : propFor(propActivity,v.propWanted,v.instrument) : null;
     // a thing the body carries (the engine's prop) with no activity posing the hands is in one hand at the carry point,
     // standing or walking (below); a book is carried closed and read open
     const held = !!propKind && propKind === v.propWanted;
-    const carried = held && !act?.hands && !clipBody && sitW === 0 && !fp && !gait;
+    const canonicalArmFree = !act?.hands && !clipBody && !waveClip && !interactClip;
+    v.heldArmOwner = !heldArmBlocked && canonicalArmFree && (canonicalHeld || !!v.heldArmOrigin);
+    const carried = (held || canonicalHeld) && canonicalArmFree && (sitW === 0 || canonicalHeld) && !fp && !gait;
     if (!carried) v.carrySince = undefined; else if (v.carrySince === undefined || v.carrySince > tSec) v.carrySince = tSec;
-    const carryW = carried ? smooth(Math.min(1, (tSec - v.carrySince!) / CARRY_EASE)) : 0;
+    const seatExit = v.seatPlan;
+    const carryAge = seatExit?.activity === 'stand-up' ? v.seatSample!.postureChange!.age - seatExit.end : tSec - v.carrySince!;
+    const carryW = carried ? smooth(Math.min(1, carryAge / CARRY_EASE)) : 0;
     const wantProp = held ? carriedProp(propKind, v.activity) : propKind;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     // A free standing overlay shares ordinary idle's foot policy. Floor layout and
@@ -1337,12 +1444,13 @@ export class HumanViews {
     const freeFootFit = !water && !waterFrom && !lib.water && freeBody && sitW <= 0 && !gait && !posed && !runFallback && !gripping && !hasHands
       && !lib.posture && !lib.still && !act?.lying && !act?.ride && !act?.pairedContact && !v.handHold && !v.rps && !v.propWanted;
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
-    if (!(v.formPress || footFit || freeFootFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || handGame || floorTransition || freeStandingContacts)) return;
+    if (!(v.formPress || footFit || freeFootFit || runFallback || waterFrom || water || expression || Math.abs(gaze) > 1e-5 || sitW > 0 || warmW > 0 || gripping || hasHands || posed || gait || fp || proneW > 0 || act || lib.cur || lib.prev || wantProp || canonicalHeld || handGame || floorTransition || freeStandingContacts)) return;
     for (const s of v.saved) { s.p.copy(s.o.position); s.q.copy(s.o.quaternion); }
     v.layered = true;
     _fwd.set(Math.cos(yaw), 0, Math.sin(yaw)); // engine yaw 0 faces +x; holder.rotation.y = -yaw
     _right.set(-Math.sin(yaw), 0, Math.cos(yaw));
     const seatClip = this.libraryBody(v, lib, curW, prevW, yaw);
+    const seatHands = seatClip || !!v.seatSample && (lib.cur?.pick.body === 'seat' || lib.prev?.pick.body === 'seat');
     h.updateMatrixWorld(true);
     let waterStart:{p:THREE.Vector3;q:THREE.Quaternion}[]|null=null;
     if(waterFrom){
@@ -1393,6 +1501,20 @@ export class HumanViews {
         legTo(l, v.ankle[i], ankle.setY(ankle.y + dip), knee.sub(hip.add(ankle).multiplyScalar(0.5)), 0.999, l.foot.getWorldQuaternion(new THREE.Quaternion()));
       });
     }
+    // Seated continuity precedes existing native-hand, held-prop and selected-press
+    // owners. Each applies once below, after the attained base has been blended.
+    const seatHandOwner = !!(hasHands || v.propWanted || v.formPress?.length) && !v.itemPose && !v.handActuator && !v.transfer && !v.watering && !v.cup && !v.letGo;
+    let seatOwnerShare = 1;
+    if (v.seatSample && seatHandOwner && freeBody && !gripping && !v.handHold && !v.rps) {
+      seatOwnerShare = this.blendSeat(v, tSec, sourcePose);
+      if (act && seatOwnerShare < 1) act = blendFrames(null, act, seatOwnerShare);
+    }
+    // Synthetic seat fallback retains truthful current metadata, but its old body base must precede
+    // the selected held layer. The final held fold composes that owner once over the attained seat.
+    const heldOwnerHands=sourcePose&&v.heldArmOwner?new Set([
+      ...heldProjections(v.heldEntries,v.nativeHands).map(p=>p.hand),
+      ...v.heldArmOrigin?.hands??[],...v.heldArmOrigin?.history?.flatMap(p=>p.hands)??[]]):undefined;
+    v.ownerArmBase = sourcePose ? hasHands || v.formPress?.length ? armBases(v) : v.heldArmKnown!==false&&heldOwnerHands?.size ? armBases(v,heldOwnerHands) : undefined : undefined;
     if (act && v.spine && !hasHands && !gripping) {
       if (act.lying) {
         if (act.lying.face === 'back' && act.lying.raise > 0) bendTorso(v.spine, act.lying.raise);
@@ -1513,7 +1635,7 @@ export class HumanViews {
       const armBase=v.arms.some((_,i)=>armW(i)<1)?v.arms.flatMap((arm,i)=>[...(arm.shoulder?[arm.shoulder]:[]),arm.upper,arm.lower,arm.hand].map(o=>({o,w:armW(i)}))).map(({o,w})=>({o,w,q:o.quaternion.clone(),p:o.position.clone()})):[];
       const k = reachTo(v, targets, pz.rise > 0, v.carryWeight===undefined?BODY_MODEL.maxExtension:CARRY_EXTENSION, undefined, pa);
       v.arms.forEach((arm, i) => {
-        if (!targets[i] && sitW > 0 && !seatClip) handOnThigh(v, i, sitW);
+        if (!targets[i] && sitW > 0 && !seatHands) handOnThigh(v, i, sitW);
       });
       // an opted-in item reach bends up to ~60° in 1 s: let the free arm hang from the first degree of bend,
       // not swing down between 30° and 63° in a fifth of a second; an idle gesture still fading out (folded arms at a
@@ -1565,14 +1687,19 @@ export class HumanViews {
       source = 'expression';
       const floor = (act.lying ? (act.lying.face === 'back' ? lieFloor : h.position.y - 0.1) : h.position.y - act.hop) + 0.06;
       v.arms.forEach((arm, i) => {
-        const left = armSide(v, i) === 'left', q = act.hands![left ? 0 : 1], r = act.rootHands?.[left ? 0 : 1], wgt = act.handW?.[left ? 0 : 1] ?? 1;
-        if (!q && !r) { if (sitW > 0 && !seatClip) handOnThigh(v, i, sitW); return; }
+        const left = armSide(v, i) === 'left', aimedPoint = !!pointFrame && !act.pairedContact;
+        const q = aimedPoint ? (armSide(v,i) === point!.hand ? act.hands![1] : null) : act.hands![left ? 0 : 1], r = act.rootHands?.[left ? 0 : 1], wgt = act.handW?.[left ? 0 : 1] ?? 1;
+        if (!q && !r) { if (sitW > 0 && !seatHands) handOnThigh(v, i, sitW); return; }
         const weight=act.handWeights?.[left?0:1]??1;
         const saved=weight<1?[arm.upper,arm.lower,arm.hand].map(o=>({o,p:o.position.clone(),q:o.quaternion.clone()})):[];
         arm.upper.getWorldPosition(_s);
         // entry 36: a goal on a fixed thing (the mic's grip) is placed from the body root at its own height above the floor
         const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]).addScaledVector(_right, (left ? -1 : 1) * r[1]).addScaledVector(UP, r[2])
           : V().copy(_s).addScaledVector(_fwd, q![0]).addScaledVector(_right, (left ? -1 : 1) * q![1]).addScaledVector(UP, q![2]);
+        if (aimedPoint && q) {
+          const direction = V().set(point!.at[0]-_s.x,0,point!.at[1]-_s.z);
+          if (direction.lengthSq() > 1e-12) t.copy(_s).addScaledVector(direction.normalize(),Math.hypot(q[0],q[1])).addScaledVector(UP,q[2]);
+        }
         if(act.flute){
           const head=v.spine?.head?.getWorldPosition(V())??V().copy(h.position).addScaledVector(UP,1.525);
           t.copy(head).addScaledVector(_fwd,.125).addScaledVector(UP,.005).addScaledVector(_right,left?.14:.36);
@@ -1599,7 +1726,7 @@ export class HumanViews {
         }
       });
       if(act.piano)v.arms.forEach((arm,i)=>{if(targets[i])posePianoHand(arm,h.position,targets[i]!,_fwd,_right,h.position.y+act.piano!.height,act.piano!.lift[armSide(v,i)==='left'?0:1],act.piano!.weight,visit=>eachSkinnedWorld(v.surf.hand.get(arm.side),V(),visit));});
-    } else if (carried && carryW > 0) {
+    } else if (carried && carryW > 0 && !canonicalHeld) {
       // a carried thing: its hand at the carry point from its own shoulder (forearm forward, elbow bent), walking or
       // standing; the other arm keeps the clip (its walk swing, its idle). The prop follows the drawn palm (below).
       source = 'carry';
@@ -1608,12 +1735,12 @@ export class HumanViews {
         const arm = v.arms[i], out = side === 'left' ? -1 : 1;
         const t = arm.upper.getWorldPosition(V()).addScaledVector(_fwd, CARRY_HAND[0]).addScaledVector(_right, out * CARRY_HAND[1]).addScaledVector(UP, CARRY_HAND[2]);
         targets[i] = t;
-        armTo(arm, t, carryW, 0.98, h, V().copy(_right).multiplyScalar(out * 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
-        curlHand(arm, smooth((0.6 * carryW - 0.3) / 0.5));
+        armTo(arm, t, carryW * seatOwnerShare, 0.98, h, V().copy(_right).multiplyScalar(out * 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
+        curlHand(arm, smooth((0.6 * carryW - 0.3) / 0.5) * seatOwnerShare);
       }
     } else if (runFallback && !gait && !fp && !posed && proneW===0 && sitW===0) {
       source='expression';v.arms.forEach((arm,i)=>{const f=runFallback.hands[arm.side>0?0:1];targets[i]=arm.upper.getWorldPosition(V()).addScaledVector(_fwd,f.forward).addScaledVector(_right,-arm.side*.06).addScaledVector(UP,f.up);});reachTo(v,targets,false);closeHands(v,targets.map(()=>.45));
-    } else if (sitW > 0 && !seatClip) v.arms.forEach((_, i) => handOnThigh(v, i, sitW));
+    } else if (sitW > 0 && !seatHands) v.arms.forEach((_, i) => handOnThigh(v, i, sitW));
     else if (fp && fw > 0 && (fp.hands[0] || fp.hands[1])) {
       // free hands on the frame (climbing: the ladder cycle's holds; on the bracing: column + brace) or held
       // out for balance on a beam — renderer-chosen, within reach by construction, reach-honest all the same
@@ -1634,6 +1761,32 @@ export class HumanViews {
       });
       reachTo(v,targets,false);closeHands(v,targets.map(()=>0));
     } else dangle(v, pz.bend, []);
+    // Canonical geometry replaces only the generic object. The declared holding hand keeps a real carry pose,
+    // including seated holds; its opposite hand and every authoritative contact keep the attained base pose.
+    if (canonicalHeld && canonicalArmFree) {
+      const pictures = this.heldPictures.get(h.name);
+      for (const [id,current] of pictures ?? []) {
+        const entry = v.heldEntries?.entries.find(e => e.id === id), i = v.arms.findIndex((_,i)=>armSide(v,i)===current.hand);
+        if (!entry || i < 0) continue;
+        const arm = v.arms[i], out = current.hand === 'left' ? -1 : 1;
+        const target = arm.upper.getWorldPosition(V()).addScaledVector(_fwd,CARRY_HAND[0]+heldBackExtent(current.picture,entry))
+          .addScaledVector(_right,out*CARRY_HAND[1]).addScaledVector(UP,CARRY_HAND[2]);
+        if (sitW > 0) {
+          // A held solid clears the actual posed lap, including crossed legs; never raise the body to fit it.
+          let lap = -Infinity;
+          for (const refs of v.surf.leg?.values() ?? []) eachSkinnedWorld(refs,V(),p=>{lap=Math.max(lap,p.y);});
+          const bottom=heldGripBounds(current.picture,entry)?.min.y;
+          if (bottom !== undefined && Number.isFinite(lap)) target.y=Math.max(target.y,lap-bottom);
+        }
+        // Recorded current ownership is factual even when its pickup predecessor is unknown.
+        // Only the direct legacy path uses the live arrival fade; rising never invents a new pickup.
+        const weight = (v.heldArmKnown !== undefined ? 1 : carryW) * (v.heldArmKnown === false ? seatOwnerShare : 1);
+        if (weight <= 0) continue; // Leave the attained base untouched at the exact arrival boundary.
+        current.picture.object.userData.heldReach = {requested:target.toArray(),reachable:arm.upper.getWorldPosition(V()).distanceTo(target)<=armLen(arm)*.98};
+        targets[i]=target; source='carry'; armTo(arm,target,weight,.98,h,V().copy(_right).multiplyScalar(out*.6).addScaledVector(UP,-.5).addScaledVector(_fwd,-.2));
+        curlHand(arm,smooth((.6*weight-.3)/.5)); h.updateMatrixWorld(true);
+      }
+    }
     // The recorded press owns only its selected free hand, over the actual current base pose.
     // Its native recovery is inside the move; cancellation lowers from the attained weight.
     // Explicit hands, held props, grips and paired contacts always win.
@@ -1671,7 +1824,8 @@ export class HumanViews {
       head.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -act.look));
       h.updateMatrixWorld(true);
     }
-    if (wantProp) {
+    if (canonicalHeld && v.prop) v.prop.obj.visible = false;
+    if (wantProp && !canonicalHeld) {
       if (!v.prop || v.prop.kind !== wantProp) { if (v.prop) h.remove(v.prop.obj); v.prop = { kind: wantProp, obj: makeProp(wantProp) }; h.add(v.prop.obj); }
       const hand = (side: 'left' | 'right') => { const i = v.arms.findIndex((_, k) => armSide(v, k) === side); return i >= 0 ? palm(v.arms[i], V()) : null; };
       let L = hand('left'), R = hand('right');
@@ -1744,12 +1898,90 @@ export class HumanViews {
     if (clipBoundary) {
       this.blendClipOrigin(v, origin!, tSec, sourcePose);
     }
+    if (v.seatSample && freeBody && !nativeHandOwner && !engineHands && !gripping && !v.handHold && !v.rps && !v.propWanted && !v.formPress?.length && !v.instrument && !act?.pairedContact) this.blendSeat(v, tSec, sourcePose);
     const freeContacts=noOwner||freeFloor&&freeBody&&!engineHands&&!gripping&&!v.handHold&&!v.rps&&!v.partner&&!v.propWanted&&!v.prop?.obj.visible&&!v.shore&&!waterFrom&&sitW===0;
     if (freeContacts && (act?.lying || pc && (pc.age < ACT_BLEND || phase !== undefined || lib.posture))) fitFreeGround(v, h, v.cur.p[1]);
+    if(!heldArmBlocked&&canonicalArmFree&&v.heldArmOrigin)this.blendHeldArmOrigin(v,v.heldArmOrigin,tSec,sourcePose);
+    // No recorded pickup predecessor: preserve the actual initial owner, not an invented open-arm base.
+    if(sourcePose&&v.heldArmKnown===false&&heldOwnerHands?.size)v.ownerArmBase=armBases(v,heldOwnerHands);
+    this.drawHeld(v);
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
     if(hgDiag)v.diag.handGame=hgDiag;
+  }
+
+  private prepareHeld(v: View, blocked: boolean): boolean {
+    const id = v.rig.holder.name;
+    if (blocked || !this.heldPictureFactory) { this.clearHeldPictures(id); return false; }
+    const projections = heldProjections(v.heldEntries, v.nativeHands);
+    if (!projections.length) { this.clearHeldPictures(id); return false; }
+    let pictures = this.heldPictures.get(id);
+    if (!pictures) this.heldPictures.set(id, pictures = new Map());
+    const kept = new Set<string>();
+    for (const {entry, hand} of projections) {
+      if (!v.arms.some((_, i) => armSide(v,i) === hand)) continue;
+      const key = JSON.stringify(entry); let current = pictures.get(entry.id);
+      if (current?.key !== key) {
+        current?.picture.dispose(); pictures.delete(entry.id);
+        const picture = this.heldPictureFactory!(entry);
+        if (picture) { this.group.add(picture.object); current = {key,picture,hand}; pictures.set(entry.id,current); }
+        else current = undefined;
+      }
+      if (current) { if (current.hand !== hand) v.carrySince = undefined; current.hand = hand; kept.add(entry.id); }
+    }
+    for (const [entry, current] of pictures) if (!kept.has(entry)) { current.picture.dispose(); pictures.delete(entry); }
+    return pictures.size > 0;
+  }
+
+  private drawHeld(v: View) {
+    const pictures = this.heldPictures.get(v.rig.holder.name); if (!pictures?.size) return;
+    v.rig.holder.updateMatrixWorld(true);
+    const rotation = v.rig.holder.getWorldQuaternion(new THREE.Quaternion());
+    for (const [id, current] of pictures) {
+      const entry = v.heldEntries?.entries.find(e => e.id === id), i = v.arms.findIndex((_, i) => armSide(v,i) === current.hand);
+      if (entry && i >= 0) placeHeld(current.picture,entry,palm(v.arms[i],V()),rotation,this.group);
+    }
+  }
+
+  /** Fold immutable observed predecessors in an isolated rig, then affect only the declared arm bones. */
+  private blendHeldArmOrigin(v:View,c:HeldArmOrigin,time:number,sourcePose:boolean){
+    if(c.age<0||c.age>=HELD_ARM_EASE)return;
+    if(v.heldArmContext!==c.context){v.heldArmCache?.clear();v.heldArmContext=c.context;}
+    const cache=v.heldArmCache??=new Map<string,DrawnOrigin>(),h=v.rig.holder,joints=poseBones(v.rig.model);
+    let origin=c.drawn;
+    const sources=[{at:c.at,age:c.age,hands:c.hands,sample:c.sample},...(c.history??[]).map(s=>({...s,at:c.at-s.offset}))];
+    const displayBoundary=time-c.age;
+    const key=(i:number)=>JSON.stringify([sources[i].at,sources[i].sample,h.position.toArray(),v.cur.yaw,displayBoundary-(c.at-sources[i].at)]);
+    if(!origin){
+      let start=sources.length-1;
+      for(let i=0;i<sources.length;i++){const found=cache.get(key(i));if(found){origin=found;start=i-1;break;}}
+      const evaluator=new HumanViews(false);evaluator.templates=[v.rig.template];
+      // A historical probe returns metadata on a non-rendered empty object, never a second visible held mesh.
+      evaluator.setHeldPictureFactory(entry=>this.heldPictureFactory?.(entry,'probe')??null);
+      try {
+        for(let i=start;i>=0;i--){
+          const source=sources[i],prior=sources[i+1];
+          // Missing exact historical contact geometry is unknown, never a legacy-prop origin.
+          for(const projection of heldProjections(source.sample.heldEntries,source.sample.nativeHands)){
+            const probe=this.heldPictureFactory?.(projection.entry,'probe');if(!probe)return;probe.dispose();
+          }
+          const sample={...source.sample,id:h.name,p:[...v.cur.p] as [number,number,number],yaw:v.cur.yaw,heldArmKnown:true,
+            heldArmOrigin:origin&&prior?{at:prior.at,age:prior.age,hands:[...new Set(sources.slice(i+1).flatMap(s=>s.hands))],sample:prior.sample,drawn:origin,context:c.context}:undefined};
+          if(sample.bodyModel)evaluator.setBodyTemplates(new Map([[sample.bodyModel,v.rig.template]]));
+          evaluator.setFrame([sample],displayBoundary-(c.at-source.at));evaluator.render(1);
+          const old=evaluator.bodyObject(h.name);if(!old)return;
+          origin=drawnOrigin(old,old,new THREE.Vector3(...v.cur.p),new THREE.Quaternion().setFromAxisAngle(UP,-v.cur.yaw));
+          if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
+        }
+      }finally{evaluator.clear();}
+    }
+    if(!origin)return;
+    const selected=new Set<THREE.Object3D>();
+    for(const hand of new Set(sources.flatMap(s=>s.hands))){const arm=v.arms.find((_,i)=>armSide(v,i)===hand);if(arm){arm.upper.traverse(o=>selected.add(o));selected.add(arm.hand);for(const finger of [...arm.fingers,...arm.thumb])selected.add(finger);}}
+    const weight=smooth(c.age/HELD_ARM_EASE);
+    joints.forEach((bone,i)=>{if(selected.has(bone)){bone.position.lerpVectors(origin!.bones[i].p,bone.position,weight);bone.quaternion.slerp(origin!.bones[i].q,1-weight);}});
+    h.updateMatrixWorld(true);
   }
 
   private blendClipOrigin(v: View, c: ClipOrigin, time: number, sourcePose: boolean) {
@@ -1760,20 +1992,25 @@ export class HumanViews {
     const cache=v.clipOrigins??=new Map();let origin=c.drawn;
     if(!origin){
       const boundary=time-c.age, sources=[{offset:0,age:c.age,sample:c.sample},...c.history??[]];
+      if(sources.some(source=>source.sample.bodyModel&&this.bodyTemplates.get(source.sample.bodyModel)!==v.rig.template))return;
       const key=(i:number)=>JSON.stringify([boundary-sources[i].offset,sources[i].sample,v.cur.p,v.cur.yaw],(_k,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
       // A cached collapsed prefix is a complete fixed-size pose, including every earlier contribution.
       // Warm playback evaluates only new boundaries; a cold seek folds the retained chain once, without recursion.
       let start=sources.length-1;
-      for(let i=0;i<sources.length;i++){const found=cache.get(key(i));if(found){origin=found;start=i-1;break;}}
+      for(let i=0;i<sources.length;i++){const found=cache.get(key(i));if(found&&(!v.seatSample||found.feet)){origin=found;start=i-1;break;}}
       if(start>=0){
         const evaluator=new HumanViews(false);evaluator.setTemplates([v.rig.template]);
+        evaluator.setHeldPictureFactory(entry=>this.heldPictureFactory?.(entry,'probe')??null);
         try {
           for(let i=start;i>=0;i--){
             const source=sources[i],prior=sources[i+1];
             const sample={...source.sample,id:h.name,p:[...v.cur.p] as [number,number,number],yaw:v.cur.yaw,
               ...(origin&&prior?{clipOrigin:{age:prior.age,sample:prior.sample,drawn:origin}}:{})};
-            evaluator.setFrame([sample],boundary-source.offset);evaluator.render(1);
+            if(sample.bodyModel)evaluator.setBodyTemplates(new Map([[sample.bodyModel,v.rig.template]]));
+            evaluator.setFrame([sample],boundary-source.offset);
+            if(v.seatSample&&(v.cur.hands.left||v.cur.hands.right||v.formPress?.length))evaluator.pose(evaluator.views.get(h.name)!,1,undefined,true);else evaluator.render(1);
             const old=evaluator.bodyObject(h.name)!;origin=drawnOrigin(old,old,root,nativeQ);
+            if(v.seatSample){const view=evaluator.views.get(h.name)!;origin.feet=seatFootOffsets(view);origin.arms=view.ownerArmBase;}
             if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
           }
         } finally {evaluator.clear();}
@@ -1781,7 +2018,7 @@ export class HumanViews {
     }
     if(!origin)return;
     const k=smooth(c.age/CLIP_FADE);
-    blendDrawn(h,joints,target,origin,k,root,nativeQ);
+    if(v.seatSample)blendSeatDrawn(v,joints,target,origin,k,root,nativeQ);else blendDrawn(h,joints,target,origin,k,root,nativeQ);
   }
 
   private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {
@@ -1815,6 +2052,57 @@ export class HumanViews {
     }
     const k=smooth((pc.age-phase)/ACT_BLEND);
     blendDrawn(h,joints,target,origin!,k,root,nativeQ);
+  }
+
+  /** Seat phase endpoints and activity interruptions share immutable recorded origins. */
+  private blendSeat(v: View, time: number, sourcePose: boolean): number {
+    const sample = v.seatSample!, pc = sample.postureChange, plan = v.seatPlan;
+    const endpoint = plan && pc && pc.age >= plan.end && pc.age - plan.end < ACT_BLEND ? plan.end : undefined;
+    const initial = pc && pc.age < ACT_BLEND && plan ? 0 : undefined;
+    const phase = endpoint ?? initial;
+    let origin: SampledHuman | undefined, age: number;
+    const shift = (p: PostureChange, dt: number): PostureChange => ({ ...p, age: p.age - dt, ...(p.before ? { before: shift(p.before, dt) } : {}) });
+    if (phase !== undefined && sample.seatOrigin?.phase === phase && sample.seatOrigin.sample) {
+      origin = sample.seatOrigin.sample; age = pc!.age - phase!;
+    } else if (phase === 0 && sample.clipOrigin && Math.abs(sample.clipOrigin.age - pc!.age) < 1e-5) {
+      this.blendClipOrigin(v, sample.clipOrigin, time, sourcePose);
+      v.legs.forEach((_, i) => fitSeatedFoot(v, i, 1, true)); return smooth(sample.clipOrigin.age / CLIP_FADE);
+    }
+    else if (phase !== undefined && pc) {
+      age = pc.age - phase;
+      const delta = age + 1e-6;
+      origin = phase > 0 ? { ...sample, activityAge: sample.activityAge === undefined ? undefined : Math.max(0, sample.activityAge - delta), postureChange: shift(pc, delta), clipOrigin: sample.clipOrigin && sample.clipOrigin.age >= delta ? { ...sample.clipOrigin, age: sample.clipOrigin.age - delta } : undefined }
+        : { ...sample, activity: pc.from, baseActivity: pc.fromBase, activityAge: sample.activity === pc.from && sample.activityAge !== undefined ? Math.max(0, sample.activityAge - delta) : pc.fromAge, postureChange: pc.before ? shift(pc.before, delta) : undefined, clipOrigin: undefined,
+          ...(sample.seatOrigin ? { seatHeight: sample.seatOrigin.height } : {}) };
+    } else if (sample.clipOrigin && sample.clipOrigin.age < CLIP_FADE && postureKind(sample.activity ?? 'idle', sample.baseActivity) === postureKind(sample.clipOrigin.sample.activity ?? 'idle', sample.clipOrigin.sample.baseActivity)) {
+      this.blendClipOrigin(v, sample.clipOrigin, time, sourcePose);
+      v.legs.forEach((_, i) => fitSeatedFoot(v, i, 1, true)); return smooth(sample.clipOrigin.age / CLIP_FADE);
+    } else return 1;
+    if(origin.bodyModel&&this.bodyTemplates.get(origin.bodyModel)!==v.rig.template)return 1;
+    const h = v.rig.holder, root = new THREE.Vector3(...v.cur.p), nativeQ = new THREE.Quaternion().setFromAxisAngle(UP, -v.cur.yaw), joints = poseBones(v.rig.model);
+    const target = { bones: joints.map(o => ({ p: o.position.clone(), q: o.quaternion.clone() })), p: h.position.clone(), q: h.quaternion.clone() };
+    const key = JSON.stringify([time - age!, origin, v.cur.p, v.cur.yaw], (_key, value) => typeof value === 'number' ? Math.round(value * 1e6) / 1e6 : value);
+    const cache = v.seatOrigins ??= new Map();
+    let drawn = cache.get(key);
+    if (!drawn) {
+      const evaluator = new HumanViews(false); evaluator.setTemplates([v.rig.template]);
+      evaluator.setHeldPictureFactory(entry=>this.heldPictureFactory?.(entry,'probe')??null);
+      if(origin.bodyModel)evaluator.setBodyTemplates(new Map([[origin.bodyModel,v.rig.template]]));
+      try {
+        evaluator.setFrame([{ ...origin, id: h.name, p: [...v.cur.p], yaw: v.cur.yaw }], time - age! - 1e-6);
+        const old = evaluator.views.get(h.name)!; evaluator.pose(old, 1, undefined, true);
+        drawn = drawnOrigin(old.rig.model, old.rig.holder, root, nativeQ); drawn.feet = seatFootOffsets(old); drawn.arms = old.ownerArmBase;
+      } finally { evaluator.clear(); }
+      if (!sourcePose) { if (cache.size >= 32) cache.delete(cache.keys().next().value!); cache.set(key, drawn); }
+    }
+    let share = smooth(age! / ACT_BLEND);
+    blendSeatDrawn(v, joints, target, drawn, share, root, nativeQ);
+    // A newer gesture can interrupt a still-blending seat endpoint. Its origin is
+    // the whole attained endpoint blend, not just the outgoing chair clip.
+    if (phase !== undefined && sample.clipOrigin && sample.clipOrigin.age < CLIP_FADE && pc!.age - sample.clipOrigin.age > phase + 1e-5) { this.blendClipOrigin(v, sample.clipOrigin, time, sourcePose); share *= smooth(sample.clipOrigin.age / CLIP_FADE); }
+    // Bone interpolation must not bury a shoe cuff; never lower an already fitted origin twice.
+    v.legs.forEach((_, i) => fitSeatedFoot(v, i, 1, true));
+    return share;
   }
 
   /**
@@ -1865,7 +2153,7 @@ export class HumanViews {
   private libraryBody(v: View, lib: LibPlan, curW: number, prevW: number, yaw: number): boolean {
     const h = v.rig.holder, t = v.rig.template;
     if (!v.spine || v.legs.length < 2) return false;
-    let seatW = 0, seatShift = 0, seatX = 0, seatZ = 0;
+    let seatW = 0, seatShift = 0, seatX = 0, seatZ = 0, supportW = 0;
     for (const [one, wgt] of [[lib.cur, curW], [lib.prev, prevW]] as [LibOne | null, number][]) {
       if (!one || wgt <= 1e-4) continue;
       const body = one.pick.body;
@@ -1880,6 +2168,7 @@ export class HumanViews {
           // through the plank's front. Translate the fitted seated layout,
           // including foot goals, rather than stretching legs or moving a seat.
           if (body === 'seat') {
+            supportW += wgt * k;
             seatX -= wgt * k * (rest.hip.x * Math.cos(yaw) - rest.hip.z * Math.sin(yaw));
             seatZ -= wgt * k * (rest.hip.x * Math.sin(yaw) + rest.hip.z * Math.cos(yaw));
           }
@@ -1933,6 +2222,7 @@ export class HumanViews {
       const goal = feet[i].p.clone(); goal.x += seatX; goal.z += seatZ;
       goal.y = Math.max(goal.y, floorY);
       legTo(l, v.ankle[i], goal, V().copy(_fwd).addScaledVector(UP, 0.35), 0.995, feet[i].q);
+      fitSeatedFoot(v, i, supportW);
     });
     return seatW > 0.5;
   }
@@ -2022,6 +2312,10 @@ export class HumanViews {
   positions() {
     return new Map([...this.views].map(([id, v]) => [id, v.rig.holder.position]));
   }
+
+  /** Read-only native metadata after sampling; no inferred grip or pose is added. */
+  heldEntriesOf(id:string):HeldSet|undefined { return this.views.get(id)?.heldEntries; }
+  consumeMoveOf(id:string):ConsumeMove|undefined { return this.views.get(id)?.consumeMove; }
 
   info() {
     return [...this.views].map(([id, v]) => ({ id, template: v.rig.template.name, clipSpeed: +v.rig.template.walkSpeed.toFixed(3), forward: v.rig.template.forward, speed: +v.speed.toFixed(3), walkWeight: +v.cur.walkW.toFixed(2), activity: v.activity, base: v.base, grip: v.grip ?? null, gripSlot: v.gripSlot ?? null, reach: v.grip || v.cur.hands.left || v.cur.hands.right ? v.reachRatio : null, armLen: v.arms[0] ? +armLen(v.arms[0]).toFixed(3) : null, arms: v.arms.length, sit: +v.cur.sitW.toFixed(2), seat: v.cur.sitW > 0 ? +v.seat.toFixed(2) : null, crossed: v.cross, pose: { drop: +v.cur.pose.drop.toFixed(3), bend: +v.cur.pose.bend.toFixed(3), rise: +v.cur.pose.rise.toFixed(3), kneel: +v.cur.pose.kneel.toFixed(3) } }));
@@ -2793,6 +3087,37 @@ function fitGroundFeet(v: View, holder: THREE.Object3D, fullSkinWeight?: number)
   }
 }
 
+/** Seat-owned leg correction, after its pelvis fit. No root/pelvis/bearing or hand-contact target changes. */
+function fitSeatedFoot(v: View, i: number, phase: number, liftOnly = false) {
+  if (phase <= 0 || v.grip || v.on || v.frame) return;
+  const leg = v.legs[i], holder = v.rig.holder, refs = v.surf.foot.get(leg.side);
+  if (!refs?.length) return;
+  holder.updateMatrixWorld(true);
+  const ankle = leg.foot.getWorldPosition(V()), hip = leg.upper.getWorldPosition(V()), knee = leg.lower.getWorldPosition(V());
+  const end = leg.lower.localToWorld(v.ankle[i].clone()), length = hip.distanceTo(knee) + knee.distanceTo(end);
+  const ground = humanGroundSampler(), legRefs = v.surf.leg?.get(leg.side);
+  const clearance = () => {
+    let low = Infinity;
+    eachSkinnedWorld(refs, _vp, p => { low = Math.min(low, p.y - seatedSupportY(holder.position.y, ground?.(p.x, p.z)) - (liftOnly ? 0 : .003)); });
+    // Trouser cuffs blend across the ankle; they must also clear the support.
+    if (legRefs) eachSkinnedWorld(legRefs, _vp, p => { low = Math.min(low, p.y - seatedSupportY(holder.position.y, ground?.(p.x, p.z))); });
+    return low;
+  };
+  const before = clearance();
+  if (!Number.isFinite(before) || liftOnly && before >= 0) return;
+  const supportGoal = ankle.clone(); supportGoal.y -= before;
+  const weight = seatedFootWeight(hip.toArray(), supportGoal.toArray(), length, phase);
+  if (weight <= 0) return;
+  const targetClearance = before * (1 - weight), rotation = leg.foot.getWorldQuaternion(new THREE.Quaternion());
+  for (let pass = 0; pass < 3; pass++) {
+    const delta = targetClearance - clearance();
+    if (Math.abs(delta) < .0001) break;
+    leg.foot.getWorldPosition(ankle); ankle.y += delta;
+    legTo(leg, v.ankle[i], ankle, V().copy(_fwd).addScaledVector(UP, .35), .995, rotation);
+    holder.updateMatrixWorld(true);
+  }
+}
+
 /**
  * Stairs: plant each foot on its tread (stair-gait.ts), lower the pelvis just enough that no leg has
  * to over-extend (it rises riser by riser with the body point), knees forward, feet flat except the
@@ -2932,6 +3257,7 @@ function sitPose(v: View, w: number, ground: number) {
       kp = pole.clone().addScaledVector(UP, 1.2 * crossW).addScaledVector(_right, -0.6 * crossW);
     }
     legTo(l, v.ankle[i], goal, kp, 0.995);
+    if (crossW <= 0 || l.side > 0) fitSeatedFoot(v, i, w);
   }
 }
 
