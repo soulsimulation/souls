@@ -8376,7 +8376,7 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         }
     }
     std::fs::write(&p, e.to_json()).unwrap();
-    let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 8, (36, -20), Some(&d.join("entries")));
     let socket = d.join("s");
     let s = serve_with(&w, &socket, None);
     s.line("listening ", 120);
@@ -8485,35 +8485,31 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         }
     };
 
-    // The frames, each by a crew of two whose two walks are sent by both (A3's): Soul 1 lets go, the other holds.
-    for (frame, slot, other) in [(fa, "upright_a", 1), (fb, "upright_b", 2)] {
+    // The frames, each by a crew of two whose two walks are sent by both (A3's), Souls 7 and 2, then 8 and 3: both
+    // hold it on, one on each post, until beams brace it (#5067: two holders keep an unbraced frame standing).
+    for (frame, slot, front, other) in [(fa, "upright_a", 6, 1), (fb, "upright_b", 7, 2)] {
         let (f0, f1) = frame_ends(where_is(&w, frame).2);
-        walk_all(&mut souls, &[(0, f0), (other, f1)], "to the frame").await;
-        let c = crew(&mut souls, &[0, other]).await;
-        let got = souls[0].act("part:take", c, part(frame)).await;
+        walk_all(&mut souls, &[(front, f0), (other, f1)], "to the frame").await;
+        let c = crew(&mut souls, &[front, other]).await;
+        let got = souls[front].act("part:take", c, part(frame)).await;
         assert_eq!(got.kind, 1, "frame taken: {got:?}");
-        let now = crew_now(&w, w.souls[0], w.souls[other]);
+        let now = crew_now(&w, w.souls[front], w.souls[other]);
         for (f0, f1) in frame_legs(now, frame_ends(slot_of(bay, slots[slot]))) {
             // Led by its front ([`heading_walk`]); the world keeps the other in its place.
-            let got = souls[0].act("eden:walk", g, heading_walk(f0, f1)).await;
+            let got = souls[front].act("eden:walk", g, heading_walk(f0, f1)).await;
             assert_eq!(got.kind, 1, "the frame to the bay, its front: {got:?}");
             settled(&w, w.souls[other], f1, "the frame to the bay");
             walk_all(&mut souls, &[(other, f1)], "the frame to the bay").await;
         }
-        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
+        let got = souls[front].act("part:put", c, in_slot(bay, slots[slot])).await;
         assert_eq!(got.kind, 1, "frame seated in {slot}: {got:?}");
-        // #5067: seated, its crew still holds it, each carrier on its grip; Soul 1's leave takes only its own hold.
-        let (a, b) = (body_of(&w, w.souls[0]), body_of(&w, w.souls[other]));
+        // #5067: seated, its crew still holds it, each carrier on its grip; neither may let go while it is unbraced.
+        let (a, b) = (body_of(&w, w.souls[front]), body_of(&w, w.souls[other]));
         let held = grips_said(&w, c, |p, _| p == "souls:held");
         assert_eq!(held.1, [a, b], "frame in {slot}: both hold it");
-        let got = souls[0].act("activity:leave", c, BTreeMap::new()).await;
-        assert_eq!(got.kind, 1, "Soul 1 lets go: {got:?}");
-        let held = grips_said(&w, c, |p, b| p == "souls:held" && b.len() == 1);
-        assert_eq!(
-            held.1,
-            [b],
-            "frame in {slot}: the other still holds its grip"
-        );
+        let got = souls[front].act("activity:leave", c, BTreeMap::new()).await;
+        println!("one of frame {slot}'s two holders lets go: {got:?}");
+        assert_eq!((got.kind, got.reason.as_str()), (2, "support.holders"), "refused: {got:?}");
     }
 
     // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
