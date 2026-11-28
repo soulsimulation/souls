@@ -5279,11 +5279,21 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     assert_eq!(got.kind, 1, "lifted: {got:?}");
     std::thread::sleep(Duration::from_secs(2));
     // Turned in their hands so its length points outward from the bay (-z): a quarter turn.
+    // A node's pose on the ground; one riding the crew's slot (which is no slot of its fields), the crew's node's pose
+    // times its place there.
     let pose_of = |id: Id| {
         let (copy, _) = served_copy(&w);
         let t = copy.tree();
-        let x = sim::ground::scene::xform_to(t, t.handle(id).unwrap(), t.handle(g).unwrap()).unwrap();
-        (x.pos, x.rot)
+        let h = t.handle(id).unwrap();
+        if let Ok(x) = sim::ground::scene::xform_to(t, h, t.handle(g).unwrap()) {
+            return (x.pos, x.rot);
+        }
+        let n = t.node(h).unwrap();
+        let place = n.place().unwrap();
+        let ph = t.handle(n.parent().unwrap()).unwrap();
+        let x = sim::ground::scene::xform_to(t, ph, t.handle(g).unwrap()).unwrap();
+        let o = x.rot.rotate(place.position).unwrap();
+        (Vec3::new(x.pos.x + o.x, x.pos.y + o.y, x.pos.z + o.z), x.rot.then(place.orientation).unwrap())
     };
     let (_, rot) = pose_of(frame);
     let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
