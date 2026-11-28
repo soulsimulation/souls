@@ -265,6 +265,7 @@ export const FIX = {
   'edit.name-twice': 'give each place in a batch its own "name" number',
   'edit.root': 'the world\'s root is never moved or removed',
   'edit.stale': 'something you changed was changed by someone else first: describe, then send again',
+  'edit.checker-busy': 'the world is still checking 8 edits sent before this one: wait for their answers, then send it again',
   'edit.too-many-operations': 'split the batch: at most 256 operations',
   'edit.too-many-nodes': 'remove less at once',
   'edit.batch': 'see the usage: souls-god.mjs with no arguments; a field\'s plain string is a name (namespace:name): give a placed thing the name Souls see it by as "title": "rack frame 1"',

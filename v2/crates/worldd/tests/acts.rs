@@ -1463,6 +1463,8 @@ mod attend;
 mod borrowed;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
+#[path = "acts/held_by_another.rs"]
+mod held_by_another;
 #[path = "acts/named_args.rs"]
 mod named_args;
 #[path = "acts/timer_world_form.rs"]
