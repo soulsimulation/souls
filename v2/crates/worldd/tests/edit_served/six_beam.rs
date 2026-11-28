@@ -2,8 +2,8 @@
 //! gateway on a served world (N2's yard world, [`yard_world`]). The beam's entry (`content/kinds/construction/
 //! rack_beam.json`) has six grips: its two ends and four between, so a crew of six holds it with one carrier at each.
 //!
-//! Two Souls stand the bay's frames in its uprights' slots and hold them (B18: a frame stands held until beams join
-//! it). Two carry the yard's easternmost beam out to open ground and lay it down; four, then three, take it, carry it
+//! Four Souls stand the bay's frames in its uprights' slots and hold them, two to a frame, one on each post (B18: a
+//! frame stands held until beams join it; #5067: two holders keep an unbraced frame standing). Two carry the yard's easternmost beam out to open ground and lay it down; four, then three, take it, carry it
 //! 3 m and lay it down again (crews of two, three and four still carry the beam). Then six take it and carry it to the
 //! bay's mouth, 0.45 m west of `beam_high_l`'s line: the frames' columns stand on that line, so nobody can stand on
 //! it within reach of an end grip. They put it in from there: on the set-in track the front and the back stand (each
@@ -119,7 +119,7 @@ async fn carry_by(
 async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
     let d = scratch("sixbeam");
     let (facts, slots) = yard_world(&d);
-    let w = seed_entries(&d, &facts, 8, (52, -30), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 10, (52, -30), Some(&d.join("entries")));
     let socket = d.join("s");
     let served = serve_with(&w, &socket, None);
     served.line("listening ", 120);
@@ -157,12 +157,12 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
     )
     .unwrap();
     assert_eq!(l.most(), 6, "six grips");
-    let [s1, s2, s3, s4, s5, s6, s7, s8] = &mut souls[..] else {
+    let [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] = &mut souls[..] else {
         unreachable!()
     };
 
-    // The frames: B into `upright_b`, then A into `upright_a`, each held by its east carrier (Souls 4 and 1), east of
-    // the bay: clear of the bay's west mouth, where the beam's crew stands.
+    // The frames: B into `upright_b`, then A into `upright_a`, each held on by both its carriers (Souls 4 and 3,
+    // then 1 and 2), one beside each post.
     let crew_b = carry_in(
         &s,
         s4,
@@ -174,7 +174,6 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
         "frame B",
     )
     .await;
-    leave_crew(s3, crew_b, "Soul 3 lets go of frame B; Soul 4 holds it").await;
     let crew_a = carry_in(
         &s,
         s1,
@@ -186,25 +185,25 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
         "frame A",
     )
     .await;
-    leave_crew(s2, crew_a, "Soul 2 lets go of frame A; Soul 1 holds it").await;
+    let _ = (crew_a, crew_b);
 
     // Crews of two, four and three carry the beam on open ground.
     let at = where_is(&w, beam).2;
-    let at = carry_by(&s, &mut [&mut *s2, &mut *s3], &l, beam, at, 8 * M).await;
+    let at = carry_by(&s, &mut [&mut *s5, &mut *s6], &l, beam, at, 8 * M).await;
     let at = carry_by(
         &s,
-        &mut [&mut *s2, &mut *s3, &mut *s5, &mut *s6],
+        &mut [&mut *s5, &mut *s6, &mut *s7, &mut *s8],
         &l,
         beam,
         at,
         3 * M,
     )
     .await;
-    let at = carry_by(&s, &mut [&mut *s2, &mut *s3, &mut *s5], &l, beam, at, 3 * M).await;
+    let at = carry_by(&s, &mut [&mut *s5, &mut *s6, &mut *s7], &l, beam, at, 3 * M).await;
 
     // Six take it, carry it to 2.5 m west of the slot and step east to the bay's mouth: the front and the back in line
     // with the beam, [`BEAM_MOUTH`] west of the slot's line, the sides beside their grips either side of it.
-    let six: &mut [&mut GwSoul] = &mut [&mut *s2, &mut *s3, &mut *s5, &mut *s6, &mut *s7, &mut *s8];
+    let six: &mut [&mut GwSoul] = &mut [&mut *s5, &mut *s6, &mut *s7, &mut *s8, &mut *s9, &mut *s10];
     walk_all(&s, six, &places(at, &l, 6, l.places()[1]), "six gather").await;
     let c = crew_all(&s, six).await;
     let got = six[0].act("part:take", c, part_of(beam)).await;

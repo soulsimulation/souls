@@ -26,7 +26,8 @@
 
 use replica::effects::{Actor, Cause};
 use replica::ids::Id;
-use replica::pose::Vec3;
+use replica::encode::Value;
+use replica::pose::{Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
@@ -38,8 +39,8 @@ use sim::ground::scene::xform_to;
 use sim::slots::Slots;
 
 use super::{
-    Act, Engine, R, Verb, apart, face_holds, param_id, param_point, refusal, regrip, stands,
-    way_is_ground,
+    Act, Engine, R, Verb, apart, face_holds, hold_standing, param_id, param_point, refusal, regrip,
+    stands, way_is_ground,
 };
 use crate::assembly::{Carrier, Ready, Step, out_of_reach};
 
@@ -53,6 +54,12 @@ const STILL: u32 = 100;
 /// How many ticks a commit (the take's, or a part stood up) may be out before the world stops waiting for it: a take
 /// is given up, a part stood up is laid down again. A track always ends, so its crew can always leave.
 const WAIT: u32 = 200;
+/// How near a free slot's place a part's foot must be to be raised into it, µm, and how near its turn, as the
+/// thousandths of the cosine between them (15 degrees: 966).
+const INTO_NEAR: i64 = 150_000;
+const INTO_COS: i128 = 966;
+/// µm in a metre.
+const M: i64 = 1_000_000;
 /// Half the distance between a carrier's two hands along its post, µm.
 const HAND_HALF: i64 = 100_000;
 
@@ -88,6 +95,11 @@ pub struct Raising {
     since: Micros,
     /// The grip the lifter is said to hold: the kind's highest, its name and its point (the foot when it names none).
     grip: (String, Vec3),
+    /// The bay and the slot it is raised into, and the slot's pose on the ground (#5067): stood up, it slides there
+    /// and is seated in it, held. None: stood on the ground at its foot.
+    into: Option<(Id, u64, (Vec3, Quat))>,
+    /// Its slide into its slot once it stands: from, to, and its track's times.
+    slide: Option<((Vec3, Quat), (Vec3, Quat), Micros, Micros)>,
 }
 
 impl Raising {
@@ -224,8 +236,17 @@ impl Engine {
                 format!("{} and {} stand on two grounds", show(lifter), show(footer)),
             ));
         }
-        // On the crew's own ground: lying there to be raised, standing there to be lowered.
-        if node.parent() != Some(ground) {
+        // On the crew's own ground: lying there to be raised, standing there (or in a slot of a bay on it) to be
+        // lowered. A part lowered out of its slot is unseated by the take, refused by name when anything braces or rests
+        // on it (`support.none`).
+        let in_bay = !up
+            && node.slot().is_some()
+            && node
+                .parent()
+                .and_then(|b| tree.handle(b))
+                .and_then(|h| tree.node(h))
+                .is_some_and(|b| b.parent() == Some(ground));
+        if node.parent() != Some(ground) && !in_bay {
             let (name, how) = match up {
                 true => ("raise.not-lying", "lies"),
                 false => ("raise.not-standing", "stands"),
@@ -244,6 +265,16 @@ impl Engine {
         let geo = match up {
             true => Raise::up(spec, at.pos, at.rot, lf)?,
             false => Raise::down(spec, at.pos, at.rot, toward, lf)?,
+        };
+        // #5067: raised into a bay's slot (parameters 4 and 5): its foot at the slot's place, within `INTO_NEAR`, turned
+        // as the slot within `INTO_TURN`; else refused by name before anything moves.
+        let into = match (up, a.params.get(&4), a.params.get(&5)) {
+            (true, Some(_), Some(Value::Uint(k))) => {
+                let bay = param_id(&a.params, 4, "raise-into")?;
+                Some(self.raise_slot(tree, ground, bay, *k, &geo, part)?)
+            }
+            (_, None, None) => None,
+            _ => return Err(refusal("raise-into", "parameters 4 and 5: a bay and its slot")),
         };
         let mut ra = Raising {
             geo,
@@ -264,6 +295,8 @@ impl Engine {
             failed: 0,
             since: now,
             grip,
+            into,
+            slide: None,
         };
         // Each reaches its hold from where it stands, or is named.
         out_of_reach(&ra.carriers(lf, ff)?, ra.geo.node(ra.r)?)?;
@@ -298,6 +331,64 @@ impl Engine {
         ra.since = now;
         self.raising.insert(activity, ra);
         Ok(())
+    }
+
+    /// Slot `k` of `bay` on `ground` for a part whose raise is `geo` (#5067): its pose on the ground (the slot's point,
+    /// the bay's turn), when the part's foot is within [`INTO_NEAR`] of it on the plan and the part stands turned as
+    /// the slot within [`INTO_TURN`]; refused `raise.not-at-slot` naming how far, or `slot.occupied`.
+    fn raise_slot(
+        &self,
+        tree: &Tree,
+        ground: Id,
+        bay: Id,
+        k: u64,
+        geo: &Raise,
+        part: Id,
+    ) -> R<(Id, u64, (Vec3, Quat))> {
+        let (bh, gh) = tree
+            .handle(bay)
+            .zip(tree.handle(ground))
+            .ok_or_else(|| refusal("part-nowhere", show(bay)))?;
+        let at = sim::ground::scene::slot_points(tree, bh, gh)
+            .map_err(|e| refusal("part-pose", e))?
+            .into_iter()
+            .find(|(n, _)| *n == k)
+            .map(|(_, p)| p)
+            .ok_or_else(|| refusal("slot.unknown", format!("{} has no slot {k}", show(bay))))?;
+        let turn = xform_to(tree, bh, gh).map_err(|e| refusal("part-pose", e))?.rot;
+        if let Some(other) = tree
+            .children(bh)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .find(|n| n.slot() == Some(k))
+        {
+            return Err(refusal(
+                "slot.occupied",
+                format!("{} holds {} in slot {k}", show(bay), show(other.id())),
+            ));
+        }
+        let off = apart(geo.foot, at);
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let x = |q: Quat| q.rotate(Vec3::new(M, 0, 0)).map_err(pose);
+        let (a, b) = (x(geo.stand)?, x(turn)?);
+        let cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z)) * 1000
+            / (i128::from(M) * i128::from(M));
+        if off > INTO_NEAR || cos < INTO_COS {
+            return Err(refusal(
+                "raise.not-at-slot",
+                format!(
+                    "{}'s foot is {} mm from slot {k} of {} (at most {} mm), turned {} thousandths from its turn \
+                     (at least {INTO_COS}); next: lay it with its foot at the slot, its face as the bay's frames face",
+                    show(part),
+                    off / 1000,
+                    show(bay),
+                    INTO_NEAR / 1000,
+                    cos
+                ),
+            ));
+        }
+        Ok((bay, k, (at, turn)))
     }
 
     /// The holds of a part on its way, said in `phase`: the lifter's post where it holds it now, the footer's near the
@@ -397,15 +488,12 @@ impl Engine {
                 ) {
                     eprintln!("worldd: a raise's end was not said: {e}");
                 }
-                // Standing, its crew holds it on.
-                if let Err(e) = regrip(
-                    &mut self.activities,
-                    &mut tree,
-                    r.activity,
-                    grips::HELD,
-                    None,
-                    word,
-                ) {
+                // Standing, its crew holds it on: each holder's hands on its post at a standing body's height (#5067).
+                let w = self.half_width(&tree, ra.part);
+                self.stances.insert(r.activity);
+                if let Err(e) =
+                    hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
+                {
                     eprintln!("worldd: a raise's holds were not said at its end: {e}");
                 }
                 self.collect(Some((r.intent, r.soul)));
@@ -494,6 +582,8 @@ impl Engine {
             failed: 0,
             since: now,
             grip: ("foot".to_owned(), Vec3::ZERO),
+            into: None,
+            slide: None,
         };
         self.turned_back(tree, activity, &ra, "souls:world-restarted", now);
         self.raising.insert(activity, ra);
@@ -736,6 +826,85 @@ impl Engine {
                 asm.ended(activity);
             }
             return Ok(true);
+        }
+        // Standing, raised into a slot: it slides there first, a sample a tick, at a set-in's pace (#5067).
+        if let Some((bay, k, slot)) = ra.into {
+            let starts = ra.slide.is_none();
+            let (from, to, t0, t1) = *ra.slide.get_or_insert_with(|| {
+                let d = |a: i64, b: i64| i128::from(a - b).pow(2);
+                let far = (d(p.x, slot.0.x) + d(p.y, slot.0.y) + d(p.z, slot.0.z)).isqrt();
+                let span = crate::assembly::set_in_time(i64::try_from(far).unwrap_or(i64::MAX));
+                ((p, q), slot, now, now + span)
+            });
+            // Its crew steps with it, as far as it slides, each over ground its body stands on: they stand where they
+            // held it, beside its posts, when it is seated.
+            if starts {
+                let (dx, dz) = (to.0.x - from.0.x, to.0.z - from.0.z);
+                let far = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+                let speed = i64::try_from(far * 1_000_000 / i128::from((t1 - t0).max(1)))
+                    .unwrap_or(PACE)
+                    .max(1);
+                for (b, at) in [(ra.lifter, lf), (ra.footer, ff)] {
+                    let Some(at) = at else { continue };
+                    let goal = Vec3::new(at.x + dx, at.y, at.z + dz);
+                    if far > 0 && way_is_ground(c, town, ra.ground, b, at, goal) {
+                        let track = Track {
+                            link: None,
+                            line: vec![goal],
+                            speed,
+                            to: ra.ground,
+                            arrive: None,
+                            hold: false,
+                        };
+                        if let Err(e) = c.carry_on(b, track) {
+                            eprintln!("worldd: {} did not step with its part: {e}", show(b));
+                        }
+                    }
+                }
+            }
+            if now < t1 {
+                let (sp, sq) = sim::activity::carry::between(from, to, (t0, t1), now)?;
+                if let Some(carry) = ra.carry.as_mut() {
+                    carry.turn_to(tree, now, sp, sq)?;
+                    self.activities
+                        .stream
+                        .extend(carry.log.parts.drain(..).flatten());
+                }
+                return Ok(false);
+            }
+            if let Some(carry) = ra.carry.as_mut() {
+                carry.turn_to(tree, now, to.0, to.1)?;
+                self.activities
+                    .stream
+                    .extend(carry.log.parts.drain(..).flatten());
+            }
+            let asm = self
+                .asm
+                .as_mut()
+                .ok_or_else(|| refusal("seating-off", "the world's kinds join no parts"))?;
+            let put = asm.settle_into(
+                tree,
+                &self.activities,
+                &mut self.mint,
+                now,
+                ra.by,
+                activity,
+                ra.part,
+                (bay, k, to.0),
+                ra.ground,
+                ra.reach,
+            );
+            match put {
+                Ok(()) => ra.settling = true,
+                Err(e) => {
+                    eprintln!("worldd: {} was not seated as it stood: {e}", show(ra.part));
+                    ra.up = false;
+                    ra.walking = false;
+                    ra.slide = None;
+                    self.turned_back(tree, activity, ra, "souls:raise-refused", now);
+                }
+            }
+            return Ok(false);
         }
         // Standing: put on the ground at its foot with its crew holding it.
         let asm = self

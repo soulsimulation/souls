@@ -7,7 +7,8 @@
 //!   the front ([`Load::side_places`]). A load lifted the other way round ([`Load::reversed`]) or taken turned as it
 //!   lay is read as it is held, so its back carrier holds the grip at its back.
 //! - **Kept, not renumbered.** The holds are written on the carry's activity node ([`F_GRIPS`]) and said to its
-//!   audience ([`GRIPS`]) whenever they change: at the lift or a take ([`CARRY`]), a seating's set-in and its way back
+//!   audience ([`GRIPS`]) whenever they change: at the lift ([`CARRY`]), a take ([`LIFT`] on its track, [`CARRY`] once
+//!   lifted), a seating's set-in and its way back
 //!   ([`SET_IN`], [`RETURN`], each with when its track ends), a carry taken up again ([`CARRY`]), a part seated that
 //!   its crew stays on holding ([`HELD`]) and its end ([`RELEASED`], the last holds kept so a page can show the hands
 //!   letting go). A carrier who leaves while the crew goes on holding takes only its own hold away: every other carrier
@@ -20,9 +21,11 @@
 //!   side of the body as it is drawn. A hand's target is the load's drawn pose times its point. A load that stands as
 //!   it is held (a frame taken standing) is taken along the line its carriers stand on: its front and its back each
 //!   hold its edge on that line toward them (a rack frame's post, a timber bent's: the outermost member of a part
-//!   whose bounds are its own), [`STAND_HOLD`] above the carry's height, its hands [`HAND_HALF`] above and below
+//!   whose bounds are its own), [`STAND_HOLD`] up it from its foot, its hands [`STAND_HAND_HALF`] above and below
 //!   (#5067: the edge, not the grip's distance along the line, which lay in the air between a bent's posts; and at a
-//!   height a standing body's hands reach, not at the load's foot). A side's stays where its grip lies along the line.
+//!   height a standing body's hands reach with the load lifted [`super::STAND_LIFT`]: 1.05 m and 1.35 m above the
+//!   ground, not at the load's foot). A
+//!   side's stays where its grip lies along the line.
 //!
 //! The word and the field, `{1: activity, 2: load, 3: phase, 4: since µs (the phase's start, or a carrier's leave),
 //! 5?: until µs, 6: [hold, ...]}`, a hold
@@ -46,16 +49,52 @@ pub const GRIPS: &str = "souls:carry-grips";
 /// How far either side of where a carrier holds its load its two hands are, along the load's long axis, µm (#5067:
 /// 0.1 m; at 0.2 m the far hand was 0.55 m ahead of an end carrier, beyond a standing body's arm).
 pub const HAND_HALF: i64 = 100_000;
-/// How far either side of where it is held a load that stands has its carrier's two hands, up and down it, µm: the
-/// lower at the carry's height, the upper 0.3 m above.
+/// How far either side of where it is held a load that stands has its carrier's two hands, up and down it, µm: 0.9 m
+/// and 1.2 m up it.
 pub const STAND_HAND_HALF: i64 = 150_000;
 
-/// How far above the carry's height (its slot's) a load that stands as it is held is held, µm (#5067): its two hands
-/// [`STAND_HAND_HALF`] below and above that. A frame taken standing has its foot at the carry's height, 1.05 m above
-/// its carriers' feet, so its hands are 1.05 m and 1.35 m above the ground.
-pub const STAND_HOLD: i64 = 150_000;
+/// How far up from its foot a load that stands as it is held is held, µm (#5067), or at its top when it is shorter: its
+/// two hands [`STAND_HAND_HALF`] below and above that. A frame taken standing is lifted [`super::STAND_LIFT`] (its
+/// foot 0.15 m above its carriers' feet), so its hands are 1.05 m and 1.35 m above the ground, where a standing body
+/// holds it upright.
+pub const STAND_HOLD: i64 = 1_050_000;
 
-/// The phases a carry's holds are in: carried, on a seating's set-in track, on its way back, let go.
+/// How high above a standing part's foot each holder's two hands are, µm (#5067): on its post's outer face, where a
+/// standing body holds a frame upright (not on all fours at the foot, nor overhead).
+pub const HOLD_HANDS: [i64; 2] = [1_050_000, 1_350_000];
+
+/// How far off a standing part's outer face its holders stand, µm (#5067): behind its posts, outside the bay.
+pub const HOLD_STAND: i64 = 350_000;
+
+/// The holds of a standing part's holders ([`HELD`], after a put or a raise; #5067): each holder keeps its post (the
+/// side of the part its hands are on now) and holds it from the part's outer side, `outer` (its own +z, 1, or −z, −1:
+/// away from its bay's other upright, else its back), both hands on that post's outward face at [`HOLD_HANDS`]
+/// above its foot, the lower first: out of the space between the frames, where the beams go. `half` is half the part
+/// in its own frame: a post's middle is its thickness in from the part's edge.
+pub fn standing(holds: &[Hold], half: Vec3, outer: i64) -> Vec<Hold> {
+    holds
+        .iter()
+        .map(|h| {
+            let x = (half.x - half.z) * if h.hands[0].x + h.hands[1].x < 0 { -1 } else { 1 };
+            Hold {
+                hands: HOLD_HANDS.map(|y| Vec3::new(x, y, outer * half.z)),
+                ..h.clone()
+            }
+        })
+        .collect()
+}
+
+/// Where the holder of `hold` (a [`standing`] hold) stands in the part's own frame, and the point it faces (#5067):
+/// [`HOLD_STAND`] off the part's outer face, behind its post, on the floor.
+pub fn stance(hold: &Hold, half: Vec3) -> (Vec3, Vec3) {
+    let (x, z) = (hold.hands[0].x, hold.hands[0].z);
+    let out = z.signum();
+    (Vec3::new(x, 0, z + out * HOLD_STAND), Vec3::new(x, 0, out * half.z))
+}
+
+/// The phases a carry's holds are in: on a take's track into their hands, carried, on a seating's set-in track, on
+/// its way back, let go.
+pub const LIFT: &str = "souls:lift";
 pub const CARRY: &str = "souls:carry";
 pub const SET_IN: &str = "souls:set-in";
 pub const RETURN: &str = "souls:return";
@@ -304,7 +343,7 @@ pub fn assign(
     };
     // A load that stands as it is held (a frame taken standing) is taken along the line its carriers stand on: its
     // front and its back at its edge on that line, a side where its grip lies along it and at the load's edge on the
-    // side it stands, each [`STAND_HOLD`] above the carry's height (its slot's).
+    // side it stands, each [`STAND_HOLD`] up it from its foot.
     let standing = load.lies_along(held.1)?.is_none();
     let middle_c = held
         .0
@@ -338,7 +377,7 @@ pub fn assign(
         };
         let c = Vec3::new(
             middle_c.x + along,
-            STAND_HOLD.clamp(middle_c.y - ext.y, middle_c.y + ext.y),
+            (middle_c.y - ext.y + STAND_HOLD).min(middle_c.y + ext.y),
             z,
         );
         conj(held.1)?
@@ -533,16 +572,15 @@ mod tests {
         let h = assign(&g, &load, (Vec3::ZERO, Quat::IDENTITY), id(1), id(2), &[]).unwrap();
         assert_eq!(names(&h), ["grip_high", "grip_low"]);
         for (hold, x) in h.iter().zip([609_500, -609_500]) {
-            // At its edge toward the carrier (its post's outer face), its lower hand at the carry's height (its foot),
-            // its upper 0.3 m above.
+            // At its edge toward the carrier (its post's outer face), its hands 0.9 m and 1.2 m up its post.
             assert_eq!(
                 hold.hands,
-                [Vec3::new(x, 0, 0), Vec3::new(x, 300_000, 0)],
+                [Vec3::new(x, 900_000, 0), Vec3::new(x, 1_200_000, 0)],
                 "{}",
                 hold.grip
             );
         }
-        // Its foot held 0.9 m below the slot: its hands at the carry's height and 0.3 m above.
+        // Wherever it is held in the slot, the same points of the load: measured up it from its foot.
         let low = (Vec3::new(0, -900_000, 0), Quat::IDENTITY);
         let h = assign(&g, &load, low, id(1), id(2), &[]).unwrap();
         let want = [
@@ -558,8 +596,8 @@ mod tests {
         assert_eq!(
             [h[0].middle(), h[1].middle()],
             [
-                Vec3::new(900_000, 150_000, 0),
-                Vec3::new(-900_000, 150_000, 0)
+                Vec3::new(900_000, 1_050_000, 0),
+                Vec3::new(-900_000, 1_050_000, 0)
             ]
         );
     }
