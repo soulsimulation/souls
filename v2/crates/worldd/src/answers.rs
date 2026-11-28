@@ -7871,7 +7871,7 @@ fn edit_checker(
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
                                     // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
                                     crate::edit_joins::with_joins(
-                                        &mut e, &copy, world, &structure, ground,
+                                        &mut e, &copy, world, &structure,
                                     )?;
                                     edit::check(e, &copy, world)
                                 })
@@ -7907,6 +7907,8 @@ fn edit_checker(
                                 crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                             let tree = buildsafe::souls(&copy, &world.kinds);
                             let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            // Nothing is placed onto a Soul: not inside a placed thing's bounds (racks, lane C).
+                            buildsafe::bounds_clear(&copy, &p, &entries, &souls, reserved.clone())?;
                             let maps = source
                                 .map(|source| {
                                     buildsafe::PreparedMaps::prepare_classes(

@@ -680,7 +680,11 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                     return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
                 }
                 if *bare && (*field != 0 || !row.is_empty() || door.is_some()) {
-                    return refuse(here, "edit.link", "a bare link writes no field, row or door");
+                    return refuse(
+                        here,
+                        "edit.link",
+                        "a bare link writes no field, row or door",
+                    );
                 }
                 if ty.as_str().starts_with("souls:") {
                     return refuse(

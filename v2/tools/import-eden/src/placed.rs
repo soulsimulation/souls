@@ -25,7 +25,7 @@
 use super::json::{self, Json};
 use super::{
     F_DEF, F_DOORWAYS, F_HEIGHT, F_LEVEL, F_NAME, F_OPEN, F_ORIGIN, F_OUTLINE, F_PARAMS, F_SILL,
-    F_SLOTS, F_SOLIDS, F_STAIRS, F_SURFACES, F_WIDTH, R, i, int, label, name, need, points, pose4,
+    F_SLOTS, F_SOLIDS, F_STAIRS, F_SURFACES, F_WHILE_JOINED, F_WIDTH, R, i, int, label, name, need, points, pose4,
     s,
 };
 use replica::edit::{Op, Ref, Spot};
@@ -149,33 +149,20 @@ pub fn ops(
     let rooms = t.get("rooms").map(Json::arr).unwrap_or(&[]);
     let floors = t.get("floors").map(Json::arr).unwrap_or(&[]);
     let stairs = t.get("stairs").map(Json::arr).unwrap_or(&[]);
-    let mut levels: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
-    for r in rooms {
-        levels.entry(int(r, "floor")?).or_default();
-    }
-    for fl in floors {
-        levels
-            .entry(int(fl, "level")?)
-            .or_default()
-            .push(Value::Array(vec![
-                i(int(fl, "y")?),
-                points(need(fl, "polygon")?)?,
-            ]));
-    }
-    for st in stairs {
-        levels.entry(int(st, "from")?).or_default();
-        levels.entry(int(st, "to")?).or_default();
-    }
-    let mut floor_of: BTreeMap<i64, Ref> = BTreeMap::new();
-    for (lv, surfaces) in levels {
-        let n = fresh();
-        let mut ff = BTreeMap::from([(F_ORIGIN, origin(&format!("floor-{lv}"))), (F_LEVEL, i(lv))]);
-        if !surfaces.is_empty() {
-            ff.insert(F_SURFACES, Value::Array(surfaces));
-        }
-        out.push(place(n, kind(parts.floor)?, building, spot([0; 4])?, ff));
-        floor_of.insert(lv, Ref::New(n));
-    }
+    let rooms_on = rooms
+        .iter()
+        .map(|r| int(r, "floor"))
+        .collect::<R<Vec<_>>>()?;
+    let (made, floor_of) = floor_ops(
+        &rooms_on,
+        floors,
+        stairs,
+        building,
+        parts.floor,
+        &|lv| Some(origin(&format!("floor-{lv}"))),
+        &mut fresh,
+    )?;
+    out.extend(made);
     let mut room_of: BTreeMap<&str, Ref> = BTreeMap::new();
     for r in rooms {
         let rid = s(r, "id")?;
@@ -305,7 +292,71 @@ pub fn ops(
             bare: false,
         });
     }
-    // Stairs: a link from the lower floor to the upper, its row in the lower's field 21.
+    out.extend(stair_ops(stairs, &floor_of, &mut fresh)?);
+    Ok(out)
+}
+
+/// The floor nodes under `parent` (a place of kind `floor` each): one per level its `rooms_on`, `floors` or `stairs`
+/// name, at its origin, with its surfaces (14), ground only while joined (104) where its floor row says so (a frame's
+/// standing place), and `origin` its field 1 where it gives one. Gives the operations and each level's floor.
+fn floor_ops(
+    rooms_on: &[i64],
+    floors: &[Json],
+    stairs: &[Json],
+    parent: Ref,
+    floor: &str,
+    origin: &dyn Fn(i64) -> Option<Value>,
+    fresh: &mut dyn FnMut() -> u64,
+) -> R<(Vec<Op>, BTreeMap<i64, Ref>)> {
+    let mut levels: BTreeMap<i64, (Vec<Value>, bool)> = BTreeMap::new();
+    for lv in rooms_on {
+        levels.entry(*lv).or_default();
+    }
+    for fl in floors {
+        let e = levels.entry(int(fl, "level")?).or_default();
+        e.0.push(Value::Array(vec![
+            i(int(fl, "y")?),
+            points(need(fl, "polygon")?)?,
+        ]));
+        e.1 |= fl.get("while_joined").and_then(Json::bool) == Some(true);
+    }
+    for st in stairs {
+        levels.entry(int(st, "from")?).or_default();
+        levels.entry(int(st, "to")?).or_default();
+    }
+    let (mut out, mut floor_of) = (Vec::new(), BTreeMap::new());
+    for (lv, (surfaces, while_joined)) in levels {
+        let n = fresh();
+        let mut ff = BTreeMap::from([(F_LEVEL, i(lv))]);
+        if let Some(o) = origin(lv) {
+            ff.insert(F_ORIGIN, o);
+        }
+        if !surfaces.is_empty() {
+            ff.insert(F_SURFACES, Value::Array(surfaces));
+        }
+        if while_joined {
+            ff.insert(F_WHILE_JOINED, Value::Uint(1));
+        }
+        out.push(Op::Place {
+            name: n,
+            kind: kind(floor)?,
+            parent,
+            at: spot([0; 4])?,
+            audience: Audience::Everyone,
+            fields: ff,
+        });
+        floor_of.insert(lv, Ref::New(n));
+    }
+    Ok((out, floor_of))
+}
+
+/// Stairs (and ladders): a link from the lower floor to the upper, its row in the lower's field 21.
+fn stair_ops(
+    stairs: &[Json],
+    floor_of: &BTreeMap<i64, Ref>,
+    fresh: &mut dyn FnMut() -> u64,
+) -> R<Vec<Op>> {
+    let mut out = Vec::new();
     for st in stairs {
         let (lo, hi) = (int(st, "from")?, int(st, "to")?);
         let (Some(a), Some(z)) = (floor_of.get(&lo).copied(), floor_of.get(&hi).copied()) else {
@@ -339,4 +390,51 @@ pub fn ops(
         });
     }
     Ok(out)
+}
+
+/// The rows a thing of a kind with declared ways (`geometry.floors`, `stairs`, `ladders`) holds, as the import gives a
+/// seeded one ([`crate::way_rows`]), as the import's own `floors` and `stairs` facts: none for an entry that declares
+/// none.
+fn way_facts(entry: &replica::rules::json::Value) -> R<Option<(Vec<Json>, Vec<Json>)>> {
+    let Some((_, w, half)) = crate::entry_ways(entry)? else {
+        return Ok(None);
+    };
+    let (floors, stairs) = crate::way_rows(&w, half, "thing");
+    let read = |rows: Vec<replica::rules::json::Value>| {
+        rows.iter()
+            .map(|r| json::parse(&r.to_json()))
+            .collect::<R<Vec<_>>>()
+    };
+    Ok(Some((read(floors)?, read(stairs)?)))
+}
+
+/// For a place of a kind whose entry declares ways (racks, lane C: a frame's ladders and standing places, a sheet's
+/// top, a stair flight), the floors and the stair and ladder links the import makes for a seeded thing of the kind
+/// ([`crate::way_rows`]), as operations of the same batch under the placed `thing`: a floor (a place of kind
+/// `floor`) per level, its surfaces and while-joined mark, and each stair or ladder a link from its lower floor to its
+/// upper. `next` is the batch's first free name, moved past each name used. None for an entry that declares no ways.
+pub fn way_ops(
+    entry: &replica::rules::json::Value,
+    thing: Ref,
+    floor: &str,
+    next: &mut u64,
+) -> R<Vec<Op>> {
+    let Some((floors, stairs)) = way_facts(entry)? else {
+        return Ok(Vec::new());
+    };
+    let mut fresh = || {
+        let n = *next;
+        *next += 1;
+        n
+    };
+    let (mut out, floor_of) = floor_ops(&[], &floors, &stairs, thing, floor, &|_| None, &mut fresh)?;
+    out.extend(stair_ops(&stairs, &floor_of, &mut fresh)?);
+    Ok(out)
+}
+
+/// The most new ids a place of a kind with declared ways mints with them ([`way_ops`]: a floor per level, two for a
+/// stair or ladder, and each stair or ladder linked), or none for an entry that declares none.
+pub fn way_ids_most(entry: &replica::rules::json::Value) -> Option<u64> {
+    let (floors, stairs) = way_facts(entry).ok()??;
+    Some(floors.len() as u64 + 3 * stairs.len() as u64)
 }

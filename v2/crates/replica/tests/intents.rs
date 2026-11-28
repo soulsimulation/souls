@@ -374,6 +374,21 @@ fn link_wire_roundtrip_keeps_its_row_owner_and_door_under_strict_i2() {
         let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
         assert_eq!(read(&decoded.parameters).unwrap(), ops);
     }
+    // A bare link (racks lane C, a creator's joint): its mark is key 9, read back as written.
+    let bare = vec![Op::Link {
+        name: 7,
+        ty: replica::encode::Name::new("mars:joint").unwrap(),
+        ends: [node(1), node(2)],
+        owner: End::First,
+        field: 0,
+        row: Vec::new(),
+        door: None,
+        bare: true,
+    }];
+    let (_, mut i) = intent("edit");
+    i.parameters = parameters(&bare);
+    let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
+    assert_eq!(read(&decoded.parameters).unwrap(), bare);
 }
 
 /// #3728: a rows operation (a land edit's changed tiles) keeps its node, field and rows on the wire, and merges each
