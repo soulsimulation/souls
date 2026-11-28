@@ -63,3 +63,31 @@ test('explicit creator definitions retain priority and absent import authority n
  kinds.apply([{id:'creator-kind',kind:'souls:kind',parent:null,defines:KIND,entry:new TextEncoder().encode(JSON.stringify(custom))}],[]);
  assert.deepEqual(kinds.held(entry)?.grip,[.04,.05,.06]);
 });
+
+
+test('creator and appearance definition lifetimes stay in separate full/plain namespaces',async()=>{
+ const {value}=await loaded(),f=appearanceFixture(),kinds=new CreatorKinds();
+ const entry={id:'bowl',kind:KIND,def:f.stored.ref,origin:'e_bowl0001',parent:'body',slot:1,pos:[0,0,0]as const,rot:[2**30,0,0,0]as const,fields:{28:2}};
+ const authority={id:'ground',kind:'souls:ground',parent:null,defBodies:[[f.stored.ref,JSON.stringify(f.stored)]]as[string,string][]};
+ kinds.apply([authority],[]);kinds.appearances(value.rows);
+ const custom=structuredClone(f.entry);custom.points.grip.at_mm=[40,50,60];const creator={id:'creator',kind:'souls:kind',parent:null,defines:KIND,entry:new TextEncoder().encode(JSON.stringify(custom))};
+ kinds.apply([creator],[]);assert.deepEqual(kinds.held(entry)?.grip,[.04,.05,.06]);kinds.apply([],['creator']);assert.deepEqual(kinds.held(entry)?.grip,[.12,.06,0],'creator removal restores canonical shape');
+ const model={entities:new Map(),defs:new Map()};assert.equal(kinds.next({model,seq:1},0),null);
+ kinds.apply([],['entry:appearance:'+KIND]);assert.equal(kinds.held(entry),null,'appearance removal removes its full key');
+ kinds.apply([{id:'plain-bowl',kind:KIND.split('@')[0],parent:'root',pos:[0,0,0],rot:[2**30,0,0,0],slot:null}],[]);assert.equal(kinds.next({model,seq:1},0),null,'appearance plain alias is removed too');
+ kinds.appearances(value.rows);kinds.apply([creator],[]);kinds.apply([],['entry:appearance:'+KIND]);assert.deepEqual(kinds.held(entry)?.grip,[.04,.05,.06],'shape removal cannot erase explicit creator');
+});
+test('source authority is indexed on apply and updates/removals/conflicts fail closed without held-time parsing',async t=>{
+ const {value}=await loaded(),f=appearanceFixture(),kinds=new CreatorKinds();kinds.appearances(value.rows);
+ const entry={id:'bowl',kind:KIND,def:f.stored.ref,origin:'e_bowl0001',parent:'body',slot:1,pos:[0,0,0]as const,rot:[2**30,0,0,0]as const,fields:{28:2}};
+ const source=(id:string,body=JSON.stringify(f.stored))=>({id,kind:'souls:ground',parent:null,defBodies:[[f.stored.ref,body]]as[string,string][]});
+ assert.equal(kinds.held(entry),null);kinds.apply([source('ground')],[]);assert(kinds.held(entry));
+ const original=JSON.parse;let parses=0;const parse=t.mock.method(JSON,'parse',(...args:Parameters<typeof JSON.parse>)=>{parses++;return original(...args);});
+ kinds.apply(Array.from({length:1000},(_,i)=>({id:'unrelated'+i,kind:'souls:body',parent:null})),[]);
+ for(let i=0;i<100;i++)assert(kinds.held(entry));assert.equal(parses,0,'unrelated world growth and held lookups do not parse declarations');parse.mock.restore();
+ kinds.apply([source('conflict',JSON.stringify({...f.stored,hash:'a'.repeat(64)}))],[]);assert.equal(kinds.held(entry),null);kinds.apply([],['conflict']);assert(kinds.held(entry));
+ kinds.apply([source('ground','broken')],[]);assert.equal(kinds.held(entry),null);kinds.apply([source('ground')],[]);assert(kinds.held(entry));
+ kinds.apply([source('wrong-ref',JSON.stringify({...f.stored,ref:'other@1'}))],[]);assert.equal(kinds.held(entry),null);kinds.apply([],['wrong-ref']);assert(kinds.held(entry));
+ kinds.apply([{id:'ground',kind:'souls:ground',parent:null}],[]);assert.equal(kinds.held(entry),null,'replacement without declarations invalidates prior authority');
+ kinds.apply([source('ground')],[]);kinds.apply([],['ground']);assert.equal(kinds.held(entry),null,'removing source removes authority');
+});
