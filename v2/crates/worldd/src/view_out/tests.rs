@@ -5210,7 +5210,8 @@ fn a_writer_opening_removes_what_a_killed_group_left() {
     let (stream_dir, generation) = (out.dir.clone(), out.generation_dir());
     drop(out);
     let left = [
-        base.join("objects").join(format!("{}.tmp", "ab".repeat(32))),
+        base.join("objects")
+            .join(format!("{}.tmp", "ab".repeat(32))),
         base.join("head.tmp"),
         stream_dir.join(format!("{POINTER}.tmp")),
         generation.join("7.tmp"),
@@ -5232,6 +5233,9 @@ fn a_writer_opening_removes_what_a_killed_group_left() {
     for f in &left {
         assert!(!f.exists(), "{f:?} is left");
     }
-    assert!(text_write.exists(), "a text write's temporary is not the group's");
+    assert!(
+        text_write.exists(),
+        "a text write's temporary is not the group's"
+    );
     fs::remove_dir_all(&d).unwrap();
 }
