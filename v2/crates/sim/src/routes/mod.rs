@@ -1341,6 +1341,11 @@ impl Map {
     }
 
     /// The spot at `at` (µm, the node's frame) on the patch of `node` (a floor, or the open ground's dry ground).
+    /// DEBUG: whether node `node` has pieces of its own on the map.
+    pub fn has_patch(&self, node: Id) -> bool {
+        self.by_patch.get(&(node, None)).is_some_and(|v| !v.is_empty())
+    }
+
     pub fn spot(&self, node: Id, at: Vec3) -> Option<Spot> {
         self.spot_for(node, at, 0)
     }

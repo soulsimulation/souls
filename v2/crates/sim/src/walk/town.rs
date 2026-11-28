@@ -1462,6 +1462,11 @@ impl Town {
         }
         .put(&self.tree, ground, fresh, after, &versions);
         self.versions = versions;
+        for f in &touched {
+            if self.tree.handle(*f).and_then(|h| self.tree.node(h)).is_some_and(|n| replica::world_model::plain(n.kind().as_str()) == crate::ground::scene::FLOOR) {
+                eprintln!("worldd: DEBUG install {}: floor {} on the map {}", "t", show(*f), self.map.has_patch(*f));
+            }
+        }
         // The wet surfaces follow the map's wet pieces (#3225).
         if self.water.built {
             self.water
