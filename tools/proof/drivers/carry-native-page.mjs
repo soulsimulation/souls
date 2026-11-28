@@ -109,7 +109,7 @@ const SCENES = {
   // its six grips (the offerer its front, sides right 1, left 2, right 3, left 4), carry it to the west mouth and seat
   // it in beam_high_l: the side carriers walk with it on the set-in.
   sixbeam: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
-    view: 'post=0&hour=12:00&eye=-.5,5.2,30&at=3,.9,20',
+    view: 'post=0&hour=12:00&eye=0,7,31&at=0,.9,20',
     sixbeam: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', 'upright_a'], ['rack-frame-2', 'cy', 'di', 'upright_b']],
       beams: ['ed', 'fi', [['rack-beam-1', ['4.978,20'], 'beam_low_l'], ['rack-beam-2', ['4,16', '8,16', '7.022,20'], 'beam_low_r']]],
       six: { load: 'rack-beam-3', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2], ['ed', 'right', 3], ['fi', 'left', 4]], mouth: '4.978,20', slot: 'beam_high_l' } } },
@@ -739,9 +739,13 @@ async function sixBeamSurvey({ state, page, paths, signal, check, arm, root }) {
   check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
   const out = {};
   try {
-    const holds = [];
+    const holds = [], ends = k => Promise.all([[S.frames[k][1], 'back'], [S.frames[k][2], 'front']].map(([w, end]) => retried(state, w, 'carry', 'grip', frames[k].id, end)));
+    // attempt 28: frame 2's back carrier, sent to its end once frame 1 stood in the bay, stopped 2.1 m short (bodies in
+    // the way); as the bay scene does, both pairs go to their ends at the start, and the second again once the first left
+    const early = ends(1).catch(() => null);
     for (const [k, [name, a, b, slot]] of S.frames.entries()) {
-      await gripEnds(state, frames[k].id, a, b);
+      if (k) await early;
+      await ends(k);
       const c = await crewOf(state, a, b); holds.push([c, a, b]);
       await retried(state, a, 'part', 'take', c, frames[k].id); await wait(1500);
       await retried(state, a, 'carry', 'to', c, bay, slot); await wait(9000);
