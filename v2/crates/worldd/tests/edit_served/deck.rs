@@ -748,7 +748,7 @@ impl Bay {
         let tree = copy.tree().frozen();
         let header = import_eden::header(self.root, &self.rules).unwrap();
         let next = tree.to_state().next;
-        let town = sim::walk::town::Town::new_on(
+        let mut town = sim::walk::town::Town::new_on(
             tree,
             self.w.ground,
             sim::links::Doors::new(header, self.rules.clone(), next),
