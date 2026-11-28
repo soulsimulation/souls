@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import { addresses, runArgs, WORLD } from './world.mjs';
 import { lastJson, pairArgs, seatEnv } from './seat.mjs';
 import { noOldServer } from './smoke.mjs';
-import { frontDoor, genesisFor, templateName, withRoute } from './old-page.mjs';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { frontDoor, genesisFor, templateName, withRoute, bindCanonicalAppearance, canonicalAppearanceNamed } from './old-page.mjs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -102,4 +102,17 @@ test("whatson-interest: a notice board in the genesis, and a notice's interest r
   assert.deepEqual(linksOf(record), [{ type: 'eden:poster', end: 'ab12-2' }, { type: 'eden:interested', end: 'cd-0' }]);
   assert.deepEqual(linksOf(new Map([[1, [scope, 1]]])), [], 'a record with no links');
   assert.ok(calendarKind('eden:calendar_entry@1220ab') && !calendarKind('eden:notice_board@1'));
+});
+
+
+test('canonical appearance binds only the ordinary boot world without changing other bindings', t => {
+ const scratch=new URL('../../../../.local/appearance-binding-',import.meta.url);mkdirSync(new URL('../../../../.local/',import.meta.url),{recursive:true});
+ const dir=mkdtempSync(scratch);t.after(()=>rmSync(dir,{recursive:true,force:true}));const file=join(dir,'binding.json');
+ const original={worlds:[{canonicalSlug:'meal',oldWorldId:'meal-1'},{canonicalSlug:'other',oldWorldId:'other-1'}]};writeFileSync(file,JSON.stringify(original));
+ const appearance={file:join(dir,'public.json'),sha256:'a'.repeat(64),world:'meal',stream:'/s/meal/'};
+ assert.equal(canonicalAppearanceNamed('{"v2Stream":"/s/meal/"}',appearance),false,'old stream config alone is not ready');
+ const descriptor={url:`/w/meal/v2/appearance/${appearance.sha256}.json`,sha256:appearance.sha256,world:'meal',stream:'/s/meal/'};
+ assert.equal(canonicalAppearanceNamed(JSON.stringify({v2Appearance:descriptor}),appearance),true);assert.equal(canonicalAppearanceNamed(JSON.stringify({v2Appearance:{...descriptor,stream:'/s/stale/'}}),appearance),false);
+ bindCanonicalAppearance(file,'meal',appearance);const bound=JSON.parse(readFileSync(file,'utf8'));assert.deepEqual(bound.worlds[0].appearance,appearance);assert.deepEqual(bound.worlds[1],original.worlds[1]);
+ assert.throws(()=>bindCanonicalAppearance(file,'other',appearance),/appearance-binding/);assert.throws(()=>bindCanonicalAppearance(file,'absent',appearance),/appearance-binding/);
 });

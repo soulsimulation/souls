@@ -15,7 +15,7 @@
 // `geometry.palette`. A model (K3, #3725's design: an allowed upload named by its hash, `1220` and the SHA-256 in hex)
 // is `looks.model: "upload:<hash>"`; the old page fetches it from where the world serves uploads (`/v2/uploads/<hash>`,
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
-import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
+import { defSchema, hashOf, coreLibrary, type StoredDef } from '@souls/world-compiler';
 import { KIT_ROLES } from '@souls/generators';
 import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
 import { layerDraws } from './layer-draws.ts';
@@ -26,7 +26,7 @@ export { entityId, heldKindOf } from './held-kind.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
-  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][];
+  def?: string; defBodies?: [string,string][]; slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][];
   line?: number[][]; lineWidth?: number; outline?: number[][]; fields?: Record<number, unknown> };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 type Json = Record<string, unknown>;
@@ -147,7 +147,7 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
 /** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
  *  (an imported thing), else one made from it. */
 
-type Drawn = NonNullable<ReturnType<typeof kindDef>>;
+type Drawn = NonNullable<ReturnType<typeof kindDef>> & { appearance?: {ref:string;hash:string;origins:readonly string[]} };
 const same = (a: Uint8Array | undefined, b: Uint8Array) => a === b || (!!a && a.length === b.length && a.every((x, i) => x === b[i]));
 /** A thing's state as its def's picture reads it, from its node's fields: plain values only (a timed value's is read
  *  where it is drawn, so it is left out here), a permille as a fraction. */
@@ -217,11 +217,29 @@ export class CreatorKinds {
     }
   }
 
+  /** Definition-only registration from the verified active world's appearance asset; scenery ownership is unchanged. */
+  appearances(rows: import('./canonical-appearance.ts').AppearanceRow[]): void {
+    for (const row of rows) {
+      const id = `entry:appearance:${row.kind}`, bytes = new TextEncoder().encode(JSON.stringify(row.entry));
+      this.apply([{id,kind:'souls:kind',parent:null,defines:row.kind,entry:bytes}], []);
+      const drawn = this.shapes.get(row.kind);
+      if (drawn) drawn.appearance = {ref:row.sourceDef.ref,hash:row.sourceDef.sha256,origins:row.origins};
+    }
+  }
+
   /** An exact recorded revision, using the same loaded definition and state conversion as scenery. */
   held(entry: import('../../../../mars/viewer/app/engine-view/held-entry.ts').HeldEntry) {
     if (!entry.kind.includes('@') || ![...this.definers.values()].includes(entry.kind)) return null;
     const d = this.defs.get(entry.kind) ?? this.shapes.get(entry.kind);
     if (!d || d.def.ref.endsWith('-box@1')) return null;
+    if (d.appearance) {
+      if (entry.def !== d.appearance.ref || !entry.origin || !d.appearance.origins.includes(entry.origin)) return null;
+      let source: {hash?:string}|undefined = coreLibrary().get(d.appearance.ref);
+      for (const n of this.nodes.values()) for (const [ref,body] of n.defBodies ?? []) if (ref===d.appearance.ref) {
+        try { const declared=JSON.parse(body); if(declared?.hash!==d.appearance.hash)return null; source=declared; } catch { return null; }
+      }
+      if (source?.hash!==d.appearance.hash) return null;
+    }
     const grips = Object.values(d.points ?? {}).filter(p => p.role === 'grip');
     if (grips.length !== 1) return null;
     // Recorded JSON preserves big/timed values losslessly, but this look converter has no recorded clock/decoder.

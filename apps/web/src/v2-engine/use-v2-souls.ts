@@ -12,6 +12,7 @@ import type { V2Bridge } from './bridge.ts';
 import { StreamLife, streamNotice } from './stream-health.ts';
 import { EdgeLog, setKindFields, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds, setHeldKinds } from './creator-kinds.ts';
+import { loadCanonicalAppearance } from './canonical-appearance.ts';
 import { setBuildNodes } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
 import { oldViews } from './source/scene-offer.ts';
@@ -26,7 +27,7 @@ import { claimEarlyReader, replicaUrl, takeEarlyScene, v2Stream } from './early-
 
 // The inline config as the page arrived with it: the app takes (deletes) window.__simConfig at its first config read
 // (inline-config.ts), before this hook's effect reads v2Replica, v2History and v2Bodies, so it is kept at load.
-const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown; v2StreamOrigin?: unknown } }).__simConfig;
+const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: { v2Replica?: unknown; v2History?: unknown; v2Bodies?: unknown; v2StreamOrigin?: unknown; v2World?: unknown; v2Appearance?: unknown } }).__simConfig;
 
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
 export { v2Stream };
@@ -56,6 +57,9 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
     const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
     const releaseHeldKinds = setHeldKinds(kinds);
+    void loadCanonicalAppearance(PAGE_CONFIG?.v2Appearance, {world: String(PAGE_CONFIG?.v2World ?? worldId ?? ''), stream, origin: location.origin})
+      .then(value => { if (!stopped && value) kinds.appearances(value.rows); })
+      .catch(error => console.warn('v2 canonical appearance:', error));
     setBuildNodes(() => kinds.seen); // 0.133 item 6: the creator panel's Build places, moves and removes from what the stream shows
     // K1 (0.135): a carried load moves with its carry's samples; construction parts draw from their own entries
     // W2: every content kind's bounds, for a placed thing no library def draws (stream-scene.ts entryLooks)
