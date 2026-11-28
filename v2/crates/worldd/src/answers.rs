@@ -1923,8 +1923,8 @@ pub const STOPPED: &str = "act.stopped";
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
 /// A walk done at a place moved off the point it was sent to (#5254): that point in a doorway's or a stair's clearance,
 /// moved out to a walker's clearance of it ([`sim::spots::CLEAR`], 0.7 m off the passage: A3), however far that is; or
-/// off the ground a body stands on, within a walker's goal tolerance of it ([`crate::bodies::STOPPED_SHORT_MM`]). Never a
-/// walk held off its point by a crowd (that is [`DONE_SHORT`], A2-4). Said as its end's word, with how far (field 7, mm)
+/// off the ground a body stands on, within a walker's goal tolerance of it ([`crate::bodies::STOPPED_SHORT_MM`]). A walk
+/// held off its point by a crowd is [`DONE_SHORT`] (A2-4) instead. Said as its end's word, with how far (field 7, mm)
 /// and, for a passage, the thing it belongs to (field 9) and its kind (field 10: `doorway`, `stairs`, `ramp`, `ladder`
 /// or `step`).
 pub const GOAL_MOVED: &str = "walk.goal-moved";
