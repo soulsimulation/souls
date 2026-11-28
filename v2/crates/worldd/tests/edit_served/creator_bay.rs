@@ -449,6 +449,25 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     hands[1].send("eden:walk", deck, to);
     let e = socket_end(&mut hands[1].s);
     println!("Soul 2 climbs frame 1 onto the deck: {e:?}");
+    {
+        let b2 = body_of(&site.w, site.w.souls[1]);
+        for r in sim::log::recover(&std::fs::read(site.w.dir.join("log")).unwrap()).unwrap().records {
+            if sim::recorder::is_input(&r) {
+                continue;
+            }
+            let p = replica::effects::Part::read(&r).unwrap();
+            if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+                for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                    if b == b2 {
+                        println!("N14DBG row on {:?} at {:?}", pose.frame.node.counter, pose.position);
+                    }
+                }
+            }
+        }
+        for l in site._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
+            println!("N14DBG {l}");
+        }
+    }
     assert_eq!(e.kind, 1, "the climb ends on the deck: {e:?}");
     let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[1]));
     assert_eq!((on, p.y), (deck, 19_000), "on the sheet's top");
