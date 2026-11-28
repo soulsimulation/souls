@@ -220,9 +220,6 @@ pub(super) struct Deck {
     pub rails: [Id; 2],
     pub joists: [Id; 2],
     pub sheet: Id,
-    pub flight: Id,
-    /// The floor the sheet holds: its top.
-    pub deck: Id,
     /// The standing place the left rail holds, in a world with perches.
     pub perch: Option<Id>,
 }
@@ -263,8 +260,6 @@ impl Deck {
             rails: [im.nodes["timber-rail-1"], im.nodes["timber-rail-2"]],
             joists: [im.nodes["joist-back"], im.nodes["joist-front"]],
             sheet: im.nodes["sheet"],
-            flight: im.nodes["flight"],
-            deck: im.nodes["sheet/floor-1"],
             perch: im.nodes.get("timber-rail-1/floor-1").copied(),
             w,
             _s: s,
@@ -642,13 +637,18 @@ const JOISTS_Z: [i64; 3] = [-572, -2, 578];
 const SHEETS_Z: [i64; 2] = [-612, 607];
 /// A seated sheet's top above the ground, mm: its slot's 1991 and its own 19.
 const BAY_DECK_TOP: i64 = 2_010;
+/// Where the sheets lie before they are carried in, mm east of the bay's middle: clear of the 2x4s under the bay.
+const SHEETS_X: i64 = 3_000;
+/// How far west of its slot the flight stands before it is set, mm: clear of the 1.8 m beams lying 1 m outside.
+const FLIGHT_OFF: i64 = 800;
 /// The stair slot's place in the bay, mm: its top at the sheets' west edge (x = -914), over `s1`, on `j2`'s line.
 const STAIR_AT: [i64; 2] = [-2_164, -572];
 
 /// N2's test world with a deck bay's parts at the site, in the test kinds `test_deck_*` (`#5258`'s sizes, with a
 /// `stair` slot and a flight that hooks onto a 2x4): the bay at the site's centre, its two 12 ft frames standing loose
 /// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
-/// the three 2x4s lying under their slots, each sheet under its own, and the flight standing 0.5 m west of its slot.
+/// the three 2x4s lying under their slots, the sheets lying 3 m east (each on its own slot's line), and the flight
+/// standing 0.8 m west of its slot.
 /// Each sheet holds a floor of its own, its top (19 mm up in its frame); the flight a stair from the ground to the
 /// deck's top and a landing beyond its top too small to stand on, as a roof stair's is (a thing's `floors` and
 /// `stairs`). Returns the facts and the bay's slot numbers, by name.
@@ -720,14 +720,14 @@ fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
         (
             "flight".into(),
             5,
-            [x + STAIR_AT[0] - 500, 0, z + STAIR_AT[1], 0],
+            [x + STAIR_AT[0] - FLIGHT_OFF, 0, z + STAIR_AT[1], 0],
         ),
     ];
     for (k, jz) in JOISTS_Z.iter().enumerate() {
         things.push((format!("joist-{}", k + 2), 3, [x, 0, z + jz, 0]));
     }
     for (k, sz) in SHEETS_Z.iter().enumerate() {
-        things.push((format!("sheet-{}", k + 1), 4, [x, 0, z + sz, 0]));
+        things.push((format!("sheet-{}", k + 1), 4, [x + SHEETS_X, 0, z + sz, 0]));
     }
     let quad = |x0: i64, x1: i64, z0: i64, z1: i64| {
         json::Value::Arr(vec![
@@ -976,8 +976,8 @@ impl Bay {
         self.leave(3, c);
     }
 
-    /// The deck: each 2x4 seated across the two 1.8 m beams by Souls 3 and 4 from where it lies, then each sheet on
-    /// its two 2x4s by Souls 1 and 2 (`s1` on `j2` and `j3`, `s2` on `j3` and `j4`).
+    /// The deck: each 2x4 seated across the two 1.8 m beams by Souls 3 and 4 from where it lies, then each sheet carried
+    /// in from where it lies by Souls 1 and 2 and seated on its two 2x4s (`s1` on `j2` and `j3`, `s2` on `j3` and `j4`).
     fn deck(&mut self) {
         let high = self.high;
         for (k, (j, slot)) in self.joists.into_iter().zip(["j2", "j3", "j4"]).enumerate() {
@@ -992,9 +992,18 @@ impl Bay {
         }
         let [j2, j3, j4] = self.joists;
         for (k, (slot, on)) in [("s1", [j2, j3]), ("s2", [j3, j4])].into_iter().enumerate() {
-            let c = self.crew_at((0, 1), (1_264, SHEETS_Z[k]), "Souls 1 and 2 to a sheet's ends");
+            let sz = SHEETS_Z[k];
+            self.walk(
+                &[(0, Bay::at(SHEETS_X - 1_264, sz)), (1, Bay::at(SHEETS_X + 1_264, sz))],
+                "Souls 1 and 2 to a sheet's ends",
+            );
+            let c = self.crew(0, &[1]);
             let got = self.act(0, "part:take", c, self.sheets[k]);
             self.ok(got, "a sheet taken");
+            self.walk(
+                &[(0, Bay::at(-1_264, sz)), (1, Bay::at(1_264, sz))],
+                "the sheet carried in over its slot",
+            );
             let got = self.put(0, c, slot, Some(&on));
             self.ok(got, slot);
             assert_eq!(joints_at(&self.w, self.sheets[k]), 2, "{slot}: its two joints");
@@ -1023,8 +1032,8 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
     let (flight, decks, sheets) = (k.flight, k.decks, k.sheets);
 
     // The flight: Souls 1 and 2 at its ends (its grips 1 m from its middle, 0.35 m beyond), set in the stair slot
-    // 0.5 m east of where it stands, hooked onto j2.
-    let (fx, fz) = (STAIR_AT[0] - 500, STAIR_AT[1]);
+    // 0.8 m east of where it stands, hooked onto j2.
+    let (fx, fz) = (STAIR_AT[0] - FLIGHT_OFF, STAIR_AT[1]);
     k.walk(
         &[(0, Bay::at(fx - 1_350, fz)), (1, Bay::at(fx + 1_350, fz))],
         "Souls 1 and 2 to the flight's ends",
