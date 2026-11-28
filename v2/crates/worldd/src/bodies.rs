@@ -2164,14 +2164,24 @@ impl Bodies {
                             Err(_) => (None, None, None),
                         };
                         let tb: Option<&sim::spots::Table> = None;
+                        let near: Vec<String> = self
+                            .live
+                            .keys()
+                            .chain(self.runner.granted.keys())
+                            .filter_map(|b| self.pose(*b).map(|(n, at)| (*b, n, at)))
+                            .filter(|(_, n, at)| *n == t && (i128::from(at.x - p.x).pow(2) + i128::from(at.z - p.z).pow(2)).isqrt() < 2_000_000)
+                            .map(|(b, _, at)| format!("{} at {:?}", replica::world_model::show(b), at))
+                            .collect();
+                        let all: Vec<String> = self.runner.controller.bodies().filter_map(|m| { let (n, at) = (m.pose.frame.node, m.pose.position); (n == t && (i128::from(at.x - p.x).pow(2) + i128::from(at.z - p.z).pow(2)).isqrt() < 2_000_000).then(|| format!("{} at {:?}", replica::world_model::show(m.id), at)) }).collect();
+                        let _ = (&near, &all);
                         let _ = (&sn, &sr, &fine);
                         use std::io::Write as _;
                         let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/n4diag.log").unwrap();
                         let _ = writeln!(
                             f,
-                            "worldd: N4DIAG walk {} of {} to {:?} on {}: {mm} mm short; granted {:?} (there {:?}); passage_at {:?}; table clear {:?} places {:?}; pose {:?}; stand_near0 {:?} stand_reached {:?} near700 {:?}",
+                            "worldd: N4DIAG walk {} of {} to {:?} on {}: {mm} mm short; granted {:?} (there {:?}); passage_at {:?}; table clear {:?} places {:?}; pose {:?}; stand_near0 {:?} stand_reached {:?} near700 {:?}; near {:?}; all {:?}",
                             replica::world_model::show(id), replica::world_model::show(body), p, replica::world_model::show(t), g, g.and_then(|g| self.gap_to(body, t, g)),
-                            self.town.passage_at(t, p), tb.map(|x| x.clear), tb.map(|x| x.places.len()), self.pose(body), sn, sr, fine
+                            self.town.passage_at(t, p), tb.map(|x| x.clear), tb.map(|x| x.places.len()), self.pose(body), sn, sr, fine, near, all
                         );
                     }
                     let crowd = self.short.contains(&id);
