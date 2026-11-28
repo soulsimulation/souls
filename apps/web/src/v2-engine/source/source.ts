@@ -3,6 +3,7 @@
 // (a snapshot) and what changed (parts). V1's stream of numbered files is the first; V9 (history) and V13 add theirs
 // by implementing `Source`. Times are world microseconds; positions micrometres in the node's parent frame (T4).
 
+import type { CarryChange, CarryGrips, CrewMember } from './carry-record.ts';
 import type { Happened } from './sound-record.ts';
 import type { SkyFields } from './sky-record.ts';
 import type { Fields } from './kinds-state.ts';
@@ -71,6 +72,11 @@ export type NodeRec = {
   /** Its plain fields by number (record key 6: whole numbers, texts, timed values), which hold its kind's state by each
    *  state field's `n` (#3871, `kinds/state.ts`); absent when it has none. */
   fields?: Fields;
+  /** Public native activity membership and load-local two-hand records. */
+  crewMembers?: CrewMember[];
+  carryGrips?: CarryGrips;
+  /** Validated node field presence, distinct from an unknown or undecodable contact record. */
+  carryField?: 'absent'|'valid'|'invalid';
   /** A creator's kind (`souls:kind`, #3697): the full name it defines (field 1) and its canonical `souls-entry/1`
    *  record (field 2), for the page's kind catalogue (`kinds/catalogue.ts`). */
   defines?: string;
@@ -83,7 +89,7 @@ export type NodeRec = {
 export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
 
 /** One motion sample, as the part carried it: node, frame (parent node and slot), world time µs, position µm (V6). */
-export type SampleRec = [string, string, number | null, number, number, number, number];
+export type SampleRec = [string, string, number | null, number, number, number, number, [number, number, number, number]?];
 
 /** One `souls:said` event (V1b): the speaker's body, world time µs, length µs, reach mm, its words' reference and the
  * words from the part's text file (null when the file does not hold them, e.g. removed). */
@@ -102,7 +108,8 @@ export type RunEndRec = { body: string; at: number; how: string; run?: string };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[];
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[]; carryChanges?: CarryChange[];
+  carryError?: string;
   /** K4 (0.135): where each node on a course is over the part (../course-samples.ts). */
   courses?: Record<string, number[]>;
   /** First-day round 4: when each still node on a course moves on, world µs (../course-samples.ts `courseLeaves`). */
