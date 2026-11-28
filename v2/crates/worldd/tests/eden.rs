@@ -4251,12 +4251,13 @@ fn w14_a_soul_eats_a_slice_from_edens_borrowed_pie_pack() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// W14 follow-up (#4090, after #5231): a street planter box (today's e_c5e1a35c, at (50.75, -5.75) m) borrows
-/// `eden:planter`, a compost heap on the street borrows `eden:compost_bin`, and the planter's `feed` moves one `compost`
-/// from the nearest heap on the same ground into the box: a transfer between two borrowed things that number the field
-/// differently (the bin's 28, the planter's 34). A Soul walks to the box, sows it, then feeds it, on a served full
+/// W14 follow-up (#4090, after #5231): a planter box (today's e_3157342d, at (41.0, 27.6) m) borrows `eden:planter`,
+/// a compost heap borrows `eden:compost_bin`, and the planter's `feed` moves one `compost` from the nearest heap within
+/// 20 m of the Soul (today's e_2ea05a09, 2 m off) into the box: a transfer between two borrowed things that number the
+/// field differently (the bin's 28, the planter's 34). A Soul walks to the box, sows it, then feeds it, on a served full
 /// Eden. `feed` needs the box well watered, so it is served with the planter's water seeded full and not drying
-/// (watering needs a can in hand, and `feed` a free hand). A greenhouse bed finds no heap: none stands indoors.
+/// (watering needs a can in hand, and `feed` a free hand). A box further than 20 m from any heap finds none
+/// (`thing.none-selected`).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn w14_a_soul_feeds_a_borrowed_planter_box_from_a_borrowed_compost_heap() {
@@ -4275,12 +4276,12 @@ fn w14_a_soul_feeds_a_borrowed_planter_box_from_a_borrowed_compost_heap() {
     std::fs::write(&file, watered).unwrap();
     let wrong = served_steps_in(
         wet.to_str().unwrap(),
-        "52.0,-4.0",
+        "41.0,30.0",
         "w14feed",
         &[
-            ("e_c5e1a35c", "walk", &[], "done"),
-            ("e_c5e1a35c", "sow", &[], "done"),
-            ("e_c5e1a35c", "feed", &[], "done"),
+            ("e_3157342d", "walk", &[], "done"),
+            ("e_3157342d", "sow", &[], "done"),
+            ("e_3157342d", "feed", &[], "done"),
         ],
     );
     let _ = std::fs::remove_dir_all(&wet);
