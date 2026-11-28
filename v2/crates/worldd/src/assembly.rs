@@ -608,8 +608,10 @@ pub fn slot_turns(entries: &replica::rules::json::Value) -> BTreeMap<(String, u6
     use replica::rules::json::Value as Json;
     let mut out = BTreeMap::new();
     for (_, e) in entries.obj().unwrap_or(&[]) {
-        let (Some(kind), Some(slots)) = (e.get("kind").and_then(Json::str), e.get("slots").and_then(Json::obj))
-        else {
+        let (Some(kind), Some(slots)) = (
+            e.get("kind").and_then(Json::str),
+            e.get("slots").and_then(Json::obj),
+        ) else {
             continue;
         };
         for (n, (_, s)) in (1u64..).zip(slots) {

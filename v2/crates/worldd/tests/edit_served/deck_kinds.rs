@@ -688,7 +688,8 @@ fn deck_slots_that_declare_a_turn_seat_their_frames_turned_90_and_the_half_turn_
         let json::Value::Obj(top) = &mut bay else {
             panic!("an entry")
         };
-        let (_, json::Value::Obj(slots)) = top.iter_mut().find(|(k, _)| k == "slots").unwrap() else {
+        let (_, json::Value::Obj(slots)) = top.iter_mut().find(|(k, _)| k == "slots").unwrap()
+        else {
             panic!("its slots")
         };
         for (name, s) in slots.iter_mut() {
@@ -701,12 +702,17 @@ fn deck_slots_that_declare_a_turn_seat_their_frames_turned_90_and_the_half_turn_
         let json::Value::Obj(top) = &mut f else {
             panic!("facts")
         };
-        let (_, json::Value::Arr(things)) = top.iter_mut().find(|(k, _)| k == "things").unwrap() else {
+        let (_, json::Value::Arr(things)) = top.iter_mut().find(|(k, _)| k == "things").unwrap()
+        else {
             panic!("things")
         };
         for t in things.iter_mut() {
             let json::Value::Obj(t) = t else { continue };
-            let id = t.iter().find(|(k, _)| k == "id").and_then(|(_, v)| v.str()).map(str::to_owned);
+            let id = t
+                .iter()
+                .find(|(k, _)| k == "id")
+                .and_then(|(_, v)| v.str())
+                .map(str::to_owned);
             if let Some((_, yaw)) = turns.iter().find(|(n, _)| Some(*n) == id.as_deref())
                 && let Some((_, json::Value::Arr(pose))) = t.iter_mut().find(|(k, _)| k == "pose")
             {
@@ -723,16 +729,32 @@ fn deck_slots_that_declare_a_turn_seat_their_frames_turned_90_and_the_half_turn_
         let q = Quat::from_yaw_mdeg(yaw).unwrap();
         let e = q.rotate(v3(1_060_000, 0, 0)).unwrap();
         let (ex, ez) = (e.x / 1000, e.z / 1000);
-        y.walk(&[(a, (ex, dz + ez)), (b, (-ex, dz - ez))], "beside a turned frame's edges");
+        y.walk(
+            &[(a, (ex, dz + ez)), (b, (-ex, dz - ez))],
+            "beside a turned frame's edges",
+        );
         let hold = y.crew(a, &[b]);
         let f = y.id(frame);
-        assert!(same_turn(yaw_in_slot(&y.w, f).1, q), "{frame} stands turned {yaw} mdeg");
-        y.ok(a, "part:take", hold, Yard::part(f), "a turned 12 ft frame taken");
+        assert!(
+            same_turn(yaw_in_slot(&y.w, f).1, q),
+            "{frame} stands turned {yaw} mdeg"
+        );
+        y.ok(
+            a,
+            "part:take",
+            hold,
+            Yard::part(f),
+            "a turned 12 ft frame taken",
+        );
         let p = y.slot_in(slot, &[]);
         y.ok(a, "part:put", hold, p, slot);
         let (in_slot, turn) = yaw_in_slot(&y.w, f);
         println!("{frame} in slot {in_slot:?} turned {:?}", turn.parts());
         assert_eq!(in_slot, Some(y.slots[slot]), "{frame} in {slot}");
-        assert!(same_turn(turn, q), "{frame} seated turned {yaw} mdeg in {slot}: {:?}", turn.parts());
+        assert!(
+            same_turn(turn, q),
+            "{frame} seated turned {yaw} mdeg in {slot}: {:?}",
+            turn.parts()
+        );
     }
 }
