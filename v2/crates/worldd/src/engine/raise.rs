@@ -47,6 +47,12 @@ use crate::assembly::{Carrier, Ready, Step, out_of_reach};
 /// The grips' phase while a part is raised, and while it is lowered.
 pub const RAISE: &str = "souls:raise";
 pub const LOWER: &str = "souls:lower";
+/// A raise whose end could not be committed for the world's seat wait (FOR-FABLE 15): it stops held where it stands,
+/// its crew holding it (`souls:carry-track` in this phase, why [`BUSY_WORD`]); the Soul who asked is refused
+/// [`MAP_BUSY`] and may ask again.
+pub const RAISE_HELD: &str = "souls:raise-held";
+pub const MAP_BUSY: &str = "raise.map-busy";
+const BUSY_WORD: &str = "souls:map-busy";
 /// How near its end the lifter's walk has to come for the part to finish its turn, µm.
 const NEAR: i64 = 60_000;
 /// How many ticks a part may stay still on its way before it goes on without its lifter, for good.
@@ -101,6 +107,8 @@ pub struct Raising {
     /// Its slide into its slot once it stands: from, to, and its track's times.
     #[allow(clippy::type_complexity)]
     slide: Option<((Vec3, Quat), (Vec3, Quat), Micros, Micros)>,
+    /// Stopped held, its end not committed in the world's seat wait (FOR-FABLE 15): it waits for its crew to ask again.
+    parked: bool,
 }
 
 /// A raise into a slot turned back after (or on) its slide (review of #5268): its geometry taken again from where the
@@ -170,6 +178,9 @@ impl Engine {
         let activity = a
             .target
             .ok_or_else(|| refusal("part-needs-a-crew", "a target node"))?;
+        if self.raising.get(&activity).is_some_and(|ra| ra.parked) {
+            return self.raise_again(tree, c, a, activity, up, now);
+        }
         if self.carries.contains_key(&activity) || self.raising.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
         }
@@ -331,6 +342,7 @@ impl Engine {
             grip,
             into,
             slide: None,
+            parked: false,
         };
         // Each reaches its hold from where it stands, or is named.
         out_of_reach(&ra.carriers(lf, ff)?, ra.geo.node(ra.r)?)?;
@@ -651,10 +663,211 @@ impl Engine {
             grip: ("foot".to_owned(), Vec3::ZERO),
             into: None,
             slide: None,
+            parked: false,
         };
         self.turned_back(tree, activity, &ra, "souls:world-restarted", now);
         self.raising.insert(activity, ra);
         None
+    }
+
+    /// A raise stopped held (FOR-FABLE 15, [`MAP_BUSY`]) asked again by a member of its crew: `part:raise` seats it in
+    /// its slot (or on the ground at its foot) as its end would have, answered when it is; `part:lower` lays it down
+    /// from where it stands, toward where it lay. Refused by name, and left stopped held, when another part
+    /// (`part.held`) or another slot (`raise.not-at-slot`) is named, or a holder no longer reaches its hold
+    /// (`part.grip-out-of-reach`). Every check is made before anything changes.
+    fn raise_again(
+        &mut self,
+        tree: &mut Tree,
+        c: &Controller,
+        a: &Act,
+        activity: Id,
+        up: bool,
+        now: Micros,
+    ) -> R<()> {
+        if !self
+            .activities
+            .members(activity)
+            .is_some_and(|m| m.iter().any(|m| m.body == a.body))
+        {
+            return Err(refusal("not-a-member", show(a.body)));
+        }
+        let Some(ra) = self.raising.get(&activity) else {
+            return Err(refusal("part.held", show(activity)));
+        };
+        if a.params.contains_key(&1) && param_id(&a.params, 1, "raise-needs-a-part")? != ra.part {
+            return Err(refusal("part.held", show(activity)));
+        }
+        // Where the part stands now: slid into its slot's place, or at its foot.
+        let node = match (ra.into, ra.slide) {
+            (Some(_), Some((_, to, _, _))) => to,
+            _ => ra.geo.node(ra.r)?,
+        };
+        if up {
+            let named = match (a.params.get(&4), a.params.get(&5)) {
+                (Some(_), Some(Value::Uint(k))) => {
+                    Some((param_id(&a.params, 4, "raise-into")?, *k))
+                }
+                (None, None) => None,
+                _ => {
+                    return Err(refusal(
+                        "raise-into",
+                        "parameters 4 and 5: a bay and its slot",
+                    ));
+                }
+            };
+            if named.is_some() && named != ra.into.map(|(bay, k, _)| (bay, k)) {
+                return Err(refusal(
+                    "raise.not-at-slot",
+                    format!(
+                        "{} stands held at the slot it was raised to; next: part raise {} {} (that slot), or part lower",
+                        show(ra.part),
+                        show(activity),
+                        show(ra.part)
+                    ),
+                ));
+            }
+            let on = |b: Id| {
+                stands(c, b)
+                    .ok()
+                    .filter(|(g, _)| *g == ra.ground)
+                    .map(|(_, p)| p)
+            };
+            match (on(ra.lifter), on(ra.footer)) {
+                (Some(l), Some(f)) => out_of_reach(&ra.carriers(l, f)?, node)?,
+                _ => {
+                    return Err(refusal(
+                        "part.grip-out-of-reach",
+                        format!("{}'s holders are not on its ground", show(ra.part)),
+                    ));
+                }
+            }
+        }
+        let Some(mut ra) = self.raising.remove(&activity) else {
+            return Err(refusal("part.held", show(activity)));
+        };
+        ra.parked = false;
+        ra.waited = 0;
+        if !up {
+            ra.up = false;
+            ra.walking = false;
+            unslide(&mut ra, now);
+            self.turned_back(tree, activity, &ra, "souls:lower-asked", now);
+            self.raising.insert(activity, ra);
+            self.collect(Some((a.id, a.soul)));
+            return Ok(());
+        }
+        ra.by = (a.id, a.soul);
+        let put = match self.asm.as_mut() {
+            None => Err(refusal("seating-off", "the world's kinds join no parts")),
+            Some(asm) => match ra.into {
+                Some((bay, k, _)) => asm.settle_into(
+                    tree,
+                    &self.activities,
+                    &mut self.mint,
+                    now,
+                    ra.by,
+                    activity,
+                    ra.part,
+                    (bay, k, node.0, node.1),
+                    ra.ground,
+                    ra.reach,
+                ),
+                None => asm.settle(
+                    tree,
+                    &self.activities,
+                    &mut self.mint,
+                    now,
+                    ra.by,
+                    activity,
+                    ra.part,
+                    ra.ground,
+                    node,
+                    true,
+                    ra.reach,
+                ),
+            },
+        };
+        match put {
+            Ok(()) => {
+                ra.settling = true;
+                self.raising.insert(activity, ra);
+                Ok(())
+            }
+            Err(e) => {
+                ra.parked = true;
+                self.raising.insert(activity, ra);
+                Err(e)
+            }
+        }
+    }
+
+    /// Whether crew `activity`'s raise stopped held (FOR-FABLE 15): it stands, and waits for its crew to ask again.
+    pub(super) fn raise_parked(&self, activity: Id) -> bool {
+        self.raising.get(&activity).is_some_and(|ra| ra.parked)
+    }
+
+    /// Crew `activity`'s raise, if it is one, ended its end's wait for a stale map past the world's seat wait
+    /// (FOR-FABLE 15): stopped held where it stands, never turned back, its crew holding it. Said `souls:carry-track`
+    /// [`RAISE_HELD`] why [`BUSY_WORD`] and `souls:carry-grips` `souls:held`; the intent that ended it, if still open, is
+    /// refused [`MAP_BUSY`]. `false` when it is no raise.
+    pub(super) fn raise_busy(&mut self, r: &Ready, now: Micros, live: &Tree) -> bool {
+        let Some(ra) = self.raising.get_mut(&r.activity) else {
+            return false;
+        };
+        ra.settling = false;
+        ra.parked = true;
+        ra.waited = 0;
+        let (part, since) = (ra.part, ra.since);
+        let mut tree = live.frozen();
+        let word = (now, Actor::World, Cause::World);
+        self.activities.next = tree.next();
+        if let Err(e) = self.activities.carry_track(
+            &mut tree,
+            r.activity,
+            part,
+            RAISE_HELD,
+            (since, now),
+            Some(BUSY_WORD),
+            word,
+        ) {
+            eprintln!("worldd: a raise stopped held was not said: {e}");
+        }
+        if let Err(e) = regrip(
+            &mut self.activities,
+            &mut tree,
+            r.activity,
+            grips::HELD,
+            None,
+            word,
+        ) {
+            eprintln!("worldd: a raise stopped held's holds were not said: {e}");
+        }
+        if let Some(asm) = self.asm.as_mut() {
+            asm.refused.push((
+                r.intent,
+                r.soul,
+                refusal(
+                    MAP_BUSY,
+                    format!(
+                        "{} stands held, not seated: the ground's map changed under it every time its seating was \
+                         tried (bodies moving near it); next: ask again (part raise {} {})",
+                        show(part),
+                        show(r.activity),
+                        show(part)
+                    ),
+                ),
+            ));
+        }
+        self.collect(None);
+        true
+    }
+
+    /// Crew `activity`'s raise, if it is one, has its end's commit out again (FOR-FABLE 15: prepared again for a stale
+    /// map): it has come back, so the wait for it starts again.
+    pub(super) fn raise_waits(&mut self, activity: Id) {
+        if let Some(ra) = self.raising.get_mut(&activity) {
+            ra.waited = 0;
+        }
     }
 
     /// The world's word that a raise turned back, and why: `souls:carry-track` with `souls:lower`.
@@ -697,8 +910,13 @@ impl Engine {
             let Some(mut ra) = self.raising.remove(&activity) else {
                 continue;
             };
-            let moving = ra.carry.is_some() && !ra.settling;
-            ra.waited = if moving { 0 } else { ra.waited + 1 };
+            let moving = ra.carry.is_some() && !ra.settling && !ra.parked;
+            // Stopped held (FOR-FABLE 15), it waits for its crew: nothing is out for it.
+            ra.waited = if moving || ra.parked {
+                0
+            } else {
+                ra.waited + 1
+            };
             let done = match (moving, ra.waited > WAIT) {
                 (true, _) => match self.raise_step(tree, c, town, activity, &mut ra, now) {
                     Ok(done) => {
