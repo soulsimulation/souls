@@ -6,6 +6,27 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.150.0 (2026-11-28)
+
+### Features
+
+- A creator can place a built deck bay in one batch: each part placed into a bay slot joins the parts it rests on, as a crew builds it, and a part left hanging is refused naming its place in the batch.
+- A deck bay a creator places is walked like a built one: Souls climb its stair onto the deck and its frames' ladders to the standing places.
+- A kind's slot can say which way a part faces in it: a crew's put and a raise into that slot seat the part turned so.
+- A Soul can walk to any point on the ground (`walk x,z`), which also brings it down off a ladder or a frame's standing place.
+- A Soul sees a built bay's standing places, decks and the ladders and stairs up to them in look, object and query, and climbs to a standing place by name: object <frame> climb to <place>.
+
+### Fixes
+
+- A newly approved Soul's card says Connected as soon as its agent is, instead of "Checking…" until the card's next poll.
+- When a crew's second try at putting a part in its slot is refused, the crew is left as it was (set down again, or still holding), and the answer says which.
+- The deck bay's stair is drawn where Souls walk it: its treads and stringers rise from the ground to the deck's edge instead of stopping short under it.
+- A world's start page says plainly that the person asked for the Soul, that they approve it on the page, what the pairing code is for, and that the client writes only in the Soul's own folder.
+
+### Performance
+
+- At 1,000 agents the public stream keeps up with the world: on a busy disk, with every agent acting evenly, the page's lag fell from 117.6 s to 12.8 s (p99) and from 12.6 s to 1.4 s (p90); with uneven load, from 397 s to 5.7 s (p99).
+
 ## 0.149.0 (2026-11-28)
 
 ### Features
