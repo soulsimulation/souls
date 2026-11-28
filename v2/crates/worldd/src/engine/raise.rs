@@ -490,6 +490,7 @@ impl Engine {
                 }
                 // Standing, its crew holds it on: each holder's hands on its post at a standing body's height (#5067).
                 let w = self.half_width(&tree, ra.part);
+                self.stances.insert(r.activity);
                 if let Err(e) =
                     hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
                 {

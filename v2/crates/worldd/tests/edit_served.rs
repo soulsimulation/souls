@@ -5002,6 +5002,172 @@ fn a_crew_takes_a_frame_off_a_live_placed_stand_and_seats_it_in_a_live_placed_ba
     );
 }
 
+/// #5067 (raise into a slot): a creator places a rack bay and a rack frame lying with its foot 80 mm from the bay's
+/// `upright_a`, its length outward. Raised with no slot named it would stand on the ground; raised into `upright_a` it
+/// stands, slides the 80 mm into the slot a sample a tick, and is seated there, held by both: its holders' hands on its
+/// posts' outward faces at 1.05 and 1.35 m, on the side away from `upright_b`, and they walk round to stand behind its
+/// posts. A raise into `upright_b`, 2.9 m off, is refused `raise.not-at-slot` before anything moves.
+#[test]
+fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() {
+    use replica::effects::{Body, Change};
+    use sim::activity::carry::grips::{GRIPS, HELD, HOLD_HANDS, Holds};
+    use sim::activity::carry::raise::{SIDE, Spec};
+    let d = scratch("raiseinto");
+    let (facts, slots) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa8);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes()).unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let kind = |prefix: &str| Name::new(rules.kinds.keys().find(|k| k.starts_with(prefix)).unwrap()).unwrap();
+    let place = |prefix: &str, at: Vec3, q: Quat| Op::Place {
+        name: 1,
+        kind: kind(prefix),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: at,
+            orientation: q,
+            support: Support::Surface { surface: g, height: 0 },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -24 * M), Quat::IDENTITY));
+    assert_eq!(got.kind, 1, "a bay: {got:?}");
+    let bay = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let points = sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap()).unwrap();
+    let at = |k: u64| points.iter().find(|(n, _)| *n == k).unwrap().1;
+    let (ua, ub) = (at(slots["upright_a"]), at(slots["upright_b"]));
+    drop(copy);
+    // Lying on its face, its length along -z from its foot (outward from the bay), 80 mm east of upright_a.
+    let spec = Spec::of(&json::parse(&std::fs::read_to_string(d.join("entries/rack_upright.json")).unwrap()).unwrap()).unwrap();
+    let half = 759_250_125;
+    let lie = Quat::new(half, -half, 0, 0).unwrap();
+    let foot = Vec3::new(ua.x + 80_000, spec.half_thick, ua.z);
+    let got = creator_edit(place("mars:rack_upright@", foot, lie));
+    assert_eq!(got.kind, 1, "a frame lying: {got:?}");
+    let frame = got.names[&1];
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    // The lifter beside its top end, the footer beside its base on the other side.
+    let beside = spec.half_width + SIDE;
+    let stations = [
+        v3(foot.x + beside, 0, foot.z - spec.height),
+        v3(foot.x - beside, 0, foot.z),
+    ];
+    for (k, p) in stations.iter().enumerate() {
+        hands[k].walk_to(g, *p);
+    }
+    for h in hands.iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "to its raise station: {e:?}");
+    }
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    assert_eq!(hands[1].act("activity:accept", crew, BTreeMap::new()).kind, 1);
+    let into = |k: u64| {
+        BTreeMap::from([(1, frame.to_value()), (4, bay.to_value()), (5, Value::Uint(k))])
+    };
+    // Its foot 2.9 m from upright_b: refused by name, nothing moves.
+    let far = hands[0].act("part:raise", crew, into(slots["upright_b"]));
+    println!("raised into upright_b, {} mm off: {far:?}", apart_mm(foot, ub));
+    assert_eq!((far.kind, far.reason.as_str()), (2, "raise.not-at-slot"), "{far:?}");
+    let got = hands[0].act("part:raise", crew, into(slots["upright_a"]));
+    println!("raised into upright_a: {got:?}");
+    assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    // Raised, slid and seated, held by both.
+    let t0 = std::time::Instant::now();
+    let held = loop {
+        let h = logged(&w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back();
+        if let Some(h) = h.filter(|h| h.phase == HELD) {
+            break h;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(40), "never held: {:?}", where_is(&w, frame));
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let (parent, slot, pos) = where_is(&w, frame);
+    println!("seated: {parent:?} slot {slot:?} at {pos:?}; held {:?}", held.holds);
+    assert_eq!((parent, slot), (Some(bay), Some(slots["upright_a"])), "in upright_a");
+    assert!(apart_mm(pos, ua) <= 2, "where the slot is: {pos:?} {ua:?}");
+    // Held from outside the bay: away from upright_b, which is at the bay's +z of upright_a, so the frame's own -z.
+    assert_eq!(held.holds.len(), 2);
+    for h in &held.holds {
+        assert_eq!([h.hands[0].y, h.hands[1].y], HOLD_HANDS, "{h:?}");
+        assert!(h.hands[0].z < 0, "on the outer face: {h:?}");
+    }
+    assert!(held.holds[0].hands[0].x == -held.holds[1].hands[0].x, "one on each post");
+    // The track: no sample of the crew's node more than 0.1 m from the last, the slide included.
+    let samples: Vec<Vec3> = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter_map(|e| match &e.body {
+            Body::Changes(cs) => cs.iter().find_map(|c| match &c.change {
+                Change::Motion(h) if h.node == crew => Some(h.pose.position),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+    let jump = samples
+        .windows(2)
+        .map(|p| apart_mm(p[0], p[1]))
+        .max()
+        .unwrap_or(0);
+    println!("{} samples of the crew's node, at most {jump} mm apart", samples.len());
+    assert!(jump <= 100, "no jump: {jump} mm");
+    // The holders walk round behind its posts: each 0.35 m off its outer face, outside the bay.
+    let t0 = std::time::Instant::now();
+    loop {
+        let z: Vec<i64> = w.souls.iter().map(|s| body_at(&w, body_of(&w, *s)).z).collect();
+        if z.iter().all(|z| *z < ua.z - 300_000) {
+            println!("the holders stand outside the bay, z {z:?} mm off {}", ua.z);
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(20), "holders behind its posts: {z:?} {}", ua.z);
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn apart_mm(a: Vec3, b: Vec3) -> i64 {
+    ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt() / 1000) as i64
+}
+
 /// A frame a creator places live stands on its two posts, as a seeded one does (its import's solids, one box a post),
 /// not on one box its whole width: a Soul walks through it, between the posts, to its middle and out the other side.
 #[test]

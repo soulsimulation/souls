@@ -63,20 +63,33 @@ pub const STAND_HOLD: i64 = 1_050_000;
 /// standing body holds a frame upright (not on all fours at the foot, nor overhead).
 pub const HOLD_HANDS: [i64; 2] = [1_050_000, 1_350_000];
 
+/// How far off a standing part's outer face its holders stand, µm (#5067): behind its posts, outside the bay.
+pub const HOLD_STAND: i64 = 350_000;
+
 /// The holds of a standing part's holders ([`HELD`], after a put or a raise; #5067): each holder keeps its post (the
-/// side of the part its hands are on now), its two hands on that post's outer face, `half_width` from the part's
-/// middle, at [`HOLD_HANDS`] above its foot, the lower first.
-pub fn standing(holds: &[Hold], half_width: i64) -> Vec<Hold> {
+/// side of the part its hands are on now) and holds it from the part's outer side, `outer` (its own +z, 1, or −z, −1:
+/// away from its bay's other upright, else its back), both hands on that post's outward face at [`HOLD_HANDS`]
+/// above its foot, the lower first: out of the space between the frames, where the beams go. `half` is half the part
+/// in its own frame: a post's middle is its thickness in from the part's edge.
+pub fn standing(holds: &[Hold], half: Vec3, outer: i64) -> Vec<Hold> {
     holds
         .iter()
         .map(|h| {
-            let x = if h.hands[0].x + h.hands[1].x < 0 { -half_width } else { half_width };
+            let x = (half.x - half.z) * if h.hands[0].x + h.hands[1].x < 0 { -1 } else { 1 };
             Hold {
-                hands: HOLD_HANDS.map(|y| Vec3::new(x, y, 0)),
+                hands: HOLD_HANDS.map(|y| Vec3::new(x, y, outer * half.z)),
                 ..h.clone()
             }
         })
         .collect()
+}
+
+/// Where the holder of `hold` (a [`standing`] hold) stands in the part's own frame, and the point it faces (#5067):
+/// [`HOLD_STAND`] off the part's outer face, behind its post, on the floor.
+pub fn stance(hold: &Hold, half: Vec3) -> (Vec3, Vec3) {
+    let (x, z) = (hold.hands[0].x, hold.hands[0].z);
+    let out = z.signum();
+    (Vec3::new(x, 0, z + out * HOLD_STAND), Vec3::new(x, 0, out * half.z))
 }
 
 /// The phases a carry's holds are in: on a take's track into their hands, carried, on a seating's set-in track, on

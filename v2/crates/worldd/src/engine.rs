@@ -248,6 +248,10 @@ pub struct Engine {
     /// Why and when each crew's carry last broke off, its part set down (#5067): a put by a crew that holds nothing
     /// says so, never a bare `part.not-held`.
     set_down_why: BTreeMap<Id, (&'static str, Micros)>,
+    /// Crews holding a standing part whose holders are to go to their stance behind its posts (#5067), and each holder
+    /// on its way there: where it stands then and the point it faces.
+    stances: BTreeSet<Id>,
+    stance_face: BTreeMap<Id, (Vec3, Vec3)>,
     /// Acts held while a carry's node is on a lift's or a set-down's track (#5067), by the carry: a set-down or a put
     /// asked during its lift, the last member's leave during its set-down (its node holds the load until it rests).
     /// Each runs again when the track ends ([`Engine::reruns`]), answered then.
@@ -387,20 +391,47 @@ fn hold_standing(
     activities: &mut Activities,
     tree: &mut Tree,
     activity: Id,
-    half_width: Option<i64>,
+    half: Option<Vec3>,
     by: (Micros, Actor, Cause),
 ) -> R<()> {
     let Some(mut h) = holds_on(tree, activity) else {
         return Ok(());
     };
-    if let Some(w) = half_width {
-        h.holds = grips::standing(&h.holds, w);
+    if let Some(half) = half {
+        h.holds = grips::standing(&h.holds, half, outer_side(tree, h.load));
     }
     h.phase = grips::HELD.to_owned();
     h.since = by.0;
     h.until = None;
     activities.next = tree.next();
     activities.carry_grips(tree, activity, &h, by)
+}
+
+/// The side of standing `part` its holders hold it from (#5067): its own +z (1) or −z (−1), away from the other upright
+/// slot of the bay it stands in; a part on its own, its back (−z).
+fn outer_side(tree: &Tree, part: Id) -> i64 {
+    let found = (|| {
+        let ph = tree.handle(part)?;
+        let n = tree.node(ph)?;
+        let (k, bh) = (n.slot()?, tree.handle(n.parent()?)?);
+        let own = sim::ground::scene::slot_point(tree, bh, k)?;
+        // The other slots with a point at the floor, as far off on the bay's z as an upright's is: its other upright.
+        let other = sim::ground::scene::slot_points(tree, bh, bh)
+            .ok()?
+            .into_iter()
+            .filter(|(n, p)| *n != k && p.y == own.y && p.z != own.z && (p.x - own.x).abs() < 100_000)
+            .min_by_key(|(_, p)| (p.z - own.z).abs())?
+            .1;
+        // Into the part's frame: its turn in the slot.
+        let [w, x, y, z] = n.place()?.orientation.parts();
+        let d = Vec3::new(other.x - own.x, 0, other.z - own.z);
+        let inv = replica::pose::Quat::new(w, -x, -y, -z)
+            .or_else(|_| replica::pose::Quat::new(-w, x, y, z))
+            .ok()?;
+        let z = inv.rotate(d).ok()?.z;
+        Some(if z > 0 { -1 } else { 1 })
+    })();
+    found.unwrap_or(-1)
 }
 
 /// `activity`'s carriers let go of their grips as its load comes to rest (#5067): at once for a load set down at once,
@@ -839,6 +870,8 @@ impl Engine {
             led: BTreeMap::new(),
             broke: BTreeMap::new(),
             set_down_why: BTreeMap::new(),
+            stances: BTreeSet::new(),
+            stance_face: BTreeMap::new(),
             held: BTreeMap::new(),
             rerun: Vec::new(),
             answering: BTreeMap::new(),
@@ -2526,6 +2559,11 @@ impl Engine {
                 );
             }
         }
+        // #5067: the holders of a part just held standing walk to their stances behind its posts, outside its bay, and
+        // face it once there.
+        if !self.stances.is_empty() || !self.stance_face.is_empty() {
+            self.stance_walks(live, c, town);
+        }
         // #5067: each part on its way up or down turns as far as its lifter has walked.
         if !self.raising.is_empty() {
             let tr = tree.get_or_insert_with(|| live.frozen());
@@ -3605,10 +3643,67 @@ impl Engine {
         }
     }
 
-    /// Half the width of `part` in its own frame, µm (its entry's bounds' x): where its posts' outer faces are.
-    fn half_width(&self, tree: &Tree, part: Id) -> Option<i64> {
+    /// The holders of each crew in `stances` sent to their stances (#5067, [`grips::stance`]): each one on the crew's
+    /// ground walked there at a set-in's pace when the way is ground its body stands on, else left where it is; each
+    /// faces its post once it is there.
+    fn stance_walks(&mut self, live: &Tree, c: &mut Controller, town: &sim::walk::town::Town) {
+        for activity in std::mem::take(&mut self.stances) {
+            let Some(h) = holds_on(live, activity) else { continue };
+            let Some(half) = self.half_width(live, h.load) else { continue };
+            for hold in &h.holds {
+                let Ok((ground, feet)) = stands(c, hold.body) else { continue };
+                let Some(x) = live
+                    .handle(h.load)
+                    .zip(live.handle(ground))
+                    .and_then(|(p, g)| sim::ground::scene::xform_to(live, p, g).ok())
+                else {
+                    continue;
+                };
+                let (at, face) = grips::stance(hold, half);
+                let (Ok(at), Ok(face)) = (x.point(at), x.point(face)) else { continue };
+                let (to, face) = (Vec3::new(at.x, feet.y, at.z), Vec3::new(face.x, feet.y, face.z));
+                if apart(feet, to) > 20_000 {
+                    if !way_is_ground(c, town, ground, hold.body, feet, to) {
+                        eprintln!("worldd: {} holds from where it stands: no ground to its stance", show(hold.body));
+                        continue;
+                    }
+                    let track = sim::controller::Track {
+                        link: None,
+                        line: vec![to],
+                        speed: crate::assembly::SET_IN_PACE,
+                        to: ground,
+                        arrive: None,
+                        hold: false,
+                    };
+                    if let Err(e) = c.carry_on(hold.body, track) {
+                        eprintln!("worldd: {} was not walked to its stance: {e}", show(hold.body));
+                        continue;
+                    }
+                }
+                self.stance_face.insert(hold.body, (to, face));
+            }
+        }
+        let arrived: Vec<Id> = self
+            .stance_face
+            .iter()
+            .filter(|(b, (to, _))| stands(c, **b).is_ok_and(|(_, f)| apart(f, *to) <= 30_000))
+            .map(|(b, _)| *b)
+            .collect();
+        for b in arrived {
+            if let (Some((_, face)), Ok((_, feet))) = (self.stance_face.remove(&b), stands(c, b))
+                && let Some(f) = sim::controller::facing_toward(feet, face)
+            {
+                let _ = c.face(b, f);
+            }
+        }
+        // One that never gets there (its walk stopped) is forgotten once it no longer stands.
+        self.stance_face.retain(|b, _| stands(c, *b).is_ok());
+    }
+
+    /// Half of `part` in its own frame, µm (its entry's bounds): where its posts and faces are.
+    fn half_width(&self, tree: &Tree, part: Id) -> Option<Vec3> {
         let n = tree.handle(part).and_then(|h| tree.node(h))?;
-        Some(self.loads.get(plain(n.kind().as_str()))?.half.x)
+        Some(self.loads.get(plain(n.kind().as_str()))?.half)
     }
 
     /// The load `part` is as its kind's entry states it, turned as it is held in its crew's slot (0.135 C4's
@@ -3716,6 +3811,7 @@ impl Engine {
                 let said = match holds.filter(|_| under == holds) {
                     Some(part) => {
                         let w = self.half_width(&tree, part);
+                        self.stances.insert(r.activity);
                         hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
                     }
                     None => regrip(
