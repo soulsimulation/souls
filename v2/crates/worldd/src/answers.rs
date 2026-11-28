@@ -1428,8 +1428,12 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
     away_next: Option<u64>,
+    /// The passage a walk's goal was moved off, for the next note (fields 9 and 10, #5254).
+    passage_next: Option<(Id, sim::links::Kind)>,
     /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
     words_next: Option<String>,
+    /// The other body nearest a crowded walk's point, for the next note (field 11, A2-4).
+    held_next: Option<Id>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1950,11 +1954,27 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 pub const TIMED_OUT: &str = "act.timed-out";
 /// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
 pub const STOPPED: &str = "act.stopped";
-/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
+/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done. Its
+/// end says how far from its point it stood (field 7, mm) and the other body nearest that point there (field 11).
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
-/// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance or off
-/// the ground a body stands on, as near as stands clear (#5254): said as its end's word, with how far (field 7).
+/// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance (moved
+/// only as far as clears the passage itself) or off the ground a body stands on, as near as stands clear (#5254): said
+/// as its end's word, with how far (field 7, mm) and, for a passage, the thing it belongs to (field 9) and its kind
+/// (field 10: `doorway`, `stairs`, `ramp`, `ladder` or `step`).
 pub const GOAL_MOVED: &str = "walk.goal-moved";
+
+/// A passage's kind as a walk's end names it (field 10, [`GOAL_MOVED`]).
+fn passage_word(kind: sim::links::Kind) -> &'static str {
+    use sim::links::Kind;
+    match kind {
+        Kind::Doorway => "doorway",
+        Kind::Stairs => "stairs",
+        Kind::Ramp => "ramp",
+        Kind::Ladder => "ladder",
+        Kind::Step => "step",
+        _ => "passage",
+    }
+}
 
 /// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
 /// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
@@ -4296,6 +4316,13 @@ impl Clock {
         if let Some(w) = self.words_next.take() {
             fields.insert(8, Value::Bytes(w.into_bytes()));
         }
+        if let Some(by) = self.held_next.take() {
+            fields.insert(11, by.to_value());
+        }
+        if let Some((thing, kind)) = self.passage_next.take() {
+            fields.insert(9, thing.to_value());
+            fields.insert(10, Value::Bytes(passage_word(kind).as_bytes().to_vec()));
+        }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
                 u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
@@ -5797,11 +5824,8 @@ impl Clock {
             .as_mut()
             .and_then(|b| b.stopped_short.remove(&id));
         // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
-        let moved = self
-            .bodies
-            .as_mut()
-            .and_then(|b| b.goal_moved.remove(&id))
-            .is_some();
+        let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id));
+        let held = self.bodies.as_mut().and_then(|b| b.held_off_by.remove(&id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
@@ -5827,9 +5851,11 @@ impl Clock {
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
-                let done = if moved {
+                let done = if let Some((_, why)) = moved {
+                    self.passage_next = why;
                     GOAL_MOVED
                 } else if short {
+                    self.held_next = held;
                     DONE_SHORT
                 } else {
                     "done"
@@ -7178,7 +7204,9 @@ pub fn start<S: Storage + 'static>(
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
+        passage_next: None,
         words_next: None,
+        held_next: None,
         edits,
         editing,
         set_down: Vec::new(),
