@@ -67,7 +67,9 @@ export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,rece
  // #2280: the last known list while the connection comes back (owned-souls-hold.ts): dimmed, never emptied
  return <div className="my-souls" aria-label="Your account Souls" data-reconnecting={reconnecting?'1':undefined} aria-busy={reconnecting||undefined} title={reconnecting?'Reconnecting…':undefined}>{menuList}{pinned.length>3
   ? <NavbarMenu label="Your Souls" className="souls-menu" trigger={<span className="soul-avatar-pile">{pinned.slice(0,3).map((soul,i)=><span key={soul.id} style={{zIndex:3-i}} data-soul-id={soul.id}><SoulAvatar soul={soul}/></span>)}</span>}>
-      {close=><>{pinned.map(soul=>chip(soul,close))}<div onClick={close}>{newSoul}</div></>}
+      {close=><>{pinned.map(soul=>chip(soul,close))}</>}
     </NavbarMenu>
-  : <>{pinned.map(soul=>chip(soul))}<span className="new-soul-control">{newSoul}</span></>}</div>;
+  : <>{pinned.map(soul=>chip(soul))}</>}
+  {/* New Soul stays a button in the bar whatever the number of Souls: the pile folds the chips only */}
+  <span className="new-soul-control">{newSoul}</span></div>;
 }

@@ -165,11 +165,14 @@ export async function agentFolder(world, folder) {
 /** A pairing as an agent asks it: the link and code (`pair` or `god pair`'s first answer), the owner's approval, then
  *  the pairing's own outcome in the home's pairing.log. → the paired id (`s_…` or `c_…`) */
 export async function pairFolder(agent, words, owner, { waitMs = 120_000 } = {}) {
+  // N13: a Soul's `pair` returns at once; `start` waits for the approval, keeps the token and starts the client.
+  const soulPair = words[0] === 'pair';
   const { lines } = await agent.run(words);
   const asked = lines.find((j) => typeof j.code === 'string' && j.code && j.ok !== false);
   if (!asked) throw new Error(`${words.join(' ')}: no pairing code (${JSON.stringify(lines.at(-1) ?? {}).slice(0, 200)})`);
   const a = await owner.post('/v1/pair/approve', { code: asked.code, confirm: true });
   if (a.status !== 200) throw new Error(`the owner's approval answered ${a.status} ${a.body.refused ?? ''}`);
+  if (soulPair) await agent.run(['start']);
   for (const end = Date.now() + waitMs; Date.now() < end; await sleep(250)) {
     let text = ''; try { text = readFileSync(join(agent.home, 'pairing.log'), 'utf8'); } catch { /* not yet */ }
     const done = jsonLines(text).find((j) => j.ok === true && typeof j.soul === 'string');

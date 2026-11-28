@@ -1012,3 +1012,161 @@ fn a_sync_cut_off_after_asking_for_a_withheld_record_again_leaves_it_withheld() 
     let s = copy.sync(&scope, &mut w).unwrap();
     whole(&copy, s.held);
 }
+
+/// N12: a sync with `window` records requests in flight, each answered in an order a seeded generator picks (as a
+/// socket's answers may come); after `cut` answers, if given, the connection drops and the sync is abandoned. Counts
+/// each record the world answers.
+fn windowed(
+    copy: &mut Copy,
+    w: &mut Made,
+    window: usize,
+    seed: u64,
+    cut: Option<usize>,
+    answered: &mut std::collections::BTreeMap<Vec<u8>, usize>,
+) -> Option<replica::sync::Synced> {
+    let scope = [world_id(0)];
+    let now = w.hashes(&scope).unwrap();
+    let mut d = copy.compare(
+        &scope,
+        now.into_iter().map(|h| h.map(Hash::to_bytes)).collect(),
+    );
+    let (mut x, mut left) = (seed, cut);
+    let mut out: Vec<Vec<Vec<u8>>> = Vec::new();
+    loop {
+        while out.len() < window {
+            let asked = copy.ask(&mut d, replica::sync::wire::RECORDS_MOST);
+            if asked.is_empty() {
+                break;
+            }
+            out.push(asked);
+        }
+        assert_eq!(d.in_flight(), out.len());
+        if out.is_empty() {
+            return Some(copy.finish(d).unwrap());
+        }
+        if left == Some(0) {
+            copy.abandon(d);
+            return None;
+        }
+        x = x
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let asked = out.swap_remove((x >> 33) as usize % out.len());
+        let got = w.records(&asked).unwrap();
+        for h in &asked {
+            *answered.entry(h.clone()).or_default() += 1;
+        }
+        copy.take(&mut d, &asked, got).unwrap();
+        left = left.map(|n| n - 1);
+    }
+}
+
+/// N12: many records requests in flight, answered out of order, give the same copy as one at a time, and ask for no
+/// record twice. A connection dropped mid-way resumes: the next sync takes what the first had taken without asking for
+/// it again, and asks for the rest; what is in flight when it drops is asked for again, once.
+#[test]
+fn many_rounds_in_flight_with_a_connection_dropped_mid_way_resume_and_copy_each_record_once() {
+    // A root, 20 rooms of 200 things (4,020 records, 64 to a request): one thing is in two rooms.
+    let rooms: Vec<Node> = (0..20u64)
+        .map(|r| {
+            Node(
+                1_000_000 + r,
+                (0..200)
+                    .map(|t| {
+                        Node(
+                            r * 1000 + t + u64::from(r == 7 && t == 0) * 5000,
+                            Vec::new(),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    let mut w = Made::default();
+    w.set(&Node(9_999_999, rooms));
+    // One request of 64 at a time, as the daemon asked before.
+    let mut alone = Copy::default();
+    let one = windowed(&mut alone, &mut w, 1, 0, None, &mut Default::default()).unwrap();
+    whole(&alone, one.held);
+
+    for (seed, cut) in [(1, 7), (2, 30), (3, 1), (4, 40)] {
+        let mut answered = std::collections::BTreeMap::new();
+        let mut copy = Copy::default();
+        assert!(windowed(&mut copy, &mut w, 16, seed, Some(cut), &mut answered).is_none());
+        assert!(
+            copy.roots().is_empty(),
+            "the scope's hashes are the copy's only once it finishes"
+        );
+        assert_eq!(copy.reach().unwrap().len(), 0, "the copy is as it was");
+        let first: usize = answered.values().sum();
+        let s = windowed(&mut copy, &mut w, 16, seed + 100, None, &mut answered).unwrap();
+        assert_eq!(s.in_flight, 16, "seed {seed}: many requests in flight");
+        assert!(
+            s.reused > 0,
+            "seed {seed}: the cut sync's records are taken, not asked again"
+        );
+        assert_eq!(
+            s.fetched + s.reused,
+            s.held,
+            "seed {seed}: each record copied once"
+        );
+        assert!(
+            answered.values().all(|n| *n == 1),
+            "seed {seed}: no record is asked for twice"
+        );
+        assert_eq!(answered.len(), first + s.fetched);
+        assert_eq!(s.held, one.held);
+        assert_eq!(copy.roots(), alone.roots());
+        assert_eq!(
+            copy.reach().unwrap(),
+            alone.reach().unwrap(),
+            "seed {seed}: the same copy"
+        );
+        whole(&copy, s.held);
+        // Current: one round, nothing fetched, nothing loose left over.
+        let again = windowed(&mut copy, &mut w, 16, seed, None, &mut answered).unwrap();
+        assert_eq!((again.fetched, again.reused, again.rounds), (0, 0, 1));
+    }
+    assert!(one.rounds > 60, "one at a time: {} rounds", one.rounds);
+    assert_eq!(one.in_flight, 1);
+}
+
+/// N12: in flight, a record answered withheld is not asked for again in the same sync however often it is named, and an
+/// answer to records nobody asked for is refused by name.
+#[test]
+fn in_flight_a_withheld_record_is_asked_once_and_an_unasked_answer_is_refused() {
+    // Two rooms that both hold the same withheld thing, among others.
+    let rooms: Vec<Node> = (0..2u64)
+        .map(|r| {
+            Node(
+                1_000_000 + r,
+                (0..100)
+                    .map(|t| Node(if t == 0 { 5_000 } else { r * 1000 + t }, Vec::new()))
+                    .collect(),
+            )
+        })
+        .collect();
+    let mut w = Made::default();
+    w.set(&Node(9_999_999, rooms));
+    w.withhold(5_000);
+    let mut answered = std::collections::BTreeMap::new();
+    let mut copy = Copy::default();
+    let s = windowed(&mut copy, &mut w, 16, 9, None, &mut answered).unwrap();
+    assert!(answered.values().all(|n| *n == 1), "nothing asked twice");
+    assert_eq!(s.fetched, s.held);
+    whole(&copy, s.held);
+
+    let mut fresh = Copy::default();
+    let now = w.hashes(&[world_id(0)]).unwrap();
+    let mut d = fresh.compare(
+        &[world_id(0)],
+        now.into_iter().map(|h| h.map(Hash::to_bytes)).collect(),
+    );
+    let root = w.root.unwrap().to_bytes();
+    let got = w.records(std::slice::from_ref(&root)).unwrap();
+    assert_eq!(
+        fresh.take(&mut d, &[root], got).map_err(|e| e.name),
+        Err("sync-record"),
+        "an answer to a request not asked"
+    );
+}
