@@ -49,7 +49,7 @@ function segmentDistanceSq(p:Vector3,q:Vector3,a:Vector3,b:Vector3){
 }
 type Scan={node:Object3D;child:number;entered:boolean};
 type Bounds={position:unknown;version:number;count:number;next:number;box:Box3;invalid:boolean};
-type Blocks={bounds:Bounds;index:unknown;version:number;count:number;start:number;end:number;next:number;boxes:Box3[];pending:Box3;complete:boolean;invalid:boolean;groups:Box3[];groupNext:number;groupPending:Box3;groupComplete:boolean};
+type Blocks={bounds:Bounds;index:unknown;version:number;count:number;start:number;end:number;next:number;boxes:Box3[];pending:Box3;complete:boolean;invalid:boolean;groups:Box3[];groupNext:number;groupPending:Box3|null;groupComplete:boolean};
 const visible=(o:Object3D)=>{let depth=0;for(let p:Object3D|null=o;p;p=p.parent){if(++depth>64||!p.visible)return false;}return true;};
 /** Incremental collection over actual rendered roots. Each incomplete pass remains explicitly unknown.
  * Bounds belong to this reader; it never asks Three to compute or update shared geometry/matrices. */
@@ -89,7 +89,7 @@ export class FollowGeometry{
   for(const mesh of this.meshes){const g=mesh.geometry,p=g?.attributes.position,cache=this.bounds.get(g);if(!p||!cache||cache.next<p.count||cache.invalid||!this.requested.has(g))continue;
    const ix=g.index,start=this.authored.has(mesh)?0:Math.max(0,g.drawRange.start),end=this.authored.has(mesh)?ix?.count??p.count:Math.min(ix?.count??p.count,start+g.drawRange.count),version=ix?.version??0,count=ix?.count??p.count;
    let blocks=this.blocks.get(g);if(blocks&&(blocks.bounds!==cache||blocks.index!==ix||blocks.version!==version||blocks.count!==count||blocks.start!==start||blocks.end!==end)){if(blocks.index!==ix||blocks.version!==version||blocks.count!==count)this.generation++;this.retainedBlocks-=blocks.boxes.length;this.retainedGroups-=blocks.groups.length;this.blocks.delete(g);blocks=undefined;}
-   if(!blocks){blocks={bounds:cache,index:ix,version,count,start,end,next:start,boxes:[],pending:new Box3(),complete:false,invalid:false,groups:[],groupNext:0,groupPending:new Box3(),groupComplete:false};this.blocks.set(g,blocks);}
+   if(!blocks){blocks={bounds:cache,index:ix,version,count,start,end,next:start,boxes:[],pending:new Box3(),complete:false,invalid:false,groups:[],groupNext:0,groupPending:null,groupComplete:false};this.blocks.set(g,blocks);}
    while(!blocks.complete&&!blocks.invalid&&blocks.next+2<end&&this.stats.vertices+3<=FOLLOW_LIMITS.vertices){
     // A partially built block reserves one slot too. Never grow past the retained cap.
     if(blocks.pending.isEmpty()){if(this.retainedBlocks+this.retainedGroups>=FOLLOW_LIMITS.blocks)break;blocks.boxes.push(blocks.pending);this.retainedBlocks++;}
@@ -105,7 +105,7 @@ export class FollowGeometry{
    if(!blocks.complete||blocks.invalid||blocks.boxes.length<=16)continue;
    while(blocks.groupNext<blocks.boxes.length&&this.stats.vertices+this.stats.groupPrepWork+2<=FOLLOW_LIMITS.vertices){
     if(blocks.groupNext%16===0){if(this.retainedBlocks+this.retainedGroups>=FOLLOW_LIMITS.blocks)break;blocks.groupPending=new Box3();blocks.groups.push(blocks.groupPending);this.retainedGroups++;}
-    const child=blocks.boxes[blocks.groupNext++];blocks.groupPending.expandByPoint(child.min).expandByPoint(child.max);this.stats.groupPrepWork+=2;
+    const child=blocks.boxes[blocks.groupNext++];blocks.groupPending!.expandByPoint(child.min).expandByPoint(child.max);this.stats.groupPrepWork+=2;
    }
    blocks.groupComplete=blocks.groupNext===blocks.boxes.length;
   }
