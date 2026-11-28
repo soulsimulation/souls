@@ -194,9 +194,10 @@ pub mod io {
     /// The part begun at `at` is written: one part, and its syncs and waits.
     pub(super) fn part_written(at: [u64; 2]) {
         if HERE.get() == 1 {
-            COUNTS[3].fetch_add(1, Relaxed);
+            // The part last, so a reading never has more parts than their syncs and waits.
             COUNTS[4].fetch_add(COUNTS[1].load(Relaxed).saturating_sub(at[0]), Relaxed);
             COUNTS[5].fetch_add(COUNTS[2].load(Relaxed).saturating_sub(at[1]), Relaxed);
+            COUNTS[3].fetch_add(1, Relaxed);
         }
     }
     /// `[bytes, syncs, waits, parts, part syncs, part waits]` so far, and the syncs' time (ns, profile only).
@@ -1390,6 +1391,9 @@ pub struct PublicWriter<S> {
     /// quiet time it is still up to) fell, by that pointer's own anchor; `i64::MIN` before the first. How far a viewer
     /// is behind the world is the wall time now less this (`stream_behind_ms` in `health.json`).
     shown_wall_ms: std::sync::atomic::AtomicI64,
+    /// A part was played into the published state and its files were not all written (a refused write, #2803
+    /// follow-up): the writer's memory is ahead of the disk, so it writes nothing more (`stream-write`).
+    broken: bool,
     /// The world's closed kinds (#3948) and the containers and things it follows them by, for the entries.
     closed_kinds: Closed,
     inside: Inside,
@@ -2085,6 +2089,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             asleep: None,
             quiet_from: None,
             shown_wall_ms: std::sync::atomic::AtomicI64::new(i64::MIN),
+            broken: false,
             closed_kinds: closed,
             inside,
             hides: true,
@@ -3760,6 +3765,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        self.whole_on_disk()?;
         let window = self.window;
         let mut lap = prof::Lap::start();
         self.apply_record(record, raw)?;
@@ -3865,7 +3871,19 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
         }
     }
+    /// Refused (`stream-write`) once a part's write was refused after it was played ([`PublicWriter::flush`]): what
+    /// it would write next would name a part, or a chain, that is not on the disk. A restart recovers from the disk.
+    fn whole_on_disk(&self) -> R<()> {
+        if self.broken {
+            return Err(fault(
+                "stream-write",
+                "a part's write was refused after it was played",
+            ));
+        }
+        Ok(())
+    }
     pub fn flush(&mut self) -> R<()> {
+        self.whole_on_disk()?;
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
@@ -4257,6 +4275,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.put_all_into(&[&chunk, &bytes, &text, &manifest], &mut group)?;
         lap.mark(4);
         self.player.play(&bytes)?;
+        // From here a refused write leaves the published state ahead of the disk: final for this writer.
+        self.broken = true;
         lap.mark(6);
         self.commit_into(&manifest, &mut group)?;
         lap.mark(7);
@@ -4334,6 +4354,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         self.quiet_from = self.last_to;
         self::io::part_written(begun);
+        self.broken = false;
         lap.mark(10);
         // Old generations' deletes once the part is out: they never hold it back from the page.
         self.delete_some(DELETES_PER_PART);
@@ -4441,6 +4462,7 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     /// [`PublicWriter::idle`]: whether it wrote the pointer quiet.
     fn quiet_now(&mut self, real: i64) -> R<bool> {
+        self.whole_on_disk()?;
         if self.canonical.tree().time().is_empty() && self.clock_seed.is_none() {
             return Ok(false);
         }

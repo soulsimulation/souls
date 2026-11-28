@@ -79,10 +79,13 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   `health.json` has `"stream_queue":{"queued":<records>,"queued_bytes":<bytes>,"in_log":<records>}`: `in_log` that
   stays above 0 is a stream behind the world. `"stream_behind_ms":<ms>` is how far: the wall time now less the one at
   which the newest world time the pointer names fell (about 0.4 to 1.1 s for a world that keeps up: a part is half a
-  second, written 0.1 s after its end). `"stream_io":{"parts":…,"part_syncs":…,"part_waits":…,"syncs":…,"waits":…,
+  second, written 0.1 s after its end; a world clock stepped ahead of the machine's, `clock` in `health.json`, adds
+  its step). `"stream_io":{"parts":…,"part_syncs":…,"part_waits":…,"syncs":…,"waits":…,
   "bytes":…}` counts what the stream's thread wrote and synced since the start: one wait a part, at most eight files
   synced (a part that starts a new generation, one in 240, writes its pointer after the generation's baseline,
-  a few more).
+  a few more; a part whose words had a removal applied while it was cut writes them, then the pointer, on their own:
+  three). A part whose write is refused stops the stream (`stream-write`, `"state":"stopped"`); a restart recovers it
+  from the disk.
   `STREAM_PROFILE=1` prints each stage's time, bytes, syncs and waits every 10 s to the journal.
   Before this (November 2026) every waiting record was held in memory: at 1,000 agents on a busy disk that was
   about 2 GB an hour.
