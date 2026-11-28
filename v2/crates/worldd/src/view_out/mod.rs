@@ -4141,14 +4141,37 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
+            // Why a cut is whole, for the profile (#5282): it changes nothing written.
+            prof::cause(match (&timers, &links, landed, bare, sure) {
+                (None, ..) => "whole:timer-owner-not-live",
+                (_, None, ..) => "whole:link-end-not-live",
+                (_, _, false, ..) => "whole:not-landed",
+                (_, _, _, false, _) => "whole:made-with-links-or-timers",
+                (_, _, _, _, false) => "whole:row-not-live",
+                _ => "rows",
+            });
             match (timers, links, landed && bare && sure) {
                 (Some(timers), Some(links), true) => {
-                    self.player
-                        .row_delta(tree.next(), rows, timers, links, &self.made)?
+                    let d = self
+                        .player
+                        .row_delta(tree.next(), rows, timers, links, &self.made)?;
+                    if d.is_none() {
+                        prof::cause("whole:rows-not-in-place");
+                    }
+                    d
                 }
                 _ => None,
             }
         } else {
+            prof::cause(if self.structural {
+                "whole:structural"
+            } else if self.force_remainder {
+                "whole:remainder"
+            } else if self.records.is_empty() {
+                "whole:no-records"
+            } else {
+                "whole:other"
+            });
             None
         };
         let (after, after_digest) = match &delta {
