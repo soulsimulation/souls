@@ -314,7 +314,7 @@ impl Holding {
         };
         seated_in(cx, thing)?;
         // E16 (#2787): never out of another body's hand (or off what it wears). The holder is not named.
-        let t = cx.tree;
+        let t = &*cx.tree;
         if let Some(p) = t
             .handle(thing)
             .and_then(|h| t.node(h))
