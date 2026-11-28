@@ -5249,9 +5249,15 @@ fn a_writer_opening_removes_what_a_killed_group_left() {
 fn i5282_a_fixed_seed_writes_the_parts_main_wrote() {
     let (all, parts, whole) = i5282_run();
     assert!(parts > 40, "parts written: {parts}");
-    assert!(whole > 0 && whole < parts, "both kinds of cut: {whole} whole of {parts}");
+    assert!(
+        whole > 0 && whole < parts,
+        "both kinds of cut: {whole} whole of {parts}"
+    );
     let got = replica::encode::to_hex(&replica::ids::sha256(&all));
-    println!("5282 fixed seed: {parts} parts, {whole} whole, {} bytes, sha256 {got}", all.len());
+    println!(
+        "5282 fixed seed: {parts} parts, {whole} whole, {} bytes, sha256 {got}",
+        all.len()
+    );
     assert_eq!(got, I5282_MAIN, "the parts differ from main's");
 }
 
@@ -5377,17 +5383,29 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
             let node = id(0xa0, s);
             if !live[s as usize] {
                 // A Soul made, public or (one in five) private, with words on it.
-                let audience = if s % 5 == 4 { Audience::Of(node) } else { everyone };
+                let audience = if s % 5 == 4 {
+                    Audience::Of(node)
+                } else {
+                    everyone
+                };
                 effects.push(w3e_create(&h, seq, node, h.zone, audience));
                 seq += 1;
                 let said = words
-                    .write(format!("words of {s} at {record}").as_bytes(), audience, node)
+                    .write(
+                        format!("words of {s} at {record}").as_bytes(),
+                        audience,
+                        node,
+                    )
                     .unwrap();
                 effects.push(change(seq, node, audience, set(node, 5, said.to_value())));
                 seq += 1;
                 live[s as usize] = true;
             } else {
-                let audience = if s % 5 == 4 { Audience::Of(node) } else { everyone };
+                let audience = if s % 5 == 4 {
+                    Audience::Of(node)
+                } else {
+                    everyone
+                };
                 match next(20) {
                     0..=11 => effects.push(change(
                         seq,
@@ -5397,7 +5415,11 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                     )),
                     12..=13 => {
                         let said = words
-                            .write(format!("more of {s} at {record}").as_bytes(), audience, node)
+                            .write(
+                                format!("more of {s} at {record}").as_bytes(),
+                                audience,
+                                node,
+                            )
                             .unwrap();
                         effects.push(change(seq, node, audience, set(node, 5, said.to_value())));
                     }
@@ -5405,7 +5427,13 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                         // A link between two public Souls.
                         let t = next(souls);
                         let to = id(0xa0, t);
-                        if t != s && live[t as usize] && s % 5 != 4 && t % 5 != 4 && s != 0 && t != 0 {
+                        if t != s
+                            && live[t as usize]
+                            && s % 5 != 4
+                            && t % 5 != 4
+                            && s != 0
+                            && t != 0
+                        {
                             let link = id(0xb0, seq);
                             links.insert(link, node);
                             effects.push(change(
@@ -5425,8 +5453,12 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                         }
                     }
                     16 => match links.pop_first() {
-                        Some((link, owner)) => effects.push(change(seq, owner, everyone, Change::Unlink { link })),
-                        None => effects.push(change(seq, node, audience, set(node, 1, Value::Uint(2)))),
+                        Some((link, owner)) => {
+                            effects.push(change(seq, owner, everyone, Change::Unlink { link }))
+                        }
+                        None => {
+                            effects.push(change(seq, node, audience, set(node, 1, Value::Uint(2))))
+                        }
                     },
                     17..=18 if s != 0 => {
                         let timer = id(0xc0, seq);
@@ -5442,7 +5474,9 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                             }]),
                         ));
                     }
-                    17..=18 => effects.push(change(seq, node, audience, set(node, 1, Value::Uint(4)))),
+                    17..=18 => {
+                        effects.push(change(seq, node, audience, set(node, 1, Value::Uint(4))))
+                    }
                     _ => match timers.pop_first() {
                         Some((timer, owner)) => effects.push(w3e_effect(
                             seq,
@@ -5454,7 +5488,9 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                             },
                             Body::Timers(vec![replica::effects::TimerRec::Clear { timer }]),
                         )),
-                        None => effects.push(change(seq, node, audience, set(node, 1, Value::Uint(3)))),
+                        None => {
+                            effects.push(change(seq, node, audience, set(node, 1, Value::Uint(3))))
+                        }
                     },
                 }
                 seq += 1;

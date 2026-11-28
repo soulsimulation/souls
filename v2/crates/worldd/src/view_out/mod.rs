@@ -2478,12 +2478,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             };
             let id = replica::effects::read_id(&p[0])?;
             // A node taken out is a row of its id alone: no references.
-            Ok((
-                id,
-                p.get(1)
-                    .map(refs_of)
-                    .unwrap_or_default(),
-            ))
+            Ok((id, p.get(1).map(refs_of).unwrap_or_default()))
         };
         // From a whole state: the one after a whole cut, or the one before the first cut by rows.
         let version = |v: &Value| match v {
@@ -2571,7 +2566,8 @@ impl<S: ObjectStore> PublicWriter<S> {
                 // and timers with the delta's rows in place of theirs (a row with no value is gone).
                 rest.clear();
                 for (k, v) in st.iter().filter(|(k, _)| **k != 2) {
-                    let (Some(Value::Array(rows)), Value::Array(old), 3 | 6) = (d.get(k), v, *k) else {
+                    let (Some(Value::Array(rows)), Value::Array(old), 3 | 6) = (d.get(k), v, *k)
+                    else {
                         refs_into(v, rest);
                         continue;
                     };
@@ -3607,10 +3603,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 self.view = view;
                 for (_, record) in self.view.take() {
                     if Carried::read(&record)?.is_none()
-                        && (kept.is_empty()
-                            || !kept.contains(
-                                &seq_at(&self.header, &record)?.0,
-                            ))
+                        && (kept.is_empty() || !kept.contains(&seq_at(&self.header, &record)?.0))
                     {
                         self.records.push(record)
                     }
@@ -3924,10 +3917,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         lap.mark(0);
         prof::count(1, 0, 0);
         if let (Some(before), Some(last)) = (window, self.records.last())
-            && seq_at(&self.header, last)?
-                .1
-                .div_euclid(stream::PERIOD_US)
-                > before
+            && seq_at(&self.header, last)?.1.div_euclid(stream::PERIOD_US) > before
         {
             self.flush()?;
         }
@@ -4258,9 +4248,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         // The end covers every actual public effect in this cut, even across a still interval.
         if let Some(last) = self.records.last() {
-            sp.to = sp
-                .to
-                .max(seq_at(&self.header, last)?.1);
+            sp.to = sp.to.max(seq_at(&self.header, last)?.1);
         }
         // A returned public child can become live without being canonically touched by Return. Bind its
         // actual query version, including zero for an ordinary checkpoint's formerly flying child.
