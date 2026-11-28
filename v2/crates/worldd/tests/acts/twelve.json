@@ -13,7 +13,8 @@
       "ask": ["a", "test:throw_from_end_a_to_end_b", "court"], "code": "field_differs", "facts": null, "next": null },
     { "n": 4, "request": "throw from an end of the court another Soul holds",
       "setup": [["a", "test:play_at_end_a", "court"], ["b", "test:play_at_end_b", "court"]],
-      "ask": ["b", "test:throw_from_end_a_to_end_b", "court"], "code": "not-permitted", "facts": null, "next": null },
+      "ask": ["b", "test:throw_from_end_a_to_end_b", "court"], "code": "not-permitted", "facts": "who may: its end_a", "next": null,
+      "may_name": ["w1"], "why_named": "the holder of end_a, whose link everyone is shown" },
     { "n": 5, "request": "water the planter with empty hands",
       "setup": [],
       "ask": ["a", "test:water", "planter"], "code": "not_holding_kind", "facts": null, "next": null },
@@ -37,7 +38,8 @@
       "setup": [],
       "ask": ["a", "test:dance", "rack"], "code": "form-unknown", "facts": null, "next": null },
     { "n": 12, "request": "take the vessel out of another Soul's hand",
-      "setup": [["a", "test:take", "vessel"]],
-      "ask": ["b", "test:take", "vessel"], "code": "in_hand", "facts": null, "next": null }
+      "setup": [["a", "test:take", "vessel"], ["b", "test:walk", "ground", { "1": { "point": [-40500000, 0, 30000000] } }]],
+      "ask": ["b", "test:take", "vessel"], "code": "in_hand", "facts": null, "next": null,
+      "revised": "first run without the walk: b stood 2.7 m away and was refused out-of-reach, so the setup now walks b beside a" }
   ]
 }

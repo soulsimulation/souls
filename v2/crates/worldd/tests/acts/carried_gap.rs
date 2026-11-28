@@ -216,9 +216,28 @@ fn e16_a_load_carried_across_the_only_way_is_never_walked_through() {
         }
         Err(code) => {
             assert_eq!(code, "goal-unreachable", "{detail:?}");
+            // The walk's ending is the world's `souls:order-ended` entry on the walker, which names the next step.
+            let log = run.store.0.lock().unwrap().bytes.clone();
+            let words: Vec<String> = recover(&log)
+                .unwrap()
+                .records
+                .iter()
+                .filter(|rec| !sim::recorder::is_input(rec))
+                .flat_map(|rec| Part::read(rec).unwrap().effects)
+                .filter(|e| e.envelope.node == w3())
+                .flat_map(|e| e.events.unwrap_or_default())
+                .filter(|v| v.name.as_str() == "souls:order-ended")
+                .flat_map(|v| v.fields.into_values())
+                .filter_map(|f| match f {
+                    Value::Bytes(b) => Some(String::from_utf8_lossy(&b).into_owned()),
+                    Value::Text(t) => Some(t.as_str().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            println!("E16 carried gap: the ending's words {words:?}");
             assert!(
-                detail.as_deref().is_some_and(|d| d.contains("next:")),
-                "naming its next step: {detail:?}"
+                words.iter().any(|w| w.contains("next:")),
+                "naming its next step: {words:?} {detail:?}"
             );
         }
     }

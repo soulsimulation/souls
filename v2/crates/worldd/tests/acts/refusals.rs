@@ -26,6 +26,12 @@ fn arguments(v: Option<&Json>) -> BTreeMap<u64, Value> {
             Value::Text(name(&full(kind, 0xfe)))
         } else if let Some(text) = a.get("name").and_then(Json::str) {
             Value::Text(name(text))
+        } else if let Some(p) = a.get("point").and_then(Json::arr) {
+            let at = |k: usize| match p[k] {
+                Json::Int(n) => i64::try_from(n).unwrap(),
+                _ => panic!("a point's µm"),
+            };
+            point(Vec3::new(at(0), at(1), at(2)))[&1].clone()
         } else {
             let ids = a.get("ids").and_then(Json::arr).expect("ids");
             Value::Array(
@@ -130,11 +136,14 @@ fn one(case: &Json) -> (String, Vec<String>) {
         {
             wrong.push(format!("{n}: the detail {detail:?} does not say {f:?}"));
         }
-        // A4: the detail names only what the asker named or is.
+        // A4: the detail names only what the asker named or is, and what the table says everyone may see.
         let mut may: BTreeSet<String> = [if by_a { w1() } else { w2() }, target]
             .iter()
             .map(|i| replica::world_model::show(*i))
             .collect();
+        for i in case.get("may_name").and_then(Json::arr).unwrap_or(&[]) {
+            may.insert(replica::world_model::show(node(i.str().unwrap())));
+        }
         for (_, a) in args.as_ref().and_then(Json::obj).unwrap_or(&[]) {
             for i in a.get("ids").and_then(Json::arr).unwrap_or(&[]) {
                 may.insert(replica::world_model::show(node(i.str().unwrap())));

@@ -3343,6 +3343,11 @@ impl Acts {
             .filter_map(|e| {
                 let why = self.blocked.remove(&e.body);
                 let why = why.filter(|_| e.how.as_str() == BLOCKED).or(e.why);
+                // E16 (#2787): every refusal says its facts; a hand step's ends by name alone.
+                let why = why.or_else(|| {
+                    (e.how.as_str() == "not-held")
+                        .then(|| "the thing is not in the body's hand".to_owned())
+                });
                 let id = self.runs.remove(&e.run)?;
                 self.timer_runs.remove(&id);
                 Some((id, e.how.as_str().to_owned(), why))
