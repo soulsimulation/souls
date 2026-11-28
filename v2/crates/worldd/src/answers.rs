@@ -5746,9 +5746,16 @@ impl Clock {
         // 0.133: how far from its target a done walk ended, mm, taken however the move ends
         let away = self.bodies.as_mut().and_then(|b| b.away(id));
         // #5254: a walk to a point that ended short of it, sent again while bodies moved, never answers as arrived.
-        let stopped = self.bodies.as_mut().and_then(|b| b.stopped_short.remove(&id));
+        let stopped = self
+            .bodies
+            .as_mut()
+            .and_then(|b| b.stopped_short.remove(&id));
         // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
-        let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id)).is_some();
+        let moved = self
+            .bodies
+            .as_mut()
+            .and_then(|b| b.goal_moved.remove(&id))
+            .is_some();
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
@@ -7871,7 +7878,7 @@ fn edit_checker(
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
                                     // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
                                     crate::edit_joins::with_joins(
-                                        &mut e, &copy, world, &structure, ground,
+                                        &mut e, &copy, world, &structure,
                                     )?;
                                     edit::check(e, &copy, world)
                                 })

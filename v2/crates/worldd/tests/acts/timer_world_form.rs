@@ -324,3 +324,88 @@ fn i3991_a_timer_whose_thing_was_removed_writes_nothing() {
     );
     run.stop();
 }
+
+/// The log's timer records, in order: each one's world time, its due time when it sets one (none when it clears),
+/// and the timer it names.
+fn timer_records(run: &Run) -> Vec<(i64, Option<i64>, Id)> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut out = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            if let Body::Timers(ts) = &e.body {
+                for t in ts {
+                    out.push(match t {
+                        replica::effects::TimerRec::Set { timer, due, .. } => {
+                            (e.envelope.at, Some(*due), *timer)
+                        }
+                        replica::effects::TimerRec::Clear { timer } => {
+                            (e.envelope.at, None, *timer)
+                        }
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #3991 (2), the replacement half: the bell is rung, and rung again a second later while its first fade is pending.
+/// The second ring's timer replaces the first (a form's timer clears the pending timers of the same name on its thing,
+/// C24): the first is cleared at the second ring, before it was due, and never fires; the second fires at its own,
+/// later deadline, and its fade clears the flag. Read from the log: four timer records and no refusal.
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn i3991_a_timer_set_again_while_pending_fires_once_at_the_later_deadline() {
+    let (run, mut a, _) = serve("i3991-again");
+    let rung = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(!rung.expect("the ring lands").is_empty(), "one receipt");
+    std::thread::sleep(Duration::from_secs(1));
+    let again = a.act("test:ring", Some(rack()), BTreeMap::new());
+    assert!(
+        !again.expect("the second ring lands").is_empty(),
+        "one receipt"
+    );
+    assert_eq!(ringing(&run), 1, "ringing");
+    let t0 = std::time::Instant::now();
+    while ringing(&run) == 1 && t0.elapsed() < Duration::from_secs(8) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // A moment more, for a second fire that should not come.
+    std::thread::sleep(Duration::from_millis(500));
+    let records = timer_records(&run);
+    let refused = rack_events(&run, worldd::acts::TIMER_REFUSED);
+    println!("#3991 set again: timer records {records:?}, refused {refused:?}");
+    assert_eq!(records.len(), 4, "two sets and two clears: {records:?}");
+    let (set1, first_due, first) = records[0];
+    let (cleared, none, cleared_timer) = records[1];
+    let (set2, later, second) = records[2];
+    let (fired, none2, fired_timer) = records[3];
+    let (first_due, later) = (first_due.expect("a set"), later.expect("a set"));
+    assert_eq!((none, none2), (None, None), "then two clears");
+    assert_ne!(first, second, "a new timer");
+    assert_eq!(cleared_timer, first, "the first timer is the one cleared");
+    assert_eq!(
+        cleared, set2,
+        "cleared by the second ring, as it set the new one"
+    );
+    assert!(
+        cleared < first_due,
+        "before the first was due: {cleared} < {first_due}"
+    );
+    assert!(
+        set1 < set2 && later > first_due,
+        "the second deadline is the later one"
+    );
+    assert_eq!(
+        (fired, fired_timer),
+        (later, second),
+        "the second fired at its own deadline"
+    );
+    assert!(refused.is_empty(), "nothing refused");
+    assert_eq!(ringing(&run), 0, "the fade cleared the flag");
+    run.stop();
+}

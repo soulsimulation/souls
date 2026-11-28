@@ -250,7 +250,7 @@ export const FIX = {
   'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it (a kind with solids only into a hand), and timers that start each other wait 50 ms or more',
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
-  'kind.field-reserved': 'number your kind\'s state fields from 28 to 79: higher numbers are the engine\'s own (marks, a tint, schedules)',
+  'kind.field-reserved': 'number your kind\'s state fields from 28 to 79: lower numbers are a thing\'s own facts (27 names the entry it borrows) and higher ones the engine\'s (marks, a tint, schedules)',
   'kind.collision':'that kind is defined already: place it by the full name describe lists',
   'kind.model': 'looks.model names an upload as "upload:1220<64 hex>", the hash upload answered',
   'kind.model-unknown': 'upload the model first (souls-god upload <file>) and name the hash it answers; a held upload cannot be used until it is released',
@@ -522,6 +522,7 @@ export function withJoins(ops, entries) {
     const plain = String(o.kind).replace(/@.*$/, '');
     const declared = Object.keys(entries?.[plain]?.links ?? {})[0];
     if (!Array.isArray(joins) || !joins.length) throw usage('joins: a list of the parts it joins (ids, or earlier names in the batch)');
+    if (!Number.isInteger(o.name)) throw usage('a place with joins has a "name" number, its joints\' first end');
     if (!declared) throw Object.assign(new Error(`${plain} declares no joint: its joins cannot be named`), { code: 'joint-undeclared' });
     const type = `${plain.split(':')[0]}:${declared}`;
     out.push(place);
