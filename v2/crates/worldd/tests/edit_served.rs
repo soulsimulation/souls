@@ -3126,11 +3126,15 @@ fn a2_parts_rest_at_the_grounds_height() {
         let (p, q) = frame_ends_of(&w, fa);
         if what.contains("again") {
             for (k, s) in w.souls.iter().enumerate() {
-                let b = body_of(&w, *s);
                 let (copy, _) = served_copy(&w);
-                let here = copy.tree().handle(b).is_some();
+                let t = copy.tree();
+                let b = t
+                    .links_at(*s)
+                    .iter()
+                    .filter(|e| t.ty(e).as_str() == "souls:body-of")
+                    .find_map(|e| Some(t.link(e.link)?.1[0]));
                 drop(copy);
-                println!("{what}: Soul {} at {:?}, in the world {here}", k + 1, body_at(&w, b));
+                println!("{what}: Soul {} body {b:?} at {:?}", k + 1, b.map(|b| body_at(&w, b)));
             }
             println!("{what}: its ends {p:?} {q:?}");
         }
