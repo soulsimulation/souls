@@ -369,6 +369,11 @@ impl Measures {
         AUDIT.json(&mut o);
         STREAM.json("stream", &mut o);
         let _ = write!(o, ",\"stream_queue\":{{{}}}", STREAM_QUEUE.fields());
+        let shown = STREAM_SHOWN_WALL_MS.load(Ordering::Relaxed);
+        if shown != i64::MIN {
+            let now = i64::try_from(unix_ms).unwrap_or(i64::MAX);
+            let _ = write!(o, ",\"stream_behind_ms\":{}", now.saturating_sub(shown).max(0));
+        }
         BACKUP.json("stream_backup", &mut o);
         CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
@@ -804,6 +809,12 @@ pub static ARCHIVE_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
 /// #2803): the records waiting in its channel and their bytes (at most its window), and the records past them left in
 /// the log for it to read. `in_log` that stays above 0 is a stream behind the world.
 pub static STREAM_QUEUE: Backlog = Backlog(Mutex::new((0, 0, 0)));
+
+/// How far the public stream is behind the world (`stream_behind_ms` in `health.json`): the wall time at which the
+/// newest world time its pointer names fell, set by `worldd serve`'s stream thread after each write
+/// ([`crate::view_out::PublicWriter::shown_wall_ms`]); `i64::MIN`, no field, before its first. The health writer
+/// reports the wall time now less this, so a stream that has stopped writing shows ever further behind.
+pub static STREAM_SHOWN_WALL_MS: AtomicI64 = AtomicI64::new(i64::MIN);
 
 impl Backlog {
     /// The backlog as it stands now.

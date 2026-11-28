@@ -1280,6 +1280,10 @@ pub struct PublicWriter<S> {
     /// The world time a still world's pointer was last brought up to (its quiet time, or the newest part's end), so
     /// [`PublicWriter::idle`] writes it every [`PUBLIC_QUIET_EVERY_US`] (rule 11), not each 20 ms.
     quiet_from: Option<Micros>,
+    /// The wall time, ms, at which the newest world time the pointer last published (its newest part's end, or the
+    /// quiet time it is still up to) fell, by that pointer's own anchor; `i64::MIN` before the first. How far a viewer
+    /// is behind the world is the wall time now less this (`stream_behind_ms` in `health.json`).
+    shown_wall_ms: std::sync::atomic::AtomicI64,
     /// The world's closed kinds (#3948) and the containers and things it follows them by, for the entries.
     closed_kinds: Closed,
     inside: Inside,
@@ -1827,6 +1831,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             still_at: None,
             asleep: None,
             quiet_from: None,
+            shown_wall_ms: std::sync::atomic::AtomicI64::new(i64::MIN),
             closed_kinds: closed,
             inside,
             hides: true,
@@ -4115,7 +4120,19 @@ impl<S: ObjectStore> PublicWriter<S> {
         if let Some(due) = self.asleep {
             value.insert(11, Value::Array(due.map(int).into_iter().collect()));
         }
-        write_whole(&self.dir.join(POINTER), &wire(Value::Map(value))?)
+        write_whole(&self.dir.join(POINTER), &wire(Value::Map(value))?)?;
+        if let Some(shown) = self.last_to.max(quiet) {
+            let behind = world.saturating_sub(shown).div_euclid(1000);
+            self.shown_wall_ms.store(
+                wall.div_euclid(1000).saturating_sub(behind),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        Ok(())
+    }
+    /// The wall time, ms, at which the newest world time this stream's pointer names fell; none before its first.
+    pub fn shown_wall_ms(&self) -> Option<i64> {
+        Some(self.shown_wall_ms.load(std::sync::atomic::Ordering::Relaxed)).filter(|w| *w != i64::MIN)
     }
     /// Before the world exits to sleep (#2731, rule 13): what is open is written, and the pointer says the world is
     /// still up to now and until `next_due`, the world time of its next due change (none: nothing is due). Refused
