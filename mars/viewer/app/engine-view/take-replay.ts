@@ -544,7 +544,7 @@ export class TakePeople {
       let owners=this.clipOwnerStreams.get(take);
       if(!owners){
         owners=new Map();
-        const fields=new Set(['hands','grip','on','prop','instrument','partner','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
+        const fields=new Set(['hands','grip','on','prop','instrument','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
         for(const [tick,id,field,value]of take.changes)if(fields.has(field)&&value&&(typeof value!=='object'||Object.keys(value).length)){
           let ticks=owners.get(id);if(!ticks)owners.set(id,(ticks=[]));ticks.push(tick);
         }
