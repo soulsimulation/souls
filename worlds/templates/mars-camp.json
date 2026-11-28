@@ -4425,7 +4425,7 @@
       ]
     },
     {
-      "note": "the deck yard (racks T2): the scripted build's piles (mars/viewer/engine/scenarios/build-bay.ts) west of the plywood stack: two 12 ft frames and four 9 ft beams, five 2x4 joists and two plywood sheets, the site of one deck bay and a stair flight (its treads part of it) beside it; the frames stand, since a template places things upright (content/kinds/construction; content/worlds/mars/map.json names each copy's kind)",
+      "note": "the deck yard (racks T2): the scripted build's piles (mars/viewer/engine/scenarios/build-bay.ts) west of the plywood stack: two 12 ft frames and four 9 ft beams, five 2x4 joists and two plywood sheets, the site of one deck bay and a stair flight (its treads part of it) beside it; the frames lie flat (content/kinds/construction; content/worlds/mars/map.json names each copy's kind)",
       "group": "deck",
       "ops": [
         {
@@ -5158,6 +5158,11 @@
           "p": [
             -30.0,
             19.0
+          ],
+          "r": [
+            3.141592653589793,
+            1.5707963267948966,
+            0
           ]
         },
         {
@@ -5167,6 +5172,11 @@
           "p": [
             -30.0,
             21.5
+          ],
+          "r": [
+            3.141592653589793,
+            1.5707963267948966,
+            0
           ]
         },
         {
