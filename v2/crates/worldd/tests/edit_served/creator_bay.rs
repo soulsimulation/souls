@@ -2,7 +2,7 @@
 //! into that slot makes (`worldd::edit_joins`), so one batch that places the camp's deck kinds in the order a crew
 //! builds them (frames, beams, joists, sheets, the stair) is accepted, each part joined as a put joins it, and one that
 //! places a beam before the frames is refused `support.none`, naming the beam's operation, its kind and its slot.
-use super::deck::refused_as;
+use super::deck::{body_on, refused_as};
 use super::*;
 use std::collections::BTreeSet;
 
@@ -132,6 +132,7 @@ const BUILT: [(&str, &str); 14] = [
 struct Site {
     w: Seeded,
     _s: Served,
+    socket: PathBuf,
     maker: Ws,
     actor: Actor,
     bay: Id,
@@ -141,13 +142,17 @@ struct Site {
 
 impl Site {
     async fn serve(tag: &str) -> Site {
+        Site::serve_souls(tag, 1).await
+    }
+
+    async fn serve_souls(tag: &str, souls: u64) -> Site {
         let d = scratch(tag);
         let (facts, slots) = bay_only(&d);
         let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
         let w = seed_entries(
             &d,
             &facts,
-            1,
+            souls,
             ((x - 4_000) / 1000, (z - 5_000) / 1000),
             Some(&d.join("entries")),
         );
@@ -174,6 +179,7 @@ impl Site {
         Site {
             w,
             _s: s,
+            socket,
             maker,
             actor,
             bay,
@@ -363,4 +369,161 @@ async fn a_creators_named_joins_are_kept_unfiltered_and_checked_as_a_puts() {
     ops.push(bad);
     let got = site.edit(2, ops).await;
     refused_as(&got, "edit.link", "a bare link with a field");
+}
+
+/// The floors a placed part holds (the import's, or a creator's place's ways): `(floor, its level, ground only while
+/// joined)`.
+fn floors_of(w: &Seeded, part: Id) -> Vec<(Id, i64, bool)> {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    t.children(t.handle(part).unwrap())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|h| t.node(*h))
+        .filter(|n| replica::world_model::plain(n.kind().as_str()) == sim::ground::scene::FLOOR)
+        .map(|n| {
+            let level = match n.fields().get(&import_eden::F_LEVEL) {
+                Some(Value::Uint(l)) => *l as i64,
+                _ => -1,
+            };
+            (
+                n.id(),
+                level,
+                n.fields().contains_key(&import_eden::F_WHILE_JOINED),
+            )
+        })
+        .collect()
+}
+
+/// Lane C: a creator-placed bay is walked as a seeded one is. Its parts bring the floors and the stair and ladder
+/// rows their kinds declare (as the import gives a seeded thing), so after the creator places the whole deck bay in
+/// one batch, a Soul walks from the open ground up the stair onto the first sheet's top, and another climbs frame 1's
+/// ladder to its outer 1.8 m standing place.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_frame() {
+    let mut site = Site::serve_souls("creator-bay-walk", 2).await;
+    let ops: Vec<Op> = BUILT
+        .iter()
+        .enumerate()
+        .map(|(k, (kind, slot))| site.place(k as u64 + 1, kind, slot))
+        .collect();
+    let got = site.edit(1, ops).await;
+    assert_eq!(got.kind, 1, "the built bay is accepted: {got:?}");
+    let part = |k: usize| got.names[&(k as u64 + 1)];
+    let (frame, sheet, _flight) = (part(0), part(11), part(13));
+    let deck = floors_of(&site.w, sheet);
+    let deck = deck
+        .iter()
+        .find(|f| f.1 == 1)
+        .expect("the sheet's top, a floor")
+        .0;
+    let g = site.w.ground;
+    let mut hands: Vec<Hand> = site
+        .w
+        .souls
+        .iter()
+        .map(|s| Hand::new(&site.socket, &site.w, *s))
+        .collect();
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let at = |dx: i64, dz: i64| v3((x + dx) * 1000, 0, (z + dz) * 1000);
+
+    // Soul 1 to the flight's foot (west of the bay, its top at the sheets' west edge), then up onto the first sheet's
+    // top, past the stair's top.
+    hands[0].walk_to(g, at(-4_500, -717));
+    let e = socket_end(&mut hands[0].s);
+    assert_eq!(e.kind, 1, "Soul 1 to the flight's foot: {e:?}");
+    let to = BTreeMap::from([(1, Value::Array(vec![int(400_000), int(19_000), int(0)]))]);
+    hands[0].send("eden:walk", deck, to);
+    let e = socket_end(&mut hands[0].s);
+    println!("Soul 1 up the stair onto the deck: {e:?}");
+    assert_eq!(e.kind, 1, "up the stair onto the deck: {e:?}");
+    let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[0]));
+    assert_eq!((on, p.y), (deck, 19_000), "on the sheet's top");
+
+    // Soul 2 climbs frame 1's ladder to its outer standing place (frame 1 stands at the bay's -z end). The frame's
+    // standing places are its kind's floors 1 and 2, at z -488 and +488 mm in its frame: the outer is the one farther
+    // from the bay's middle.
+    let place_z = |frame_z: i64| {
+        let (copy, _) = served_copy(&site.w);
+        let t = copy.tree();
+        let x = sim::ground::scene::xform_to(t, t.handle(frame).unwrap(), t.handle(g).unwrap())
+            .unwrap();
+        x.point(v3(0, 0, frame_z)).unwrap().z
+    };
+    let (face, level) = match place_z(-488_000) < place_z(488_000) {
+        true => (-488_000, 1),
+        false => (488_000, 2),
+    };
+    let perch = floors_of(&site.w, frame)
+        .into_iter()
+        .find(|f| f.1 == level && f.2)
+        .expect("the outer standing place, ground while joined")
+        .0;
+    hands[1].walk_to(g, at(0, -3_900));
+    let e = socket_end(&mut hands[1].s);
+    assert_eq!(e.kind, 1, "Soul 2 to the ladder's foot: {e:?}");
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(face)]))]);
+    hands[1].send("eden:walk", perch, to);
+    let e = socket_end(&mut hands[1].s);
+    println!("Soul 2 climbs frame 1: {e:?}");
+    assert_eq!(e.kind, 1, "the climb ends on the standing place: {e:?}");
+    let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[1]));
+    assert_eq!(
+        (on, p.y),
+        (perch, 1_800_000),
+        "on the frame's 1.8 m standing place"
+    );
+}
+
+/// Lane C: nothing is placed onto a Soul. A stair flight placed on the open ground with a Soul standing in its tread
+/// lane (between its stringers, where the flight's own walk boxes leave the way open) is refused `edit.would-bury`,
+/// naming the Soul, and nothing is placed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_flight_placed_where_a_soul_stands_in_its_tread_lane_is_refused() {
+    let mut site = Site::serve_souls("creator-bay-bury", 1).await;
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let g = site.w.ground;
+    let mut hand = Hand::new(&site.socket, &site.w, site.w.souls[0]);
+    // 4 m west of the bay, the Soul where the flight's lane will be.
+    let at = v3((x - 4_000) * 1000, 0, (z - 717) * 1000);
+    hand.walk_to(g, at);
+    let e = socket_end(&mut hand.s);
+    assert_eq!(e.kind, 1, "the Soul to the place: {e:?}");
+    let body = body_of(&site.w, site.w.souls[0]);
+    let (_, feet) = body_on(&site.w, body);
+    let ops = vec![Op::Place {
+        name: 1,
+        kind: site.kinds["mars:stair_flight"].clone(),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: v3(feet.x + 300_000, 0, feet.z),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    }];
+    let got = site.edit(1, ops).await;
+    refused_as(
+        &got,
+        "edit.would-bury",
+        "a flight placed on a standing Soul",
+    );
+    let body = body_of(&site.w, site.w.souls[0]);
+    assert!(
+        got.detail.contains(&replica::world_model::show(body)),
+        "names the Soul: {got:?}"
+    );
+    let (copy, _) = served_copy(&site.w);
+    let t = copy.tree();
+    assert!(
+        t.children(t.handle(site.bay).unwrap())
+            .unwrap_or(&[])
+            .is_empty(),
+        "nothing placed"
+    );
 }

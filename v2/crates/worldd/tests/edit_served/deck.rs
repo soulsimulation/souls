@@ -506,7 +506,7 @@ fn deck_joists_on_rails_take_a_sheet_and_a_joist_under_it_stays_until_the_sheet_
 }
 
 /// Where body `body` last was, as the log's body rows have it: the node it stands on and its place there.
-fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
+pub(super) fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
     let mut at = None;
     for p in logged(w) {
         if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
@@ -1336,4 +1336,121 @@ fn deck_bay_a_soul_walking_up_the_stair_writes_its_place_every_tick_on_the_fligh
             .all(|w| w[1].2.y >= w[0].2.y && w[1].0 - w[0].0 <= 200_000),
         "rising, one every 200 ms"
     );
+}
+
+/// Where body `body` stands in the open ground's frame (µm), from its last body row.
+fn body_in_ground(w: &Seeded, body: Id) -> Vec3 {
+    let (node, at) = body_on(w, body);
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    sim::ground::scene::xform_to(t, t.handle(node).unwrap(), t.handle(w.ground).unwrap())
+        .unwrap()
+        .point(at)
+        .unwrap()
+}
+
+/// FOR-FABLE 14, a walk to a point on the ground (`walk x,z` in the client: `eden:walk` on the open ground with the
+/// point, its height not read), in a served world by a Soul's intents:
+///
+/// - Soul 5 climbs frame 1 to its 1.8 m standing place;
+/// - sent to the point on the plan where it stands, it stays on the place: the standing place is the ground there
+///   nearest its own level, not the open ground 1.8 m below;
+/// - sent to a point on the open ground 2 m out from the frame's foot, it climbs down by the ordinary planner and
+///   ends there, on the open ground;
+/// - sent to a point with no ground under it (far off the world's ground), it is refused `walk.no-ground-there`,
+///   which says so, and stays where it is.
+#[test]
+fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m_from_its_foot() {
+    let mut k = Bay::serve("deck-walk-point", 5);
+    k.frame();
+    let g = k.w.ground;
+    let perch = k.places[0][0];
+    k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let up = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
+    k.hands[4].send("eden:walk", perch, up);
+    let got = socket_end(&mut k.hands[4].s);
+    k.ok(got, "Soul 5 climbs to the 1.8 m standing place");
+    assert_eq!(body_on(&k.w, walker).0, perch, "on the standing place");
+
+    // The point on the plan where it stands: the standing place is the level there nearest its own.
+    let here = body_in_ground(&k.w, walker);
+    let to = |p: Vec3| BTreeMap::from([(1, Value::Array(vec![int(p.x), int(0), int(p.z)]))]);
+    k.hands[4].send("eden:walk", g, to(here));
+    let got = socket_end(&mut k.hands[4].s);
+    k.ok(got, "Soul 5 sent to the point under it");
+    let (on, at) = body_on(&k.w, walker);
+    assert_eq!(
+        (on, at.y),
+        (perch, 1_800_000),
+        "it stays up, on the standing place"
+    );
+
+    // Down to a point on the open ground 2 m out from the frame's foot (frame 1 stands at the bay's -z end).
+    let foot = Bay::at(0, -1_448 - 2_000);
+    k.hands[4].send("eden:walk", g, to(foot));
+    let got = socket_end(&mut k.hands[4].s);
+    k.ok(got, "Soul 5 walks down to 2 m from the frame's foot");
+    let (on, at) = body_on(&k.w, walker);
+    assert_eq!(on, g, "on the open ground");
+    let off = (i128::from(at.x - foot.x).pow(2) + i128::from(at.z - foot.z).pow(2)).isqrt();
+    println!("ended {off} µm from the point");
+    assert!(off <= 400_000, "at the point: {off} µm off it");
+
+    // A point with no ground under it.
+    let nowhere = v3(foot.x + 50_000_000_000, 0, foot.z);
+    k.hands[4].send("eden:walk", g, to(nowhere));
+    let got = socket_end(&mut k.hands[4].s);
+    refused_as(
+        &got,
+        "walk.no-ground-there",
+        "Soul 5 sent off the world's ground",
+    );
+    assert!(
+        got.detail.contains("no ground to stand on"),
+        "says so: {got:?}"
+    );
+    assert_eq!(body_on(&k.w, walker).0, g, "it stays where it was");
+
+    // A point 2 m inside the ring's solid middle (`testworld`): refused, naming the nearest point to stand on, which
+    // a walk then reaches.
+    let solid = v3(
+        (testworld::RING_X - testworld::RING_MIDDLE / 2 + 2_000) * 1000,
+        0,
+        0,
+    );
+    k.hands[4].send("eden:walk", g, to(solid));
+    let got = socket_end(&mut k.hands[4].s);
+    refused_as(
+        &got,
+        "walk.no-ground-there",
+        "Soul 5 sent into the ring's solid middle",
+    );
+    let named = got
+        .detail
+        .split("the nearest point to stand on: ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("names the nearest point: {got:?}"));
+    let mm = |k: &str| -> i64 {
+        named
+            .split(k)
+            .nth(1)
+            .unwrap()
+            .split([' ', ';'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let near = v3(mm("x=") * 1000, 0, mm("z=") * 1000);
+    let off = (i128::from(near.x - solid.x).pow(2) + i128::from(near.z - solid.z).pow(2)).isqrt();
+    println!("the nearest point named: {near:?}, {off} µm from the point asked");
+    assert!(
+        off > 400_000 && off <= 7_000_000,
+        "between 0.4 m and 7 m off: {off}"
+    );
+    k.hands[4].send("eden:walk", g, to(near));
+    let got = socket_end(&mut k.hands[4].s);
+    k.ok(got, "Soul 5 walks to the point named");
+    assert_eq!(body_on(&k.w, walker).0, g, "on the open ground there");
 }
