@@ -1249,58 +1249,59 @@ fn deck_bay_a_soul_walking_up_the_stair_writes_its_place_every_tick_on_the_fligh
     for s in &samples[samples0..] {
         println!("  {} {} {:?} {:?} {:?}", s.0, show(s.1), s.2, s.3, s.4);
     }
-    // On the flight: the rows between its last on the ground at the foot and its first on the deck.
-    let walk = &rows[rows0..];
-    let first_deck = walk
-        .iter()
-        .position(|r| r.1 == decks[0])
-        .expect("a row on the deck");
-    let climb: Vec<_> = walk[..first_deck]
-        .iter()
-        .skip_while(|r| r.2.y == 0)
-        .collect();
-    println!("{} rows on the flight", climb.len());
-    assert!(
-        climb.len() >= 20,
-        "a row every tick on the flight: {}",
-        climb.len()
-    );
-    for w in climb.windows(2) {
-        assert_eq!(w[1].0, w[0].0 + 1, "one a tick: {w:?}");
-        assert!(w[1].2.y >= w[0].2.y, "rising: {w:?}");
-        assert!(
-            (w[1].2.y - w[0].2.y) <= 70_000,
-            "no jump between ticks: {w:?}"
-        );
+    // On the flight: its rows on the link, each with the tick, its place, the link and how far along it.
+    let mut on: Vec<(u64, Vec3, Id, u32)> = Vec::new();
+    for p in logged(&k.w) {
+        let Some(Value::Uint(t)) = p.rest.get(&answers::TICK) else {
+            continue;
+        };
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for r in rows {
+                if let (Some((b, pose, _)), Some((l, along))) =
+                    (worldd::bodies::read_row(r), worldd::bodies::read_link(r))
+                    && b == walker
+                {
+                    on.push((*t, pose.position, l, along));
+                }
+            }
+        }
     }
-    // Each row on the flight names the link and how far along it, from near its foot to its end.
-    let on: Vec<(Id, u32)> = logged(&k.w)
-        .iter()
-        .filter_map(|p| match p.rest.get(&answers::BODIES) {
-            Some(Value::Array(rows)) => Some(rows.clone()),
-            _ => None,
-        })
-        .flatten()
-        .filter(|r| worldd::bodies::read_row(r).is_some_and(|(b, ..)| b == walker))
-        .filter_map(|r| worldd::bodies::read_link(&r))
-        .collect();
     println!(
         "{} rows on the link, along {:?} .. {:?}",
         on.len(),
-        on.first(),
-        on.last()
+        on.first().map(|r| r.3),
+        on.last().map(|r| r.3)
     );
-    assert_eq!(
-        on.len(),
-        climb.len(),
-        "every row on the flight names its link"
-    );
-    assert!(on.iter().all(|(l, _)| *l == on[0].0), "one link");
-    assert!(on.windows(2).all(|w| w[1].1 >= w[0].1), "on along it");
     assert!(
-        on.last().unwrap().1 >= 950_000,
+        on.len() >= 20,
+        "a row every tick on the flight: {}",
+        on.len()
+    );
+    assert!(on.iter().all(|r| r.2 == on[0].2), "one link");
+    for w in on.windows(2) {
+        assert_eq!(w[1].0, w[0].0 + 1, "one a tick: {w:?}");
+        assert!(w[1].1.y >= w[0].1.y, "rising: {w:?}");
+        assert!(
+            w[1].1.y - w[0].1.y <= 70_000,
+            "no jump between ticks: {w:?}"
+        );
+        assert!(w[1].3 >= w[0].3, "on along it: {w:?}");
+    }
+    assert!(
+        on.last().unwrap().3 >= 950_000,
         "to its end: {:?}",
         on.last()
+    );
+    assert!(
+        on.last().unwrap().1.y >= 1_900_000,
+        "up to the deck: {:?}",
+        on.last()
+    );
+    // Then off the link, on the deck.
+    let last = on.last().unwrap().0;
+    assert!(
+        rows[rows0..].iter().any(|r| r.0 > last && r.1 == decks[0]),
+        "its next row on the deck"
     );
     // The node's motion samples on the flight rise with it, as a walk's do, at least one every 200 ms.
     let up: Vec<_> = samples[samples0..]

@@ -6468,14 +6468,14 @@ fn answer_loop<S: Storage + 'static>(
     }
 }
 
-/// What a restart reads back from the log besides the tree: each body's last pose and the last tick logged.
+/// What a restart reads back from the log besides the tree: each body's last pose off a link and the last tick logged.
 fn read_back(part: &Part, placed: &mut Placed, last: &mut Option<i64>) {
     if let Some(Value::Array(rows)) = part.rest.get(&BODIES) {
         // A row on a link (FOR-FABLE 8) is where a body was on a stair or a ladder: a restart stands it where its last
         // row off the link has it.
         for (id, pose, stance) in rows
             .iter()
-            .filter(|r| bodies::read_link(r).is_none())
+            .filter(|r| !bodies::on_link(r))
             .filter_map(bodies::read_row)
         {
             placed.insert(id, (pose, stance));
@@ -8131,6 +8131,63 @@ fn io(e: std::io::Error) -> Refusal {
     Refusal {
         name: "thread",
         detail: e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod read_back_tests {
+    use super::*;
+    use replica::ids::Scope;
+    use replica::pose::{Frame, Quat, Support};
+
+    /// FOR-FABLE 8: a restart reads no body row on a link. A body's row on the ground, then its rows up a stair (one
+    /// well formed, one not), stand it where the ground row has it.
+    #[test]
+    fn a_restart_stands_a_body_where_its_last_row_off_a_link_has_it() {
+        let id = |n| Id::new(Scope([7; 16]), n).unwrap();
+        let (body, link, ground) = (id(1), id(2), id(3));
+        let foot = Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: Vec3::new(1_000_000, 0, 2_000_000),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        };
+        let up = Pose {
+            position: Vec3::new(1_500_000, 400_000, 2_000_000),
+            ..foot
+        };
+        let bad = Value::Array(vec![
+            body.to_value(),
+            up.to_value(),
+            Value::Array(vec![Value::Uint(1)]),
+        ]);
+        let rows = vec![
+            bodies::row(body, &foot, None),
+            bodies::row_on(body, &up, (link, 250_000)),
+            bad,
+        ];
+        assert_eq!(bodies::read_link(&rows[1]), Some((link, 250_000)));
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(vec![0; 32])),
+            (2, Value::Array(Vec::new())),
+            (BODIES, Value::Array(rows)),
+            (TICK, Value::Uint(9)),
+        ]));
+        let part = Part::read(&replica::encode::encode(&v).unwrap()).unwrap();
+        let (mut placed, mut last) = (Placed::new(), None);
+        read_back(&part, &mut placed, &mut last);
+        assert_eq!(
+            placed.get(&body),
+            Some(&(foot, None)),
+            "stood at its row off the link"
+        );
+        assert_eq!(last, Some(9));
     }
 }
 

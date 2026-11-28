@@ -25,8 +25,8 @@
 //!   crew's node at carrying height, not at the foot) is set down standing, as a carry's is.
 
 use replica::effects::{Actor, Cause};
-use replica::encode::Value;
 use replica::ids::Id;
+use replica::encode::Value;
 use replica::pose::{Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
@@ -113,11 +113,7 @@ fn unslide(ra: &mut Raising, now: Micros) {
         return;
     };
     let base = ra.geo.lifter_at(0);
-    let lifter = Vec3::new(
-        base.x + p.x - ra.geo.foot.x,
-        base.y,
-        base.z + p.z - ra.geo.foot.z,
-    );
+    let lifter = Vec3::new(base.x + p.x - ra.geo.foot.x, base.y, base.z + p.z - ra.geo.foot.z);
     match Raise::down(ra.geo.spec, p, q, Some(ra.geo.along), lifter) {
         Ok(g) => {
             ra.geo = g;
@@ -204,10 +200,7 @@ impl Engine {
             under.or_else(carried).ok_or_else(|| {
                 refusal(
                     "raise-needs-a-part",
-                    format!(
-                        "{} holds no part; next: name the part (part lower <crew> <part>)",
-                        show(activity)
-                    ),
+                    format!("{} holds no part; next: name the part (part lower <crew> <part>)", show(activity)),
                 )
             })
         };
@@ -302,12 +295,7 @@ impl Engine {
                 Some(self.raise_slot(tree, ground, bay, *k, &geo, part)?)
             }
             (_, None, None) => None,
-            _ => {
-                return Err(refusal(
-                    "raise-into",
-                    "parameters 4 and 5: a bay and its slot",
-                ));
-            }
+            _ => return Err(refusal("raise-into", "parameters 4 and 5: a bay and its slot")),
         };
         let mut ra = Raising {
             geo,
@@ -388,9 +376,7 @@ impl Engine {
             .find(|(n, _)| *n == k)
             .map(|(_, p)| p)
             .ok_or_else(|| refusal("slot.unknown", format!("{} has no slot {k}", show(bay))))?;
-        let turn = xform_to(tree, bh, gh)
-            .map_err(|e| refusal("part-pose", e))?
-            .rot;
+        let turn = xform_to(tree, bh, gh).map_err(|e| refusal("part-pose", e))?.rot;
         if let Some(other) = tree
             .children(bh)
             .unwrap_or(&[])
@@ -407,8 +393,7 @@ impl Engine {
         let pose = |e| refusal("part-pose", format!("{e:?}"));
         let x = |q: Quat| q.rotate(Vec3::new(M, 0, 0)).map_err(pose);
         let (a, b) = (x(geo.stand)?, x(turn)?);
-        let mut cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z))
-            * 1000
+        let mut cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z)) * 1000
             / (i128::from(M) * i128::from(M));
         // A part the same turned a half turn (`symmetry` `front_back`) is seated turned the nearer way (#5067).
         let mut turn = turn;
@@ -507,7 +492,8 @@ impl Engine {
                 }
                 let said = self.raise_holds(&ra, phase, now).and_then(|h| {
                     self.activities.next = tree.next();
-                    self.activities.carry_grips(&mut tree, r.activity, &h, word)
+                    self.activities
+                        .carry_grips(&mut tree, r.activity, &h, word)
                 });
                 if let Err(e) = said {
                     eprintln!("worldd: a raise's holds were not said: {e}");
@@ -534,7 +520,8 @@ impl Engine {
                 // Standing, its crew holds it on: each holder's hands on its post at a standing body's height (#5067).
                 let w = self.half_width(&tree, ra.part);
                 self.stances.insert(r.activity);
-                if let Err(e) = hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
+                if let Err(e) =
+                    hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
                 {
                     eprintln!("worldd: a raise's holds were not said at its end: {e}");
                 }
@@ -590,8 +577,7 @@ impl Engine {
             .flatten();
             sim::ground::scene::Terrain::ground(base.as_ref(), here.0.x, here.0.z, here.0.y)
         };
-        let on_ground =
-            |s: &sim::activity::carry::raise::Spec| here.0.y - floor <= s.half_thick + 50_000;
+        let on_ground = |s: &sim::activity::carry::raise::Spec| here.0.y - floor <= s.half_thick + 50_000;
         let found = match spec.filter(|s| at_foot && on_ground(s)) {
             Some(spec) => Raise::resume(spec, here.0, here.1).ok().flatten(),
             None => None,
@@ -688,19 +674,11 @@ impl Engine {
                         // Given up after WAIT ticks in a row: its crew is let go and may leave; the part stays
                         // where its last sample had it, and the failure stays in the log.
                         if ra.failed > WAIT {
-                            eprintln!(
-                                "worldd: {}'s raise was given up: its ticks fail",
-                                show(activity)
-                            );
+                            eprintln!("worldd: {}'s raise was given up: its ticks fail", show(activity));
                             let word = (now, Actor::World, Cause::World);
-                            if let Err(e) = regrip(
-                                &mut self.activities,
-                                tree,
-                                activity,
-                                grips::RELEASED,
-                                None,
-                                word,
-                            ) {
+                            if let Err(e) =
+                                regrip(&mut self.activities, tree, activity, grips::RELEASED, None, word)
+                            {
                                 eprintln!("worldd: a given-up raise's holds were not let go: {e}");
                             }
                             if let Some(asm) = self.asm.as_mut() {
@@ -712,10 +690,7 @@ impl Engine {
                 },
                 // A take whose commit never came back: nothing was taken as far as the world knows; given up.
                 (false, true) if ra.carry.is_none() => {
-                    eprintln!(
-                        "worldd: {}'s raise was given up: its take never came back",
-                        show(activity)
-                    );
+                    eprintln!("worldd: {}'s raise was given up: its take never came back", show(activity));
                     if let Some(asm) = self.asm.as_mut() {
                         asm.ended(activity);
                     }
@@ -759,7 +734,9 @@ impl Engine {
         let (lf, ff) = (on(c, ra.lifter), on(c, ra.footer));
         // A raise whose carrier no longer reaches its hold turns back: the part is laid down where it lay.
         let reaches = match (lf, ff) {
-            (Some(l), Some(f)) => out_of_reach(&ra.carriers(l, f)?, ra.geo.node(ra.r)?).is_ok(),
+            (Some(l), Some(f)) => {
+                out_of_reach(&ra.carriers(l, f)?, ra.geo.node(ra.r)?).is_ok()
+            }
             _ => false,
         };
         // On its slide into its slot (at most 0.15 m, its crew stepping with it) the raise's own geometry is not where the
@@ -786,10 +763,7 @@ impl Engine {
             };
             match c.carry_on(ra.lifter, track) {
                 Ok(()) => ra.walking = true,
-                Err(e) => eprintln!(
-                    "worldd: {} was not walked beside its part: {e}",
-                    show(ra.lifter)
-                ),
+                Err(e) => eprintln!("worldd: {} was not walked beside its part: {e}", show(ra.lifter)),
             }
             // And the footer the step to its own place beside the base, so that both stand clear of the ground the
             // part takes when it stands; one with no ground straight there stays where it is.
@@ -807,10 +781,7 @@ impl Engine {
                     hold: false,
                 };
                 if let Err(e) = c.carry_on(ra.footer, track) {
-                    eprintln!(
-                        "worldd: {} was not walked to the foot: {e}",
-                        show(ra.footer)
-                    );
+                    eprintln!("worldd: {} was not walked to the foot: {e}", show(ra.footer));
                 }
             }
         }
@@ -822,21 +793,13 @@ impl Engine {
             Some(l) => ra.geo.r_of(l),
             None => ra.goal(),
         };
-        let want = if ra.up {
-            want.min(ra.r)
-        } else {
-            want.max(ra.r)
-        };
+        let want = if ra.up { want.min(ra.r) } else { want.max(ra.r) };
         let next = match want == ra.r {
             true => ra.r,
             false => ra.geo.spec.toward(ra.r, want),
         };
         let step = next - ra.r;
-        ra.still = if step == 0 {
-            ra.still.saturating_add(1)
-        } else {
-            0
-        };
+        ra.still = if step == 0 { ra.still.saturating_add(1) } else { 0 };
         if step != 0 {
             // Written first: a sample not written leaves the part where its last sample has it.
             let (p, q) = ra.geo.node(next)?;

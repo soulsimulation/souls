@@ -860,10 +860,7 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     // #5067 item 2: held at a natural height. Each hand on its post's outer face, 0.9 m and 1.2 m up the frame from its
     // foot, which is lifted 0.15 m: 1.05 m and 1.35 m above the ground.
     for hold in &h.holds {
-        assert!(
-            (hold.hands[0].x.abs() - l.half.x).abs() <= 2_000,
-            "at the post's outer edge: {hold:?}"
-        );
+        assert!((hold.hands[0].x.abs() - l.half.x).abs() <= 2_000, "at the post's outer edge: {hold:?}");
         assert_eq!(
             [hold.hands[0].y, hold.hands[1].y],
             [900_000, 1_200_000],
@@ -976,12 +973,7 @@ fn seat_said(dir: &Path, carry: Id) -> bool {
             .iter()
             .flat_map(|e| e.events.iter().flatten())
             .filter(|ev| ev.name.as_str() == "souls:carry-track")
-            .filter(|ev| {
-                ev.fields
-                    .get(&1)
-                    .and_then(|v| replica::effects::read_id(v).ok())
-                    == Some(carry)
-            })
+            .filter(|ev| ev.fields.get(&1).and_then(|v| replica::effects::read_id(v).ok()) == Some(carry))
             .filter(|ev| matches!(ev.fields.get(&3), Some(Value::Text(t)) if t.as_str() == phase))
             .find_map(|ev| match (ev.fields.get(&4), ev.fields.get(&5)) {
                 (Some(Value::Uint(a)), Some(Value::Uint(b))) => Some((*a, *b)),
@@ -1002,12 +994,7 @@ fn said_at(dir: &Path, carry: Id, phase: &str) -> (Option<usize>, Option<usize>)
         .flat_map(|e| e.events.iter().flatten())
         .enumerate()
     {
-        if ev
-            .fields
-            .get(&1)
-            .and_then(|v| replica::effects::read_id(v).ok())
-            != Some(carry)
-        {
+        if ev.fields.get(&1).and_then(|v| replica::effects::read_id(v).ok()) != Some(carry) {
             continue;
         }
         let third = match ev.fields.get(&3) {

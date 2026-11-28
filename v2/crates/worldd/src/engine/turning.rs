@@ -100,12 +100,7 @@ impl Engine {
         }
         let want = match super::param_point(&a.params, 3, "carry-turn-heading")? {
             Some(v) if v.x != 0 || v.z != 0 => [v.x, v.z],
-            _ => {
-                return Err(refusal(
-                    "carry-turn-heading",
-                    "parameter 3: a heading [x, z]",
-                ));
-            }
+            _ => return Err(refusal("carry-turn-heading", "parameter 3: a heading [x, z]")),
         };
         let (front, back) = carry
             .ends()?
@@ -146,19 +141,13 @@ impl Engine {
         {
             return Err(refusal(
                 "carry-turn-walking",
-                format!(
-                    "{} is walking; next: turn it once the crew stands",
-                    show(*b)
-                ),
+                format!("{} is walking; next: turn it once the crew stands", show(*b)),
             ));
         }
         // The load as it is held, at every tick of the turn, against its ground's fixed geometry.
         let fixed = Fixed::of(tree, ground).map_err(|e| refusal("carry-geometry", e))?;
         let (plan, band) = carry.load.as_held()?;
-        let (f0, b0) = (
-            Vec3::new(front[0], 0, front[1]),
-            Vec3::new(back[0], 0, back[1]),
-        );
+        let (f0, b0) = (Vec3::new(front[0], 0, front[1]), Vec3::new(back[0], 0, back[1]));
         let start = fixed.hits(&outline(front, back, &plan));
         for k in 1..=ticks {
             let m = turn * k / ticks;
@@ -197,12 +186,7 @@ impl Engine {
                 // Its body's footprint against the ground's fixed geometry as the tree has it now: the load it carries
                 // is not on the ground, though the walkers' map may still hold where it lay until it is rebuilt.
                 let r = BODY_HALF;
-                let foot = [
-                    [p.x - r, p.z - r],
-                    [p.x + r, p.z - r],
-                    [p.x + r, p.z + r],
-                    [p.x - r, p.z + r],
-                ];
+                let foot = [[p.x - r, p.z - r], [p.x + r, p.z - r], [p.x + r, p.z + r], [p.x - r, p.z + r]];
                 if fixed.hit(&foot).is_some() {
                     return Err(refusal(
                         "carry-turn-blocked",
@@ -219,9 +203,7 @@ impl Engine {
                 last = p;
                 line.push(p);
             }
-            let speed = i64::try_from(far * 1_000_000 / i128::from(span))
-                .unwrap_or(1)
-                .max(1);
+            let speed = i64::try_from(far * 1_000_000 / i128::from(span)).unwrap_or(1).max(1);
             walks.push((*body, line, speed));
         }
         // A walk the front led is over: the world walks every carrier now.
@@ -241,11 +223,7 @@ impl Engine {
         }
         let word = (now, Actor::Soul(a.soul), Cause::Intent(a.id));
         self.activities.next = tree.next();
-        let load = self
-            .carries
-            .get(&activity)
-            .map(|c| c.board)
-            .unwrap_or(activity);
+        let load = self.carries.get(&activity).map(|c| c.board).unwrap_or(activity);
         if let Err(e) = self.activities.carry_track(
             tree,
             activity,

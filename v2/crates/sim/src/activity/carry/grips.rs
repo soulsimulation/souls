@@ -75,12 +75,7 @@ pub fn standing(holds: &[Hold], half: Vec3, outer: i64) -> Vec<Hold> {
     holds
         .iter()
         .map(|h| {
-            let x = (half.x - half.z)
-                * if h.hands[0].x + h.hands[1].x < 0 {
-                    -1
-                } else {
-                    1
-                };
+            let x = (half.x - half.z) * if h.hands[0].x + h.hands[1].x < 0 { -1 } else { 1 };
             Hold {
                 hands: HOLD_HANDS.map(|y| Vec3::new(x, y, outer * half.z)),
                 ..h.clone()
@@ -95,10 +90,7 @@ pub fn stance(hold: &Hold, half: Vec3) -> (Vec3, Vec3) {
     let (x, z) = (hold.hands[0].x, hold.hands[0].z);
     // On its outer face by `standing`; a hold on no face (z 0) is taken to be on the back.
     let out = if z > 0 { 1 } else { -1 };
-    (
-        Vec3::new(x, 0, z + out * HOLD_STAND),
-        Vec3::new(x, 0, out * half.z),
-    )
+    (Vec3::new(x, 0, z + out * HOLD_STAND), Vec3::new(x, 0, out * half.z))
 }
 
 /// The phases a carry's holds are in: on a take's track into their hands, carried, on a seating's set-in track, on

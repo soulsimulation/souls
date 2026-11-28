@@ -32,8 +32,9 @@
 //!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it. A body being carried across a link
-//!   is not written while it crosses: its pose then lies on neither end's ground, so the log keeps where it last
-//!   stood until it lands (#4669: a kill mid-crossing once left every later restart refusing every move).
+//!   (a stair, a ladder) is written every tick it moves with the link and how far along it ([`row_on`], FOR-FABLE 8),
+//!   but a restart reads no such row: its pose then lies on neither end's ground, so a restart stands it where its last
+//!   row off the link has it (#4669: a kill mid-crossing once left every later restart refusing every move).
 //!
 //! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
 //!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
@@ -440,6 +441,11 @@ pub fn row_on(body: Id, pose: &Pose, (link, along): (Id, u32)) -> Value {
         pose.to_value(),
         Value::Array(vec![link.to_value(), Value::Uint(u64::from(along))]),
     ])
+}
+
+/// Whether a row is a body's on a link ([`row_on`]): its third item is a list, read or not.
+pub fn on_link(v: &Value) -> bool {
+    matches!(v, Value::Array(p) if matches!(p.get(2), Some(Value::Array(_))))
 }
 
 /// The link and how far along it a row names, when it is a body's on a link ([`row_on`]).
@@ -1004,6 +1010,7 @@ impl Bodies {
                         self.runner.controller.remove(id);
                         let Some(m) = near else {
                             self.logged.remove(&id);
+                            self.crossed.remove(&id);
                             return Err(e);
                         };
                         self.add_body_built(family, m, build)?;
@@ -1280,7 +1287,7 @@ impl Bodies {
 
     /// The bodies whose pose changed since the last call, in id order, a body in a seat's slot with its stance: what
     /// the tick's record keeps of them (K18), so a restart stands each where it last stood or seats it again.
-    pub fn moved(&mut self) -> Vec<(Id, Pose, Option<Stance>)> {
+    pub fn moved(&mut self) -> MovedRows {
         self.moved_and_poses().0
     }
 
@@ -2386,6 +2393,7 @@ impl Bodies {
             self.away_of.remove(&i);
         }
         self.logged.remove(&r.body);
+        self.crossed.remove(&r.body);
         self.shown.remove(&r.body);
         self.wind.remove(r.body);
         self.wind_moves.remove(&r.body);

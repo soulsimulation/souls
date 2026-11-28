@@ -53,6 +53,7 @@ pub(super) fn done(got: Got, what: &str) {
     assert_eq!(got.kind, 1, "{what}");
 }
 
+
 fn refused_as(got: &Got, name: &str, what: &str) {
     println!("{what}: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, name), "{what}");
@@ -72,6 +73,7 @@ fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
     }
     at.expect("a body row")
 }
+
 
 /// Where each 2x4 in the bay sits, mm from the bay's middle along z: `j2`, `j3`, `j4`.
 const JOISTS_Z: [i64; 3] = [-572, -2, 578];
@@ -238,11 +240,7 @@ struct Bay {
 
 impl Bay {
     fn at(dx: i64, dz: i64) -> Vec3 {
-        v3(
-            (testworld::SITE_X + dx) * 1000,
-            0,
-            (testworld::YARD_Z + dz) * 1000,
-        )
+        v3((testworld::SITE_X + dx) * 1000, 0, (testworld::YARD_Z + dz) * 1000)
     }
 
     fn serve(tag: &str, souls: u64) -> Bay {
@@ -516,11 +514,7 @@ impl Bay {
         let c = self.crew(0, &[1]);
         let got = self.act(0, "part:unseat", c, self.flight);
         self.ok(got, "the flight unseated");
-        assert_eq!(
-            where_is(&self.w, self.flight).0,
-            Some(c),
-            "the flight rides its crew"
-        );
+        assert_eq!(where_is(&self.w, self.flight).0, Some(c), "the flight rides its crew");
         let fx = sx - FLIGHT_OFF;
         self.walk(
             &[(0, Bay::at(fx - 1_350, sz)), (1, Bay::at(fx + 1_350, sz))],
@@ -528,11 +522,7 @@ impl Bay {
         );
         self.leave(0, c);
         self.leave(1, c);
-        assert_eq!(
-            where_is(&self.w, self.flight).0,
-            Some(self.w.ground),
-            "the flight on the ground"
-        );
+        assert_eq!(where_is(&self.w, self.flight).0, Some(self.w.ground), "the flight on the ground");
         let (_, _, at) = where_is(&self.w, self.flight);
         let o = Bay::at(0, 0);
         println!(
@@ -547,11 +537,7 @@ impl Bay {
     /// ground under its slot where it lay.
     fn sheets_off(&mut self) {
         for k in [1, 0] {
-            let c = self.crew_at(
-                (0, 1),
-                (1_264, SHEETS_Z[k]),
-                "Souls 1 and 2 to a sheet's ends",
-            );
+            let c = self.crew_at((0, 1), (1_264, SHEETS_Z[k]), "Souls 1 and 2 to a sheet's ends");
             self.unseat_and_let_go((0, 1), c, self.sheets[k], &format!("sheet {}", k + 1));
         }
         self.clear(&[0, 1]);
@@ -560,11 +546,7 @@ impl Bay {
     /// Stage 3: each 2x4 unseated by Souls 3 and 4 at its ends and let go onto its pile under its slot.
     fn joists_off(&mut self) {
         for k in [2, 1, 0] {
-            let c = self.crew_at(
-                (2, 3),
-                (1_082, JOISTS_Z[k]),
-                "Souls 3 and 4 to a 2x4's ends",
-            );
+            let c = self.crew_at((2, 3), (1_082, JOISTS_Z[k]), "Souls 3 and 4 to a 2x4's ends");
             self.unseat_and_let_go((2, 3), c, self.joists[k], &format!("2x4 j{}", k + 2));
         }
         self.clear(&[2, 3]);
@@ -584,10 +566,7 @@ impl Bay {
             BTreeMap::from([
                 (1, pinned_activity(&self.w, "mars:carry_activity")),
                 (2, Value::Text(Name::new("mars:front").unwrap())),
-                (
-                    3,
-                    Value::Array(vec![body_of(&self.w, self.w.souls[b]).to_value()]),
-                ),
+                (3, Value::Array(vec![body_of(&self.w, self.w.souls[b]).to_value()])),
             ]),
         );
         let entries = got.entries.clone();
@@ -612,10 +591,7 @@ impl Bay {
         };
         for k in 0..2 {
             self.walk(
-                &[
-                    (0, Bay::at(xs[k], -BEAM_END)),
-                    (1, Bay::at(xs[k], BEAM_END)),
-                ],
+                &[(0, Bay::at(xs[k], -BEAM_END)), (1, Bay::at(xs[k], BEAM_END))],
                 "Souls 1 and 2 to a beam's ends",
             );
             let c = self.crew(0, &[1]);
@@ -689,11 +665,7 @@ fn teardown_1_the_stair_flight_unseated_and_carried_away() {
 fn gap_2_a_sheets_west_end_cannot_be_reached_from_clear_of_the_bay() {
     let (mut k, _) = Bay::down_to("td2", 2);
     k.sheets_off();
-    assert_eq!(
-        joints_at(&k.w, k.joists[1]),
-        2,
-        "j3 on its two beams, nothing on it"
-    );
+    assert_eq!(joints_at(&k.w, k.joists[1]), 2, "j3 on its two beams, nothing on it");
 }
 
 #[test]
@@ -755,18 +727,9 @@ fn gap_7_everything_back_at_its_pile_waits_on_the_frames_being_laid_down() {
         let (parent, _, at) = where_is(&k.w, part);
         let pile = Bay::at(dx, dz);
         let off = (i128::from(at.x - pile.x).pow(2) + i128::from(at.z - pile.z).pow(2)).isqrt();
-        println!(
-            "{} on {parent:?}, {} mm from its pile",
-            show(part),
-            off / 1000
-        );
+        println!("{} on {parent:?}, {} mm from its pile", show(part), off / 1000);
         assert_eq!(parent, Some(k.w.ground), "{} on the ground", show(part));
-        assert!(
-            off < 1_000_000,
-            "{} within 1 m of its pile: {} mm",
-            show(part),
-            off / 1000
-        );
+        assert!(off < 1_000_000, "{} within 1 m of its pile: {} mm", show(part), off / 1000);
     }
 }
 
@@ -776,23 +739,11 @@ fn gap_7_everything_back_at_its_pile_waits_on_the_frames_being_laid_down() {
 #[test]
 fn teardown_wrong_a_two_by_four_under_a_sheet_is_refused_naming_the_sheet() {
     let mut k = Bay::built("tdw1");
-    let c = k.crew_at(
-        (2, 3),
-        (1_082, JOISTS_Z[2]),
-        "Souls 3 and 4 under j4's ends",
-    );
+    let c = k.crew_at((2, 3), (1_082, JOISTS_Z[2]), "Souls 3 and 4 under j4's ends");
     let got = k.act(2, "part:unseat", c, k.joists[2]);
     refused_as(&got, "support.none", "j4 out from under sheet 2");
-    assert!(
-        got.detail.contains(&show(k.sheets[1])),
-        "names sheet 2 {}: {got:?}",
-        show(k.sheets[1])
-    );
-    assert_eq!(
-        where_is(&k.w, k.joists[2]).0,
-        Some(k.bay),
-        "j4 where it was"
-    );
+    assert!(got.detail.contains(&show(k.sheets[1])), "names sheet 2 {}: {got:?}", show(k.sheets[1]));
+    assert_eq!(where_is(&k.w, k.joists[2]).0, Some(k.bay), "j4 where it was");
 }
 
 /// Gap: Soul 7 walks up the flight onto sheet 1; frame 1 taken out of its slot meanwhile is refused, but by the beam
@@ -802,41 +753,20 @@ fn teardown_wrong_a_two_by_four_under_a_sheet_is_refused_naming_the_sheet() {
 #[ignore = "gap: refused support.none before part.stood-on"]
 fn gap_a_frame_under_a_soul_on_the_deck_is_refused_support_none_not_part_stood_on() {
     let mut k = Bay::built("tdw2");
-    k.walk(
-        &[(6, Bay::at(-4_500, STAIR_AT[1]))],
-        "Soul 7 to the flight's foot",
-    );
+    k.walk(&[(6, Bay::at(-4_500, STAIR_AT[1]))], "Soul 7 to the flight's foot");
     let walker = body_of(&k.w, k.w.souls[6]);
     let to = BTreeMap::from([(1, Value::Array(vec![int(400_000), int(19_000), int(0)]))]);
     k.hands[6].send("eden:walk", k.decks[0], to);
     let got = socket_end(&mut k.hands[6].s);
     k.ok(got, "Soul 7 up onto sheet 1");
     assert_eq!(body_on(&k.w, walker).0, k.decks[0], "on sheet 1's top");
-    let c = k.crew_at(
-        (0, 1),
-        (1_060, FRAME_Z[0]),
-        "Souls 1 and 2 beside frame 1's edges",
-    );
+    let c = k.crew_at((0, 1), (1_060, FRAME_Z[0]), "Souls 1 and 2 beside frame 1's edges");
     let got = k.act(0, "part:unseat", c, k.frames[0]);
-    refused_as(
-        &got,
-        "part.stood-on",
-        "frame 1 taken out with Soul 7 on the deck",
-    );
-    assert!(
-        got.detail.contains(&show(walker)),
-        "names the body: {got:?}"
-    );
+    refused_as(&got, "part.stood-on", "frame 1 taken out with Soul 7 on the deck");
+    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
     let got = k.act(0, "part:lower", c, k.frames[0]);
-    refused_as(
-        &got,
-        "part.stood-on",
-        "frame 1 lowered with Soul 7 on the deck",
-    );
-    assert!(
-        got.detail.contains(&show(walker)),
-        "names the body: {got:?}"
-    );
+    refused_as(&got, "part.stood-on", "frame 1 lowered with Soul 7 on the deck");
+    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
     assert_eq!(where_is(&k.w, k.frames[0]).0, Some(k.bay), "frame 1 stays");
 }
 
@@ -853,17 +783,10 @@ fn teardown_wrong_a_frame_under_a_soul_on_its_standing_place_is_refused_stood_on
     let got = socket_end(&mut k.hands[6].s);
     k.ok(got, "Soul 7 climbs to frame 1's standing place");
     assert_eq!(body_on(&k.w, walker).0, perch, "on the standing place");
-    let c = k.crew_at(
-        (0, 1),
-        (1_060, FRAME_Z[0]),
-        "Souls 1 and 2 beside frame 1's edges",
-    );
+    let c = k.crew_at((0, 1), (1_060, FRAME_Z[0]), "Souls 1 and 2 beside frame 1's edges");
     let got = k.act(0, "part:unseat", c, k.frames[0]);
     refused_as(&got, "part.stood-on", "frame 1 taken out with Soul 7 on it");
-    assert!(
-        got.detail.contains(&show(walker)),
-        "names the body: {got:?}"
-    );
+    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
     // Its lowering is refused `raise.no-foot` before anything else is judged: gap 6.
     assert_eq!(where_is(&k.w, k.frames[0]).0, Some(k.bay), "frame 1 stays");
 }
@@ -875,23 +798,11 @@ fn teardown_wrong_a_holder_letting_go_of_an_unbraced_frame_is_refused() {
     let (mut k, crews) = Bay::down_to("tdw4", 6);
     let c = crews.unwrap()[0];
     let got = k.hands[2].act("activity:leave", c, BTreeMap::new());
-    refused_as(
-        &got,
-        "support.holders",
-        "a holder lets go of unbraced frame 1",
-    );
-    assert_eq!(
-        where_is(&k.w, k.frames[0]).0,
-        Some(k.bay),
-        "frame 1 still in its slot"
-    );
+    refused_as(&got, "support.holders", "a holder lets go of unbraced frame 1");
+    assert_eq!(where_is(&k.w, k.frames[0]).0, Some(k.bay), "frame 1 still in its slot");
     // A refused leave changes nothing: the crew's last word of who holds it still names both.
     std::thread::sleep(Duration::from_millis(500));
     let (a, b) = (body_of(&k.w, k.w.souls[2]), body_of(&k.w, k.w.souls[3]));
     let last = grips_said(&k.w, c, |_, _| true);
-    assert_eq!(
-        last,
-        ("souls:held".to_owned(), vec![a, b]),
-        "both still hold frame 1"
-    );
+    assert_eq!(last, ("souls:held".to_owned(), vec![a, b]), "both still hold frame 1");
 }

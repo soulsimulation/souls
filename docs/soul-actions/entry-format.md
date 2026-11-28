@@ -96,11 +96,12 @@ the floor at its top. A thing whose facts give their own `floors` or `stairs` ke
   600 mm wide unless `width_mm` says. Its top lands on the floor of the thing nearest it at `top_mm`. It is climbed as
   any ladder: a track, with free hands.
 
-A body on a stair or a ladder is carried along the link's line, a sample a tick (FOR-FABLE 8). The tick's record
-writes its row every tick it moves, as a walk's: `[body, pose, [link, along]]`, its place on the line (in the frame of
-the floor it set out from), the link's id, and how far along the line it is, in millionths (0 at the foot, 1,000,000
-at the end). Its node's motion samples carry the same place, as a walk's do. A restart reads no row on a link: it stands
-the body where its last row off the link has it.
+A body on a stair or a ladder is carried along the link's line (FOR-FABLE 8). The tick's record writes its row every
+tick it moves, as a walk's: `[body, pose, [link, along]]`, its place on the line (in the frame of the floor it set out
+from), the link's id, and how far along the line it is, in millionths: 0 where it set out (the foot going up, the top
+going down), toward 1,000,000 at the far end; the tick it lands writes its row off the link. Its node's motion samples
+carry the same place at least every 200 ms, as a walk's do. A restart reads no row on a link: it stands the body where
+its last row off the link has it.
 
 A part with someone on its floor cannot be taken out of its bay (`part.stood-on`), and nor can a part under it
 (`support.none`). The rows are in the kind's hash (section 7's keys 4 to 6).

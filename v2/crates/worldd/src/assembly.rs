@@ -114,8 +114,7 @@ pub const SET_IN_LEAST: Micros = 600_000;
 /// at [`SET_IN_PACE`], at least [`SET_IN_LEAST`], in whole ticks.
 pub fn set_in_time(far: i64) -> Micros {
     let tick = i128::from(sim::activity::carry::HOIST_TICK);
-    let us = (i128::from(far.max(0)) * 1_000_000 / i128::from(SET_IN_PACE))
-        .max(i128::from(SET_IN_LEAST));
+    let us = (i128::from(far.max(0)) * 1_000_000 / i128::from(SET_IN_PACE)).max(i128::from(SET_IN_LEAST));
     i64::try_from((us + tick - 1) / tick * tick).unwrap_or(Micros::MAX)
 }
 
@@ -463,16 +462,10 @@ pub fn admitted_from(
     let n = PUT_REACH / ADMIT_STEP;
     let mut spots: Vec<(i128, i64, i64)> = (-n..=n)
         .flat_map(|i| (-n..=n).map(move |k| (i * ADMIT_STEP, k * ADMIT_STEP)))
-        .filter(|(dx, dz)| {
-            i128::from(*dx).pow(2) + i128::from(*dz).pow(2) <= i128::from(PUT_REACH).pow(2)
-        })
+        .filter(|(dx, dz)| i128::from(*dx).pow(2) + i128::from(*dz).pow(2) <= i128::from(PUT_REACH).pow(2))
         .map(|(dx, dz)| {
             let (x, z) = (to.x + dx, to.z + dz);
-            (
-                i128::from(x - from.0.x).pow(2) + i128::from(z - from.0.z).pow(2),
-                x,
-                z,
-            )
+            (i128::from(x - from.0.x).pow(2) + i128::from(z - from.0.z).pow(2), x, z)
         })
         .collect();
     spots.sort_unstable();
@@ -496,10 +489,7 @@ pub fn admitted_from(
             .map(|c| {
                 let g = end_turn.rotate(c.grip).unwrap_or(c.grip);
                 let grip = [to.x + g.x, to.z + g.z];
-                let (dx, dz) = (
-                    i128::from(c.feet.x - grip[0]),
-                    i128::from(c.feet.z - grip[1]),
-                );
+                let (dx, dz) = (i128::from(c.feet.x - grip[0]), i128::from(c.feet.z - grip[1]));
                 let d = (dx * dx + dz * dz).isqrt().max(1);
                 let k = |v: i128| (v * (d + i128::from(ADMIT_MARGIN)) / d) as i64;
                 Carrier {
@@ -508,9 +498,7 @@ pub fn admitted_from(
                 }
             })
             .collect();
-        out_of_reach(&standing, (to, end_turn))
-            .is_ok()
-            .then_some(at)
+        out_of_reach(&standing, (to, end_turn)).is_ok().then_some(at)
     })
 }
 
@@ -608,9 +596,7 @@ fn conj(q: Quat) -> R<Quat> {
 
 /// The kinds (plain names) whose entries say they are the same turned a half turn about their upright
 /// (`state.symmetry`'s default `front_back`, #5067): seated in a slot turned either way, the nearer.
-pub fn symmetric_kinds(
-    entries: &replica::rules::json::Value,
-) -> std::collections::BTreeSet<String> {
+pub fn symmetric_kinds(entries: &replica::rules::json::Value) -> std::collections::BTreeSet<String> {
     use replica::rules::json::Value as Json;
     entries
         .obj()
@@ -622,8 +608,7 @@ pub fn symmetric_kinds(
                 .and_then(|s| s.get("symmetry"))
                 .and_then(|f| f.get("default"))
                 .and_then(Json::str);
-            (sym == Some("front_back"))
-                .then(|| e.get("kind").and_then(Json::str).map(str::to_owned))?
+            (sym == Some("front_back")).then(|| e.get("kind").and_then(Json::str).map(str::to_owned))?
         })
         .collect()
 }
@@ -984,10 +969,7 @@ impl Assembly {
                 reach,
                 &[],
             )
-            .and_then(|()| {
-                self.seating
-                    .put(tree, acts, mint, now, activity, part, &target)
-            });
+            .and_then(|()| self.seating.put(tree, acts, mint, now, activity, part, &target));
         if let Err(r) = done {
             self.seating.parts.clear();
             return Err(r);
@@ -1039,20 +1021,8 @@ impl Assembly {
         };
         let done = self
             .seating
-            .check(
-                tree,
-                acts,
-                &mut mint.clone(),
-                activity,
-                part,
-                &target,
-                reach,
-                &[],
-            )
-            .and_then(|()| {
-                self.seating
-                    .put(tree, acts, mint, now, activity, part, &target)
-            });
+            .check(tree, acts, &mut mint.clone(), activity, part, &target, reach, &[])
+            .and_then(|()| self.seating.put(tree, acts, mint, now, activity, part, &target));
         if let Err(r) = done {
             self.seating.parts.clear();
             return Err(r);
@@ -1140,11 +1110,7 @@ impl Assembly {
         // A part the same turned a half turn about its upright is seated turned the nearer way to how it is held now
         // (#5067: `symmetry` `front_back`).
         let half = Quat::from_yaw_mdeg(180_000).map_err(pose)?;
-        let seat_turn = match slot.is_some()
-            && self
-                .symmetric
-                .contains(replica::world_model::plain(pk.as_str()))
-        {
+        let seat_turn = match slot.is_some() && self.symmetric.contains(replica::world_model::plain(pk.as_str())) {
             true => {
                 let now = from.1.then(held.orientation).map_err(pose)?;
                 let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose);
@@ -1174,19 +1140,13 @@ impl Assembly {
             Some([f, b, ..]) => [f.body, b.body],
             _ => return Err(refusal("crew.size", show(activity))),
         };
-        let mut walks = match ways_turning(carriers, ends, from.0, end.0, (from.1, end.1), walkable)
-        {
+        let mut walks = match ways_turning(carriers, ends, from.0, end.0, (from.1, end.1), walkable) {
             Ok(w) => w,
             // #5067: refused, it says where the crew's node would be admitted from, nearest where it is: the same
             // admission (`ways`) with the whole crew there, so a client carries it there and asks again.
             Err(mut r) if r.name == "part.grip-out-of-reach" => {
                 if let Some(p) = admitted_from(carriers, ends, from, end, walkable) {
-                    r.detail = format!(
-                        "{}; {ADMITTED_AT} x={} z={} mm",
-                        r.detail,
-                        p.x / 1000,
-                        p.z / 1000
-                    );
+                    r.detail = format!("{}; {ADMITTED_AT} x={} z={} mm", r.detail, p.x / 1000, p.z / 1000);
                 }
                 return Err(r);
             }
@@ -1327,9 +1287,7 @@ impl Assembly {
 
     /// When crew `activity`'s set-in track began and ended, while its seating waits for its commit (#5067).
     pub fn set_in_times(&self, activity: Id) -> Option<(Id, Micros, Micros)> {
-        self.committing
-            .get(&activity)
-            .map(|s| (s.part, s.t0, s.due))
+        self.committing.get(&activity).map(|s| (s.part, s.t0, s.due))
     }
 
     /// Stops crew `activity`'s set-in by `why` (#5067 item 3: a carrier out of reach of its grip): refused to the put's
@@ -1675,30 +1633,11 @@ mod tests {
         // #5067 item 4: refused, the nearest place the crew's node would be admitted from, the same `ways` with the
         // whole crew there: with nobody able to walk, where every carrier stands within reach where the set-in ends.
         let at = admitted_from(&crew, ends, (from, turn), (far, turn), &walled).expect("a place");
-        assert!(
-            ways(
-                &crew.map(|c| Carrier {
-                    feet: Vec3::new(c.feet.x + at.x, 0, c.feet.z + at.z),
-                    ..c
-                }),
-                ends,
-                at,
-                far,
-                turn,
-                &walled
-            )
-            .is_ok()
-        );
-        assert!(
-            at.x > 0 && at.x < far.x && at.z == 0 && at.y == from.y,
-            "toward where it goes: {at:?}"
-        );
+        assert!(ways(&crew.map(|c| Carrier { feet: Vec3::new(c.feet.x + at.x, 0, c.feet.z + at.z), ..c }), ends, at, far, turn, &walled).is_ok());
+        assert!(at.x > 0 && at.x < far.x && at.z == 0 && at.y == from.y, "toward where it goes: {at:?}");
         // Nowhere within a metre of where it goes, a crew none of whose carriers reaches its hold at the start.
         let off = [c(1, 0, 3_000_000, 0, 1_097_000), crew[1]];
-        assert_eq!(
-            admitted_from(&off, ends, (from, turn), (far, turn), &walled),
-            None
-        );
+        assert_eq!(admitted_from(&off, ends, (from, turn), (far, turn), &walled), None);
         // Out of reach where the track would start: refused whoever could walk.
         let mut off = crew;
         off[1].feet.z -= 400_000;

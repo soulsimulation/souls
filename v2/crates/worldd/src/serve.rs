@@ -7949,8 +7949,9 @@ mod s10c_lockstep {
         );
     }
 
-    /// The write path: a body carried across a link is not logged while it is carried (its pose then follows the
-    /// line past its floor's edge), so a kill mid-crossing restarts it where it last stood.
+    /// The write path: a body carried across a link is written while it is carried with the link and how far along it
+    /// (FOR-FABLE 8), but its checkpoint keeps where it last stood (its pose then follows the line past its floor's
+    /// edge), so a kill mid-crossing restarts it there.
     #[test]
     fn a_body_crossing_a_link_is_logged_where_it_last_stood() {
         use replica::kinds::sizes::Build;

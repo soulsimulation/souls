@@ -341,11 +341,7 @@ async fn a_creators_named_joins_are_kept_unfiltered_and_checked_as_a_puts() {
         .filter(|(ty, ends, ..)| ty.as_str() == "mars:joint" && ends[0] == joist)
         .map(|(_, ends, ..)| ends[1])
         .collect();
-    assert_eq!(
-        on,
-        BTreeSet::from([got.names[&3], got.names[&4]]),
-        "on the low beams, unfiltered"
-    );
+    assert_eq!(on, BTreeSet::from([got.names[&3], got.names[&4]]), "on the low beams, unfiltered");
     drop(copy);
 
     // A beam named onto another beam: their connectors do not mate.
