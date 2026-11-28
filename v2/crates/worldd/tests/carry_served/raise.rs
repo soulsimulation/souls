@@ -384,7 +384,9 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             "its back: {h:?}"
         );
     }
-    // Each holder walks round to behind its post, 0.35 m off the frame's back.
+    // Each holder walks round to behind its post, 0.35 m off the frame's back (`grips::stance`). The lowering waits for
+    // the world to have ended each one's walk there, its body at its stance (within 1 mm): while the world still
+    // carries the lifter the lowering is refused `raise.way-blocked`, a load race on a busy runner.
     let end = Instant::now() + Duration::from_secs(20);
     loop {
         let feet = stood(&dir);
@@ -392,16 +394,13 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             .holds
             .iter()
             .map(|h| {
-                let st = dir_of(
-                    stands.orientation,
-                    Vec3::new(h.hands[0].x, 0, -spec.half_thick - 350_000),
-                );
+                let st = dir_of(stands.orientation, grips::stance(h, Vec3::ZERO).0);
                 let p = Vec3::new(stands.position.x + st.x, 0, stands.position.z + st.z);
                 let f = feet[&h.body];
                 (i128::from(f.x - p.x).pow(2) + i128::from(f.z - p.z).pow(2)).isqrt()
             })
             .collect();
-        if offs.iter().all(|o| *o <= 100_000) {
+        if offs.iter().all(|o| *o <= 1_000) {
             println!("the holders stand behind its posts, {offs:?} µm off");
             break;
         }

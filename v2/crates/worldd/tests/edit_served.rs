@@ -5837,6 +5837,47 @@ fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
     }
 }
 
+/// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` stands at its stance behind its post
+/// (`grips::stance`, within 1 mm on the plan: the world's walk there has ended), and fails otherwise, naming how far.
+fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
+    use sim::activity::carry::grips::{GRIPS, Holds, stance};
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (copy, _) = served_copy(w);
+        let t = copy.tree();
+        let x =
+            sim::ground::scene::xform_to(t, t.handle(part).unwrap(), t.handle(w.ground).unwrap())
+                .unwrap();
+        drop(copy);
+        let h = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back()
+            .expect("its holds");
+        let offs: Vec<i64> = h
+            .holds
+            .iter()
+            .map(|hold| {
+                apart_mm(
+                    body_at(w, hold.body),
+                    x.point(stance(hold, Vec3::ZERO).0).unwrap(),
+                )
+            })
+            .collect();
+        if offs.iter().all(|o| *o <= 1) {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "{what}: the holders not at their stances, mm off {offs:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn apart_mm(a: Vec3, b: Vec3) -> i64 {
     ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt() / 1000) as i64
 }
@@ -9363,8 +9404,10 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             ("souls:held".to_owned(), vec![a, b]),
             "frame in {slot}: both still hold it"
         );
-        // Each holder walks round to behind its post, its hands on that face.
-        std::thread::sleep(Duration::from_secs(3));
+        // Each holder walks round to behind its post, its hands on that face. The beams' puts wait for the world to
+        // have ended those walks: a holder still on its way round stood where a beam is set in (`site.occupied`, a load
+        // race on a busy runner).
+        at_stances(&w, c, frame, slot);
         hands_on_the_face_held_from(&w, c, frame);
     }
 
@@ -9456,7 +9499,11 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
                 k + 1,
                 replica::world_model::show(b),
                 body_at(&w, b),
-                if crew_bodies.contains(&b) { " (crew)" } else { "" }
+                if crew_bodies.contains(&b) {
+                    " (crew)"
+                } else {
+                    ""
+                }
             );
         }
         let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
