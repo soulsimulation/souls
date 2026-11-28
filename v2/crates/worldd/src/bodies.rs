@@ -2156,7 +2156,21 @@ impl Bodies {
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
                 {
-                    let crowd = self.short.contains(&id);
+                    // Held off its point by others (A2-4): ended short as near as the crowd allows, or at the place it
+                    // was granted while the point itself is ground it may stand on and reach, clear of every doorway and
+                    // stair (the spot tables' own test, `View::stand_reached`): a body stood in its room there when it
+                    // was granted. Done as near as the crowd allows, never `walk.stopped-short`.
+                    let pushed = self
+                        .runner
+                        .granted
+                        .get(&body)
+                        .is_some_and(|g| self.gap_to(body, t, *g).is_some_and(|mm| mm <= 50))
+                        && self.pose(body).is_some_and(|from| {
+                            self.town
+                                .view_for(body)
+                                .is_ok_and(|v| v.stand_reached(t, p, from).is_some())
+                        });
+                    let crowd = self.short.contains(&id) || pushed;
                     let n = self.walked_again.get(&id).copied().unwrap_or(0);
                     // Sent again half a second after it stopped, so bodies in its way have time to move off.
                     let since = self
@@ -2178,6 +2192,9 @@ impl Bodies {
                             self.short.remove(&id);
                             continue;
                         }
+                    }
+                    if crowd {
+                        self.short.insert(id);
                     }
                     self.stopped_short.insert(id, (mm, crowd));
                 }
