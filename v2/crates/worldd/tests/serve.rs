@@ -195,6 +195,22 @@ fn first_line(
     None
 }
 
+/// A process that ends before its awaited line is said by its end, as [`Served::line`] says it: an exit code, a signal,
+/// or still running.
+#[test]
+fn a_child_s_end_is_read_without_reaping_it() {
+    for (script, said) in [
+        ("exit 3", "exited with code 3"),
+        ("kill -9 $$", "was ended by signal 9"),
+        ("sleep 30", "is still running"),
+    ] {
+        let mut c = Command::new("sh").args(["-c", script]).spawn().expect("sh");
+        assert_eq!(ended(c.id()), said, "{script}");
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
 /// The clock thread's "started at tick" (stderr) can come in before the "restart:" the main thread printed first
 /// (stdout): on two-core runners it did, and the wait for "restart:" dropped it, so the start looked hung (#3421).
 #[test]
