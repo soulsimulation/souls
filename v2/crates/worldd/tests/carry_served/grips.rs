@@ -518,7 +518,7 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
     let phases: Vec<String> = words(&dir, carry).into_iter().map(|h| h.phase).collect();
     // #5067: taken on a track (`souls:lift`), carried, carried on the set-in's track too, let go once seated.
     assert_eq!(phases, [grips::LIFT, grips::CARRY, grips::RELEASED]);
-    assert!(seat_said(&dir, carry), "the set-in said as a track");
+    assert!(fit_said(&dir, carry), "the set-in said as a track");
     for s in souls.iter_mut() {
         let _ = s.act("activity:leave", carry, BTreeMap::new()).await;
     }
@@ -542,7 +542,7 @@ async fn grips_a_seating_track_never_takes_the_part_out_of_a_carriers_reach() {
     let w = words(&dir, carry);
     let phases: Vec<&str> = w.iter().map(|h| h.phase.as_str()).collect();
     assert_eq!(phases, [grips::LIFT, grips::CARRY, grips::RELEASED]);
-    assert!(seat_said(&dir, carry), "the set-in says when it ends");
+    assert!(fit_said(&dir, carry), "the set-in says when it ends");
     assert!(
         w.windows(2).all(|p| p[0].holds == p[1].holds),
         "the same holds throughout"
@@ -784,7 +784,7 @@ async fn grips_a_carrier_out_of_reach_where_the_set_in_starts_is_refused_by_name
     let phases: Vec<&str> = w.iter().map(|h| h.phase.as_str()).collect();
     println!("phases: {phases:?}");
     assert_eq!(phases.last().copied(), Some(grips::RELEASED));
-    assert!(seat_said(&dir, carry), "the set-in said as a track");
+    assert!(fit_said(&dir, carry), "the set-in said as a track");
     assert!(
         w.windows(2).all(|p| p[0].holds == p[1].holds),
         "the same holds throughout"
@@ -860,7 +860,10 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     // #5067 item 2: held at a natural height. Each hand on its post's outer face, 0.9 m and 1.2 m up the frame from its
     // foot, which is lifted 0.15 m: 1.05 m and 1.35 m above the ground.
     for hold in &h.holds {
-        assert!((hold.hands[0].x.abs() - l.half.x).abs() <= 2_000, "at the post's outer edge: {hold:?}");
+        assert!(
+            (hold.hands[0].x.abs() - l.half.x).abs() <= 2_000,
+            "at the post's outer edge: {hold:?}"
+        );
         assert_eq!(
             [hold.hands[0].y, hold.hands[1].y],
             [900_000, 1_200_000],
@@ -965,24 +968,29 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     drop(served);
 }
 
-/// Whether the log holds the set-in's track for `carry` (#5067 item 3): `souls:carry-track` `souls:seat` from t0 to a
-/// later t1, then `souls:seated` with the same times.
-fn seat_said(dir: &Path, carry: Id) -> bool {
+/// Whether the log holds the set-in's track for `carry` (#5067 item 3): `souls:carry-track` `souls:fit` from t0 to a
+/// later t1, then `souls:fitted` with the same times.
+fn fit_said(dir: &Path, carry: Id) -> bool {
     let times = |phase: &str| {
         effects(dir)
             .iter()
             .flat_map(|e| e.events.iter().flatten())
             .filter(|ev| ev.name.as_str() == "souls:carry-track")
-            .filter(|ev| ev.fields.get(&1).and_then(|v| replica::effects::read_id(v).ok()) == Some(carry))
+            .filter(|ev| {
+                ev.fields
+                    .get(&1)
+                    .and_then(|v| replica::effects::read_id(v).ok())
+                    == Some(carry)
+            })
             .filter(|ev| matches!(ev.fields.get(&3), Some(Value::Text(t)) if t.as_str() == phase))
             .find_map(|ev| match (ev.fields.get(&4), ev.fields.get(&5)) {
                 (Some(Value::Uint(a)), Some(Value::Uint(b))) => Some((*a, *b)),
                 _ => None,
             })
     };
-    let (seat, seated) = (times("souls:seat"), times("souls:seated"));
-    println!("the set-in's track: {seat:?}, seated {seated:?}");
-    seat.is_some_and(|(a, b)| b >= a + 600_000) && seated == seat
+    let (fit, fitted) = (times("souls:fit"), times("souls:fitted"));
+    println!("the set-in's track: {fit:?}, fitted {fitted:?}");
+    fit.is_some_and(|(a, b)| b >= a + 600_000) && fitted == fit
 }
 
 /// Where the log first holds a `souls:carry-track` word of `phase` for `carry`, and a `souls:carry-grips` word in the
@@ -994,7 +1002,12 @@ fn said_at(dir: &Path, carry: Id, phase: &str) -> (Option<usize>, Option<usize>)
         .flat_map(|e| e.events.iter().flatten())
         .enumerate()
     {
-        if ev.fields.get(&1).and_then(|v| replica::effects::read_id(v).ok()) != Some(carry) {
+        if ev
+            .fields
+            .get(&1)
+            .and_then(|v| replica::effects::read_id(v).ok())
+            != Some(carry)
+        {
             continue;
         }
         let third = match ev.fields.get(&3) {

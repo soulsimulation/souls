@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { PHASE2_FALLBACK_MS, PHASE2_FILL, PHASE2_GLOBAL, SOCKET_FALLBACK_MS, phasedLoaderScript, rewritePhasedHtml } from './phased-entry.ts';
+import { APP_CDN_HANG_MS, PHASE2_FALLBACK_MS, PHASE2_FILL, PHASE2_GLOBAL, SOCKET_FALLBACK_MS, phasedLoaderScript, rewritePhasedHtml } from './phased-entry.ts';
 import { phasedEntryWanted } from './snapshot-prefetch.ts';
 import { pickQualityTier } from './quality-tier.ts';
 import { earlyArrivalWanted } from './early-arrival.ts';
@@ -125,4 +125,110 @@ test('phasedEntryWanted = the early layer\'s gate (lever D on the page\'s tier) 
     const want = q.get('earlyLayer') !== '0' && q.get('phased') !== '0' && earlyArrivalWanted(tier, true, search, q.has('shot'));
     assert.equal(phasedEntryWanted(search, coarse, screen[0], screen[1], mem), want, `${search} ${coarse} ${screen} ${mem}`);
   }
+});
+
+/** #4986: the loader on a page whose config may name the CDN; records the tags, reloads, workers, blobs, the window's
+ *  listeners and the timers, and lets a test say which files the browser has had (resource timing). */
+function runCdn(js: string, config: unknown, search = '') {
+  type Ev = Record<string, unknown> & { fire: (type: string, e?: unknown) => void; listens: (type: string) => number };
+  const added: { tag: string; url: string; el: Ev }[] = [], replaced: string[] = [], timers: { f: () => void; ms: number }[] = [];
+  const on = (o: Record<string, unknown>): Ev => {
+    const ls: Record<string, ((e?: unknown) => void)[]> = {};
+    o.addEventListener = (type: string, f: () => void) => { if (type === 'error') o.failed = f; (ls[type] ??= []).push(f); };
+    o.fire = (type: string, e?: unknown) => (ls[type] ?? []).forEach((f) => f(e));
+    o.listens = (type: string) => (ls[type] ?? []).length;
+    return o as Ev;
+  };
+  const document = { createElement: (tag: string) => on({ tag }), head: { appendChild: (el: Ev) => { added.push({ tag: el.type === 'module' ? 'entry' : String(el.rel), url: String(el.src ?? el.href), el }); } } };
+  const location = { pathname: '/w/eden/', search, hash: '#watch', href: 'https://soul.game/w/eden/', replace: (u: string) => replaced.push(u) };
+  // the browser's Worker, recording what it was started with; and enough of URL and Blob for the wrapper
+  class Worker { static started: [string, unknown][] = []; static made: Ev[] = []; constructor(u: string, o: unknown) { Worker.started.push([u, o]); Worker.made.push(on(this as unknown as Record<string, unknown>)); } }
+  const blobs: string[] = [], revoked: string[] = [], arrived: string[] = [], window = on({ __soulsPhased: false, __simConfig: config, Worker });
+  const URL_ = Object.assign(function (u: string, b?: string) { return new URL(u, b); }, { createObjectURL: (b: { text: string }) => { blobs.push(b.text); return `blob:https://soul.game/${blobs.length}`; }, revokeObjectURL: (u: string) => { revoked.push(u); } });
+  class Blob { text: string; constructor(parts: string[]) { this.text = parts.join(''); } }
+  const performance = { getEntriesByType: (type: string) => type === 'resource' ? arrived.map((name) => ({ name })) : [] };
+  vm.runInNewContext(js, { window, document, location, URL: URL_, Blob, performance, setTimeout: (f: () => void, ms: number) => { timers.push({ f, ms }); return timers.length; } });
+  const after = (ms: number) => { const due = timers.filter((t) => t.ms === ms); due.forEach((t) => t.f()); return due.length; };
+  return { added, replaced, window, Original: Worker, blobs, revoked, arrived, after };
+}
+
+test('#4986: where the launcher says the build is on the asset CDN, both phases are asked for there, by file name', () => {
+  const js = /<script>(\(function\(\)\{var d=document[\s\S]*?)<\/script>/.exec(rewritePhasedHtml(HTML, 'assets/main-A.js', 'assets/early-E.js', ['assets/three-B.js']))![1];
+  const run = (config: unknown, search = '') => runCdn(js, config, search);
+  const CDN = 'https://cdn.soul.game/assets/app/';
+  const on = run({ appCdn: CDN });
+  assert.deepEqual(on.added.map((a) => `${a.tag} ${a.url}`), [`modulepreload ${CDN}react-C.js`, `modulepreload ${CDN}Shell-D.js`, `entry ${CDN}main-A.js`, `modulepreload ${CDN}three-B.js`, `entry ${CDN}early-E.js`]);
+  assert.ok(on.added.every((a) => a.el.crossOrigin === ''), 'read as another origin\'s module needs it');
+  // an entry that does not load from the CDN: the page once more, from the origin; a preload's failure alone does nothing
+  assert.equal(on.added[0].el.failed, undefined);
+  (on.added[2].el.failed as () => void)();
+  assert.deepEqual(on.replaced, ['/w/eden/?appcdn=0#watch']);
+  assert.deepEqual(run({ appCdn: CDN }, '?hour=12:00').added[2].url, `${CDN}main-A.js`);
+  const off = ['/worlds/assets/react-C.js', '/worlds/assets/Shell-D.js', '/worlds/assets/main-A.js', '/worlds/assets/three-B.js', '/worlds/assets/early-E.js'];
+  // not named, another place named, or the visitor (or the loader's own fallback) asked for the origin: as before
+  for (const [config, search] of [[undefined, ''], [{}, ''], [{ appCdn: 'https://cdn.soul.game/assets/' }, ''], [{ appCdn: 'https://evil.example/assets/app/' }, ''], [{ appCdn: [CDN] }, ''], [{ appCdn: CDN }, '?appcdn=0'], [{ appCdn: CDN }, '?hour=12:00&appcdn=0']] as const) {
+    const r = run(config, search);
+    assert.deepEqual(r.added.map((a) => a.url), off, JSON.stringify([config, search]));
+    assert.ok(r.added.every((a) => a.el.failed === undefined), 'no reload from the origin\'s own failures');
+    assert.equal(r.window.Worker, r.Original, 'Worker is the browser\'s own');
+  }
+  // workers on a page whose code came from the CDN: a module worker asked for at the CDN's origin (the built code names
+  // it by the site's path, resolved beside a CDN file) starts from a same-origin blob that imports it from the CDN folder
+  const W = on.window.Worker as unknown as new (u: string | URL, o?: unknown) => object, Original = on.Original;
+  assert.notEqual(W, Original); assert.equal((W as unknown as { prototype: unknown }).prototype, Original.prototype, 'instanceof still holds');
+  const w = new W(new URL('/assets/worker-C1tn-FgR.js', `${CDN}early-layer-AAAAbbbb.js`), { type: 'module' });
+  assert.ok(w instanceof Original);
+  assert.deepEqual(Original.started.at(-1), ['blob:https://soul.game/1', { type: 'module' }]);
+  assert.deepEqual(on.blobs, [`import ${JSON.stringify(`${CDN}worker-C1tn-FgR.js`)}`]);
+  new W(`${CDN}history-worker-D7OBKG8k.js`, { type: 'module' });
+  assert.equal(on.blobs[1], `import ${JSON.stringify(`${CDN}history-worker-D7OBKG8k.js`)}`, 'already in the CDN folder: the same file');
+  // any other worker is started as asked: a library's blob worker, a same-origin file, a classic worker
+  for (const [u, o] of [['blob:https://soul.game/abc', undefined], ['/assets/worker-C1tn-FgR.js', { type: 'module' }], ['https://soul.game/assets/worker-C1tn-FgR.js', { type: 'module' }], ['https://cdn.soul.game/assets/app/x.js', undefined]] as const) {
+    new W(u, o);
+    assert.deepEqual(Original.started.at(-1), [u, o]);
+  }
+  assert.equal(on.blobs.length, 2);
+});
+
+test('#4986 review: a hung CDN, a lazy chunk or style that fails, a worker that does not load: one reload from the origin, never a loop', () => {
+  const js = /<script>(\(function\(\)\{var d=document[\s\S]*?)<\/script>/.exec(rewritePhasedHtml(HTML, 'assets/main-A.js', 'assets/early-E.js', ['assets/three-B.js']))![1];
+  const CDN = 'https://cdn.soul.game/assets/app/', early = (r: ReturnType<typeof runCdn>) => r.added.find((a) => a.url.endsWith('early-E.js'))!.el;
+  assert.ok(APP_CDN_HANG_MS >= 5_000 && APP_CDN_HANG_MS <= 10_000, 'a few seconds');
+  // hung: nothing of the CDN has arrived by the limit
+  const hung = runCdn(js, { appCdn: CDN });
+  assert.equal(hung.after(APP_CDN_HANG_MS), 1);
+  assert.deepEqual(hung.replaced, ['/w/eden/?appcdn=0#watch']);
+  // slow, not hung: a file of the CDN has arrived (the rest still coming), or the early entry is in: no reload
+  const slow = runCdn(js, { appCdn: CDN }); slow.arrived.push('https://soul.game/w/eden/v1/scene', `${CDN}three-B.js`); slow.after(APP_CDN_HANG_MS);
+  assert.deepEqual(slow.replaced, []);
+  const loaded = runCdn(js, { appCdn: CDN }); early(loaded).fire('load'); loaded.after(APP_CDN_HANG_MS);
+  assert.deepEqual(loaded.replaced, [], 'the early entry is in');
+  const origin = runCdn(js, { appCdn: CDN }); origin.arrived.push('https://soul.game/assets/three-B.js'); origin.after(APP_CDN_HANG_MS);
+  assert.deepEqual(origin.replaced, ['/w/eden/?appcdn=0#watch'], 'only the CDN\'s own files count');
+  // after the entry: a lazy chunk or style that fails (Vite's event) reloads once, however many fail
+  const lazy = runCdn(js, { appCdn: CDN }); early(lazy).fire('load');
+  lazy.window.fire('vite:preloadError'); lazy.window.fire('vite:preloadError');
+  (lazy.added[2].el.failed as () => void)();
+  assert.deepEqual(lazy.replaced, ['/w/eden/?appcdn=0#watch'], 'once');
+  // a worker from the CDN that does not load reloads once; an error inside a running worker (it has a message) does not
+  const wk = runCdn(js, { appCdn: CDN }), W = wk.window.Worker as unknown as new (u: string, o?: unknown) => object;
+  new W(`${CDN}worker-C1tn-FgR.js`, { type: 'module' }); new W('/assets/plain.js');
+  const [cdnWorker, plain] = wk.Original.made.slice(-2);
+  assert.equal(plain.listens('error'), 0, 'a worker not from the CDN is left alone');
+  cdnWorker.fire('error', { message: 'Uncaught TypeError: x is not a function' });
+  assert.deepEqual(wk.replaced, []);
+  cdnWorker.fire('error', { type: 'error' });
+  assert.deepEqual(wk.replaced, ['/w/eden/?appcdn=0#watch']);
+  // the blob it started from is freed once the worker has read it
+  assert.equal(wk.after(60_000), 1); assert.deepEqual(wk.revoked, ['blob:https://soul.game/1']);
+  // never a loop: after the reload (?appcdn=0) none of it is armed
+  for (const search of ['?appcdn=0', '?hour=12:00&appcdn=0']) {
+    const r = runCdn(js, { appCdn: CDN }, search);
+    assert.equal(r.window.listens('vite:preloadError'), 0);
+    assert.equal(r.after(APP_CDN_HANG_MS), 0, 'no hang timer');
+    assert.equal(r.window.Worker, r.Original);
+    assert.deepEqual(r.replaced, []);
+  }
+  // and a page whose config names no CDN: as before
+  const none = runCdn(js, undefined); assert.equal(none.window.listens('vite:preloadError'), 0); assert.equal(none.after(APP_CDN_HANG_MS), 0);
 });

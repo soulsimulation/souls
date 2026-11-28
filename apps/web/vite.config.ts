@@ -322,7 +322,20 @@ function devProxy() {
   return { '^/w/[^/]+/[^?]+': { target: http, ws: true }, [`^/(?:${roots})(?:[/?]|$)`]: http, '^/ws(?:[/?]|$)': { target: http.replace(/^http/, 'ws'), ws: true } };
 }
 
+// #4986: the built code names its own files by where it was loaded from, not by the site's base path, so the same build
+// runs from the origin (`<base>assets/`) or from a copy on the asset CDN (app-cdn.ts decides which the page's loader
+// asks for). A chunk's imports are relative already; this makes the rest follow: a file named from code (a JSON, an
+// image, a preloaded chunk or style of a lazy import) or from a style sheet is resolved beside the file that names it.
+// index.html keeps the base path (the loader rewrites what it asks for), and so does a worker's file named from code:
+// a worker cannot be started from another origin, the loader's `Worker` wrapper (phased-entry.ts) maps it by file name
+// whatever its path, and the site's path costs the page's first chunks no bytes.
+const WORKER_FILE = /(?:^|[./-])worker-[A-Za-z0-9_-]{8}\.js$/;
+function builtUrl(filename: string, { hostType }: { hostType: 'js' | 'css' | 'html' }) {
+  return hostType === 'html' || (hostType === 'js' && WORKER_FILE.test(filename)) ? undefined : { relative: true };
+}
+
 export default defineConfig({
+  experimental: { renderBuiltUrl: builtUrl },
   plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig(), kindBounds()],
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
     __SIM_ASSETS_CDN_ENABLED__: process.env.SIM_ASSETS_CDN_ENABLED==='1',

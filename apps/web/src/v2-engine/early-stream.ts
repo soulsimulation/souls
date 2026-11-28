@@ -21,9 +21,10 @@ export function v2Stream(): string | null {
 }
 
 /** The replica the reader's worker loads: the one the launcher names by version (`v2Replica`, cutover.mjs: its files are
- *  immutable), else the world's plain path. */
+ *  immutable), else the world's plain path. #4986: first, the asset CDN's copy with the origin's after a `#`, when
+ *  index.html's head script found the page's config names one (`window.__simReplica`, replica-cdn.ts). */
 export function replicaUrl(named: unknown): string {
-  return new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
+  return (globalThis as { __simReplica?: string }).__simReplica || new URL(typeof named === 'string' && /^\/(?!\/)[A-Za-z0-9._/-]+\/replica\.js$/.test(named) && !named.includes('..') ? named : apiPath('/replica.js'), location.href).href;
 }
 
 /** Not taken by then (the page never mounted its stream hook): the worker is stopped. */

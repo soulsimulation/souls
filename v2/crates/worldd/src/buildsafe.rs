@@ -225,7 +225,10 @@ pub fn with_buildings(
                 .map_err(|detail| replica::edit::Refused {
                     op: Some(k),
                     name: "edit.building-plan",
-                    detail: format!("{}: its ways could not be read: {detail}", plain(kind.as_str())),
+                    detail: format!(
+                        "{}: its ways could not be read: {detail}",
+                        plain(kind.as_str())
+                    ),
                 })?;
             if edit_len + added.len() + more.len() > replica::edit::OPS_MOST {
                 return Err(replica::edit::Refused {
@@ -312,7 +315,10 @@ pub fn bounds_clear(
         .iter()
         .enumerate()
         .filter_map(|(i, op)| {
-            let Op::Place { name, kind, fields, .. } = op else {
+            let Op::Place {
+                name, kind, fields, ..
+            } = op
+            else {
                 return None;
             };
             let b = entries
@@ -413,7 +419,8 @@ pub fn ids_most(entries: &Json) -> BTreeMap<String, u64> {
                 .get("links")
                 .and_then(Json::obj)
                 .is_some_and(|l| !l.is_empty());
-            let parts = import_eden::placed::ids_most(e).or_else(|| import_eden::placed::way_ids_most(e));
+            let parts =
+                import_eden::placed::ids_most(e).or_else(|| import_eden::placed::way_ids_most(e));
             match (parts, joins) {
                 (None, false) => None,
                 (p, j) => Some((k.clone(), p.unwrap_or(0) + if j { bay_slots } else { 0 })),

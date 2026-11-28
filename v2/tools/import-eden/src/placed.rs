@@ -25,8 +25,8 @@
 use super::json::{self, Json};
 use super::{
     F_DEF, F_DOORWAYS, F_HEIGHT, F_LEVEL, F_NAME, F_OPEN, F_ORIGIN, F_OUTLINE, F_PARAMS, F_SILL,
-    F_SLOTS, F_SOLIDS, F_STAIRS, F_SURFACES, F_WHILE_JOINED, F_WIDTH, R, i, int, label, name, need, points, pose4,
-    s,
+    F_SLOTS, F_SOLIDS, F_STAIRS, F_SURFACES, F_WHILE_JOINED, F_WIDTH, R, i, int, label, name, need,
+    points, pose4, s,
 };
 use replica::edit::{Op, Ref, Spot};
 use replica::encode::{Name, Value};
@@ -427,7 +427,8 @@ pub fn way_ops(
         *next += 1;
         n
     };
-    let (mut out, floor_of) = floor_ops(&[], &floors, &stairs, thing, floor, &|_| None, &mut fresh)?;
+    let (mut out, floor_of) =
+        floor_ops(&[], &floors, &stairs, thing, floor, &|_| None, &mut fresh)?;
     out.extend(stair_ops(&stairs, &floor_of, &mut fresh)?);
     Ok(out)
 }
