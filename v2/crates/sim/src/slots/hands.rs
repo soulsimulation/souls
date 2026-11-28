@@ -313,6 +313,19 @@ impl Holding {
             );
         };
         seated_in(cx, thing)?;
+        // E16 (#2787): never out of another body's hand (or off what it wears). The holder is not named.
+        let t = cx.tree;
+        if let Some(p) = t
+            .handle(thing)
+            .and_then(|h| t.node(h))
+            .and_then(|n| n.parent())
+            && p != body
+            && t.links_at(p)
+                .iter()
+                .any(|e| t.ty(e).as_str() == "souls:body-of")
+        {
+            return refuse("in_hand", format!("{} is in another's hand", show(thing)));
+        }
         let free = free_hands(cx.tree, &cx.log.rules, body, &all);
         if free.len() < usize::from(need) {
             return refuse(
