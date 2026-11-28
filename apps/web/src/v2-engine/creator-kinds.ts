@@ -21,6 +21,8 @@ import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, ty
 import { layerDraws } from './layer-draws.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
+import { entityId, setHeldKindResolver } from './held-kind.ts';
+export { entityId, heldKindOf } from './held-kind.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
@@ -112,7 +114,7 @@ function shapeLook(entry: Json): { make: Json; palette: Record<string, string>; 
  *  new def and the things placed from the old one keep theirs. Its look, in order: an uploaded model, its kit parts
  *  (`geometry.parts`), its own shape (`looks.shape`, with the state its `when`s and looks table read: `fields`), else its
  *  bounds as one box, named `…-box`, so a look that arrives later for the same kind is a new def. */
-export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField> } | null {
+export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField>; points?: Record<string, { role: string; at: [number, number, number] }> } | null {
   let entry: Json | null;
   try { entry = obj(JSON.parse(new TextDecoder().decode(bytes))); } catch { return null; }
   if (!entry || entry.format !== 'souls-entry/1') return null;
@@ -138,19 +140,12 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
   const { budget: _b, ...hashable } = def;
   const fields = own ? Object.fromEntries(pictured(entry.state)) : undefined;
   return { def: { ...def, budget: { tris: 0, bytes: 0, textures: 0 }, hash: hashOf(hashable), ref: `${named}@1`, by: 'v2', born: 0 }, model: upload ? upload[1] : null,
-    ...(fields && Object.keys(fields).length ? { fields } : {}) };
+    ...(fields && Object.keys(fields).length ? { fields } : {}),
+    points: Object.fromEntries(Object.entries(obj(entry.points) ?? {}).flatMap(([name, value]) => { const p = obj(value); return p && typeof p.role === 'string' && point(p.at_mm) ? [[name, { role: p.role, at: p.at_mm.map(mm) as [number, number, number] }]] : []; })) };
 }
 
 /** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
  *  (an imported thing), else one made from it. */
-export function entityId(node: string): string {
-  if (/^[eh]_[a-z0-9]{4,12}$/.test(node)) return node;
-  let h = 2166136261;
-  for (let i = 0; i < node.length; i++) h = Math.imul(h ^ node.charCodeAt(i), 16777619);
-  let h2 = h ^ 0x9e3779b9;
-  for (let i = node.length - 1; i >= 0; i--) h2 = Math.imul(h2 ^ node.charCodeAt(i), 16777619);
-  return `e_v${((h >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 11)}`;
-}
 
 type Drawn = NonNullable<ReturnType<typeof kindDef>>;
 const same = (a: Uint8Array | undefined, b: Uint8Array) => a === b || (!!a && a.length === b.length && a.every((x, i) => x === b[i]));
@@ -220,6 +215,21 @@ export class CreatorKinds {
       into.set(n.defines.split('@')[0], d);
       if (d.model && d.def.make.kind === 'mesh') this.onModel(d.def.make.asset, this.uploadUrl(d.model));
     }
+  }
+
+  /** An exact recorded revision, using the same loaded definition and state conversion as scenery. */
+  held(entry: import('../../../../mars/viewer/app/engine-view/held-entry.ts').HeldEntry) {
+    if (!entry.kind.includes('@') || ![...this.definers.values()].includes(entry.kind)) return null;
+    const d = this.defs.get(entry.kind) ?? this.shapes.get(entry.kind);
+    if (!d || d.def.ref.endsWith('-box@1')) return null;
+    const grips = Object.values(d.points ?? {}).filter(p => p.role === 'grip');
+    if (grips.length !== 1) return null;
+    // Recorded JSON preserves big/timed values losslessly, but this look converter has no recorded clock/decoder.
+    // Refuse that representation rather than silently showing default contents.
+    if (entry.fields && Object.values(entry.fields).some(value => value === null || typeof value === 'object' || typeof value === 'number' && !Number.isSafeInteger(value))) return null;
+    const tint = tintState(entry.tint?.map(([name, colour]) => [name, colour]));
+    const state: Record<string, boolean | number | string> = { ...(d.fields ? lookState(entry.fields as Fields | undefined, d.fields) : entry.state ?? {}), ...(tint !== undefined ? {tint} : {}) };
+    return { def: d.def, grip: grips[0].at, points: d.points ?? {}, state };
   }
 
   /** Whether a node the stream still holds has this origin (a thing removed and placed again under it: the layer's still). */
@@ -299,3 +309,6 @@ export class CreatorKinds {
     return { type: 'edge', kind: 'world-diff', seq: Math.max(seq, after ?? seq) + 1, at, by: 'engine', diff: { upserts, removes, defs, tiles: [] } };
   }
 }
+
+// A callback into the live hook's existing catalogue; no duplicate registry or definition ownership.
+export const setHeldKinds = (kinds: CreatorKinds | null) => setHeldKindResolver(kinds ? entry => kinds.held(entry) : null);
