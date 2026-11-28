@@ -812,6 +812,11 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                     if ends.len() != 2 {
                         return Err("a link's ends are [node, node]".into());
                     }
+                    // A bare link (`"bare": true`, a creator's joint): the link alone, no field, row or door.
+                    let bare = matches!(o.get("bare"), Some(json::Value::Bool(true)));
+                    if bare && ["field", "row", "door"].iter().any(|k| o.get(k).is_some()) {
+                        return Err("a bare link has no field, row or door".into());
+                    }
                     Op::Link {
                         name: uint_of(o.get("name"), "a link's name")?,
                         ty: o
@@ -825,15 +830,22 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                             1 => crate::world_model::End::Second,
                             _ => return Err("a link's owner is 0 or 1".into()),
                         },
-                        field: uint_of(o.get("field"), "a link's field")?,
-                        row: match field_value(o.get("row").ok_or("a link's row")?)? {
-                            Value::Array(row) => row,
-                            _ => return Err("a link's row is an array".into()),
+                        field: match bare {
+                            true => 0,
+                            false => uint_of(o.get("field"), "a link's field")?,
+                        },
+                        row: match bare {
+                            true => Vec::new(),
+                            false => match field_value(o.get("row").ok_or("a link's row")?)? {
+                                Value::Array(row) => row,
+                                _ => return Err("a link's row is an array".into()),
+                            },
                         },
                         door: match o.get("door") {
                             None | Some(json::Value::Null) => None,
                             d => Some(ref_of(d)?),
                         },
+                        bare,
                     }
                 }
                 // #3728: rows into an array field (a land edit's changed terrain tiles).

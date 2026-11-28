@@ -367,6 +367,7 @@ fn link_wire_roundtrip_keeps_its_row_owner_and_door_under_strict_i2() {
             field: 21,
             row: row.clone(),
             door,
+            bare: false,
         }];
         let (_, mut i) = intent("edit");
         i.parameters = parameters(&ops);

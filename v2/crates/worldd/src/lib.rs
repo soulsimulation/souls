@@ -13,6 +13,7 @@ pub mod checkers;
 pub mod closed;
 pub mod courses;
 pub mod directory;
+mod edit_joins;
 mod edit_places;
 pub mod engine;
 pub mod handover;
