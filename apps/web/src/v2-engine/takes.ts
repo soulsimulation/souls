@@ -173,15 +173,15 @@ export function standingFacingAt(records: readonly StandingFacing[] | undefined,
 /** A native standing turn or slot release keeps its attained facing when walking starts. Compile from public
  * timestamps once per chunk; sampling this plan never depends on an earlier draw or the chunk's loop fallback. */
 export function facingHandoffs(samples: readonly WorldSample[], heading: number, turns: readonly Turn[] = [], standing?: readonly StandingFacing[]): (t: number) => number | null {
-  type Event = { at: number; native?: Turn; toward?: number; walking?: boolean; seated?: boolean };
+  type Event = { at: number; native?: Turn; toward?: number; walking?: boolean; seat?: Seat };
   const events: Event[] = turns.map(native => ({ at: native.at, native }));
   for (let i = 0; i + 1 < samples.length; i++) {
     const a = samples[i], b = samples[i + 1], dx = b.p[0] - a.p[0], dz = b.p[2] - a.p[2];
     const seated = !!(a.seat || b.seat), seconds = (b.at - a.at) / 1e6;
     const walking = !seated && seconds > 0 && Math.hypot(dx, dz) / POS_Q / seconds >= WALKING;
-    events.push({ at: a.at, walking, seated: !!a.seat, ...(walking ? { toward: Math.atan2(dz, dx) } : {}) });
+    events.push({ at: a.at, walking, seat: a.seat, ...(walking ? { toward: Math.atan2(dz, dx) } : {}) });
   }
-  if (samples.length) events.push({ at: samples[samples.length - 1].at, walking: false, seated: !!samples[samples.length - 1].seat });
+  if (samples.length) events.push({ at: samples[samples.length - 1].at, walking: false, seat: samples[samples.length - 1].seat });
   // Native facing at a movement's start is the standing left limit, before that new segment owns travel direction.
   events.sort((a, b) => a.at - b.at || Number(!a.native) - Number(!b.native));
   const movingAfter = new Map(events.filter(e => !e.native).map(e => [e.at, e.walking]));
@@ -195,7 +195,7 @@ export function facingHandoffs(samples: readonly WorldSample[], heading: number,
       turn = { at: e.at, from, to: e.native.to }; ordinary = turn.to;
     } else {
       moving = e.walking!;
-      if (e.seated) { turn = null; plan.push({ at: e.at, turn }); continue; }
+      if (e.seat) { ordinary = e.seat.heading ?? ordinary; turn = null; plan.push({ at: e.at, turn }); continue; }
       if (e.toward === undefined) continue;
       const owned = standingFacingAt(standing, e.at, attained);
       const pending = turn && Math.abs(Math.atan2(Math.sin(attained - turn.to), Math.cos(attained - turn.to))) > 1e-9;

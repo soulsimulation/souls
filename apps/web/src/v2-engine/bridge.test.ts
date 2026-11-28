@@ -67,7 +67,7 @@ function standingSlotProjection({ cold = false, posture = 'stand', known = true,
 
 // Retained conference timing: leave toward +Z, native face toward -Z at7.95s,
 // then a70mm/500ms return to the raised standing slot at8.45s.
-function slowStandingReentry(period = 500_000, quiet = false) {
+function slowStandingReentry(period = 500_000, quiet = false, seatHeading?: number) {
   const bridge = new V2Bridge({ rulesVersion: 'test/1' });
   const yaw = (r: number) => [Math.cos(r / 2) * Q, 0, Math.sin(r / 2) * Q, 0] as [number, number, number, number];
   const platform = node('p.1', 'w.0', [0, 0, 4_000_000], { kind: 'fixture:lectern@1', rot: yaw(Math.PI), slots: [[1, 0, 100, -350, 0, 1]] });
@@ -75,12 +75,17 @@ function slowStandingReentry(period = 500_000, quiet = false) {
     entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { lectern: { admits: 'body', at_mm: [0, 100, -350], posture: 'stand' } } })) });
   const occupied = node('b.7', 'p.1', [0, 0, 0], { kind: 'souls:body@1', soul: 'soul-abc-7', slot: 1, at: T0 });
   const free = { ...occupied, parent: 'w.0', slot: null, pos: [0, 0, 4_420_000] as [number, number, number], rot: yaw(2.8855), at: null };
-  bridge.receive({ t: 'snapshot', s: { nodes: [world, platform, entry, occupied], removed: [] } });
+  const chair = node('chair.1', 'w.0', [0, 0, 4_420_000], { kind: 'fixture:chair@1', rot: yaw(Math.PI / 2 - (seatHeading ?? 0)), slots: [[1, 0, 450, 0, 0, 1]] });
+  const chairEntry = { ...entry, id: 'chair.kind', defines: chair.kind, entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { seat: { admits: 'body', at_mm: [0, 450, 0], posture: 'sit' } } })) };
+  bridge.receive({ t: 'snapshot', s: { nodes: [world, platform, entry, ...(seatHeading === undefined ? [occupied] : [chair, chairEntry, { ...free, pos: [-70_000, 0, 4_420_000] as [number, number, number], rot: yaw(0), at: T0 }])], removed: [] } });
   type Sample = [string, string, number | null, number, number, number, number];
   const samples: Sample[] = [[ 'b.7', 'w.0', null, T0 + 3_000_000, 0, 0, 4_350_000 ],
     ['b.7', 'w.0', null, T0 + 3_050_000, 0, 0, 4_420_000], ['b.7', 'w.0', null, T0 + 3_100_000, 0, 0, 4_420_000],
     ['b.7', 'w.0', null, T0 + 7_950_000, 0, 0, 4_420_000], ['b.7', 'p.1', 1, T0 + 8_450_000, 0, 0, 0]];
-  const records = [{ at: T0 + 3_100_000, value: free }, { at: T0 + 7_950_000, value: { ...free, rot: yaw(Math.PI / 2) } },
+  if (seatHeading !== undefined) samples.splice(0, 3, ['b.7', 'w.0', null, T0, -70_000, 0, 4_420_000], ['b.7', 'w.0', null, T0 + 500_000, 0, 0, 4_420_000],
+    ['b.7', 'chair.1', 1, T0 + 1_000_000, 0, 0, 0], ['b.7', 'w.0', null, T0 + 3_100_000, 0, 0, 4_420_000]);
+  const records = [...(seatHeading === undefined ? [] : [{ at: T0 + 1_000_000, value: { ...occupied, parent: 'chair.1' } }]),
+    { at: T0 + 3_100_000, value: free }, { at: T0 + 7_950_000, value: { ...free, rot: yaw(Math.PI / 2) } },
     { at: T0 + 8_450_000, value: { ...occupied, at: null } }];
   let frozen = '';
   for (let from = T0, number = 0; from < T0 + 12_000_000; from += period, number++) {
@@ -117,6 +122,21 @@ test('a native standing turn continues through slow opposite walking and slot ac
   for (const i of [44, 0, 30, 3, 12, 20]) assert.deepEqual(ordinary.at(times[i]), expected[i], 'fresh/backward seeks are independent of earlier sampling');
   for (const boundary of [8, 8.45, 9]) assert(angle(live.at(boundary - .00001).yaw, live.at(boundary + .00001).yaw) < .002, `continuous seam/acquisition at ${boundary}`);
   assert.equal(live.frozen, JSON.stringify(live.bridge.view.takes.chunks.find(c => c.fromTick === T0 / TICK_US + 140)), 'the earlier published chunk stays immutable');
+});
+
+test('a native turn after rising starts from the actual seat front rather than stale pre-seat facing', () => {
+  const seatHeading = .7, ordinary = slowStandingReentry(500_000, false, seatHeading);
+  const split = slowStandingReentry(250_000, false, seatHeading), cold = slowStandingReentry(500_000, false, seatHeading);
+  const angle = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  assert.ok(Math.abs(ordinary.at(.5).yaw) < .002, 'pre-seat heading is independently zero');
+  assert.equal(ordinary.at(2).activity, 'sit');
+  assert.ok(angle(ordinary.at(2).yaw, seatHeading) < .002, 'the actual turned chair owns seated facing');
+  assert.ok(angle(ordinary.at(7.8).yaw, seatHeading) < .002, 'the risen body retains that seat exit facing');
+  assert.ok(angle(ordinary.at(7.96).yaw, seatHeading) < .02, 'native retarget begins from the attained seat-facing left limit');
+  const times = Array.from({ length: 40 }, (_, i) => 7.8 + i / 25), expected = times.map(t => ordinary.at(t));
+  for (let i = 1; i < times.length; i++) assert(angle(expected[i - 1].yaw, expected[i].yaw) <= 1.5 * Math.PI / .6 / 25 + .005, `seat-exit turn continuity at ${times[i]}`);
+  for (const i of [39, 0, 28, 5, 15, 2]) for (const other of [split, cold]) assert.deepEqual(other.at(times[i]), expected[i], 'cold/backward and stream partitions preserve the seat-owned origin');
+  assert.ok(angle(ordinary.at(9).yaw, -Math.PI / 2) < .002);
 });
 
 test('the actual lecture slot faces through its authored lectern front toward the conference benches', () => {
