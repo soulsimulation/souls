@@ -422,3 +422,14 @@ test('#5067: part raise and part lower send their intents; carry grip top|foot s
   assert.equal(carryIntents({ kind: 'part', do: 'raise', crew: id(8) }, c).code, 'part-usage');
 });
 
+test('racks T2: the deck kinds are loads: a 4x6 sheet and a 6 ft 2x4 carried by two from their ends, a 12 ft frame by two', () => {
+  const sheet = loadOf(entry('construction', 'plywood_sheet.json')), joist = loadOf(entry('construction', 'two_by_four.json'));
+  // both lie lower than a walker is blocked by, so each end carrier stands 0.25 m (the 2x4: 75 mm past its end) beyond its grip
+  assert.deepEqual([sheet.axis, sheet.places, sheet.inner.length, sheet.joins], [0, [-1_164_000, 1_164_000], 2, true]);
+  assert.deepEqual([joist.axis, joist.places, joist.joins], [0, [-989_500, 989_500], true]);
+  assert.equal(crewNeeds(entry('construction', 'plywood_sheet.json')), 2);
+  assert.equal(crewNeeds(entry('construction', 'two_by_four.json')), 2);
+  assert.equal(crewNeeds(entry('construction', 'rack_upright_12ft.json')), 2);
+  const frame = loadOf(entry('construction', 'rack_upright_12ft.json'));
+  assert.deepEqual([frame.axis, frame.hold, frame.joins], [1, 609_500, true], 'a standing frame held at its edges');
+});
