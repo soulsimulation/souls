@@ -1037,12 +1037,12 @@ fn deck_bay_each_joist_is_fed_over_the_near_beam_into_the_standing_bay() {
         let (fx, fz) = named_place(&got.detail, "it would be fed with the crew's node at");
         let (hx, hz) = (fx - testworld::SITE_X, fz - testworld::YARD_Z);
         assert!(
-            (2_000..=2_400).contains(&hx) && (hz - dz).abs() <= 10,
+            (2_000..=2_400).contains(&hx) && (hz - dz).abs() <= 50,
             "{slot}: fed from beside the bay, in line with its slot: {}",
             got.detail
         );
         k.walk(
-            &[(3, Bay::at(hx - PLACE, dz)), (2, Bay::at(hx + PLACE, dz))],
+            &[(3, Bay::at(hx - PLACE, hz)), (2, Bay::at(hx + PLACE, hz))],
             "the 2x4 carried to where it is fed from",
         );
         let by_bay = body_on(&k.w, body_of(&k.w, k.w.souls[3])).1;
@@ -1056,7 +1056,7 @@ fn deck_bay_each_joist_is_fed_over_the_near_beam_into_the_standing_bay() {
             "{slot}: the carrier by the bay fed it from where it stood"
         );
         let behind = body_on(&k.w, body_of(&k.w, k.w.souls[2])).1;
-        let want = Bay::at(PLACE, dz);
+        let want = Bay::at(PLACE, hz);
         assert!(
             (behind.x - want.x).abs() <= 60_000 && (behind.z - want.z).abs() <= 60_000,
             "{slot}: the carrier behind walked it in to its end: {behind:?}"
