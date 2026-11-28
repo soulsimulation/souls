@@ -750,9 +750,8 @@ impl Assembly {
             _ => return Err(refusal("crew.size", show(activity))),
         };
         let mut walks = ways(carriers, ends, from.0, at, from.1, walkable)?;
-        // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
-        // (its rails), which it rests on.
-        let rests = s.rests(pk.as_str());
+        // By default a part joins the bay's seated parts of the kinds its own kind rests on (a rail its frames, a
+        // sheet its joists).
         let joins = match joins {
             Some(j) => j,
             None if bay && !s.stands(pk.as_str()) => tree
@@ -762,7 +761,7 @@ impl Assembly {
                 .filter_map(|h| tree.node(*h))
                 .filter(|n| {
                     let k = n.kind().as_str();
-                    n.slot().is_some() && if rests { s.bears(k) } else { s.stands(k) }
+                    n.slot().is_some() && s.rests_on(pk.as_str(), k)
                 })
                 .map(|n| n.id())
                 .collect(),
