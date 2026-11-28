@@ -402,7 +402,8 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
     }));
     await shot('frames-raised-and-held'); await phase(state, page, 'frames-held');
     const [, back, front, mouth, slot] = T.beam, bc = await crewOf(state, back, front);
-    await gripEnds(state, beam.id, back, front);
+    // attempt 19: the beam's carriers walk from the camp to its ends for longer than a refused take is asked again
+    await gripEnds(state, beam.id, back, front); await wait(12000);
     await retried(state, back, 'part', 'take', bc, beam.id); await wait(1000); await shot('beam-taken');
     await retried(state, back, 'carry', 'to', bc, mouth); await wait(1500); await shot('beam-at-the-mouth');
     const put = await putAsked(back, 'part', 'put', bc, bay, slot); await wait(2500); await shot('beam-put-answered');
