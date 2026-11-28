@@ -3137,9 +3137,12 @@ fn a2_parts_rest_at_the_grounds_height() {
             BTreeMap::from([(1, bay.to_value()), (2, Value::Uint(slots["upright_a"]))]),
         );
         assert_eq!(got.kind, 1, "{what}: put: {got:?}");
+        let gone = body_of(&w, w.souls[ab.0]);
         hands[ab.0].send_to(answers::LEAVE, None, BTreeMap::new());
         let got = socket_end(&mut hands[ab.0].s);
         assert_eq!(got.kind, 1, "{what}: Soul {} retires: {got:?}", ab.0 + 1);
+        // The next crew walks where it stood: the test waits on the world, for its body to have left.
+        left_the_world(&w, gone, what);
         c
     };
     let on_ground = |what: &str, mid: i64| {
@@ -3939,6 +3942,26 @@ fn whys(w: &Seeded, entries: &[u64], event: &str) -> Vec<(Id, String)> {
             _ => None,
         })
         .collect()
+}
+
+/// Waits (at most 60 s) until body `body` is no longer in the served world's tree (a retired Soul's body has left),
+/// and fails otherwise.
+fn left_the_world(w: &Seeded, body: Id, what: &str) {
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (copy, _) = served_copy(w);
+        if copy.tree().handle(body).is_none() {
+            return;
+        }
+        drop(copy);
+        assert!(
+            Instant::now() < end,
+            "{what}: the retired body {} is still in the world, at {:?}",
+            replica::world_model::show(body),
+            body_at(w, body)
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// The crews on part `id` (its children of the crew's kind) and how many of them are kept holds (B18's `F_KEPT`).
