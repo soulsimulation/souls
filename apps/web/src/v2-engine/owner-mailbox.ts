@@ -368,18 +368,7 @@ export const v2MailboxPlace = (): MailboxPlace | null => (PAGE_STREAM && typeof 
  *  owner view; empty on an old-engine world, signed out, or while the directory cannot be asked. */
 export function useV2OwnedSouls(): readonly string[] {
   const s = useSession();
-  // first day (28 Nov): a card that opens at arrival starts from the page's last exchange (the approval's box made one),
-  // not from nothing: else it is a visitor's card until its own exchange answers
-  const [owned, setOwnedState] = useState<readonly string[]>(() => ownedSeen(s.label));
-  const setOwned = (ids: readonly string[]) => { setOwnedState(ids); sawOwned(s.label, ids); };
-  // first day (28 Nov): asked again when this page approves a Soul, or its card opened as a visitor's at arrival
-  const [asked, setAsked] = useState(0);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const again = () => setAsked((n) => n + 1);
-    window.addEventListener(OWNED_CHANGED_EVENT, again);
-    return () => window.removeEventListener(OWNED_CHANGED_EVENT, again);
-  }, []);
+  const [owned, setOwned] = useState<readonly string[]>([]);
   useEffect(() => {
     const place = PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
     if (!place || (!s.authed && !('testName' in place.session))) { setOwned([]); return; }
@@ -391,7 +380,7 @@ export function useV2OwnedSouls(): readonly string[] {
       } catch { if (live) setOwned([]); }
     })();
     return () => { live = false; };
-  }, [s.authed, s.mode, s.label, asked]);
+  }, [s.authed, s.mode, s.label]);
   return owned;
 }
 /** One of the signed-in person's Souls on this world, as the navbar lists it (the directory's `/v1/account/souls`). */
@@ -479,20 +468,6 @@ export function useV2AccountSouls(world: string | null = v2WorldName()): readonl
 /** Said on the window when this page approved a Soul: the owned list is asked again (useV2OwnedSouls). */
 export const OWNED_CHANGED_EVENT = 'sim:v2-owned-changed';
 
-/** First day (28 Nov): this page approved `soulId`. The owned lists are asked again, and its box starts now: its body
- *  arrives some seconds later (about 28 s on soul.game), by when the gateway has said whether its agent is connected,
- *  so the card's first read says Connected instead of Checking… while the box signs in. */
-export function v2Approved(soulId: string): void {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new Event(OWNED_CHANGED_EVENT));
-  v2OwnerMailbox(soulId);
-}
-
-/** The Soul ids the page's last view-token exchange listed, and for which sign-in. */
-let lastOwned: { label: string | null; ids: readonly string[] } | null = null;
-const sawOwned = (label: string | null, ids: readonly string[]) => { lastOwned = { label, ids }; };
-const ownedSeen = (label: string | null): readonly string[] => (lastOwned && lastOwned.label === label ? lastOwned.ids : []);
-
 const boxes = new Map<string, V2OwnerMailbox>();
 /** What watches each Soul's box (`watchV2OwnerMailbox`): kept by Soul, so a box made again after a failed start tells
  *  them too. */
@@ -517,7 +492,6 @@ export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
     const { soulIdOf } = await import('./bridge.ts');
     const renew = () => viewToken(place);
     const g = await renew();
-    sawOwned(pageSession().label ?? null, g.owned.map((o) => soulIdOf(o.grant)));
     const own = g.owned.find((o) => soulIdOf(o.grant) === soulId);
     if (!own) throw new Error('This Soul is not yours on this world.');
     self.attach(new MailBox(), new BoxSocket(place.gateway, g, renew), own.grant);
