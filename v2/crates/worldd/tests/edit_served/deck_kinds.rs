@@ -863,3 +863,187 @@ fn deck_a_creators_place_into_a_slot_that_declares_a_turn_seats_the_part_turned_
         );
     }
 }
+
+impl Yard {
+    /// Frames 1 and 2 taken where they stand and put in `upright_a` and `upright_b` by Souls 2 and 3, and 4 and 5,
+    /// each pair staying to hold its frame ([`Yard::frame`]'s first step). → the two hold crews
+    fn frames_held(&mut self) -> [Id; 2] {
+        let mut holds = Vec::new();
+        for (frame, dz, (a, b), slot) in [
+            ("deck-frame-1", -1_448, (1, 2), "upright_a"),
+            ("deck-frame-2", 1_448, (3, 4), "upright_b"),
+        ] {
+            self.walk(
+                &[(a, (1_060, dz)), (b, (-1_060, dz))],
+                "beside a frame's edges",
+            );
+            let hold = self.crew(a, &[b]);
+            let f = self.id(frame);
+            self.ok(a, "part:take", hold, Self::part(f), "a 12 ft frame taken");
+            let p = self.slot_in(slot, &[]);
+            self.ok(a, "part:put", hold, p, slot);
+            holds.push(hold);
+        }
+        [holds[0], holds[1]]
+    }
+
+    /// Souls 1 and 6 at the left 0.5 m beam's ends take it where it lies. → their crew, holding it lifted
+    fn low_beam_taken(&mut self) -> Id {
+        self.walk(
+            &[(0, (-1_072, -1_547)), (5, (-1_072, 1_547))],
+            "Souls 1 and 6 to the left 0.5 m beam's ends",
+        );
+        let c = self.crew(0, &[5]);
+        let b = self.id("deck-beam-low-l");
+        self.ok(
+            0,
+            "part:take",
+            c,
+            Self::part(b),
+            "the left 0.5 m beam taken",
+        );
+        c
+    }
+}
+
+/// The turn of `node` in the open ground's frame.
+fn turn_on_ground(w: &Seeded, node: Id) -> Quat {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    sim::ground::scene::xform_to(t, t.handle(node).unwrap(), t.handle(w.ground).unwrap())
+        .unwrap()
+        .rot
+}
+
+/// N4 item 4, a frame lowered out of its slot, in a served world by Souls' intents: frames 1 and 2 stand in their slots,
+/// each held by its crew of two; the left 0.5 m beam is seated, joining both. Frame 1's crew asks `part:lower`: refused
+/// `support.none` (the beam is braced by it), and it stays in its slot. The beam's crew unseats it, carries it 2 m west
+/// and sets it down. Asked again, frame 1 is unseated and laid down on its turning track (`souls:lower`, then its
+/// crew's grips `souls:released`): it lies on the open ground, its up axis now level.
+#[test]
+fn deck_a_frame_lowered_out_of_its_slot_is_refused_while_a_beam_braces_it_then_laid_down() {
+    let mut y = Yard::serve("decklower", 6);
+    let [hold, _] = y.frames_held();
+    let (bay, frame) = (y.id("deck-bay"), y.id("deck-frame-1"));
+    let beams = y.low_beam_taken();
+    let p = y.slot_in("beam_low_l", &[]);
+    y.ok(0, "part:put", beams, p, "beam_low_l");
+    let beam = y.id("deck-beam-low-l");
+    assert_eq!(joints_at(&y.w, beam), 2, "the beam joins both frames");
+    // Toward the bay's outside (-z), so it lies clear of the bay.
+    let toward = y.at(0, -1_448 - 4_000);
+    let lower = || BTreeMap::from([(3, Value::Array(vec![int(toward.x), int(0), int(toward.z)]))]);
+    let got = y.act(
+        1,
+        "part:lower",
+        hold,
+        lower(),
+        "frame 1 lowered while the beam braces it",
+    );
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "support.none"),
+        "{got:?}"
+    );
+    assert_eq!(
+        where_is(&y.w, frame).0,
+        Some(bay),
+        "frame 1 stays in its slot"
+    );
+
+    y.ok(
+        0,
+        "part:unseat",
+        beams,
+        Yard::part(beam),
+        "the beam unseated",
+    );
+    y.walk(
+        &[(0, (-3_072, -1_547)), (5, (-3_072, 1_547))],
+        "the beam carried 2 m west",
+    );
+    y.ok(
+        0,
+        "carry:set-down",
+        beams,
+        BTreeMap::new(),
+        "the beam set down",
+    );
+    assert_eq!(
+        where_is(&y.w, beam).0,
+        Some(y.w.ground),
+        "the beam on the open ground"
+    );
+
+    y.ok(
+        1,
+        "part:lower",
+        hold,
+        lower(),
+        "frame 1 lowered out of its slot",
+    );
+    let (phase, _) = grips_said(&y.w, hold, |p, _| p == "souls:released");
+    println!("frame 1's crew's grips: {phase}");
+    let tracks: Vec<String> = logged(&y.w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.fields.get(&1) == Some(&hold.to_value()))
+        .map(|ev| ev.name.as_str().to_owned())
+        .collect();
+    println!("frame 1's crew's words: {tracks:?}");
+    assert!(
+        tracks.iter().any(|n| n == "souls:lowered"),
+        "laid down on its track, ended `souls:lowered`: {tracks:?}"
+    );
+    assert_eq!(
+        where_is(&y.w, frame).0,
+        Some(y.w.ground),
+        "out of its slot, on the open ground"
+    );
+    let up = turn_on_ground(&y.w, frame)
+        .rotate(v3(0, 1_000_000, 0))
+        .unwrap();
+    println!("frame 1's up axis now {up:?}");
+    assert!(up.y.abs() < 100_000, "it lies: its up axis level, {up:?}");
+}
+
+/// N4 item 4, `carry-turn-blocked`, in a served world by Souls' intents: frames 1 and 2 stand in their slots, held;
+/// Souls 1 and 6 hold the left 0.5 m beam lifted between the frames' columns, along the bay. Turned toward east, a
+/// quarter turn, its swept load (or a carrier's way round it) meets a standing frame: refused `carry-turn-blocked`
+/// before anything moves, saying what it meets; the beam and both carriers stand where they were.
+#[test]
+fn deck_a_carried_beam_turned_into_a_standing_frame_is_refused_before_anything_moves() {
+    let mut y = Yard::serve("deckturnblock", 6);
+    y.frames_held();
+    let beams = y.low_beam_taken();
+    let beam = y.id("deck-beam-low-l");
+    let bodies = [body_of(&y.w, y.w.souls[0]), body_of(&y.w, y.w.souls[5])];
+    let feet = |y: &Yard| bodies.map(|b| body_at(&y.w, b));
+    let (before, at) = (feet(&y), where_is(&y.w, beams).2);
+    let got = y.act(
+        0,
+        "carry:turn",
+        beams,
+        BTreeMap::from([(3, Value::Array(vec![int(1_000_000), int(0), int(0)]))]),
+        "the beam turned toward east",
+    );
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "carry-turn-blocked"),
+        "{got:?}"
+    );
+    assert!(got.detail.contains("meets"), "says what it meets: {got:?}");
+    std::thread::sleep(Duration::from_millis(1_000));
+    assert_eq!(
+        where_is(&y.w, beams).2,
+        at,
+        "the crew's node (the beam rides it) where it was"
+    );
+    assert_eq!(
+        where_is(&y.w, beam).0,
+        Some(beams),
+        "the beam still in its crew's hands"
+    );
+    assert_eq!(feet(&y), before, "both carriers where they were");
+}

@@ -342,3 +342,101 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
     }
     drop(served);
 }
+
+/// Each part of the log, in order: its tick, its body rows of `body` (where it stood) and whether it ended a move of
+/// `body` (`souls:move-ended`).
+fn ticks_of(dir: &Path, body: Id) -> Vec<(u64, Option<Vec3>, bool)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+    let Ok(r) = sim::log::recover(&bytes) else {
+        return Vec::new();
+    };
+    r.records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .filter_map(|r| Part::read(&r).ok())
+        .filter_map(|p| {
+            let Some(Value::Uint(t)) = p.rest.get(&answers::TICK) else {
+                return None;
+            };
+            let at = match p.rest.get(&answers::BODIES) {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .filter_map(worldd::bodies::read_row)
+                    .filter(|(b, ..)| *b == body)
+                    .map(|(_, pose, _)| pose.position)
+                    .next_back(),
+                _ => None,
+            };
+            let ended = p
+                .effects
+                .iter()
+                .flat_map(|e| e.events.iter().flatten())
+                .any(|ev| {
+                    ev.name.as_str() == "souls:move-ended"
+                        && ev.fields.get(&1) == Some(&body.to_value())
+                });
+            Some((*t, at, ended))
+        })
+        .collect()
+}
+
+/// N4 item 4, the walk's six sends (#5254, `WALK_AGAIN`): a Soul sent to a point in the hall's floor's frame 1 m
+/// outside its front wall (no floor there; 5 m from the doorway) walks in through the front door and stops at the
+/// nearest place on the floor, about 1.3 m short of the point. Its walk is sent again six times, each half a second
+/// after it stopped (nothing in its way moves), and only then ends `walk.stopped-short`: at least six half seconds after
+/// the body last moved, not before.
+#[tokio::test(flavor = "multi_thread")]
+async fn walk_goal_a_walk_stopped_short_is_sent_again_six_times_before_it_ends_stopped_short() {
+    let d = scratch("wgsix");
+    let facts = world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (0, 36), &socket, 1);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, floor) = (im.nodes["ground"], im.nodes["hall/floor-0"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut s = Soul::connect(&url, ids[0], lineage, &tokens[0]).await;
+    s.act("eden:walk", ground, point(Vec3::new(0, 0, 36 * M)))
+        .await
+        .expect("born");
+    let body = body_of(&dir, ids[0]);
+    let goal = Vec3::new(5 * M, 0, -(testworld::HALL_DEPTH / 2 + 1_000) * 1000);
+    let got = s.act("eden:walk", floor, point(goal)).await;
+    println!("to 1 m outside the hall's front wall, in its floor's frame: {got:?}");
+    assert_eq!(
+        got.map(|_| ()),
+        Err("walk.stopped-short".to_owned()),
+        "its end"
+    );
+    let rows = ticks_of(&dir, body);
+    let moved = rows
+        .iter()
+        .filter(|(_, at, _)| at.is_some())
+        .map(|(t, ..)| *t)
+        .max()
+        .expect("the body's rows");
+    let ended = rows
+        .iter()
+        .filter(|(.., e)| *e)
+        .map(|(t, ..)| *t)
+        .max()
+        .expect("the walk's end");
+    let again = u64::from(worldd::bodies::WALK_AGAIN);
+    let wait = u64::try_from(worldd::bodies::WALK_AGAIN_AFTER / 50_000).unwrap();
+    println!(
+        "last moved at tick {moved}, ended at tick {ended}: {} ticks ({again} sends again, {wait} ticks apart at least)",
+        ended - moved
+    );
+    assert!(
+        ended - moved >= again * wait,
+        "sent again {again} times before it ends: {} ticks",
+        ended - moved
+    );
+    assert!(
+        ended - moved <= again * (wait + 5) + 20,
+        "and then ended, not sent on: {} ticks",
+        ended - moved
+    );
+    drop(served);
+}
