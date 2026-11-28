@@ -217,6 +217,14 @@ struct Spec {
     kind: String,
     pose: [i64; 4],
     fields: BTreeMap<u64, Value>,
+    /// Placed lying (the facts' `lying`): turned so its length, its own y, lies flat along its yaw's x.
+    lying: bool,
+}
+
+/// How a part placed lying is turned: its length, its own y, onto x, its x onto z and its z onto y, as sim's `Load::of`
+/// lays a part whose length is its height (an upright set down off a carry lies so, and `raise` reads it as lying).
+fn lie() -> R<Quat> {
+    Quat::new(1 << 29, -(1 << 29), -(1 << 29), -(1 << 29)).map_err(|e| format!("{e:?}"))
 }
 
 struct Build {
@@ -275,6 +283,7 @@ impl Build {
             kind: kind.to_owned(),
             pose,
             fields,
+            lying: false,
         });
         Ok(id)
     }
@@ -1424,6 +1433,11 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             (0..3).for_each(|k| pose[k] -= at[k]);
         }
         let node = b.add(id, parent, slot, &kind, pose, fields)?;
+        if t.get("lying").and_then(Json::bool) == Some(true)
+            && let Some(sp) = b.specs.last_mut()
+        {
+            sp.lying = true;
+        }
 
         // Floors: one node per level its rooms, floors or stairs name, at the thing's origin.
         let mut levels: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
@@ -1757,7 +1771,10 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
                     slot: sp.slot,
                 },
                 position: Vec3::new(um(x)?, um(y)?, um(z)?),
-                orientation: Quat::from_yaw_mdeg(yaw).map_err(|e| format!("{e:?}"))?,
+                orientation: match Quat::from_yaw_mdeg(yaw).map_err(|e| format!("{e:?}"))? {
+                    q if sp.lying => q.then(lie()?).map_err(|e| format!("{e:?}"))?,
+                    q => q,
+                },
                 support: match sp.slot {
                     Some(_) => Support::Slot,
                     None => Support::Surface {

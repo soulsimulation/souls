@@ -1,0 +1,151 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:deck_beam",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:rack_upright_12ft",
+   "most": 2,
+   "most_per": 56,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "end_l": {
+   "role": "joint",
+   "connector": "beam_end",
+   "mates": "beam_seat",
+   "at_mm": [
+    0,
+    51,
+    -1372
+   ],
+   "yaw_mdeg": 180000
+  },
+  "end_r": {
+   "role": "joint",
+   "connector": "beam_end",
+   "mates": "beam_seat",
+   "at_mm": [
+    0,
+    51,
+    1372
+   ],
+   "yaw_mdeg": 0
+  },
+  "grip_mid": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    51,
+    0
+   ]
+  },
+  "grip_l": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    51,
+    -1197
+   ]
+  },
+  "grip_r": {
+   "role": "grip",
+   "at_mm": [
+    0,
+    51,
+    1197
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   51,
+   102,
+   2743
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 10,
+   "palette": {
+    "beam": "#e0782a",
+    "clip": "#3b3d40"
+   },
+   "tags": [
+    "rack",
+    "beam"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      51,
+      0
+     ],
+     "size": [
+      51,
+      102,
+      2623
+     ],
+     "tint": "beam"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      51,
+      -1341
+     ],
+     "size": [
+      51,
+      102,
+      60
+     ],
+     "tint": "clip"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      51,
+      1341
+     ],
+     "size": [
+      51,
+      102,
+      60
+     ],
+     "tint": "clip"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A 9 ft deck beam: two carry it and seat it between two 12 ft frames."
+ },
+ "card": {
+  "text": "card"
+ }
+}

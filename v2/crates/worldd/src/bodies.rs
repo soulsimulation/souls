@@ -95,6 +95,14 @@ const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 
 /// A walk's speed, µm a second: `sim::gaits`' walk.
 pub const WALK: i64 = sim::gaits::WALK.speed;
+/// #5254: how far from the point it was sent to a walk may end and be an arrival, mm (walks end within 0.3 m of their
+/// goal), and how many times one that ends further off is sent again, while bodies move off its way, before it answers
+/// `walk.stopped-short`.
+pub const STOPPED_SHORT_MM: u64 = 400;
+pub const WALK_AGAIN: u8 = 6;
+/// How long after a walk stopped short it is sent again, µs: bodies in its way have time to move off (six times, three
+/// seconds).
+pub const WALK_AGAIN_AFTER: Micros = 500_000;
 
 /// The speed of a walk at `gait` (0.135 G1): that gait's, or a walk's when it names none.
 pub fn speed(gait: Option<&str>) -> i64 {
@@ -233,6 +241,14 @@ pub struct Bodies {
     ended: Vec<(Id, Result<(), String>)>,
     /// The walks that ended `done` as near their goal as a crowd there allows (A2-4), until the answer is written.
     pub short: BTreeSet<Id>,
+    /// #5254: each walk to a point that ended more than [`STOPPED_SHORT_MM`] from it, how far (mm) and whether a crowd
+    /// held it off, until its answer is written: it answers `walk.stopped-short`, never as an arrival.
+    pub stopped_short: BTreeMap<Id, (u64, bool)>,
+    /// #5254: each walk done at a place moved off the point it was sent to (that point in a passage's clearance or off
+    /// its ground), how far, mm, until its answer is written.
+    pub goal_moved: BTreeMap<Id, u64>,
+    /// How many times each such walk was sent again while bodies moved round its goal ([`WALK_AGAIN`]).
+    walked_again: BTreeMap<Id, u8>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each started walk's target, and the point on it when it was sent to one, kept to its end however it ends
@@ -496,6 +512,9 @@ impl Bodies {
             live: BTreeMap::new(),
             ended: Vec::new(),
             short: BTreeSet::new(),
+            stopped_short: BTreeMap::new(),
+            goal_moved: BTreeMap::new(),
+            walked_again: BTreeMap::new(),
             took: BTreeMap::new(),
             walked_to: BTreeMap::new(),
             away_of: BTreeMap::new(),
@@ -1622,7 +1641,7 @@ impl Bodies {
 
     /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
     pub fn walks_kept(&self) -> usize {
-        self.walked_to.len() + self.away_of.len()
+        self.walked_to.len() + self.away_of.len() + self.walked_again.len()
     }
 
     /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
@@ -2107,6 +2126,48 @@ impl Bodies {
                     None if self.runner.running(body) => continue,
                     None => Err("claim-taken".to_owned()),
                 };
+                // #5254: a walk to a point that ended short of it is sent again while bodies may be moving off its way,
+                // [`WALK_AGAIN`] times (some three seconds); then it answers how far short it stopped, and why.
+                // #5254: one that came to the place it was granted, nearer than a walker's goal tolerance to the point it
+                // was sent to (that point in a doorway's or a stair's clearance, or off its ground), is done there and
+                // says so (`goal_moved`).
+                if how.is_ok()
+                    && let Some(&(t, Some(p))) = self.walked_to.get(&id)
+                    && let Some(g) = self.runner.granted.get(&body).copied()
+                    && let (Some(asked), Some(there)) = (self.gap_to(body, t, p), self.gap_to(body, t, g))
+                    && asked > 50
+                    && asked <= STOPPED_SHORT_MM
+                    && there <= 50
+                {
+                    self.goal_moved.insert(id, asked);
+                }
+                if how.is_ok()
+                    && let Some(&(t, Some(p))) = self.walked_to.get(&id)
+                    && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
+                {
+                    let crowd = self.short.contains(&id);
+                    let n = self.walked_again.get(&id).copied().unwrap_or(0);
+                    // Sent again half a second after it stopped, so bodies in its way have time to move off.
+                    let since = self
+                        .runner
+                        .ended
+                        .get(&body)
+                        .map_or(Micros::MAX, |(at, _)| self.runner.now.saturating_sub(*at));
+                    if n < WALK_AGAIN && since < WALK_AGAIN_AFTER {
+                        continue;
+                    }
+                    if n < WALK_AGAIN {
+                        self.walked_again.insert(id, n + 1);
+                        let goal = self.goal(body, t, Some(p));
+                        let walk = Box::new(Route::sent(WALK, self.runner.tick));
+                        if goal.and_then(|g| self.runner.send(body, walk, g, id)).is_ok() {
+                            self.short.remove(&id);
+                            continue;
+                        }
+                    }
+                    self.stopped_short.insert(id, (mm, crowd));
+                }
+                self.walked_again.remove(&id);
                 self.live.remove(&body);
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
@@ -2124,6 +2185,9 @@ impl Bodies {
                 out.push((id, how));
             }
         }
+        // A walk sent again that was then replaced, cancelled or retired keeps no count (review of #5268).
+        let live: BTreeSet<Id> = self.live.values().map(|(id, _)| *id).collect();
+        self.walked_again.retain(|id, _| live.contains(id));
         out
     }
 

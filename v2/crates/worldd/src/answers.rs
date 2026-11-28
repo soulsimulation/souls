@@ -1919,6 +1919,9 @@ pub const TIMED_OUT: &str = "act.timed-out";
 pub const STOPPED: &str = "act.stopped";
 /// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
+/// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance or off
+/// the ground a body stands on, as near as stands clear (#5254): said as its end's word, with how far (field 7).
+pub const GOAL_MOVED: &str = "walk.goal-moved";
 
 /// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
 /// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
@@ -3063,8 +3066,10 @@ impl Clock {
                         })
                     })
             });
-            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
-            if r.step == crate::assembly::Step::Retired
+            // A part whose walkers' maps went stale before its commit is prepared again from the world as it is then
+            // (0.135 A2: a retiring holder's set-down, its body leaving; #5067: a raise's or a seating's end, bodies
+            // walking meanwhile), never refused for it: at most `RETRIES` times.
+            if r.step != crate::assembly::Step::Taken
                 && done
                     .as_ref()
                     .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
@@ -5740,15 +5745,42 @@ impl Clock {
         let short = self.bodies.as_mut().is_some_and(|b| b.short.remove(&id));
         // 0.133: how far from its target a done walk ended, mm, taken however the move ends
         let away = self.bodies.as_mut().and_then(|b| b.away(id));
+        // #5254: a walk to a point that ended short of it, sent again while bodies moved, never answers as arrived.
+        let stopped = self.bodies.as_mut().and_then(|b| b.stopped_short.remove(&id));
+        // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
+        let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id)).is_some();
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
             false => how,
         };
+        let stopped_refusal;
+        // A walk held off its goal by a crowd standing at it ends done as near as the crowd allows (A2-4, after being
+        // sent again while the crowd might move); one with no way nearer is a named stop.
+        let (how, said) = match (how, stopped) {
+            (Ok(()), Some((mm, false))) => {
+                stopped_refusal = Refusal {
+                    name: "walk.stopped-short",
+                    detail: format!(
+                        "stopped {mm} mm short of the point it was sent to: no way nearer it that this body can \
+                         walk (ground it cannot stand on, or bodies in the way); next: walk there again, or choose a \
+                         point beside it"
+                    ),
+                };
+                (Err("walk.stopped-short".to_owned()), Some(&stopped_refusal))
+            }
+            (how, _) => (how, said),
+        };
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
-                let done = if short { DONE_SHORT } else { "done" };
+                let done = if moved {
+                    GOAL_MOVED
+                } else if short {
+                    DONE_SHORT
+                } else {
+                    "done"
+                };
                 // 0.133: how far from its target the walk ended, mm, as field 7 of its end (a fact, never a label)
                 self.note_away(id, MOVE_ENDED, Some(done), away, now);
                 self.end(id, |c| Answer::Receipt {

@@ -74,7 +74,7 @@ fn rack(height: i64, crew: u64) -> Rack {
             if p.ends_with("rack_upright.json") {
                 json = json
                     .replace("[1219, 2438, 76]", &format!("[1219, {height}, 76]"))
-                    .replacen("\"default\": 1,", &format!("\"default\": {crew},"), 1);
+                    .replacen("\"default\": 2,", &format!("\"default\": {crew},"), 1);
             }
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
             (
