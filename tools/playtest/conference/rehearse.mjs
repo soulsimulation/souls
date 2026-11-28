@@ -297,7 +297,8 @@ export async function performSlotPointComponent({ seats, lecture, benches, quest
   await act(speaker, 'take_the_lectern', lecture, 'place=lectern');
   assert.equal(await parent(speaker), lecture, 'component reentry reaches the original lectern');
   await observe('component-reentry-ready', { seat: speaker });
-  await closeConference({ speaker, listeners: [], lecture, benches, record, observe });
+  await observe('departure-start', { seat: speaker, listeners: [] });
+  await act(speaker, 'step_down', lecture);
   assert.notEqual(await parent(speaker), lecture, 'component final departure releases the lectern');
   for (const seat of seats) {
     const look = await command(seat, 'look');
