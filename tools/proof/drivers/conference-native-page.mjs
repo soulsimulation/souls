@@ -3,8 +3,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { decode, idText } from '../../../v2/client/src/brief/copy.mjs';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
 import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
@@ -13,12 +14,60 @@ const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
 const save = (paths, file, value) => writeFileSync(join(paths.dir, file), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
 
-// Use the selected product's exported mapping, never a driver copy of its hashing algorithm.
-export async function conferenceNativeLectureBinding({ checkout, nativeLecture }) {
-  assert(typeof checkout === 'string' && typeof nativeLecture === 'string' && nativeLecture, 'conference native lectern binding missing');
-  const file = join(checkout, 'apps/web/src/v2-engine/creator-kinds.ts');
-  const { entityId } = await import(pathToFileURL(file).href);
-  return { nativeLecture, entity: entityId(nativeLecture), mapping: 'creator-kinds.entityId',
+// Read only the fixture's already published public view with the same validated player as the page.
+export async function conferencePublicLecture({ paths, recipe, nativeLecture }) {
+  const root = join(paths.data, 'world', 'world'), publicRoot = join(root, 'views'), inputs = [];
+  const read = file => {
+    const rel = relative(publicRoot, file);
+    assert(rel && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel), 'conference public view path escapes');
+    const bytes = readFileSync(file); inputs.push({ file: rel, sha256: createHash('sha256').update(bytes).digest('hex') }); return bytes;
+  };
+  const manifest = JSON.parse(read(join(publicRoot, 'world.json'))), stream = resolve(root, manifest.stream);
+  const { initSync, readPointer, StreamPlayer } = await import(pathToFileURL(join(recipe.pkg, 'replica.js')).href);
+  initSync({ module: readFileSync(join(recipe.pkg, 'replica_bg.wasm')) });
+  const pointer = JSON.parse(readPointer(read(join(stream, 'pointer'))));
+  assert(typeof pointer.header === 'string' && pointer.header, 'conference public header missing');
+  const header = read(resolve(stream, '../../../headers', pointer.header));
+  assert(!pointer.generation || /^[a-f0-9]{64}$/.test(pointer.generation) && pointer.baseline === pointer.generation, 'conference public generation differs');
+  const file = name => join(stream, ...(pointer.generation ? ['g', pointer.generation] : []), name);
+  let player;
+  if (pointer.generation) {
+    const baseline = read(file('baseline'));
+    assert.equal(createHash('sha256').update(baseline).digest('hex'), pointer.baseline, 'conference public baseline hash differs');
+    player = StreamPlayer.fromBaseline(header, baseline);
+  } else player = new StreamPlayer(header);
+  try {
+    let parts = 0;
+    while (Number(player.next()) <= pointer.newest) {
+      assert(++parts <= 2048, 'conference identity public catch-up bound exceeded');
+      player.play(read(file(String(player.next()))));
+    }
+    player.verify();
+    const records = decode(player.snapshot()).filter(n => idText(n.get(1)) === nativeLecture);
+    assert.equal(records.length, 1, 'conference native lectern public record missing or ambiguous');
+    const record = records[0], fields = record.get(6), text = new TextDecoder();
+    return { id: nativeLecture, kind: record.get(2),
+      ...(fields.get(1) instanceof Uint8Array ? { origin: text.decode(fields.get(1)) } : {}),
+      ...(fields.get(2) instanceof Uint8Array ? { def: text.decode(fields.get(2)) } : {}), inputs, parts };
+  } finally { player.free(); }
+}
+
+export async function conferenceNativeLectureBinding({ checkout, nativeLecture, node, name }) {
+  assert(typeof checkout === 'string' && nativeLecture && node?.id === nativeLecture, 'conference native lectern binding missing');
+  assert.equal(name, 'presentation-lectern', 'conference native lectern name differs');
+  assert.equal(node.kind.split('@')[0], 'eden:hall_lecture', 'conference native lectern kind differs');
+  const file = join(checkout, 'apps/web/src/v2-engine/layer-draws.ts');
+  const { OLD_ENTITY, layerDraws } = await import(pathToFileURL(file).href);
+  let entity, mapping;
+  if (layerDraws(node)) {
+    assert(OLD_ENTITY.test(node.origin) && node.def, 'conference imported lectern origin/def unavailable');
+    entity = node.origin; mapping = 'layerDraws: imported NodeRec.origin';
+  } else {
+    const { entityId } = await import(pathToFileURL(join(checkout, 'apps/web/src/v2-engine/creator-kinds.ts')).href);
+    entity = entityId(nativeLecture); mapping = 'CreatorKinds: entityId for non-imported node';
+  }
+  return { nativeLecture, nativeKind: node.kind, nativeName: name, ...(node.origin ? { origin: node.origin } : {}),
+    ...(node.def ? { def: node.def } : {}), entity, mapping,
     mappingSha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
 }
 
@@ -35,7 +84,7 @@ export function conferenceLecternIdentity(world, binding, drawnLoad) {
     const matches = entities.filter(e => e.id === binding.entity);
     if (matches.length !== 1) throw Error('conference mapped lectern identity missing or ambiguous');
     const entity = matches[0];
-    if (entity.name !== 'presentation-lectern' || model.resolvedDef(entity.def)?.name !== 'core-hall_lecture') throw Error('conference mapped lectern name or kind differs');
+    if (entity.name !== undefined && entity.name !== binding.nativeName || binding.def && entity.def !== binding.def || model.resolvedDef(entity.def)?.name !== 'core-hall_lecture') throw Error('conference mapped lectern name or kind differs');
     const load = drawnLoad(world.layer, world.scene, entity.id);
     if (load.entity !== entity.id || !Number.isInteger(load.parts) || load.parts < 1) throw Error('conference mapped lectern geometry unavailable');
     witness.matched = { id: entity.id, name: entity.name, def: entity.def, resolvedDef: 'core-hall_lecture',
@@ -364,7 +413,9 @@ export async function prepare({ base, paths, recipe, signal }) {
     find('presentation-lectern', 'eden:hall_lecture'), find('question-stand', 'eden:conference_question'), find('audience', 'eden:bench'),
   ]);
   state.fixtures = conferenceFixtures({ lecterns, questions, benches });
-  state.lecternBinding = await conferenceNativeLectureBinding({ checkout: recipe.checkout, nativeLecture: state.fixtures.lecture });
+  const nativeLecture = await conferencePublicLecture({ paths, recipe, nativeLecture: state.fixtures.lecture });
+  save(paths, 'command-conference-native-lectern.json', nativeLecture);
+  state.lecternBinding = await conferenceNativeLectureBinding({ checkout: recipe.checkout, nativeLecture: state.fixtures.lecture, node: nativeLecture, name: lecterns[0].name });
   state.discovery = await discoverConference({ seat: state.seats[0], ...state.fixtures, record: state.record });
   state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
   state.creatorProof = await proveConferenceCreator({ creator: state.creator, record: state.record, signal });
@@ -532,7 +583,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     }, error => { if (failures.length < 30) failures.push(String(error)); });
     window.__conferenceDrawObserver = { samples, failures, sampleLimit, stopRender, prototype, show, original,
       measurementLimits: geometry.limits,
-      lecternEntry: { ...entry, ...binding, entity: lecternEntity, identity: identity.witness, association: 'actual product creator-kinds.entityId(nativeLecture), exact mapped scene id/name/definition and visibly attached drawn geometry; canonical entry bytes are provenance, drawn triangles own the measurement' },
+      lecternEntry: { ...entry, ...binding, entity: lecternEntity, identity: identity.witness, association: 'validated public native node, actual product layerDraws/NodeRec.origin or CreatorKinds entityId; exact scene id/def and visibly attached drawn geometry; native name is checked separately, streamSnapshot Entity.name is optional; canonical entry bytes are provenance, drawn triangles own the measurement' },
       qualification: 'actual visible indexed bodyDraw vertices measured; bounded extrema/lectern vertex-inside witnesses every250ms, not every-frame or complete triangle-intersection proof; inferred skin/foot groups are not native identities; no native contact certification; original full-body video remains required. Historical story clips used hidden-source primitive extrema and did not measure actual lectern clearance.' };
   }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul),
     entry: state.lecternEntry, binding: state.lecternBinding });

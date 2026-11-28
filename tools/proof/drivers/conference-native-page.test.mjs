@@ -16,7 +16,7 @@ function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
 const vertex = p => ({ p, mesh:'actual-skin',index:7 });
 
 test('canonical native lecture binding selects physical geometry despite a same-name landmark', async () => {
-  const binding = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-native-lecture.17' });
+  const binding = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-native-lecture.17', node: { id: 'fictional-native-lecture.17', kind: 'eden:hall_lecture' }, name: 'presentation-lectern' });
   const { entityId } = await import('../../../apps/web/src/v2-engine/creator-kinds.ts');
   assert.equal(binding.entity, entityId(binding.nativeLecture));
   assert.match(binding.mappingSha256, /^[a-f0-9]{64}$/);
@@ -28,7 +28,7 @@ test('canonical native lecture binding selects physical geometry despite a same-
   assert.equal(result.ok, true); assert.equal(result.witness.candidateCount, 2);
   assert.equal(result.witness.matched.id, binding.entity); assert.equal(result.witness.matched.parts, 1);
   assert.equal(result.witness.nativeLecture, binding.nativeLecture);
-  const another = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-other-lecture.18' });
+  const another = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-other-lecture.18', node: { id: 'fictional-other-lecture.18', kind: 'eden:hall_lecture' }, name: 'presentation-lectern' });
   const missing = conferenceLecternIdentity(f, another, drawnLoad);
   assert.equal(missing.ok, false); assert.match(missing.error, /missing or ambiguous/);
   assert.equal(missing.witness.candidateCount, 2, 'failed association retains diagnostic candidates without choosing one');
@@ -42,6 +42,34 @@ test('canonical native lecture binding selects physical geometry despite a same-
   const noGeometry = conferenceLecternIdentity(f, binding, drawnLoad);
   assert.equal(noGeometry.ok, false); assert.equal(noGeometry.witness.candidates.length, 2);
   assert.equal(noGeometry.witness.matched, null);
+});
+
+test('real streamSnapshot and WorldModel preserve an imported lecture origin without an Entity.name', async () => {
+  const { streamSnapshot } = await import('../../../apps/web/src/v2-engine/source/stream-scene.ts');
+  const { WorldModel } = await import('../../../packages/world-compiler/src/index.ts');
+  const checkout = resolve(new URL('../../../', import.meta.url).pathname), Q = 2 ** 30;
+  const node = (id, kind, parent, extra = {}) => ({ id, kind, parent, slot: null, pos: [0, 0, 0], rot: [Q, 0, 0, 0], at: null, ...extra });
+  const lecture = node('fictional-native.2', 'eden:hall_lecture@1', 'ground', { origin: 'e_lecture1', def: 'core-hall_lecture@1' });
+  const defined = JSON.parse(readFileSync(new URL('../../../worlds/templates/conference-rehearsal.json', import.meta.url))).batches.flatMap(b => b.ops).find(op => op.op === 'define' && op.def.name === 'core-hall_lecture');
+  const stored = new WorldModel({ constants: { ground: 'land' }, seed: 'fixture' }).defineDef(defined.def, 'fixture', 0);
+  const snapshot = streamSnapshot([node('world', 'souls:world', null), node('ground', 'eden:ground', 'world', { origin: 'ground', defBodies: [[stored.ref, JSON.stringify(stored)]] }), lecture,
+    node('fictional-native.6', 'eden:place', 'ground', { origin: 'e_lecture1.landmark' })], 'fictional-world');
+  const model = WorldModel.fromSnapshot({ constants: snapshot.constants, state: snapshot.state, seed: snapshot.seed, seq: 0, editSeq: 0,
+    defs: snapshot.defs, entities: snapshot.entities, ground: snapshot.ground });
+  assert.equal(model.entities.size, 1, 'a derived landmark is not an extra physical thing');
+  const entity = model.entities.get(lecture.origin); assert(entity); assert.equal(Object.hasOwn(entity, 'name'), false);
+  const binding = await conferenceNativeLectureBinding({ checkout, nativeLecture: lecture.id, node: lecture, name: 'presentation-lectern' });
+  assert.equal(binding.entity, lecture.origin); assert.equal(binding.def, lecture.def);
+  const f = rigidFixture(); f.layer.model = model; f.layer.drawn = new Map([[binding.entity, { obj: f.root }]]);
+  assert.equal(conferenceLecternIdentity(f, binding, drawnLoad).ok, true, 'production nameless scene entity is valid');
+  const wrong = await conferenceNativeLectureBinding({ checkout, nativeLecture: lecture.id, node: { ...lecture, origin: 'e_other1' }, name: 'presentation-lectern' });
+  assert.equal(conferenceLecternIdentity(f, wrong, drawnLoad).ok, false, 'an unrelated origin never selects nearby geometry');
+  await assert.rejects(conferenceNativeLectureBinding({ checkout, nativeLecture: lecture.id, node: { ...lecture, kind: 'eden:place' }, name: 'presentation-lectern' }), /kind differs/);
+  await assert.rejects(conferenceNativeLectureBinding({ checkout, nativeLecture: lecture.id, node: lecture, name: 'other-name' }), /name differs/);
+  model.entities.set('alias', { ...entity }); assert.equal(conferenceLecternIdentity(f, binding, drawnLoad).ok, false); model.entities.delete('alias');
+  entity.name = 'contradictory'; assert.equal(conferenceLecternIdentity(f, binding, drawnLoad).ok, false); delete entity.name;
+  const def = entity.def; entity.def = 'core-bench@1'; assert.equal(conferenceLecternIdentity(f, binding, drawnLoad).ok, false); entity.def = def;
+  f.scene.remove(f.root); assert.equal(conferenceLecternIdentity(f, binding, drawnLoad).ok, false, 'detached geometry refuses');
 });
 
 test('clearance uses actual instance slot plus mesh-parent transform without applying geometry-local placement twice',()=>{
