@@ -93,9 +93,8 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    from that body), which the client gives as `away_m` on the walk's receipt. A walk that ends any other way
    (refused, stopped, replaced, timed out) carries none. **A goal in a doorway or on a stair (#5254).** A point within
    0.7 m of a doorway's or a stair's end, or of its width along its line, is no place a walker stops; a walk sent to
-   one is granted the nearest point in that clearance that is clear of the passage itself by the body's radius and
-   margin (0.34 m for a standard body), never further (others sent there take the next nearest, a body's room apart),
-   and ends `walk.goal-moved`: field 7 how far, mm, field 9 the thing the passage
+   one is granted the nearest point 0.7 m clear of the passage, so no Soul stands where it narrows a doorway or a stair
+   for others (others sent there take the next nearest, a body's room apart), and ends `walk.goal-moved`: field 7 how far, mm, field 9 the thing the passage
    belongs to, field 10 its kind (`doorway`, `stairs`, `ramp`, `ladder` or `step`). A walk to a point off the ground
    ends `walk.goal-moved` when it stands within 0.4 m of it, else `walk.stopped-short`.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
