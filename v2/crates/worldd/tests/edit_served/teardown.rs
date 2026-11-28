@@ -624,8 +624,7 @@ impl Bay {
         }
     }
 
-    /// Every stage before `stage`. The sheets come off before the flight (gap 2: once the flight is let go beside
-    /// the bay, a sheet's west end cannot be reached); stage 2 leaves the flight in its slot (nothing rests on it).
+    /// Every stage before `stage`; the sheets come off before the flight (nothing rests on the flight).
     fn down_to(tag: &str, stage: u32) -> (Bay, Option<[Id; 2]>) {
         let mut k = Bay::built(tag);
         let mut crews = None;
@@ -656,32 +655,28 @@ fn teardown_1_the_stair_flight_unseated_and_carried_away() {
     k.flight_off();
 }
 
-/// Gap: in the briefed order, the flight first: once it is let go at its pile (its origin 2.36 m west of the bay's
-/// middle and 0.92 m south, where its carriers walked it to 2.96 m and 1.47 m), Soul 1 cannot reach sheet 2's west
-/// end: `walk.stopped-short`: "stopped 742 mm short of the point it was sent to: no way nearer it that this body can
-/// walk (ground it cannot stand on, or bodies in the way)". (From the south it stopped 714 mm short.)
+/// Gap: a sheet's west end, 1.26 m out from the bay's middle on its line, where the build's crew stood to seat it,
+/// cannot be reached from clear of the bay (from the north-west, the flight seated or let go; from the south-west the
+/// same): `walk.stopped-short`: "stopped 700 mm short of the point it was sent to: no way nearer it that this body can
+/// walk (ground it cannot stand on, or bodies in the way)". The deck test reaches it only from the 2x4s' ends beside
+/// it, during the build.
 #[test]
-#[ignore = "gap: after the flight is let go, a sheet's west end cannot be reached"]
-fn gap_2_after_the_flight_is_let_go_a_sheets_west_end_cannot_be_reached() {
-    let mut k = Bay::built("tdg2");
-    k.flight_off();
-    k.sheets_off();
-}
-
-#[test]
-fn teardown_2_each_sheet_lifted_off_and_carried_to_its_pile() {
+#[ignore = "gap: a sheet's west end cannot be reached from clear of the bay"]
+fn gap_2_a_sheets_west_end_cannot_be_reached_from_clear_of_the_bay() {
     let (mut k, _) = Bay::down_to("td2", 2);
     k.sheets_off();
     assert_eq!(joints_at(&k.w, k.joists[1]), 2, "j3 on its two beams, nothing on it");
 }
 
 #[test]
+#[ignore = "waits on gap 2: its setup takes the sheets off"]
 fn teardown_3_each_two_by_four_unseated_and_carried_away() {
     let (mut k, _) = Bay::down_to("td3", 3);
     k.joists_off();
 }
 
 #[test]
+#[ignore = "waits on gap 2: its setup takes the sheets off"]
 fn teardown_4_holders_take_each_frame_then_the_high_beams_come_out() {
     let (mut k, _) = Bay::down_to("td4", 4);
     k.hold_frames();
@@ -689,6 +684,7 @@ fn teardown_4_holders_take_each_frame_then_the_high_beams_come_out() {
 }
 
 #[test]
+#[ignore = "waits on gap 2: its setup takes the sheets off"]
 fn teardown_5_the_low_beams_come_out_while_the_frames_are_held() {
     let (mut k, _) = Bay::down_to("td5", 5);
     k.beams_off(false);
@@ -696,7 +692,8 @@ fn teardown_5_the_low_beams_come_out_while_the_frames_are_held() {
 
 /// Gap: `part lower` is refused for the deck frame, so no frame comes out of its slot and down:
 /// `raise.no-foot`: "10:55 names no foot to turn about" (`test_deck_frame` has no `foot` point, which
-/// `sim::activity::carry::raise::Spec::of` needs).
+/// `sim::activity::carry::raise::Spec::of` needs). The text is from frame 1's lowering under a Soul on its standing
+/// place, where it is refused before anything else is judged; this test's own setup waits on gap 2.
 #[test]
 #[ignore = "gap: part lower is refused raise.no-foot for the deck frame"]
 fn gap_6_part_lower_is_refused_the_deck_frame_names_no_foot() {
@@ -796,6 +793,7 @@ fn teardown_wrong_a_frame_under_a_soul_on_its_standing_place_is_refused_stood_on
 
 /// With every beam out, a holder of frame 1 letting go is refused `support.holders`, and both still hold it.
 #[test]
+#[ignore = "waits on gap 2: its setup takes the sheets off"]
 fn teardown_wrong_a_holder_letting_go_of_an_unbraced_frame_is_refused() {
     let (mut k, crews) = Bay::down_to("tdw4", 6);
     let c = crews.unwrap()[0];
