@@ -2444,7 +2444,7 @@ pub fn in_passage_but(
         }
         b.links
             .iter()
-            .any(|l| link_passage(b, l, ground, node, p, door, false) != Lies::Clear)
+            .any(|l| link_passage(b, l, ground, node, p, door, false, CLEARS) != Lies::Clear)
     })
 }
 
@@ -2505,6 +2505,7 @@ fn passage_indexed(
             p,
             door,
             mouths,
+            CLEARS,
         ));
         if most == Lies::In {
             break;
@@ -2512,6 +2513,10 @@ fn passage_indexed(
     }
     most
 }
+
+/// The passage's clearances [`in_passage_but`] tests (µm): [`CLEAR`] round a link's end on a floor, and half
+/// [`CLEAR`] past its width along its line.
+const CLEARS: (i64, i64) = (CLEAR, CLEAR / 2);
 
 /// How a point lies in one link's passage ([`link_passage`]): clear of it, only at its mouth (a doorway's, on the
 /// room's side of its end, [`in_mouth_indexed`]), or in it.
@@ -2523,7 +2528,8 @@ enum Lies {
 }
 
 /// How `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`). With `mouths`
-/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line.
+/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line. `(end, band)` is how far round
+/// its ends and past its width along its line it reaches, µm: [`CLEARS`] for a walker's passage (#5254).
 fn link_passage(
     b: &Building,
     l: &crate::links::Link,
@@ -2532,6 +2538,7 @@ fn link_passage(
     p: Vec3,
     door: Option<Id>,
     mouths: bool,
+    (end, band): (i64, i64),
 ) -> Lies {
     if door.is_some() && l.door == door {
         return Lies::Clear;
@@ -2546,7 +2553,7 @@ fn link_passage(
     let (mut on, mut at_end) = (false, false);
     for e in ends {
         on = true;
-        if to_segment(p, e.a, e.b) < CLEAR {
+        if to_segment(p, e.a, e.b) < end {
             if !(mouths && doorway) {
                 return Lies::In;
             }
@@ -2579,13 +2586,13 @@ fn link_passage(
     // Between a doorway's ends its band is as wide as they are (the passage where it meets each floor), and half CLEAR;
     // past them only half CLEAR, so an opening's width is no disc round its ends.
     let reach = match l.kind {
-        Kind::Step => CLEAR / 2,
+        Kind::Step => band,
         Kind::Doorway if between => {
             let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
-            held.unwrap_or(0) + CLEAR / 2
+            held.unwrap_or(0) + band
         }
-        Kind::Doorway => CLEAR / 2,
-        _ => l.width / 2 + CLEAR / 2,
+        Kind::Doorway => band,
+        _ => l.width / 2 + band,
     };
     let on_line = read
         && l.line.windows(2).any(|s| {
