@@ -1148,3 +1148,58 @@ fn a_point_past_a_squares_edge_is_granted_itself_not_a_place_short_of_it() {
         "the point itself, not a place short of it on the walker's own square: {got:?}"
     );
 }
+
+/// N4 item 6 (#5279 follow-up): what a target in a doorway's clearance costs. Its table keeps the fine places round it
+/// (`NEAR_PITCH` rings out to twice `CLEAR`, the nearest points clear of the passage) beside the ordinary rings. Sent to
+/// the hall's front doorway from 5 m off, one walker's first tick (its table built, its place granted) against the same
+/// to a clear point on the square, each on a fresh town, five times; and the table's places' memory. Prints both; the
+/// memory is held under 1 MB (the brief's line for cutting the rings), the time is measured in release on the farm:
+/// 28 Nov, 191 places (16,808 bytes), the first tick 1.21 ms against 0.39 ms to a clear point (about 0.8 ms more).
+#[test]
+#[ignore = "a measurement: run with --release -- --ignored --nocapture"]
+// The wall clock times the test, never the engine (as `tests/sizes.rs`).
+#[allow(clippy::disallowed_methods)]
+fn a3_a_doorway_targets_fine_places_cost_measured() {
+    use std::time::Instant;
+    let hz = testworld::HALL_DEPTH / 2 + testworld::WALL / 2;
+    let door = Vec3::new(0, 0, (testworld::HALL_Z - hz) * 1000);
+    let square = Vec3::new(5_000_000, 0, 10_000_000);
+    let times = |goal: Vec3| -> (Vec<u128>, usize, usize) {
+        let mut out = Vec::new();
+        let (mut places, mut fine) = (0, 0);
+        for _ in 0..5 {
+            let (mut t, _) = town();
+            let ground = t.ground;
+            let from = Vec3::new(goal.x, 0, goal.z - 5_000_000);
+            let t0 = Instant::now();
+            bind(&mut t, 1, ground, from, Target::new(ground, goal)).expect("bound");
+            out.push(t0.elapsed().as_micros());
+            let table = t
+                .spots
+                .table(&Target::new(ground, goal))
+                .expect("its table");
+            places = table.places.len();
+            fine = table.places.iter().filter(|p| p.ring == 0).count();
+        }
+        out.sort();
+        (out, places, fine)
+    };
+    let (d, dn, dfine) = times(door);
+    let (c, cn, _) = times(square);
+    let bytes = |n: usize| n * std::mem::size_of::<sim::spots::Place>();
+    println!(
+        "a doorway target: {dn} places ({dfine} of them fine, {} bytes), first tick {d:?} µs (median {}); a clear \
+         target: {cn} places ({} bytes), first tick {c:?} µs (median {}); the doorway's fine places cost about {} µs \
+         more",
+        bytes(dn),
+        d[2],
+        bytes(cn),
+        c[2],
+        d[2].saturating_sub(c[2])
+    );
+    assert!(
+        dfine > 1,
+        "the doorway target keeps its fine places: {dfine}"
+    );
+    assert!(bytes(dn) < 1 << 20, "under 1 MB: {} bytes", bytes(dn));
+}

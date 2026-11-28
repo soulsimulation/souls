@@ -696,7 +696,9 @@ export async function runViews(args, shootOne) {
 export const HELP_TOPICS = ['schedule-wake', 'safety', 'account', 'carry', 'build'];
 /** First day (26 Nov): `help` with no topic lists the commands, as a newcomer expects; it had answered an error. */
 export function help(home, named, topic) {
-  if (topic === undefined) return { ok: true, commands: [...new Set([...OPS, ...LOCAL, ...HOME_COMMANDS, 'shoot', 'view', 'views', 'map', 'upgrade'])].sort(), topics: HELP_TOPICS.map((t) => `help ${t}`), note: 'Each command is taught in the souls skill (.souls/bin/skill.md).' };
+  if (topic === undefined) return { ok: true, commands: [...new Set([...OPS, ...LOCAL, ...HOME_COMMANDS, 'shoot', 'view', 'views', 'map', 'upgrade'])].sort(), topics: HELP_TOPICS.map((t) => `help ${t}`),
+    ways: 'object <part> lists its places (a standing place, a deck) and ways up; object <frame> climb to <place id> climbs its ladder there, and act <place id> walks to any place',
+    note: 'Each command is taught in the souls skill (.souls/bin/skill.md).' };
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic === 'carry') return { ok: true, commands: CARRY_HELP, note: CARRY_NOTE };
   if (topic === 'build') return { ok: true, steps: BUILD_HELP, note: BUILD_NOTE };

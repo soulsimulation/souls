@@ -50,7 +50,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `yaw_mdeg` (the way a body in it faces, the thing's +z turned by it; a thing placed live gets its slot rows from these), `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `yaw_mdeg` (the way a body in it faces, the thing's +z turned by it; a thing placed live gets its slot rows from these), `turn_mdeg` (a part's turn about the vertical in it: a put, a raise into it and a creator's place into it seat the part at the slot's point turned so, the set-in track turning to it; a kind the same either way, `symmetry` `front_back`, at it or a half turn from it, the nearer; none: a put and a raise seat it unturned, a creator's place as the creator turned it), `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below); `solids_mm` (optional): the thing's own walk boxes, `[[cx, cz, hx, hz, yaw_mdeg, y0, y1]]` in its frame, given to what is placed of it in place of one box its bounds' size, so a thing with gaps (a rack frame's two posts) is walked through as one seeded from a model is; a kind with `floors`, `stairs` or `ladders` and no `solids_mm` gets no box, as a seeded one has none (its ways are how it is walked); `floors`, `stairs`, `ladders` (optional): what a thing of it is walked on and up (below) |
 | 8 | `forms` | What can be done with it (below) |
 | 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
@@ -95,6 +95,13 @@ the floor at its top. A thing whose facts give their own `floors` or `stairs` ke
   (-z) face. It sits `at_mm` along x (default 0) and runs from `run_mm` out from the face (default 600) to the face,
   600 mm wide unless `width_mm` says. Its top lands on the floor of the thing nearest it at `top_mm`. It is climbed as
   any ladder: a track, with free hands.
+
+A body on a stair or a ladder is carried along the link's line (FOR-FABLE 8). The tick's record writes its row every
+tick it moves, as a walk's: `[body, pose, [link, along]]`, its place on the line (in the frame of the floor it set out
+from), the link's id, and how far along the line it is, in millionths: 0 where it set out (the foot going up, the top
+going down), toward 1,000,000 at the far end; the tick it lands writes its row off the link. Its node's motion samples
+carry the same place at least every 200 ms, as a walk's do. A restart reads no row on a link: it stands the body where
+its last row off the link has it.
 
 A part with someone on its floor cannot be taken out of its bay (`part.stood-on`), and nor can a part under it
 (`support.none`). The rows are in the kind's hash (section 7's keys 4 to 6).

@@ -1957,10 +1957,13 @@ pub const STOPPED: &str = "act.stopped";
 /// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done. Its
 /// end says how far from its point it stood (field 7, mm) and the other body nearest that point there (field 11).
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
-/// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance (moved
-/// only as far as clears the passage itself) or off the ground a body stands on, as near as stands clear (#5254): said
-/// as its end's word, with how far (field 7, mm) and, for a passage, the thing it belongs to (field 9) and its kind
-/// (field 10: `doorway`, `stairs`, `ramp`, `ladder` or `step`).
+/// A walk done at a place moved off the point it was sent to (#5254): that point in a doorway's or a stair's clearance,
+/// moved out to a walker's clearance of it (A3: [`sim::spots::CLEAR`], 0.7 m, round its ends, half that past its width
+/// along its line), however far that is; or
+/// off the ground a body stands on, within a walker's goal tolerance of it ([`crate::bodies::STOPPED_SHORT_MM`]). A walk
+/// held off its point by a crowd is [`DONE_SHORT`] (A2-4) instead. Said as its end's word, with how far (field 7, mm)
+/// and, for a passage, the thing it belongs to (field 9) and its kind (field 10: `doorway`, `stairs`, `ramp`, `ladder`
+/// or `step`).
 pub const GOAL_MOVED: &str = "walk.goal-moved";
 
 /// A passage's kind as a walk's end names it (field 10, [`GOAL_MOVED`]).
@@ -6118,7 +6121,10 @@ impl Clock {
                         Value::Array(
                             moved
                                 .iter()
-                                .map(|(id, p, s)| bodies::row(*id, p, *s))
+                                .map(|(id, p, s, on)| match on {
+                                    Some(on) => bodies::row_on(*id, p, *on),
+                                    None => bodies::row(*id, p, *s),
+                                })
                                 .collect(),
                         ),
                     ),
@@ -6537,10 +6543,16 @@ fn answer_loop<S: Storage + 'static>(
     }
 }
 
-/// What a restart reads back from the log besides the tree: each body's last pose and the last tick logged.
+/// What a restart reads back from the log besides the tree: each body's last pose off a link and the last tick logged.
 fn read_back(part: &Part, placed: &mut Placed, last: &mut Option<i64>) {
     if let Some(Value::Array(rows)) = part.rest.get(&BODIES) {
-        for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+        // A row on a link (FOR-FABLE 8) is where a body was on a stair or a ladder: a restart stands it where its last
+        // row off the link has it.
+        for (id, pose, stance) in rows
+            .iter()
+            .filter(|r| !bodies::on_link(r))
+            .filter_map(bodies::read_row)
+        {
             placed.insert(id, (pose, stance));
         }
     }
@@ -7957,6 +7969,11 @@ fn edit_checker(
                             buildsafe::with_buildings(&mut e, &entries, &world.kinds)
                                 .and_then(|parts| {
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    crate::assembly::turned_into_slots(
+                                        &mut e,
+                                        &entries,
+                                        copy.tree(),
+                                    );
                                     // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
                                     crate::edit_joins::with_joins(
                                         &mut e, &copy, world, &structure,
@@ -8221,6 +8238,67 @@ fn io(e: std::io::Error) -> Refusal {
     Refusal {
         name: "thread",
         detail: e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod read_back_tests {
+    use super::*;
+    use replica::ids::Scope;
+    use replica::pose::{Frame, Quat, Support};
+
+    /// FOR-FABLE 8: a restart reads no body row on a link. A body's row on the ground, then its rows up a stair (one
+    /// well formed, one not), stand it where the ground row has it.
+    #[test]
+    fn a_restart_stands_a_body_where_its_last_row_off_a_link_has_it() {
+        let id = |n| Id::new(Scope([7; 16]), n).unwrap();
+        let (body, link, ground) = (id(1), id(2), id(3));
+        let foot = Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: Vec3::new(1_000_000, 0, 2_000_000),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        };
+        let up = Pose {
+            position: Vec3::new(1_500_000, 400_000, 2_000_000),
+            ..foot
+        };
+        let bad = Value::Array(vec![
+            body.to_value(),
+            up.to_value(),
+            Value::Array(vec![Value::Uint(1)]),
+        ]);
+        let rows = vec![
+            bodies::row(body, &foot, None),
+            bodies::row_on(body, &up, (link, 250_000)),
+            bad,
+        ];
+        assert_eq!(bodies::read_link(&rows[1]), Some((link, 250_000)));
+        let v = Value::Map(BTreeMap::from([
+            (1, {
+                let mut h = vec![replica::ids::SHA2_256, 32];
+                h.extend([0; 32]);
+                Value::Bytes(h)
+            }),
+            (2, Value::Array(Vec::new())),
+            (BODIES, Value::Array(rows)),
+            (TICK, Value::Uint(9)),
+        ]));
+        let part = Part::read(&replica::encode::encode(&v).unwrap()).unwrap();
+        let (mut placed, mut last) = (Placed::new(), None);
+        read_back(&part, &mut placed, &mut last);
+        assert_eq!(
+            placed.get(&body),
+            Some(&(foot, None)),
+            "stood at its row off the link"
+        );
+        assert_eq!(last, Some(9));
     }
 }
 
