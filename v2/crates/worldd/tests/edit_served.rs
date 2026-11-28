@@ -5344,10 +5344,15 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
         .1;
     drop(copy);
     let spec_of = |file: &str| {
-        Spec::of(&json::parse(&std::fs::read_to_string(d.join("entries").join(file)).unwrap()).unwrap())
-            .unwrap()
+        Spec::of(
+            &json::parse(&std::fs::read_to_string(d.join("entries").join(file)).unwrap()).unwrap(),
+        )
+        .unwrap()
     };
-    let (spec, long) = (spec_of("rack_upright.json"), spec_of("rack_upright_12ft.json"));
+    let (spec, long) = (
+        spec_of("rack_upright.json"),
+        spec_of("rack_upright_12ft.json"),
+    );
     // Both lying on their faces, their lengths along -z from their feet.
     let half = 759_250_125;
     let lie = Quat::new(half, -half, 0, 0).unwrap();
@@ -5423,7 +5428,14 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
             .flat_map(|p| p.effects.iter())
             .flat_map(|e| e.events.iter().flatten())
             .filter(|ev| ev.fields.get(&1) == Some(&crew.to_value()))
-            .map(|ev| format!("{} {:?} {:?}", ev.name.as_str(), ev.fields.get(&3), ev.fields.get(&6)))
+            .map(|ev| {
+                format!(
+                    "{} {:?} {:?}",
+                    ev.name.as_str(),
+                    ev.fields.get(&3),
+                    ev.fields.get(&6)
+                )
+            })
             .collect()
     };
     let t0 = std::time::Instant::now();
@@ -5439,7 +5451,9 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
             break;
         }
         let said = words(crew);
-        if t0.elapsed() > Duration::from_secs(60) || said.iter().any(|s| s.contains("raise-refused")) {
+        if t0.elapsed() > Duration::from_secs(60)
+            || said.iter().any(|s| s.contains("raise-refused"))
+        {
             while let Ok(l) = s.lines.try_recv() {
                 if l.contains("worldd:") {
                     println!("served: {l}");
