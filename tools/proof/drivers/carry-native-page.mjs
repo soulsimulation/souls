@@ -33,6 +33,14 @@ const SCENES = {
   raise: { who: ['ada', 'bo'], kind: 'mars:rack_upright', entry: 'content/kinds/construction/rack_upright.json',
     view: 'post=0&hour=12:00&eye=-2.5,4.2,27&at=1.5,.9,17.5',
     raise: { frame: 'rack-frame-1', lifter: 'ada', footer: 'bo', down: '-1,17', place: '4,18.3' } },
+  // The first third of the build (B4 item 3, attempt 16; CARRY_SCENE=third): each of the stand's frames is carried standing
+  // to its upright place by the bay, set down, laid down away from the bay and raised there by its own pair, who hold it;
+  // then a third crew carries a loose beam to the bay's west mouth and asks to seat it on the low left slot. On today's
+  // native a raise ends standing on the ground, not in the bay's slot, so that put is refused (support.none); the survey
+  // records the answer.
+  third: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_upright', entry: 'content/kinds/construction/rack_upright.json',
+    view: 'post=0&hour=12:00&eye=-1,4.6,29&at=4,.9,19.5',
+    third: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', '6,18.552'], ['rack-frame-2', 'di', 'cy', '6,21.448']], beam: ['rack-beam-1', 'ed', 'fi', '4.978,20', 'beam_low_l'] } },
 };
 const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
 if (!SCENE) throw Error('carry-proof.scene');
@@ -110,7 +118,7 @@ export async function prepare({ paths, recipe, signal }) {
   // Each carrier comes to its end along the load's own line (first 2.2 m out, then in): the page draws a body facing
   // the way it last walked, and the world does not turn a carrier to its load (attempt 8: Ada lifted with her back to it).
   if (SCENE.build) state.frames = standFrames(state).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
-  state.grips = SCENE.build || SCENE.raise ? Promise.resolve({ ok: true }) : Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  state.grips = SCENE.build || SCENE.raise || SCENE.third ? Promise.resolve({ ok: true }) : Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   return { dir: paths.dir };
 }
 async function offer(state) {
@@ -342,6 +350,45 @@ async function raiseSurvey({ state, page, paths, signal, check, arm, root }) {
     save(state, 'survey-measurement.json', { note: 'The contact oracle on the frame\'s crew: a measurement, not a check of this scene.', observer, watch: state.watch ?? null, raises: state.raises ?? [] });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
+/** The first third on the page (all of it after the setup gate). Its checks: every command but the beam's put accepted (a
+ *  refusal for a moment asked again), no page error; the put's answer and the oracle on the first frame's crew are measured. */
+async function firstThird({ state, page, paths, signal, check, arm, root }) {
+  const T = SCENE.third, wait = ms => delay(ms, signal);
+  const shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  check('candidate-arm', arm === 'candidate');
+  const manifest = await verifyAssets(state, check);
+  const bay = (await find(state, T.bay)).id, frames = []; for (const [name] of T.frames) frames.push(await find(state, name));
+  const beam = await find(state, T.beam[0]);
+  await setupGate(state, page, signal);
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  try {
+    let leave; const left = new Promise(ok => { leave = ok; }); const crews = [];
+    await Promise.all(T.frames.map(async ([name, lift, foot, place], k) => {
+      const frame = frames[k];
+      await gripEnds(state, frame.id, lift, foot);
+      if (k) await left;
+      const crew = crews[k] = await crewOf(state, lift, foot);
+      if (!k) await watchBeam({ state, page, check, beam: frame, manifest, root, carriers: [lift, foot] });
+      await retried(state, lift, 'part', 'take', crew, frame.id); if (!k) setTimeout(leave, 6000);
+      await retried(state, lift, 'carry', 'to', crew, place); await wait(12000);
+      await retried(state, lift, 'carry', 'set-down', crew); await wait(2500); if (k) await shot('frames-set-down-at-their-places');
+      const stations = () => Promise.all([cli(state, lift, 'carry', 'grip', frame.id, 'top'), cli(state, foot, 'carry', 'grip', frame.id, 'foot')]);
+      await stations(); await wait(800);
+      await retried(state, lift, 'part', 'lower', crew, frame.id); await wait(9000); if (k) await shot('frames-laid-down');
+      await stations(); await wait(800);
+      await retried(state, lift, 'part', 'raise', crew, frame.id); await wait(3000); await shot(`${name}-raise-part-way`); await wait(6000);
+    }));
+    await shot('frames-raised-and-held'); await phase(state, page, 'frames-held');
+    const [, back, front, mouth, slot] = T.beam, bc = await crewOf(state, back, front);
+    await gripEnds(state, beam.id, back, front);
+    await retried(state, back, 'part', 'take', bc, beam.id); await wait(1000); await shot('beam-taken');
+    await retried(state, back, 'carry', 'to', bc, mouth); await wait(1500); await shot('beam-at-the-mouth');
+    const put = await asked(state, back, 'part', 'put', bc, bay, slot); await wait(2500); await shot('beam-put-answered');
+    check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+    const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
+    save(state, 'survey-measurement.json', { note: 'The contact oracle on the first frame\'s crew, and the beam put\'s answer: measurements, not checks of this scene.', observer, watch: state.watch ?? null, beamPut: { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null } });
+  } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
+}
 /** The contact observer on the beam's crew, as the beam scene installs it. A survey measures: failing to install is recorded, not thrown. */
 async function watchBeam({ state, page, check, beam, manifest, root, carriers = SCENE.build?.carriers }) {
   try {
@@ -370,6 +417,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   await nativeCameraMode(page, 'manual', snapshot);
   if (SCENE.build) return bayBuild({ state, page, paths, signal, check, arm, root });
   if (SCENE.raise) return raiseSurvey({ state, page, paths, signal, check, arm, root });
+  if (SCENE.third) return firstThird({ state, page, paths, signal, check, arm, root });
   await offer(state);
   if (arm === 'baseline') {
     const manifest = await verifyAssets(state, check);
