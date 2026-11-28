@@ -467,19 +467,19 @@ test('#4978: two clients of the Soul acting in turn share its one numbering: eve
   try {
     await waitFor(async () => (await request(otherRt.socket, { op: 'status' }).catch(() => null))?.connected, 60_000);
     const before = taken().length, acts = [];
+    const finals = (r) => (r?.receipt?.answers ?? []).filter((x) => x.answer !== 'accepted');
     // Each client's own counter would give both the same numbers: the world would take only the first of each.
+    // In turn: each act's final answer is on its own client before the other client acts. The other's act takes the
+    // Soul (the last device wins), and an answer the world gives after that goes to the client that holds it now; the
+    // one replaced has it at its next sign-in, not while the other holds the Soul.
     for (let k = 0; k < 4; k++) {
       for (const socket of [rt.socket, otherRt.socket]) {
         const a = await request(socket, { op: 'act', verb: k % 2 ? 'r2:switch_off' : 'r2:switch_on', target: LAMP });
         outputs.push(JSON.stringify(a));
         assert.equal(a.ok, true, JSON.stringify(a));
         acts.push({ socket, sequence: a.sequence });
-        await sleep(300);
+        await waitFor(async () => finals(await request(socket, { op: 'receipt', sequence: a.sequence })).length > 0, 30_000);
       }
-    }
-    const finals = (r) => (r?.receipt?.answers ?? []).filter((x) => x.answer !== 'accepted');
-    for (const { socket, sequence } of acts) {
-      await waitFor(async () => finals(await request(socket, { op: 'receipt', sequence })).length > 0, 30_000);
     }
     await sleep(500);
     for (const { socket, sequence } of acts) {
