@@ -5,7 +5,7 @@
 // the world carries a frame standing, its native hand contacts at its foot's middle, out of its carriers' reach.
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync, fsyncSync, renameSync, copyFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync, fsyncSync, renameSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAIR, pairArgs, lastJson, seatOf, seatEnv } from '../../playtest/arena/new-engine/seat.mjs';
 import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
@@ -161,7 +161,7 @@ async function creatorOf(state) {
   if (result.answer?.ok !== true) throw Error('carry-proof.creator-pair-result');
   mkdirSync(join(home, 'kinds'), { recursive: true });
   copyFileSync(join(worldDir, 'world/world.kinds'), join(home, 'kinds', `${recipe.world.world}.kinds`));
-  const id = readdirSync(join(home, 'souls')).find(n => n.startsWith('c_')); if (!id) throw Error('carry-proof.creator-id');
+  const id = result.answer.soul; if (!/^c_/.test(id ?? '')) throw Error('carry-proof.creator-id');
   const fd = openSync(join(paths.dir, 'client-creator.log'), 'wx', 0o600);
   let daemon;
   try { daemon = spawn(process.execPath, [join(recipe.checkout, 'v2/client/src/daemon/daemon.mjs'), '--home', home, '--soul', id, '--pkg', recipe.pkg, '--ready-fd', '3'], { cwd: folder, env, detached: true, stdio: ['ignore', fd, fd, 'pipe'] }); }
