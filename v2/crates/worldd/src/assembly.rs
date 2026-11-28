@@ -434,10 +434,13 @@ pub struct OnTrack<'a> {
     pub holding: &'a [Id],
 }
 
-/// The conjugate of a unit quaternion: its inverse turn.
+/// The conjugate of a unit quaternion: its inverse turn. A half turn (w 0) is written with its other sign, its one
+/// byte form (a crew whose front stands straight behind its back along -x faced a 2x4 the wrong way: `orientation-sign`).
 fn conj(q: Quat) -> R<Quat> {
     let [w, x, y, z] = q.parts();
-    Quat::new(w, -x, -y, -z).map_err(|e| refusal("part-pose", format!("{e:?}")))
+    Quat::new(w, -x, -y, -z)
+        .or_else(|_| Quat::new(-w, x, y, z))
+        .map_err(|e| refusal("part-pose", format!("{e:?}")))
 }
 
 impl Assembly {
@@ -630,10 +633,7 @@ impl Assembly {
         let turn = yaw_toward([front.x - back.x, front.z - back.z])?;
         let inside = conj(turn)?
             .then(at.rot)
-            .map_err(|e| {
-                eprintln!("worldd: DEBUG take {}: rot {:?} turn {:?} front {front:?} back {back:?}", show(part), at.rot, turn);
-                refusal("part-pose", format!("{e:?}"))
-            })?;
+            .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
         // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
         // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.

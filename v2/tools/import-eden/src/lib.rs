@@ -1016,13 +1016,23 @@ fn with_declared_ways(text: &str, entries: &[(String, String)]) -> R<Option<Stri
                 }
                 floors.push(J::Obj(row));
             }
-            // A row's top level: the floor at its height, else one of its own past the floors.
+            // A row's top level: the floor at its height nearest its top (a ladder's own face's), else one of its
+            // own past the floors.
             let mut next = w.floors.len() as i64 + 1;
-            let mut level_at = |y: i64| match w.floors.iter().position(|f| f.top == y) {
-                Some(k) => k as i64 + 1,
-                None => {
-                    next += 1;
-                    next - 1
+            let mut level_at = |y: i64, p: [i64; 2]| {
+                let far = |f: &replica::kinds::ways::Floor| {
+                    let d = |a: i64, c: i64, h: i64| (a - c).abs().saturating_sub(h);
+                    d(p[0], f.at[0], f.size[0] / 2).max(d(p[1], f.at[1], f.size[1] / 2))
+                };
+                match (0..w.floors.len())
+                    .filter(|k| w.floors[*k].top == y)
+                    .min_by_key(|k| far(&w.floors[*k]))
+                {
+                    Some(k) => k as i64 + 1,
+                    None => {
+                        next += 1;
+                        next - 1
+                    }
                 }
             };
             let mut stairs = Vec::new();
@@ -1040,12 +1050,13 @@ fn with_declared_ways(text: &str, entries: &[(String, String)]) -> R<Option<Stri
                 ]));
             };
             for s in &w.stairs {
-                let to = level_at(s.top);
+                let to = level_at(s.top, s.to);
                 row("stairs", [s.from, s.to], s.bottom, s.top, s.width, to);
             }
             for l in &w.ladders {
-                let to = level_at(l.top);
-                row("ladder", l.path(*half), l.bottom, l.top, l.width, to);
+                let path = l.path(*half);
+                let to = level_at(l.top, path[1]);
+                row("ladder", path, l.bottom, l.top, l.width, to);
             }
             let J::Obj(o) = t else { continue };
             if !floors.is_empty() {

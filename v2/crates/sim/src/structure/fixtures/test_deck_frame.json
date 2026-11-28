@@ -161,6 +161,90 @@
         0,
         3658
       ]
+    ],
+    "floors": [
+      {
+        "top_mm": 500,
+        "size_mm": [
+          1144,
+          700
+        ],
+        "at_mm": [
+          0,
+          -388
+        ],
+        "while_joined": true
+      },
+      {
+        "top_mm": 1800,
+        "size_mm": [
+          1144,
+          700
+        ],
+        "at_mm": [
+          0,
+          -388
+        ],
+        "while_joined": true
+      },
+      {
+        "top_mm": 500,
+        "size_mm": [
+          1144,
+          700
+        ],
+        "at_mm": [
+          0,
+          388
+        ],
+        "while_joined": true
+      },
+      {
+        "top_mm": 1800,
+        "size_mm": [
+          1144,
+          700
+        ],
+        "at_mm": [
+          0,
+          388
+        ],
+        "while_joined": true
+      }
+    ],
+    "ladders": [
+      {
+        "face": "back",
+        "at_mm": -286,
+        "bottom_mm": 0,
+        "top_mm": 500,
+        "width_mm": 500,
+        "run_mm": 1200
+      },
+      {
+        "face": "back",
+        "at_mm": 286,
+        "bottom_mm": 0,
+        "top_mm": 1800,
+        "width_mm": 500,
+        "run_mm": 1200
+      },
+      {
+        "face": "front",
+        "at_mm": -286,
+        "bottom_mm": 0,
+        "top_mm": 500,
+        "width_mm": 500,
+        "run_mm": 1200
+      },
+      {
+        "face": "front",
+        "at_mm": 286,
+        "bottom_mm": 0,
+        "top_mm": 1800,
+        "width_mm": 500,
+        "run_mm": 1200
+      }
     ]
   },
   "looks": {

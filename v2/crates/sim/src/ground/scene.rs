@@ -599,9 +599,87 @@ fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64;
 
 /// Whether floor `floor` is ground now: every floor is, but one marked [`F_WHILE_JOINED`] only while a part linked
 /// to its thing, beside it in the same parent (a beam beside a frame in its bay, joined to it), sits at the floor's
-/// height in the thing's frame, within half that part's own height (its walk boxes', none: exactly). A frame's
-/// standing place is there while a beam braces the frame at that level, and gone once the beam comes out.
+/// height in the thing's frame, within half that part's own height (its walk boxes', none: exactly), and while
+/// nothing else in that parent lies over it within a standing body's height ([`BODY_HIGH`]): a box of another part,
+/// or another part's floor (a sheet's top). A frame's standing place is there while a beam braces the frame at that
+/// level, and gone once the beam comes out; one on a frame's inner face, under a deck, is never there.
 pub fn braced(tree: &Tree, floor: Handle) -> bool {
+    let marked = tree
+        .node(floor)
+        .is_some_and(|n| n.fields().contains_key(&F_WHILE_JOINED));
+    !marked || joined_at(tree, floor) && headroom(tree, floor)
+}
+
+/// A floor's rectangle in the frame of its thing's parent: [x0, z0, x1, z1] and its height, µm (none for a floor with
+/// no surfaces).
+fn plan_in_parent(tree: &Tree, floor: Handle, frame: Handle) -> Option<([i64; 4], i64)> {
+    let n = tree.node(floor)?;
+    let thing = tree.handle(n.parent()?)?;
+    let x = xform_to(tree, thing, frame).ok()?;
+    let rows = n.fields().get(&F_SURFACES)?;
+    let mut bb = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+    let mut top = None;
+    for sfc in row(rows) {
+        let [y, ring] = row(sfc) else { continue };
+        let y = um(y)?;
+        for p in ring_mm(ring).ok()? {
+            let q = on_plane(&x, p, y).ok()?;
+            bb = [bb[0].min(q.x), bb[1].min(q.z), bb[2].max(q.x), bb[3].max(q.z)];
+            top = Some(top.map_or(q.y, |t: i64| t.max(q.y)));
+        }
+    }
+    Some((bb, top?))
+}
+
+/// Whether nothing in the parent of floor `floor`'s thing, other than the thing, lies over the floor within a standing
+/// body's height (see [`braced`]).
+fn headroom(tree: &Tree, floor: Handle) -> bool {
+    let Some(thing) = tree.node(floor).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+        return false;
+    };
+    let Some(parent) = tree.node(thing).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+        return true;
+    };
+    let Some((bb, y)) = plan_in_parent(tree, floor, parent) else {
+        return false;
+    };
+    let over = |r: [i64; 4], y0: i64| {
+        y0 > y && y0 < y + BODY_HIGH * 1000 && r[0] < bb[2] && r[2] > bb[0] && r[1] < bb[3] && r[3] > bb[1]
+    };
+    for &sib in tree.children(parent).unwrap_or(&[]) {
+        if sib == thing {
+            continue;
+        }
+        if let Ok(boxes) = solids_under(tree, sib, parent)
+            && boxes.iter().any(|b| {
+                let xs = b.ring.iter().map(|p| p[0]);
+                let zs = b.ring.iter().map(|p| p[1]);
+                let r = [
+                    xs.clone().min().unwrap_or(0),
+                    zs.clone().min().unwrap_or(0),
+                    xs.max().unwrap_or(0),
+                    zs.max().unwrap_or(0),
+                ];
+                over(r, b.y0)
+            })
+        {
+            return false;
+        }
+        for &c in tree.children(sib).unwrap_or(&[]) {
+            if kind_of(tree, c) == FLOOR
+                && let Some((r, top)) = plan_in_parent(tree, c, parent)
+                && over(r, top)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Whether floor `floor` is not marked [`F_WHILE_JOINED`], or a part joined to its thing sits at its height (see
+/// [`braced`]).
+fn joined_at(tree: &Tree, floor: Handle) -> bool {
     let Some(n) = tree.node(floor) else {
         return false;
     };
