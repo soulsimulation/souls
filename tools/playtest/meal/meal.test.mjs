@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { batchSchema } from '../../../packages/world-compiler/src/schemas.ts';
-import { ENTRIES, sceneOf, mealTemplate, foundId, requireDone, requireField, terminalReceipt, meal } from './meal.mjs';
+import { validateEntry, hashKinds } from '../../entry/format.mjs';
+import { ENTRIES, sceneOf, mealTemplate, foundId, requireDone, requireField, terminalReceipt, requireMeetingRange, meal } from './meal.mjs';
 const entries = ENTRIES.map((p) => JSON.parse(readFileSync(resolve('content/kinds', p + '.json'), 'utf8')));
 
 test('the scene keeps original entry defaults and the bowl on the only serving shelf', () => {
@@ -63,7 +64,7 @@ test('set-down waits for its final receipt rather than treating sent as success'
 
 test('already arrived Souls are not joined a second time', async () => {
   const calls = [], seats = ['cook', 'server', 'diner'].map(label => ({ label, run: async (...words) => {
-    calls.push(words); return words[0] === 'status' ? { ok: true, in_world: true, body: label + '-body' } : words[0] === 'help' ? { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait'] } : { ok: true, found: [] };
+    calls.push(words); return words[0] === 'status' ? { ok: true, in_world: true, body: label + '-body' } : words[0] === 'help' ? { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait', 'query'] } : { ok: true, found: [] };
   } }));
   await assert.rejects(meal({ seats, report: { complete: false, steps: [] } }), /expected one named thing/);
   assert.equal(calls.filter(w => w[0] === 'status').length, 3);
@@ -83,14 +84,16 @@ test('the meal table preserves canonical physical surface metadata without addin
 // Public reply fixtures, deliberately independent of the client implementation. Act aliases make it observable
 // that the workflow uses inspected offers rather than reconstructing form:<id> from authored fixture entries.
 function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchingOffer = false, expiredOffer = false, canAfter, ladleRefused = false, wrongLadleQuantity = false,
-  chairNeedsPullOut = false, sitRefusal, pullOutResult, retrySitRefused = false, chairOfferTarget = 'chair' } = {}) {
+  chairNeedsPullOut = false, sitRefusal, pullOutResult, retrySitRefused = false, chairOfferTarget = 'chair',
+  missingMeetingParameter = false, meetingRefused = false, meetingQuery, giveOfferRefused = false, giveAcceptRefused = false } = {}) {
   const calls = [], state = { cooked: false, soup: 0, bowl: 0, parent: 'pot', water: 5000, running: false, chairPulled: false };
   const ids = { 'soup-pot': 'pot', 'meal-bowl': 'bowl', 'wash-sink': 'sink', 'meal-table': 'table', 'diner-chair': 'chair' };
   const offer = (id, name, params, who = 'anyone') => ({ name, act: `${name}-public:${id}`, who, ...(params ? { params } : {}) });
-  const inspect = (id) => ({ ok: true, id, card: `Public ${id} card`, ...(id === 'bowl' ? { parent: state.parent } : {}), state:
+  const inspect = (id) => ({ ok: true, id, card: id === 'pot' ? 'Cook 6; ladle 2. Meet position=serving_side or diner_side before giving bowl.' : `Public ${id} card`, ...(id === 'bowl' ? { parent: state.parent } : {}), state:
     id === 'pot' ? { soup: state.soup, vegetables: state.cooked ? 0 : 3, water: state.cooked ? 0 : 1500, fuel: state.cooked ? 0 : 1, cooked: state.cooked } :
     id === 'bowl' ? { soup: state.bowl } : id === 'sink' ? { water: state.water, running: state.running } : {},
-    offers: [offer(id, 'walk'), ...(id === 'pot' ? [offer(id, 'cook'), offer(id, 'ladle', missingBowlParameter ? {} : { bowl: { type: 'thing', optional: true } })] :
+    offers: [offer(id, 'walk'), ...(id === 'pot' ? [offer(id, 'cook'), offer(id, 'ladle', missingBowlParameter ? {} : { bowl: { type: 'thing', optional: true } }),
+      offer(id, 'meet', missingMeetingParameter ? { position: { type: 'value' } } : { position: { type: 'part' } })] :
       id === 'bowl' ? [offer(id, 'take'), offer(id, 'bite', null, 'holder')] :
       id === 'sink' ? [offer(id, 'turn_on'), offer(id, 'turn_off'), offer(id, 'wash', { thing: { type: 'thing' } })] :
       id === 'chair' ? [offer(id, 'sit'), offer(chairOfferTarget, 'pull_out')] : [])] });
@@ -98,13 +101,18 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
     calls.push({ label, words });
     const [command, word] = words;
     if (command === 'status') return { ok: true, in_world: true, body: `${label}-body` };
-    if (command === 'help') return { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait'] };
+    if (command === 'help') return { ok: true, commands: ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait', 'query'] };
     if (command === 'look') return { ok: true, nearby: Object.entries(ids).map(([name, id]) => ({ name, id })) };
     if (command === 'find') return { ok: true, found: [{ name: word, id: ids[word] }] };
     if (command === 'inspect') return inspect(word);
     if (command === 'can') return state.cooked ? canAfter ?? { ok: true, can: 'yes', current: true } : { ok: true, can: 'no', reason: 'field_differs', field: 'cooked', current: true };
+    if (command === 'query') {
+      assert.equal(label, 'diner'); assert.deepEqual(JSON.parse(word), [{ find: 'Server', near: 'me', within: 1.5 }]);
+      return meetingQuery ?? { ok: true, answers: [{ near: { id: 'diner-body', name: 'Diner', within: 1.5 }, found: [{ id: 'server-body', name: 'Server', kind: 'souls:body', metres: 1.2 }] }] };
+    }
     if (command === 'give') {
-      if (word === 'accept') { assert.equal(words[2], 'bowl-offer'); state.parent = 'diner-body'; return { ok: true, phase: 'done' }; }
+      if (word === 'accept') { assert.equal(words[2], 'bowl-offer'); if (giveAcceptRefused) return { ok: false, phase: 'refused', reason: 'give.too-far' }; state.parent = 'diner-body'; return { ok: true, phase: 'done' }; }
+      if (giveOfferRefused) return { ok: false, phase: 'refused', reason: 'give.not-held' };
       return { ok: true, phase: 'done' };
     }
     if (command === 'events') return { ok: true, events: [{ kind: 'give', what: 'offered', offer: 'old-bowl-offer', thing: 'bowl', from_id: 'server-body' }] };
@@ -119,6 +127,10 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
     if (command === 'receipt') { state.parent = 'table'; return { ok: true, receipt: { answers: [{ answer: 'receipt' }] } }; }
     if (command === 'act') {
       const form = word.split(':')[0];
+      if (form === 'meet-public') {
+        assert.equal(words[2], `position=${label === 'server' ? 'serving' : 'diner'}_side`);
+        if (meetingRefused) return { ok: false, phase: 'refused', reason: 'souls:no-way' };
+      }
       if (form === 'sit-public' && (chairNeedsPullOut && !state.chairPulled || state.chairPulled && retrySitRefused)) return sitRefusal ?? {
         ok: false, phase: 'refused', reason: 'souls:no-way', receipt: { target: 'chair',
           answers: [{ answer: 'accepted' }, { answer: 'refused', reason: 'souls:no-way' }],
@@ -156,6 +168,79 @@ test('the meal discovers each role, recovers from raw soup and conserves the sam
   }
   assert(fixture.calls.some((c) => c.words.includes('ladle-public:pot') && c.words.includes('bowl=bowl')));
   assert(!fixture.calls.some((c) => c.words.includes('ladle:pot')));
+  const meeting = fixture.calls.filter(c => c.words[1] === 'meet-public:pot');
+  assert.deepEqual(meeting.map(c => [c.label, c.words[2]]), [['server', 'position=serving_side'], ['diner', 'position=diner_side']]);
+  const queryAt = fixture.calls.findIndex(c => c.words[0] === 'query'), offerAt = fixture.calls.findIndex(c => c.words[0] === 'give');
+  assert(queryAt > fixture.calls.indexOf(meeting[1]) && queryAt < offerAt);
+  assert.equal(report.meeting.server, 'server-body');
+  assert(!fixture.calls.some(c => c.words[1] === 'walk:server-body'));
+});
+
+test('meeting discovery rejects a value selector in place of the supported part argument before cooking', async () => {
+  const fixture = publicMeal({ missingMeetingParameter: true });
+  await assert.rejects(meal({ seats: fixture.seats, report: { complete: false, steps: [] } }), /public part parameter position/);
+  assert(!fixture.calls.some(c => c.words[0] === 'act'));
+});
+
+test('a refused meeting stops once, without an offer or blind walking retry', async () => {
+  const fixture = publicMeal({ meetingRefused: true });
+  await assert.rejects(meal({ seats: fixture.seats, report: { complete: false, steps: [] } }), /souls:no-way/);
+  assert.equal(fixture.calls.filter(c => c.words[1] === 'meet-public:pot').length, 1);
+  assert(!fixture.calls.some(c => c.words[0] === 'give'));
+});
+
+test('public proximity must return the exact server in the diner query radius; rounded nearest is not admission', async () => {
+  const near = { id: 'diner-body', within: 1.5 };
+  const replies = [
+    { ok: false }, { ok: true, answers: [{ error: 'query.unknown-near' }] },
+    { ok: true, answers: [{ near, found: [], nearest: { id: 'server-body', metres: 1 } }] },
+    { ok: true, answers: [{ near, found: [{ id: 'another-body', metres: 1.2 }] }] },
+    { ok: true, answers: [{ near: { ...near, id: 'cook-body' }, found: [{ id: 'server-body', metres: 1.2 }] }] },
+    { ok: true, answers: [{ near, found: [{ id: 'server-body' }] }] },
+  ];
+  for (const meetingQuery of replies) {
+    const fixture = publicMeal({ meetingQuery });
+    await assert.rejects(meal({ seats: fixture.seats, report: { complete: false, steps: [] } }), /not confirmed within give range/);
+    assert(!fixture.calls.some(c => c.words[0] === 'give'));
+  }
+  const actualBoundaryReply = { ok: true, answers: [{ near, found: [{ id: 'server-body', metres: 1.5 }] }] };
+  assert.equal(requireMeetingRange(actualBoundaryReply, 'server-body', 'diner-body'), actualBoundaryReply);
+});
+
+test('give or accept refusal remains authoritative even after successful meeting and range query', async () => {
+  for (const options of [{ giveOfferRefused: true }, { giveAcceptRefused: true }]) {
+    const fixture = publicMeal(options), report = { complete: false, steps: [] };
+    await assert.rejects(meal({ seats: fixture.seats, report }), /give\.(not-held|too-far)/);
+    assert.equal(report.complete, false);
+    assert(!fixture.calls.some(c => c.words[1] === 'sit-public:chair'));
+    assert.equal(fixture.calls.filter(c => c.words[0] === 'give' && c.words[1] === 'accept').length, options.giveAcceptRefused ? 1 : 0);
+  }
+});
+
+test('meeting points validate as existing parts, change the entry meaning and clear conservative fixture bounds', () => {
+  const pot = entries.find(e => e.kind === 'eden:camp_soup_pot');
+  assert.deepEqual(validateEntry(pot), []);
+  assert.deepEqual(pot.forms.meet.takes, { position: { type: 'part' } });
+  assert.deepEqual(pot.forms.meet.steps, [{ step: 'walk_to', point: { arg: 'position' } }]);
+  assert.deepEqual(pot.forms.meet.effects, []);
+  assert.deepEqual(pot.points.serving_side.at_mm, [-600, 0, 2000]);
+  assert.deepEqual(pot.points.diner_side.at_mm, [600, 0, 2000]);
+  assert.equal(pot.text.card.length <= 80, true);
+  const old = structuredClone(pot); delete old.forms.meet; delete old.points.serving_side; delete old.points.diner_side;
+  const kinds = entries.filter(e => e.kind !== pot.kind);
+  assert.notEqual(hashKinds([...kinds, pot]).get(pot.kind).ref, hashKinds([...kinds, old]).get(pot.kind).ref);
+  // Offline conservative boxes only. Monster's declared Giant class radius1300mm (not measured skin width),
+  // plus native static margin60+1. Both still need actual-page skin/contact and crowd/route validation.
+  const radius = 1300 + 60 + 1, ops = mealTemplate(entries).batches[0].ops;
+  const rectangleDistance = (p, centre, half) => Math.hypot(Math.max(0, Math.abs(p[0] - centre[0]) - half[0]), Math.max(0, Math.abs(p[1] - centre[1]) - half[1]));
+  for (const point of [pot.points.serving_side, pot.points.diner_side]) {
+    const p = [point.at_mm[0] - 3000, point.at_mm[2]];
+    assert(rectangleDistance(p, [-3000, 0], [475, 275]) > radius, 'clear of whole pot box with giant static cut');
+    for (const [name, half] of [['meal-table', [585, 385]], ['diner-chair', [270, 270]]]) {
+      const placed = ops.find(o => o.name === name), centre = placed.p.map(x => Math.round(x * 1000));
+      assert(rectangleDistance(p, centre, half) > radius, `clear of conservative ${name} box`);
+    }
+  }
 });
 
 test('missing public bowl arguments stop discovery before anyone cooks', async () => {

@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:camp_soup_pot and eden:soup_bowl (from #1784). The pot holds three vegetable portions, 1500 g of water and one fuel charge, and cooks once: ten seconds with a free hand turn them into six bites of soup (three servings). Refused as the original refused ('Cooking requires the three supplied raw vegetable and water portions and unused hot fuel charge; this pot cooks once'): already cooked, too few vegetables, too little water, no fuel, no free hand. Ladling moves one serving (two bites) into the bowl on its shelf: refused before it is cooked (fix: cook; 'Cook the supplied soup first'), with no free hand, with less than a serving left (not_enough: 'at least one cooked serving must remain') and into a bowl that is not empty (no_room: 'Put one empty camp soup bowl on this pot serving shelf'). The bowl is taken and eaten in two bites ('This soup bowl is empty').",
+  "about": "Shared camp soup: cooking and serving refusals, bowl ownership and portions, plus both named meeting positions. These rule cases do not prove walking, body clearance or handover proximity.",
   "cases": [
     {
       "name": "camp_soup_pot_cook_every_need_met",
@@ -113,6 +113,8 @@
       "state": {"actor": "b1", "nodes": {"sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 0}}, "b1": {"hands": {"left": "sb1", "right": null}}}},
       "asker": {"sees": ["public"]},
       "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "soup", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
-    }
+    },
+    {"name": "camp_soup_pot_meet_serving_side", "act": {"this": "p1", "form": "meet", "args": {"position": "serving_side"}}, "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot"}, "b1": {"hands": {"left": "sb1", "right": null}}, "sb1": {"kind": "eden:soup_bowl"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}},
+    {"name": "camp_soup_pot_meet_diner_side", "act": {"this": "p1", "form": "meet", "args": {"position": "diner_side"}}, "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot"}, "b1": {"hands": {"left": "sb1", "right": null}}, "sb1": {"kind": "eden:soup_bowl"}}}, "asker": {"sees": ["public"]}, "expect": {"verdict": "yes"}}
   ]
 }

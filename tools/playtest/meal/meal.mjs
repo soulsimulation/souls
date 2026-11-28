@@ -106,13 +106,31 @@ export function mealOffer(answer, name, args = {}) {
   return [offer.act, ...Object.entries(args).map(([key, value]) => `${key}=${value}`)];
 }
 
+/** A declared part is a named point, not a thing id or an invented closed-list selector. */
+export function meetingOffer(answer, position) {
+  const offer = answer.offers?.find(o => o.name === 'meet');
+  if (!['serving_side', 'diner_side'].includes(position) || typeof offer?.act !== 'string'
+    || offer.params?.position?.type !== 'part') throw new Error('meal discovery: meet needs a public part parameter position');
+  if (!answer.card?.includes(`position=serving_side`) || !answer.card.includes('diner_side')) throw new Error('meal discovery: card must name both meeting positions');
+  return [offer.act, `position=${position}`];
+}
+
+/** The ordinary query applies its radius to unrounded composed positions, before displaying metres. */
+export function requireMeetingRange(answer, serverBody, dinerBody) {
+  const row = answer.answers?.[0], matches = row?.found?.filter(r => r.id === serverBody);
+  if (answer.ok !== true || row?.near?.id !== dinerBody || row.near.within !== 1.5
+    || !Array.isArray(matches) || matches.length !== 1 || !Number.isFinite(matches[0].metres)
+    || matches[0].metres < 0 || matches[0].metres > 1.5) throw Object.assign(new Error('meal meeting: known server not confirmed within give range'), { answer });
+  return answer;
+}
+
 /** Each role reads its own public copy before acting; cards describe responsibilities, offers supply syntax. */
 export async function discoverMeal({ seats, record }) {
   const names = ['soup-pot', 'meal-bowl', 'wash-sink', 'meal-table', 'diner-chair'];
   const discovery = {};
   for (const seat of seats) {
     const help = await record(seat, 'discover commands', 'help');
-    for (const command of ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait']) {
+    for (const command of ['look', 'find', 'inspect', 'can', 'act', 'give', 'receipt', 'events', 'wait', 'query']) {
       if (!help.commands?.includes(command)) throw new Error(`meal discovery: missing ${command} command`);
     }
     const look = await record(seat, 'look before meal', 'look');
@@ -125,6 +143,7 @@ export async function discoverMeal({ seats, record }) {
       things[name] = answer;
     }
     mealOffer(things['soup-pot'], 'cook'); mealOffer(things['soup-pot'], 'ladle', { bowl: things['meal-bowl'].id });
+    meetingOffer(things['soup-pot'], 'serving_side'); meetingOffer(things['soup-pot'], 'diner_side');
     mealOffer(things['meal-bowl'], 'take'); mealOffer(things['meal-bowl'], 'bite');
     if (things['meal-bowl'].offers.find((o) => o.name === 'bite').who !== 'holder') throw new Error('meal discovery: bite must name the holder');
     mealOffer(things['wash-sink'], 'turn_on'); mealOffer(things['wash-sink'], 'turn_off');
@@ -132,8 +151,8 @@ export async function discoverMeal({ seats, record }) {
     mealOffer(things['diner-chair'], 'sit');
     discovery[seat.label] = { things, responsibility: {
       cook: 'Cook once; confirm six soup units and clear the serving point.',
-      server: 'Ladle two units into the shelf bowl; take and offer that same bowl to the diner.',
-      diner: 'Accept the offered bowl; sit and bite twice; wash it and return it empty.',
+      server: 'Ladle two units; take the bowl and meet at serving_side before offering it.',
+      diner: 'Meet at diner_side; confirm the server nearby; accept, sit and bite twice; wash and return the bowl.',
     }[seat.label] };
   }
   return discovery;
@@ -214,7 +233,11 @@ export async function meal({ seats, report, log = () => {}, observe = async () =
   await observe({ phase: 'server-held', soup: 2, bowl: servingBowl, holder: serverBody, role: server.label });
   const dinerBody = (await record(diner, 'body', 'status')).body;
   if (!dinerBody) throw new Error('diner body is not known');
-  await act(diner, 'approach server', `walk:${serverBody}`);
+  await act(server, 'meet at server side', ...meetingOffer(discovery.server.things['soup-pot'], 'serving_side'));
+  await act(diner, 'meet at diner side', ...meetingOffer(discovery.diner.things['soup-pot'], 'diner_side'));
+  const meeting = requireMeetingRange(await record(diner, 'confirm known server within give range', 'query',
+    JSON.stringify([{ find: 'Server', near: 'me', within: 1.5 }])), serverBody, dinerBody);
+  report.meeting = { server: serverBody, diner: dinerBody, query: meeting };
   const prior = await record(diner, 'read prior invitations', 'events');
   if (prior.ok !== true) throw new Error('prior invitations read failed');
   const oldOffers = new Set((prior.events ?? []).filter(e => e.kind === 'give').map(e => e.offer));

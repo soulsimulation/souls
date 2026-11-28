@@ -60,6 +60,16 @@
     "stand": {
       "role": "stand",
       "at_mm": [0, 0, 1000]
+    },
+    "serving_side": {
+      "role": "stand",
+      "at_mm": [-600, 0, 2000],
+      "yaw_mdeg": 90000
+    },
+    "diner_side": {
+      "role": "stand",
+      "at_mm": [600, 0, 2000],
+      "yaw_mdeg": -90000
     }
   },
   "slots": {
@@ -77,6 +87,14 @@
     "bounds_mm": [950, 1220, 550]
   },
   "forms": {
+    "meet": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "position": { "type": "part" } },
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": { "arg": "position" } }],
+      "effects": []
+    },
     "cook": {
       "who": "anyone",
       "starts": "act",
@@ -213,7 +231,7 @@
     "shape": {"round":0,"shapes":[{"kind":"box","at":[-400,450,-220],"size":[50,900,50],"tint":"iron"},{"kind":"box","at":[-400,450,220],"size":[50,900,50],"tint":"iron"},{"kind":"box","at":[400,450,-220],"size":[50,900,50],"tint":"iron"},{"kind":"box","at":[400,450,220],"size":[50,900,50],"tint":"iron"},{"kind":"box","at":[0,920,0],"size":[950,80,550],"tint":"wood"},{"kind":"box","at":[-220,980,0],"size":[380,40,400],"tint":"iron"},{"kind":"box","at":[-220,1010,0],"size":[270,25,270],"tint":"fire","when":"@fuel>=1"},{"kind":"lathe","at":[-220,1020,0],"profile":[[0,0],[160,0],[180,190],[160,190],[140,25],[0,25]],"segments":10,"tint":"iron"},{"kind":"box","at":[-220,1190,0],"size":[230,40,230],"tint":"raw","when":"@vegetables>=1"},{"kind":"box","at":[-220,1200,0],"size":[300,16,300],"tint":"soup","when":"@soup>=3"},{"kind":"box","at":[-220,1160,0],"size":[270,16,270],"tint":"soup","when":"@soup>=1&@soup<3"}],"palette":{"iron":"#454b50","wood":"#a4865c","fire":"#ef8932","raw":"#78a252","soup":"#d88b3b"},"tags":["camping","cooking","soup","object"]}
   },
   "text": {
-    "card": "Cook once for 6 soup units; ladle 2 into an empty bowl on this pot's shelf.",
+    "card": "Cook 6; ladle 2. Meet position=serving_side or diner_side before giving bowl.",
     "camp": "camp",
     "soup": "soup",
     "stew": "stew",

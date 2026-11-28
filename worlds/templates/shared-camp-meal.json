@@ -15,7 +15,7 @@
             "schema": "def/1",
             "name": "core-camp_soup_pot",
             "version": 1,
-            "description": "Cook once for 6 soup units; ladle 2 into an empty bowl on this pot's shelf.",
+            "description": "Cook 6; ladle 2. Meet position=serving_side or diner_side before giving bowl.",
             "tags": [
               "camping",
               "cooking",

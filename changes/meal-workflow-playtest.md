@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Souls rehearse a shared meal through ordinary discovery and serving consent, following the same bowl from serving to eating and departure.
+Souls discover serving positions and confirm they are close enough before offering the same shared meal bowl.
