@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {BoxGeometry,Group,InstancedMesh,Matrix4,Mesh,MeshBasicMaterial,PerspectiveCamera,PlaneGeometry,Vector3} from 'three';
+import {BoxGeometry,Group,InstancedMesh,Matrix4,Mesh,MeshBasicMaterial,MeshLambertMaterial,InstancedBufferAttribute,PerspectiveCamera,PlaneGeometry,Vector3} from 'three';
 import {CutAuthority,CUT_LIMITS,prepareCutFrame} from './transitions.ts';import {FollowCamera,FollowGeometry,FOLLOW_LIMITS,type PresentSubject} from './follow-camera.ts';
 const v=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 const ready=(a:CutAuthority,t:number,key='view')=>a.consider(t,key,true,2,[0,2,5],'represented-exterior-witness');
@@ -31,3 +31,10 @@ test('policy projection refusal breaks persistence without erasing executed hist
 test('represented shader-deformed plants cannot use undeformed witness triangles',()=>{const{box,q}=geometry();box.userData.edenWindMode='crown';assert.equal(q.exteriorWitness(v(5),.1).reason,'shader-deformed-or-unsupported');});
 
 test('witness material cap precedes custom shader-key inspection',()=>{const{box,q}=geometry(),material=new MeshBasicMaterial();material.customProgramCacheKey=()=>{throw Error('must not inspect over cap');};(box as Mesh).material=Array(65).fill(material);assert.equal(q.exteriorWitness(v(5),.1).reason,'material-cap');});
+
+
+test('only audited render-only ground-cover cards are excluded from obstacle witness',()=>{
+ const{root,q}=geometry(),material=new MeshLambertMaterial(),cards=new InstancedMesh(new PlaneGeometry(1,1),material,1);
+ cards.name='ground cover: tall';cards.userData={cameraTransparent:true,edenWindMode:'grass',keepDetail:true};cards.geometry.setAttribute('coverRank',new InstancedBufferAttribute(new Float32Array([.5]),1));material.customProgramCacheKey=()=> 'ground-cover-v3:tall|eden-atmos-wind-v2:grass';cards.setMatrixAt(0,new Matrix4().makeTranslation(4,3,0));root.add(cards);root.updateMatrixWorld(true);q.prepare([root],'r');assert.equal(q.exteriorWitness(v(4,2,0),.2).status,'clear');
+ for(const change of[()=>{cards.name='ordinary grass';},()=>{cards.name='ground cover: tall';material.customProgramCacheKey=()=> 'other-shader';},()=>{material.customProgramCacheKey=()=> 'ground-cover-v3:tall';cards.geometry.deleteAttribute('coverRank');}]){change();q.prepare([root],'r');assert.equal(q.exteriorWitness(v(4,2,0),.2).status,'unknown');}
+});

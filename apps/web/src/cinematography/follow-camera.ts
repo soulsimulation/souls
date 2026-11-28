@@ -15,6 +15,14 @@ import type {CameraSubject} from '../../../../packages/camera/src/observation.ts
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
 export function publishedFollowGround(info:Pick<SceneInfo,'scene'|'shore'>|null){return !info||(info.scene?.surfaces.length??0)>256?undefined:cameraGroundSampler(info);}
 export type Sight='clear'|'blocked'|'unknown';
+/** GroundCover emits render-only open blade/flower cards, never authored solids.
+ * Match its positive producer contract, not generic cameraTransparent or wind. */
+function decorativeGroundCover(mesh:Mesh):boolean{
+ if(!(mesh as InstancedMesh).isInstancedMesh||mesh.userData.cameraTransparent!==true||mesh.userData.edenWindMode!=='grass'||mesh.userData.keepDetail!==true||Array.isArray(mesh.material)||mesh.material.type!=='MeshLambertMaterial')return false;
+ const kind=/^ground cover: (tall|tuft|flower)$/.exec(mesh.name)?.[1],rank=mesh.geometry.getAttribute('coverRank');if(!kind||!rank||(rank as {isInstancedBufferAttribute?:boolean}).isInstancedBufferAttribute!==true||rank.itemSize!==1)return false;
+ return new RegExp('^ground-cover-v3:'+kind+'(?:\\|eden-atmos-wind-v2:grass)?$').test(mesh.material.customProgramCacheKey());
+}
+
 export const FOLLOW_LIMITS=Object.freeze({visits:256,objects:4096,meshes:2048,depth:64,vertices:4096,triangles:12000,blocks:4096,blockVisits:4096,blockTriangles:64,instances:512,candidates:7,speed:5,acceleration:5,aimSpeed:4,aimAcceleration:8,previewSeconds:1.5,previewDistance:2,previewStableSeconds:.3,previewMaxSpeed:4});
 /** Orientation-independent envelope of the actual near plane, including a pending
  * final viewport projection. Its capsule covers every intermediate eye rotation.
@@ -98,7 +106,7 @@ export class FollowGeometry{
  exteriorWitness(eye:Vector3,radius:number):{status:Sight;reason:string;witness:number[]|null}{
   const unknown=(reason:string,mesh?:Mesh)=>{this.stats.unknown=reason;if(mesh)this.stats.unknownMesh={name:mesh.name.slice(0,128),type:mesh.type,root:this.rootOf.get(mesh)?.name.slice(0,128)??null};return{status:'unknown' as Sight,reason,witness:null};};
   if(!this.stats.complete||!this.meshes.length||!Number.isFinite(radius)||radius<=0)return unknown('coverage-incomplete');let maxY=-Infinity;
-  for(const mesh of this.meshes){const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap',mesh);
+  for(const mesh of this.meshes){if(decorativeGroundCover(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap',mesh);
    if(mesh.userData.shadowProxy===true&&materials.length===1&&materials[0].name==='shadow-proxy'&&materials[0].type==='ShaderMaterial'&&!materials[0].colorWrite&&!materials[0].depthWrite)continue;
    if(mesh.userData.edenWindMode||materials.some(m=>m.type==='ShaderMaterial'||m.type==='RawShaderMaterial'||/eden-atmos-(wind|motion)/.test(m.customProgramCacheKey())))return unknown('shader-deformed-or-unsupported',mesh);
    const g=mesh.geometry,b=this.bounds.get(g);if(!b||b.invalid||b.next!==g.attributes.position?.count)return unknown('bounds-incomplete');
@@ -106,12 +114,12 @@ export class FollowGeometry{
    const instances=(mesh as InstancedMesh).isInstancedMesh?(mesh as InstancedMesh).count:1;
    for(let i=0;i<instances;i++){if(this.stats.blockVisits>=FOLLOW_LIMITS.blockVisits)return unknown('witness-bound-cap');this.stats.blockVisits++;if((mesh as InstancedMesh).isInstancedMesh&&++this.stats.instances>FOLLOW_LIMITS.instances)return unknown('instance-cap');this.matrix.copy(mesh.matrixWorld);if((mesh as InstancedMesh).isInstancedMesh){(mesh as InstancedMesh).getMatrixAt(i,this.instance);this.matrix.multiply(this.instance);}if(!this.matrix.elements.every(Number.isFinite)||Math.abs(this.matrix.determinant())<1e-12)return unknown('invalid-transform');this.expanded.copy(b.box).applyMatrix4(this.matrix);if(!Number.isFinite(this.expanded.max.y))return unknown('bounds-invalid');maxY=Math.max(maxY,this.expanded.max.y);}
   }
-  if(!Number.isFinite(maxY)||![...eye].every(Number.isFinite))return unknown('bounds-invalid');const witness=eye.clone();witness.y=Math.max(eye.y,maxY+radius+.01);const status=this.segment(eye,witness,radius,true,true,true);return{status,reason:status==='clear'?'represented-exterior-witness':status==='blocked'?'witness-path-blocked':this.stats.unknown??'witness-unknown',witness:witness.toArray()};
+  if(!Number.isFinite(maxY)||![...eye].every(Number.isFinite))return unknown('bounds-invalid');const witness=eye.clone();witness.y=Math.max(eye.y,maxY+radius+.01);const status=this.segment(eye,witness,radius,true,true,true);return{status,reason:status==='clear'?'represented-obstacle-exterior-witness':status==='blocked'?'witness-path-blocked':this.stats.unknown??'witness-unknown',witness:witness.toArray()};
  }
  segmentAuthored(from:Vector3,to:Vector3,radius=0,glassOccludes=false):Sight{return this.segment(from,to,radius,true,glassOccludes);}
  segment(from:Vector3,to:Vector3,radius=0,fullAuthored=false,glassOccludes=false,fullScene=false):Sight{
   const unknown=(reason:string,mesh?:Mesh):Sight=>{this.stats.unknown=reason;if(mesh){const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];this.stats.unknownMesh={name:mesh.name.slice(0,128),type:mesh.type.slice(0,64),constructor:mesh.constructor.name.slice(0,64),root:this.rootOf.get(mesh)?.name.slice(0,128)??null,geometry:mesh.geometry.type.slice(0,64),blockComplete:this.blocks.get(mesh.geometry)?.complete??false,builtBlocks:this.blocks.get(mesh.geometry)?.boxes.length??0,blockNext:this.blocks.get(mesh.geometry)?.next??null,retainedBlocks:this.retainedBlocks,vertices:mesh.geometry.attributes.position?.count??null,skinned:!!(mesh as Mesh&{isSkinnedMesh?:boolean}).isSkinnedMesh,morphCount:mesh.geometry.morphAttributes.position?.length??0,customRaycast:mesh.raycast!==Mesh.prototype.raycast,shadowProxy:mesh.userData.shadowProxy===true,materialCount:materials.length,materials:materials.slice(0,4).map(m=>({name:m.name.slice(0,64),type:m.type.slice(0,64),visible:m.visible,colorWrite:m.colorWrite,depthWrite:m.depthWrite,transparent:m.transparent,opacity:m.opacity}))};}return'unknown';};this.stats.queries++;this.stats.surfaceStartOverlap=false;if(!this.stats.complete)return'unknown';if(![from.x,from.y,from.z,to.x,to.y,to.z,radius].every(Number.isFinite)||radius<0)return unknown('invalid-clearance-input');const length=from.distanceTo(to);if(length===0&&radius===0)return'clear';this.worldRay.set(from,to.clone().sub(from).normalize());let invalidMatrix=false;
-  for(const mesh of this.meshes){const authored=fullScene||fullAuthored&&this.authored.has(mesh);if(!fullScene&&mesh.userData.cameraTransparent===true&&!this.authored.has(mesh))continue;if(!authored&&!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap',mesh);
+  for(const mesh of this.meshes){if(fullScene&&decorativeGroundCover(mesh))continue;const authored=fullScene||fullAuthored&&this.authored.has(mesh);if(!fullScene&&mesh.userData.cameraTransparent===true&&!this.authored.has(mesh))continue;if(!authored&&!visible(mesh))continue;const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];if(materials.length>64)return unknown('material-cap',mesh);
    // The renderer's explicit shadow proxy clips every vertex in the colour pass.
    // Its disabled picking hook is not unsupported visible geometry.
    if(mesh.userData.shadowProxy===true&&materials.length===1&&materials[0].name==='shadow-proxy'&&materials[0].type==='ShaderMaterial'&&!materials[0].colorWrite&&!materials[0].depthWrite)continue;
