@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { silentPartyTemplate } from '../../playtest/party/rehearse.mjs';
-import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyCaptureMs, partyStageWaitMs, partyDrawSnapshot } from './party-native-page.mjs';
+import { partyPage, partyBoot, partyStage, partyBrowserStop, partyFinalization, partyJourney, partyCaptureMs, partyStageWaitMs, partyDrawSnapshot } from './party-native-page.mjs';
 
 const souls = ['s0','s1','s2','s3','s4'];
 const sample = (n, activities) => ({ at:n*250, tick:n*5, frame:n, currentCanvas:true,
@@ -107,6 +107,31 @@ test('finalization preserves ordinary receipts before collection and rejects a m
   partyFinalization(page,{dir},state);
   await assert.rejects(state.finalize(),/collector missing/);await assert.rejects(state.finalize(),/collector missing/);assert.equal(calls,1);
   assert.equal(JSON.parse(readFileSync(join(dir,'command-party-finalization.json'))).ok,false);
+});
+
+test('simultaneous journey and collector failures retain both causes and keep cleanup failed',async()=>{
+  mkdirSync(new URL('../../../.local',import.meta.url),{recursive:true});
+  const dir=mkdtempSync(new URL('../../../.local/party-errors-test-',import.meta.url).pathname);
+  const primary=new Error('departure draw observation stale'),secondary=new Error('collector ownership changed');
+  const state={rows:[{answer:'ordinary leave retained'}],stages:[],observerInstalled:true};
+  partyFinalization({evaluate:async()=>{throw secondary;}},{dir},state);
+  await assert.rejects(partyJourney(state,async()=>{throw primary;}),error=>{
+    assert(error instanceof AggregateError);assert.deepEqual(error.errors,[primary,secondary]);assert.equal(error.cause,primary);return true;
+  });
+  const sequence=JSON.parse(readFileSync(join(dir,'command-party-sequence.json')));
+  const finalization=JSON.parse(readFileSync(join(dir,'command-party-finalization.json')));
+  assert.equal(sequence.rows[0].answer,'ordinary leave retained');
+  assert.match(sequence.failure,/departure draw observation stale/);
+  assert.match(finalization.journeyFailure,/departure draw observation stale/);
+  assert.match(finalization.finalizationFailure,/collector ownership changed/);assert.equal(finalization.ok,false);
+  await assert.rejects(state.finalize(),error=>error===secondary,'cached cleanup still fails');
+});
+
+test('journey-only and collector-only failures preserve their original identity',async()=>{
+  const primary=new Error('ordinary party command refused'),secondary=new Error('collector missing');
+  await assert.rejects(partyJourney({finalize:async()=>{}},async()=>{throw primary;}),error=>error===primary);
+  await assert.rejects(partyJourney({finalize:async()=>{throw secondary;}},async()=>42),error=>error===secondary);
+  assert.equal(await partyJourney({finalize:async()=>{}},async()=>42),42);
 });
 
 

@@ -125,10 +125,26 @@ export function partyFinalization(page, paths, state) {
       const draw = await page.evaluate(partyBrowserStop);
       assert(draw || !state.observerInstalled, 'party installed draw collector missing');
       if (draw) { save(paths, 'command-party-final-draw.json', draw); assert(draw.samples.length >= 2 && draw.failures.length === 0, 'party final draw collection failed'); }
-      state.outcome = { ok: !!draw, samples: draw?.samples.length ?? 0 };
-    } catch (error) { state.outcome = { ok: false, error: String(error) }; throw error; }
+      state.outcome = { ok: !!draw, samples: draw?.samples.length ?? 0,
+        journeyFailure: state.failure ?? null, finalizationFailure: null };
+    } catch (error) { state.outcome = { ok: false, error: String(error), journeyFailure: state.failure ?? null,
+      finalizationFailure: String(error.stack ?? error) }; throw error; }
     finally { save(paths, 'command-party-finalization.json', state.outcome); }
   })();
+}
+
+/** Keep the original journey and collector failures without waiving either cleanup result. */
+export async function partyJourney(state, journey) {
+  let primary;
+  try { return await journey(); }
+  catch (error) { primary = error; state.failure = String(error.stack ?? error); throw error; }
+  finally {
+    try { await state.finalize(); }
+    catch (secondary) {
+      if (primary) throw new AggregateError([primary, secondary], 'party journey and finalization both failed', { cause: primary });
+      throw secondary;
+    }
+  }
 }
 
 export async function beforeNavigation({ paths, page, base }) {
@@ -203,7 +219,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul) });
   state.observerInstalled = true;
   const began = Date.now();
-  try {
+  return partyJourney(state, async () => {
     const immediate = new Set(['greeting-start', 'reply-start', 'departure-start', 'cleanup-start']);
     const observe = async (stage, details) => {
       const status = await page.evaluate(() => ({ count: window.__partyDrawObserver.samples.length }));
@@ -227,6 +243,5 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     check('party-ordinary-sequence-depicted', state.result.allLeft && state.stages.filter(s => s.observed).length === 6,
       'Five ordinary consented dancers, sustained activity, departure/wave with four continuing and final rest; geometry/continuity require original-video review.');
     await page.screenshot({ path: join(paths.dir, 'party-completion.png') });
-  } catch (error) { state.failure = String(error.stack ?? error); throw error; }
-  finally { await state.finalize(); }
+  });
 }
