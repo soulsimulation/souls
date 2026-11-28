@@ -406,10 +406,11 @@ impl Table {
         let clear = stands && !passage;
         // #5254: a target in a doorway's or a stair's clearance (on ground a body stands on, or in the opening itself)
         // is stood at only as far off as clears the passage itself ([`Ground::in_passage_itself`]: the body's radius
-        // and margin, not [`CLEAR`]): on fine rings [`NEAR_PITCH`] apart from the target itself out, the first that
-        // has such a point, out to twice [`CLEAR`] (past that only the full rings' places, clear of [`CLEAR`], as before);
-        // numbered after the target on its ring 0. Never further than that ring: the walk says how far it was moved,
-        // and why (`walk.goal-moved`).
+        // and margin, not [`CLEAR`]): its places in the passage's clearance and clear of the passage itself, on fine
+        // rings [`NEAR_PITCH`] apart from the target itself out to twice [`CLEAR`], numbered after the target on its
+        // ring 0; beyond the clearance the full rings' places stand, as before. The nearest is granted first, and the
+        // walk says how far it was moved, and why (`walk.goal-moved`). Fine places are a body's room apart from every
+        // holder, as the full rings' pitch keeps theirs (below).
         if passage {
             let mut k = 0u16;
             for i in 0..=2 * CLEAR / NEAR_PITCH {
@@ -418,7 +419,6 @@ impl Table {
                 } else {
                     (6_283 * i / 1_000).max(NEAR_EACH)
                 };
-                let before = places.len();
                 for j in 0..n {
                     let off = Quat::from_yaw_mdeg(j * 360_000 / n)
                         .and_then(|q| q.rotate(Vec3::new(0, 0, i * NEAR_PITCH)))
@@ -428,7 +428,8 @@ impl Table {
                     let Some((at, world)) = g.stand(target.node, p) else {
                         continue;
                     };
-                    if g.in_passage_itself(target.node, at) {
+                    // In the passage's clearance (beyond it the full rings' places stand), clear of the passage itself.
+                    if !g.passage(target.node, at) || g.in_passage_itself(target.node, at) {
                         continue;
                     }
                     places.push(Place {
@@ -439,9 +440,6 @@ impl Table {
                         world,
                         joined: None,
                     });
-                }
-                if places.len() > before {
-                    break;
                 }
             }
         }
@@ -1331,8 +1329,15 @@ impl Spots {
                                 return (h.world.y - p.world.y).abs() < LEVEL
                                     && flat(h.world, p.world) < c;
                             }
+                            // A fine place round a target in a passage or off its ground (ring 0 past the target,
+                            // #5254) lies nearer its neighbours than a pitch: it keeps a body's room from every holder,
+                            // and every place keeps it from a holder of one.
+                            let fine = |(ring, k): (u16, u16)| ring == 0 && k > 0;
                             if h.target.node != t.node
-                                || (*size == Size::Standard && h.size == Size::Standard)
+                                || (*size == Size::Standard
+                                    && h.size == Size::Standard
+                                    && !fine((p.ring, p.k))
+                                    && !fine(h.place))
                             {
                                 return false;
                             }

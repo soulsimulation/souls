@@ -2132,9 +2132,9 @@ impl Bodies {
                 // #5254: one that came to the place it was granted off the point it was sent to is done there and says
                 // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved only as far as clears the
                 // passage itself, however far that is; or off its ground, nearer than a walker's goal tolerance. Never
-                // one a crowd held off (A2-4, A2-5: done as near as the crowd allows), nor one granted a place a crowd
-                // pushed out: the spot tables admit a place in a passage's clearance only as the nearest that clears
-                // the passage itself, so a place outside it is the full rings' or an overflow point's.
+                // one a crowd held off (A2-4, A2-5: done as near as the crowd allows), nor one granted a place outside
+                // the passage's clearance (the full rings' or an overflow point): the spot tables admit a place in the
+                // clearance only as one that clears the passage itself, nearest first.
                 if how.is_ok()
                     && !self.short.contains(&id)
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
@@ -2145,10 +2145,7 @@ impl Bodies {
                     && there <= 50
                 {
                     match self.town.passage_at(t, p) {
-                        Some(why)
-                            if self.town.passage_at(t, g).is_some()
-                                || asked <= STOPPED_SHORT_MM =>
-                        {
+                        Some(why) if self.town.passage_at(t, g).is_some() => {
                             self.goal_moved.insert(id, (asked, Some(why)));
                         }
                         Some(_) => {}
