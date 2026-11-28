@@ -174,7 +174,8 @@ export class FollowCamera{
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
   const preview:FollowPreview={status:'unavailable',shift:[0,0,0],current:null,alternative:null,selected:false};let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({cut:{...this.cuts.diagnostic,history:[...this.cuts.diagnostic.history]},interior:{...this.interior.diagnostic},preview,eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
-  if(invalidStep){this.cuts.refuse('cut-invalid-input');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
+  if(!geometry.stats.complete||!centre)this.interior.discardRetreat();
+  if(invalidStep){this.interior.discardRetreat();this.cuts.refuse('cut-invalid-input');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
   if(!centre||(!geometry.stats.complete&&manual)){this.cuts.refuse('cut-input-unavailable');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
@@ -209,8 +210,9 @@ export class FollowCamera{
   if(manualEye){this.cuts.refuse('cut-manual');this.aim.add(this.eye.clone().sub(manualEye));return result(reason==='tracking'?'user-hold':'user-hold:'+reason,screen);}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
+  const retreatChecked=interiorActive&&this.interior.prepareRetreat(this.clock,subject,camera,this.eye,viewport,projection,{geometry,points,radius:eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground});
   const cutDue=!!cutReadiness?.ready&&interiorActive&&!!this.interior.destination()&&this.clock>=this.nextCutCheck;
-  if(interiorActive&&!cutDue){this.interior.search(this.clock,this.eye,points,geometry,eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground);}
+  if(interiorActive&&!cutDue&&!retreatChecked){this.interior.search(this.clock,this.eye,points,geometry,eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground);}
   const destination=this.interior.destination();
   if(!cutReadiness?.ready)this.cuts.refuse(cutReadiness?.reason??'cut-source-readiness-unknown');
   else if(!interiorActive||manual||!destination)this.cuts.refuse('cut-no-preparation');
