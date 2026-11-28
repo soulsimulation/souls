@@ -284,6 +284,9 @@ impl Descent {
     }
 }
 
+/// A loose record ([`Copy::abandon`]): its bytes, and the hashes it names below it.
+type Loose = (Vec<u8>, Vec<Vec<u8>>);
+
 /// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash. A record the world
 /// withheld (empty bytes in its answer: under a closed container this asker may not see into, #3915) is held as
 /// withheld: a leaf the copy never reads.
@@ -302,7 +305,7 @@ pub struct Copy {
     bytes: u64,
     /// Records a sync cut off had taken, checked, with the hashes each names below it: the next sync takes them from
     /// here (rule 5), and lets go of the rest when it finishes.
-    loose: BTreeMap<Vec<u8>, (Vec<u8>, Vec<Vec<u8>>)>,
+    loose: BTreeMap<Vec<u8>, Loose>,
 }
 
 /// Checks a record against the hash that named it (rule 3) and gives the hashes it names below it: its big fields'
