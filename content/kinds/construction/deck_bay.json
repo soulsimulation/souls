@@ -158,11 +158,24 @@
     1991,
     607
    ]
+  },
+  "stair": {
+   "admits": "thing",
+   "kinds": [
+    "mars:stair_flight"
+   ],
+   "most": 1,
+   "at_mm": [
+    3440,
+    0,
+    -622
+   ],
+   "yaw_mdeg": 180000
   }
  },
  "geometry": {
   "bounds_mm": [
-   1219,
+   6880,
    3658,
    2972
   ]
@@ -174,7 +187,7 @@
   "ever": true
  },
  "text": {
-  "card": "A deck bay: two 12 ft frames, four beams, five joists at 1.9 m, two sheets."
+  "card": "A deck bay: two 12 ft frames, four beams, five joists, two sheets, a stair."
  },
  "card": {
   "text": "card"

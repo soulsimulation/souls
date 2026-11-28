@@ -984,13 +984,6 @@
    "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
    "kind": "mars:stair_flight",
    "forms": "own"
-  },
-  {
-   "def": "mars-stair-tread@1",
-   "placed": 10,
-   "template": "worlds/templates/mars-camp.json (its deck yard), not mars-two",
-   "kind": "mars:stair_tread",
-   "forms": "own"
   }
  ]
 }

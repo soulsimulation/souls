@@ -3,6 +3,15 @@
  "kind": "mars:stair_flight",
  "owner": "thing",
  "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
   "carry_crew": {
    "n": 29,
    "type": "int",
@@ -13,129 +22,29 @@
    }
   }
  },
- "slots": {
-  "tread_1": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:deck_beam",
    "most": 1,
-   "at_mm": [
-    -1125,
-    180,
-    0
-   ]
-  },
-  "tread_2": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    -875,
-    360,
-    0
-   ]
-  },
-  "tread_3": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    -625,
-    540,
-    0
-   ]
-  },
-  "tread_4": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    -375,
-    720,
-    0
-   ]
-  },
-  "tread_5": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    -125,
-    900,
-    0
-   ]
-  },
-  "tread_6": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    125,
-    1080,
-    0
-   ]
-  },
-  "tread_7": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    375,
-    1260,
-    0
-   ]
-  },
-  "tread_8": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    625,
-    1440,
-    0
-   ]
-  },
-  "tread_9": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    875,
-    1620,
-    0
-   ]
-  },
-  "tread_10": {
-   "admits": "thing",
-   "kinds": [
-    "mars:stair_tread"
-   ],
-   "most": 1,
-   "at_mm": [
-    1125,
-    1800,
-    0
-   ]
+   "most_per": 8,
+   "audience": {
+    "rule": "everyone"
+   }
   }
  },
  "points": {
+  "hook": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    1250,
+    1980,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
   "grip_back": {
    "role": "grip",
    "at_mm": [
@@ -148,14 +57,6 @@
    "role": "grip",
    "at_mm": [
     1000,
-    0,
-    0
-   ]
-  },
-  "bottom": {
-   "role": "stand",
-   "at_mm": [
-    -1550,
     0,
     0
    ]
@@ -172,7 +73,8 @@
   "shape": {
    "round": 3,
    "palette": {
-    "timber": "#b8905a"
+    "timber": "#b8905a",
+    "tread": "#c9a36b"
    },
    "tags": [
     "stair",
@@ -207,6 +109,146 @@
       38
      ],
      "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -1125,
+      180,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -875,
+      360,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -625,
+      540,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -375,
+      720,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -125,
+      900,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      125,
+      1080,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      375,
+      1260,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      625,
+      1440,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      875,
+      1620,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      1125,
+      1800,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
     }
    ]
   }
@@ -218,7 +260,7 @@
   "ever": true
  },
  "text": {
-  "card": "A ten-tread stair flight, 1.98 m rise: two to four carry it; treads go in."
+  "card": "A ten-tread stair flight, 1.98 m rise: two to four carry it to the deck."
  },
  "card": {
   "text": "card"
