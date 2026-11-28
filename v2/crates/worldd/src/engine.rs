@@ -1285,10 +1285,11 @@ impl Engine {
                 // carrier's leave would say without it are taken back with it (#5067).
                 let said = self.activities.stream.len();
                 self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
+                // Alone among the members whose bodies are in the world (one who retired keeps its place, N4 item 5).
                 let lone = self
                     .activities
                     .members(activity)
-                    .is_some_and(|m| m.len() == 1);
+                    .is_some_and(|m| m.iter().filter(|m| c.body(m.body).is_some()).count() == 1);
                 let e = &mut self.activities;
                 e.next = tree.next();
                 let left = e
