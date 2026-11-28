@@ -5,9 +5,9 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration, nativePageExportArgs, nativePageStartupRegistration } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration, nativePageExportArgs, nativePageStartupRegistration, nativePageRecipe } from './native-page-fixture.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
-import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
+import { runOwnedCommand, addresses, WORLD } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(t, options = {}) {
@@ -56,6 +56,18 @@ test('derived page, native services and launcher ranges cannot include reserved 
   assert.throws(() => nativePagePorts(7829), /reserved/);
   assert.throws(() => nativePagePorts(7729), /reserved/);
   assert.equal(nativePagePorts(19120).length, 29);
+});
+test('the launched-world recipe exports actual address fields and owns clients separately from finite commands', () => {
+  const world = { ...addresses(19120), world: WORLD }, children = [], registrations = [];
+  const verify = () => 'verified';
+  const recipe = nativePageRecipe(parent, world, children, (child, mode) => registrations.push({ child, mode }), verify);
+  assert.equal(recipe.checkout, parent); assert.equal(recipe.pkg, join(parent, 'v2/target/wasm-load/pkg'));
+  assert.deepEqual(recipe.world, { directory: world.directory, gateway: world.gateway, world: WORLD, page: world.page });
+  assert.equal(recipe.world.dir, undefined); assert.equal(recipe.verify(), 'verified');
+  const client = { id: 'long-lived-client' }, command = { id: 'finite-command' };
+  recipe.registerClient(client); recipe.registerCommand(command);
+  assert.deepEqual(children, [client]);
+  assert.deepEqual(registrations, [{ child: client, mode: { processGroup: true } }, { child: command, mode: { transient: true } }]);
 });
 test('owned group cleanup kills descendants even after its direct leader has exited', async () => {
   const leader = spawn(process.execPath, ['-e', "const{spawn}=require('node:child_process');spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}).unref();process.stdout.write('owned');"], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });

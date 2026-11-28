@@ -73,6 +73,14 @@ export function nativePageStartupRegistration(onSpawn, log) {
     onSpawn(child, mode);
   };
 }
+/** The recipe exposes the launched world's addresses and registers every later child with its owner. */
+export function nativePageRecipe(checkout, world, children, onSpawn, verify) {
+  const root = resolve(checkout);
+  return { kind: 'native-page', checkout: root, pkg: join(root, 'v2/target/wasm-load/pkg'),
+    world: { directory: world.directory, gateway: world.gateway, world: world.world, page: world.page },
+    registerClient(child) { children.push(child); onSpawn(child, { processGroup: true }); },
+    registerCommand(child) { onSpawn(child, { transient: true }); }, verify };
+}
 export async function startNativePageFixture({ checkout, data, log, port, artifacts, signal, onSpawn, timeoutMs = 180000 }) {
   const until = Date.now() + timeoutMs; signal?.throwIfAborted();
   for (const p of nativePagePorts(port).slice(0, 8)) if (!await portFree(p)) fail('occupied-port');
@@ -86,5 +94,5 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   const runtime = await startOldPage({ checkout: root, template: m.template, facts, dir: data, port, bin: join(root, 'v2/target/release'),
     marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });
-  return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: { kind: 'native-page', checkout: root, pkg: join(root, 'v2/target/wasm-load/pkg'), ...nativePageClientRegistration(children, onSpawn), world: { directory: runtime.world.directory, gateway: runtime.world.gateway, world: runtime.world.world, page: runtime.world.page }, verify: () => verifyNativePageArtifacts(root, artifacts) } };
+  return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: nativePageRecipe(root, runtime.world, children, onSpawn, () => verifyNativePageArtifacts(root, artifacts)) };
 }

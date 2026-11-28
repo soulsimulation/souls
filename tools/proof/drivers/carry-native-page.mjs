@@ -12,8 +12,23 @@ import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
 import { entityId } from '../../../apps/web/src/v2-engine/entity-id.ts';
 import { layerDraws } from '../../../apps/web/src/v2-engine/layer-draws.ts';
 import { nativeCameraMode } from './camera-native-page.mjs';
-const SCENE = { load: 'rack-beam-4', kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
-  view: 'post=0&hour=12:00&eye=3.5,3.2,26.5&at=-2,.9,22.3', liftMs: 2500, legs: [['-3.1,23.5', 4500], ['-0.5,23.5', 3500]] };
+// A second scene, a survey (attempt 12; CARRY_SCENE=bay): a beam seated between two held frames, by four Souls in the
+// camp's own yard. Two crews carry the stand's two frames into the bay's upright slots at once; the west carrier of
+// each lets go and the east one stays holding its frame. The two free Souls then take a loose beam, carry it to the
+// bay's west mouth, 0.45 m outside the slot's line (the frames' posts stand on that line), and `part put` sets it in
+// from there. The frames' carries start as the seats are paired, so the whole scene fits the attempt's 90 s journey;
+// the page is open before the frames are taken. The contact oracle watches the beam's crew and is recorded as a
+// measurement: this scene's checks are that every command was accepted, the parts ended in the bay and the page raised
+// no error. (The holders cannot let go yet: a frame stands unheld only with a beam on each of its columns.)
+const SCENES = {
+  beam: { who: ['ada', 'bo'], load: 'rack-beam-4', kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
+    view: 'post=0&hour=12:00&eye=3.5,3.2,26.5&at=-2,.9,22.3', liftMs: 2500, legs: [['-3.1,23.5', 4500], ['-0.5,23.5', 3500]] },
+  bay: { who: ['ada', 'bo', 'cy', 'di'], kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
+    view: 'post=0&hour=12:00&eye=.8,5.5,32&at=.8,.8,20.5',
+    build: { bay: 'rack-bay', frames: [['rack-frame-1', 'upright_a', 'ada', 'bo'], ['rack-frame-2', 'upright_b', 'di', 'cy']], carriers: ['ada', 'di'], beam: ['rack-beam-1', 'beam_low_l', '4.978,20'] } },
+};
+const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
+if (!SCENE) throw Error('carry-proof.scene');
 const states = new Map();
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const native = id => id.replace(/-(\d+)$/, '.$1');
@@ -23,15 +38,20 @@ const delay = (ms, signal) => new Promise((ok, no) => {
   const timer = setTimeout(() => { signal.removeEventListener('abort', abort); ok(); }, ms);
   signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
 });
-async function cli(state, who, ...words) {
+/** One ordinary command line of `who`'s own client; its answer, accepted or refused. */
+async function asked(state, who, ...words) {
   state.signal.throwIfAborted();
   const seat = state.seats[who];
   const result = await new Promise((ok, no) => {
     const child = execFile(process.execPath, [join(state.recipe.checkout, 'v2/client/src/cli/souls.mjs'), ...words, '--soul', seat.soul],
-      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : words[0] === 'carry' && words[1] === 'to' ? 25000 : 15000, maxBuffer: 4 << 20 },
+      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : words[0] === 'carry' && words[1] === 'to' ? 40000 : 15000, maxBuffer: 4 << 20 },
       (error, stdout, stderr) => { const result = { who, words, stdout, stderr, code: child.exitCode, signal: child.signalCode }; save(state, `command-carry-${++state.ordinal}.json`, result); if (error) no(error); else { try { ok(JSON.parse(stdout)); } catch (e) { no(e); } } });
     state.recipe.registerCommand(child);
   });
+  return result;
+}
+async function cli(state, who, ...words) {
+  const result = await asked(state, who, ...words);
   if (result.ok !== true) throw Error(`carry-proof.command-refused: ${who} ${words.join(' ')}`);
   return result;
 }
@@ -58,14 +78,14 @@ async function pair(state, who) {
   const soul = result.answer.soul, post = (path, body) => fetch(new URL(path, state.recipe.world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: who }), signal: state.signal });
   const mine = (await (await post('/v1/account/souls', {})).json()).souls ?? [];
   const key = mine.find(s => s.soul.replace(/^soul-/, '') === soul.replace(/^s_/, ''))?.soul ?? soul;
-  if ((await post('/v1/account/souls/profile', { soul: key, name: who === 'ada' ? 'Ada' : 'Bo' })).status !== 200) throw Error('carry-proof.name');
+  if ((await post('/v1/account/souls/profile', { soul: key, name: who[0].toUpperCase() + who.slice(1) })).status !== 200) throw Error('carry-proof.name');
   return seatOf({ label: who, folder, home, soul, env: seatEnv(home, state.recipe.pkg), log: join(folder, 'commands.jsonl') });
 }
 export async function prepare({ paths, recipe, signal }) {
   if (recipe?.kind !== 'native-page' || !recipe.world || !recipe.registerClient) throw Error('carry-proof.recipe');
   const state = { paths, recipe, signal, seats: {}, bodies: {}, ordinal: 0, loaded: {}, pending: [], pageErrors: [] };
   states.set(paths.dir, state);
-  await Promise.all(['ada', 'bo'].map(async who => {
+  await Promise.all(SCENE.who.map(async who => {
     signal.throwIfAborted();
     const seat = await pair(state, who);
     state.seats[who] = seat;
@@ -82,7 +102,8 @@ export async function prepare({ paths, recipe, signal }) {
   }));
   // Each carrier comes to its end along the load's own line (first 2.2 m out, then in): the page draws a body facing
   // the way it last walked, and the world does not turn a carrier to its load (attempt 8: Ada lifted with her back to it).
-  state.grips = Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  if (SCENE.build) state.frames = standFrames(state).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  state.grips = SCENE.build ? Promise.resolve({ ok: true }) : Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   return { dir: paths.dir };
 }
 async function offer(state) {
@@ -210,6 +231,87 @@ export async function setupGate(state, page, signal) {
     await delay(100, signal);
   }
 }
+/** A thing of the construction kinds by its name, as Ada's own copy finds it. */
+async function find(state, name) {
+  for (let i = 0; i < 40; i++) {
+    await asked(state, 'ada', 'look');
+    const found = ((await asked(state, 'ada', 'query', JSON.stringify([{ find: name }]))).answers ?? []).flatMap(a => a.found ?? []).find(n => n.name === name && /^mars:/.test(n.kind ?? ''));
+    if (found) return found; await delay(500, state.signal);
+  }
+  throw Error('carry-proof.find ' + name);
+}
+const crewOf = async (state, a, b) => { const crew = (await cli(state, a, 'carry', 'offer', state.bodies[b])).crew; if (!crew) throw Error('carry-proof.crew'); await cli(state, b, 'carry', 'accept', crew); return crew; };
+const gripEnds = (state, thing, back, front) => Promise.all([[back, 'back'], [front, 'front']].map(([who, end]) => cli(state, who, 'carry', 'grip', thing, end)));
+// A command the world refuses for a moment (a way out still blocked by the crew ahead, a body that moved while the
+// change was prepared) is asked again, as a Soul's own agent asks again.
+async function retried(state, who, ...words) {
+  for (let i = 0; ; i++) { const a = await asked(state, who, ...words); if (a.ok === true) return a; if (i >= 8) throw Error(`carry-proof.command-refused: ${who} ${words.join(' ')} ${a.code ?? ''}`); await delay(1500, state.signal); }
+}
+/** The survey scene's frames: each from the stand into its upright slot, the stand's first frame first and the second six
+ *  seconds behind it (attempt 12: the second crew, first to its frame, found its way out blocked); its east carrier stays holding it. */
+async function standFrames(state) {
+  const B = SCENE.build, mark = step => (state.steps ??= []).push({ step, at: new Date().toISOString() });
+  state.bay = (await find(state, B.bay)).id;
+  const frames = []; for (const [name] of B.frames) frames.push((await find(state, name)).id);
+  state.beam = await find(state, B.beam[0]);
+  let leave; const left = new Promise(ok => { leave = ok; });
+  await Promise.all(B.frames.map(async ([name, slot, lead, holder], k) => {
+    await gripEnds(state, frames[k], lead, holder);
+    if (k) await left;
+    const crew = await crewOf(state, lead, holder);
+    await cli(state, lead, 'part', 'take', crew, frames[k]); mark(name + '-taken');
+    if (!k) setTimeout(leave, 6000);
+    await retried(state, lead, 'carry', 'to', crew, state.bay, slot); mark(name + '-at-the-bay');
+    await delay(500, state.signal); await retried(state, lead, 'part', 'put', crew, state.bay, slot); mark(`${name}-in-${slot}`);
+    await cli(state, lead, 'carry', 'leave', crew); mark(`${name}-held-by-${holder}`);
+  }));
+}
+/** The survey scene on the page: the frames stood and held (begun in `prepare`), then the beam seated between them. */
+async function bayBuild({ state, page, paths, signal, check, arm, root }) {
+  const B = SCENE.build, [back, front] = B.carriers, [name, slot, mouth] = B.beam;
+  const shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  check('candidate-arm', arm === 'candidate');
+  const manifest = await verifyAssets(state, check);
+  await setupGate(state, page, signal);
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  try {
+    const stood = await state.frames; if (!stood.ok) throw Error(stood.error);
+    await delay(1000, signal); await shot('frames-held');
+    state.crew = await crewOf(state, back, front);
+    const beam = state.beam;
+    await gripEnds(state, beam.id, back, front);
+    await watchBeam({ state, page, check, beam, manifest, root });
+    await cli(state, back, 'part', 'take', state.crew, beam.id);
+    await delay(1000, signal); await shot('beam-taken'); await phase(state, page, 'take');
+    await retried(state, back, 'carry', 'to', state.crew, mouth);
+    await shot('beam-at-the-mouth'); await phase(state, page, 'carry');
+    await delay(500, signal); await retried(state, back, 'part', 'put', state.crew, state.bay, slot);
+    await delay(2500, signal); await shot('beam-seated'); await phase(state, page, 'seat');
+    const parts = [...B.frames.map(f => f[0]), name], found = ((await asked(state, 'ada', 'query', JSON.stringify(parts.map(find => ({ find }))))).answers ?? []).flatMap(a => a.found ?? []);
+    const ends = parts.map(part => ({ name: part, in: found.find(n => n.name === part && /^mars:/.test(n.kind ?? ''))?.in ?? null }));
+    check('parts-in-the-bay', ends.every(e => String(e.in).includes(B.bay)), JSON.stringify(ends));
+    check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+    const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
+    save(state, 'survey-measurement.json', { note: 'The contact oracle on the beam, take to seat: a measurement, not a check of this scene.', observer, watch: state.watch ?? null, ends });
+  } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
+}
+/** The contact observer on the beam's crew, as the beam scene installs it. A survey measures: failing to install is recorded, not thrown. */
+async function watchBeam({ state, page, check, beam, manifest, root }) {
+  try {
+    state.load = beam;
+    await page.waitForFunction(({ load, crew }) => window.__soulsCarry?.evidence?.[load] && window.__soulsCarry.contactStates.some(s => s.crew === crew && s.members?.length === 2), { load: native(beam.id), crew: native(state.crew) }, { timeout: 6000 });
+    const scene = await page.evaluate(() => ({ frame: window.__soulsEntity.gameFrame(), carry: window.__soulsCarry, viewport: { width: innerWidth, height: innerHeight, touch: navigator.maxTouchPoints } }));
+    const node = scene.carry.evidence[native(beam.id)].frames[0].record, bytes = readFileSync(join(root, SCENE.entry)), entry = JSON.parse(bytes);
+    const binding = { crew: native(state.crew), load: { native: native(beam.id), entity: layerDraws(node) && node.origin ? node.origin : entityId(node.id), kind: beam.kind, entrySha256: hash(bytes) },
+      bodies: SCENE.build.carriers.map(who => { const seat = state.seats[who], shown = scene.frame.souls.filter(s => s.id === seat.soul); if (shown.length !== 1) throw Error('carry-proof.body-mapping'); return { native: native(state.bodies[who]), soul: seat.soul, entity: shown[0].entityId }; }) };
+    check('desktop-input', scene.viewport.touch === 0 && scene.viewport.width === 1440 && scene.viewport.height === 1000);
+    const kitURL = Object.keys(state.loaded).find(path => /\/people-kit-[^/]+\.js$/.test(path)); check('production-kit-loaded', !!kitURL);
+    await installContactObserver(page, { kitURL, binding, entry, source: manifest.sourceHead }, { record: (stage, detail) => diagnostic(state, stage, detail) });
+    save(state, 'carry-binding.json', binding);
+    await page.evaluate(() => { window.__carryContactObserver.active = true; });
+    state.watch = { installed: true };
+  } catch (error) { state.watch = { installed: false, error: String(error.message ?? error) }; diagnostic(state, 'survey-watch-unavailable', state.watch); }
+}
 export default async function ({ page, paths, signal, fixture, check, expectHttp, arm }) {
   const state = states.get(fixture.dir), root = state.recipe.checkout;
   // This is a published optional client document route, not a waived asset/stream/measurement failure.
@@ -217,8 +319,9 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   const snapshot = async label => writeFileSync(join(paths.dir, `accessibility-before-${label}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
   const url = new URL(page.url()); url.search = SCENE.view;
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.__soulsEntity?.gameFrame().souls.length >= 2 && !document.querySelector('.viewer-arrival') && document.querySelector('.viewer-history[data-viewer-ready="true"]'), null, { timeout: 30000 });
+  await page.waitForFunction(n => window.__soulsEntity?.gameFrame().souls.length >= n && !document.querySelector('.viewer-arrival') && document.querySelector('.viewer-history[data-viewer-ready="true"]'), SCENE.who.length, { timeout: 30000 });
   await nativeCameraMode(page, 'manual', snapshot);
+  if (SCENE.build) return bayBuild({ state, page, paths, signal, check, arm, root });
   await offer(state);
   if (arm === 'baseline') {
     const manifest = await verifyAssets(state, check);
