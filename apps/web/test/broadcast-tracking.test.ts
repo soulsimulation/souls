@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {Tracker,tracked,hotspotView,pathClear,TRACK_TYPES,GLIDE,FRAME_QUERIES,type Scenery} from '../src/broadcast-tracking.ts';
 import {makeMove} from '../src/WorldTour.ts';
+import {PerspectiveCamera,Vector3} from 'three';
+import {liftHorizon} from '../src/broadcast-horizon.ts';
 
 type Box=[number,number,number,number,number,number];// minx,miny,minz,maxx,maxy,maxz
 /** Scenery made of boxes: clear = 0.8 m from every box; reach = distance along a→b to the first box (slab test). */
@@ -15,6 +17,19 @@ const run=(t:Tracker,s:Scenery,centre:(now:number)=>number[],from:number,to:numb
   for(let now=from;now<to;now+=dt){const q=t.pose('group:a',centre(now),3,now,s),r=q==='pending'?null:q;out.push({now,pose:r?.pose??null,type:r?.type??null,cut:!!r?.cut});}return out;};
 /** The first answer that is not 'pending' (planning is spread over frames). */
 const settle=(t:Tracker,s:Scenery)=>{for(let f=0;f<200;f++){const r=t.pose('group:a',[0,0,0],2,f/60,s);if(r!=='pending')return r;}return 'pending';};
+
+test('tracked compact-pair dolly preserves portrait framing while keeping its original eye path and lens', t => {
+ const tracker=new Tracker(4),open=scenery([]);let frames=0,oldPortraitMisses=0,newPortraitMisses=0,oldWideMisses=0;
+ const inside=(pose:any,aspect:number)=>{const c=new PerspectiveCamera(pose.fov,aspect,.175,2400);c.position.fromArray(pose.position);c.lookAt(new Vector3().fromArray(liftHorizon(pose.position,pose.target)));c.updateMatrixWorld();return[-.35,.35].every(x=>[0,1.05,1.65,1.75].every(y=>{const p=new Vector3(x,y,0).project(c);return p.x>=-1&&p.x<=1&&p.y>=-1&&p.y<=1;}));};
+ for(let now=0;now<90;now+=1/60){const result=tracker.pose('talk:pair',[0,0,0],.35,now,open),state=tracker as any;if(!result||result==='pending'||result.type!=='dolly'||state.from)continue;
+  const k=Math.min(1,(now-state.start)/state.move.seconds),moves=[1,-1].map(side=>makeMove(state.move.view,'dolly',state.move.seconds,side as 1|-1).at(k));
+  const distance=(p:any)=>Math.hypot(...p.position.map((v:number,i:number)=>v-result.pose.position[i]));moves.sort((a,b)=>distance(a)-distance(b));const old=moves[0];
+  assert.ok(distance(old)<1e-8,'original lateral eye path');assert.equal(result.pose.fov,old.fov);frames++;
+  if(!inside(old,390/844))oldPortraitMisses++;if(!inside(result.pose,390/844))newPortraitMisses++;if(!inside(old,16/9))oldWideMisses++;
+ }
+ assert.ok(frames>100);assert.ok(oldPortraitMisses>40,'scenery dolly loses a member for many frames');assert.equal(newPortraitMisses,0,'planned centred dolly keeps this compact pair');assert.equal(oldWideMisses,0,'wide control exposes portrait-specific pressure');
+ t.diagnostic(JSON.stringify({frames,oldPortraitMisses,newPortraitMisses,oldWideMisses}));
+});
 
 test('#2202 B2: gatherings and activity are tracked; two-shots, gestures, riders and walkers keep the solver', () => {
   assert.ok(tracked({key:'group:a',label:'group',members:['a','b','c']}));
