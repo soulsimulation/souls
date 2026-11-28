@@ -26,6 +26,12 @@ test('the current entry advances its content reference without editing an immuta
   assert.deepEqual(entry.slots.lectern.at_mm,entry.points.behind_the_lectern.at_mm);
   assert.deepEqual(entry.geometry.bounds_mm,entry.looks.shape.shapes[0].size.map((n,i)=>i===1?1300:n));
   const cases=provenCases([entry]);assert.equal(cases.ok,true,JSON.stringify(cases.findings));
+  const shapes=entry.looks.shape.shapes,top=shapes[3],column=shapes[2],q=new THREE.Quaternion().setFromEuler(new THREE.Euler(top.pitch*Math.PI/180000,0,0));
+  const corners=[];for(const x of [-1,1])for(const y of [-1,1])for(const z of [-1,1])corners.push(new THREE.Vector3(x*top.size[0]/2000,y*top.size[1]/2000,z*top.size[2]/2000).applyQuaternion(q).add(new THREE.Vector3(...metre(top.at))));
+  for(const p of corners)assert(Math.abs(p.x)<=entry.geometry.bounds_mm[0]/2000&&p.y>=0&&p.y<=entry.geometry.bounds_mm[1]/1000&&Math.abs(p.z)<=entry.geometry.bounds_mm[2]/2000,'the complete tilted top stays inside declared bounds');
+  const rear=Math.min(...corners.map(p=>p.z)),front=Math.max(...corners.map(p=>p.z));
+  assert(rear<=column.at[2]/1000-column.size[2]/2000-.01&&front>=column.at[2]/1000+column.size[2]/2000+.01,'the top overhangs both sides of its supporting column by at least10mm');
+  for(const x of [-1,1])assert(inside([x*column.size[0]/2000,(column.at[1]+column.size[1]/2)/1000,(column.at[2]+column.size[2]/2)/1000],top),'both front column corners meet the tilted wooden top instead of floating below it');
 });
 
 async function template(name){
@@ -101,10 +107,13 @@ test('named point and immutable clap return clear wood on complete production sk
     const priorTop=structuredClone(entry.looks.shape.shapes[3]);priorTop.at[2]=60;
     let oldTopInside=0,maxInside=0,minRear=Infinity,minSide=Infinity,minSole=Infinity,maxSole=-Infinity,worst=null;
     try{
-      const point=draw(1.1);assert.equal(sampled.pointAim.target,'question');assert.equal(sampled.pointAim.hand,'left');
+      draw(1.1);assert.equal(sampled.pointAim.target,'question');assert.equal(sampled.pointAim.hand,'left');
       const arm=views.bones(id)[id].arms.find(a=>a.side==='left');
       const expected=new THREE.Vector2(3-arm.shoulder[0],3-arm.shoulder[2]).normalize(),actual=new THREE.Vector2(arm.palm[0]-arm.shoulder[0],arm.palm[2]-arm.shoulder[2]).normalize();
       assert(expected.dot(actual)>.999,'the real named point reaches toward the question');
+      const top=entry.looks.shape.shapes[3],nearEdge=new THREE.Vector3(0,top.size[1]/2000,-top.size[2]/2000).applyAxisAngle(new THREE.Vector3(1,0,0),top.pitch*Math.PI/180000).add(new THREE.Vector3(...metre(top.at)));
+      const worldEdge=new THREE.Vector3(-nearEdge.x,nearEdge.y,4-nearEdge.z);
+      for(const a of views.bones(id)[id].arms)assert(new THREE.Vector3(...a.shoulder).distanceTo(worldEdge)<a.len*.98,'the near tabletop remains within unextended anatomical reach; this does not invent a contact');
       const times=[...Array.from({length:205},(_,i)=>i*.02),CLAP_START-1e-5,CLAP_START+1e-5,CLAP_END-1e-5,CLAP_END+1e-5,CLAP_END+.11427115,CLAP_END+.2908577,CLAP_END+.35].sort((a,b)=>a-b);
       for(const time of times){
         const skin=draw(time),local=skin.map(p=>({...p,p:[-p.p[0],p.p[1],4-p.p[2]]}));
