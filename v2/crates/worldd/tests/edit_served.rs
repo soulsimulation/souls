@@ -3124,7 +3124,7 @@ fn a2_parts_rest_at_the_grounds_height() {
             "{what}: frame A at {:?}, its ends {p:?} {q:?}",
             where_is(&w, fa).2
         );
-        for (k, s) in w.souls.iter().enumerate() {
+        for (k, s) in w.souls.iter().enumerate().filter(|_| what != "frame A in") {
             let b = body_of(&w, *s);
             println!(
                 "{what}: Soul {} body {} at {:?}",
