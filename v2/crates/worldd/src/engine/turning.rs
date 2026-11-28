@@ -9,7 +9,7 @@
 //!   carry's own step puts the load between its front and its back each tick, so the load turns with them, one motion
 //!   sample a tick, and goes on at its new heading.
 //! - **Refused before anything moves** (`carry-turn-blocked`): when the load, as it is held, would meet fixed
-//!   geometry at any tick of the turn (naming where), or a carrier's arc is not ground its body stands on (naming it).
+//!   geometry at any tick of the turn (naming where), or a carrier's arc would take its body into it (naming it).
 //! - **Words.** `souls:carry-track` `souls:turn` with the turn's start and end.
 
 use replica::effects::{Actor, Cause};
@@ -21,7 +21,10 @@ use replica::world_model::show;
 use sim::activity::carry::{Fixed, HOIST_TICK, outline};
 use sim::controller::{Controller, Track};
 
-use super::{Act, Engine, R, refusal, stands, way_is_ground};
+use super::{Act, Engine, R, refusal, stands};
+
+/// Half the side of the square a carrier's body takes on the plan, µm: its radius (0.28 m).
+const BODY_HALF: i64 = 280_000;
 
 /// How far a carried load turns in one tick at most, millidegrees: 30 degrees a second at 20 ticks a second.
 pub const RATE: i64 = 1_500;
@@ -69,7 +72,6 @@ impl Engine {
         &mut self,
         tree: &mut Tree,
         c: &mut Controller,
-        town: &sim::walk::town::Town,
         a: &Act,
         now: Micros,
     ) -> R<()> {
@@ -159,11 +161,15 @@ impl Engine {
             let mut far = 0i128;
             for k in 1..=ticks {
                 let p = turned(feet, mid, turn * k / ticks)?;
-                if !way_is_ground(c, town, ground, *body, last, p) {
+                // Its body's footprint against the ground's fixed geometry as the tree has it now: the load it carries
+                // is not on the ground, though the walkers' map may still hold where it lay until it is rebuilt.
+                let r = BODY_HALF;
+                let foot = [[p.x - r, p.z - r], [p.x + r, p.z - r], [p.x + r, p.z + r], [p.x - r, p.z + r]];
+                if fixed.hit(&foot).is_some() {
                     return Err(refusal(
                         "carry-turn-blocked",
                         format!(
-                            "{}'s way round the load, at ({}, {}) mm, is not ground it can walk; next: carry it to open \
+                            "{}'s way round the load, at ({}, {}) mm, meets something; next: carry it to open \
                              ground, then turn it",
                             show(*body),
                             p.x / 1000,

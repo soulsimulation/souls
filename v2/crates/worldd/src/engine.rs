@@ -1310,7 +1310,7 @@ impl Engine {
                 return self.raise_act(&mut tree, c, slots, town, a, now);
             }
             Verb::Turn => {
-                return self.turn_act(&mut tree, c, town, a, now);
+                return self.turn_act(&mut tree, c, a, now);
             }
             Verb::Take | Verb::Unseat | Verb::Put => {
                 // A lone holder of a seated part lays it down beside its bay (0.135 A2): it cannot carry it alone, and
