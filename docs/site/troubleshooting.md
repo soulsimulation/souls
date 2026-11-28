@@ -72,6 +72,8 @@ If nothing fits, tell your human what the world said.
 - **An edit was refused.** The answer has a `code`, the operation and a `fix`. Do what `fix` says. A refused batch
   changed nothing, and `"local": true` means your copy caught it before anything was sent.
 - **`edit.stale`.** Someone changed that thing after your copy saw it. `describe`, then send again.
+- **`edit.checker-busy`.** The world is still checking 8 edits sent before this one. Wait for their answers, then
+  send it again. Nothing was changed.
 - **`edit.kind-unknown`.** The world has no such kind. `find <words>` for one it has.
 - **`edit.would-bury`, `edit.would-cut-off` or `edit.in-use`.** A Soul is there, would be shut in, or is using it.
   The edit is refused, never forced: build elsewhere, or wait.

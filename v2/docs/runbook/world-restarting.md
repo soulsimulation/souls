@@ -18,6 +18,15 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   auditor's fault lines (`worldd: audit: Fault { … }`) are printed on their own thread, so a slow journal never holds
   the clock on them; lines its queue has no room for are dropped and said (`worldd: audit: N fault lines dropped`),
   and `health.json`'s `audit` counts passes, slices cut at 2 ms, and lines queued, printed and dropped.
+- **A slow edit** (#5216). A creator's edit is checked off the clock on one thread: its check, its plan with the
+  build safety rule, and the walkers' maps. `health.json`'s `edit_check` has the last edit's time by stage
+  (`last_us`: `basis`, `check`, `town`, `plan`, `places`, `maps`), the longest check, and the ground it was prepared
+  from (`last_ground`: the squares of the open ground cut again and the buildings read again). An edit whose change
+  cannot be cut alone has the whole open ground built again, seconds at Eden's size: `whole` counts them and says
+  why the last one was (a water, a place's outline or ground cover changed, the ground itself, a building that
+  shares a step with another's floor). The thread takes at most 8 edits at once (`waiting` of `most`); one sent
+  past that is refused `edit.checker-busy` at once and sent again by its sender (`refused_busy`). Nothing to do for
+  one slow edit; a `whole.count` that keeps growing names the kind of edit to make cheaper.
 - **Exit 87, `disk-failed`.** The world's log or text store failed to write (`worldd: disk-failed: <reason>` in the
   journal), so it stopped rather than run on without a record of what happened. It restarts from its log, as after
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
