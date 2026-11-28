@@ -1821,13 +1821,14 @@ pub fn wire_sync_scope(n: u64) -> Result<Vec<u8>, JsError> {
     .map_err(js)
 }
 
-/// The daemon's copy of its scope (R5's `sync::Copy`), synced one request at a time through the gateway (R5b).
+/// The daemon's copy of its scope (R5's `sync::Copy`), synced through the gateway (R5b) with several records
+/// requests in flight (N12): each request's hashes are kept by its number until its answer comes.
 #[wasm_bindgen(js_name = Copy)]
 #[derive(Default)]
 pub struct WasmCopy {
     copy: Copy,
     descent: Option<Descent>,
-    asked: Vec<Vec<u8>>,
+    asked: BTreeMap<u64, Vec<Vec<u8>>>,
 }
 
 #[wasm_bindgen(js_class = Copy)]
@@ -1850,42 +1851,62 @@ impl WasmCopy {
         let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
         let version = to_hex(&encode(version).map_err(js)?);
         // A sync cut off before it finished (its socket closed) is let go first (#3424).
+        // Its records are kept loose: the next sync takes them without asking again (`sync::Copy::abandon`).
         if let Some(old) = self.descent.take() {
             self.copy.abandon(old);
         }
+        self.asked.clear();
         self.descent = Some(self.copy.compare(&ids, hashes));
         Ok(version)
     }
 
-    /// The next records request `{20: n, 22: [hashes]}`, or nothing once the copy holds its scope.
+    /// The next records request `{20: n, 22: [hashes]}`, or nothing when nothing more is to be asked for now: the
+    /// copy holds its scope once no request is in flight either ([`WasmCopy::in_flight`]).
     pub fn next(&mut self, n: u64) -> Result<Vec<u8>, JsError> {
         let d = self
             .descent
             .as_mut()
             .ok_or_else(|| JsError::new("sync-not-started"))?;
-        self.asked = self.copy.ask(d, wire::RECORDS_MOST);
-        if self.asked.is_empty() {
+        let asked = self.copy.ask(d, wire::RECORDS_MOST);
+        if asked.is_empty() {
             return Ok(Vec::new());
         }
-        encode(&Value::Map(BTreeMap::from([
+        let frame = encode(&Value::Map(BTreeMap::from([
             (wire::ASK, Value::Uint(n)),
             (
                 wire::RECORDS,
-                Value::Array(self.asked.iter().cloned().map(Value::Bytes).collect()),
+                Value::Array(asked.iter().cloned().map(Value::Bytes).collect()),
             ),
         ])))
-        .map_err(js)
+        .map_err(js)?;
+        self.asked.insert(n, asked);
+        Ok(frame)
     }
 
-    /// A records answer: each record checked against the hash that named it, and kept.
+    /// Records requests sent and not yet answered.
+    #[wasm_bindgen(js_name = inFlight)]
+    pub fn in_flight(&self) -> u32 {
+        self.descent.as_ref().map_or(0, |d| d.in_flight() as u32)
+    }
+
+    /// A records answer, to the request its key 20 numbers: each record checked against the hash that named it, and
+    /// kept.
     #[wasm_bindgen(js_name = onRecords)]
     pub fn on_records(&mut self, frame: &[u8]) -> Result<(), JsError> {
-        let got = read_records(&sync_map(frame)?).map_err(js)?;
+        let m = sync_map(frame)?;
+        let Some(Value::Uint(n)) = m.get(&wire::ASK) else {
+            return Err(JsError::new("sync-answer"));
+        };
+        let asked = self
+            .asked
+            .remove(n)
+            .ok_or_else(|| JsError::new("sync-answer"))?;
+        let got = read_records(&m).map_err(js)?;
         let d = self
             .descent
             .as_mut()
             .ok_or_else(|| JsError::new("sync-not-started"))?;
-        self.copy.take(d, &self.asked, got).map_err(js)
+        self.copy.take(d, &asked, got).map_err(js)
     }
 
     /// Ends the sync: lets go what the scope no longer reaches, and gives R5's counts as JSON, with `heldBytes`, the
@@ -1895,12 +1916,15 @@ impl WasmCopy {
             .descent
             .take()
             .ok_or_else(|| JsError::new("sync-not-started"))?;
+        self.asked.clear();
         let s = self.copy.finish(d).map_err(js)?;
         Ok(format!(
-            r#"{{"rounds":{},"changed":{},"fetched":{},"sent":{},"got":{},"held":{},"heldBytes":{}}}"#,
+            r#"{{"rounds":{},"changed":{},"fetched":{},"reused":{},"inFlight":{},"sent":{},"got":{},"held":{},"heldBytes":{}}}"#,
             s.rounds,
             s.changed,
             s.fetched,
+            s.reused,
+            s.in_flight,
             s.sent,
             s.got,
             s.held,

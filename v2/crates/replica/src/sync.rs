@@ -20,8 +20,15 @@
 //!    change.
 //!
 //! Over the gateway (R5b, #3164), the same steps ([`Copy::compare`], [`Copy::ask`], [`Copy::take`], [`Copy::finish`])
-//! run one request at a time: `gatewayd/src/lib.rs` names the frames, and the world answers for the asking actor's
-//! scope.
+//! run with several requests in flight (N12): a request's answer may come while others are out, and the records it
+//! names below are asked for at once, whatever level they are on; a hash asked and not yet answered is never asked
+//! again. Over a link with a long round trip the rounds overlap: Eden's first sync is about 156 requests of
+//! [`wire::RECORDS_MOST`], one after another 22 s at soul.game's 140 ms. `gatewayd/src/lib.rs` names the frames, and
+//! the world answers for the asking actor's scope.
+//!
+//! 5. **A sync cut off resumes** ([`Copy::abandon`]): the records it took and checked are kept aside, loose, and the
+//!    next sync takes each one it reaches from there instead of asking for it again; what it does not reach is let go
+//!    when it finishes. A hash names the same record for ever, so a loose record is still the one it names.
 //!
 //! Not here: missed events (speech to me) are not state and are not restored. The library a client checks with is loaded by its build hash in `v2/client/src/sync/library.mjs`.
 
@@ -251,6 +258,10 @@ pub struct Synced {
     /// Names the let go looked at ([`Copy::finish`]): the scope's old hashes and what each record let go named, so a
     /// sync that changed little looks at little, however much the copy holds.
     pub walked: usize,
+    /// Records taken from a sync cut off before ([`Copy::abandon`]) instead of being asked for again.
+    pub reused: usize,
+    /// The most requests that were in flight at once.
+    pub in_flight: usize,
 }
 
 /// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, the count,
@@ -258,9 +269,19 @@ pub struct Synced {
 pub struct Descent {
     want: Vec<Vec<u8>>,
     next: Vec<Vec<u8>>,
+    /// Asked and not yet answered, and the requests they are in.
+    pending: BTreeSet<Vec<u8>>,
+    requests: usize,
     s: Synced,
     roots: BTreeMap<Id, Vec<u8>>,
     taken: Vec<Vec<u8>>,
+}
+
+impl Descent {
+    /// Requests asked ([`Copy::ask`]) and not yet answered ([`Copy::take`]).
+    pub fn in_flight(&self) -> usize {
+        self.requests
+    }
 }
 
 /// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash. A record the world
@@ -279,6 +300,9 @@ pub struct Copy {
     named: BTreeMap<Vec<u8>, u32>,
     /// The bytes of every record held.
     bytes: u64,
+    /// Records a sync cut off had taken, checked, with the hashes each names below it: the next sync takes them from
+    /// here (rule 5), and lets go of the rest when it finishes.
+    loose: BTreeMap<Vec<u8>, (Vec<u8>, Vec<Vec<u8>>)>,
 }
 
 /// Checks a record against the hash that named it (rule 3) and gives the hashes it names below it: its big fields'
@@ -409,24 +433,72 @@ impl Copy {
         Descent {
             want: Vec::new(),
             next: want,
+            pending: BTreeSet::new(),
+            requests: 0,
             s,
             roots,
             taken: Vec::new(),
         }
     }
 
-    /// The next records to ask for, at most `most`: the rest of this level, else the next level's not yet held.
-    /// Empty when the descent is done.
-    pub fn ask(&self, d: &mut Descent, most: usize) -> Vec<Vec<u8>> {
-        if d.want.is_empty() {
-            // A child named twice in one level, or also asked for in it, is fetched once.
-            d.want = std::mem::take(&mut d.next);
-            d.want.retain(|c| !self.holds(c));
-            d.want.sort();
-            d.want.dedup();
+    /// The next records to ask for, at most `most`: the rest of what is known to be wanted, else what the answers
+    /// since named below, not held and not asked already. A record a sync cut off took (rule 5) is taken here, not
+    /// asked for. Empty when nothing more is to be asked for now: the descent is done once no request is in flight
+    /// ([`Descent::in_flight`]) either.
+    pub fn ask(&mut self, d: &mut Descent, most: usize) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        while out.len() < most {
+            if d.want.is_empty() {
+                // A child named twice, or asked for already, is fetched once.
+                d.want = std::mem::take(&mut d.next);
+                d.want
+                    .retain(|c| !self.holds(c) && !d.pending.contains(c));
+                d.want.sort();
+                d.want.dedup();
+                d.want.reverse(); // taken from the end, in order
+                if d.want.is_empty() {
+                    break;
+                }
+            }
+            let Some(h) = d.want.pop() else { break };
+            if self.holds(&h) || d.pending.contains(&h) {
+                continue;
+            }
+            if let Some((bytes, below)) = self.loose.remove(&h) {
+                d.s.reused += 1;
+                self.keep(d, h, bytes, below);
+                continue;
+            }
+            d.pending.insert(h.clone());
+            out.push(h);
         }
-        let n = most.min(d.want.len());
-        d.want.drain(..n).collect()
+        if !out.is_empty() {
+            d.requests += 1;
+            d.s.in_flight = d.s.in_flight.max(d.requests);
+        }
+        out
+    }
+
+    /// A record checked against its hash, kept, and what it names below asked for next if not held.
+    fn keep(&mut self, d: &mut Descent, h: Vec<u8>, bytes: Vec<u8>, below: Vec<Vec<u8>>) {
+        for c in &below {
+            if !self.holds(c) {
+                d.next.push(c.clone());
+            }
+        }
+        if self.holds(&h) {
+            return; // held already: a hash names the same record for ever
+        }
+        // Withheld before (an empty record, naming nothing), or not held: kept as it came.
+        for c in &below {
+            *self.named.entry(c.clone()).or_default() += 1;
+        }
+        self.bytes += bytes.len() as u64;
+        if let Some(old) = self.records.insert(h.clone(), bytes) {
+            self.bytes -= old.len() as u64;
+        }
+        self.below.insert(h.clone(), below);
+        d.taken.push(h);
     }
 
     /// The records `asked` came back as: each checked against its hash (rule 3), kept, and its children not held
@@ -435,30 +507,18 @@ impl Copy {
         if got.len() != asked.len() {
             return refuse("sync-record", "an answer of another length");
         }
+        if !asked.iter().all(|h| d.pending.contains(h)) {
+            return refuse("sync-record", "an answer to records not asked for");
+        }
+        d.requests = d.requests.saturating_sub(1);
         d.s.rounds += 1;
         d.s.sent += asked.iter().map(|h| h.len() as u64).sum::<u64>();
         for (h, bytes) in asked.iter().zip(got) {
             let below = check(h, &bytes)?;
-            for c in &below {
-                if !self.holds(c) {
-                    d.next.push(c.clone());
-                }
-            }
+            d.pending.remove(h);
             d.s.got += bytes.len() as u64;
             d.s.fetched += 1;
-            if self.holds(h) {
-                continue; // held already: a hash names the same record for ever
-            }
-            // Withheld before (an empty record, naming nothing), or not held: kept as it came.
-            for c in &below {
-                *self.named.entry(c.clone()).or_default() += 1;
-            }
-            self.bytes += bytes.len() as u64;
-            if let Some(old) = self.records.insert(h.clone(), bytes) {
-                self.bytes -= old.len() as u64;
-            }
-            self.below.insert(h.clone(), below);
-            d.taken.push(h.clone());
+            self.keep(d, h.clone(), bytes, below);
         }
         Ok(())
     }
@@ -482,6 +542,8 @@ impl Copy {
             self.abandon(d);
             return refuse("sync-missing", crate::encode::to_hex(&h));
         }
+        // Loose records this sync did not reach are no longer the scope's.
+        self.loose.clear();
         let old = std::mem::replace(&mut self.roots, std::mem::take(&mut d.roots));
         for h in self.roots.values() {
             *self.named.entry(h.clone()).or_default() += 1;
@@ -520,15 +582,19 @@ impl Copy {
     /// the copy is as it was. Compare only descends from a hash it does not hold, so it must never hold a record
     /// without the records below it, or the next sync would stop short of them (`sync-missing`, #3424). A record it
     /// took that something held before still names was withheld before (only those are asked for again), and is
-    /// withheld again.
+    /// withheld again. What it took is kept loose (rule 5): the next sync takes it from there, never asking twice.
     pub fn abandon(&mut self, d: Descent) {
         for h in &d.taken {
             let Some(below) = self.below.remove(h) else {
                 continue;
             };
-            self.bytes -= self.records.remove(h).map_or(0, |b| b.len() as u64);
+            let bytes = self.records.remove(h).unwrap_or_default();
+            self.bytes -= bytes.len() as u64;
             for c in &below {
                 self.unname(c);
+            }
+            if !bytes.is_empty() {
+                self.loose.insert(h.clone(), (bytes, below));
             }
         }
         for h in d.taken {
