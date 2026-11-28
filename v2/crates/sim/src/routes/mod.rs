@@ -1253,11 +1253,13 @@ impl Map {
             .collect()
     }
 
-    /// Whether a body with hands may walk from piece `a` to piece `b`: false only when no portal or link it may use
-    /// joins them, so no route search can find a way (#4072). One lookup once the map's parts are found (once after
-    /// each change); a failed route search instead searches the whole part the walk starts in, twice.
+    /// Whether a body with hands that climbs may walk from piece `a` to piece `b`: false only when no portal or link it
+    /// may use joins them, so no route search can find a way (#4072). A place up a ladder (racks T6: a frame's
+    /// standing place) is reached; a body that cannot climb is refused by its own walk, by name. One lookup once the
+    /// map's parts are found (once after each change); a failed route search instead searches the whole part the walk
+    /// starts in, twice.
     pub fn may_reach(&self, a: u32, b: u32) -> bool {
-        let parts = self.hands_parts.get_or_init(|| self.parts(HANDS));
+        let parts = self.hands_parts.get_or_init(|| self.parts(HANDS | CLIMB));
         parts.get(a as usize) == parts.get(b as usize)
     }
 
