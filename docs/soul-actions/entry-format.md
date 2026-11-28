@@ -69,9 +69,15 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 | 24 | `building` | A building kind's rooms, as a template's building of it has them at its def's defaults (written by `v2/tools/import-eden/export/buildings.ts`, never by hand): its walls (`solids`), `slots`, `floors`, `rooms` (each name a key of the text table), `openings` (doorways and windows), `stairs` and `doors`, in its frame, mm and millidegrees. A place of the kind gets them in the same edit (`worldd`'s `with_buildings`, #5006) |
 
-A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
-thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
-chain with a wake entry of its own; the world never waits for a time or a condition.
+`howtos` declares recipe metadata: a text key and an ordered chain of this kind's forms. The served v2 client has no
+`how` command and does not automatically execute these chains or create waits and wakes from them. Agents use `look`
+or `find <words>` to discover actual things, then `inspect <id>` for their current offers, argument descriptions and
+act strings. Send a chosen offer with `act <offered-act> [<argument-id> ...] --wait`, or use
+`object <id> <offer> [<name>=<value> ...]`. For a composition, choose the participants and arguments and execute each
+step explicitly, checking its receipt before dependent work; if `--wait` reports it still running, use the reported
+sequence with `receipt <sequence>`. Declaring a recipe does not make its full text or chain visible in these replies.
+`can` is an advisory local check: `unknown` means it cannot decide locally, not that the world refused the act.
+The chosen act's authoritative receipt or refusal determines what actually happened.
 
 Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
 
