@@ -5,7 +5,9 @@
 //!   ring with one, when those have none: a pond's bank), `⌊2πk⌋` places on ring `k` (so
 //!   neighbours on a ring are at least about a pitch apart), the target itself ring 0. A place is kept only where the
 //!   target's node has walkable ground ([`Ground::stand`]), and never in a doorway or on a stair
-//!   ([`Ground::passage`]). That rule is about the engine's choice only: a body whose own order is to stay in a
+//!   ([`Ground::passage`]); but a target in a doorway's or a stair's clearance has the nearest points that clear the
+//!   passage itself by the body's radius and margin ([`Ground::in_passage_itself`], #5254), so a walk there is moved
+//!   off only as far as that, and says how far (`walk.goal-moved`). That rule is about the engine's choice only: a body whose own order is to stay in a
 //!   doorway is not a walker here, and nothing here refuses it.
 //! - **One table per target, owned by the target's node** ([`Spots::owners`]); a place has one holder. A walker never
 //!   writes it: it marks what it asks (the walk skill's `Mark::spot`), and at the start of each tick the owner reads
@@ -98,6 +100,12 @@ pub trait Ground {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     /// Whether `p` on `node` lies in a doorway or on a stair.
     fn passage(&self, node: Id, p: Vec3) -> bool;
+    /// Whether a body standing at `p` on `node` would be in a doorway or on a stair itself: within its radius and
+    /// margin of the passage, not [`CLEAR`] (#5254). A target in a passage ([`Ground::passage`]) is stood at only as
+    /// far off as this needs. A ground that cannot tell says [`Ground::passage`].
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.passage(node, p)
+    }
     /// Whether `p` on `node`, in a passage ([`Ground::passage`]), lies only at a doorway's mouth: within [`CLEAR`] of
     /// a doorway's end, on the room's side of it, off every line and every end but a doorway's
     /// (`walk::town::in_mouth_indexed`).
@@ -130,6 +138,10 @@ pub trait Ground {
 pub trait ClassGround {
     fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool;
+    /// [`Ground::in_passage_itself`] for a body of class `size`.
+    fn in_passage_itself(&self, size: Size, node: Id, p: Vec3) -> bool {
+        self.passage(size, node, p)
+    }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
     fn may_reach(&self, _size: Size, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
         true
@@ -151,6 +163,9 @@ impl Ground for Selected<'_> {
     }
     fn passage(&self, node: Id, p: Vec3) -> bool {
         self.ground.passage(self.size, node, p)
+    }
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.ground.in_passage_itself(self.size, node, p)
     }
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.ground.walk(self.size, an, a, bn, b)
@@ -174,6 +189,9 @@ impl ClassGround for Standard<'_> {
     }
     fn passage(&self, _size: Size, node: Id, p: Vec3) -> bool {
         self.0.passage(node, p)
+    }
+    fn in_passage_itself(&self, _size: Size, node: Id, p: Vec3) -> bool {
+        self.0.in_passage_itself(node, p)
     }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         (size == Size::Standard)
@@ -383,11 +401,53 @@ impl Table {
                 });
             }
         }
-        let clear = g.stand(target.node, t).is_some() && !g.passage(target.node, t);
-        // #5254: a target a body cannot stand at (in a doorway's or a stair's clearance, or off its ground) is
-        // stood at only as far off as needed: on fine rings [`NEAR_PITCH`] apart out to [`NEAR_MOST`], within a
-        // walker's own goal tolerance, before the first full ring; numbered after the target on its ring 0.
-        if !clear {
+        let stands = g.stand(target.node, t).is_some();
+        let passage = g.passage(target.node, t);
+        let clear = stands && !passage;
+        // #5254: a target in a doorway's or a stair's clearance (on ground a body stands on, or in the opening itself)
+        // is stood at only as far off as clears the passage itself ([`Ground::in_passage_itself`]: the body's radius
+        // and margin, not [`CLEAR`]): on fine rings [`NEAR_PITCH`] apart from the target itself out, the first that
+        // has such a point, out to the full rings' reach; numbered after the target on its ring 0. Never further than
+        // that ring: the walk says how far it was moved, and why (`walk.goal-moved`).
+        if passage {
+            let mut k = 0u16;
+            for i in 0..=RINGS * PITCH / NEAR_PITCH {
+                let n = if i == 0 {
+                    1
+                } else {
+                    (6_283 * i / 1_000).max(NEAR_EACH)
+                };
+                let before = places.len();
+                for j in 0..n {
+                    let off = Quat::from_yaw_mdeg(j * 360_000 / n)
+                        .and_then(|q| q.rotate(Vec3::new(0, 0, i * NEAR_PITCH)))
+                        .unwrap_or(Vec3::ZERO);
+                    let p = Vec3::new(t.x + off.x, t.y, t.z + off.z);
+                    k = k.saturating_add(1);
+                    let Some((at, world)) = g.stand(target.node, p) else {
+                        continue;
+                    };
+                    if g.in_passage_itself(target.node, at) {
+                        continue;
+                    }
+                    places.push(Place {
+                        ring: 0,
+                        k,
+                        at,
+                        holder: None,
+                        world,
+                        joined: None,
+                    });
+                }
+                if places.len() > before {
+                    break;
+                }
+            }
+        }
+        // #5254: a target a body cannot stand at (off its ground) is stood at only as far off as needed: on fine rings
+        // [`NEAR_PITCH`] apart out to [`NEAR_MOST`], within a walker's own goal tolerance, before the first full ring;
+        // numbered after the target on its ring 0.
+        if !stands && !passage {
             let mut k = 1u16;
             for r in (1..=NEAR_MOST / NEAR_PITCH).map(|i| i * NEAR_PITCH) {
                 for j in 0..NEAR_EACH {
