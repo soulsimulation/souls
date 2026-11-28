@@ -1378,7 +1378,30 @@ fn teardown_without_the_deck_by_intents_and_every_part_back_on_its_pile() {
 
     // (4) Each frame lowered out of its slot, away from the bay, by its holders (the asker its lifter).
     for (f, (a, b)) in [(1, 2), (3, 4)].into_iter().enumerate() {
-        let got = k.lower(a, crews[f], f);
+        let at = |k: &Kinds, s: usize| {
+            let (p, o) = (body_at(&k.w, body_of(&k.w, k.w.souls[s])), Bay::at(0, 0));
+            ((p.x - o.x) / 1000, (p.z - o.z) / 1000)
+        };
+        println!(
+            "frame {}'s holders stand at {:?} and {:?} mm from the bay's middle; the frame at {:?}",
+            f + 1,
+            at(&k, a),
+            at(&k, b),
+            where_is(&k.w, k.frames()[f]).2
+        );
+        let mut got = k.lower(a, crews[f], f);
+        if got.reason == "part.grip-out-of-reach" {
+            println!("frame {} lowered from where they hold it: {got:?}", f + 1);
+            // The raise crew's places for a standing part (the client's `carry grip <frame> top|foot`): beside its
+            // base, half its width and `raise::SIDE` beyond each post, the asker on the frame's own +x.
+            let z = FRAME_Z[f];
+            k.walk(
+                &[(a, (1_030, z)), (b, (-1_030, z))],
+                "the lifter and the footer beside the frame's base",
+            );
+            println!("then at {:?} and {:?}", at(&k, a), at(&k, b));
+            got = k.lower(a, crews[f], f);
+        }
         k.ok(got, &format!("frame {} lowered", f + 1));
         let t0 = std::time::Instant::now();
         while where_is(&k.w, k.frames()[f]).0 != Some(g) {
