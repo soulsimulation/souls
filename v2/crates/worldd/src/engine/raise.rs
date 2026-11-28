@@ -393,8 +393,16 @@ impl Engine {
         let pose = |e| refusal("part-pose", format!("{e:?}"));
         let x = |q: Quat| q.rotate(Vec3::new(M, 0, 0)).map_err(pose);
         let (a, b) = (x(geo.stand)?, x(turn)?);
-        let cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z)) * 1000
+        let mut cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z)) * 1000
             / (i128::from(M) * i128::from(M));
+        // A part the same turned a half turn (`symmetry` `front_back`) is seated turned the nearer way (#5067).
+        let mut turn = turn;
+        if geo.spec.symmetric && cos < 0 {
+            cos = -cos;
+            turn = turn
+                .then(Quat::from_yaw_mdeg(180_000).map_err(pose)?)
+                .map_err(pose)?;
+        }
         if off > INTO_NEAR || cos < INTO_COS {
             return Err(refusal(
                 "raise.not-at-slot",
@@ -915,7 +923,7 @@ impl Engine {
                 ra.by,
                 activity,
                 ra.part,
-                (bay, k, to.0),
+                (bay, k, to.0, to.1),
                 ra.ground,
                 ra.reach,
             );

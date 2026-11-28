@@ -81,6 +81,11 @@ Every kind of thing states both. `motion.how` is one closed list, shared with En
 `pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
 by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+A part the same turned a half turn about its upright (a rack frame, its beam seats on both faces) says so with an enum
+field `state.symmetry` whose default is `front_back` (else `none`). A put into a slot, and a raise into one, then seat
+it turned as the slot or a half turn from it, whichever is nearer to how it is held; a raise into a slot admits either
+turn within 15 degrees.
+
 Raised and lowered (#5067, `sim::activity::carry::raise`): a part whose entry names a point `foot` at its origin (role
 `contact`) and whose height is its longest side is tilted up about that foot by a crew of two, from lying to standing,
 and laid down again (`part:raise`, `part:lower`); `state.raise_crew`'s default is how many it takes (two when it says

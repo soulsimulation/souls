@@ -987,11 +987,12 @@ impl Engine {
     /// part that would then hang is refused `support.none`, as it is after a restart.
     pub fn with_structure(mut self, entries: &Json) -> Engine {
         let structure = sim::structure::Structure::from_entries;
-        let asm = crate::assembly::Assembly::new(
+        let mut asm = crate::assembly::Assembly::new(
             self.header.clone(),
             self.rules.clone(),
             structure(entries),
         );
+        asm.symmetric = crate::assembly::symmetric_kinds(entries);
         if asm.any() {
             self.activities.structure = structure(entries);
             self.asm = Some(asm);
