@@ -7,8 +7,12 @@
 //! at its commit, as it judges a Soul's put: a part left hanging refuses the batch `support.none`, naming it.
 //!
 //! A place whose batch already names its joints (bare links from it, `souls-god.mjs place --joins` or a batch op's
-//! `joins`) keeps them, never filtered, as `part:put --joins`. Either way each joint is refused
-//! `connectors-do-not-mate` where the two kinds' connectors do not mate, as a put's is, and is of the world's joint type.
+//! `joins`) keeps them, never filtered, as `part:put --joins`. Either way a joint from a part placed into a bay's slot
+//! is refused `connectors-do-not-mate` where the two kinds' connectors do not mate, as a put's is, and is of the
+//! world's joint type. Other links a batch makes are judged as before.
+//!
+//! The previews here are planned with no open ground (`sim::edit::plan` with `None`): they need only where the parts
+//! would stand and the structure rule's verdict, never the walk map, which the world's own plan builds once.
 //!
 //! The joints are added after the creator's operations (as [`crate::buildsafe::with_buildings`] adds a building's
 //! rooms), so a refusal names the creator's operations by their places in the batch.
@@ -33,7 +37,6 @@ pub fn with_joins(
     copy: &Replica,
     world: &World,
     structure: &Structure,
-    ground: Option<Id>,
 ) -> Result<(), Refused> {
     let kinds: BTreeMap<u64, Name> = batch
         .ops
@@ -131,7 +134,7 @@ pub fn with_joins(
     // The batch as it would stand, on a copy (no structure rule: only where its parts would be). A batch the world's
     // check refuses is left for that check.
     let Ok(planned) =
-        edit::check(batch.clone(), copy, world).and_then(|c| sim::edit::plan(c, copy, ground))
+        edit::check(batch.clone(), copy, world).and_then(|c| sim::edit::plan(c, copy, None))
     else {
         return Ok(());
     };
@@ -224,7 +227,7 @@ pub fn with_joins(
     // places the part named and its kind and slot written where the world's verdict names a node not minted yet. The
     // commit judges it again on its tick.
     let verdict = edit::check(batch.clone(), copy, world)
-        .and_then(|c| sim::edit::plan(c, copy, ground))
+        .and_then(|c| sim::edit::plan(c, copy, None))
         .and_then(|p| {
             sim::edit::commit_guarded(
                 &mut copy.frozen(),

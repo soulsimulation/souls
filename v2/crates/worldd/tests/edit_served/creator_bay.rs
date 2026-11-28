@@ -300,3 +300,68 @@ async fn a_creators_batch_with_a_beam_before_the_frames_is_refused_naming_the_be
         "nothing placed"
     );
 }
+
+/// A joint the batch names itself (`place --joins`, a batch place's "joins"): a bare link from the placed part.
+fn joint(name: u64, from: u64, to: Ref) -> Op {
+    Op::Link {
+        name,
+        ty: Name::new("mars:joint").unwrap(),
+        ends: [Ref::New(from), to],
+        owner: replica::world_model::End::First,
+        field: 0,
+        row: Vec::new(),
+        door: None,
+        bare: true,
+    }
+}
+
+/// Lane C: joints a batch names are its own, never filtered, as `part:put --joins`: a joist named onto the two 0.5 m
+/// beams rests on them, not on the 1.8 m beams its level would give. A named joint whose kinds' connectors do not
+/// mate is refused `connectors-do-not-mate`, and a bare link that writes a field is refused `edit.link`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_creators_named_joins_are_kept_unfiltered_and_checked_as_a_puts() {
+    let mut site = Site::serve("creator-bay-named").await;
+    let mut ops: Vec<Op> = BUILT[..7]
+        .iter()
+        .enumerate()
+        .map(|(k, (kind, slot))| site.place(k as u64 + 1, kind, slot))
+        .collect();
+    // The joist (name 7) named onto the low beams (names 3 and 4).
+    ops.push(joint(20, 7, Ref::New(3)));
+    ops.push(joint(21, 7, Ref::New(4)));
+    let got = site.edit(1, ops.clone()).await;
+    assert_eq!(got.kind, 1, "named joins accepted: {got:?}");
+    let (copy, _) = served_copy(&site.w);
+    let t = copy.tree();
+    let joist = got.names[&7];
+    let on: BTreeSet<Id> = t
+        .links_at(joist)
+        .iter()
+        .filter_map(|e| t.link(e.link))
+        .filter(|(ty, ends, ..)| ty.as_str() == "mars:joint" && ends[0] == joist)
+        .map(|(_, ends, ..)| ends[1])
+        .collect();
+    assert_eq!(on, BTreeSet::from([got.names[&3], got.names[&4]]), "on the low beams, unfiltered");
+    drop(copy);
+
+    // A beam named onto another beam: their connectors do not mate.
+    let mut site = Site::serve("creator-bay-mate").await;
+    let mut ops: Vec<Op> = BUILT[..4]
+        .iter()
+        .enumerate()
+        .map(|(k, (kind, slot))| site.place(k as u64 + 1, kind, slot))
+        .collect();
+    ops.push(joint(20, 4, Ref::New(3)));
+    let got = site.edit(1, ops.clone()).await;
+    refused_as(&got, "connectors-do-not-mate", "a beam named onto a beam");
+
+    // A bare link writes no field.
+    ops.pop();
+    let mut bad = joint(20, 4, Ref::New(1));
+    if let Op::Link { field, .. } = &mut bad {
+        *field = 9;
+    }
+    ops.push(bad);
+    let got = site.edit(2, ops).await;
+    refused_as(&got, "edit.link", "a bare link with a field");
+}

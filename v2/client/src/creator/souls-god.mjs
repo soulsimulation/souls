@@ -522,6 +522,7 @@ export function withJoins(ops, entries) {
     const plain = String(o.kind).replace(/@.*$/, '');
     const declared = Object.keys(entries?.[plain]?.links ?? {})[0];
     if (!Array.isArray(joins) || !joins.length) throw usage('joins: a list of the parts it joins (ids, or earlier names in the batch)');
+    if (!Number.isInteger(o.name)) throw usage('a place with joins has a "name" number, its joints\' first end');
     if (!declared) throw Object.assign(new Error(`${plain} declares no joint: its joins cannot be named`), { code: 'joint-undeclared' });
     const type = `${plain.split(':')[0]}:${declared}`;
     out.push(place);
