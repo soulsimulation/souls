@@ -4079,7 +4079,6 @@ fn rest_of(w: &Seeded, id: Id, up_mm: i64) -> (i64, i64, bool) {
 ///   where it was, and Soul 1 may leave the crew.
 /// - Taking frame A out from under beam 1 is refused `support.none`, and nothing changes.
 #[test]
-#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     const H: i64 = 1_200_000;
     let d = scratch("a2seat");
