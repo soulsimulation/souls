@@ -11,23 +11,29 @@ import { pathToFileURL } from 'node:url';
 import { startOldPage } from '../arena/new-engine/old-page.mjs';
 import { exportFacts } from '../arena/new-engine/world.mjs';
 import { REPO_ROOT } from '../../lib/paths.mjs';
+import { defOf } from '../../entry/look.mjs';
 
 const exec = promisify(execFile);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
 
-/** Use the shipped furniture, with room to walk round it; no new kind or world map is authored. */
+/** Retain shipped revisions; compile this local rehearsal's lecture from its current entry. */
 export function rehearsalTemplate(eden) {
   const wanted = ['core-hall_lecture', 'core-conference_question'];
   const definitions = eden.batches.flatMap((batch) => batch.ops).filter((op) =>
     op.op === 'define' && wanted.includes(op.def.name));
   assert.deepEqual(definitions.map((op) => op.def.name).sort(), [...wanted].sort(), 'existing furniture definitions');
+  const lecture = JSON.parse(readFileSync(join(REPO_ROOT, 'content/kinds/hall/lecture.json'), 'utf8'));
+  assert.equal(lecture.kind, 'eden:hall_lecture', 'canonical lecture entry');
+  const current = defOf(lecture);
+  assert(current?.make, 'canonical lecture picture is required');
+  const localLecture = { op: 'define', def: { ...current, version: 2 } };
   return {
     schema: 'genesis/1', name: 'Presentation rehearsal', description: 'A lectern and four audience seats.',
     constants: { extent: 50, ground: 'land' },
-    batches: [{ group: 'conference-rehearsal', ops: [...definitions,
-      { op: 'place', def: 'core/hall_lecture@1', name: 'presentation-lectern', p: [0, 0, 4], r: Math.PI },
+    batches: [{ group: 'conference-rehearsal', ops: [...definitions, localLecture,
+      { op: 'place', def: 'core/hall_lecture@2', name: 'presentation-lectern', p: [0, 0, 4], r: Math.PI },
       { op: 'place', def: 'core/conference_question@1', name: 'question-stand', p: [3, 0, 3] },
       { op: 'place', def: 'core/bench@1', name: 'audience-left', p: [-1.4, 0, 0], r: 0 },
       { op: 'place', def: 'core/bench@1', name: 'audience-right', p: [1.4, 0, 0], r: 0 },

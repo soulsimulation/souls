@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { completed, discoverConference, performConference, rehearsalTemplate, conferenceMemberships, performSlotPointComponent } from './rehearse.mjs';
 
 import { brief } from '../../../v2/client/src/brief/brief.mjs';
@@ -45,6 +48,61 @@ test('the rehearsal reuses both existing definitions and refuses an incomplete f
   assert.equal(scene.batches[0].ops[0], definitions[0]);
   assert.equal(scene.batches[0].ops[1], definitions[1]);
   assert.throws(() => rehearsalTemplate({ batches: [{ ops: [definitions[0]] }] }), /existing furniture/);
+});
+
+test('the local lecture revision is compiled from the current entry without rewriting the shipped revision', async () => {
+  const read = file => JSON.parse(readFileSync(new URL(file, import.meta.url)));
+  const eden = read('../../../worlds/templates/eden-2026.json');
+  const canonical = read('../../../content/kinds/hall/lecture.json');
+  const { defOf } = await import('../../entry/look.mjs');
+  const original = eden.batches.flatMap(b => b.ops).find(o => o.op === 'define' && o.def.name === 'core-hall_lecture');
+  const originalBytes = JSON.stringify(original);
+  const scene = rehearsalTemplate(eden);
+  const ops = scene.batches.flatMap(b => b.ops);
+  const newDef = ops.find(o => o.op === 'define' && o.def.name === 'core-hall_lecture' && o.def.version === 2);
+  assert(newDef, 'the current entry needs a new local definition revision');
+  assert.deepEqual(newDef.def, { ...defOf(canonical), version: 2 }, 'complete canonical make/state/size, not a hand-copied subset');
+  assert.equal(JSON.stringify(ops.find(o => o.op === 'define' && o.def.name === 'core-hall_lecture' && o.def.version === 1)), originalBytes);
+  assert.equal(JSON.stringify(original), originalBytes, 'generator must not mutate the shipped definition');
+  assert.equal(ops.find(o => o.op === 'place' && o.name === 'presentation-lectern').def, 'core/hall_lecture@2');
+  assert.deepEqual(read('../../../worlds/templates/conference-rehearsal.json'), scene);
+  const { WorldModel, applyBatch, correctKitDefines, coreLibrary } = await import('../../../packages/world-compiler/src/index.ts');
+  const model = new WorldModel({ constants: scene.constants, seed: 1 });
+  model.library = coreLibrary();
+  for (const [i, batch] of scene.batches.entries()) {
+    const r = applyBatch(model, correctKitDefines(batch).batch, 'genesis', i + 1, { trusted: true });
+    assert.equal(r.result.accepted, true, JSON.stringify(r.result));
+  }
+  const placed = [...model.entities.values()].find(e => e.name === 'presentation-lectern');
+  assert(placed, 'normal WorldModel must place the lecture');
+  const resolved = model.resolvedDef(placed.def);
+  assert.equal(resolved.ref, 'core-hall_lecture@2');
+  assert.deepEqual(resolved.make, newDef.def.make);
+  assert.equal(resolved.version, 2);
+});
+
+test('normal export preserves the canonical local lecture revision in the public boot facts', async () => {
+  const root = fileURLToPath(new URL('../../../', import.meta.url));
+  const scratch = join(root, '.local', 'canonical-conference-fixture-tests');
+  mkdirSync(scratch, { recursive: true });
+  const out = join(mkdtempSync(join(scratch, 'export-')), 'facts.json');
+  execFileSync(process.execPath, ['v2/tools/import-eden/export/export.ts', '--template',
+    'worlds/templates/conference-rehearsal.json', '--out', out], { cwd: root, timeout: 30000, stdio: 'pipe' });
+  const facts = JSON.parse(readFileSync(out, 'utf8'));
+  const thing = facts.things.find(t => t.name === 'presentation-lectern');
+  assert.equal(thing.ref, 'core-hall_lecture@2');
+  const kind = facts.kinds.find(k => k.ref === thing.ref);
+  assert.equal(kind.name, 'core:hall_lecture', 'ordinary native importer maps this public name to eden:hall_lecture');
+  const stored = facts.ground.defs.filter(d => d.ref === thing.ref);
+  assert.equal(stored.length, 1, 'the page must receive this exact world-local StoredDef');
+  const def = JSON.parse(stored[0].body);
+  const entry = JSON.parse(readFileSync(join(root, 'content/kinds/hall/lecture.json'), 'utf8'));
+  const { defOf } = await import('../../entry/look.mjs');
+  const canonical = defOf(entry);
+  assert.equal(def.version, 2);
+  assert.equal(def.hash, kind.hash);
+  for (const key of ['make', 'state']) assert.deepEqual(def[key], canonical[key], `public boot ${key} must match the current entry`);
+  assert.deepEqual(def.size, { ...canonical.size, scale: [1, 1] }, 'normal StoredDef adds only its declared identity size scale');
 });
 
 test('discovery rejects a client that hides a required argument, before sending any action', async () => {
