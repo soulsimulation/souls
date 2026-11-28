@@ -1440,8 +1440,8 @@ impl Engine {
                     // Each carrier faces its hold as the part is set in.
                     face_holds(c, &carriers, from);
                     self.push(effects, Some(by));
-                    // #5067: the set-in is a track as a lift's is, said `souls:seat` from now to its end; the holds stay
-                    // carried on it, until the part is seated (`souls:seated`, then held or let go).
+                    // #5067: the set-in is a track as a lift's is, said `souls:fit` from now to its end; the holds stay
+                    // carried on it, until the part is seated (`souls:fitted`, then held or let go).
                     let until = self.asm.as_ref().and_then(|s| {
                         s.tracks(now)
                             .into_iter()
@@ -1456,7 +1456,7 @@ impl Engine {
                             &mut tree,
                             activity,
                             part,
-                            "souls:seat",
+                            "souls:fit",
                             (now, t1),
                             None,
                             word,
@@ -3066,6 +3066,8 @@ impl Engine {
             .iter()
             .filter_map(|h| tree.node(*h))
             .filter(|n| n.id() != activity)
+            // Only a crew's node is a kept hold: a floor the part holds keeps its level in the same field number.
+            .filter(|n| self.asm.as_ref().is_some_and(|s| s.structure().is_crew(n.kind().as_str())))
             .filter(|n| {
                 matches!(n.fields().get(&sim::structure::F_KEPT), Some(Value::Uint(k)) if *k > 0)
             })
@@ -3797,7 +3799,7 @@ impl Engine {
         }
         let taking = self.taking.remove(&r.activity);
         // #5067: a set-in's track, said ended as its part is seated.
-        let seat = self
+        let fit = self
             .asm
             .as_ref()
             .and_then(|a| a.set_in_times(r.activity))
@@ -3838,13 +3840,13 @@ impl Engine {
             if r.step == crate::assembly::Step::Seated && written {
                 self.set_sides.remove(&r.activity);
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
-                if let Some((part, t0, t1)) = seat {
+                if let Some((part, t0, t1)) = fit {
                     self.activities.next = tree.next();
                     if let Err(e) = self.activities.carry_track(
                         &mut tree,
                         r.activity,
                         part,
-                        "souls:seated",
+                        "souls:fitted",
                         (t0, t1),
                         None,
                         word,
