@@ -30,7 +30,7 @@ export const LOOP_HOLD = 700_000;
  *  when it began, world x and z in mm; whether it holds that body's hand. */
 /** The existing humanoid resource names, with the move’s authoritative phase times in world µs. */
 export type FormPress = { hand: 'left' | 'right'; start: number; contact: number; end: number; cut?: number; current?: boolean };
-export type Gesture = { press?: FormPress; start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
+export type Gesture = { press?: FormPress; point?: { hand: 'left' | 'right'; ends: readonly number[]; contact?: string }; start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
 export function gestureOf(move: string): string | null {
@@ -39,7 +39,7 @@ export function gestureOf(move: string): string | null {
 }
 
 /** A move record (start and phase ends, µs) as a gesture, or null when its move is not one. */
-export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null; run?: string; limbs?: readonly string[] }, toward?: [number, number] | null): Gesture | null {
+export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null; run?: string; limbs?: readonly string[]; contact?: string }, toward?: [number, number] | null): Gesture | null {
   const activity = gestureOf(move.name), last = move.ends[move.ends.length - 1];
   const hold = HOLDS.has(move.name.slice(move.name.indexOf(':') + 1).split('@')[0]);
   if (!(activity || hold) || !(last > move.start)) return null;
@@ -47,7 +47,19 @@ export function gestureFrom(move: { name: string; start: number; ends: readonly 
   const hands = (move.limbs ?? []).filter(x => x === 'souls:hand-left' || x === 'souls:hand-right');
   const press: FormPress | undefined = activity === 'operate' && hands.length === 1 && move.ends.length >= 2 && move.ends[0] > move.start && last > move.ends[0]
     ? { hand: hands[0] === 'souls:hand-left' ? 'left' : 'right', start: move.start, contact: move.ends[0], end: last } : undefined;
-  return { ...(press ? { press } : {}), start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}), ...(move.run ? { run: move.run } : {}) };
+  const point: Gesture['point'] = activity === 'point' && hands.length === 1 && move.target && toward?.every(Number.isFinite)
+    ? { hand: hands[0] === 'souls:hand-left' ? 'left' : 'right', ends: [...move.ends], ...(move.contact ? { contact: move.contact } : {}) } : undefined;
+  return { ...(press ? { press } : {}), ...(point ? { point } : {}), start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward: [...toward] as [number, number] } : {}), ...(hold ? { hold } : {}), ...(move.run ? { run: move.run } : {}) };
+}
+
+/** Cosmetic named-target bearing only, metres/world µs. Retain the existing half-second point return. */
+export function pointAimAt(gestures: readonly Gesture[] | undefined, t: number) {
+  let g: Gesture | undefined;
+  for (const candidate of gestures ?? []) if (candidate.start <= t) g = candidate;
+  const point = g?.point;
+  if (!g || !point || !g.target || !g.toward || t > g.end + 500_000) return null;
+  return { target: g.target, at: g.toward.map(n => n / 1000) as [number, number], hand: point.hand, start: g.start,
+    ends: [...point.ends], ...(g.end < point.ends.at(-1)! ? { cut: g.end } : {}), ...(point.contact ? { contact: point.contact } : {}), ...(g.run ? { run: g.run } : {}) };
 }
 /** How long a reading is drawn at most when its run's end never reaches the page, µs. */
 export const READ_LONGEST = 600_000_000;
