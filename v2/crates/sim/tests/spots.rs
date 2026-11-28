@@ -1156,6 +1156,8 @@ fn a_point_past_a_squares_edge_is_granted_itself_not_a_place_short_of_it() {
 /// memory is held under 1 MB (the brief's line for cutting the rings), the time is measured in release on the farm:
 /// 28 Nov, 191 places (16,808 bytes), the first tick 1.21 ms against 0.39 ms to a clear point (about 0.8 ms more).
 #[test]
+// A measurement: the wall clock times the test, never the engine (as `tests/sizes.rs`).
+#[allow(clippy::disallowed_methods)]
 fn a3_a_doorway_targets_fine_places_cost_measured() {
     use std::time::Instant;
     let hz = testworld::HALL_DEPTH / 2 + testworld::WALL / 2;

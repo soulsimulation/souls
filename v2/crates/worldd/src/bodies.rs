@@ -2156,7 +2156,18 @@ impl Bodies {
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
                 {
-                    let crowd = self.short.contains(&id);
+                    // Held off its point by a crowd (A2-4): ended short as near as the crowd allows, or at the place
+                    // it was granted off a point that is itself clear ground, its nearer places held by others (#5279
+                    // follow-up: never `walk.goal-moved`, nor `walk.stopped-short`).
+                    let pushed = self.runner.granted.get(&body).is_some_and(|g| {
+                        self.gap_to(body, t, *g).is_some_and(|mm| mm <= 50)
+                            && self
+                                .town
+                                .spots
+                                .table(&sim::spots::Target::new(t, p))
+                                .is_some_and(|tb| tb.clear)
+                    });
+                    let crowd = self.short.contains(&id) || pushed;
                     let n = self.walked_again.get(&id).copied().unwrap_or(0);
                     // Sent again half a second after it stopped, so bodies in its way have time to move off.
                     let since = self
@@ -2178,6 +2189,9 @@ impl Bodies {
                             self.short.remove(&id);
                             continue;
                         }
+                    }
+                    if crowd {
+                        self.short.insert(id);
                     }
                     self.stopped_short.insert(id, (mm, crowd));
                 }
