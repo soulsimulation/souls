@@ -581,10 +581,9 @@ async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_othe
         let got = s.answer().await;
         let gap = off(bodies[k], goals[k]);
         println!("crossing walker {k}: {got:?}, {} mm off its goal", gap / 1000);
-        match got {
-            Ok(_) => assert!(gap <= 400_000, "done within 0.4 m: {gap} µm"),
-            Err(name) => assert_eq!(name, "walk.stopped-short", "a walk ends done or stopped short by name"),
-        }
+        // #5254: each arrives within 0.4 m, the others' bodies having moved off (its walk sent again meanwhile).
+        assert!(got.is_ok(), "crossing walker {k} arrives: {got:?}");
+        assert!(gap <= 400_000, "done within 0.4 m: {gap} µm");
     }
     drop(served);
 }

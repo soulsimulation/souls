@@ -69,6 +69,11 @@ pub const RINGS: i64 = 10;
 /// doorway's between its ends: and half its widest end), µm: the engine never stops a walker in a doorway or on a
 /// stair (`walk::town::in_passage`).
 pub const CLEAR: i64 = 700_000;
+/// The fine rings round a target a body cannot stand at (#5254): their step and their reach, µm (within a walker's
+/// 0.4 m goal tolerance), and the points on each.
+pub const NEAR_PITCH: i64 = 100_000;
+pub const NEAR_MOST: i64 = 400_000;
+pub const NEAR_EACH: i64 = 12;
 /// How far round a crowded target its overflow points lie, µm (A2-5): a walker is refused `spot-none-free` only when
 /// no free standing point is within this.
 pub const OVERFLOW: i64 = 15_000_000;
@@ -378,10 +383,37 @@ impl Table {
                 });
             }
         }
-        Table {
-            clear: g.stand(target.node, t).is_some() && !g.passage(target.node, t),
-            places,
+        let clear = g.stand(target.node, t).is_some() && !g.passage(target.node, t);
+        // #5254: a target a body cannot stand at (in a doorway's or a stair's clearance, or off its ground) is
+        // stood at only as far off as needed: on fine rings [`NEAR_PITCH`] apart out to [`NEAR_MOST`], within a
+        // walker's own goal tolerance, before the first full ring; numbered after the target on its ring 0.
+        if !clear {
+            let mut k = 1u16;
+            for r in (1..=NEAR_MOST / NEAR_PITCH).map(|i| i * NEAR_PITCH) {
+                for j in 0..NEAR_EACH {
+                    let off = Quat::from_yaw_mdeg(j * 360_000 / NEAR_EACH)
+                        .and_then(|q| q.rotate(Vec3::new(0, 0, r)))
+                        .unwrap_or(Vec3::ZERO);
+                    let p = Vec3::new(t.x + off.x, t.y, t.z + off.z);
+                    k += 1;
+                    let Some((at, world)) = g.stand(target.node, p) else {
+                        continue;
+                    };
+                    if g.passage(target.node, at) {
+                        continue;
+                    }
+                    places.push(Place {
+                        ring: 0,
+                        k,
+                        at,
+                        holder: None,
+                        world,
+                        joined: None,
+                    });
+                }
+            }
         }
+        Table { clear, places }
     }
 
     /// The grounds a crowded target `t` overflows onto ([`Ground::overflow_at`]), each with its points; `own` is the
