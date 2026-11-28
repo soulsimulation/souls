@@ -736,6 +736,66 @@ fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id
     let _ = std::fs::remove_dir_all(d);
 }
 
+/// A served world's public part costs its stream one wait on the disk (#2803 follow-up: at 1,000 agents the stream fell
+/// minutes behind the world, most of its time in four syncs a part one after another): the part's recovery objects,
+/// the chain's head, the part and text files and the pointer are written, synced together, then named. Its thread's
+/// count (`stream_io` in `health.json`): one wait a part, and at most one sync for each of those eight files. And
+/// `stream_behind_ms` says how far the stream is behind the world.
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn a_served_public_part_is_synced_in_one_wait() {
+    let d = scratch("part-syncs");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let w = serve(&dir, &socket);
+    w.line("worldd: started at tick");
+    let mut s = connect(&socket);
+    walk(&mut s, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(
+        answer(&mut s),
+        (1, String::new()),
+        "the walk ends in a receipt"
+    );
+    walk(&mut s, body, root.scope(), ground, 2, -40, 30);
+    assert_eq!(answer(&mut s), (1, String::new()), "the walk back");
+    let int = |h: &json::Value, k: &str| match h.get("stream_io").and_then(|io| io.get(k)) {
+        Some(json::Value::Int(n)) => *n,
+        other => panic!("stream_io.{k}: {other:?}"),
+    };
+    let end = Instant::now() + Duration::from_secs(20);
+    let health = loop {
+        let h = json::parse(&std::fs::read_to_string(dir.join("health.json")).unwrap_or_default())
+            .unwrap_or(json::Value::Null);
+        if h.get("stream_io").is_some() && int(&h, "parts") >= 3 {
+            break h;
+        }
+        assert!(
+            Instant::now() < end,
+            "no 3 parts in health.json: {}",
+            h.to_json()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let (parts, syncs, waits) = (
+        int(&health, "parts"),
+        int(&health, "part_syncs"),
+        int(&health, "part_waits"),
+    );
+    println!("{parts} parts, {syncs} files synced, {waits} waits");
+    assert_eq!(waits, parts, "one wait a part");
+    assert!(
+        syncs >= parts && syncs <= 8 * parts,
+        "each of a part's files synced once: {syncs} for {parts} parts"
+    );
+    assert!(
+        matches!(health.get("stream_behind_ms"), Some(json::Value::Int(n)) if *n >= 0),
+        "how far the stream is behind: {}",
+        health.to_json()
+    );
+    w.kill();
+    let _ = std::fs::remove_dir_all(d);
+}
+
 /// #3837 A1, A2, A4: a served world whose log is compacted while it runs restarts from its newest checkpoint and the
 /// log after the cut, with the last logged tick's state hash; and the same log uncompacted, replayed from record 0
 /// with no checkpoint, gives the same state. The bytes before the cut are a hole on the disk.
