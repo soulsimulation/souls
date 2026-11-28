@@ -99,13 +99,40 @@ outermost grips go to the front and the back (the back the one at the carry's ba
 between to the side carriers in join order from the back. It is kept on the carry's node (its field 6) and said to its
 audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: phase, 4: since µs, 5?: until µs, 6:
 [{1: body, 2: point:<grip>, 3: grip [x, y, z], 4: [hand, hand]}, ...]}`, points in µm in the load's own (entry) frame,
-the two hands 0.2 m either side of where the carrier holds along the load's length, from the carry's back toward its
+the two hands 0.1 m either side of where the carrier holds along the load's length, from the carry's back toward its
 front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
 ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and `souls:released` (set down, seated or
-broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it is held (a frame taken standing) is held where each grip lies along its
-carriers' line, at the load's edge and the carry's height. A seating never moves a part out of the reach of a carrier
-who could reach its grip when the seating began (0.7 m on the plan, its standing reach above its feet): refused before
-anyone moves, or its set-in stopped and sent back while it runs, as `part.grip-out-of-reach`.
+broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
+is held (a frame taken standing) is held by its front and its back at its edge on the line they stand on (a rack
+frame's posts, a timber bent's), its lower hand at the carry's height and its upper 0.3 m above: for the 2.4 m rack
+frame `[±609.5, 0, 0]` and `[±609.5, 300, 0]` mm in its own frame, which carried (its foot 1.05 m up) is 1.05 m and
+1.35 m above the ground. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
+or as near as 0.25 m for a load too low to block a walker where it is set down (a rack beam: its hands 0.15 m and
+0.35 m ahead of it). Every carrier must be within reach of its
+own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its
+standing reach above its feet. No carrier is exempt, at any step:
+
+- **Take** (`part:take`, `part:unseat`): refused `part.grip-out-of-reach`, naming the carrier and how far it stands,
+  before anything is written, when any carrier would not reach its hold as the crew will hold the part. A part that
+  stands is held at its edges along its carriers' line, so it is taken from beside its edges, along its wider side
+  (0.35 m beyond each, within arm's reach of both hands: the client's `carry grip <part> front|back`), not from off its
+  faces. A part that lies is measured, and held, by its middle.
+- **Lift** (`carry:lift`): the same check against the same holds, refused `carry-grip-out-of-reach`.
+- **Put** (`part:put`): refused `part.grip-out-of-reach` before anyone moves when any carrier is out of reach where the
+  set-in track starts. A carrier who stepped away walks back to its grip and the crew puts again. On the track each
+  carrier stands or walks beside the part, keeping its place at its grip: the world carries its body along the track's
+  own line at its pace, over ground it can stand on, so it is where its hold is all the way. A set-in that moves the
+  part less than 50 mm on the plan moves nobody. Beyond that a side carrier walks with the part where the straight way
+  beside it is ground it can stand on, else it stands; the front and the back stand while they reach their holds at
+  both ends of the track, else they walk with it. A carrier who can neither stand within reach nor walk beside the part
+  refuses the put by the same name before anyone moves. While the set-in runs, a carrier who moves out of reach stops
+  it by that name; the part goes back, and those who walked beside it walk back beside it.
+- A rack beam goes into a bay from the bay's mouth (about 0.45 m off its slot's line: the frames' columns stand on that
+  line, so nobody can stand on it within reach of an end grip). Its two end carriers stand, 0.57 m from their holds
+  when it is seated; its side carriers walk in beside it, those on the bay's side into the open bay. A side carrier's
+  place is 0.45 m off the load's side, so it still stands on ground when the part is seated beside it.
+- Not checked yet: where the part is before a take. It still goes to its carriers' middle in one change of parent.
+
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
 load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
 (`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.
