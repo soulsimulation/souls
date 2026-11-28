@@ -114,13 +114,21 @@ between to the side carriers in join order from the back. It is kept on the carr
 audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: phase, 4: since µs, 5?: until µs, 6:
 [{1: body, 2: point:<grip>, 3: grip [x, y, z], 4: [hand, hand]}, ...]}`, points in µm in the load's own (entry) frame,
 the two hands 0.1 m either side of where the carrier holds along the load's length, from the carry's back toward its
-front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
-ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and `souls:released` (set down, seated or
-broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
-is held (a frame taken standing) is held by its front and its back at its edge on the line they stand on (a rack
-frame's posts, a timber bent's), its lower hand at the carry's height and its upper 0.3 m above: for the 2.4 m rack
-frame `[±609.5, 0, 0]` and `[±609.5, 300, 0]` mm in its own frame, which carried (its foot 1.05 m up) is 1.05 m and
-1.35 m above the ground. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
+front. The phases are `souls:lift` (a take's track, the part on its way into its carriers' hands), `souls:carry`
+(lifted, or a take once `souls:lifted`), `souls:return` (a refused seating's way back, until it ends), `souls:raise` and
+`souls:lower` (a raise's track), `souls:held` (seated or raised, its crew still holding it: a frame in its bay) and
+`souls:released` (set down, seated or broken off; the last holds kept). A put keeps `souls:carry` on its set-in's track,
+said as a track of its own: `souls:carry-track` `souls:seat` with its start and end, then `souls:seated` with the same
+times at the commit (`souls:set-in` is no longer said for a put). The set-in moves the crew's node a motion sample a tick
+to the pose that seats the part exactly, its turn blended, at 0.4 m/s and at least 0.6 s; an unseat's way out goes at the
+same pace. A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
+is held (a frame taken standing) is lifted 0.15 m, not carried at the 1.05 m of a load held by its middle, and is held by
+its front and its back at its edge on the line they stand on (a rack frame's posts, a timber bent's), its hands 0.9 m
+and 1.2 m up it: for the 2.4 m rack frame `[±609.5, 900, 0]` and `[±609.5, 1200, 0]` mm in its own frame, 1.05 m and
+1.35 m above the ground. Held standing once seated or raised (`souls:held`, two holders for a rack frame:
+`hold_crew` 2), each holder holds its own post from the frame's outer side (away from its bay's other upright, else its
+back), both hands on the post's outward face: `[±571.5, 1050, ±38]` and `[±571.5, 1350, ±38]` mm; the world walks each
+round its post to stand 0.35 m off that face, out of the space between the frames, facing it. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
 or as near as 0.25 m for a load too low to block a walker where it is set down (a rack beam: its hands 0.15 m and
 0.35 m ahead of it). Every carrier must be within reach of its
 own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its

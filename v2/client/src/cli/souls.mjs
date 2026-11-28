@@ -441,6 +441,7 @@ export function requestOf(argv) {
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
     else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}), ...(out !== undefined ? { out } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
+    else if (does === 'turn') Object.assign(req, { crew: a, deg: b });
     // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
     else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}), ...(go !== undefined ? { go: goTime(go) } : {}) });
@@ -744,6 +745,7 @@ export const CARRY_HELP = [
   'carry lift <crew id> <load id>   lift a loose load together',
   'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place, and turns it square into a slot. A carrier who sends its own walk keeps to it (--go sets it off at that UTC moment) and stays where it ends until the front walks again. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
   'carry to <crew id> the loading spot   the load goes into the spot\'s first free bay, square (the answer names it): the front\'s walks the whole crew; then one sends carry set-down',
+  'carry turn <crew id> <degrees>   turn the carried load about its middle (positive: from east toward north); every carrier walks round with it. carry to <crew id> <x,z> <degrees> names its heading there (0 east, 90 north)',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',

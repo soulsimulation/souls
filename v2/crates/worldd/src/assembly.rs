@@ -408,6 +408,10 @@ pub fn admitted_from(
     to: Vec3,
     walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
 ) -> Option<Vec3> {
+    // Moving the whole crew keeps every carrier's reach where the set-in starts: one out of reach there is not helped.
+    if out_of_reach(carriers, from).is_err() {
+        return None;
+    }
     let n = PUT_REACH / ADMIT_STEP;
     let mut spots: Vec<(i128, i64, i64)> = (-n..=n)
         .flat_map(|i| (-n..=n).map(move |k| (i * ADMIT_STEP, k * ADMIT_STEP)))
@@ -1031,6 +1035,7 @@ impl Assembly {
         // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
         // (its rails), which it rests on.
         let rests = s.rests(pk.as_str());
+        let named = joins.is_some();
         let joins = match joins {
             Some(j) => j,
             None if bay && !s.stands(pk.as_str()) => tree
@@ -1048,8 +1053,9 @@ impl Assembly {
         };
         // #5067: a resting part joins only those at its own level: the ones whose slots are highest at or under its
         // own (a joist the two beams it lies on, not the two below them).
-        let joins = match (rests, slot) {
-            (true, Some(k)) => at_level(tree, th, k, joins),
+        // Joins named by the put are its own (`--joins`): never filtered.
+        let joins = match (rests, slot, named) {
+            (true, Some(k), false) => at_level(tree, th, k, joins),
             _ => joins,
         };
         let mut joined = Vec::new();

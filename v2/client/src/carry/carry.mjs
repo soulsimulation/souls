@@ -64,7 +64,7 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n>|top|foot [--from <m>] [--out <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n>|top|foot [--from <m>] [--out <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot> | <degrees>] [--go <hh:mm:ss>] | carry turn <crew id> <degrees> | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
   part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z | part raise <crew id> <part id> | part lower <crew id> [<part id> | x,z]',
 };
 
@@ -241,6 +241,8 @@ export function slotPoint(at, entry, slot) {
 /** How near a free slot's place a lying part's foot (its origin) must be for `part raise` to raise it into the slot,
  *  µm: worldd's own bound for a raise into a slot (`raise.not-at-slot`). */
 export const RAISE_INTO = 150_000;
+/** And how near its turn: the cosine between its base line and the bay's, at least (15 degrees). */
+export const RAISE_INTO_COS = 0.966;
 
 /** The free slot of a bay in the copy that takes `part`'s kind, its place nearest the part's foot within RAISE_INTO:
  *  {bay, n, name}, or null. `ctx.loose()` lists what stands on the open ground, `ctx.seated(bay)` what fills its slots. */
@@ -257,7 +259,10 @@ export function raiseSlot(ctx, part) {
       const s = slotPoint(b, entry, name);
       if (!s || taken.has(s.n)) continue;
       const d = Math.hypot(s.point[0] - at.pos[0], s.point[1] - at.pos[2]);
-      if (d <= RAISE_INTO && (!best || d < best.d)) best = { bay, n: s.n, name, d };
+      // turned as the slot within 15 degrees (worldd's bound too): its own x, its base line, along the bay's
+      const px = turn(at.rot ?? [ONE, 0, 0, 0], [M, 0, 0]), bx = turn(b.rot ?? [ONE, 0, 0, 0], [M, 0, 0]);
+      const cos = (px[0] * bx[0] + px[2] * bx[2]) / ((Math.hypot(px[0], px[2]) * Math.hypot(bx[0], bx[2])) || 1);
+      if (d <= RAISE_INTO && cos >= RAISE_INTO_COS && (!best || d < best.d)) best = { bay, n: s.n, name, d };
     }
   }
   return best && { bay: best.bay, n: best.n, name: best.name };
@@ -267,6 +272,12 @@ export function raiseSlot(ctx, part) {
 function lowered(ctx, crew) {
   const under = ctx.parentOf?.(crew);
   return (under && under !== ctx.ground ? under : null) ?? ctx.heldBy?.(crew) ?? null;
+}
+
+/** `v` on the plan ([x, z]) turned `deg` degrees about +y: positive from east (+x) toward north (−z). */
+export function turnBy(v, deg) {
+  const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  return [v[0] * c + v[1] * s, -v[0] * s + v[1] * c];
 }
 
 /** A point word, `x,z` in metres, as µm; null when it is not one. */
@@ -424,8 +435,24 @@ export function carryIntents(req, ctx) {
       if (!spot) return no('carry-grip-unknown', `${req.thing} has ${inner} grip${inner === 1 ? '' : 's'} between its ends, so no ${req.end.replace('side', 'side ')}: a crew of ${2 + inner} at most carries it`);
       return [walk(ns, ground, spot)];
     }
+    case 'turn': {
+      // #5067: `carry turn <crew> <degrees>`: the load turned about its middle, positive from east toward north (the
+      // world's yaw), its carriers walked round with it by the world (`carry:turn`, its heading as parameter 3).
+      const deg = Number(req.deg), e = ctx.crewEnds?.(req.crew);
+      if (!id(req.crew) || !Number.isFinite(deg)) return usage;
+      if (!e) return no('carry-crew-unseen', `${req.crew} holds nothing the copy places: lift or take first`);
+      const h = turnBy([e.at[0][0] - e.at[1][0], e.at[0][1] - e.at[1][1]], deg);
+      return [{ verb: 'carry:turn', target: req.crew, params: { 3: [Math.round(h[0]), 0, Math.round(h[1])] } }];
+    }
     case 'to': {
       if (!id(req.crew) || req.where === undefined) return usage;
+      // `carry to <crew> x,z <degrees>`: the load's heading there (the world's yaw, from its back toward its front),
+      // named on the front's walk (parameter 3), the crew turned as it goes, a quarter turn at most a walk.
+      let turnTo = null;
+      if (req.slot !== undefined && pointOf(req.where) && /^-?\d+(\.\d+)?$/.test(String(req.slot))) {
+        turnTo = Number(req.slot);
+        req = { ...req, slot: undefined };
+      }
       if (req.slot === undefined && id(req.where) && isSpot(kinds[kindOf(req.where)])) {
         // A loading spot (spot.mjs): its first free bay that takes the crew's load, square in it.
         const s = toSpot(req, ctx, req.where);
@@ -475,6 +502,13 @@ export function carryIntents(req, ctx) {
         const end = ends.ids.includes(me);
         const along = end ? Math.hypot(...off) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
         return [heading(walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across]), u)];
+      }
+      if (turnTo !== null) {
+        const r = turnTo * Math.PI / 180, h = [Math.cos(r), -Math.sin(r)], e = ctx.crewEnds?.(req.crew);
+        // This Soul's place in the crew turns with it: its offset from the load's middle, turned from now to there.
+        const now = e ? Math.atan2(-(e.at[0][1] - e.at[1][1]), e.at[0][0] - e.at[1][0]) : r;
+        const o = turnBy(off, (r - now) * 180 / Math.PI);
+        return [heading(walk(ns, ground, [dest[0] + o[0], dest[1] + o[1]]), h)];
       }
       return [walk(ns, ground, [dest[0] + off[0], dest[1] + off[1]])];
     }
