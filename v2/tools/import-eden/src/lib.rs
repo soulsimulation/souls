@@ -1200,7 +1200,7 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             .collect::<Vec<_>>()
             .join(", ");
         let mut children = vec!["thing".to_owned()];
-        if has_floors.contains(r) || with_ways.contains_key(kind_name(s(k, "name")?).as_str()) {
+        if has_floors.contains(r) || with_ways.contains_key(plain(s(k, "name")?)) {
             children.push(FLOOR.to_owned());
         }
         children.extend(own.map(|(_, c)| c.clone()).unwrap_or_default());

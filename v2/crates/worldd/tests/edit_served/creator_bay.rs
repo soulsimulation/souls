@@ -417,11 +417,6 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let part = |k: usize| got.names[&(k as u64 + 1)];
     let (frame, sheet, flight) = (part(0), part(11), part(13));
     let deck = floors_of(&site.w, sheet);
-    println!(
-        "the sheet's floors: {deck:?}; the frame's: {:?}; the flight's: {:?}",
-        floors_of(&site.w, frame),
-        floors_of(&site.w, flight)
-    );
     let deck = deck
         .iter()
         .find(|f| f.1 == 1)
@@ -482,5 +477,40 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
         (on, p.y),
         (perch, 1_800_000),
         "on the frame's 1.8 m standing place"
+    );
+}
+
+/// Lane C: nothing is placed onto a Soul. A stair flight placed into the bay's stair slot while a Soul stands in its
+/// tread lane (between its stringers, where the flight's own walk boxes leave the way open) is refused
+/// `edit.would-bury`, naming the Soul, and nothing is placed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_flight_placed_where_a_soul_stands_in_its_tread_lane_is_refused() {
+    let mut site = Site::serve_souls("creator-bay-bury", 1).await;
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let g = site.w.ground;
+    let mut hand = Hand::new(&site.socket, &site.w, site.w.souls[0]);
+    // The stair slot's point (`deck_bay.json`: x -2164, z -717 mm from the bay's middle), the middle of its lane.
+    hand.walk_to(g, v3((x - 2_164) * 1000, 0, (z - 717) * 1000));
+    let e = socket_end(&mut hand.s);
+    assert_eq!(e.kind, 1, "the Soul to the stair slot: {e:?}");
+    let ops = vec![site.place(1, "mars:stair_flight", "stair")];
+    let got = site.edit(1, ops).await;
+    refused_as(
+        &got,
+        "edit.would-bury",
+        "a flight placed on a standing Soul",
+    );
+    let body = body_of(&site.w, site.w.souls[0]);
+    assert!(
+        got.detail.contains(&replica::world_model::show(body)),
+        "names the Soul: {got:?}"
+    );
+    let (copy, _) = served_copy(&site.w);
+    let t = copy.tree();
+    assert!(
+        t.children(t.handle(site.bay).unwrap())
+            .unwrap_or(&[])
+            .is_empty(),
+        "nothing placed"
     );
 }

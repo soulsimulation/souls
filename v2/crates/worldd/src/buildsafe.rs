@@ -291,6 +291,108 @@ pub fn with_buildings(
     Ok(parts)
 }
 
+/// Nothing is placed onto a Soul (racks, lane C): a creator's place of a kind whose entry gives `geometry.bounds_mm`
+/// is refused `edit.would-bury`, naming the Soul, while any Soul's body stands inside the placed thing's bounds (its
+/// width and depth about its origin, its height up from it), its walkable lane included, even where the ground would
+/// let it stand there afterwards. `planned` is the edit as the check planned it, `souls` the bodies G2 judges. The
+/// walk boxes a placed thing gets are as before ([`stand_as_kinds`]); this judges the bounds alone.
+pub fn bounds_clear(
+    copy: &Replica,
+    planned: &sim::edit::Planned,
+    entries: &Json,
+    souls: &[Who],
+    names: replica::ids::Minter,
+) -> Result<(), replica::edit::Refused> {
+    use replica::edit::{Op, Unsafe};
+    use sim::ground::scene::{slot_point, xform_to};
+    let bounded: Vec<(usize, u64, [i64; 3])> = planned
+        .checked
+        .edit
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| {
+            let Op::Place { name, kind, fields, .. } = op else {
+                return None;
+            };
+            let b = entries
+                .get(import_eden::entry_name(kind.as_str(), fields))?
+                .get("geometry")?
+                .get("bounds_mm")?
+                .arr()?;
+            let mm = |k: usize| match b.get(k) {
+                Some(Json::Int(n)) => i64::try_from(*n).ok(),
+                _ => None,
+            };
+            Some((i, *name, [mm(0)?, mm(1)?, mm(2)?]))
+        })
+        .collect();
+    if bounded.is_empty() || souls.is_empty() {
+        return Ok(());
+    }
+    let ground = open_ground(copy);
+    let mut preview = copy.frozen();
+    let mut mint = names;
+    let Ok(done) = sim::edit::commit(&mut preview, &mut mint, planned, &[], 0) else {
+        return Ok(());
+    };
+    let tree = preview.tree();
+    let Some(gh) = ground.and_then(|g| tree.handle(g)) else {
+        return Ok(());
+    };
+    // Each body's feet on the open ground's frame.
+    let feet: Vec<(&Who, Vec3)> = souls
+        .iter()
+        .filter_map(|w| {
+            let h = tree.handle(w.pose.frame.node)?;
+            let base = match w.pose.frame.slot {
+                Some(n) => slot_point(tree, h, n)?,
+                None => Vec3::ZERO,
+            };
+            let p = base.plus(w.pose.position).ok()?;
+            Some((w, xform_to(tree, h, gh).ok()?.point(p).ok()?))
+        })
+        .collect();
+    for (i, name, [w, h, d]) in bounded {
+        let Some(th) = done.names.get(&name).and_then(|id| tree.handle(*id)) else {
+            continue;
+        };
+        let Ok(x) = xform_to(tree, th, gh) else {
+            continue;
+        };
+        let [qw, qx, qy, qz] = x.rot.parts();
+        let Ok(back) = replica::pose::Quat::new(qw, -qx, -qy, -qz)
+            .or_else(|_| replica::pose::Quat::new(-qw, qx, qy, qz))
+        else {
+            continue;
+        };
+        for (who, at) in &feet {
+            let Ok(rel) = at.minus(x.pos) else {
+                continue;
+            };
+            let Ok(p) = back.rotate(rel) else { continue };
+            let inside = p.x.abs() * 2 <= w * 1000
+                && p.z.abs() * 2 <= d * 1000
+                && (0..=h * 1000).contains(&p.y);
+            if inside {
+                let u = Unsafe {
+                    name: replica::edit::BURIES,
+                    soul: who.soul,
+                    node: who.pose.frame.node,
+                    at: who.pose.position,
+                    thing: None,
+                };
+                return Err(replica::edit::Refused {
+                    op: Some(i),
+                    name: replica::edit::BURIES,
+                    detail: u.text(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The most new ids each building kind's place can mint with its parts, by entry name
 /// (`import_eden::placed::ids_most`): what the world reserves for each such place when it takes an edit in. A kind
 /// that declares a link (a part that joins: a beam, a joist, a sheet) may be placed into a bay's slot, where the
