@@ -185,7 +185,10 @@ test('canonical held quantity, owner and arrival controls follow production palm
       heldEntries:[observed(0),observed(100000,2),observed(250000),observed(300000,1),observed(450000)],
       look:{family:'humanoid',model:'casual',params:{},nativeBody:'native-body',nativeKindHash:nativeHands.kindHash,nativeResources:nativeHands.resources}};
     const composedTake=chunkOf([composedBody],0,{rulesVersion:'held-seat-composition',datetime:null},40).take as unknown as Take;
-    const createComposed=()=>{const p=new TakePeople(composedTake,{heldPicture:(entry,mode)=>layer.heldPicture(entry,mode)});p.setTemplates([template]);p.setBodyTemplates(new Map([['casual',template]]));return p;};
+    // This outgoing control omits only the future native seat exit. Its ongoing release,
+    // rig, held observations and display clocks are identical before that event.
+    const outgoingTake=chunkOf([{...composedBody,samples:composedBody.samples.slice(0,-1)}],0,{rulesVersion:'held-seat-composition',datetime:null},40).take as unknown as Take;
+    const createComposed=(take=composedTake)=>{const p=new TakePeople(take,{heldPicture:(entry,mode)=>layer.heldPicture(entry,mode)});p.setTemplates([template]);p.setBodyTemplates(new Map([['casual',template]]));return p;};
     const composed=createComposed();try{
       const emptyTake=chunkOf([{...composedBody,held:[],heldEntries:[observed(0)]}],0,{rulesVersion:'empty-seat-control',datetime:null},40).take as unknown as Take;
       const fixedBoundaryGap=(take:Take)=>{
@@ -205,7 +208,22 @@ test('canonical held quantity, owner and arrival controls follow production palm
           const before=boundary-epsilon,after=boundary+epsilon;
           composed.show(before,9000+before);const a=skin(composed.bodyObject(sample.id)!);
           composed.show(after,9000+after);const b=skin(composed.bodyObject(sample.id)!);
-          close(a,b,'held/seat composed boundary '+boundary+' epsilon '+epsilon,2e-5);
+          if(boundary===.7&&epsilon===1e-5){
+            // Over 20 microseconds the already-running release legitimately travels
+            // more than 20 micrometres. Bound the seat event's ADDED displacement,
+            // rather than accidentally imposing a speed cap on that ordinary motion.
+            // This is a finite all-submitted-coordinate comparison, not a limit estimate.
+            const control=createComposed(outgoingTake);
+            try{
+              control.show(before,9000+before);const outgoingBefore=skin(control.bodyObject(sample.id)!);
+              control.show(after,9000+after);const outgoingAfter=skin(control.bodyObject(sample.id)!);
+              assert.deepEqual(a,outgoingBefore,'outgoing control changes nothing before native seat exit');
+              const actualDelta=b.map((p,i)=>p-a[i]),outgoingDelta=outgoingAfter.map((p,i)=>p-outgoingBefore[i]);
+              close(actualDelta,outgoingDelta,'seat exit adds no held/seat displacement discontinuity',2e-5);
+              let rawMax=0,addedMax=0;for(let i=0;i<a.length;i++){rawMax=Math.max(rawMax,Math.abs(actualDelta[i]));addedMax=Math.max(addedMax,Math.abs(actualDelta[i]-outgoingDelta[i]));}
+              console.log('held/seat native exit displacement',JSON.stringify({boundary,interval:2*epsilon,rawMax,addedMax}));
+            }finally{control.dispose();}
+          }else close(a,b,'held/seat composed boundary '+boundary+' epsilon '+epsilon,2e-5);
           const coldBefore=createComposed(),coldAfter=createComposed();
           try{
             coldBefore.show(before,9000+before);coldAfter.show(after,9000+after);
@@ -224,6 +242,17 @@ test('canonical held quantity, owner and arrival controls follow production palm
         }finally{cold.dispose();}
       }
     }finally{composed.dispose();}
+    // Known initial ownership and genuinely absent pre-observation history both survive seat origins.
+    for(const initial of [true,false]){
+      const body={...composedBody,held:[{at:initial?0:100000,prop:'plate'}],heldEntries:[observed(initial?0:100000,2)]};
+      const take=chunkOf([body],0,{rulesVersion:'held-seat-history',datetime:null},40).take as unknown as Take,unchanged=JSON.stringify(take);
+      const make=()=>{const p=new TakePeople(take,{heldPicture:(entry,mode)=>layer.heldPicture(entry,mode)});p.setTemplates([template]);p.setBodyTemplates(new Map([['casual',template]]));return p;};
+      const warm=make();try{
+        for(const boundary of [.2,.7]){warm.show(boundary-1e-7,9000+boundary-1e-7);const before=skin(warm.bodyObject(sample.id)!);warm.show(boundary+1e-7,9000+boundary+1e-7);close(skin(warm.bodyObject(sample.id)!),before,'initial/missing held history seat boundary '+initial+' '+boundary,2e-5);}
+        for(const t of [.75,.22,.05,.3]){warm.show(t,9000);const cold=make();try{cold.show(t,9000);close(skin(warm.bodyObject(sample.id)!),skin(cold.bodyObject(sample.id)!),'initial/missing held history cold/backward '+initial+' '+t);}finally{cold.dispose();}}
+        assert.equal(JSON.stringify(take),unchanged,'known/unknown initial history remains immutable');
+      }finally{warm.dispose();}
+    }
     // More contributing boundaries than the bounded pose cache: no recursive/truncated chain.
     const rapid=[observed(0),...Array.from({length:45},(_,i)=>observed(50000*(i+1),i%3===2?undefined:2,i%4<2?7:4))];
     const rapidBody={entity:sample.id,soul:'soul',name:'Person',heading:sample.yaw,samples:[{at:0,p:[2000,0,3000] as [number,number,number]}],held:[],heldEntries:rapid,look:{family:'humanoid',model:'casual',params:{},nativeBody:'native-body',nativeKindHash:nativeHands.kindHash,nativeResources:nativeHands.resources}};
@@ -235,5 +264,41 @@ test('canonical held quantity, owner and arrival controls follow production palm
       assert.equal(hv.views.get(sample.id)!.heldArmCache.size,32,'old prefixes evicted without changing the pose');
       for(const t of [.1,.2,2.2,2.25]){warmRapid.show(t-1e-7,9000);const before=skin(warmRapid.bodyObject(sample.id)!);warmRapid.show(t,9000);close(skin(warmRapid.bodyObject(sample.id)!),before,'rapid hand/release boundary '+t,2e-5);}
     }finally{warmRapid.dispose();}
+    // A settled pickup used to retain its exact onset quaternion until the 0.4s fade expired:
+    // slerpQuaternions copied the origin over its aliased target. Quantity updates are deliberately later.
+    const womanWire=CHARACTER_WIRE.woman,womanMesh=await load(womanWire.mesh);womanMesh.animations=(await load(womanWire.clips)).animations;
+    const womanTemplate=templateFromGltf('woman',womanMesh);
+    const skinDistance=(a:number[],b:number[])=>{assert.equal(a.length,b.length);let max=0;for(let i=0;i<a.length;i+=3)max=Math.max(max,Math.hypot(a[i]-b[i],a[i+1]-b[i+1],a[i+2]-b[i+2]));return max;};
+    for(const [model,rigTemplate]of [['woman',womanTemplate],['casual',template]] as const)for(const seated of [false,true])for(const hand of ['left','right'] as const){
+      const offset=hand==='left'?[0,0,0] as const:[5000,1000,-3000] as const;
+      const rotation=hand==='left'?[Q,0,0,0] as const:[Math.round(Q*Math.cos(.15)),0,Math.round(Q*Math.sin(.15)),0] as const;
+      const observation=(at:number,soup?:number)=>({observedAt:at,entries:soup===undefined?[]:[{id:'same-bowl',kind:'eden:soup_bowl@aa',parent:'native-body',slot:hand==='left'?7:4,pos:offset,rot:rotation,fields:{28:soup}}]});
+      const changes=[observation(0),observation(100000,2),observation(650000,1),observation(800000,0),observation(950000),observation(1000000,2),observation(1100000),observation(1150000,1),observation(1700000)];
+      const body={entity:sample.id,soul:'soul',name:'Person',heading:.7,
+        samples:[{at:0,p:[2000,0,3000] as [number,number,number],...(seated?{seat:{height:465,lie:false,heading:.7}}:{})}],
+        heldEntries:changes,held:[{at:100000,prop:'plate'},{at:950000,prop:null},{at:1000000,prop:'plate'},{at:1100000,prop:null},{at:1150000,prop:'plate'},{at:1700000,prop:null}],
+        look:{family:'humanoid',model,params:{},nativeBody:'native-body',nativeKindHash:nativeHands.kindHash,nativeResources:nativeHands.resources}};
+      const take=chunkOf([body],0,{rulesVersion:'held-origin-alias',datetime:null},60).take as unknown as Take,unchanged=JSON.stringify(take);
+      const make=(source=take)=>{const p=new TakePeople(source,{heldPicture:(entry,mode)=>layer.heldPicture(entry,mode)});p.setTemplates([rigTemplate]);p.setBodyTemplates(new Map([[model,rigTemplate]]));return p;};
+      const warm=make(),plain=make(chunkOf([{...body,held:[],heldEntries:[observation(0)]}],0,{rulesVersion:'held-origin-alias',datetime:null},60).take as unknown as Take);
+      try{
+        for(const boundary of [.1,.5,.65,.8,.95,1,1.1,1.15,1.55,1.7]){
+          const before=boundary-1e-7,after=boundary+1e-7;warm.show(before,9000+before);const a=skin(warm.bodyObject(sample.id)!);warm.show(after,9000+after);
+          const gap=skinDistance(a,skin(warm.bodyObject(sample.id)!));assert(gap<2e-5,model+' '+seated+' '+hand+' full indexed skin20um at '+boundary+' gap='+gap);
+        }
+        for(const t of [1.6,.7,.3,1.05,1.125,1.2,.4999999,.5000001,.3]){
+          warm.show(t,9000);const cold=make();try{cold.show(t,9000);assert(skinDistance(skin(warm.bodyObject(sample.id)!),skin(cold.bodyObject(sample.id)!))<1e-6,model+' '+hand+' cold/backward '+t);}finally{cold.dispose();}
+        }
+        for(const t of [.7,.85,1.6]){
+          warm.show(t,9000+t);plain.show(t,9000+t);const h=warm.bodyObject(sample.id)!,base=plain.bodyObject(sample.id)!,actual=bones(h),reference=bones(base),selected=new Set<string>();h.getObjectByName(hand==='left'?'UpperArmL':'UpperArmR')!.traverse(o=>selected.add(o.name));selected.add(hand==='left'?'WristL':'WristR');
+          for(const[name,matrix]of Object.entries(actual))if(!selected.has(name))assert.deepEqual(matrix,reference[name],model+' '+hand+' '+name+' root/feet/opposite owner');
+          const picture=((warm as unknown as {humans:{heldPictures:Map<string,Map<string,{picture:{object:THREE.Object3D;grip:readonly [number,number,number]}}> >}}).humans.heldPictures.get(sample.id)!.get('same-bowl')!.picture),palm=new THREE.Vector3();
+          (warm as unknown as {humans:HumanViews}).humans.palmOf(sample.id,hand,palm);const bodyQ=h.getWorldQuaternion(new THREE.Quaternion());
+          assert(picture.object.localToWorld(new THREE.Vector3(...picture.grip)).distanceTo(palm.add(new THREE.Vector3(...offset).multiplyScalar(1e-6).applyQuaternion(bodyQ)))<2e-5,'native grip/local translation unchanged');
+          const expected=bodyQ.multiply(new THREE.Quaternion(rotation[1],rotation[2],rotation[3],rotation[0]).normalize());assert(picture.object.getWorldQuaternion(new THREE.Quaternion()).normalize().angleTo(expected.normalize())<1e-7,'native orientation unchanged');
+        }
+        assert.equal(JSON.stringify(take),unchanged,'immutable historical take remains byte-identical');
+      }finally{warm.dispose();plain.dispose();}
+    }
   }finally{views.clear();reference.clear();setHeldKinds(null);layer.dispose();setHumanGround(()=>0);}
 });
