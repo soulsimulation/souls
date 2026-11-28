@@ -38,11 +38,10 @@ fn move_ended(dir: &Path, body: Id) -> BTreeMap<u64, Value> {
         let found = effects(dir)
             .iter()
             .flat_map(|e| e.events.iter().flatten())
-            .filter(|ev| {
+            .rfind(|ev| {
                 ev.name.as_str() == "souls:move-ended"
                     && ev.fields.get(&1) == Some(&body.to_value())
             })
-            .next_back()
             .map(|ev| ev.fields.clone());
         if let Some(f) = found {
             return f;
