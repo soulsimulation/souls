@@ -366,7 +366,9 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
     await Promise.all(T.frames.map(async ([name, lift, foot, place], k) => {
       const frame = frames[k];
       await gripEnds(state, frame.id, lift, foot);
-      if (k) await left;
+      // attempt 16: the second pair, at its ends before the first left, was out of reach of its grips at the take; it
+      // comes to its ends again once the first frame has gone
+      if (k) { await left; await gripEnds(state, frame.id, lift, foot); }
       const crew = crews[k] = await crewOf(state, lift, foot);
       if (!k) await watchBeam({ state, page, check, beam: frame, manifest, root, carriers: [lift, foot] });
       await retried(state, lift, 'part', 'take', crew, frame.id); if (!k) setTimeout(leave, 6000);
