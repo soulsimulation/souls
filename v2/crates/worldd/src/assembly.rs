@@ -1216,7 +1216,7 @@ impl Assembly {
             .map(|(a, _)| *a)
             .collect();
         for activity in ended {
-            let Some(mut s) = self.setting.remove(&activity) else {
+            let Some(s) = self.setting.remove(&activity) else {
                 continue;
             };
             // The node's last sample at its track's end, the part exactly where it is seated, whatever its seating's
