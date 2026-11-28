@@ -1111,21 +1111,27 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     println!("the body on {} at {at:?}", show(on));
     assert_eq!(on, perch, "the body stands on the frame's standing place");
     assert_eq!(at.y, 1_800_000, "at the beam level");
-    // The climb is a track the controller follows a sample a tick; a body on a track writes no body row (the page
-    // lane's gap, #5256), so the rows show it last at the ladder's foot and next on the place. No jump: the time
-    // between is at least the rise at the walk's speed (1.4 m/s), in 50 ms ticks, counted from the later of its last
-    // row on the ground and the walk being sent (a body standing still writes no row either).
+    // The climb is a track the controller follows a sample a tick, and the body writes its row on the ladder every
+    // tick it moves (FOR-FABLE 8), so its rows rise from the ground to the place, none a jump: the time from its last
+    // row on the ground (or the walk being sent) to its first on the place is at least the rise at the walk's speed
+    // (1.4 m/s), in 50 ms ticks, and no two rows on the way are more than a tick's walk apart in height.
     let first = rows[before..]
         .iter()
         .position(|r| r.1 == perch)
         .map(|i| before + i)
         .expect("a row on the standing place");
-    let (t0, n0, foot) = rows[first - 1];
+    let ground_rows = rows[before..first]
+        .iter()
+        .rposition(|r| r.1 == g && r.2.y == 0)
+        .map(|i| before + i)
+        .expect("a row on the ground before the climb");
+    let (t0, n0, foot) = rows[ground_rows];
     let t0 = t0.max(sent);
     let (t1, ..) = rows[first];
     println!(
-        "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}",
-        show(n0)
+        "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}, {} rows on the ladder",
+        show(n0),
+        first - ground_rows - 1
     );
     assert_eq!((n0, foot.y), (g, 0), "it leaves from the ground");
     assert!(
@@ -1133,6 +1139,14 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
         "no jump: {} ticks for a 1.8 m rise",
         t1 - t0
     );
+    let up = &rows[ground_rows..=first];
+    assert!(up.len() > 10, "rows on the ladder: {}", up.len() - 2);
+    for w in up[..up.len() - 1].windows(2) {
+        assert!(
+            (w[1].2.y - w[0].2.y).abs() <= 70_000,
+            "no jump between rows on the ladder: {w:?}"
+        );
+    }
 
     // A second step, off the place's outer edge (0.9 m from the face), is refused.
     let off = BTreeMap::from([(
@@ -1251,7 +1265,15 @@ fn deck_bay_a_soul_walking_up_the_stair_writes_its_place_every_tick_on_the_fligh
     }
     // On the flight: its rows on the link, each with the tick, its place, the link and how far along it.
     let mut on: Vec<(u64, Vec3, Id, u32)> = Vec::new();
-    for p in logged(&k.w) {
+    // Every part, those with no effect too (a tick where only the climber moved writes rows alone).
+    for r in sim::log::recover(&std::fs::read(k.w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+    {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let p = replica::effects::Part::read(&r).unwrap();
         let Some(Value::Uint(t)) = p.rest.get(&answers::TICK) else {
             continue;
         };

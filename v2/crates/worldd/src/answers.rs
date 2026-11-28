@@ -8174,7 +8174,11 @@ mod read_back_tests {
         ];
         assert_eq!(bodies::read_link(&rows[1]), Some((link, 250_000)));
         let v = Value::Map(BTreeMap::from([
-            (1, Value::Bytes(vec![0; 32])),
+            (1, {
+                let mut h = vec![replica::ids::SHA2_256, 32];
+                h.extend([0; 32]);
+                Value::Bytes(h)
+            }),
             (2, Value::Array(Vec::new())),
             (BODIES, Value::Array(rows)),
             (TICK, Value::Uint(9)),
