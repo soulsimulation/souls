@@ -175,3 +175,47 @@ test('an empty local chain cannot replay the latest imported source, and the val
  review.evidenceHashes=[reports.at(-1).hash,state.attempts.at(-1).reportHash];review.at=new Date(Date.now()+1).toISOString();review.hypothesis=report.hypothesis;pin(5);
  await assert.rejects(runner(options),/third-hypothesis/);assert.equal(boots,1);
 });
+
+test('truthful five-try imports need exact finite sixth authority and preserve stopped history',async t=>{
+ const f=fixture(t),snapshot=head=>Object.fromEntries(['product','tool','driver'].map(k=>[k,{root:f.root,head}])),reports=[];
+ f.o.owner=f.h.owner;f.o.currentHeads={product:'p2',tool:'p2',driver:'p2'};f.o.current=snapshot('p2');
+ for(let i=0;i<5;i++){
+  const file=join(f.root,`frozen-five-${i}.json`),report={arm:'baseline',repeat:1,status:i===4?'CLEANUP_FAIL':'FAIL',source:snapshot('p1'),hypothesis:'retained finding '+i,endedAt:`2026-01-0${i+1}T00:00:00Z`};
+  writeFileSync(file,JSON.stringify(report));reports.push({file,hash:digest(readFileSync(file)),report});
+ }
+ const oldLedger=join(f.root,'old-stopped-ledger.json'),oldLock=oldLedger+'.lock';mkdirSync(oldLock);
+ writeFileSync(oldLedger,JSON.stringify({owner:f.h.owner,cycles:[{id:'original',stopped:'cleanup failed'}],attempts:reports.map(({file,hash})=>({report:file,reportHash:hash}))}));
+ writeFileSync(join(oldLock,'owner.json'),JSON.stringify({owner:f.h.owner,at:'2026-01-05T00:00:00Z'}));
+ const frozen=[oldLedger,join(oldLock,'owner.json')].map(file=>({file,hash:digest(readFileSync(file))}));
+ f.h.captures=4;f.h.evidence=[...reports.map(({file,hash})=>({file,hash})),...frozen];
+ f.h.slots=f.h.plan.map((s,i)=>({...s,consumed:i===0?5:0,attemptEvidence:i===0?reports.map(({hash,report})=>({hash,hypothesis:report.hypothesis,endedAt:report.endedAt})):[]}));
+ f.state.historicalCaptures=4;f.state.historicalEvidence=f.h.evidence;f.pin();f.save();
+ const arms={baseline:{root:f.root,head:'p0'},candidate:{root:f.root,head:'p0'}};
+ const cycle={id:'retained-concern',plan:f.h.plan,arms,fix:{root:f.root,from:'p0',to:'p2',paths:['driver.mjs'],scope:'reviewed material correction'}};f.o.cycle=cycle;
+ const file=join(f.root,'sixth-authority.json'),a={schema:'owned-proof-continuation/1',authorizer:'coordinator',grant:'https://github.com/soulsimulation/souls/issues/4933#issuecomment-1',at:new Date().toISOString(),owner:f.h.owner,cycle,current:f.o.current,
+  ledger:{file:f.o.ledgerFile,hash:digest(readFileSync(f.o.ledgerFile))},importedBudget:{historyFile:f.o.historyFile,historyHash:f.o.historyHash},slot:{arm:'baseline',repeat:1,maxTotalAttempts:6},frozenEvidence:f.h.evidence,relocations:[]};
+ const pin=()=>{writeFileSync(file,JSON.stringify(a));f.o.continuationAuthority={file,hash:digest(readFileSync(file))};};
+ assert.throws(()=>assertImportedAttemptBudget(f.o),/ceiling/,'truthful history alone grants no extra attempt');pin();
+ const review={evidenceOnly:true,reviewer:'independent-reviewer',decision:'TRY',at:new Date().toISOString(),evidenceHashes:reports.slice(-2).map(r=>r.hash),currentHeads:f.o.currentHeads,hypothesis:'new actual appearance pipeline correction',change:{path:'driver.mjs',line:1}};
+ f.o.thirdReview=review;const admitted=assertImportedAttemptBudget(f.o);assert.equal(admitted.nextTotalAttempt,6);assert.equal(admitted.priorAttempts,5);assert.equal(admitted.remaining,1);
+ for(const [change,error]of [[{owner:'wrong'},/continuation-source-or-plan/],[{current:snapshot('wrong')},/continuation-source-or-plan/],[{ledger:{...a.ledger,hash:'a'.repeat(64)}},/continuation-ledger/],[{slot:{...a.slot,repeat:2}},/continuation-slot/],[{slot:{...a.slot,maxTotalAttempts:5}},/ceiling/],[{at:'not-a-time'},/continuation-time/]]){
+  const before=structuredClone(a);Object.assign(a,change);pin();assert.throws(()=>assertImportedAttemptBudget(f.o),error);Object.assign(a,before);pin();
+ }
+ delete f.o.thirdReview;assert.throws(()=>assertImportedAttemptBudget(f.o),/third-review-required/);f.o.thirdReview=review;
+ review.evidenceHashes.reverse();assert.throws(()=>assertImportedAttemptBudget(f.o),/third-review-binding/);review.evidenceHashes.reverse();
+ review.at='2025-01-01T00:00:00Z';assert.throws(()=>assertImportedAttemptBudget(f.o),/third-review-stale/);review.at=new Date().toISOString();
+ const fifth=readFileSync(reports[4].file);writeFileSync(reports[4].file,'changed');assert.throws(()=>assertImportedAttemptBudget(f.o),/evidence-changed/);writeFileSync(reports[4].file,fifth);
+ const evidence=f.h.evidence;f.h.evidence=evidence.filter(e=>e.hash!==reports[4].hash);f.state.historicalEvidence=f.h.evidence;f.pin();f.save();assert.throws(()=>assertImportedAttemptBudget(f.o),/attempt-provenance-missing/);f.h.evidence=evidence;f.state.historicalEvidence=evidence;f.pin();f.save();pin();
+ for(const consumed of [-1,1.5,Number.MAX_SAFE_INTEGER+1,4]){f.h.slots[0].consumed=consumed;f.pin();assert.throws(()=>assertImportedAttemptBudget(f.o),/counts-invalid/);}f.h.slots[0].consumed=5;f.pin();pin();
+ writeFileSync(join(f.root,'driver.mjs'),'export default async () => {};\n');
+ for(const args of [['init','-q'],['add','driver.mjs'],['-c','user.name=Fixture','-c','user.email=fixture@example.com','commit','-qm','fixture']])execFileSync('git',['-c','gc.auto=0','-C',f.root,...args]);
+ let boots=0,head='p1';const runner=createTestRunner({source:root=>({root,head}),changed:()=>['driver.mjs'],portFree:async()=>true,boot:async()=>{boots++;throw Error('controlled injected boot abort');}});
+ const options={owner:f.h.owner,sourceRoot:f.root,toolRoot:f.root,ledger:f.o.ledgerFile,arm:'baseline',repeat:1,cycle,world:{port:19044,slug:'fixture'},history:{count:4,evidence:f.h.evidence},driver:{root:f.root,path:'driver.mjs'},repair:cycle.fix,
+  importedBudget:{historyFile:f.o.historyFile,historyHash:f.o.historyHash,thirdReview:review},continuationAuthority:f.o.continuationAuthority};
+ cycle.fix.to='p1';a.cycle=cycle;a.current=snapshot('p1');review.currentHeads={product:'p1',tool:'p1',driver:'p1'};pin();options.continuationAuthority=f.o.continuationAuthority;
+ await assert.rejects(runner(options),/unchanged-retry/);assert.equal(boots,0,'finite sixth authority cannot repeat the latest imported source');
+ head='p2';cycle.fix.to=head;a.cycle=cycle;a.current=snapshot(head);review.currentHeads=f.o.currentHeads;pin();options.continuationAuthority=f.o.continuationAuthority;
+ const result=await runner(options);
+ assert.equal(result.status,'BOOT_ABORT');assert.equal(boots,1);assert.deepEqual(result.review.evidence,review.evidenceHashes);
+ for(const e of frozen)assert.equal(digest(readFileSync(e.file)),e.hash,'original stopped ledger and ownership lock stay byte-identical');assert(existsSync(oldLock));
+});

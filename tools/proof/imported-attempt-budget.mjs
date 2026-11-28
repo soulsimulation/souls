@@ -49,7 +49,7 @@ export function assertImportedAttemptBudget({historyFile,historyHash,ledgerFile,
  need(h.schema==='owned-proof-budget/1'&&typeof h.owner==='string'&&h.owner&&Number.isSafeInteger(h.captures)&&h.captures>=0,'history-invalid');
  need(Array.isArray(h.plan)&&h.plan.every(s=>typeof s.arm==='string'&&s.arm&&Number.isSafeInteger(s.repeat)&&s.repeat>0)&&same(plan,h.plan)&&new Set(h.plan.map(key)).size===h.plan.length,'plan-changed');
  need(Array.isArray(h.slots)&&h.slots.length===h.plan.length&&same(h.slots.map(key),h.plan.map(key)),'slots-changed');
- need(h.slots.every(s=>Number.isSafeInteger(s.consumed)&&s.consumed>=0&&s.consumed<=3&&Array.isArray(s.attemptEvidence)&&s.attemptEvidence.length===s.consumed),'counts-invalid');
+ need(h.slots.every(s=>Number.isSafeInteger(s.consumed)&&s.consumed>=0&&Array.isArray(s.attemptEvidence)&&s.attemptEvidence.length===s.consumed),'counts-invalid');
  need(h.captures<=h.slots.reduce((n,s)=>n+s.consumed,0),'capture-count-invalid');
  need(h.evidence?.length&&h.evidence.every(e=>e.file&&/^[a-f0-9]{64}$/.test(e.hash)),'evidence-required');
  for(const e of h.evidence)need(hash(readFileSync(e.file))===e.hash,'evidence-changed');
