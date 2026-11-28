@@ -25,8 +25,8 @@
 //!   crew's node at carrying height, not at the foot) is set down standing, as a carry's is.
 
 use replica::effects::{Actor, Cause};
-use replica::ids::Id;
 use replica::encode::Value;
+use replica::ids::Id;
 use replica::pose::{Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
@@ -113,7 +113,11 @@ fn unslide(ra: &mut Raising, now: Micros) {
         return;
     };
     let base = ra.geo.lifter_at(0);
-    let lifter = Vec3::new(base.x + p.x - ra.geo.foot.x, base.y, base.z + p.z - ra.geo.foot.z);
+    let lifter = Vec3::new(
+        base.x + p.x - ra.geo.foot.x,
+        base.y,
+        base.z + p.z - ra.geo.foot.z,
+    );
     match Raise::down(ra.geo.spec, p, q, Some(ra.geo.along), lifter) {
         Ok(g) => {
             ra.geo = g;
@@ -298,7 +302,12 @@ impl Engine {
                 Some(self.raise_slot(tree, ground, bay, *k, &geo, part)?)
             }
             (_, None, None) => None,
-            _ => return Err(refusal("raise-into", "parameters 4 and 5: a bay and its slot")),
+            _ => {
+                return Err(refusal(
+                    "raise-into",
+                    "parameters 4 and 5: a bay and its slot",
+                ));
+            }
         };
         let mut ra = Raising {
             geo,
@@ -379,7 +388,9 @@ impl Engine {
             .find(|(n, _)| *n == k)
             .map(|(_, p)| p)
             .ok_or_else(|| refusal("slot.unknown", format!("{} has no slot {k}", show(bay))))?;
-        let turn = xform_to(tree, bh, gh).map_err(|e| refusal("part-pose", e))?.rot;
+        let turn = xform_to(tree, bh, gh)
+            .map_err(|e| refusal("part-pose", e))?
+            .rot;
         if let Some(other) = tree
             .children(bh)
             .unwrap_or(&[])
@@ -396,7 +407,8 @@ impl Engine {
         let pose = |e| refusal("part-pose", format!("{e:?}"));
         let x = |q: Quat| q.rotate(Vec3::new(M, 0, 0)).map_err(pose);
         let (a, b) = (x(geo.stand)?, x(turn)?);
-        let mut cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z)) * 1000
+        let mut cos = (i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z))
+            * 1000
             / (i128::from(M) * i128::from(M));
         // A part the same turned a half turn (`symmetry` `front_back`) is seated turned the nearer way (#5067).
         let mut turn = turn;
@@ -522,8 +534,7 @@ impl Engine {
                 // Standing, its crew holds it on: each holder's hands on its post at a standing body's height (#5067).
                 let w = self.half_width(&tree, ra.part);
                 self.stances.insert(r.activity);
-                if let Err(e) =
-                    hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
+                if let Err(e) = hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
                 {
                     eprintln!("worldd: a raise's holds were not said at its end: {e}");
                 }
