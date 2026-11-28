@@ -122,9 +122,11 @@ impl Served {
     /// The first line starting with `prefix`, within 60 s.
     fn line(&self, prefix: &str) -> String {
         first_line(&self.lines, &self.early, prefix, Duration::from_secs(60)).unwrap_or_else(|| {
-            // Say why: a process that ended closes its pipes and the wait ends early; what it printed says how.
+            // Say why: a process that ended closes its pipes and the wait ends early; what it printed says how, and
+            // its end (an exit code or a signal) says how when it printed nothing about it.
             let said = self.all.lock().map(|a| a.join("\n")).unwrap_or_default();
-            panic!("no line {prefix:?}; it printed:\n{said}")
+            let ended = ended(self.child.id());
+            panic!("no line {prefix:?}; the process {ended}; it printed:\n{said}")
         })
     }
 
@@ -132,6 +134,39 @@ impl Served {
         // SIGKILL: no flush, no goodbye.
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// How the child `pid` ended, read without reaping it (its `Drop` still waits for it): an exit code or a signal, or
+/// that it is still running. Its pipes close as it exits, so the end is looked for a little while.
+// A real process on the real clock.
+#[allow(clippy::disallowed_methods)]
+fn ended(pid: u32) -> String {
+    let until = Instant::now() + Duration::from_secs(2);
+    loop {
+        // SAFETY: `info` is a zeroed siginfo_t that waitid fills; WNOWAIT leaves the child to be reaped by its owner.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let r = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        // SAFETY: si_pid and si_status are set by waitid for a child that changed state.
+        let (who, status) = unsafe { (info.si_pid(), info.si_status()) };
+        if r == 0 && who != 0 {
+            return match info.si_code {
+                libc::CLD_EXITED => format!("exited with code {status}"),
+                libc::CLD_KILLED | libc::CLD_DUMPED => format!("was ended by signal {status}"),
+                c => format!("ended ({c}, {status})"),
+            };
+        }
+        if r != 0 || Instant::now() > until {
+            return "is still running".to_owned();
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
