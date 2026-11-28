@@ -3,9 +3,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {createHash} from 'node:crypto';
+import {setTimeout as pause} from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
-import { meal, foundId, requireDone } from '../../playtest/meal/meal.mjs';
+import { meal, foundId } from '../../playtest/meal/meal.mjs';
 import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
@@ -80,7 +81,8 @@ export async function proveMealCreator({ creator, record = () => {}, signal }) {
 
 /** Ordinary wear is a real native command/receipt; catalogue identity remains a separate observed page check. */
 export async function wearMealBody({seat,bodies,verify,record=()=>{},signal}) {
-  verify();signal?.throwIfAborted();
+  assert(signal&&typeof signal.throwIfAborted==='function','meal wear requires the bounded preparation signal');
+  verify();signal.throwIfAborted();
   const bytes=readFileSync(bodies.catalogue);
   assert.equal(createHash('sha256').update(bytes).digest('hex'),bodies.sha256,'meal catalogue receipt drift');
   const catalogue=JSON.parse(bytes),rows=catalogue.bodies?.filter(row=>row.preset==='monster')??[];
@@ -90,9 +92,21 @@ export async function wearMealBody({seat,bodies,verify,record=()=>{},signal}) {
   assert.equal(companion.kindHash,row.hash,'meal companion kind differs from admitted preset');
   assert.equal(createHash('sha256').update(companionBytes).digest('hex'),row.entryHash,'meal companion entryHash drift');
   assert.deepEqual(companion.resources.filter(r=>r[0]==='souls:hand-left'||r[0]==='souls:hand-right').map(r=>r.slice(0,2)),[['souls:hand-left',2],['souls:hand-right',2]],'meal declared body requires actual named hands');
-  const words=['wear',row.preset,'--wait'],answer=await seat.cli(...words);record({role:seat.label,words,answer});requireDone(answer,'wear declared meal body');assert(Number.isSafeInteger(answer.sequence)&&answer.sequence>0,'meal wear sequence missing');
-  return {preset:row.preset,hash:row.hash,entryHash:row.entryHash,resources:companion.resources,sequence:answer.sequence,
-    qualification:'Declared existing admitted preset only; default body resource mapping remains unproved.'};
+  const run=async words=>{signal.throwIfAborted();const answer=await seat.cli(...words);record({role:seat.label,words,answer});return answer;};
+  const sent=await run(['wear',row.preset]);
+  if(sent?.ok!==true||sent.sent!==true)throw Object.assign(Error(`wear declared meal body: ${sent?.code??sent?.reason??'intent not sent'}`),{answer:sent});
+  assert(Number.isSafeInteger(sent.sequence)&&sent.sequence>0&&sent.verb==='life:wear','meal wear sequence or verb missing');
+  for(;;){
+    const answer=await run(['receipt',String(sent.sequence)]),receipt=answer?.receipt;
+    if(answer?.ok!==true)throw Object.assign(Error(`wear receipt: ${answer?.code??answer?.reason??'invalid answer'}`),{answer});
+    assert((answer.sequence===undefined||answer.sequence===sent.sequence)&&receipt?.sequence===sent.sequence,'meal wear receipt sequence differs');
+    assert.deepEqual(receipt.verbs,['life:wear'],'meal wear receipt verb differs');assert(Array.isArray(receipt.answers),'meal wear receipt answers missing');
+    assert(receipt.answers.every(a=>a&&typeof a.answer==='string'),'meal wear receipt answer malformed');const end=receipt.answers.at(-1);
+    if(end?.answer==='receipt')return {preset:row.preset,hash:row.hash,entryHash:row.entryHash,resources:companion.resources,sequence:sent.sequence,receipt,
+      qualification:'Ordinary terminal wear receipt for a declared existing preset; native/page identity checks remain separate and default mapping remains unproved.'};
+    if(end&&end.answer!=='accepted')throw Object.assign(Error(`wear receipt: ${end.reason??end.answer}`),{answer});
+    signal.throwIfAborted();await pause(200,undefined,{signal});
+  }
 }
 
 export async function prepare({ base, paths, recipe, signal }) {
@@ -105,7 +119,11 @@ export async function prepare({ base, paths, recipe, signal }) {
   for (const seat of state.seats) seat.run = async (...words) => {
     const answer = await seat.cli(...words); state.rows.push({ role: seat.label, words, answer }); return answer;
   };
-  if(recipe.bodies)state.declaredBody=await wearMealBody({seat:state.seats[2],bodies:recipe.bodies,verify:recipe.verify,signal,record:row=>state.rows.push(row)});
+  if(recipe.bodies){
+    const rows=[];
+    try{state.declaredBody=await wearMealBody({seat:state.seats[2],bodies:recipe.bodies,verify:recipe.verify,signal,record:row=>{state.rows.push(row);rows.push(row);}});}
+    finally{save(paths,'command-meal-wear.json',{rows,declaredBody:state.declaredBody??null,qualification:'Ordinary sent acknowledgement and exact-sequence receipt reads; native/page/physical acceptance remains separate.'});}
+  }
   state.bowl = foundId(await state.seats[0].run('find', 'meal-bowl'), 'meal-bowl');
   state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
   const creatorRows = [];
