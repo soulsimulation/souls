@@ -131,9 +131,9 @@ pub mod io {
     #![allow(clippy::disallowed_methods)]
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-    /// 1 on the stream's thread, 2 on a thread writing beside it, 0 elsewhere.
+    // 1 on the stream's thread, 2 on a thread writing beside it, 0 elsewhere.
     thread_local!(static HERE: Cell<u8> = const { Cell::new(0) });
-    /// On the stream's thread, inside [`stage`]: its syncs are one wait, counted when it ends.
+    // On the stream's thread, inside `stage`: its syncs are one wait, counted when it ends.
     thread_local!(static STAGED: Cell<u32> = const { Cell::new(0) });
     /// Bytes written, files synced, sync waits, parts published, and the files synced and waits while writing a part
     /// (from its recovery objects to its pointer), in that order.
@@ -1575,12 +1575,11 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    let written =
-        fs::File::create(&tmp).and_then(|mut f| {
-            f.write_all(bytes)?;
-            self::io::wrote(bytes.len());
-            self::io::sync(&f)
-        });
+    let written = fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(bytes)?;
+        self::io::wrote(bytes.len());
+        self::io::sync(&f)
+    });
     if let Err(e) = written {
         let _ = fs::remove_file(&tmp);
         return Err(io(e));
@@ -4417,7 +4416,11 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     /// The wall time, ms, at which the newest world time this stream's pointer names fell; none before its first.
     pub fn shown_wall_ms(&self) -> Option<i64> {
-        Some(self.shown_wall_ms.load(std::sync::atomic::Ordering::Relaxed)).filter(|w| *w != i64::MIN)
+        Some(
+            self.shown_wall_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+        .filter(|w| *w != i64::MIN)
     }
     /// Before the world exits to sleep (#2731, rule 13): what is open is written, and the pointer says the world is
     /// still up to now and until `next_due`, the world time of its next due change (none: nothing is due). Refused

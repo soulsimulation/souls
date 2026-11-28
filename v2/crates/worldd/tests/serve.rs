@@ -742,6 +742,7 @@ fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id
 /// count (`stream_io` in `health.json`): one wait a part, and at most one sync for each of those eight files. And
 /// `stream_behind_ms` says how far the stream is behind the world.
 #[test]
+#[allow(clippy::disallowed_methods)]
 fn a_served_public_part_is_synced_in_one_wait() {
     let d = scratch("part-syncs");
     let (dir, body, root, ground) = seeded(&d);
@@ -750,7 +751,11 @@ fn a_served_public_part_is_synced_in_one_wait() {
     w.line("worldd: started at tick");
     let mut s = connect(&socket);
     walk(&mut s, body, root.scope(), ground, 1, -34, 30);
-    assert_eq!(answer(&mut s), (1, String::new()), "the walk ends in a receipt");
+    assert_eq!(
+        answer(&mut s),
+        (1, String::new()),
+        "the walk ends in a receipt"
+    );
     walk(&mut s, body, root.scope(), ground, 2, -40, 30);
     assert_eq!(answer(&mut s), (1, String::new()), "the walk back");
     let int = |h: &json::Value, k: &str| match h.get("stream_io").and_then(|io| io.get(k)) {
@@ -764,7 +769,11 @@ fn a_served_public_part_is_synced_in_one_wait() {
         if h.get("stream_io").is_some() && int(&h, "parts") >= 3 {
             break h;
         }
-        assert!(Instant::now() < end, "no 3 parts in health.json: {}", h.to_json());
+        assert!(
+            Instant::now() < end,
+            "no 3 parts in health.json: {}",
+            h.to_json()
+        );
         std::thread::sleep(Duration::from_millis(100));
     };
     let (parts, syncs, waits) = (

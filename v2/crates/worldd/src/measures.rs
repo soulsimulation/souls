@@ -372,9 +372,14 @@ impl Measures {
         let shown = STREAM_SHOWN_WALL_MS.load(Ordering::Relaxed);
         if shown != i64::MIN {
             let now = i64::try_from(unix_ms).unwrap_or(i64::MAX);
-            let _ = write!(o, ",\"stream_behind_ms\":{}", now.saturating_sub(shown).max(0));
+            let _ = write!(
+                o,
+                ",\"stream_behind_ms\":{}",
+                now.saturating_sub(shown).max(0)
+            );
         }
-        let ([bytes, syncs, waits, parts, part_syncs, part_waits], _) = crate::view_out::io::totals();
+        let ([bytes, syncs, waits, parts, part_syncs, part_waits], _) =
+            crate::view_out::io::totals();
         let _ = write!(
             o,
             ",\"stream_io\":{{\"parts\":{parts},\"part_syncs\":{part_syncs},\"part_waits\":{part_waits},\"syncs\":{syncs},\"waits\":{waits},\"bytes\":{bytes}}}"
