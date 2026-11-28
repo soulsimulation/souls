@@ -958,6 +958,14 @@ impl Town {
         crate::commit::off_clock();
         // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
         let ids = changed(base, part);
+        // EXPERIMENT (racks T9): a part that holds a floor of its own, moved, is built whole.
+        let floored = ids.iter().any(|&id| {
+            base.handle(id)
+                .and_then(|h| base.children(h))
+                .unwrap_or(&[])
+                .iter()
+                .any(|&c| base.node(c).is_some_and(|n| replica::world_model::plain(n.kind().as_str()) == crate::ground::scene::FLOOR))
+        });
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -976,7 +984,12 @@ impl Town {
         // its own squares and the same read of its buildings (S13b), each built whole only when it must be.
         let class = |basis: &Basis| -> Result<(Fresh, Basis, Option<&'static str>), String> {
             let mut why = None;
-            let fresh = if touched.contains(&ground) {
+            let fresh = if floored {
+                why = Some("a part with a floor of its own moved");
+                Fresh::Whole(Box::new(Town::assemble_for(
+                    base, ground, &versions, basis.size, 1,
+                )?))
+            } else if touched.contains(&ground) {
                 // The buildings whose floors the part touches besides the open ground (a creator's new building, S13):
                 // read again with the squares cut again, not the whole ground built.
                 let things: Option<BTreeSet<Id>> = touched
