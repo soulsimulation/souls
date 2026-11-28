@@ -6330,6 +6330,15 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     ] {
         leave(&mut souls, k, c, what).await;
     }
+    // Crew C steps back off the bay's mouths, where frame B's holders will stand.
+    let p = |v: Vec3| BTreeMap::from([(1, Value::Array(vec![int(v.x), int(0), int(v.z)]))]);
+    for (k, at) in [
+        (0, v3(ua.x - 5_000_000, 0, ua.z)),
+        (1, v3(ub.x - 5_000_000, 0, ub.z)),
+    ] {
+        let got = souls[k].act("eden:walk", g, p(at)).await;
+        assert_eq!(got.kind, 1, "Soul {} steps back: {got:?}", k + 1);
+    }
     {
         let (copy, _) = served_copy(&w);
         let t = copy.tree();
