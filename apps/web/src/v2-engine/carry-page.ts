@@ -2,7 +2,7 @@
 import type {CarriedParts} from './take-parts.ts';
 import {entityId} from './entity-id.ts';
 import {layerDraws} from './layer-draws.ts';
-import {worldPoint,type NativePose} from './recorded-carry.ts';
+import {rotate,worldPoint,type NativePose} from './recorded-carry.ts';
 import {setCarryHeading} from './carry-heading.ts';
 import type {CarryObservation} from './recorded-carry.ts';
 import type {CarryGrips} from './source/carry-record.ts';
@@ -20,6 +20,22 @@ export const setCarryPage=(parts:CarriedParts|null)=>{current=parts;setCarryHead
 export function carryHeadingAt(entity:string,at:number,byBody:ReadonlyMap<string,string>=bodies,source:CarriedParts|null=current):number|null{
  if(!source)return null;const body=source.recorded.facing(at,b=>byBody.get(b)===entity),pose=body?source.recorded.pose(body,at):null;
  return pose?-2*Math.atan2(pose.q[2],pose.q[0]):null;}
+/** A raise's holds (#5067: phase `souls:raise` or `souls:lower`, a lifter and a footer, `point:foot`) are said once, at
+ *  its start; their hands are placed by rule on each frame (the engine's `raise::Spec::hold_up`, `FOOT_HOLD`): the
+ *  lifter's two hands on its post where the post is 1.9 m above the foot, or at its top while that is lower, the
+ *  footer's 0.4 m up its post from the foot, each 0.1 m either side along the post, within the post's length. The
+ *  same holds carried on unchanged into the phase that follows (`souls:held`, `souls:released`) keep the rule; holds
+ *  the world says again are its own. */
+export const RAISE_PHASES=new Set(['souls:raise','souls:lower']);
+const LIFT_HAND=1.9,FOOT_HOLD=.4,HAND_HALF=.1;
+export function raiseRule(records:CarriedParts['recorded'],g:CarryGrips,at:number):boolean{
+ if(RAISE_PHASES.has(g.phase))return true;if(!g.holds.some(h=>h.grip==='point:foot'))return false;
+ const h=records.phaseHistory(g.crew,at),i=h.lastIndexOf(g),prev=i>0?h[i-1]:null;
+ return!!prev&&RAISE_PHASES.has(prev.phase)&&prev.load===g.load&&JSON.stringify(prev.holds)===JSON.stringify(g.holds);}
+/** The two hand points of hold `h` (load-local µm) on a raised part `heightUm` long, posed `pose`. */
+export function raiseHands(h:CarryGrips['holds'][number],pose:NativePose,heightUm:number):[[number,number,number],[number,number,number]]{
+ const H=heightUm/1e6,rise=rotate(pose.q,[0,1,0])[1],s=h.grip==='point:foot'?Math.min(FOOT_HOLD,H):rise>0?Math.min(H,LIFT_HAND/rise):H,[x,,z]=h.handsUm[0];
+ return[[x,Math.max(0,s-HAND_HALF)*1e6,z],[x,Math.min(H,s+HAND_HALF)*1e6,z]];}
 export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:CarriedParts|null=current):CarryPageFrame|null{
  if(!source)return null;const records=source.recorded,loads:Record<string,NativePose>={},bodies:Record<string,NativeCarryBody>={},observations=records.observations(at),errors:string[]=[],evidence:CarryPageFrame['evidence']={},ambiguous=new Set<string>();
  if(records.error)errors.push('carry-record:'+records.error);
@@ -36,11 +52,13 @@ export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:C
   if(!released&&(o.members!.length!==g.holds.length||o.members!.some(m=>!g.holds.some(h=>h.body===m.body))))errors.push('crew-contacts:'+g.crew);
   if(!released&&g.untilUs!==undefined&&at>=g.untilUs){errors.push('expired-phase:'+g.crew);continue;}
   const weight=released?Math.max(0,1-(at-g.sinceUs)/300000):1;
+  const ruled=raiseRule(records,g,at);
   evidence[g.load]=records.evidence(g.load,at);
   if(!weight)continue;
   for(const h of g.holds){const entity=byBody.get(h.body),order=records.anatomical(g,h.body);if(!entity||!order){errors.push('carrier-frame:'+h.body);continue;}
    if(!released&&!o.members?.some(m=>m.body===h.body)){errors.push('carrier-membership:'+h.body);continue;}
-   const points=h.handsUm.map(p=>worldPoint(o.pose!,p));
+   const height=ruled?source.heightUm(n.kind):null;if(ruled&&height===null){errors.push('raise-height:'+g.load);continue;}
+   const points=(ruled?raiseHands(h,o.pose!,height!):h.handsUm).map(p=>worldPoint(o.pose!,p));
    if(ambiguous.has(entity)||released&&bodies[entity])continue;
    if(bodies[entity]){errors.push('ambiguous-carrier:'+h.body);delete bodies[entity];ambiguous.add(entity);continue;}
    bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,...(g.untilUs!==undefined?{untilUs:g.untilUs}:{}),hands:{left:points[order[0]],right:points[order[1]]},order,weight};

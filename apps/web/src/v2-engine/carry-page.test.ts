@@ -27,3 +27,25 @@ test('a body in an unreleased hold is drawn at the world\'s own turn, walking; b
  assert(Math.abs(yawAt(2000000))<.002,'the feed gone: its travel again');
 });
 
+test('a raise\'s hands are placed by rule each frame: the lifter where its post is 1.9 m up or at its top, the footer 0.4 m up; carried on into its hold, re-said holds are the world\'s',()=>{
+ const parts=new CarriedParts({apply:()=>{}},bundledEntries({u:{kind:'fixture:upright',points:{foot:{role:'contact',at_mm:[0,0,0]},grip_high:{role:'grip',at_mm:[0,1999,0]}},geometry:{bounds_mm:[1219,2438,76]}}}));
+ const lifter=member('lifter'),footer=member('footer'),byBody=new Map([[lifter.body,'draw-lifter'],[footer.body,'draw-footer']]);
+ parts.receive({t:'snapshot',s:{nodes:[n('ground',null),n('crew','ground',{slots:[[1,0,0,0]]}),n('upright','crew',{slot:1,kind:'fixture:upright'}),n(lifter.body,'ground',{kind:'souls:body',soul:lifter.soul}),n(footer.body,'ground',{kind:'souls:body',soul:footer.soul})],removed:[]}});
+ const h=Math.round(Q*Math.SQRT1_2),lying:[number,number,number,number]=[h,h,0,0];
+ const holds=[{body:lifter.body,grip:'point:grip_high',gripUm:[0,1999000,0]as[number,number,number],handsUm:[[572000,2338000,0],[572000,2438000,0]]as[[number,number,number],[number,number,number]]},
+  {body:footer.body,grip:'point:foot',gripUm:[0,0,0]as[number,number,number],handsUm:[[-572000,300000,0],[-572000,500000,0]]as[[number,number,number],[number,number,number]]}];
+ const g=(phase:string,sinceUs:number,hs=holds):CarryGrips=>({crew:'crew',load:'upright',phase,sinceUs,holds:hs});
+ const samples:SampleRec[]=[['crew','ground',null,0,0,0,0,lying],['crew','ground',null,6000000,0,0,0,I]];
+ parts.receive({t:'part',p:{number:1,from:0,to:10000000,nodes:[],removed:[],samples,hash:true,carryChanges:[{at:0,node:'crew',members:[lifter,footer]},{at:0,node:'crew',grips:g('souls:raise',0)},{at:6000000,node:'crew',grips:g('souls:held',6000000)}]}as PartRec});
+ const hands=(at:number,who='draw-lifter')=>{const f=carryPageAt(at,byBody,parts)!;assert.deepEqual(f.errors,[]);const b=f.bodies[who];return[b.hands.left,b.hands.right].map(p=>p[1]).sort((a,b)=>a-b);};
+ const near=(a:number[],b:number[])=>assert(a.every((v,i)=>Math.abs(v-b[i])<1e-6),`${a} vs ${b}`);
+ near(hands(0),[0,0]);// lying: its post's top, 2.34 to 2.44 m along it, flat on the ground
+ const up=hands(6000000);near(up,[1.8,2.0]);near(hands(8000000),[1.8,2.0]);// standing, and held: where the post is 1.9 m up
+ near(hands(6000000,'draw-footer'),[.3,.5]);
+ // part way (the slerp's middle, 45 degrees): the post's top is 1.72 m up, lower than 1.9 m, so the hands are at its top
+ const mid=hands(3000000),top=2.438*Math.SQRT1_2;near(mid,[2.338*Math.SQRT1_2,top]);
+ // the world says the hold again with its own hands: those are drawn
+ const own=[{...holds[0],handsUm:[[572000,1000000,0],[572000,1300000,0]]as[[number,number,number],[number,number,number]]},holds[1]];
+ parts.receive({t:'part',p:{number:2,from:10000000,to:11000000,nodes:[],removed:[],samples:[],hash:true,carryChanges:[{at:10000000,node:'crew',grips:g('souls:held',10000000,own)}]}as PartRec});
+ near(hands(10500000),[1.0,1.3]);
+});
