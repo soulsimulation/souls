@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { brief } from '../brief/brief.mjs';
-import { braced, climbNamed, climbOffers, placeAt, placesIn, rowsWithPlaces, waysOf } from './ways.mjs';
+import { braced, climbNamed, climbOffers, nothingToStandOn, placeAt, placesIn, rowsWithPlaces, waysOf } from './ways.mjs';
 import { find } from '../find/find.mjs';
 import { help, requestOf } from '../cli/souls.mjs';
 
@@ -104,4 +104,37 @@ test('the command: object <frame> climb to <place> names the offer by the place 
   assert.equal(climbNamed(offers, 'walk'), undefined, 'not a climb');
   const h = help(undefined, undefined, undefined);
   assert.equal(JSON.stringify(h).split('climb to').length - 1, 1, 'climb to, once');
+});
+
+// N14: the 12 ft frame as its kind now declares it, ladders only (no standing place of its own), in a deck bay whose
+// sheet is seated as deck_bay's s1 (1.991 m, its top 2.01 m up).
+const FRAME_N14 = { kind: 'mars:rack_upright_12ft', geometry: { bounds_mm: [1219, 3658, 76], ladders: [{ face: 'back', bottom_mm: 0, top_mm: 1800, width_mm: 900, run_mm: 330 }, { face: 'front', bottom_mm: 0, top_mm: 1800, width_mm: 900, run_mm: 330 }] } };
+function deckBay({ sheet = true } = {}) {
+  const rows = new Map();
+  const add = (r) => rows.set(r.id, { path: [], children: 0, ...r });
+  add({ id: 'g-1', name: 'ground 1', kind: 'eden:ground', parent: null });
+  add({ id: 'b-2', name: 'bay', kind: 'mars:deck_bay', parent: 'g-1', pos: [65_000_000, 0, -24_000_000], rot: [ONE, 0, 0, 0],
+    slots: [[1, 0, 0, -1448, 0, 1], [11, 0, 1991, -612, 0, 1]] });
+  add({ id: 'f-3', name: 'frame-1', kind: FRAME_N14.kind, parent: 'b-2', pos: [0, 0, 0], rot: [ONE, 0, 0, 0], slot: 1 });
+  for (const [n, id] of [[0, 'f-4'], [1, 'f-5'], [2, 'f-6']]) add({ id, name: `floor ${id.slice(2)}`, kind: 'eden:floor', parent: 'f-3', level: n });
+  if (sheet) {
+    add({ id: 's-10', name: 'sheet-1', kind: SHEET.kind, parent: 'b-2', pos: [0, 0, 0], rot: [ONE, 0, 0, 0], slot: 11 });
+    add({ id: 's-11', name: 'floor 11', kind: 'eden:floor', parent: 's-10', level: 1, surfaces: rect(19, [0, 0], [1829, 1219]) });
+  }
+  return rows;
+}
+const kindsN14 = { ...kinds, [FRAME_N14.kind]: FRAME_N14 };
+
+test('N14: a frame with a deck on it offers its outer ladder up onto the deck, and no standing place of its own', () => {
+  const rows = deckBay(), w = waysOf(rows, rows.get('f-3'), FRAME_N14, undefined, kindsN14);
+  assert.deepEqual(w.places, []);
+  assert.deepEqual(w.ways, [{ name: 'ladder up frame-1\'s back face, to deck of sheet-1', kind: 'ladder', to: 's-11' }]);
+  assert.deepEqual(climbOffers(w), [{ name: 'climb to deck of sheet-1', act: 'walk:s-11', place: 's-11', usage: 'act s-11' }]);
+  assert.equal(nothingToStandOn(w, 'f-3'), null);
+});
+
+test('N14: a frame with no deck on it has nothing to stand on at its ladders\' tops: a climb is refused by name', () => {
+  const rows = deckBay({ sheet: false }), w = waysOf(rows, rows.get('f-3'), FRAME_N14, undefined, kindsN14);
+  assert.deepEqual([w.places, w.ways, climbOffers(w)], [[], [], []]);
+  assert.equal(nothingToStandOn(w, 'f-3').code, 'climb.nothing-to-stand-on');
 });

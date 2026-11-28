@@ -364,6 +364,18 @@ fn stair_join(bs: &[&Building], i: usize, s: &Loose, st: &LooseStair) -> Option<
         })?;
     let there = back(&b.place, place.point(far.middle()).ok()?).ok()?;
     let mut line = st.line.clone();
+    // A face's rungs (`up_rungs`: a line that rises straight up) are climbed to the height of the floor they land on
+    // before the step across onto it (N14: a frame's ladder at the beam level, the deck 0.21 m above): never a slope
+    // up through the floor's edge.
+    if st.kind == Kind::Ladder
+        && line
+            .windows(2)
+            .any(|w| w[0].x == w[1].x && w[0].z == w[1].z && w[1].y > w[0].y)
+    {
+        for p in line.iter_mut().filter(|p| p.y >= st.top.y) {
+            p.y = p.y.max(there.y);
+        }
+    }
     if line.last() != Some(&there) {
         line.push(there);
     }
@@ -598,6 +610,25 @@ fn apron(patch: &Patch, end: Vec3, dir: [i64; 2]) -> Option<Vec3> {
     })
 }
 
+/// A ladder's line as it is climbed (N14): `rungs` is its foot (on the run, at the bottom) and its top's height; the
+/// line rises straight up at the foot to the top's height, then goes across as before. A line without the foot (no
+/// ends) and any other link's line are as given.
+fn up_rungs(mut line: Vec<Vec3>, rungs: Option<(Vec3, i64)>) -> Vec<Vec3> {
+    let Some((foot, y1)) = rungs else {
+        return line;
+    };
+    if let Some(i) = line.iter().position(|p| *p == foot) {
+        let top = Vec3::new(foot.x, y1, foot.z);
+        if line.get(i + 1) != Some(&top) {
+            line.insert(i + 1, top);
+        }
+        for p in &mut line[i + 2..] {
+            p.y = p.y.max(y1);
+        }
+    }
+    line
+}
+
 /// The unit (µm per metre) from `a` to `b` on the ground plane.
 fn unit(a: Vec3, b: Vec3) -> [i64; 2] {
     let (dx, dz) = (b.x - a.x, b.z - a.z);
@@ -812,7 +843,7 @@ impl Building {
                 let kind = Kind::of(ty.as_str()).ok_or("a stair of no known kind")?;
                 let n = |k: usize| r.get(k).and_then(int).ok_or("a stair row");
                 let (width, y0, y1) = (n(3)? * 1000, n(4)? * 1000, n(5)? * 1000);
-                let pts: Vec<[i64; 2]> = r
+                let mut pts: Vec<[i64; 2]> = r
                     .get(6)
                     .map(row)
                     .unwrap_or(&[])
@@ -825,6 +856,13 @@ impl Building {
                         _ => Err("a point is [x, z]"),
                     })
                     .collect::<Result<_, _>>()?;
+                // A ladder row that gives its foot twice is a face's rungs (a rack frame's, N14: import-eden's
+                // `way_rows`): climbed straight up at its foot, then across onto its top. Any other is climbed along its
+                // line, as a ladder leaning on a wall is.
+                let rungs = kind == Kind::Ladder && pts.len() > 2 && pts[0] == pts[1];
+                if rungs {
+                    pts.remove(0);
+                }
                 if pts.len() < 2 {
                     return Err("a stair path of fewer than two points".into());
                 }
@@ -845,9 +883,12 @@ impl Building {
                     })
                     .collect();
                 let k = line.len();
+                // A face's rungs are climbed straight up at the foot, in front of the face, then across onto the top
+                // (N14). The ends are found along the run as a flight's; the line climbed gets the rise.
+                let rungs = rungs.then_some((line[0], y1));
                 let patch = |f: Id| floors.get(&f).map(|(_, p)| p);
                 let lo = patch(nodes[0]).map(|p| apron(p, line[0], unit(line[1], line[0])));
-                // A ladder's top against a face lands on the floor it leans over (a frame's standing place, racks T6):
+                // A ladder's top against a face lands on the floor it leans over (a standing place of its own, racks T6):
                 // its apron is looked for back along it when there is none past its top.
                 let hi = patch(nodes[1]).map(|p| {
                     apron(p, line[k - 1], unit(line[k - 2], line[k - 1])).or_else(|| {
@@ -955,7 +996,7 @@ impl Building {
                             stair: Some(LooseStair {
                                 kind,
                                 from: nodes[0],
-                                line: std::mem::take(&mut line),
+                                line: up_rungs(std::mem::take(&mut line), rungs),
                                 top,
                                 half,
                             }),
@@ -974,7 +1015,7 @@ impl Building {
                     owner,
                     width,
                     ends,
-                    line,
+                    line: up_rungs(line, rungs),
                     door: None,
                     blocked,
                 });

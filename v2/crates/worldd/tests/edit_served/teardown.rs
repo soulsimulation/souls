@@ -82,7 +82,7 @@ const STAIR_AT: [i64; 2] = [-2_164, -572];
 /// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
 /// the three 2x4s and the two sheets lying under their slots, and the flight standing 0.8 m west of its slot.
 /// What each part is walked on and up is its kind's (`geometry.floors`, `stairs`, `ladders`): a sheet's top, the
-/// flight's stair from the ground to the deck's top, each frame's standing places and ladders. Returns the facts and
+/// flight's stair from the ground to the deck's top, each frame's ladders. Returns the facts and
 /// the bay's slot numbers, by name.
 fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
@@ -227,8 +227,6 @@ struct Bay {
     flight: Id,
     /// The floor each sheet holds: its top.
     decks: [Id; 2],
-    /// Each frame's standing places at 1.8 m, as its kind declares them: its back face's, then its front's.
-    places: [[Id; 2]; 2],
 }
 
 impl Bay {
@@ -275,7 +273,6 @@ impl Bay {
             sheets: [n("sheet-1"), n("sheet-2")],
             flight: n("flight"),
             decks: [n("sheet-1/floor-1"), n("sheet-2/floor-1")],
-            places: ["frame-1", "frame-2"].map(|f| [1, 2].map(|l| n(&format!("{f}/floor-{l}")))),
             w,
             _s: s,
             hands,
@@ -832,34 +829,6 @@ fn gap_a_frame_under_a_soul_on_the_deck_is_refused_support_none_not_part_stood_o
         got.detail.contains(&show(walker)),
         "names the body: {got:?}"
     );
-    assert_eq!(where_is(&k.w, k.frames[0]).0, Some(k.bay), "frame 1 stays");
-}
-
-/// Soul 7 climbs frame 1's ladder to its outer 1.8 m standing place; frame 1 taken out meanwhile is refused
-/// `part.stood-on`, naming the body.
-#[test]
-fn teardown_wrong_a_frame_under_a_soul_on_its_standing_place_is_refused_stood_on() {
-    let mut k = Bay::built("tdw3");
-    let perch = k.places[0][0];
-    k.walk(&[(6, Bay::at(0, -3_900))], "Soul 7 to the ladder's foot");
-    let walker = body_of(&k.w, k.w.souls[6]);
-    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
-    k.hands[6].send("eden:walk", perch, to);
-    let got = socket_end(&mut k.hands[6].s);
-    k.ok(got, "Soul 7 climbs to frame 1's standing place");
-    assert_eq!(body_on(&k.w, walker).0, perch, "on the standing place");
-    let c = k.crew_at(
-        (0, 1),
-        (1_060, FRAME_Z[0]),
-        "Souls 1 and 2 beside frame 1's edges",
-    );
-    let got = k.act(0, "part:unseat", c, k.frames[0]);
-    refused_as(&got, "part.stood-on", "frame 1 taken out with Soul 7 on it");
-    assert!(
-        got.detail.contains(&show(walker)),
-        "names the body: {got:?}"
-    );
-    // Its lowering is refused `raise.no-foot` before anything else is judged: gap 6.
     assert_eq!(where_is(&k.w, k.frames[0]).0, Some(k.bay), "frame 1 stays");
 }
 

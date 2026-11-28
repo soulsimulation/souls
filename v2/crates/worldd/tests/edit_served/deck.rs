@@ -521,26 +521,6 @@ pub(super) fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
 }
 
 /// The last tick the served world has logged.
-fn last_tick(w: &Seeded) -> u64 {
-    sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
-        .unwrap()
-        .records
-        .iter()
-        .filter(|r| !sim::recorder::is_input(r))
-        .filter_map(|r| {
-            match replica::effects::Part::read(r)
-                .ok()?
-                .rest
-                .get(&answers::TICK)
-            {
-                Some(Value::Uint(t)) => Some(*t),
-                _ => None,
-            }
-        })
-        .max()
-        .unwrap_or(0)
-}
-
 /// Every row of body `body` in the log, in order, from every part (those with no effect too): the tick, the node it
 /// was on and its place there.
 fn body_ticks(w: &Seeded, body: Id) -> Vec<(u64, Id, Vec3)> {
@@ -583,7 +563,7 @@ const STAIR_AT: [i64; 2] = [-2_164, -572];
 /// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
 /// the three 2x4s and the two sheets lying under their slots, and the flight standing 0.8 m west of its slot.
 /// What each part is walked on and up is its kind's (`geometry.floors`, `stairs`, `ladders`): a sheet's top, the
-/// flight's stair from the ground to the deck's top, each frame's standing places and ladders. Returns the facts and
+/// flight's stair from the ground to the deck's top, each frame's ladders. Returns the facts and
 /// the bay's slot numbers, by name.
 fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
@@ -728,8 +708,6 @@ struct Bay {
     flight: Id,
     /// The floor each sheet holds: its top.
     decks: [Id; 2],
-    /// Each frame's standing places at 1.8 m, as its kind declares them: its back face's, then its front's.
-    places: [[Id; 2]; 2],
     /// The import's rules and the world's root, for a town built afresh from the served tree (a check).
     rules: replica::tree::Rules,
     root: Id,
@@ -775,7 +753,6 @@ impl Bay {
             sheets: [n("sheet-1"), n("sheet-2")],
             flight: n("flight"),
             decks: [n("sheet-1/floor-1"), n("sheet-2/floor-1")],
-            places: ["frame-1", "frame-2"].map(|f| [1, 2].map(|l| n(&format!("{f}/floor-{l}")))),
             rules: im.rules.clone(),
             root: n("world"),
             w,
@@ -1070,120 +1047,105 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
     );
 }
 
-/// Racks T6, the brief's task 4, in a served world by Souls' intents: a Soul climbs a frame to its 1.8 m standing place.
+/// Where body `body`'s rows put it, from row `from` on: each row's tick, the node it was on, and its place in the
+/// bay's frame (µm from the bay's middle).
+fn rows_in_bay(k: &Bay, body: Id, from: usize) -> Vec<(u64, Id, Vec3)> {
+    let (copy, _) = served_copy(&k.w);
+    let t = copy.tree();
+    let gh = t.handle(k.w.ground).unwrap();
+    let o = sim::ground::scene::xform_to(t, t.handle(k.bay).unwrap(), gh)
+        .unwrap()
+        .pos;
+    body_ticks(&k.w, body)[from..]
+        .iter()
+        .map(|&(tick, node, p)| {
+            let w = sim::ground::scene::xform_to(t, t.handle(node).unwrap(), gh)
+                .unwrap()
+                .point(p)
+                .unwrap();
+            (tick, node, v3(w.x - o.x, w.y - o.y, w.z - o.z))
+        })
+        .collect()
+}
+
+/// N14 (28 Nov), in a served world by Souls' intents: a Soul climbs a frame of the built deck bay up its rungs onto
+/// the deck, never through the air.
 ///
-/// - the bay's frames stand on four beams. Each frame's kind declares, on each face, a ladder from the ground to each
-///   1.8 m beam level and a standing place there, 0.9 m deep and as wide as the frame, that exists only while a part
-///   joined to the frame sits at its level (a beam braces it) and nothing lies over it within a body's height;
-/// - a fifth Soul walks to frame 1's outer standing place at 1.8 m: its way is the ladder, climbed as a track (its
-///   body's rows rise from the ground, none a jump), and it stands on the place at its height;
-/// - a step off the place's outer edge is refused, and the body stays where it was;
-/// - a crew unseating (lowering) frame 1 meanwhile is refused `part.stood-on`, naming the body;
+/// - the bay's frames stand on four beams, three 2x4s rest on the 1.8 m beams and two sheets on them, the deck 2.01 m
+///   up. A frame's kind declares a ladder up each face to the 1.8 m beam level and no floor of its own to stand on;
+/// - a fifth Soul outside frame 1 (the bay's -z end) walks to a point on the first sheet's deck: its way is frame 1's
+///   outer ladder. Every row on the way up is on the ladder's line: 0.37 m in front of the frame's rung plane (its
+///   foot, 0.33 m out from its face), between its posts, rising straight up, none a jump; at the beam level it steps in
+///   across the frame onto the deck, and stands there at the deck's height. No row stands it anywhere off the deck;
 /// - it climbs down, and the walk ends on the open ground.
 #[test]
-fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stays_under_it() {
+fn deck_bay_a_soul_climbs_a_frame_up_its_rungs_onto_the_deck() {
     let mut k = Bay::serve("deck-climb", 5);
     k.frame();
+    k.deck();
     let g = k.w.ground;
-    let frame = k.frames[0];
-    // Frame 1's back face is its outer one (it stands at the bay's -z end).
-    let perch = k.places[0][0];
-    let walker = {
-        // #5268 (#5254): a walk whose goal a body cannot stand at ends `walk.stopped-short`. 3.2 m out (0.3 m beyond
-        // the ladder's 1.4 m run from the face) ended 0.7 m short; 3.9 m out is clear.
-        k.walk(&[(4, Bay::at(0, -3_900))], "Soul 5 to the ladder's foot");
-        body_of(&k.w, k.w.souls[4])
-    };
-    assert!(
-        k.fresh(perch, v3(0, 1_800_000, -488_000)).is_some(),
-        "a town built afresh from the served tree stands a body on the standing place"
-    );
+    let deck = k.decks[0];
+    k.walk(&[(4, Bay::at(0, -3_900))], "Soul 5 outside frame 1");
+    let walker = body_of(&k.w, k.w.souls[4]);
     let before = body_ticks(&k.w, walker).len();
-    // The tick the log stands at as the walk is sent: the climb starts no sooner.
-    let sent = last_tick(&k.w);
-    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
-    k.hands[4].send("eden:walk", perch, to);
+    // On the first sheet's deck (s1, 0.612 m north of the bay's middle in -z, 1.219 m deep), 0.3 m in from its north
+    // edge, over the ladder's line.
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(19_000), int(-288_000)]))]);
+    k.hands[4].send("eden:walk", deck, to);
     let got = socket_end(&mut k.hands[4].s);
-    println!("Soul 5 climbs to the 1.8 m standing place: {got:?}");
-    k.ok(got, "the climb ends on the standing place");
-    let rows = body_ticks(&k.w, walker);
-    let (_, on, at) = *rows.last().expect("rows");
-    println!("the body on {} at {at:?}", show(on));
-    assert_eq!(on, perch, "the body stands on the frame's standing place");
-    assert_eq!(at.y, 1_800_000, "at the beam level");
-    // The climb is a track the controller follows a sample a tick, and the body writes its row on the ladder every
-    // tick it moves (FOR-FABLE 8), so its rows rise from the ground to the place, none a jump: the time from its last
-    // row on the ground (or the walk being sent) to its first on the place is at least the rise at the walk's speed
-    // (1.4 m/s), in 50 ms ticks, and no two rows on the way are more than a tick's walk apart in height.
-    let first = rows[before..]
-        .iter()
-        .position(|r| r.1 == perch)
-        .map(|i| before + i)
-        .expect("a row on the standing place");
-    let ground_rows = rows[before..first]
-        .iter()
-        .rposition(|r| r.1 == g && r.2.y == 0)
-        .map(|i| before + i)
-        .expect("a row on the ground before the climb");
-    let (t0, n0, foot) = rows[ground_rows];
-    let t0 = t0.max(sent);
-    let (t1, ..) = rows[first];
-    println!(
-        "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}, {} rows on the ladder",
-        show(n0),
-        first - ground_rows - 1
-    );
-    assert_eq!((n0, foot.y), (g, 0), "it leaves from the ground");
-    assert!(
-        (t1 - t0) * 50_000 * 1_400_000 / 1_000_000 >= 1_800_000,
-        "no jump: {} ticks for a 1.8 m rise",
-        t1 - t0
-    );
-    let up = &rows[ground_rows..=first];
-    assert!(up.len() > 10, "rows on the ladder: {}", up.len() - 2);
-    for w in up[..up.len() - 1].windows(2) {
-        assert!(
-            (w[1].2.y - w[0].2.y).abs() <= 70_000,
-            "no jump between rows on the ladder: {w:?}"
+    k.ok(got, "Soul 5 climbs frame 1 onto the deck");
+    let rows = rows_in_bay(&k, walker, before);
+    for r in &rows {
+        println!(
+            "climb row: tick {} on {} at {:?} mm",
+            r.0,
+            show(r.1),
+            [r.2.x / 1000, r.2.y / 1000, r.2.z / 1000]
         );
     }
-
-    // A second step, off the place's outer edge (0.9 m from the face), is refused.
-    let off = BTreeMap::from([(
-        1,
-        Value::Array(vec![int(0), int(1_800_000), int(-1_300_000)]),
-    )]);
-    k.hands[4].send("eden:walk", perch, off);
-    let got = socket_end(&mut k.hands[4].s);
-    println!("Soul 5 steps off the edge: {got:?}");
-    assert_eq!(
-        got.kind, 2,
-        "a step off the standing place's edge is refused: {got:?}"
-    );
-    assert_eq!(body_on(&k.w, walker).0, perch, "the body where it was");
-
-    // Lowering the frame under it is refused.
-    k.walk(
-        &[(0, Bay::at(1_060, -1_448)), (1, Bay::at(-1_060, -1_448))],
-        "Souls 1 and 2 beside frame 1's edges",
-    );
-    let c = k.crew(0, &[1]);
-    let got = k.act(0, "part:unseat", c, frame);
-    refused_as(&got, "part.stood-on", "frame 1 lowered with Soul 5 on it");
-    assert!(
-        got.detail.contains(&show(walker)),
-        "names the body: {got:?}"
-    );
-    assert_eq!(where_is(&k.w, frame).0, Some(k.bay), "the frame stays");
-    k.leave(0, c);
-    k.leave(1, c);
+    let (_, on, at) = *rows.last().expect("rows");
+    assert_eq!((on, at.y), (deck, 2_010_000), "on the deck, at its top");
+    // The ladder's line: frame 1's outer face is 38 mm out from its rung plane (z -1448 in the bay), its foot 330 mm
+    // further; its posts' inner faces 534 mm either side of its middle.
+    let line_z = -1_448_000 - 38_000 - 330_000;
+    let rising: Vec<_> = rows
+        .iter()
+        .filter(|r| r.2.y > 0 && r.2.y < 1_800_000)
+        .collect();
+    assert!(rising.len() > 10, "rows on the rungs: {}", rising.len());
+    for r in &rising {
+        assert!(
+            (r.2.z - line_z).abs() <= 30_000 && r.2.x.abs() <= 534_000,
+            "on the rung line, between the posts: {r:?}"
+        );
+    }
+    for w in rows.windows(2) {
+        assert!((w[1].2.y - w[0].2.y).abs() <= 70_000, "no jump: {w:?}");
+    }
+    // Past the frame's outer face it is at the deck's height, stepping across onto it: never up through its edge.
+    for r in rows
+        .iter()
+        .filter(|r| r.2.y > 0 && r.2.z > -1_448_000 - 38_000)
+    {
+        assert!(
+            r.2.y >= 2_009_000,
+            "across the frame at the deck's height: {r:?}"
+        );
+    }
+    // Up off the ground, a row is on the rung line, stepping in from it at the top, or on the deck: never beside the
+    // frame on nothing.
+    for r in rows.iter().filter(|r| r.2.y > 0) {
+        assert!(
+            r.1 == deck || r.2.z >= line_z - 30_000,
+            "up off the ground only on the ladder or the deck: {r:?}"
+        );
+    }
 
     // Down again.
     let down = Bay::at(0, -3_900);
     let to = BTreeMap::from([(1, Value::Array(vec![int(down.x), int(0), int(down.z)]))]);
     k.hands[4].send("eden:walk", g, to);
     let got = socket_end(&mut k.hands[4].s);
-    println!("Soul 5 climbs down: {got:?}");
     k.ok(got, "the climb down ends on the ground");
     assert_eq!(body_on(&k.w, walker).0, g, "on the open ground");
 }
@@ -1352,39 +1314,36 @@ fn body_in_ground(w: &Seeded, body: Id) -> Vec3 {
 /// FOR-FABLE 14, a walk to a point on the ground (`walk x,z` in the client: `eden:walk` on the open ground with the
 /// point, its height not read), in a served world by a Soul's intents:
 ///
-/// - Soul 5 climbs frame 1 to its 1.8 m standing place;
-/// - sent to the point on the plan where it stands, it stays on the place: the standing place is the ground there
-///   nearest its own level, not the open ground 1.8 m below;
+/// - Soul 5 climbs frame 1 onto the built deck (N14: a frame has no standing place of its own);
+/// - sent to the point on the plan where it stands, it stays on the deck: the deck is the ground there nearest its
+///   own level, not the open ground 2 m below;
 /// - sent to a point on the open ground 2 m out from the frame's foot, it climbs down by the ordinary planner and
 ///   ends there, on the open ground;
 /// - sent to a point with no ground under it (far off the world's ground), it is refused `walk.no-ground-there`,
 ///   which says so, and stays where it is.
 #[test]
-fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m_from_its_foot() {
+fn deck_bay_a_soul_on_the_deck_walks_to_a_point_on_the_ground_2_m_from_a_frames_foot() {
     let mut k = Bay::serve("deck-walk-point", 5);
     k.frame();
+    k.deck();
     let g = k.w.ground;
-    let perch = k.places[0][0];
-    k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
+    let deck = k.decks[0];
+    k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 outside frame 1");
     let walker = body_of(&k.w, k.w.souls[4]);
-    let up = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
-    k.hands[4].send("eden:walk", perch, up);
+    let up = BTreeMap::from([(1, Value::Array(vec![int(0), int(19_000), int(-288_000)]))]);
+    k.hands[4].send("eden:walk", deck, up);
     let got = socket_end(&mut k.hands[4].s);
-    k.ok(got, "Soul 5 climbs to the 1.8 m standing place");
-    assert_eq!(body_on(&k.w, walker).0, perch, "on the standing place");
+    k.ok(got, "Soul 5 climbs frame 1 onto the deck");
+    assert_eq!(body_on(&k.w, walker).0, deck, "on the deck");
 
-    // The point on the plan where it stands: the standing place is the level there nearest its own.
+    // The point on the plan where it stands: the deck is the level there nearest its own.
     let here = body_in_ground(&k.w, walker);
     let to = |p: Vec3| BTreeMap::from([(1, Value::Array(vec![int(p.x), int(0), int(p.z)]))]);
     k.hands[4].send("eden:walk", g, to(here));
     let got = socket_end(&mut k.hands[4].s);
     k.ok(got, "Soul 5 sent to the point under it");
     let (on, at) = body_on(&k.w, walker);
-    assert_eq!(
-        (on, at.y),
-        (perch, 1_800_000),
-        "it stays up, on the standing place"
-    );
+    assert_eq!((on, at.y), (deck, 19_000), "it stays up, on the deck");
 
     // Down to a point on the open ground 2 m out from the frame's foot (frame 1 stands at the bay's -z end).
     let foot = Bay::at(0, -1_448 - 2_000);

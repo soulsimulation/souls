@@ -9,9 +9,17 @@
 // part beside its part in the same parent, linked to it and in a slot, sits at its height within half that part's own
 // height, and nothing else in that parent lies over it within a standing body's height (a box, or another part's
 // floor: a sheet's top). A ladder or a stair is a way up only to a place that exists now.
+//
+// A ladder whose top meets no place of its own part (a rack frame's, N14: the frame holds no floor to stand on) leads
+// onto another part's floor in the same parent that its top meets, as the world's ladder lands (`sim::links`
+// `stair_join`): a floor within a step of its top's height, reached across from the top past the face within 1 m,
+// clear of a body's edge. That is the deck when one is built; with none there, the ladder leads nowhere.
 
 /** A standing body's height, µm (`sim::ground::BODY_HIGH`). */
 const BODY_HIGH_UM = 1_800_000;
+/** A step a body takes up or down, µm (`sim::ground::STEP`); how far a flight's top is carried onto a floor, µm
+ *  (`sim::links` `APRON_MAX`); a walking body's clearance, µm (`HUMAN_RADIUS` 280 and `MARGIN` 60). */
+const STEP_UM = 220_000, APRON_UM = 1_000_000, CLEAR_UM = 340_000;
 const ONE = 2 ** 30;
 
 /** `v` turned by quaternion `q` ([w, x, y, z], any scale). */
@@ -92,12 +100,33 @@ export function braced(rows, floor, part, kids = kidsOf(rows)) {
   return true;
 }
 
+/** The floor of another part in `part`'s parent that ladder `l` of `part` (half its depth `half`, mm) lands on at its
+ *  top, or null (see the head of this file): `{floor, part}`, rows. */
+function landing(rows, part, l, half, kids) {
+  const face = l.face === 'back' ? -1 : 1, at = l.at_mm ?? 0, top = l.top_mm * 1000;
+  const t = up(part, [at * 1000, top, face * half * 1000], rows), d = up(part, [at * 1000, top, (face * half - face * 1000) * 1000], rows);
+  for (const s of kids.get(part.parent) ?? []) {
+    if (s.id === part.id) continue;
+    for (const f of kids.get(s.id) ?? []) {
+      if (f.kind !== 'eden:floor') continue;
+      const p = planOf(rows, f, s);
+      if (!p || Math.abs(p.top - t[1]) > STEP_UM) continue;
+      const [x0, z0, x1, z1] = [p.bb[0] + CLEAR_UM, p.bb[1] + CLEAR_UM, p.bb[2] - CLEAR_UM, p.bb[3] - CLEAR_UM];
+      for (let k = 0; k <= 100; k++) {
+        const x = t[0] + ((d[0] - t[0]) * k) / 100, z = t[2] + ((d[2] - t[2]) * k) / 100;
+        if (x >= x0 && x <= x1 && z >= z0 && z <= z1) return { floor: f, part: s };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * The places and ways up of `part` (a row) whose kind's entry is `entry`, that exist now: `{places: [{id, name,
  * point, standing, of}], ways: [{name, kind, to}]}`; null when its entry declares no ways. `point` is the walk's,
  * µm in the floor node's frame.
  */
-export function waysOf(rows, part, entry, kids = kidsOf(rows)) {
+export function waysOf(rows, part, entry, kids = kidsOf(rows), kinds = null) {
   const d = part ? declared(entry) : null;
   if (!d) return null;
   const floors = new Map((kids.get(part.id) ?? []).filter((r) => r.kind === 'eden:floor').map((r) => [r.level, r]));
@@ -114,16 +143,27 @@ export function waysOf(rows, part, entry, kids = kidsOf(rows)) {
   });
   // A way up reaches the place at its top's height nearest its top (import-eden's `level_at`): a ladder's on its face.
   const reach = (top, z) => places.filter((p) => p.top_mm === top).sort((a, b) => Math.abs(a.z - z) - Math.abs(b.z - z))[0];
-  const ways = [];
+  const ways = [], reached = [];
+  const half = (entry.geometry?.bounds_mm?.[2] ?? 0) / 2;
   for (const l of d.ladders) {
     const to = reach(l.top_mm, l.face === 'back' ? -1e9 : 1e9);
     if (to && faceOf(to.z) === l.face) ways.push({ name: `ladder up ${part.name}'s ${l.face} face, to its ${metres(l.top_mm)} standing place`, kind: 'ladder', to: to.id });
+    // A ladder up to a standing place of its own that is not there now leads nowhere (the world's `link-end-off-ground`).
+    else if (!to && part.parent && !d.floors.some((f) => f.top_mm === l.top_mm)) {
+      const on = landing(rows, part, l, half, kids);
+      const place = on && (kinds ? waysOf(rows, on.part, kinds[on.part.entry ?? on.part.kind], kids)?.places.find((p) => p.id === on.floor.id) : null);
+      const named = place ?? (on && { id: on.floor.id, name: `deck of ${on.part.name}`, point: [0, (on.floor.surfaces?.[0]?.[0] ?? 0) * 1000, 0], standing: false, of: on.part.id });
+      if (named) {
+        ways.push({ name: `ladder up ${part.name}'s ${l.face} face, to ${named.name}`, kind: 'ladder', to: named.id });
+        if (!reached.some((p) => p.id === named.id)) reached.push(named);
+      }
+    }
   }
   for (const s of d.stairs) {
     const to = reach(s.top_mm, s.to_mm?.[1] ?? 0);
     if (to) ways.push({ name: `stair up ${part.name}, to ${to.name}`, kind: 'stair', to: to.id });
   }
-  return { places: places.map(({ top_mm: _t, z: _z, ...p }) => p), ways };
+  return { places: places.map(({ top_mm: _t, z: _z, ...p }) => p), ways, reached, ladders: d.ladders.length };
 }
 
 /** Every place of a part in the copy that exists now, by id, with the ways up to it (`ways`: their names). */
@@ -156,9 +196,18 @@ export function rowsWithPlaces(rows, kinds) {
   return out;
 }
 
-/** `object <part>`'s offers for its standing places: `climb to <place>`, sent as a walk to the place. */
+/** `object <part>`'s offers for its standing places and the places its ladders lead onto (a frame's: the deck):
+ *  `climb to <place>`, sent as a walk to the place. */
 export function climbOffers(w) {
-  return (w?.places ?? []).filter((p) => p.standing).map((p) => ({ name: `climb to ${p.name}`, act: `walk:${p.id}`, place: p.id, usage: `act ${p.id}` }));
+  return [...(w?.places ?? []).filter((p) => p.standing), ...(w?.reached ?? [])].map((p) => ({ name: `climb to ${p.name}`, act: `walk:${p.id}`, place: p.id, usage: `act ${p.id}` }));
+}
+
+/** Why `object <part> climb ...` is refused when the part has ladders and nothing to stand on at their tops (N14: a
+ *  frame with no deck built on it), or null. */
+export function nothingToStandOn(w, part) {
+  return w?.ladders && !climbOffers(w).length
+    ? { ok: false, code: 'climb.nothing-to-stand-on', detail: `${part} has a ladder up, but nothing to stand on at its top: a frame is climbed onto a deck built on it` }
+    : null;
 }
 
 /** `object <part> climb to <place id | its name>` (the words as one offer, or `climb` then `to ...`): the offer it

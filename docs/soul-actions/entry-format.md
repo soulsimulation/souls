@@ -77,24 +77,27 @@ the floor at its top. A thing whose facts give their own `floors` or `stairs` ke
 
 - `floors`: `[{"top_mm", "size_mm": [x, z], "at_mm": [x, z], "while_joined"}]`, a rectangle `size_mm` about `at_mm` (the
   origin when left out) at height `top_mm`. Like any floor it is cut back at each edge by a body's radius and a margin
-  (341 mm for a standard body), so a place to stand needs about 0.9 m each way (a rack frame's standing place is
-  0.9 m deep and as wide as the frame). Lying within a step of the ground it is ground cover; seated in a bay's slot it
+  (341 mm for a standard body), so a place to stand needs about 0.9 m each way. Lying within a step of the ground it is ground cover; seated in a bay's slot it
   is a floor where it sits; carried it is no floor at all.
 - `"while_joined": true` makes it a standing place. It is ground only while a part joined to the thing, beside it in
   the same parent (a beam beside a frame in its bay), sits at the floor's height in the thing's frame, within half that
   part's own height (its walk boxes'; with none, exactly). It is also ground only while nothing else in that parent
   lies over it within a standing body's height (1.8 m): another part's walk box, or another part's floor (a sheet's
-  top). So a frame's standing place is there while a beam braces the frame at that level, and gone once the beam comes
-  out. One on a frame's inner face, under a deck, is never there. A standing place is declared only 1.8 m or more
+  top). A rack frame declares none (N14): a beam beside it is nothing to stand on, so its ladders lead onto the deck
+  built on it, or nowhere. A standing place is declared only 1.8 m or more
   above the ground or the thing's floor under it, so nobody walks under a floor they cannot fit beneath; a ladder may
   still reach a lower level (a step stood on from the ladder).
 - `stairs`: `[{"from_mm": [x, z], "to_mm": [x, z], "bottom_mm", "top_mm", "width_mm"}]`, a flight from its foot to its
   top. A top with no floor of the thing at its height lands on the floor it meets there (a deck's sheet), as a roof
   stair's does.
 - `ladders`: `[{"face", "at_mm", "bottom_mm", "top_mm", "width_mm", "run_mm"}]`, a ladder up the `front` (+z) or `back`
-  (-z) face. It sits `at_mm` along x (default 0) and runs from `run_mm` out from the face (default 600) to the face,
-  600 mm wide unless `width_mm` says. Its top lands on the floor of the thing nearest it at `top_mm`. It is climbed as
-  any ladder: a track, with free hands.
+  (-z) face. It sits `at_mm` along x (default 0), its foot `run_mm` out from the face (default 600), 600 mm wide unless
+  `width_mm` says. It is climbed up the rungs: straight up at its foot to `top_mm`, then across to the face (N14). Its
+  top lands on the floor of the thing nearest it at `top_mm`; with none there, on another thing's floor its top meets
+  within a step of that height, carried across past the face (a deck built on a rack frame: the 12 ft frame's ladders
+  stand 0.33 m out and reach the 1.8 m beam level, 0.21 m under the deck's top), as a stair's does. With neither, it
+  leads nowhere, and a Soul's client refuses a climb up it as `climb.nothing-to-stand-on`. It is climbed as any
+  ladder: a track, with free hands.
 
 A body on a stair or a ladder is carried along the link's line (FOR-FABLE 8). The tick's record writes its row every
 tick it moves, as a walk's: `[body, pose, [link, along]]`, its place on the line (in the frame of the floor it set out

@@ -397,8 +397,8 @@ fn floors_of(w: &Seeded, part: Id) -> Vec<(Id, i64, bool)> {
 
 /// Lane C: a creator-placed bay is walked as a seeded one is. Its parts bring the floors and the stair and ladder
 /// rows their kinds declare (as the import gives a seeded thing), so after the creator places the whole deck bay in
-/// one batch, a Soul walks from the open ground up the stair onto the first sheet's top, and another climbs frame 1's
-/// ladder to its outer 1.8 m standing place.
+/// one batch, a Soul walks from the open ground up the stair onto the first sheet's top, and another climbs frame 2's
+/// outer ladder onto the second's.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_frame() {
     let mut site = Site::serve_souls("creator-bay-walk", 2).await;
@@ -410,7 +410,7 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let got = site.edit(1, ops).await;
     assert_eq!(got.kind, 1, "the built bay is accepted: {got:?}");
     let part = |k: usize| got.names[&(k as u64 + 1)];
-    let (frame, sheet, _flight) = (part(0), part(11), part(13));
+    let (sheet, _flight) = (part(11), part(13));
     let deck = floors_of(&site.w, sheet);
     let deck = deck
         .iter()
@@ -440,39 +440,49 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[0]));
     assert_eq!((on, p.y), (deck, 19_000), "on the sheet's top");
 
-    // Soul 2 climbs frame 1's ladder to its outer standing place (frame 1 stands at the bay's -z end). The frame's
-    // standing places are its kind's floors 1 and 2, at z -488 and +488 mm in its frame: the outer is the one farther
-    // from the bay's middle.
-    let place_z = |frame_z: i64| {
-        let (copy, _) = served_copy(&site.w);
-        let t = copy.tree();
-        let x = sim::ground::scene::xform_to(t, t.handle(frame).unwrap(), t.handle(g).unwrap())
-            .unwrap();
-        x.point(v3(0, 0, frame_z)).unwrap().z
-    };
-    let (face, level) = match place_z(-488_000) < place_z(488_000) {
-        true => (-488_000, 1),
-        false => (488_000, 2),
-    };
-    let perch = floors_of(&site.w, frame)
-        .into_iter()
-        .find(|f| f.1 == level && f.2)
-        .expect("the outer standing place, ground while joined")
+    // Soul 2 climbs frame 2's outer ladder (frame 2 stands at the bay's +z end) onto the second sheet's deck, 0.3 m in
+    // from its south edge, clear of Soul 1 (N14: a frame has no standing place of its own; its ladder's top lands on
+    // the deck).
+    let deck2 = floors_of(&site.w, part(12))
+        .iter()
+        .find(|f| f.1 == 1)
+        .expect("the second sheet's top, a floor")
         .0;
-    hands[1].walk_to(g, at(0, -3_900));
+    hands[1].walk_to(g, at(0, 3_900));
     let e = socket_end(&mut hands[1].s);
-    assert_eq!(e.kind, 1, "Soul 2 to the ladder's foot: {e:?}");
-    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(face)]))]);
-    hands[1].send("eden:walk", perch, to);
+    assert_eq!(e.kind, 1, "Soul 2 outside frame 2: {e:?}");
+    let climber = body_of(&site.w, site.w.souls[1]);
+    let before = rows_of(&site.w, climber).len();
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(19_000), int(288_000)]))]);
+    hands[1].send("eden:walk", deck2, to);
     let e = socket_end(&mut hands[1].s);
-    println!("Soul 2 climbs frame 1: {e:?}");
-    assert_eq!(e.kind, 1, "the climb ends on the standing place: {e:?}");
+    println!("Soul 2 climbs frame 2 onto the deck: {e:?}");
+    assert_eq!(e.kind, 1, "the climb ends on the deck: {e:?}");
     let (on, p) = body_on(&site.w, body_of(&site.w, site.w.souls[1]));
-    assert_eq!(
-        (on, p.y),
-        (perch, 1_800_000),
-        "on the frame's 1.8 m standing place"
-    );
+    assert_eq!((on, p.y), (deck2, 19_000), "on the second sheet's top");
+    // Its way was frame 2's ladder, not the stair: on the way up it is on the rung line, 0.37 m out from the frame's
+    // rung plane (z +1448 in the bay), between its posts.
+    let (copy, _) = served_copy(&site.w);
+    let t = copy.tree();
+    let gh = t.handle(g).unwrap();
+    let rising: Vec<Vec3> = rows_of(&site.w, climber)[before..]
+        .iter()
+        .map(|(node, p)| {
+            sim::ground::scene::xform_to(t, t.handle(*node).unwrap(), gh)
+                .unwrap()
+                .point(*p)
+                .unwrap()
+        })
+        .filter(|w| w.y > 0 && w.y < 1_800_000)
+        .collect();
+    assert!(rising.len() > 10, "rows on the rungs: {}", rising.len());
+    for w in &rising {
+        let (dx, dz) = (w.x - x * 1000, w.z - (z + 1_448 + 38 + 330) * 1000);
+        assert!(
+            dz.abs() <= 30_000 && dx.abs() <= 534_000,
+            "on frame 2's rung line: {w:?}"
+        );
+    }
 }
 
 /// Lane C: nothing is placed onto a Soul. A stair flight placed on the open ground with a Soul standing in its tread
@@ -526,4 +536,26 @@ async fn a_flight_placed_where_a_soul_stands_in_its_tread_lane_is_refused() {
             .is_empty(),
         "nothing placed"
     );
+}
+
+/// Every row of body `body` in the log, in order: the node it was on and its place there.
+fn rows_of(w: &Seeded, body: Id) -> Vec<(Id, Vec3)> {
+    let mut out = Vec::new();
+    for r in sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+    {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let p = replica::effects::Part::read(&r).unwrap();
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == body {
+                    out.push((pose.frame.node, pose.position));
+                }
+            }
+        }
+    }
+    out
 }
