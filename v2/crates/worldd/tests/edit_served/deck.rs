@@ -758,18 +758,6 @@ impl Bay {
         town.view().stand_near(node, p, 0, None)
     }
 
-    /// EXPERIMENT: the world stopped and served again from its log.
-    fn restart(&mut self) {
-        let socket = self.w.dir.parent().unwrap().join("s");
-        self.hands.clear();
-        let _ = self._s.child.kill();
-        let _ = self._s.child.wait();
-        let _ = std::fs::remove_file(&socket);
-        self._s = serve_with(&self.w, &socket, None);
-        self._s.line("listening ", 120);
-        self.hands = self.w.souls.iter().map(|s| Hand::new(&socket, &self.w, *s)).collect();
-    }
-
     fn ok(&self, got: Got, what: &str) {
         println!("{what}: {got:?}");
         if got.kind != 1 {
@@ -964,14 +952,11 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
         println!("{what}: the body on {} at {:?}", show(at.0), at.1);
         at
     };
-    for l in k._s.lines.try_iter() {
-        if l.contains("planner") || l.contains("stale") || l.contains("not installed") || l.contains("map") {
-            println!("SERVER {l}");
-        }
-    }
-    let (on, at) = up(&mut k, decks[0], v3(0, 19_000, 0), "Soul 5 up onto the first sheet");
+    // Past the stair's top, more than 0.7 m in from the deck's edge: no stopping on a stair.
+    let (on, at) = up(&mut k, decks[0], v3(400_000, 19_000, 0), "Soul 5 up onto the first sheet");
     assert_eq!((on, at.y), (decks[0], 19_000), "on the first sheet's top");
-    let (on, at) = up(&mut k, decks[1], v3(0, 19_000, 200_000), "Soul 5 across to the second sheet");
+    assert!(at.x > 0, "past the stair's top: {at:?}");
+    let (on, at) = up(&mut k, decks[1], v3(400_000, 19_000, 100_000), "Soul 5 across to the second sheet");
     assert_eq!((on, at.y), (decks[1], 19_000), "on the second sheet's top");
 
     // Nothing under it leaves.

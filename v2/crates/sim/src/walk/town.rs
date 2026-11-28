@@ -958,14 +958,6 @@ impl Town {
         crate::commit::off_clock();
         // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
         let ids = changed(base, part);
-        // EXPERIMENT (racks T9): a part that holds a floor of its own, moved, is built whole.
-        let floored = ids.iter().any(|&id| {
-            base.handle(id)
-                .and_then(|h| base.children(h))
-                .unwrap_or(&[])
-                .iter()
-                .any(|&c| base.node(c).is_some_and(|n| replica::world_model::plain(n.kind().as_str()) == crate::ground::scene::FLOOR))
-        });
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -984,12 +976,7 @@ impl Town {
         // its own squares and the same read of its buildings (S13b), each built whole only when it must be.
         let class = |basis: &Basis| -> Result<(Fresh, Basis, Option<&'static str>), String> {
             let mut why = None;
-            let fresh = if floored {
-                why = Some("a part with a floor of its own moved");
-                Fresh::Whole(Box::new(Town::assemble_for(
-                    base, ground, &versions, basis.size, 1,
-                )?))
-            } else if touched.contains(&ground) {
+            let fresh = if touched.contains(&ground) {
                 // The buildings whose floors the part touches besides the open ground (a creator's new building, S13):
                 // read again with the squares cut again, not the whole ground built.
                 let things: Option<BTreeSet<Id>> = touched
@@ -1462,11 +1449,6 @@ impl Town {
         }
         .put(&self.tree, ground, fresh, after, &versions);
         self.versions = versions;
-        for f in &touched {
-            if self.tree.handle(*f).and_then(|h| self.tree.node(h)).is_some_and(|n| replica::world_model::plain(n.kind().as_str()) == crate::ground::scene::FLOOR) {
-                eprintln!("worldd: DEBUG install {}: floor {} on the map {}", "t", show(*f), self.map.has_patch(*f));
-            }
-        }
         // The wet surfaces follow the map's wet pieces (#3225).
         if self.water.built {
             self.water
@@ -2557,6 +2539,15 @@ fn link_passage(
     // A step between two surfaces of one floor (a humped deck's quads, a few centimetres apart) is ground a body walks
     // and stands on, no doorway or stair (#1960).
     if l.kind == Kind::Step && l.nodes[0] == l.nodes[1] {
+        return Lies::Clear;
+    }
+    // So is a step between two things' floors, neither the open ground (racks T9): the seam where two deck sheets meet,
+    // a boat beside a pier.
+    if l.kind == Kind::Step && !l.nodes.contains(&ground) {
+        return Lies::Clear;
+    }
+    // And a ladder's top on a floor its own thing holds (racks T6: a frame's standing place) is where one stands.
+    if l.kind == Kind::Ladder && node != ground && b.floors.contains_key(&node) {
         return Lies::Clear;
     }
     let doorway = l.kind == Kind::Doorway;
