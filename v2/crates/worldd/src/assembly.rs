@@ -635,6 +635,63 @@ pub fn slot_turn(turns: &BTreeMap<(String, u64), i64>, kind: &str, slot: u64) ->
     Quat::from_yaw_mdeg(mdeg).map_err(|e| refusal("part-pose", format!("{e:?}")))
 }
 
+/// A creator's place into a slot that declares a turn ([`slot_turns`], FOR-FABLE 10) seats the thing at it, by the
+/// put's rule: a kind the same either way ([`symmetric_kinds`]) at the turn or the half turn from it, whichever is
+/// nearer the turn the place gives; any other at the turn. Its parent a node of `tree` or one placed earlier in the
+/// batch. A slot that declares none keeps the place's own turn.
+pub fn turned_into_slots(
+    edit: &mut replica::edit::Edit,
+    entries: &replica::rules::json::Value,
+    tree: &Tree,
+) {
+    use replica::edit::{Op, Ref};
+    let turns = slot_turns(entries);
+    if turns.is_empty() {
+        return;
+    }
+    let symmetric = symmetric_kinds(entries);
+    let mut named: BTreeMap<u64, String> = BTreeMap::new();
+    for op in &mut edit.ops {
+        let Op::Place {
+            name,
+            kind,
+            parent,
+            at,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        named.insert(*name, kind.as_str().to_owned());
+        let Some(k) = at.slot else { continue };
+        let of = match parent {
+            Ref::Node(id) => tree
+                .handle(*id)
+                .and_then(|h| tree.node(h))
+                .map(|n| n.kind().as_str().to_owned()),
+            Ref::New(n) => named.get(n).cloned(),
+        };
+        let Some(of) =
+            of.filter(|of| turns.contains_key(&(replica::world_model::plain(of).to_owned(), k)))
+        else {
+            continue;
+        };
+        let Ok(turn) = slot_turn(&turns, &of, k) else {
+            continue;
+        };
+        let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).ok();
+        let back = symmetric.contains(replica::world_model::plain(kind.as_str()))
+            && ax(at.orientation).zip(ax(turn)).is_some_and(|(a, b)| {
+                i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z) < 0
+            });
+        let half = Quat::from_yaw_mdeg(180_000).and_then(|h| turn.then(h));
+        at.orientation = match (back, half) {
+            (true, Ok(h)) => h,
+            _ => turn,
+        };
+    }
+}
+
 impl Assembly {
     pub fn new(header: Header, rules: Rules, structure: Structure) -> Assembly {
         Assembly {

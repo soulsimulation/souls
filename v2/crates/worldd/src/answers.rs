@@ -7895,6 +7895,11 @@ fn edit_checker(
                             buildsafe::with_buildings(&mut e, &entries, &world.kinds)
                                 .and_then(|parts| {
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    crate::assembly::turned_into_slots(
+                                        &mut e,
+                                        &entries,
+                                        copy.tree(),
+                                    );
                                     edit::check(e, &copy, world)
                                 })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))

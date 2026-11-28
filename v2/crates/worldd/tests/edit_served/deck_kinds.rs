@@ -758,3 +758,108 @@ fn deck_slots_that_declare_a_turn_seat_their_frames_turned_90_and_the_half_turn_
         );
     }
 }
+
+/// FOR-FABLE 10, a creator's place into a slot that declares a turn: the frame stand's slot `frame_1` declares
+/// `turn_mdeg: 90000` (its entry, changed for this test). A creator places two stands on the open ground and a rack
+/// upright into each one's `frame_1`: the first given no turn is seated turned 90°, the second given 270° (the half turn
+/// from the slot's; an upright is the same either way) is seated at 270°, as a crew's put would seat them.
+#[test]
+fn deck_a_creators_place_into_a_slot_that_declares_a_turn_seats_the_part_turned_so() {
+    let d = scratch("deckplace");
+    let (facts, _) = deck_world(&d);
+    let path = d.join("entries/frame_stand.json");
+    let mut stand = json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let json::Value::Obj(top) = &mut stand else {
+        panic!("an entry")
+    };
+    let (_, json::Value::Obj(slots)) = top.iter_mut().find(|(k, _)| k == "slots").unwrap() else {
+        panic!("its slots")
+    };
+    let (_, json::Value::Obj(first)) = slots.iter_mut().find(|(k, _)| k == "frame_1").unwrap()
+    else {
+        panic!("frame_1")
+    };
+    first.push(("turn_mdeg".into(), json::Value::Int(90_000)));
+    std::fs::write(&path, stand.to_json()).unwrap();
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        1,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
+    );
+    let (creator_id, creator_actor) = creator(0xd7);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let stand_kind = rules
+        .kinds
+        .keys()
+        .find(|k| k.starts_with("mars:frame_stand@"))
+        .expect("the stand's kind")
+        .clone();
+    for (k, yaw) in [(0, 0), (1, 270_000)] {
+        let got = creator_edit(Op::Place {
+            name: 1,
+            kind: Name::new(&stand_kind).unwrap(),
+            parent: Ref::Node(g),
+            at: Spot {
+                slot: None,
+                position: v3((x - 3_000 + k * 6_000) * 1000, 0, (z + 7_000) * 1000),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: g,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        });
+        assert_eq!(got.kind, 1, "a frame stand commits: {got:?}");
+        let stand = got.names[&1];
+        let mut op = upright(&w, &rules, Some((stand, 1)), 0, 0);
+        let given = Quat::from_yaw_mdeg(yaw).unwrap();
+        if let Op::Place { at, .. } = &mut op {
+            at.orientation = given;
+        }
+        let got = creator_edit(op);
+        assert_eq!(
+            got.kind, 1,
+            "an upright in the stand's frame_1 commits: {got:?}"
+        );
+        let (slot, turn) = yaw_in_slot(&w, got.names[&1]);
+        let want = Quat::from_yaw_mdeg(if yaw == 0 { 90_000 } else { 270_000 }).unwrap();
+        println!(
+            "given {yaw} mdeg: seated in slot {slot:?} turned {:?}",
+            turn.parts()
+        );
+        assert_eq!(slot, Some(1), "in frame_1");
+        assert!(
+            same_turn(turn, want),
+            "given {yaw} mdeg, seated at {:?}",
+            turn.parts()
+        );
+    }
+}
