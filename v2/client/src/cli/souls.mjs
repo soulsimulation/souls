@@ -583,6 +583,8 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
           // 0.133: a walk's end, how far from its target it stood, metres
           ...(r?.receipt?.away_m != null ? { away_m: r.receipt.away_m } : {}),
+          // A2-4: done as near as the crowd allows, the other body nearest its point
+          ...(r?.receipt?.held_off_by ? { held_off_by: r.receipt.held_off_by } : {}),
           // #5063: a look or a point at a thing seen beyond its reach, made from afar: the world's words for it
           ...(r?.receipt?.from_afar ? { from_afar: r.receipt.from_afar } : {}),
           // #5152 follow-up: a sit by kind from the open ground: the seat taken, the place that holds it, how far it was

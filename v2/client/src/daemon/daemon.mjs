@@ -1125,7 +1125,8 @@ function onEntry(e) {
   for (const ev of events) {
     if (ev.name !== MOVE_ENDED || ev.fields?.[7] == null) continue;
     const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
-    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
+    // A2-4: one done as near as the crowd allows names the other body nearest its point (field 11)
+    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]), ...(ev.fields[11] != null ? { by: ev.fields[11] } : {}) }); if (awayEnded.length > 20) awayEnded.shift(); }
   }
   // #5063: an act of mine made from afar (its end's field 8), for that act's receipt (`from_afar`)
   for (const ev of events) {
@@ -2397,6 +2398,7 @@ async function answer(req, conn = null) {
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
+      if (away?.by != null) { const by = rowsOf(copy).get(away.by); got.receipt.held_off_by = by?.name ? `${by.name} (${away.by})` : String(away.by); }
       const far = done ? afar() : null;
       if (far) got.receipt.from_afar = readableDetail(far, rowsOf(copy).values());
       const sat = byKind ? satIn() : null;
