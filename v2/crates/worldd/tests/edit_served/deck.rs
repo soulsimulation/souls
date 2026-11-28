@@ -686,6 +686,9 @@ struct Bay {
     decks: [Id; 2],
     /// Each frame's standing places at 1.8 m, as its kind declares them: its back face's, then its front's.
     places: [[Id; 2]; 2],
+    /// The import's rules and the world's root, for a town built afresh from the served tree (a check).
+    rules: replica::tree::Rules,
+    root: Id,
 }
 
 impl Bay {
@@ -729,11 +732,30 @@ impl Bay {
             flight: n("flight"),
             decks: [n("sheet-1/floor-1"), n("sheet-2/floor-1")],
             places: ["frame-1", "frame-2"].map(|f| [1, 2].map(|l| n(&format!("{f}/floor-{l}")))),
+            rules: im.rules.clone(),
+            root: n("world"),
             w,
             _s: s,
             hands,
             slots,
         }
+    }
+
+    /// Where a body would stand at `p` on `node` on a town built afresh from the served world's tree (a check that
+    /// the world's own ground, kept up as parts move, agrees).
+    fn fresh(&self, node: Id, p: Vec3) -> Option<Vec3> {
+        let (copy, _) = served_copy(&self.w);
+        let tree = copy.tree().clone();
+        let header = import_eden::header(self.root, &self.rules).unwrap();
+        let next = tree.to_state().next;
+        let town = sim::walk::town::Town::new_on(
+            tree,
+            self.w.ground,
+            sim::links::Doors::new(header, self.rules.clone(), next),
+            4,
+        )
+        .unwrap();
+        town.view().stand_near(node, p, 0, None)
     }
 
     fn ok(&self, got: Got, what: &str) {
@@ -910,7 +932,13 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
     // Soul 5 walks up onto the first sheet, then across onto the second.
     k.walk(&[(4, Bay::at(-4_500, STAIR_AT[1]))], "Soul 5 to the flight's foot");
     let walker = body_of(&k.w, k.w.souls[4]);
-    println!("decks {} {}, flight {}", show(decks[0]), show(decks[1]), show(flight));
+    println!(
+        "decks {} {}, flight {}; afresh a body stands on the first at {:?}",
+        show(decks[0]),
+        show(decks[1]),
+        show(flight),
+        k.fresh(decks[0], v3(0, 19_000, 0))
+    );
     let up = |k: &mut Bay, node: Id, p: Vec3, what: &str| {
         let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
         k.hands[4].send("eden:walk", node, to);
@@ -975,6 +1003,7 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
         k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
+    println!("afresh a body stands on the place at {:?}", k.fresh(perch, v3(0, 1_800_000, -488_000)));
     let before = body_rows(&k.w, walker).len();
     let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
     k.hands[4].send("eden:walk", perch, to);
