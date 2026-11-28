@@ -480,20 +480,38 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
     );
 }
 
-/// Lane C: nothing is placed onto a Soul. A stair flight placed into the bay's stair slot while a Soul stands in its
-/// tread lane (between its stringers, where the flight's own walk boxes leave the way open) is refused
-/// `edit.would-bury`, naming the Soul, and nothing is placed.
+/// Lane C: nothing is placed onto a Soul. A stair flight placed on the open ground with a Soul standing in its tread
+/// lane (between its stringers, where the flight's own walk boxes leave the way open) is refused `edit.would-bury`,
+/// naming the Soul, and nothing is placed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_flight_placed_where_a_soul_stands_in_its_tread_lane_is_refused() {
     let mut site = Site::serve_souls("creator-bay-bury", 1).await;
     let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
     let g = site.w.ground;
     let mut hand = Hand::new(&site.socket, &site.w, site.w.souls[0]);
-    // The stair slot's point (`deck_bay.json`: x -2164, z -717 mm from the bay's middle), the middle of its lane.
-    hand.walk_to(g, v3((x - 2_164) * 1000, 0, (z - 717) * 1000));
+    // 4 m west of the bay, the Soul where the flight's lane will be.
+    let at = v3((x - 4_000) * 1000, 0, (z - 717) * 1000);
+    hand.walk_to(g, at);
     let e = socket_end(&mut hand.s);
-    assert_eq!(e.kind, 1, "the Soul to the stair slot: {e:?}");
-    let ops = vec![site.place(1, "mars:stair_flight", "stair")];
+    assert_eq!(e.kind, 1, "the Soul to the place: {e:?}");
+    let body = body_of(&site.w, site.w.souls[0]);
+    let (_, feet) = body_on(&site.w, body);
+    let ops = vec![Op::Place {
+        name: 1,
+        kind: site.kinds["mars:stair_flight"].clone(),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: v3(feet.x + 300_000, 0, feet.z),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    }];
     let got = site.edit(1, ops).await;
     refused_as(
         &got,
