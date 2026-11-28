@@ -175,6 +175,8 @@ export function drawLandmark(input: DirectorInput, recent: readonly string[], ra
 }
 const cell = (p: readonly number[]) => Math.floor(p[0] / PLACE_CELL) + ',' + Math.floor(p[2] / PLACE_CELL);
 
+type TalkScene = { id: string; rawKey: string; members: readonly string[] };
+
 export class WorldDirector {
   /** #2202: seeded once per page load; tests pass a seed. */
   constructor(seed: number = Date.now()) { this.random = rng(seed); }
@@ -194,6 +196,14 @@ export class WorldDirector {
   openingShown = false;
   private banned = new Map<string, number>();
   private cooling = new Map<string, number>();
+  /** Only the preceding inferred-circle partition; explicit threads own their own identities. */
+  private talkScenes: TalkScene[] = [];
+  private nextTalkScene = 0;
+  private talkRaw = new Map<string, string>();
+  /** Separate raw namespaces: an entity named scene:1 must not alias opaque talk:scene:1. */
+  private talkBanned = new Map<string, number>();
+  private talkCooling = new Map<string, number>();
+  private heldTalk: { id: string; rawKey: string } | null = null;
   private recentLandmarks: string[] = [];
   private landmarkRun = 0;
   /** DIRECTOR2: entity → [first seen, last seen] (an arrival is a body first seen after the opening, or back after a while away);
@@ -204,9 +214,56 @@ export class WorldDirector {
   /** DIRECTOR2: a paired gesture lasts 2.5-5 s; when it starts inside the cut window of an unrelated cut it would be over
    *  before the camera may move. It stays a candidate for PAIR_LINGER s after it ends (the two are still face to face). */
   private pairs = new Map<string, { c: SubjectChoice; until: number }>();
-  reset() { this.shown.subject.clear(); this.shown.place.clear(); this.shown.type.clear(); this.noise.clear(); this.motion.clear(); this.pairs.clear(); this.current = null; this.since = -Infinity; this.started = null; this.banned.clear(); this.cooling.clear(); this.recentLandmarks = []; this.landmarkRun = 0; this.seen.clear(); this.eventSeen.clear(); this.lastCut = -Infinity; }
+  reset() { this.shown.subject.clear(); this.shown.place.clear(); this.shown.type.clear(); this.noise.clear(); this.motion.clear(); this.pairs.clear(); this.current = null; this.since = -Infinity; this.started = null; this.banned.clear(); this.cooling.clear(); this.recentLandmarks = []; this.landmarkRun = 0; this.seen.clear(); this.eventSeen.clear(); this.lastCut = -Infinity; this.talkScenes = []; this.nextTalkScene = 0; this.talkRaw.clear(); this.talkBanned.clear(); this.talkCooling.clear(); this.heldTalk = null; }
   /** The solver could only frame this choice small or not at all: leave it alone for a while. */
-  reject(key: string, now: number) { this.banned.set(key, now + BAN_SECONDS); if (this.current?.key === key) { this.since = -Infinity; this.lastCut = -Infinity; } }
+  reject(key: string, now: number) {
+    const until = now + BAN_SECONDS, raw = this.talkRaw.get(key) ?? (this.heldTalk?.id === key ? this.heldTalk.rawKey : undefined);
+    // A downstream solver can reject the still-held choice after its partition disappeared.
+    if (raw !== undefined && !this.talkRaw.has(key)) this.talkBanned.set(raw, Math.max(this.talkBanned.get(raw) ?? -Infinity, until));
+    else this.banned.set(key, until); if (this.current?.key === key) { this.since = -Infinity; this.lastCut = -Infinity; } }
+
+  private normalizeTalk(all: SubjectChoice[]) {
+    const circles = all.filter(c => c.key.startsWith('talk:'));
+    if (!circles.length && !this.talkScenes.length) return;
+    const owners = new Map<string, number>();
+    this.talkScenes.forEach((s, i) => { for (const id of s.members) owners.set(id, i); });
+    const successors = new Map<number, number>();
+    const parents = circles.map(c => {
+      const overlap = new Map<number, number>();
+      for (const id of c.members) { const old = owners.get(id); if (old !== undefined) overlap.set(old, (overlap.get(old) ?? 0) + 1); }
+      const qualifying = [...overlap].filter(([, count]) => count >= 2).map(([i]) => i);
+      for (const i of qualifying) successors.set(i, (successors.get(i) ?? 0) + 1);
+      return qualifying;
+    });
+    const next = circles.map((c, i): TalkScene => {
+      const parent = parents[i], old = parent.length === 1 && successors.get(parent[0]) === 1 ? this.talkScenes[parent[0]] : null;
+      const scene = { id: old?.id ?? 'talk:scene:' + ++this.nextTalkScene, rawKey: c.key, members: c.members };
+      c.key = scene.id;
+      return scene;
+    });
+    const retained = new Set(next.map(s => s.id));
+    for (const s of this.talkScenes) if (!retained.has(s.id)) {
+      for (const [source, aliases] of [[this.banned, this.talkBanned], [this.cooling, this.talkCooling]]) {
+        const until = source.get(s.id);
+        if (until !== undefined) { aliases.set(s.rawKey, Math.max(aliases.get(s.rawKey) ?? -Infinity, until)); source.delete(s.id); }
+      }
+      this.noise.delete(s.id);
+    }
+    // Migrate retired policy first: a replacement born in this same decision must inherit it too.
+    for (const scene of next) for (const [aliases, target] of [[this.talkBanned, this.banned], [this.talkCooling, this.cooling]]) {
+      const until = aliases.get(scene.rawKey);
+      if (until !== undefined) target.set(scene.id, Math.max(target.get(scene.id) ?? -Infinity, until));
+    }
+    this.talkScenes = next;
+    this.talkRaw = new Map(next.map(s => [s.id, s.rawKey]));
+  }
+  private talkAlias(key: string, aliases: Map<string, number>) { const raw = this.talkRaw.get(key); return raw !== undefined && aliases.has(raw); }
+  private isCooling(key: string) { return this.cooling.has(key) || this.talkAlias(key, this.talkCooling); }
+  private rememberTalk() {
+    const key = this.current?.key, raw = key === undefined ? undefined : this.talkRaw.get(key);
+    if (raw !== undefined) this.heldTalk = { id: key!, rawKey: raw };
+    else if (this.heldTalk?.id !== key) this.heldTalk = null;
+  }
 
   private arrivals(input: DirectorInput): Map<string, number> {
     const now = input.now, first = this.seen.size === 0, out = new Map<string, number>();
@@ -227,7 +284,10 @@ export class WorldDirector {
     if (input.landmarks.length && this.started === null) { this.started = this.openingShown ? now - OPENING : now; this.openingShown = false; this.lastCut = -Infinity; }
     for (const [k, until] of this.banned) if (until <= now) this.banned.delete(k);
     for (const [k, until] of this.cooling) if (until <= now) this.cooling.delete(k);
-    const all = candidates({ ...input, arrivals: input.arrivals ?? this.arrivals(input) }).filter(c => !this.banned.has(c.key));
+    for (const aliases of [this.talkBanned, this.talkCooling]) for (const [k, until] of aliases) if (until <= now) aliases.delete(k);
+    const raw = candidates({ ...input, arrivals: input.arrivals ?? this.arrivals(input) });
+    this.normalizeTalk(raw);
+    const all = raw.filter(c => !this.banned.has(c.key) && !this.talkAlias(c.key, this.talkBanned));
     for (const c of all) if (c.key.startsWith('pair:')) this.pairs.set(c.key, { c, until: now + PAIR_LINGER });
     const ids = new Set(input.bodies.map(b => b.id));
     for (const [k, p] of this.pairs) {
@@ -240,11 +300,12 @@ export class WorldDirector {
     const choice = this.decide(input, all);
     // Cut discipline: at most one cut per MIN_CUT seconds (a subject the solver rejected is the only exception).
     if (choice && choice.key !== this.current?.key) {
-      if (this.current && now - this.lastCut < MIN_CUT) { this.mark(this.current, input); return this.current; }
+      if (this.current && now - this.lastCut < MIN_CUT) { this.mark(this.current, input); this.rememberTalk(); return this.current; }
       this.lastCut = now; this.noise.clear();
     }
     if (choice && choice !== this.current) { if (choice.key !== this.current?.key) this.since = now; this.current = choice; }
     if (choice) this.mark(choice, input);
+    this.rememberTalk();
     return choice;
   }
   /** #2202: activity changes and speed of every body, for motion energy. */
@@ -309,7 +370,7 @@ export class WorldDirector {
     const now = input.now;
     const cur = this.current, held = now - this.since;
     const curNow = cur?.kind === 'subjects' ? all.find(c => c.key === cur.key) ?? null : null;
-    const effective = (c: SubjectChoice) => c.score - (this.cooling.has(c.key) ? 3 : 0) + (this.fresh(c, now) ? 4 : 0);
+    const effective = (c: SubjectChoice) => c.score - (this.isCooling(c.key) ? 3 : 0) + (this.fresh(c, now) ? 4 : 0);
     // Something happening: an event (conversation, game, paired gesture, arrival, ride) or a talk; one Soul busy alone is not.
     const happening = (c: SubjectChoice) => EVENT.test(c.key) || c.key.startsWith('talk:') || c.score >= 9;
     if (cur?.kind === 'subjects' && curNow && held >= (cur.phase === 'conversing' ? CONVERSATION_MAX_HOLD : MAX_HOLD)) {
@@ -326,7 +387,7 @@ export class WorldDirector {
     // Opening: an establishing view of the town before the first cut, unless something big is on.
     if (input.landmarks.length && this.started !== null && now - this.started < OPENING && (!best || best.score < 9)) return this.landmark(input, now, true);
     if (cur?.kind === 'subjects') {
-      if (curNow && !this.cooling.has(cur.key)) {
+      if (curNow && !this.isCooling(cur.key)) {
         const better = best && best.key !== cur.key ? effective(best) - effective(curNow) : -Infinity;
         const min = cur.phase === 'conversing' ? CONVERSATION_MIN_HOLD : MIN_HOLD;
         const freshBest = !!best && best.key !== cur.key && this.fresh(best, now);
