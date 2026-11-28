@@ -1084,8 +1084,9 @@ fn many_rounds_in_flight_with_a_connection_dropped_mid_way_resume_and_copy_each_
         .collect();
     let mut w = Made::default();
     w.set(&Node(9_999_999, rooms));
+    // One request of 64 at a time, as the daemon asked before.
     let mut alone = Copy::default();
-    let one = alone.sync(&[world_id(0)], &mut w).unwrap();
+    let one = windowed(&mut alone, &mut w, 1, 0, None, &mut Default::default()).unwrap();
     whole(&alone, one.held);
 
     for (seed, cut) in [(1, 7), (2, 30), (3, 1), (4, 40)] {
@@ -1127,8 +1128,5 @@ fn many_rounds_in_flight_with_a_connection_dropped_mid_way_resume_and_copy_each_
         assert_eq!((again.fetched, again.reused, again.rounds), (0, 0, 1));
     }
     assert!(one.rounds > 60, "one at a time: {} rounds", one.rounds);
-    assert_eq!(
-        one.in_flight, 1,
-        "the library's own sync asks one at a time"
-    );
+    assert_eq!(one.in_flight, 1);
 }
