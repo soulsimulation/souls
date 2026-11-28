@@ -149,24 +149,25 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
         ));
     }
     // The import's numbers, 1 to 27, are a thing's own facts: 27 names the entry a thing borrows, and every reader of a
-    // thing's amounts or kind takes it for that (`sim::forms::amounts`, `worldd::needs`).
+    // thing's amounts or kind takes it for that (`sim::forms::amounts`, `worldd::needs`). A number past a u64 is refused
+    // too: the kind's loader would wrap it onto one of them.
     if let Some((field, n)) = entry
         .get("state")
         .and_then(Json::obj)
         .unwrap_or(&[])
         .iter()
         .find_map(|(k, v)| match v.get("n") {
-            Some(Json::Int(n)) => u64::try_from(*n)
-                .ok()
-                .filter(|n| *n < crate::fields::ENTRY_FIELDS.start)
-                .map(|n| (k, n)),
+            Some(Json::Int(n)) => match u64::try_from(*n) {
+                Ok(m) if m >= crate::fields::ENTRY_FIELDS.start => None,
+                _ => Some((k, *n)),
+            },
             _ => None,
         })
     {
         return Err((
             "kind.field-reserved",
             format!(
-                "state field {field} takes n {n}, one of the import's: number it from {} to {}",
+                "state field {field} takes n {n}, not a number a kind may take: number it from {} to {}",
                 crate::fields::ENTRY_FIELDS.start,
                 crate::fields::ENTRY_FIELDS.end - 1
             ),

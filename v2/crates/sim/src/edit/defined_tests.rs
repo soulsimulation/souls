@@ -314,8 +314,17 @@ fn each_check_at_commit_refuses_by_name() {
         );
     }
     // kind.field-reserved: a state field numbered like one the engine keeps on things (the marks, a tint), or like one
-    // of the import's (27 names the entry a thing borrows).
-    for n in [143, 144, 145, 27, 1, 0] {
+    // of the import's (27 names the entry a thing borrows), or past a u64.
+    for n in [
+        "143",
+        "144",
+        "145",
+        "27",
+        "1",
+        "0",
+        "-1",
+        "18446744073709551643",
+    ] {
         let r = format!(
             r#"{{"format":"souls-entry/1","kind":"gene:x","owner":"thing","state":{{"hue":{{"n":{n},"type":"int","default":0}}}}}}"#
         );
