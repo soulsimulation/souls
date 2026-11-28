@@ -2,6 +2,7 @@
 //! into that slot makes (`worldd::edit_joins`), so one batch that places the camp's deck kinds in the order a crew
 //! builds them (frames, beams, joists, sheets, the stair) is accepted, each part joined as a put joins it, and one that
 //! places a beam before the frames is refused `support.none`, naming the beam's operation, its kind and its slot.
+use super::deck::refused_as;
 use super::*;
 use std::collections::BTreeSet;
 
