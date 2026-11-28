@@ -1285,6 +1285,7 @@ impl Assembly {
     /// where its track has it, written on `tree`, by the put's intent and Soul. A track's last sample is written at its
     /// end ([`Assembly::due`], [`Assembly::returned`]).
     pub fn step(&mut self, tree: &mut Tree, now: Micros) -> Vec<((Id, Id), Vec<Effect>)> {
+        #[allow(clippy::type_complexity)]
         let on: Vec<(Id, (Id, Id), Id, (Vec3, Quat))> = self
             .tracks(now)
             .into_iter()

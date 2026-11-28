@@ -99,6 +99,7 @@ pub struct Raising {
     /// and is seated in it, held. None: stood on the ground at its foot.
     into: Option<(Id, u64, (Vec3, Quat))>,
     /// Its slide into its slot once it stands: from, to, and its track's times.
+    #[allow(clippy::type_complexity)]
     slide: Option<((Vec3, Quat), (Vec3, Quat), Micros, Micros)>,
 }
 
