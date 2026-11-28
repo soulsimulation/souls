@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { placedOf, WorldState } from './world-state.ts';
-import { CarriedParts, bundledEntries, headingAt, sampleAt, type PartNode } from './take-parts.ts';
+import { CarriedParts, bundledEntries, sampleAt, type PartNode } from './take-parts.ts';
 import { kindDef } from './creator-kinds.ts';
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000;
@@ -25,14 +25,14 @@ test('a carried load is where its carry\'s samples have the carry at the time dr
   const { kinds } = fake(), parts = new CarriedParts(kinds);
   parts.receive({ t: 'snapshot', s: { nodes: [place, ground, carry, beam], removed: [] } });
   // the carry walks east 1 m a second, 0 to 4 s
-  const samples = [0, 1, 2, 3, 4].map((k): [string, string, number | null, number, number, number, number] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0]);
+  const samples = [0, 1, 2, 3, 4].map((k): [string, string, number | null, number, number, number, number, [number,number,number,number]] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0, [Q,0,0,0]]);
   parts.receive({ t: 'part', p: { nodes: [], removed: [], samples } });
   const at = (s: number) => { const f = parts.frames(T0 + s * 1e6); const m = new Map([place, ground, carry, beam].map((n) => [n.id, n])); for (const n of f) m.set(n.id, n); return placedOf(m as never, 'b.3')!; };
   assert.deepEqual(at(0).p.map((v) => +v.toFixed(3)), [10, 1, 0]);
   assert.deepEqual(at(2.5).p.map((v) => +v.toFixed(3)), [12.5, 1, 0], 'between the samples around the time drawn');
   assert.deepEqual(at(9).p.map((v) => +v.toFixed(3)), [14, 1, 0], 'past the newest: the newest');
-  // turning north (-z) from 4 s, the carry and its load turn by as much as its way has turned
-  parts.receive({ t: 'part', p: { nodes: [], removed: [], samples: [5, 6].map((k): [string, string, number | null, number, number, number, number] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 14_000_000, 0, -(k - 4) * 1_000_000]) } });
+  // Native orientation turns north (-z), independently of its translation.
+  parts.receive({ t: 'part', p: { nodes: [], removed: [], samples: [5, 6].map((k): [string, string, number | null, number, number, number, number, [number,number,number,number]] => ['c.7', 'g.1', null, T0 + k * 1_000_000, 14_000_000, 0, -(k - 4) * 1_000_000, [Math.round(Math.SQRT1_2*Q),0,Math.round(Math.SQRT1_2*Q),0]]) } });
   assert.ok(Math.abs(at(6).yaw - Math.PI / 2) < 0.01, `a quarter turn, not ${at(6).yaw}`);
   // nothing carried: no frame handed on
   parts.receive({ t: 'part', p: { nodes: [{ ...beam, parent: 'g.1', pos: [14_000_000, 0, -2_000_000] }], removed: [], samples: [] } });
@@ -73,12 +73,11 @@ test('a seated part is drawn in its bay\'s slot; a part with an origin the layer
   assert.deepEqual(parts.frames(0), []);
 });
 
-test('samples between two times are interpolated; the heading is the way of the last 5 cm or more', () => {
+test('legacy position-only sampling interpolates without inventing orientation', () => {
   const s = [{ at: 0, frame: 'g', slot: null, p: [0, 0, 0] as [number, number, number] }, { at: 10, frame: 'g', slot: null, p: [1000, 0, 0] as [number, number, number] }];
   assert.deepEqual(sampleAt(s, 5)?.p, [500, 0, 0]);
-  assert.equal(headingAt(s, 10), null, '1 mm is not a direction');
   s.push({ at: 20, frame: 'g', slot: null, p: [0, 0, 100_000] });
-  assert.ok(Math.abs(headingAt(s, 20)! + Math.PI / 2) < 0.02, 'south (+z) is a quarter turn the other way');
+  assert.deepEqual(sampleAt(s, 15)?.p,[500,0,50_000]);
 });
 
 test('W4: a bay placed live (no origin) is defined as its frame, the edges of its bounds, not one box; a stand stays a box', () => {
@@ -146,7 +145,7 @@ test('K5: a carried thing of the captured world moves with its carriers laid fla
   assert.equal(step(0), null, 'at rest where the layer has it');
   // lifted at 0.5 s, laid flat (a quarter turn about z), and carried east 1 m a second from x = 10 m
   const flat: [number, number, number, number] = [Math.round(Math.cos(-Math.PI / 4) * Q), 0, 0, Math.round(Math.sin(-Math.PI / 4) * Q)];
-  const samples = [0, 1, 2, 3, 4].map((k) => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0]);
+  const samples = [0, 1, 2, 3, 4].map((k) => ['c.7', 'g.1', null, T0 + k * 1_000_000, 10_000_000 + k * 1_000_000, 0, 0, [Q,0,0,0]]);
   both({ t: 'part', p: { from: T0, to: T0 + 500_000, nodes: [{ ...frame, parent: 'c.7', pos: [0, 900_000, 0], rot: flat }], removed: [], samples } });
   assert.equal(step(0.2), null, 'not lifted before the time drawn reaches its lift');
   const up = step(2)!;
@@ -181,4 +180,31 @@ test('the construction kinds\' own entries draw their own shapes (looks.shape): 
   const parts = new CarriedParts(kinds, bundledEntries({ u: JSON.parse(new TextDecoder().decode(entry('rack_upright.json'))) }));
   parts.receive({ t: 'snapshot', s: { nodes: [place, ground, node('fa', 'mars:rack_upright@1220eb', 'g.1', [0, 0, 0])], removed: [] } });
   assert.equal(JSON.parse(new TextDecoder().decode(applied.flat()[0].entry)).looks.shape.shapes.length, 5);
+});
+
+// #5134: the load of a generated carry activity stands from the point its crew's own node gives (the world's field 15,
+// read by the workers into `slots`). The source entry `mars:carry` declares a load slot too, but the generated kind has
+// another name and its pin does not bind slot geometry: the page never takes the entry's point for it, nor a zero.
+test('a load in a generated carry activity\'s slot is placed only from the crew node\'s own points, never from the source entry by name', () => {
+  const entries = bundledEntries({
+    c: { format: 'souls-entry/1', kind: 'mars:carry', slots: { load: { admits: 'thing', most: 1, at_mm: [0, 0, 0] } }, geometry: { bounds_mm: [600, 1000, 600] } },
+    m: { format: 'souls-entry/1', kind: 'mars:rack_beam', points: { end_l: {} }, geometry: { bounds_mm: [51, 102, 2743] } },
+  });
+  const crew = node('crew', 'mars:carry_activity@1220ab', 'g.1', [4_000_000, 900_000, 2_000_000]);
+  const load = node('load', 'mars:rack_beam@1220cc', 'crew', [0, 0, -250_000], { slot: 1 });
+  const silent = new CarriedParts(fake().kinds, entries);
+  silent.receive({ t: 'snapshot', s: { nodes: [place, ground, crew, load], removed: [] } });
+  assert.equal(silent.recorded.pose('load', T0), null, 'a crew that gives no points: the load stays unplaced');
+  assert.deepEqual(silent.frames(T0).filter((n) => n.id === 'crew' && n.slots), [], 'and the entry\'s slot is not handed on under the generated kind');
+  const told = new CarriedParts(fake().kinds, entries);
+  told.receive({ t: 'snapshot', s: { nodes: [place, ground, { ...crew, slots: [[1, 0, 0, 0]] }, load], removed: [] } });
+  assert.deepEqual(told.recorded.pose('load', T0)?.p.map((v) => +v.toFixed(3)), [4, 0.9, 1.75], 'the crew\'s place, its point, then the load\'s own');
+  // a point that is not the origin is used as written, not replaced by a zero
+  const off = new CarriedParts(fake().kinds, entries);
+  off.receive({ t: 'snapshot', s: { nodes: [place, ground, { ...crew, slots: [[1, 0, 100, 0]] }, load], removed: [] } });
+  assert.deepEqual(off.recorded.pose('load', T0)?.p.map((v) => +v.toFixed(3)), [4, 1, 1.75]);
+  // a slot the node gives no point for stays unknown
+  const other = new CarriedParts(fake().kinds, entries);
+  other.receive({ t: 'snapshot', s: { nodes: [place, ground, { ...crew, slots: [[2, 0, 0, 0]] }, load], removed: [] } });
+  assert.equal(other.recorded.pose('load', T0), null);
 });

@@ -16,6 +16,7 @@ import { setBuildNodes } from './creator-build.ts';
 import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
 import { oldViews } from './source/scene-offer.ts';
 import { KIND_BOUNDS, KIND_LOOKS_URL, KIND_STATE_URL } from './source/kind-bounds.ts';
+import {setCarryPage,setNativeBodyEntities} from './carry-page.ts';
 import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
@@ -60,7 +61,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     // W2: every content kind's bounds, for a placed thing no library def draws (stream-scene.ts entryLooks)
     const looks = entryLooks(KIND_BOUNDS);
     for (const [k, v] of bundledEntries(import.meta.glob('../../../../content/kinds/construction/*.json', { eager: true }))) looks.set(k, v);
-    const parts = new CarriedParts(kinds, looks);
+    const parts = new CarriedParts(kinds, looks); setCarryPage(parts);
     // a content kind with its own shape draws as it, in its state, once the build's looks file is here (kind-bounds.ts)
     if (KIND_LOOKS_URL) void fetch(KIND_LOOKS_URL).then((r) => (r.ok ? r.json() : null)).then((all: Record<string, unknown> | null) => {
       if (stopped || !all) return;
@@ -101,7 +102,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       const replica = replicaUrl(PAGE_CONFIG?.v2Replica);
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, PAGE_CONFIG);
-      if (past) setV2History(new V2History(past, () => makeHistoryReader(replica), frame, hour));
+      if (past) setV2History(new V2History(past, () => makeHistoryReader(replica), frame, hour, parts));
       // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
       const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
       // #4159: the live stream from the CDN when the launcher names it (stream-cdn.ts), else from this page's origin
@@ -126,6 +127,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     const t = setInterval(() => {
       if (bridge) {
         const v = bridge.view;
+        setNativeBodyEntities(bridge.nativeBodies);
         st.takes = v.takes;
         if (v.takes.chunks.length) arrivalMark('stream-first-take');   // the speed probes: when the page has its first live chunk
         // what the Souls said aloud, and (R3) private turns with their words withheld: one list while neither changes
@@ -162,7 +164,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       st.streamNotice = streamNotice({ failed, reloading: bridge?.view.reloading !== undefined, error: bridge?.view.error ?? null, errorAtParts, errorAt, parts: life.parts, startedAt, lastPartAt: life.lastPartAt, now: performance.now(), catching: !!bridge?.view.catching });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); };
+    return () => { stopped = true; clearInterval(t); setCarryPage(null); setNativeBodyEntities(new Map()); bridge?.stop(); members?.stop(); setV2History(null); setBuildNodes(null); };
   }, [stream]);
   return s.current;
 }
