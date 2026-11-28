@@ -286,3 +286,22 @@ test('page qualification requires actual native hash and verified hand mapping w
  assert.equal(mealBodyReadiness(args).nativeHash,hash);drawn.entities['draw-diner'].state.body.nativeResources=[];assert.equal(mealBodyReadiness(args),null,'unverified/missing companion mapping never passes');drawn.entities['draw-diner'].state.body.nativeResources=resources;
  drawn.entities['draw-cook'].state.body={nativeResources:resources};assert.equal(mealBodyReadiness(args),null,'declared mapping must not leak onto default control');mealBrowserStop();
 }));
+
+
+for(const [value,tag] of [[NaN,'NaN'],[Infinity,'positive Infinity'],[-Infinity,'negative Infinity']])
+ test(`strict public numeric rejection identifies ${tag} without rewriting delivery`,async()=>inPage(async page=>{
+  mealBrowserInstall({bowl:'bowl',bodies:[]});const worker=new page.Worker();let delivered;
+  worker.addEventListener('message',event=>delivered=event.data);
+  const message={t:'part',p:{nodes:[],moves:[{ends:[12,value]}]}};worker.message(message);
+  const result=mealBrowserStop();assert.equal(delivered,message);assert(Object.is(delivered.p.moves[0].ends[1],value));
+  assert.equal(result.messages.length,0);assert.equal(result.failures.length,1);assert.match(result.failures[0],/unsupported public nonfinite number/);
+  assert.deepEqual(result.rejections,[{worker:0,category:'part',path:['p','moves','0','ends','1'],pathTruncated:false,valueType:'number',nonfinite:tag}]);
+  assert.equal(result.retained.records,0);
+ }));
+test('numeric diagnostics distinguish snapshot workers, unusual keys and bounded paths from normal values',async()=>inPage(async page=>{
+ mealBrowserInstall({bowl:'bowl',bodies:[]});const first=new page.Worker(),second=new page.Worker();
+ first.message({t:'part',p:{nodes:[],value:12}});const key='x'.repeat(200);
+ second.message({t:'snapshot',s:{nodes:[],[key]:{['a/b~c']:Infinity}}});
+ const result=mealBrowserStop();assert.equal(result.messages.length,1);assert.equal(result.messages[0].publicMessage.p.value,12);
+ assert.deepEqual(result.rejections[0],{worker:1,category:'snapshot',path:['s','x'.repeat(128),'a/b~c'],pathTruncated:true,valueType:'number',nonfinite:'positive Infinity'});
+}));
