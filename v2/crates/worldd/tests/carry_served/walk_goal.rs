@@ -130,9 +130,10 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
         f.contains_key(&9),
         "the thing the doorway belongs to: {f:?}"
     );
-    // Two more sent to the same goal at once, its nearest place held: each is done, and an end that says it was moved
-    // off the doorway says how far it truly stands from the goal and stands where only that move puts a body; one held
-    // off by the others says so (A2-4), never moved.
+    // Two more sent to the same goal at once, its nearest place held. An end that says it was moved off the doorway
+    // says how far it truly stands from the goal, a body's room from the others, in the doorway's clearance where
+    // only that move puts a body; one the others keep off its goal says so (`walk.stopped-short`, or A2-4's done as
+    // near as the crowd allows), never moved and never stuck.
     let mut more = Vec::new();
     for k in 1..3 {
         more.push(Soul::connect(&url, ids[k], lineage, &tokens[k]).await);
@@ -151,9 +152,9 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
             "another to the doorway: {got:?}, {} mm off; its end {f:?}",
             off / 1000
         );
-        assert!(got.is_ok(), "done: {got:?}");
         match word.as_deref() {
             Some("walk.goal-moved") => {
+                assert!(got.is_ok(), "done: {got:?}");
                 let Some(Value::Uint(mm)) = f.get(&7) else {
                     panic!("how far, field 7: {f:?}")
                 };
@@ -166,10 +167,26 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
                     "moved off the doorway only as far as needed: {end:?}"
                 );
             }
-            Some("done.as-near-as-the-crowd-allows") => {}
+            Some("done.as-near-as-the-crowd-allows") => assert!(got.is_ok(), "done: {got:?}"),
+            Some("walk.stopped-short") => {
+                assert_eq!(got, Err("walk.stopped-short".to_owned()), "refused by name")
+            }
             other => panic!(
-                "a walk to a held doorway goal ends moved or held off by the crowd: {other:?}"
+                "a walk to a held doorway goal ends moved, stopped short or held off by the crowd: {other:?}"
             ),
+        }
+    }
+    // No two bodies stand within a body's room of each other (0.56 m: two radii).
+    let at = stood(&dir);
+    let all: Vec<Vec3> = ids.iter().map(|s| at[&body_of(&dir, *s)]).collect();
+    for a in 0..all.len() {
+        for b in a + 1..all.len() {
+            assert!(
+                gap(all[a], all[b]) >= 560_000,
+                "bodies {a} and {b} stand apart: {:?} {:?}",
+                all[a],
+                all[b]
+            );
         }
     }
     drop(served);
