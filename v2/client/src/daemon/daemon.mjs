@@ -142,14 +142,15 @@
 //   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in
 //   (#4980). One whose frames still arrive while a sync's answer is late is behind, not gone: it stays, says
 //   `gap.why` `behind`, and its acts go on it (#4979: on a link slower than the world's speech, reconnecting only fell
-//   behind again). One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
+//   behind again). Frames heard only in the first second of the sync were already on their way and are no such
+//   sign: a network that stalls then is let go 10 s after the last of them, not found slow. One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
 //   once, and answers say `gap.why` `behind` until its copy is current again (#4979). A `wait` under way is told when
 //   a signed-in socket is lost (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is
 //   current (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by
 //   replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
-//   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
+//   up to SYNC_WINDOW requests in flight (N12), then takes the hashes' version as its cursor and carries on with the stream. It counts as
 //   connected, and sends intents, only once its copy is current.
 // - **Each intent is sent at most once**: its sequence is written to disk before it goes out, and nothing resends
 //   it. An intent sent and not answered by the next sign-in stays `unanswered` in `status`.
@@ -171,6 +172,7 @@ import { stats, transcriptOf } from '../stats/stats.mjs';
 import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, metresFrom, query } from './reads.mjs';
+import { climbNamed, climbOffers, placeAt, placesIn, rowsWithPlaces, waysOf } from '../view/ways.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
@@ -197,7 +199,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
-import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
+import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, pointOf, workLines } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -350,9 +352,14 @@ function markRead(ids) {
   tellRead();
 }
 const copy = new wire.Copy(); // its scope, by hash (R5b)
-// A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
-// Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
+// A sync whose socket received nothing for this long is given up and the socket started again (`awaitAnswer`): it is
+// per answer, not per sync, as an Eden-sized scope (10,000 records, 64 a request) is about 160 requests (#3424).
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
+// N12: records requests a sync keeps in flight. One at a time, Eden's first sync was about 156 round trips (22 s at
+// soul.game's 140 ms); with 16 out, the rounds overlap. 16 of the largest (64 hashes, about 2.6 KB charged each) is
+// 42 KB of the gateway's 64 KiB per agent (`world_link::SYNCS_MOST`), with room for public names beside them; the
+// gateway keeps 2 of them in the world's sync line (`SYNC_TURN`) and the rest in order.
+const SYNC_WINDOW = 16;
 // A subscription not granted by then no longer holds the follow back (a gateway that sends no grant).
 const GRANT_WITHIN = 2_000;
 const syncs = []; // the last syncs: kind, time and R5's counts
@@ -410,6 +417,9 @@ let laggingAt = null; // when the socket, frames still arriving, was found behin
 // SLOW_QUIET with nothing received (#4979), not SYNC_WITHIN (#4980's bound on a link that kept up).
 let slowLink = false;
 const SLOW_QUIET = 60_000;
+// A frame heard within this of a sync's start was on its way before an answer could be late, as on any link: it shows
+// the socket was alive when it asked, not that frames still arrive ahead of a late answer (`awaitAnswer`).
+const IN_FLIGHT = 1_000;
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
@@ -711,7 +721,8 @@ function closeMail(id, state, outcome) {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
+  // settledAt: once what was on its way when the sync began has been heard (`awaitAnswer`).
+  syncing = { n: ++asked, step: 'hashes', out: new Map(), kind, t0: performance.now(), settledAt: Infinity, version: null, waiters: carried.splice(0) };
   forgetTaken(copy); // records an earlier sync took and never finished
   if (cutAt !== null && cutWhy !== 'behind') cutWhy = 'syncing'; // #4979: behind says why until it is current
   awaitAnswer(sock);
@@ -722,17 +733,23 @@ function startSync(sock, kind) {
  * The sync's next answer is due within SYNC_WITHIN of the last frame the socket received, not of the ask (#4979): a
  * socket whose frames keep arriving is alive, only behind (a link slower than what the world sends, the speech it
  * hears included, which is never dropped), and says so (`gap.why` `behind`) instead of reconnecting in a loop, where
- * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980).
+ * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980); frames
+ * heard as the sync began (within IN_FLIGHT of it) were on their way already and do not show it behind.
  */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
+  const mine = syncing;
   const due = () => {
     if (!syncing) return;
     // On a link found slow a single frame can take longer than SYNC_WITHIN to arrive whole (a sync's records at 512
     // B/s), so silence counts only past SLOW_QUIET there; a new socket on it would only start that backlog again.
     const quiet = performance.now() - sock.heardAt, bound = slowLink ? SLOW_QUIET : SYNC_WITHIN;
     if (quiet >= bound) { sock.giveUp('sync: no answer; reconnecting'); return; }
-    if (laggingAt === null) {
+    // Found behind by a frame heard after the sync settled, an answer still to come: its answers come late, or wait
+    // behind other frames. A frame heard before that is no such sign: a network that stalled just after the ask was
+    // found slow by it, and the dead socket kept for SLOW_QUIET with acts written into it (#4980, a daemon test's
+    // failures in CI). Not found behind, the socket is looked at again once it has been silent for SYNC_WITHIN.
+    if (laggingAt === null && (slowLink || sock.heardAt > syncing.settledAt)) {
       laggingAt = performance.now();
       slowLink = true;
       cutAt ??= laggingAt;
@@ -741,18 +758,34 @@ function awaitAnswer(sock) {
     }
     syncing.timer = setTimeout(due, Math.min(bound - quiet, SYNC_WITHIN));
   };
-  syncing.timer = setTimeout(due, SYNC_WITHIN);
+  if (mine.settledAt !== Infinity) { mine.timer = setTimeout(due, SYNC_WITHIN); return; }
+  // Settled: IN_FLIGHT after the sync began, and once what had arrived by then was read (the immediate runs after that
+  // turn's reads, so frames a busy daemon had not yet read are not taken for later ones). The sync's own answers
+  // count: on a link that keeps up each is there at once; on #4979's link (512 B/s) each socket heard its last frame
+  // about 2 s after sign-in, then waited over SYNC_WITHIN for one frame, and settling at each ask reconnected in a loop.
+  const wait = Math.max(0, mine.t0 + IN_FLIGHT - performance.now());
+  mine.timer = setTimeout(() => {
+    if (syncing !== mine) return;
+    setImmediate(() => { if (syncing === mine) mine.settledAt = performance.now(); });
+    mine.timer = setTimeout(due, SYNC_WITHIN - wait);
+  }, wait);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
   if (publicNames.answer(sock, n, refused, bytes)) return;
-  if (!syncing || n !== syncing.n) return; // an answer to a request since given up
+  // An answer to a request since given up is not this sync's.
+  if (!syncing || (syncing.step === 'hashes' ? n !== syncing.n : !syncing.out.has(n))) return;
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
-  if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else { copy.onRecords(bytes); takeRecords(copy, bytes, syncing.asking); } // decoded a round at a time, not at its end
-  syncing.n = ++asked;
-  const next = copy.next(BigInt(syncing.n));
-  if (next.length > 0) { syncing.step = 'records'; syncing.asking = next; awaitAnswer(sock); sock.send(next); return; }
+  if (syncing.step === 'hashes') { syncing.version = copy.onHashes(bytes); syncing.step = 'records'; }
+  else { copy.onRecords(bytes); takeRecords(copy, bytes, syncing.out.get(n)); syncing.out.delete(n); } // decoded a round at a time
+  // N12: up to SYNC_WINDOW records requests in flight; what an answer names below is asked for at once.
+  while (syncing.out.size < SYNC_WINDOW) {
+    const m = ++asked, next = copy.next(BigInt(m));
+    if (next.length === 0) break;
+    syncing.out.set(m, next);
+    sock.send(next);
+  }
+  if (syncing.out.size > 0) { awaitAnswer(sock); return; } // each answer moves the deadline, not only a send
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
   const t = performance.now();
@@ -1103,7 +1136,8 @@ function onEntry(e) {
   for (const ev of events) {
     if (ev.name !== MOVE_ENDED || ev.fields?.[7] == null) continue;
     const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
-    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
+    // A2-4: one done as near as the crowd allows names the other body nearest its point (field 11)
+    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]), ...(ev.fields[11] != null ? { by: ev.fields[11] } : {}) }); if (awayEnded.length > 20) awayEnded.shift(); }
   }
   // #5063: an act of mine made from afar (its end's field 8), for that act's receipt (`from_afar`)
   for (const ev of events) {
@@ -1637,6 +1671,15 @@ function actsOf(words) {
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
     } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    // FOR-FABLE 14: `walk:<x>,<z>` (metres, x east and z south) walks to that point: the world stands the Soul on the
+    // ground there, or the floor there nearest its own level (down a ladder, `walk.no-ground-there` off any)
+    else if (/^walk:/.test(w) && pointOf(w.slice(5))) {
+      rows ??= rowsOf(copy);
+      // The open ground, else (a copy that holds no row of it) the node the Soul's body stands in.
+      const ground = groundIn(rows) ?? own().row?.parent ?? null;
+      if (!ground) throw Object.assign(new Error('no open ground in the copy yet: look first'), { code: 'walk-no-ground' });
+      out.push({ verb: `${NS}:walk`, this: ground, point: pointOf(w.slice(5)) });
+    }
     // #3178: `sit:<kind>` (sit:bench, sit:chair) is any free one of that kind where the Soul is, nearest it
     else if (/^sit:/.test(w) && by(w)) out.push(by(w));
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
@@ -1951,7 +1994,7 @@ async function answer(req, conn = null) {
       const clock = clockOf(copy);
       return {
         clock, worldUs: worldNow(clock),
-        ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
+        ok: true, soul, pid: process.pid, world: seat.world, worldName: seat.worldName ?? null, connected: signedIn, cursor: state.cursor,
         ...(replacedAt !== null ? { replaced: { at: new Date(replacedAt).toISOString(), say: `Another client of this Soul connected (the last to connect wins). This one signs in again at its next command, or by itself once the other has gone (it checks every ${Math.round(REPLACED_RETRY_MS / 60_000) || 1} min).` } } : {}),
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
@@ -1965,7 +2008,7 @@ async function answer(req, conn = null) {
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
       const heard = named(rows, heardSince.splice(0)), mn = meNow(rows);
-      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...mn, souls: soulsAround(rows, mn.metres), work: groupWork(rows, mn.metres), ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const b = brief(rows, { me: ME, places: placesIn(rows, heldKinds()), changes, heard, doing: doingLines(rows, mineIn(rows)), ...mn, souls: soulsAround(rows, mn.metres), work: groupWork(rows, mn.metres), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
       const away = (arrive(), arrival());
@@ -1978,7 +2021,7 @@ async function answer(req, conn = null) {
       // knows now (waiting for them, every find past a world's restart answered stale, `public-names-timeout`, in 2 s+).
       if (!age.stale && ws) publicNames.hydrate(ws, performance.now() + SYNC_WITHIN).catch((e) => log(`public names: ${String(e.message ?? e).slice(0, 160)}`));
       // Nearest first among equal matches, each with its metres from this Soul's body: anywhere in the world, no radius.
-      return closing({ ok: true }, (rows) => find(rows, req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
+      return closing({ ok: true }, (rows) => find(rowsWithPlaces(rows, heldKinds()), req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
         metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id, { placed: true }) ?? undefined, kinds: heldKinds() }), { age });
     }
     case 'wait': {
@@ -2089,10 +2132,18 @@ async function answer(req, conn = null) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
+      // FOR-FABLE 14: a walk to a point goes as parameter 1, [x, 0, z] µm on the open ground; the intent's parameters
+      // are its first act's, so only the first may be one (its fallbacks walk to things).
+      if (keep.slice(1).some((c) => c.point)) return closing({ ok: false, code: 'act-walk-point-first', sent: false, detail: 'walk:<x>,<z> goes first: a fallback walks to a thing (an id), not a point' }, null, { now: true });
+      if (keep[0].point) req.params = { ...(req.params ?? {}), 1: [keep[0].point[0], 0, keep[0].point[1]] };
       // 0.135 G1: a walk's `gait=walk|jog|run` goes as parameter 2, `gait:<name>`; the world refuses any other by name.
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      // A part's place (`../view/ways.mjs`): the walk goes to its floor node with the place's own point, as the engine's
+      // climb test sends it.
+      const place = keep.length === 1 && keep[0].verb === `${NS}:walk` && !keep[0].form && req.params?.[1] === undefined ? placeAt(rowsOf(copy), heldKinds(), keep[0].this) : null;
+      if (place) req.params = { ...(req.params ?? {}), 1: place.point };
       const lasts = repeatsFor(keep[0]);
       const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
       // A plain `act life:join`: while the client's own arrival join is on its way it is that join (one birth), and
@@ -2130,7 +2181,7 @@ async function answer(req, conn = null) {
     case 'upload': return upload(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
-    case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'query': { const rows = rowsWithPlaces(rowsOf(copy), heldKinds()), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
     case 'catalog': return closing(catalog(rowsOf(copy), kindsHeld(join(home, 'kinds'), copy)), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {
@@ -2152,7 +2203,10 @@ async function answer(req, conn = null) {
       if (req.action === undefined) return inspect(req);
       const seen = thingOf(req.this);
       if (!seen.ok) return closing(seen, null, { now: true });
-      const offer = offerNamed(seen.offers, req.action);
+      // `object <frame> climb to <place id | its name>` (`../view/ways.mjs`): a walk to that standing place.
+      const climb = climbNamed(seen.offers, req.action, req.args);
+      if (climb !== undefined) req.args = [];
+      const offer = climb !== undefined ? climb : offerNamed(seen.offers, req.action);
       if (!offer) {
         return closing({ ok: false, code: 'object.unknown-offer', detail: `${req.this} offers no ${req.action}`, did_you_mean: nearestOffers(seen.offers, req.action), offers: seen.offers.map((o) => o.name) }, null, { now: true });
       }
@@ -2368,6 +2422,7 @@ async function answer(req, conn = null) {
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
+      if (away?.by != null) { const by = rowsOf(copy).get(away.by); got.receipt.held_off_by = by?.name ? `${by.name} (${away.by})` : String(away.by); }
       const far = done ? afar() : null;
       if (far) got.receipt.from_afar = readableDetail(far, rowsOf(copy).values());
       const sat = byKind ? satIn() : null;
@@ -2459,7 +2514,9 @@ function thingOf(id) {
   }
   // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
-  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: heldState(kinds).nodes[row.id]?.fields };
+  // A part's ways (`../view/ways.mjs`): its places that exist now, the ways up to them, and a climb to each standing place.
+  const ways = waysOf(rows, row, entry);
+  return { ok: true, row, entry, ways, offers: [...offersOf(row.id, entry, { moving: Boolean(row.moving) }), ...climbOffers(ways)], fields: heldState(kinds).nodes[row.id]?.fields };
 }
 
 /** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */
@@ -2479,14 +2536,16 @@ async function inspect(req) {
   const age = live ? await ageAfter() : null;
   if (live) seen = thingOf(req.this);
   if (!seen.ok) return closing(seen, null, { age });
-  const { row, entry, offers, fields } = seen;
+  const { row, entry, offers, fields, ways } = seen;
   const rows = rowsOf(copy), poses = posesOf(copy);
   const activity = activityCard(rows, row, mineIn(rows)), slots = slotsCard(rows, row, entry, (id) => poses.get(id)?.slot ?? null);
   return closing({
     ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}), ...activity, ...slots,
     ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
     ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
-    ...(fields ? { state: readable(fields) } : {}), ...(row.hours ? { hours: row.hours } : {}), offers,
+    ...(fields ? { state: readable(fields) } : {}), ...(row.hours ? { hours: row.hours } : {}),
+    ...(ways?.places.length ? { places: ways.places.map((p) => ({ id: p.id, name: p.name, walk: `act ${p.id}` })) } : {}),
+    ...(ways?.ways.length ? { ways_up: ways.ways.map((w) => ({ name: w.name, to: w.to })) } : {}), offers,
     ...(entry || activity ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
   }, null, live ? { age } : { now: true });
 }

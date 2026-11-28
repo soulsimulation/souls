@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {WorldDirector,candidates,landmarkPose,MIN_HOLD,MIN_CUT,LANDMARK_SCORE,type DirectorInput,type Landmark} from '../src/WorldDirector.ts';
-import {subjectFraction} from '../src/WorldBroadcast.ts';
+import {WorldBroadcast,subjectFraction} from '../src/WorldBroadcast.ts';
 
 const L:Landmark[]=[{id:'commons',label:'Commons',p:[35,20,35],target:[8,1,0]},{id:'market',label:'Market',p:[83,12,42],target:[70,1,29]}];
 const body=(id:string,x:number,z:number,activity='idle',y=0)=>({id,p:[x,y,z],activity});
@@ -185,4 +185,144 @@ test('#2202 fallback: with nothing eventful on, the town views are a plain shuff
   const all=[1,2,3,4,5,6].map(views);
   for(const v of all){assert.ok(v.every(k=>k.startsWith('landmark:')),v.join());for(let i=1;i<v.length;i++)assert.ok(!v.slice(Math.max(0,i-4),i).includes(v[i]),'none of the last half again: '+v.join());}
   assert.ok(new Set(all.map(v=>v.join())).size>=5,'different orders per page load');
+});
+
+// Inferred circles have continuity only between adjacent decisions, never semantic thread authority.
+const listeners=(ids:string[],x=0)=>ids.map((id,i)=>body(id,x+i%2,i>>1,'listen'));
+const listenInput=(now:number,bodies:ReturnType<typeof body>[]):DirectorInput=>({now,bodies,speaking:new Map(),landmarks:[],arrivals:new Map()});
+const talkState=(d:WorldDirector)=>d as unknown as {
+  talkScenes:{id:string;rawKey:string;members:string[]}[]; talkRaw:Map<string,string>; nextTalkScene:number;
+  talkBanned:Map<string,number>; talkCooling:Map<string,number>; banned:Map<string,number>; cooling:Map<string,number>;
+  noise:Map<string,number>; heldTalk:{id:string;rawKey:string}|null; lastCut:number;
+};
+
+test('inferred circles: anchor departure, join, focus and membership update without a fresh shot age',()=>{
+  const d=new WorldDirector(1),base=listeners(['a','b','c']);
+  const first=d.choose(listenInput(0,base))!;
+  d.choose(listenInput(8,listeners(['a','b','c','d'])));
+  const c=d.choose(listenInput(12,listeners(['b','c','d'])))!;
+  assert.equal(c.key,first.key);assert.equal(d.since,0);assert.equal(talkState(d).lastCut,0);
+  assert.ok(c.kind==='subjects');assert.deepEqual(c.members,['b','c','d']);assert.equal(c.focus,'b');
+  d.choose(listenInput(13,[...listeners(['b','c','d']),body('passer',.5,.5,'walk')]));
+  assert.equal(d.current?.key,first.key);
+  const explicit=new WorldDirector(1),thread=(t:number,ids:string[]):DirectorInput=>({...listenInput(t,listeners(ids)),speaking:new Map(ids.map(id=>[id,{thread:'real-thread',at:t}]))});
+  explicit.choose(thread(0,['a','b','c','d']));assert.equal(explicit.choose(thread(12,['b','c','d']))?.key,'conversation:real-thread');assert.equal(explicit.since,0);
+});
+
+test('inferred circles: split, merge, one-member overlap and reused anchor cannot inherit ambiguous identity',()=>{
+  const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['a','b','c','d'])));const old=talkState(d).talkScenes[0].id;
+  d.choose(listenInput(12,[...listeners(['a','b'],-10),...listeners(['c','d'],10)]));
+  const children=talkState(d).talkScenes.map(s=>s.id);assert.equal(children.length,2);assert.ok(children.every(id=>id!==old));
+  d.choose(listenInput(20,listeners(['a','b','c','d'])));assert.ok(!children.includes(talkState(d).talkScenes[0].id));
+  const before=talkState(d).talkScenes[0].id;d.choose(listenInput(28,listeners(['d','e'])));assert.notEqual(talkState(d).talkScenes[0].id,before);
+  const collision=new WorldDirector(1);collision.choose(listenInput(0,listeners(['a','b','c'])));const continued=collision.current!.key;
+  collision.choose(listenInput(12,[...listeners(['a','x'],30),...listeners(['b','c'])]));
+  const scenes=talkState(collision).talkScenes;
+  assert.equal(scenes.find(s=>s.members.includes('b'))?.id,continued);
+  assert.notEqual(scenes.find(s=>s.members.includes('a'))?.id,continued);
+});
+
+test('inferred circles: unselected identities and refusal/cooling survive reselect and retirement on unchanged deadlines',()=>{
+  const d=new WorldDirector(1),bs=[...listeners(['a','b']),...listeners(['c','d'],30)];
+  d.choose(listenInput(0,bs));const original=talkState(d).talkScenes.map(s=>s.id),selected=d.current!.key;
+  d.reject(selected,1);d.choose(listenInput(1.25,bs));assert.notEqual(d.current?.key,selected);
+  assert.deepEqual(talkState(d).talkScenes.map(s=>s.id),original);
+  assert.equal(talkState(d).banned.get(selected),41);
+  // Cooling follows the same policy clock, including an unselected present scene.
+  talkState(d).cooling.set(selected,31);
+  d.choose(listenInput(2,[]));assert.equal(talkState(d).talkBanned.get('talk:a'),selected===original[0]?41:undefined);
+  const raw=selected===original[0]?'talk:a':'talk:c';assert.equal(talkState(d).talkBanned.get(raw),41);assert.equal(talkState(d).talkCooling.get(raw),31);
+  d.choose(listenInput(3,bs));const reborn=talkState(d).talkScenes.find(s=>s.rawKey===raw)!;assert.notEqual(reborn.id,selected);assert.notEqual(d.current?.key,reborn.id);
+  assert.equal(talkState(d).talkBanned.get(raw),41,'no deadline renewal');
+  d.choose(listenInput(31,bs));assert.equal(talkState(d).talkCooling.size,0);assert.equal(talkState(d).talkBanned.get(raw),41);
+  d.choose(listenInput(41,bs));assert.equal(talkState(d).talkBanned.size,0);
+});
+
+test('inferred circles: missing held choice can be rejected late; raw aliases never collide with opaque identities',()=>{
+  const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['a','b'])));const key=d.current!.key;
+  d.choose(listenInput(.25,[]));assert.equal(d.current?.key,key);assert.equal(talkState(d).talkScenes.length,0);
+  d.reject(key,.5);assert.equal(talkState(d).talkBanned.get('talk:a'),40.5);
+  d.choose(listenInput(.75,listeners(['a','b'])));assert.notEqual(d.current?.key,talkState(d).talkScenes[0].id);
+  assert.equal(talkState(d).talkBanned.get('talk:a'),40.5);
+  d.choose(listenInput(40.5,listeners(['a','b'])));assert.equal(d.current?.key,talkState(d).talkScenes[0].id);
+  const n=new WorldDirector(1);n.choose(listenInput(0,listeners(['a','b'])));const opaque=n.current!.key;
+  n.reject(opaque,1);n.choose(listenInput(2,[]));
+  // Raw talk:scene:1 is a different circle, not a refusal of opaque talk:scene:1.
+  const c=n.choose(listenInput(8,listeners(['scene:1','z'])))!;assert.ok(c.key.startsWith('talk:'));assert.notEqual(c.key,opaque);
+  assert.equal(talkState(n).talkBanned.has('talk:scene:1'),false);
+  n.reset();assert.equal(talkState(n).talkScenes.length,0);assert.equal(talkState(n).talkBanned.size,0);assert.equal(talkState(n).talkCooling.size,0);assert.equal(talkState(n).heldTalk,null);assert.equal(talkState(n).nextTalkScene,0);
+});
+
+test('inferred circles: activity loss expires identity and retired noise; current state stays proportional to present circles',()=>{
+  const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['a','b'])));const first=d.current!.key;
+  d.choose(listenInput(8,[body('a',0,0),body('b',1,0)]));assert.equal(talkState(d).talkScenes.length,0);assert.equal(talkState(d).noise.has(first),false);
+  d.choose(listenInput(16,listeners(['a','b'])));assert.notEqual(d.current?.key,first);
+  for(let i=0;i<200;i++){
+    d.choose(listenInput(20+i*.25,[...listeners(['a','b']),...listeners(['x'+i,'y'+i],30)]));
+    const s=talkState(d);assert.equal(s.talkScenes.length,2);assert.equal(s.talkRaw.size,2);
+    assert.ok([...s.noise.keys()].filter(k=>k.startsWith('talk:')).every(k=>s.talkRaw.has(k)));
+  }
+});
+
+test('inferred-circle continuity reaches the unchanged live Broadcast consumer without resetting Tracker',()=>{
+  const w=new WorldBroadcast(1),scene={bounds:[-100,-100,100,100],levels:[{id:0,y:0,label:'ground'}],surfaces:[],obstacles:[],links:[]};
+  const state=w as unknown as {choice:{key:string;members:string[]};cutAt:number;picker:WorldDirector;tracker:{move:unknown;last:unknown;key:string}};
+  let key='',move:unknown=null;
+  for(let i=0;i<=495;i++){
+    const t=i/60,bs=listeners(t<8?['a','b','c']:['b','c']);
+    const frame=Object.fromEntries(bs.map(b=>[b.id,{...b,yaw:0,state:{}}])),records=Object.fromEntries(bs.map(b=>[b.id,{id:b.id,kind:'human'}]));
+    w.sample(frame as never,records as never,scene as never,i,1/60,390/844,t,1/60,[]);
+    if(i===479){key=state.choice.key;move=state.tracker.move;assert.ok(move);assert.ok(state.tracker.last);}
+    if(i>=480){assert.equal(state.choice.key,key);assert.equal(state.cutAt,0);assert.equal(state.picker.since,0);assert.equal(state.tracker.move,move);assert.ok(state.tracker.last);assert.deepEqual(state.choice.members,['b','c']);}
+  }
+  w.reset();assert.equal(talkState(state.picker).talkScenes.length,0,'existing seek/epoch reset also clears continuity');
+});
+
+test('inferred circles: reappeared raw refusal becomes identity policy before another anchor leaves',()=>{
+  for(const policy of ['banned','cooling'] as const){
+    const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['a','b','c'])));const old=d.current!.key;
+    if(policy==='banned')d.reject(old,1);else talkState(d).cooling.set(old,31);
+    const deadline=policy==='banned'?41:31;
+    d.choose(listenInput(2,[]));d.choose(listenInput(8,listeners(['a','b','c'])));
+    const reborn=talkState(d).talkScenes[0].id;assert.notEqual(reborn,old);assert.equal(talkState(d)[policy].get(reborn),deadline);
+    d.choose(listenInput(9,listeners(['b','c'])));assert.equal(talkState(d).talkScenes[0].id,reborn);assert.equal(talkState(d)[policy].get(reborn),deadline);
+    if(policy==='banned')assert.notEqual(d.current?.key,reborn);
+    d.choose(listenInput(deadline,listeners(['b','c'])));assert.equal(talkState(d)[policy].has(reborn),false);
+  }
+});
+
+
+test('inferred circles: a raw name matching the NEXT opaque ID does not ban a different circle',()=>{
+  const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['scene:2','z'])));d.reject(d.current!.key,1);
+  d.choose(listenInput(2,[]));assert.equal(talkState(d).talkBanned.get('talk:scene:2'),41);
+  const c=d.choose(listenInput(8,listeners(['a','b'])))!;assert.equal(c.key,'talk:scene:2');
+  assert.equal(talkState(d).banned.has(c.key),false,'raw alias is not an opaque key refusal');
+});
+
+test('inferred circles: same-decision replacement inherits retiring refusal before anchor churn',()=>{
+  for(const policy of ['banned','cooling'] as const){
+    const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['a','b'])));const old=d.current!.key;
+    if(policy==='banned')d.reject(old,1);else talkState(d).cooling.set(old,31);
+    d.choose(listenInput(8,listeners(['a','c','d'])));const replacement=talkState(d).talkScenes[0].id;
+    assert.notEqual(replacement,old);assert.equal(talkState(d)[policy].get(replacement),policy==='banned'?41:31);
+    d.choose(listenInput(9,listeners(['c','d'])));assert.equal(talkState(d).talkScenes[0].id,replacement);
+    assert.equal(talkState(d)[policy].get(replacement),policy==='banned'?41:31);
+    if(policy==='banned')assert.notEqual(d.current?.key,replacement);
+  }
+});
+
+test('inferred-circle policy transitions: split/merge inherit only matching raw deadlines, MAX never renews',()=>{
+  for(const policy of ['banned','cooling'] as const){
+    const d=new WorldDirector(1);d.choose(listenInput(0,listeners(['a','b','c','d'])));const old=d.current!.key;
+    talkState(d)[policy].set(old,30);
+    const aliases=policy==='banned'?talkState(d).talkBanned:talkState(d).talkCooling;aliases.set('talk:a',35);
+    d.choose(listenInput(8,[...listeners(['a','b'],-10),...listeners(['c','d'],10)]));
+    const split=talkState(d).talkScenes;assert.ok(split.every(s=>s.id!==old));
+    assert.equal(talkState(d)[policy].get(split.find(s=>s.rawKey==='talk:a')!.id),35);
+    assert.equal(talkState(d)[policy].has(split.find(s=>s.rawKey==='talk:c')!.id),false);
+    d.choose(listenInput(16,listeners(['a','b','c','d'])));const merged=talkState(d).talkScenes[0];
+    assert.ok(!split.some(s=>s.id===merged.id));assert.equal(talkState(d)[policy].get(merged.id),35);
+    d.choose(listenInput(20,listeners(['b','c','d'])));assert.equal(talkState(d).talkScenes[0].id,merged.id);assert.equal(talkState(d)[policy].get(merged.id),35);
+    d.choose(listenInput(35,listeners(['b','c','d'])));assert.equal(talkState(d)[policy].has(merged.id),false);assert.equal(aliases.size,0);
+  }
 });

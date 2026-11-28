@@ -575,56 +575,102 @@ impl Carry {
         encode(&Value::Map(m)).unwrap_or_default()
     }
 
-    /// The carry a checkpoint's seed holds; an empty or unread seed carries nothing (a checkpoint from before K18c).
-    fn read(seed: &[u8]) -> Option<Carry> {
-        let Value::Map(m) = decode(seed).ok()?.value else {
-            return None;
+    /// The carry a checkpoint's seed holds. A seed that is not a map is no carry (`None`): an empty one (a checkpoint
+    /// from before K18c) or a fork's random seed (`sim::checkpoint::fork`). A carry is read whole or refused
+    /// (`checkpoint-carry`): a key this build does not read, a field of another type, or a row in a shape it does not
+    /// read is never dropped. A build put back after a newer one would otherwise restart the world from part of what
+    /// the newer one kept, and checkpoint it again without the rest (#5211: Eden's terrain went that way). Fields 4
+    /// to 7 may be absent, as in a carry from before each was added. A body's row in a known shape whose id or pose
+    /// its own reader refuses is passed over, as before: the body is still in the tree.
+    fn read(seed: &[u8]) -> R<Option<Carry>> {
+        fn bad(what: String) -> Refusal {
+            Refusal {
+                name: "checkpoint-carry",
+                detail: what,
+            }
+        }
+        fn rows(m: &BTreeMap<u64, Value>, k: u64) -> R<&[Value]> {
+            match m.get(&k) {
+                None => Ok(&[]),
+                Some(Value::Array(rows)) => Ok(rows),
+                Some(_) => Err(bad(format!("the carry's field {k} is not a list"))),
+            }
+        }
+        fn uint(m: &BTreeMap<u64, Value>, k: u64) -> R<Option<u64>> {
+            match m.get(&k) {
+                None => Ok(None),
+                Some(Value::Uint(n)) => Ok(Some(*n)),
+                Some(_) => Err(bad(format!(
+                    "the carry's field {k} is not an unsigned integer"
+                ))),
+            }
+        }
+        let Ok(Value::Map(m)) = decode(seed).map(|d| d.value) else {
+            return Ok(None);
         };
+        if let Some(k) = m.keys().find(|k| !(1..=7).contains(*k)) {
+            return Err(bad(format!(
+                "the carry holds key {k}, which this build does not read"
+            )));
+        }
         let mut c = Carry {
             tick: -1,
             ..Carry::default()
         };
-        if let Some(Value::Array(rows)) = m.get(&1) {
-            for r in rows {
-                let Value::Array(r) = r else { continue };
-                let [Value::Bytes(a), Value::Uint(last), Value::Array(kept)] = r.as_slice() else {
-                    continue;
-                };
-                let kept = kept
-                    .iter()
-                    .filter_map(|k| match k {
-                        Value::Array(p) => match p.as_slice() {
-                            [Value::Uint(s), Value::Bytes(f)] => Some((*s, f.clone())),
-                            _ => None,
-                        },
-                        _ => None,
-                    })
-                    .collect();
-                c.sequences.push((a.clone(), *last, kept));
+        for r in rows(&m, 1)? {
+            let shape =
+                || bad("a kept answers row is not [actor, last, [[sequence, frame], ...]]".into());
+            let Value::Array(r) = r else {
+                return Err(shape());
+            };
+            let [Value::Bytes(a), Value::Uint(last), Value::Array(kept)] = r.as_slice() else {
+                return Err(shape());
+            };
+            let kept = kept
+                .iter()
+                .map(|k| match k {
+                    Value::Array(p) => match p.as_slice() {
+                        [Value::Uint(s), Value::Bytes(f)] => Ok((*s, f.clone())),
+                        _ => Err(shape()),
+                    },
+                    _ => Err(shape()),
+                })
+                .collect::<R<Vec<_>>>()?;
+            c.sequences.push((a.clone(), *last, kept));
+        }
+        c.next_intent = uint(&m, 2)?.unwrap_or(0);
+        for r in rows(&m, 3)? {
+            // `bodies::row`: `[body, pose]`, or `[body, pose, stance]` with a stance this build knows.
+            let known = match r {
+                Value::Array(p) => {
+                    p.len() == 2 || (p.len() == 3 && matches!(p[2], Value::Uint(1..=3)))
+                }
+                _ => false,
+            };
+            if !known {
+                return Err(bad(
+                    "a body's row is not [body, pose] or [body, pose, stance 1 to 3]".into(),
+                ));
             }
-        }
-        if let Some(Value::Uint(n)) = m.get(&2) {
-            c.next_intent = *n;
-        }
-        if let Some(Value::Array(rows)) = m.get(&3) {
-            for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+            if let Some((id, pose, stance)) = bodies::read_row(r) {
                 c.placed.insert(id, (pose, stance));
             }
         }
-        if let Some(Value::Uint(t)) = m.get(&4) {
-            c.tick = i64::try_from(*t).unwrap_or(i64::MAX);
+        if let Some(t) = uint(&m, 4)? {
+            c.tick = i64::try_from(t).unwrap_or(i64::MAX);
         }
-        if let Some(Value::Array(rows)) = m.get(&5) {
-            c.orders = rows.clone();
-        }
-        if let Some(Value::Array(rows)) = m.get(&6) {
-            c.wind = rows.clone();
-        }
-        if let Some(Value::Uint(t)) = m.get(&7) {
-            c.wind_since = i64::try_from(*t).ok();
-        }
-        Some(c)
+        c.orders = rows(&m, 5)?.to_vec();
+        c.wind = rows(&m, 6)?.to_vec();
+        c.wind_since = uint(&m, 7)?.and_then(|t| i64::try_from(t).ok());
+        Ok(Some(c))
     }
+}
+
+/// The newest checkpoint in `dir` that this build reads whole: its records ([`checkpoint::restore`]) and its carry
+/// ([`Carry::read`]). One whose carry is refused is passed over for the one before, like one whose record is. Every
+/// reader of a served world's checkpoints takes them through here, so each starts from the same one.
+pub fn restore(dir: &std::path::Path) -> R<Option<checkpoint::Restored>> {
+    checkpoint::restore_checked(dir, &|seed| Carry::read(seed).map(|_| ()))
 }
 
 /// The wind-down's records and the Souls' acts reduced to what its resume reads (S6): each body's last record of the
@@ -691,6 +737,7 @@ pub struct Config {
     /// The tick's length (K7: the loop runs at this rate).
     pub tick: Duration,
     /// The longest an act stays open, from its arrival, when its expiry is later.
+    /// A release's rehearsal waits this long for the last fed intents (`supervisor::deploy::ACT_WITHIN`).
     pub deadline: Micros,
     pub checkers: usize,
     /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
@@ -1381,8 +1428,12 @@ struct Clock {
     overdue: BTreeSet<Id>,
     /// How far from its target the walk being ended stood, mm, for its end's field 7 ([`Clock::note_away`]).
     away_next: Option<u64>,
+    /// The passage a walk's goal was moved off, for the next note (fields 9 and 10, #5254).
+    passage_next: Option<(Id, sim::links::Kind)>,
     /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
     words_next: Option<String>,
+    /// The other body nearest a crowded walk's point, for the next note (field 11, A2-4).
+    held_next: Option<Id>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1493,7 +1544,18 @@ struct EditQueue {
     offered: std::cell::Cell<u64>,
     /// Lockstep, in a world with bodies: the tick running (or last run, between ticks). `None` otherwise.
     running: Option<std::cell::Cell<u64>>,
+    /// The edits on the checker's thread, waiting or being checked (#5216): at most [`EDITS_WAITING_MOST`].
+    waiting: std::cell::Cell<usize>,
 }
+
+/// The most creator's edits that may be on the edit checker's thread at once, waiting or being checked (#5216). The
+/// checker is one thread, and an act is kept open [`Config::deadline`] (10 s): a longer line could not all be
+/// answered in time when one check is slow, and each would end `act.timed-out` only after its 10 s. An edit sent
+/// while that many wait is refused at once, by [`EDIT_BUSY`], and is sent again. `edit_check` in `health.json` has the
+/// line's length, this limit and the edits refused by it.
+const EDITS_WAITING_MOST: usize = 8;
+/// An edit sent while [`EDITS_WAITING_MOST`] edits are on the checker's thread (#5216).
+const EDIT_BUSY: &str = "edit.checker-busy";
 
 impl Drop for EditQueue {
     fn drop(&mut self) {
@@ -1516,9 +1578,31 @@ impl EditQueue {
             .running
             .as_ref()
             .map_or(self.offered.get(), std::cell::Cell::get);
-        self.tx
-            .send((need, job))
-            .map_err(|e| std::sync::mpsc::SendError(e.0.1))
+        // Each of these comes back as one `Event::Edited` ([`EditQueue::back`]).
+        let edit = matches!(job, CheckJob::Edit(..) | CheckJob::Reprepare(_));
+        self.tx.send((need, job)).map_err(|e| {
+            // The checker's thread is gone: nothing waits on it, and the next edit is refused by that name, not
+            // by the line's (review).
+            self.waiting.set(0);
+            measures::EDIT_CHECKS.waiting(0, EDITS_WAITING_MOST);
+            std::sync::mpsc::SendError(e.0.1)
+        })?;
+        if edit {
+            self.waiting.set(self.waiting.get() + 1);
+            measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
+        }
+        Ok(())
+    }
+
+    /// An edit's check came back from the checker's thread.
+    fn back(&self) {
+        self.waiting.set(self.waiting.get().saturating_sub(1));
+        measures::EDIT_CHECKS.waiting(self.waiting.get(), EDITS_WAITING_MOST);
+    }
+
+    /// Whether the checker's thread has as many edits as it may ([`EDITS_WAITING_MOST`]).
+    fn full(&self) -> bool {
+        self.waiting.get() >= EDITS_WAITING_MOST
     }
 }
 
@@ -1870,8 +1954,30 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 pub const TIMED_OUT: &str = "act.timed-out";
 /// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
 pub const STOPPED: &str = "act.stopped";
-/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
+/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done. Its
+/// end says how far from its point it stood (field 7, mm) and the other body nearest that point there (field 11).
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
+/// A walk done at a place moved off the point it was sent to (#5254): that point in a doorway's or a stair's clearance,
+/// moved out to a walker's clearance of it (A3: [`sim::spots::CLEAR`], 0.7 m, round its ends, half that past its width
+/// along its line), however far that is; or
+/// off the ground a body stands on, within a walker's goal tolerance of it ([`crate::bodies::STOPPED_SHORT_MM`]). A walk
+/// held off its point by a crowd is [`DONE_SHORT`] (A2-4) instead. Said as its end's word, with how far (field 7, mm)
+/// and, for a passage, the thing it belongs to (field 9) and its kind (field 10: `doorway`, `stairs`, `ramp`, `ladder`
+/// or `step`).
+pub const GOAL_MOVED: &str = "walk.goal-moved";
+
+/// A passage's kind as a walk's end names it (field 10, [`GOAL_MOVED`]).
+fn passage_word(kind: sim::links::Kind) -> &'static str {
+    use sim::links::Kind;
+    match kind {
+        Kind::Doorway => "doorway",
+        Kind::Stairs => "stairs",
+        Kind::Ramp => "ramp",
+        Kind::Ladder => "ladder",
+        Kind::Step => "step",
+        _ => "passage",
+    }
+}
 
 /// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
 /// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
@@ -2736,6 +2842,18 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
+            // #5216: the checker's line has its own limit; past it an edit is refused by name, never left to wait.
+            Taken::Edit(_) if self.edits.as_ref().is_some_and(EditQueue::full) => {
+                measures::EDIT_CHECKS.refused();
+                let r = Refused {
+                    op: None,
+                    name: EDIT_BUSY,
+                    detail: format!(
+                        "{EDITS_WAITING_MOST} edits are waiting to be checked: send it again"
+                    ),
+                };
+                self.end(id, |c| c.edit_refusal(actor, sequence, &r));
+            }
             Taken::Edit(e) => match reserve_edit(
                 &e,
                 self.lineage,
@@ -3016,13 +3134,16 @@ impl Clock {
                         })
                     })
             });
-            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
-            if r.step == crate::assembly::Step::Retired
+            // A part whose walkers' maps went stale before its commit is prepared again from the world as it is then
+            // (0.135 A2: a retiring holder's set-down, its body leaving; #5067: a raise's or a seating's end, bodies
+            // walking meanwhile), never refused for it: at most `RETRIES` times, a raise's or a set-in's end for the
+            // world's seat wait (`Engine::retry`, FOR-FABLE 15).
+            if r.step != crate::assembly::Step::Taken
                 && done
                     .as_ref()
                     .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
                 && let Some(e) = self.engine.as_mut()
-                && e.retry(r.clone())
+                && e.retry(r.clone(), now, self.replica.tree())
             {
                 continue;
             }
@@ -4198,6 +4319,13 @@ impl Clock {
         if let Some(w) = self.words_next.take() {
             fields.insert(8, Value::Bytes(w.into_bytes()));
         }
+        if let Some(by) = self.held_next.take() {
+            fields.insert(11, by.to_value());
+        }
+        if let Some((thing, kind)) = self.passage_next.take() {
+            fields.insert(9, thing.to_value());
+            fields.insert(10, Value::Bytes(passage_word(kind).as_bytes().to_vec()));
+        }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
                 u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
@@ -4768,7 +4896,7 @@ impl Clock {
                 self.replica.tree(),
                 &mut b.runner.controller,
                 &mut b.slots,
-                &b.town.versions,
+                &b.town,
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
@@ -4992,6 +5120,7 @@ impl Clock {
                     self.replica.tree(),
                     &mut b.runner.controller,
                     &mut b.slots,
+                    &b.town,
                     &a,
                     now,
                 ),
@@ -5692,15 +5821,48 @@ impl Clock {
         let short = self.bodies.as_mut().is_some_and(|b| b.short.remove(&id));
         // 0.133: how far from its target a done walk ended, mm, taken however the move ends
         let away = self.bodies.as_mut().and_then(|b| b.away(id));
+        // #5254: a walk to a point that ended short of it, sent again while bodies moved, never answers as arrived.
+        let stopped = self
+            .bodies
+            .as_mut()
+            .and_then(|b| b.stopped_short.remove(&id));
+        // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
+        let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id));
+        let held = self.bodies.as_mut().and_then(|b| b.held_off_by.remove(&id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
             false => how,
         };
+        let stopped_refusal;
+        // A walk held off its goal by a crowd standing at it ends done as near as the crowd allows (A2-4, after being
+        // sent again while the crowd might move); one with no way nearer is a named stop.
+        let (how, said) = match (how, stopped) {
+            (Ok(()), Some((mm, false))) => {
+                stopped_refusal = Refusal {
+                    name: "walk.stopped-short",
+                    detail: format!(
+                        "stopped {mm} mm short of the point it was sent to: no way nearer it that this body can \
+                         walk (ground it cannot stand on, or bodies in the way); next: walk there again, or choose a \
+                         point beside it"
+                    ),
+                };
+                (Err("walk.stopped-short".to_owned()), Some(&stopped_refusal))
+            }
+            (how, _) => (how, said),
+        };
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
-                let done = if short { DONE_SHORT } else { "done" };
+                let done = if let Some((_, why)) = moved {
+                    self.passage_next = why;
+                    GOAL_MOVED
+                } else if short {
+                    self.held_next = held;
+                    DONE_SHORT
+                } else {
+                    "done"
+                };
                 // 0.133: how far from its target the walk ended, mm, as field 7 of its end (a fact, never a label)
                 self.note_away(id, MOVE_ENDED, Some(done), away, now);
                 self.end(id, |c| Answer::Receipt {
@@ -5959,7 +6121,10 @@ impl Clock {
                         Value::Array(
                             moved
                                 .iter()
-                                .map(|(id, p, s)| bodies::row(*id, p, *s))
+                                .map(|(id, p, s, on)| match on {
+                                    Some(on) => bodies::row_on(*id, p, *on),
+                                    None => bodies::row(*id, p, *s),
+                                })
                                 .collect(),
                         ),
                     ),
@@ -6378,10 +6543,16 @@ fn answer_loop<S: Storage + 'static>(
     }
 }
 
-/// What a restart reads back from the log besides the tree: each body's last pose and the last tick logged.
+/// What a restart reads back from the log besides the tree: each body's last pose off a link and the last tick logged.
 fn read_back(part: &Part, placed: &mut Placed, last: &mut Option<i64>) {
     if let Some(Value::Array(rows)) = part.rest.get(&BODIES) {
-        for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+        // A row on a link (FOR-FABLE 8) is where a body was on a stair or a ladder: a restart stands it where its last
+        // row off the link has it.
+        for (id, pose, stance) in rows
+            .iter()
+            .filter(|r| !bodies::on_link(r))
+            .filter_map(bodies::read_row)
+        {
             placed.insert(id, (pose, stance));
         }
     }
@@ -6478,7 +6649,7 @@ pub fn start<S: Storage + 'static>(
             name: "checkpoint-restore-panicked",
             detail: "the checkpoint's reader stopped".into(),
         })??,
-        (Some((dir, _)), None) if dir.exists() => checkpoint::restore(dir)?,
+        (Some((dir, _)), None) if dir.exists() => restore(dir)?,
         _ => None,
     };
     for (name, why) in restored.iter().flat_map(|r| &r.rejected) {
@@ -6524,7 +6695,7 @@ pub fn start<S: Storage + 'static>(
                 );
             }
             world = Replica::restored(world.header().clone(), r.tree, r.root.version.sequence);
-            if let Some(c) = Carry::read(&r.root.seed) {
+            if let Some(c) = Carry::read(&r.root.seed)? {
                 for (actor, last_seq, kept) in c.sequences {
                     sequences.restore(&actor, last_seq, kept);
                 }
@@ -6923,6 +7094,7 @@ pub fn start<S: Storage + 'static>(
                 // Only a world with bodies builds snapshots: in one without, a job never waits (`offered` stays 0).
                 running: (cfg.lockstep && (make.is_some() || make_built.is_some()))
                     .then(|| std::cell::Cell::new(0)),
+                waiting: std::cell::Cell::new(0),
             })
         })
         .transpose()?;
@@ -7044,7 +7216,9 @@ pub fn start<S: Storage + 'static>(
         besides_checked: false,
         overdue: BTreeSet::new(),
         away_next: None,
+        passage_next: None,
         words_next: None,
+        held_next: None,
         edits,
         editing,
         set_down: Vec::new(),
@@ -7223,6 +7397,9 @@ pub fn start<S: Storage + 'static>(
                     }
                     Event::Edited(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
+                        if let Some(q) = &c.edits {
+                            q.back();
+                        }
                         c.edited.push(*k);
                     }
                     Event::Worn(k) => {
@@ -7745,6 +7922,8 @@ fn edit_checker(
                         continue;
                     }
                 };
+                // Where the check's time goes, by stage (#5216): `edit_check` in `health.json`.
+                let stages = measures::EditStages::start();
                 let (snapshot, late) = match walkers.fresh(need, fresh_wait) {
                     Ok(s) => (s, false),
                     Err(s) => (s, true),
@@ -7756,6 +7935,7 @@ fn edit_checker(
                     .max(e.planned);
                 let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
+                stages.end(measures::EDIT_BASIS);
                 let Some(world) = world.as_mut() else {
                     let r = Err(Refused {
                         op: None,
@@ -7789,6 +7969,15 @@ fn edit_checker(
                             buildsafe::with_buildings(&mut e, &entries, &world.kinds)
                                 .and_then(|parts| {
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    crate::assembly::turned_into_slots(
+                                        &mut e,
+                                        &entries,
+                                        copy.tree(),
+                                    );
+                                    // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
+                                    crate::edit_joins::with_joins(
+                                        &mut e, &copy, world, &structure,
+                                    )?;
                                     edit::check(e, &copy, world)
                                 })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
@@ -7799,6 +7988,7 @@ fn edit_checker(
                             detail: "the world's record names no creator".into(),
                         }),
                     };
+                    stages.end(measures::EDIT_CHECK);
                     checked
                         .and_then(|c| {
                             let t = town.on(&copy, ground, false);
@@ -7807,15 +7997,18 @@ fn edit_checker(
                                 arrival_stands(&copy, t, from, set)?;
                             }
                             let known = t.map(|t| Known::of(t));
+                            stages.end(measures::EDIT_TOWN);
                             // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
-                            sim::edit::plan_classes(
+                            let planned = sim::edit::plan_classes(
                                 c,
                                 &copy,
                                 ground,
                                 known.as_ref(),
                                 snapshot.classes.values().copied(),
                                 reserved.clone(),
-                            )
+                            );
+                            stages.end(measures::EDIT_PLAN);
+                            planned
                         })
                         .and_then(|mut p| {
                             let kept = p.take_map();
@@ -7823,6 +8016,9 @@ fn edit_checker(
                                 crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                             let tree = buildsafe::souls(&copy, &world.kinds);
                             let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            // Nothing is placed onto a Soul: not inside a placed thing's bounds (racks, lane C).
+                            buildsafe::bounds_clear(&copy, &p, &entries, &souls, reserved.clone())?;
+                            stages.end(measures::EDIT_PLACES);
                             let maps = source
                                 .map(|source| {
                                     buildsafe::PreparedMaps::prepare_classes(
@@ -7837,6 +8033,16 @@ fn edit_checker(
                                     )
                                 })
                                 .transpose()?;
+                            stages.end(measures::EDIT_MAPS);
+                            if let Some(m) = &maps {
+                                let classes = m.live.whole_classes();
+                                stages.ground(
+                                    m.live.whole() || !classes.is_empty(),
+                                    m.live.why.or_else(|| classes.iter().find_map(|(_, w)| *w)),
+                                    m.live.squares(),
+                                    m.live.buildings(),
+                                );
+                            }
                             Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
                         })
                 }))
@@ -7848,6 +8054,7 @@ fn edit_checker(
                         detail: panic_text(p.as_ref()),
                     })
                 });
+                measures::EDIT_CHECKS.checked(&stages);
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }
@@ -8035,6 +8242,67 @@ fn io(e: std::io::Error) -> Refusal {
 }
 
 #[cfg(test)]
+mod read_back_tests {
+    use super::*;
+    use replica::ids::Scope;
+    use replica::pose::{Frame, Quat, Support};
+
+    /// FOR-FABLE 8: a restart reads no body row on a link. A body's row on the ground, then its rows up a stair (one
+    /// well formed, one not), stand it where the ground row has it.
+    #[test]
+    fn a_restart_stands_a_body_where_its_last_row_off_a_link_has_it() {
+        let id = |n| Id::new(Scope([7; 16]), n).unwrap();
+        let (body, link, ground) = (id(1), id(2), id(3));
+        let foot = Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position: Vec3::new(1_000_000, 0, 2_000_000),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: ground,
+                height: 0,
+            },
+        };
+        let up = Pose {
+            position: Vec3::new(1_500_000, 400_000, 2_000_000),
+            ..foot
+        };
+        let bad = Value::Array(vec![
+            body.to_value(),
+            up.to_value(),
+            Value::Array(vec![Value::Uint(1)]),
+        ]);
+        let rows = vec![
+            bodies::row(body, &foot, None),
+            bodies::row_on(body, &up, (link, 250_000)),
+            bad,
+        ];
+        assert_eq!(bodies::read_link(&rows[1]), Some((link, 250_000)));
+        let v = Value::Map(BTreeMap::from([
+            (1, {
+                let mut h = vec![replica::ids::SHA2_256, 32];
+                h.extend([0; 32]);
+                Value::Bytes(h)
+            }),
+            (2, Value::Array(Vec::new())),
+            (BODIES, Value::Array(rows)),
+            (TICK, Value::Uint(9)),
+        ]));
+        let part = Part::read(&replica::encode::encode(&v).unwrap()).unwrap();
+        let (mut placed, mut last) = (Placed::new(), None);
+        read_back(&part, &mut placed, &mut last);
+        assert_eq!(
+            placed.get(&body),
+            Some(&(foot, None)),
+            "stood at its row off the link"
+        );
+        assert_eq!(last, Some(9));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     //! I4 (#2687): each `aN_` test is one acceptance box (A1 and A2 are the `act-latency` bench).
     use super::*;
@@ -8057,6 +8325,7 @@ mod tests {
             field: 22,
             row: Vec::new(),
             door: None,
+            bare: false,
         };
         let e = Edit {
             intent: id(9),
@@ -8443,11 +8712,26 @@ mod tests {
         let said = Value::Map([(23, Value::Bytes(b"by the well".to_vec()))].into());
         i.parameters.insert(1, said);
         let rx = send(&w, &i);
-        thread::sleep(Duration::from_millis(100));
+        // On the world, not the wall clock (a loaded machine runs fewer 10 ms ticks in a fixed sleep): the words' sync
+        // is held, then the clock runs ten more ticks while it is.
+        let until = Instant::now() + Duration::from_secs(10);
+        let held = || {
+            let d = text.0.lock().unwrap();
+            d.stall_sync.is_some_and(|n| d.syncs >= n)
+        };
+        while !held() {
+            assert!(Instant::now() < until, "the words' sync is asked for");
+            thread::sleep(Duration::from_millis(5));
+        }
         let from = w.beat.read().0;
-        thread::sleep(Duration::from_millis(300));
-        let to = w.beat.read().0;
-        assert!(to >= from + 10, "the clock ticks on: tick {from} to {to}");
+        while w.beat.read().0 < from + 10 {
+            assert!(
+                Instant::now() < until,
+                "the clock ticks on: tick {from} to {}",
+                w.beat.read().0
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
         assert!(
             rx.try_recv().is_err(),
             "no answer before its words are on the disk"
@@ -9319,6 +9603,7 @@ mod tests {
             walkers,
             offered: std::cell::Cell::new(0),
             running: Some(std::cell::Cell::new(5)),
+            waiting: std::cell::Cell::new(0),
         };
         thread::sleep(Duration::from_millis(20));
         drop(queue);
@@ -10217,9 +10502,9 @@ mod standing_order_carry_tests {
         );
         assert_eq!(rebuilt(&reduced), rebuilt(&log));
         let mut carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &[], &reduced);
-        assert_eq!(Carry::read(&carry.to_bytes()).unwrap().wind_since, None);
+        assert_eq!(read_carry(&carry.to_bytes()).wind_since, None);
         carry.wind_since = Some(1_795_000_000_000_000);
-        let back = Carry::read(&carry.to_bytes()).unwrap();
+        let back = read_carry(&carry.to_bytes());
         assert_eq!(back.wind, carry.wind);
         assert_eq!(
             back.wind_since,
@@ -10261,14 +10546,13 @@ mod standing_order_carry_tests {
         );
         let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &active, &[]);
         let bytes = carry.to_bytes();
-        assert_eq!(Carry::read(&bytes).unwrap().orders, carry.orders);
+        assert_eq!(read_carry(&bytes).orders, carry.orders);
         let Value::Map(mut old) = decode(&bytes).unwrap().value else {
             panic!("carry")
         };
         old.remove(&5);
         assert!(
-            Carry::read(&encode(&Value::Map(old)).unwrap())
-                .unwrap()
+            read_carry(&encode(&Value::Map(old)).unwrap())
                 .orders
                 .is_empty(),
             "older carry reads without orders"
@@ -10279,6 +10563,129 @@ mod standing_order_carry_tests {
             vec![b],
             "cancelled order cannot restart"
         );
+    }
+
+    /// A carry is read whole or refused by name, as a node's record is (#5211): a build put back after a newer one
+    /// never restarts a world from part of a carry and checkpoints it again without the rest.
+    #[test]
+    fn a_carry_with_a_key_or_a_row_this_build_does_not_read_is_refused() {
+        let body = Id::new(Scope([0x73; 16]), 3).unwrap();
+        let pose = Pose {
+            frame: Frame {
+                node: body,
+                slot: None,
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        };
+        let mut placed = Placed::new();
+        placed.insert(body, (pose, None));
+        let carry = Carry {
+            sequences: vec![(b"actor".to_vec(), 4, vec![(4, b"frame".to_vec())])],
+            next_intent: 9,
+            placed,
+            tick: 12,
+            orders: Vec::new(),
+            wind: Vec::new(),
+            wind_since: Some(7),
+        };
+        let bytes = carry.to_bytes();
+        assert_eq!(
+            read_carry(&bytes).to_bytes(),
+            bytes,
+            "what this build writes it reads back whole, byte for byte"
+        );
+        let with = |change: &dyn Fn(&mut BTreeMap<u64, Value>)| {
+            let Value::Map(mut m) = decode(&bytes).unwrap().value else {
+                panic!("carry")
+            };
+            change(&mut m);
+            Carry::read(&encode(&Value::Map(m)).unwrap())
+        };
+        let refused = |read: R<Option<Carry>>, what: &str| {
+            let e = read.err().unwrap_or_else(|| panic!("{what} is refused"));
+            assert_eq!(e.name, "checkpoint-carry", "{what}");
+            e.detail
+        };
+        let row = |m: &mut BTreeMap<u64, Value>, field: u64, more: Value| {
+            let Some(Value::Array(rows)) = m.get_mut(&field) else {
+                panic!("rows")
+            };
+            let Value::Array(r) = &mut rows[0] else {
+                panic!("a row")
+            };
+            r.push(more);
+        };
+        let later_key = with(&|m| {
+            m.insert(8, Value::Uint(1));
+        });
+        assert!(refused(later_key, "a later build's key").contains("key 8"));
+        refused(
+            with(&|m| {
+                m.insert(2, Value::Bytes(vec![1]));
+            }),
+            "a counter of another type",
+        );
+        refused(
+            with(&|m| {
+                m.insert(5, Value::Uint(1));
+            }),
+            "orders of another type",
+        );
+        refused(
+            with(&|m| row(m, 3, Value::Uint(4))),
+            "a body's row with a stance this build does not know",
+        );
+        refused(
+            with(&|m| row(m, 1, Value::Uint(0))),
+            "a kept answers row of another shape",
+        );
+        // Not a carry at all: an empty seed (before K18c) and a fork's random seed.
+        assert!(Carry::read(b"").unwrap().is_none());
+        assert!(Carry::read(&[0xf3; 32]).unwrap().is_none());
+    }
+
+    /// [`restore`] passes a checkpoint over for its carry, as for a record it does not read whole, and gives the one
+    /// before: every reader of a served world's checkpoints starts from it.
+    #[test]
+    fn a_checkpoint_whose_carry_this_build_does_not_read_is_passed_over_for_the_one_before() {
+        let zone = Id::new(Scope([0x73; 16]), 0).unwrap();
+        let mut tree = replica::tree::Tree::start(zone, name("souls:place"));
+        let dir = std::env::temp_dir().join(format!("souls-carry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let version = Version {
+            lineage: Scope([0x73; 16]),
+            zone,
+            epoch: 1,
+            sequence: 1,
+        };
+        let old = Carry::of(&Sequences::default(), 5, Placed::new(), 3, &[], &[]).to_bytes();
+        let Value::Map(mut later) = decode(&old).unwrap().value else {
+            panic!("carry")
+        };
+        later.insert(8, Value::Uint(1));
+        let later = encode(&Value::Map(later)).unwrap();
+        let mut taken = Checkpoints::open(&dir, 1, Blobs::default()).unwrap();
+        taken.take(&mut tree, version, 1, &old).unwrap();
+        taken.take(&mut tree, version, 2, &later).unwrap();
+        taken.wait().unwrap();
+        drop(taken);
+        let r = restore(&dir).unwrap().expect("the one before");
+        assert_eq!(r.root.record, 1);
+        assert_eq!(r.rejected.len(), 1);
+        assert_eq!(r.rejected[0].1.name, "checkpoint-carry");
+        assert_eq!(read_carry(&r.root.seed).next_intent, 5);
+        assert_eq!(
+            checkpoint::restore(&dir).unwrap().unwrap().root.record,
+            2,
+            "read without the carry's check, the newest"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn read_carry(bytes: &[u8]) -> Carry {
+        Carry::read(bytes).unwrap().expect("a carry")
     }
 }
 

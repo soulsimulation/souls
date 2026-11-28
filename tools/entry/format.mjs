@@ -196,9 +196,10 @@ export function validateEntry(entry) {
     const p = `slots.${name}`;
     if (name in points) err(p, `"${name}" is already a point; a part's name is used once`);
     if (!isObj(s)) { err(p, 'a slot is an object'); continue; }
-    only(s, ['admits', 'posture', 'most', 'at_mm', 'yaw_mdeg', 'stand', 'board_mm', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
+    only(s, ['admits', 'posture', 'most', 'at_mm', 'yaw_mdeg', 'turn_mdeg', 'stand', 'board_mm', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
     // the way what is in it faces (+z turned by it), as a thing placed live is given its slots (defined::slots_of)
     if (s.yaw_mdeg !== undefined && !isInt(s.yaw_mdeg)) err(`${p}.yaw_mdeg`, 'whole millidegrees');
+    if (s.turn_mdeg !== undefined && !isInt(s.turn_mdeg)) err(`${p}.turn_mdeg`, 'whole millidegrees');
     if (!SLOT_ADMITS.includes(s.admits)) err(`${p}.admits`, `must be one of ${SLOT_ADMITS.join(', ')}`);
     if (s.posture !== undefined && (s.admits !== 'body' || !POSTURES.includes(s.posture))) err(`${p}.posture`, `a body's slot only, one of ${POSTURES.join(', ')}`);
     if (!(isInt(s.most) && s.most > 0)) err(`${p}.most`, 'how many it admits, a whole number above zero');
@@ -213,7 +214,7 @@ export function validateEntry(entry) {
   if (entry.geometry !== undefined) {
     if (!isObj(entry.geometry)) err('geometry', 'an object');
     else {
-      only(entry.geometry, ['bounds_mm', 'front', 'solids_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
+      only(entry.geometry, ['bounds_mm', 'front', 'solids_mm', 'floors', 'stairs', 'ladders'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
       // The thing's own walk boxes, [cx, cz, hx, hz, yaw_mdeg, y0, y1] in whole mm, as the engine reads them (solids_of).
       const sol = entry.geometry.solids_mm;
       if (sol !== undefined && !(Array.isArray(sol) && sol.length > 0 && sol.every(r => Array.isArray(r) && r.length === 7 && r.every(isInt) && r[2] >= 0 && r[3] >= 0 && r[5] >= 0 && r[6] > r[5]))) err('geometry.solids_mm', 'a list of walk boxes, each seven whole millimetres [cx, cz, hx, hz, yaw_mdeg, y0, y1]: half sizes and heights none below 0, the top above the bottom');

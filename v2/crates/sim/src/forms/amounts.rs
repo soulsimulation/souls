@@ -3,7 +3,8 @@
 //! two effects in one tick never read the same stale amount or the same free slot. No code here names a kind.
 //!
 //! - **Amounts** are whole numbers in the field's unit, with the least and the capacity its kind gives (K3 section 3,
-//!   [`replica::kinds::Field`]). A transfer names its field, and each end finds that field by name on its own kind
+//!   [`replica::kinds::Field`]). A transfer names its field, and each end finds that field by name on the entry it
+//!   borrows ([`F_ENTRY`], #4090), else on its own kind
 //!   (`field-unknown` when it has none, or it is not an `int`); the two ends' units must be one (`units-differ`). It
 //!   works out one number, as the reference's `measure` does: the least of what was asked and what the source has
 //!   above its least (`"room"` asks the room the target has left). More than that room is refused `no-room`, never
@@ -133,6 +134,10 @@ pub fn defs(kinds: &Kinds) -> Defs {
         .map(|def| (def.name.as_str().to_owned(), def.state.clone()))
         .collect()
 }
+
+/// The field in which a thing names the Soul Actions entry its world's map gives it, when it borrows another kind's
+/// (the import's field 27, `import_eden::F_ENTRY`: a Mars sink borrows `eden:sink`).
+pub const F_ENTRY: u64 = 27;
 
 /// `kind`'s entry in `by_kind`: by its full name, or, for a kind written without its hash, the one revision loaded of
 /// that `namespace:name`.
@@ -343,6 +348,8 @@ pub(crate) struct Cx<'a> {
     /// The actor's Soul (the body, when the actor is not a Soul): a link `from: soul` ends at it (F15).
     pub soul: Id,
     pub hands: &'a [u64],
+    /// The bodies and their families: a thing in another body's hand is not taken (#5275).
+    pub controller: &'a crate::controller::Controller,
     pub node: Id,
     /// The things other runs reserve: none is removed, nor anything holding one.
     pub reserved: &'a [Id],
@@ -383,9 +390,16 @@ impl Cx<'_> {
         }
     }
 
-    /// The amount fields of `node`'s kind: by its full name, or, for a kind written without its hash, the one
-    /// revision loaded of that `namespace:name`.
+    /// The amount fields of `node`: those of the entry its map row borrows ([`F_ENTRY`]; W14, #4090), as its needs and
+    /// its forms are read, else its own kind's: by its full name, or, for a kind written without its hash, the one
+    /// revision loaded of that `namespace:name`. Before, a transfer from a thing that borrows its entry (a Mars sink
+    /// that borrows the sink's) was refused `field-unknown`: its own kind has no fields.
     fn fields(&self, node: Id) -> Option<&BTreeMap<u64, Limit>> {
+        if let Some(Value::Text(entry)) = self.view.field(node, F_ENTRY)
+            && let Some(fields) = of_kind(self.limits, entry.as_str())
+        {
+            return Some(fields);
+        }
         of_kind(self.limits, self.view.kind(node)?.as_str())
     }
 
@@ -449,8 +463,8 @@ impl Cx<'_> {
             })
     }
 
-    /// The amount field named `name` on `node`'s own kind, with its number (E5: a transfer's two ends may be of kinds
-    /// that number it differently), refused `field-unknown` when the kind has no `int` field of that name.
+    /// The amount field named `name` on `node` ([`Cx::fields`]), with its number (E5: a transfer's two ends may be
+    /// of kinds that number it differently), refused `field-unknown` when the kind has no `int` field of that name.
     fn named(&self, node: Id, name: &Name) -> R<(u64, &Limit)> {
         self.fields(node)
             .and_then(|fs| fs.iter().find(|(_, l)| l.name == *name && l.int))
@@ -693,6 +707,12 @@ impl Cx<'_> {
             }
             Bound::Take { what } => {
                 let thing = self.of(*what);
+                crate::slots::hands::not_held_by_another(
+                    self.controller,
+                    self.view.at(thing),
+                    self.body,
+                    thing,
+                )?;
                 self.not_in_use(thing)?;
                 let to = self.free_hand()?;
                 self.transfer(m, thing, to)

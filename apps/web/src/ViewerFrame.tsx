@@ -8,6 +8,7 @@ import { requestBroadcast } from './follow-soul-request.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
 import { arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
+import { ArrivalLag, arrivalCatching } from './arrival-catching.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
@@ -17,7 +18,7 @@ import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
 import { playSpeed, setPlaySpeed, v2History } from './v2-engine/history.ts';
 import { TICK_US } from './v2-engine/takes.ts';
-import { momentLink, momentTick } from './v2-engine/moment-link.ts';
+import { landingNow, momentLink, momentTick } from './v2-engine/moment-link.ts';
 // X3: read at module load: Shell rewrites the landing fragment to its tab (#watch) before the scene is ready.
 const landingMoment = typeof location === 'undefined' ? null : momentTick(location.hash);
 
@@ -88,17 +89,31 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // Until it lands, the arrival card stays up and the pill says Loading…: the present is never shown first. It lifts
   // anyway when the world keeps no history, or a while after a seek that found nothing, so a link never holds the page.
   const [landing, setLanding] = useState(landingMoment !== null), [seeked, setSeeked] = useState(false);
-  useEffect(() => {
-    if (opened.current || !handle || state?.shownTick == null || state.loading) return;
-    if (!v2History()) { opened.current = true; setLanding(false); return; }
-    // #3358: the moment's bundle is read while the stream catches up, so the seek below only applies it
-    if (landingMoment !== null && !readAhead.current) { readAhead.current = true; void v2History()!.prepare(landingMoment).catch(() => {}); }
-    // a stream still catching up from its last checkpoint shows an older clock first (Eden on soul.game: hours back), and
-    // a seek is never past the shown clock: wait until it reaches the moment, or is about now (a link names a past time)
-    if (landingMoment !== null && state.shownTick < landingMoment && state.shownTick * TICK_US < Date.now() * 1000 - 120e6) return;
+  // A link's seek does not wait for the live stream: the moment is read from the world's history, and the page's first
+  // picture is then the recording's (LiveWorld's arrival takes whichever take it is given first). Opened cold on
+  // soul.game, the stream starts at its last checkpoint (Eden: an hour back) and reached now 10 to 11 s in, and the
+  // seek waited for that; now it leaves as soon as the view and the history are there, about 1 s in. The world's now a
+  // seek is never past is then the wall clock's (moment-link.ts landingNow); a world whose clock is its own waits for
+  // the stream's clock to reach the moment or now, as before.
+  const open = () => {
+    if (opened.current || !handle) return;
+    const drawn = state?.shownTick != null && !state.loading, h = v2History();
+    if (!h || landingMoment === null) { if (drawn) { opened.current = true; setLanding(false); } return; }
+    // #3358: the moment's bundle is read ahead, at once, so a seek that has to wait for the stream only applies it
+    if (!readAhead.current) { readAhead.current = true; void h.prepare(landingMoment, null, true).catch(() => {}); }
+    const now = landingNow(drawn ? state!.shownTick : null, landingMoment, Date.now() * 1000);
+    if (now === null) return;
     opened.current = true;
-    if (landingMoment !== null) void handle.seek(landingMoment).finally(() => setSeeked(true));
-  }, [handle, state?.shownTick, state?.loading]);
+    void handle.seek(landingMoment, now).finally(() => setSeeked(true));
+  };
+  const openNow = useRef(open); openNow.current = open;
+  useEffect(() => { openNow.current(); }, [handle, state?.shownTick, state?.loading]);
+  // the history is known a moment after the view is (use-v2-souls.ts sets it as the stream starts), with no render to say so
+  useEffect(() => {
+    if (landingMoment === null) return;
+    const id = setInterval(() => { openNow.current(); if (opened.current) clearInterval(id); }, 100);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     if (!landing) return;
     if (seeked && state?.presentation === 'history') { setLanding(false); return; }
@@ -224,14 +239,23 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const clock = shownMs !== null ? momentClock(shownMs, zone) : worldTime?.split(' · ').slice(-1)[0] ?? '';
   const day = shownMs !== null ? momentDay(shownMs, zone) : worldTime?.includes(' · ') ? worldTime.split(' · ')[0] : '';
   const ago = recorded && shownMs !== null ? momentAgo(shownMs, Date.now()) : '';
+  // 27 Nov: a cold arrival's first picture is the stream's checkpoint, up to an hour back: Catching up until it is at
+  // now, once (arrival-catching.ts); later lags say why through the reasons above, as before
+  const drawnAt = useRef<number | null>(null), reachedNow = useRef(false), lag = useRef<ArrivalLag | null>(null);
+  if (shownMs !== null && !state?.loading) drawnAt.current ??= performance.now();
+  // N8: and while the picture still gains on the clock (arrival-catching.ts ArrivalLag), so Live waits for it to be at now
+  const gaining = v2 && !recorded && !arriving && shownMs !== null && !reachedNow.current && (lag.current ??= new ArrivalLag()).gaining(performance.now(), Date.now() - shownMs);
+  const catchingUp = v2 && !recorded && !arriving && shownMs !== null && !reachedNow.current
+    && arrivalCatching(shownMs, Date.now(), performance.now() - (drawnAt.current ?? performance.now()), gaining);
+  if (shownMs !== null && !arriving && !state?.loading && !catchingUp) reachedNow.current = true;
   const busy = !handle || shownTick == null || !!state?.loading;
   const minute = v2 ? 60e6 / TICK_US : 60 / dt;
   const back = () => { if (shownTick != null) void handle?.seek(Math.max(0, shownTick - minute)); };
   // Pause from live holds the moment shown: a seek to it (the recording plays from there), then paused
   const pause = async () => { if (shownTick == null || !handle) return; if (!recorded) await handle.seek(shownTick); handle.setPlaying(false); };
   const playing = recorded && state?.playback === 'playing';
-  const pillText = arriving || state?.loading || lost || settledReason ? status : recorded ? clock ? `Recorded · ${clock}` : 'Recorded' : 'Live';
-  const pillClass = arriving || state?.loading ? 'loading' : lost || settledReason || !current || !connected ? 'warn' : recorded ? 'recorded' : 'ok';
+  const pillText = arriving || state?.loading || lost || settledReason ? status : catchingUp ? 'Catching up' : recorded ? clock ? `Recorded · ${clock}` : 'Recorded' : 'Live';
+  const pillClass = arriving || state?.loading ? 'loading' : lost || settledReason || !current || !connected ? 'warn' : catchingUp ? 'loading' : recorded ? 'recorded' : 'ok';
   const panelPlace = (): CSSProperties => {
     const r = hourButton.current?.getBoundingClientRect(), top = r?.height ? r.bottom + 8 : 60;  // a phone's pill is hidden behind the menu
     return innerWidth <= 700 ? { top, left: 16, right: 16, width: 'auto' } : { top, left: Math.max(16, Math.min((r?.left ?? 16) - 4, innerWidth - 336)) };
@@ -239,7 +263,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const statusBlock = <div className="viewer-history" data-viewer-navigation={state?.manualNavigation ?? ''} data-viewer-input={state?.inputOwned ?? false} data-viewer-mode={state?.cameraMode ?? ''} data-viewer-presentation={state?.presentation ?? ''} data-viewer-tick={state?.shownTick ?? ''} data-viewer-selection={state?.selection.soulId ?? state?.selection.entityId ?? ''} data-viewer-ready={!!handle}>
       <div className="row viewer-status">
         <button ref={hourButton} type="button" className="time-pill" disabled={arriving} aria-expanded={hourOpen} aria-haspopup="dialog" aria-label={`${pillText}: time controls`} title="Time: go back, pause, play, share this moment" onClick={() => setHourOpen(!hourOpen)}>
-          <span className={pillClass} data-viewer-status data-viewer-live={live}>{pillText}</span>
+          <span className={pillClass} data-viewer-status data-viewer-live={live && !catchingUp}>{pillText}</span>
         </button>
         {hourOpen && !arriving && createPortal(<div ref={hourPanel} className="time-panel" role="dialog" aria-label="Time" data-time-panel={recorded ? 'recorded' : 'live'} style={panelPlace()}>
           <div className="time-panel-head">

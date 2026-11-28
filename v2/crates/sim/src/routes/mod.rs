@@ -46,7 +46,8 @@
 //!   there is told the link, its door and both widths. A floater routes as a walker of its class.
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), a gait's speed as cost (a route is
-//! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
+//! the shortest, not the quickest), walking a shore link (the walk's,
+//! `crate::walk::town`, #3225, reading [`Map::shore`]). Ground
 //! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
 // The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
@@ -113,6 +114,8 @@ const SHORE_OFF: i64 = 2;
 /// The shortest stretch of edge two pieces share that is a portal or a shore, mm.
 const SHORE_MIN: i64 = 10;
 
+/// A shore link as [`Map::shore`] reads it: its kind, its two pieces (the drier first) and its edge's ends, mm.
+pub type ShoreOf = (Kind, [u32; 2], [i64; 2], [i64; 2]);
 /// A patch by its node and, on the open ground, its square.
 type PatchKey = (Id, Option<(i32, i32)>);
 /// A stretch of a square's edge a piece lies along: from, to (mm), the square, the piece.
@@ -552,9 +555,14 @@ impl Map {
             }
         }
         // Each building: its floors, in its frame, and its stairs and ladders.
+        // A thing carried (in a body's hands, on a crew's carry) is nowhere on the ground: it has no place to read a
+        // floor at, so neither it nor what it holds is a building while it is carried (racks T9).
         let mut things = Vec::new();
         let mut stack = vec![gh];
         while let Some(h) = stack.pop() {
+            if crate::ground::scene::carried(tree, h) {
+                continue;
+            }
             let kids = tree.children(h).ok_or("a node that is gone")?;
             if kids.iter().any(|&c| {
                 tree.node(c)
@@ -1245,11 +1253,13 @@ impl Map {
             .collect()
     }
 
-    /// Whether a body with hands may walk from piece `a` to piece `b`: false only when no portal or link it may use
-    /// joins them, so no route search can find a way (#4072). One lookup once the map's parts are found (once after
-    /// each change); a failed route search instead searches the whole part the walk starts in, twice.
+    /// Whether a body with hands that climbs may walk from piece `a` to piece `b`: false only when no portal or link it
+    /// may use joins them, so no route search can find a way (#4072). A place up a ladder (racks T6: a frame's
+    /// standing place) is reached; a body that cannot climb is refused by its own walk, by name. One lookup once the
+    /// map's parts are found (once after each change); a failed route search instead searches the whole part the walk
+    /// starts in, twice.
     pub fn may_reach(&self, a: u32, b: u32) -> bool {
-        let parts = self.hands_parts.get_or_init(|| self.parts(HANDS));
+        let parts = self.hands_parts.get_or_init(|| self.parts(HANDS | CLIMB));
         parts.get(a as usize) == parts.get(b as usize)
     }
 
@@ -1284,6 +1294,17 @@ impl Map {
                 .collect()
         };
         self.links.iter().filter(|l| !l.gone).map(pieces).collect()
+    }
+
+    /// Shore link `id` (a [`Kind::Wade`] or [`Kind::Swim`]): its kind, its two pieces (the drier first) and the stretch
+    /// of edge they share, both its ends (mm, the ground's frame). For the walk to cross it (#3225).
+    pub fn shore(&self, id: Id) -> Option<ShoreOf> {
+        let l = self
+            .links
+            .iter()
+            .find(|l| l.id == id && !l.gone && matches!(l.kind, Kind::Wade | Kind::Swim))?;
+        let [p, r] = [&l.ends[0], &l.ends[1]].map(|e| &self.portals[e[0] as usize]);
+        Some((l.kind, [p.pieces[0], r.pieces[0]], p.a, p.b))
     }
 
     /// Whether the map holds a floor's patch for `node`.

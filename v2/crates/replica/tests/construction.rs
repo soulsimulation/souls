@@ -111,7 +111,7 @@ fn a1_the_four_kinds_load_with_their_connectors_and_slots() {
         .values()
         .find(|f| f.name.as_str() == "hold_crew")
         .unwrap();
-    assert_eq!(crew.default, replica::encode::Value::Uint(1));
+    assert_eq!(crew.default, replica::encode::Value::Uint(2));
 
     // The beam: 9 ft, a beam end at each end, mating with a beam seat; it declares the joint link to an upright.
     let beam = kind(&kinds, "mars:rack_beam");
@@ -243,7 +243,7 @@ fn a2_a_joint_is_accepted_beam_end_to_upright_seat_and_refused_by_name_otherwise
         ),
         (
             "a grip to a seat",
-            check(end(beam, Some("grip_mid")), end(up, Some("seat_front_l_0"))),
+            check(end(beam, Some("grip_l1")), end(up, Some("seat_front_l_0"))),
             "connector-unknown",
         ),
         (

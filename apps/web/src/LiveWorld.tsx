@@ -1,3 +1,4 @@
+import {carryPageAt,carryOwnerBetween,nativeBodyEntities,type CarryPageFrame} from './v2-engine/carry-page.ts';
 import {WorldMotionHistory} from './WorldMotionHistory.ts';
 import { setPosterDay } from '../../../mars/viewer/app/engine-view/poster-sheet.ts';
 import {WorldContextViews,contextLocation,type Target as ContextTarget} from './WorldContextViews.ts';
@@ -162,11 +163,24 @@ function serverNow(sim: Souls): number | null {
   if (!t || typeof t.serverTick !== 'number') return null;
   return t.serverTick + Math.min(2, Math.max(0, (performance.now() - t.receivedAt) / 1000)) * tpsOf(sim);
 }
+/** The world's tick now for a rewind: the stream's, or a later one a seek was given (`floor.current`: a moment link's,
+ *  opened before the stream has reached now from its checkpoint, moment-link.ts landingNow), moved on at the world's
+ *  rate. Kept only until the stream is within two minutes of it: from then on the stream's own clock is the world's.
+ *  The live view itself never reads it: it plays what the stream has. */
+function headNow(sim: Souls, floor: { current: { tick: number; at: number } | null }): number | null {
+  const live = serverNow(sim), f = floor.current;
+  if (!f) return live;
+  const known = f.tick + (performance.now() - f.at) / 1000 * tpsOf(sim);
+  if (live !== null && known - live < 120 / dtOf(sim)) { floor.current = null; return live; }
+  return known;
+}
 /** Live playback sits this many ticks behind the server, so the next chunk has arrived before it is needed; a source
  *  with shorter chunks says how far (`playDelay`, the v2 bridge's, B3-4). */
 const LIVE_DELAY = 30;
 const liveDelayOf = (sim: Souls) => takesOf(sim)?.playDelay ?? LIVE_DELAY;
 const HOUR_SECONDS = 3600;
+/** How far past a sought moment a moved world's first window reads, s (seek, below). */
+const V2_FIRST_WINDOW_S = 30;
 
 type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolean; retryAt: number; ended: boolean };
 /** What is on screen, for the panels (written by the frame loop, read on React renders). */
@@ -272,6 +286,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   const context = useRef({ placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds });
   context.current = { placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds };
   const past = useRef<Past | null>(null);
+  /** The world's tick now as a seek was told it, where that is later than the stream's (headNow). */
+  const nowFloor = useRef<{ tick: number; at: number } | null>(null);
   const shown = useRef<Shown>({ tick: 0, datetime: null, take: null, entities: {} });
   const drawnTick = useRef<number | null>(null);
   const stateSignature = useRef('');
@@ -284,7 +300,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   };
   const seeking = useRef<AbortController | null>(null);
   const controlsApi = useRef<{ feedbackContext(): import('./WorldViewer.ts').WorldViewContext; overview(): void; frameSouls(ids:readonly string[]):boolean; framePoint(point:THREE.Vector3,radius:number):void; locations():readonly WorldLocation[];refreshLocations():void;locationPage():import('./WorldLocations.ts').WorldLocationPage|null;searchLocations(query:string):void;moreLocations():void;cancelLocationPictures():void;frameLocation(id:string):boolean;locationPreview(id:string):Promise<string|null>;framePlace(place:WorldPlaceId): boolean; placePreview(place:WorldPlaceId):Promise<string|null>; focusSelected(): boolean; reset(): boolean; releaseInput(): void; flyToSoul(soulId:string,opts?:{chip?:boolean}):boolean; move(delta: CameraMove): boolean; inputOwned(): boolean } | null>(null);
-  const playbackCommands = useRef<{ seek(tick: number): Promise<void>; live(): void; setPlaying(playing: boolean): boolean } | null>(null);
+  const playbackCommands = useRef<{ seek(tick: number, now?: number): Promise<void>; live(): void; setPlaying(playing: boolean): boolean } | null>(null);
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // a Soul picked elsewhere (the table, my Soul) replaces a picked thing
@@ -866,11 +882,16 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const end = p.chunks.at(-1)!;
         // replays run at the world's normal speed, or as many times it as the viewer chose (K3, a moved world); a gap in
         // what was recorded (a world stopped for a while) is crossed to the next chunk
+        const liveHead = headNow(s, nowFloor), before = p.tick;
         if (p.playing) { p.tick = Math.min(end.toTick, p.tick + step / dt * playSpeed()); const n = p.chunks.find((c) => c.toTick > p.tick); if (n && n.fromTick > p.tick) p.tick = n.fromTick; }
+        // A replay never plays past the world's now: a moved world's history gives a still world's time on to the end
+        // of the window asked for, and a link's replay can reach now before the stream has a chunk to go live on (the
+        // stream late, or a replay at ×8 from a minute ago): it waits there for the stream.
+        if (p.playing && liveHead !== null && p.tick > liveHead - liveDelayOf(s)) p.tick = Math.max(Math.min(before, p.tick), liveHead - liveDelayOf(s));
         // A paused recent seek remains history. Playing history catches the actual
-        // delayed live moment, not merely the oldest buffered chunk boundary.
-        const liveHead = serverNow(s);
-        if (p.playing && liveList.length && liveHead !== null &&
+        // delayed live moment, not merely the oldest buffered chunk boundary; and only once the stream itself has
+        // reached now (no floor: headNow), never the stream's hour-old first picture.
+        if (p.playing && liveList.length && liveHead !== null && !nowFloor.current &&
           p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
           p.extending = true;
@@ -882,7 +903,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }).catch(() => { p.retryAt = performance.now() + 5000; }).finally(() => { p.extending = false; });
         }
         if (p.ended && p.tick >= end.toTick && p.playing) {
-          const at = serverNow(s);
+          const at = headNow(s, nowFloor);
           if (at !== null && at - end.toTick < 120 / dt) { goLive(); return; } // only the last moments are missing: they are live
           p.playing = false;
           setNote('This is the end of what was recorded here. Go back to live to continue.');
@@ -967,6 +988,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           if(locationRegions!==take.finalState.regions){locationRegions=take.finalState.regions;depictedLocations=depictedWorldLocations(take.finalState.regions,base?.levels??[],(x,z,y)=>platformFloorOffset(floors,x,z,y,base?.levels.find(l=>l.id===0)?.y??0));}
           const beat=worldDepictionBeat(context.current.depictionBeatAt,s.conn.welcome?.worldId,take,depictedTick,past.current?'history':'live',pick.exact);
           if(!eyes&&!shotMode){camera.updateMatrixWorld();bodyViewer.frustum.setFromProjectionMatrix(bodyViewerM.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));bodyViewer.eye.copy(camera.position);people.setViewer(bodyViewer);entityLayer.viewer=bodyViewer;viewerLive=true;}else{people.setViewer(null);entityLayer.viewer=null;viewerLive=false;}  // PERF-EDEN: far / off-screen bodies are posed at a lower rate
+          const carryAtUs=Math.round(depictedTick*dt*1e6),carryPast=past.current?v2History()?.carry(carryAtUs):null;
+          const nativeCarry=carryPageAt(carryAtUs,carryPast?.bodies??nativeBodyEntities(),past.current?carryPast?.parts??null:undefined);
+          people.setNativeCarry(nativeCarry?.bodies??{},(id,from,to)=>carryOwnerBetween(id,from,to,carryPast?.bodies??nativeBodyEntities(),past.current?carryPast?.parts??null:undefined));
           const sampled = people.show(local * take.dt, depictedTick * dt,beat,(depictedTick - take.startTick) * take.dt,!eyes&&!shotMode?rigBudget:undefined);
           games.update(sampled.entities,depictedTick);entityLayer.setJuggled(games.juggledSets);
           bodyModels.sync(records,sampled.entities);
@@ -1166,6 +1190,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // (never for ?shot pictures or a Soul's eyes: those tools time their own frames)
       const holdDraw=!shotMode&&!eyes&&(programsPending||(arrivalStage!==undefined&&!arrivedOnce)),warmFrame=warmLayer===1;
       {const still=quality.freezeStill&&!eyes&&!shotMode;entityLayer.interiorFrom=still&&quality.tier==='phone'?camera.position:null;entityLayer.freezeSettled=still;}  // P1 phones: far buildings' furniture is not drawn; PERF-EDEN: still things freeze and cull on every tier
+      const loadAtUs=Math.round(shown.current.tick*dt*1e6),loadPast=past.current?v2History()?.carry(loadAtUs):null;
+      const nativeLoads=carryPageAt(loadAtUs,loadPast?.bodies??nativeBodyEntities(),past.current?loadPast?.parts??null:undefined);
+      entityLayer.nativeTransportPoses(nativeLoads?.loads??{});
+      (window as unknown as {__soulsCarry?:CarryPageFrame|null}).__soulsCarry=nativeLoads;
       entityLayer.applyEdge(context.current.sim.edge??[],shown.current?.tick??-Infinity);if(!holdDraw||warmFrame){entityLayer.streamFrom(camera.position);entityLayer.itemPoses(shown.current.entities);entityLayer.update(step,now,geometry.group);}
       // PERF-LOAD: the built layer's first update runs under the card and its programs (scatter and kit pools, creatures,
       // atmosphere: ~0.3 s of links on the first drawn frame) link in parallel before any frame draws them
@@ -1199,7 +1227,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // most; 20 s in all): the arrival view holds, then cuts to a Soul drawn as itself, with no town tour between (its
       // scene's reset jumped to a random view ~0.5 s before) and no Soul as a stand-in
       const firstLivePending=earlyWanted&&!past.current&&s.conn.replica.souls.size>0&&now<20_000&&(liveAt===null?!['failed','cancelled'].includes(initialGate?.snapshot().stage??''):standIns.children.length>0&&now<liveAt+1500);
-      if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !firstLivePending && !(arrivalPending && !s.conn.replica.souls.size)) {
+      // a recording drawn before the stream has listed anyone (a moment link's, moment-link.ts landingNow) has its own
+      // people: the broadcast frames them from its first frame, not from the arrival's view until the stream speaks (one cut)
+      if (context.current.cameraMode === 'broadcast' && !(earlyWanted && entityLayer.filling) && !firstLivePending && !(arrivalPending && !s.conn.replica.souls.size && !past.current)) {
         const shot = broadcast.sample(at.entities, records, base ?? (entityLayer.active ? openGroundScene(entityLayer.groundExtent()) : null), at.tick, dt, area?.aspect ?? camera.aspect, now / 1000, step,visualObstructionRoots());
         if (shot?.pose) {
           camera.position.fromArray(shot.pose.position);
@@ -1229,10 +1259,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // Idle life: breathing, weight shifts, head turns, speaking nods (render-time only).
       idleSouls.length=0;if(!past.current){const nowMs=Date.now();for(const soul of s.conn.replica.souls.values()){const e=at.entities[soul.entityId];if(!e)continue;
         const offscreen=viewerLive&&!bodyViewer.frustum.intersectsSphere(idleSphere.set(idleSphere.center.set(e.p[0],e.p[1]+.9,e.p[2]),1.3));  // PERF-PASSES: no idle offsets for a body outside the view
-        idleSouls.push({id:soul.id,root:people?.bodyObject(soul.entityId)??null,p:e.p,yaw:e.yaw??0,activity:String(e.activity??'idle'),speaking:speeches.some(sp=>sp.speaker===soul.id&&nowMs-sp.at<4000),attention:attentionTargets.get(soul.id),offscreen});}}
+        idleSouls.push({id:soul.id,root:people?.bodyObject(soul.entityId)??null,p:e.p,yaw:e.yaw??0,activity:String(e.activity??'idle'),speaking:speeches.some(sp=>sp.speaker===soul.id&&nowMs-sp.at<4000),attention:attentionTargets.get(soul.id),offscreen,contactOwned:!!e.state.nativeCarry});}}
       if(refresh)idleLife.forget(new Set(idleSouls.map(s=>s.id)));
       idleLife.apply(idleSouls,atmosphereSeconds,step,!!reducedMotionQuery?.matches);
-      bodyPoses.apply(idleSouls.map(x=>({...x,body:s.conn.replica.souls.get(x.id)?.body})),atmosphereSeconds,!!reducedMotionQuery?.matches);  // LINK: zombie arms/lurch, floating sleepers
+      bodyPoses.apply(idleSouls.filter(x=>!x.contactOwned).map(x=>({...x,body:s.conn.replica.souls.get(x.id)?.body})),atmosphereSeconds,!!reducedMotionQuery?.matches);  // LINK: zombie arms/lurch, floating sleepers
       if(seatSurvey&&!seatSurvey.done&&sceneSettled&&(!initialGate||initialGate.snapshot().stage==='ready')&&(seatSurvey.since??=now)<now-12000){seatSurvey.done=true;try{const seats=findSeats(scene),solids=scene.children.filter(o=>o!==people?.group&&!o.name.startsWith('atmosphere'));(window as unknown as {__soulsSeatSurvey?:unknown}).__soulsSeatSurvey=surveySeats(seats,solids,(x,z)=>cameraGround.heightAt(scene,x,z));}catch(e){(window as unknown as {__soulsSeatSurvey?:unknown}).__soulsSeatSurvey={error:String(e)};}}  // W8 ?survey=seats
       if(!waterDetailOff)try{waterDetail.update(scene,camera,idleSouls,shown.current.take?shown.current.tick*dt:atmosphereSeconds,light.daylight,undefined,soulId=>{const e=s.conn.replica.souls.get(soulId)?.entityId;return e?floaters.object(e)??standIns.getObjectByName(e)??null:null;});}catch{}  // W11: ripples, glitter, underwater fade (render-time only)
       people?.setSpeaking(new Set(idleSouls.flatMap(x=>{const id=x.speaking?s.conn.replica.souls.get(x.id)?.entityId:undefined;return id?[id]:[];})));  // speakers talk with their hands (library clips)
@@ -1450,14 +1480,19 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
   useEffect(() => () => { seeking.current?.abort(); if (commitTimer.current) clearTimeout(commitTimer.current); }, []);
 
   // ------------------------------------------------------------------ rewind
-  const dt = dtOf(sim), now = serverNow(sim), hour = HOUR_SECONDS / dt;
+  const dt = dtOf(sim), now = headNow(sim, nowFloor), hour = HOUR_SECONDS / dt;
   const p = past.current;
   const shownTick = p ? p.tick : (now ?? 0);
   const lo = Math.max(0, Math.floor((now ?? 0) - hour)), hi = Math.max(lo + 1, Math.floor(now ?? 0));
   const goLive = () => { controlsApi.current?.releaseInput(); seeking.current?.abort(); seeking.current = null; setLoading(false); past.current = null; setDraft(null); setNote(null); setMode('live'); };
-  const seek = async (wanted: number) => {
+  const seek = async (wanted: number, knownNow?: number) => {
     controlsApi.current?.releaseInput();
-    const s = context.current.sim, at = serverNow(s), dts = dtOf(s);
+    const s = context.current.sim, dts = dtOf(s);
+    // a now the caller knows better than the stream (a moment link's) holds for later seeks too, unless this one finds nothing
+    const floorBefore = nowFloor.current, given = knownNow !== undefined && Number.isFinite(knownNow) && knownNow > (serverNow(s) ?? -Infinity) ? { tick: knownNow, at: performance.now() } : null;
+    if (given) nowFloor.current = given;
+    const ungive = () => { if (given && nowFloor.current === given) nowFloor.current = floorBefore; };
+    const at = headNow(s, nowFloor);
     if (at === null) { setDraft(null); return; }
     // An explicit seek chooses a recorded moment even inside the live buffer.
     // The separate live command resumes the delayed live view.
@@ -1471,14 +1506,20 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
     seeking.current = ctl;
     setLoading(true); setNote(null);
     try {
-      const { from, to } = rewindWindow(tick, 1 / dts);
+      const { from, to: whole } = rewindWindow(tick, 1 / dts);
+      // A moved world's past is read a bundle at a time, each the world whole (Eden on soul.game: about 1.8 MB for a
+      // minute or three), one after the other: the first picture waits for the bundles of the next 30 s, not of two
+      // minutes (a day-old moment: one bundle, not three, about 1.5 s less). The rest is read as it plays (the frame
+      // loop extends a playing recording 20 s before its end).
+      const to = v2History() ? Math.min(whole, Math.ceil(tick + V2_FIRST_WINDOW_S / dts)) : whole;
       const got = await fetchChunks(from, to, MAX_PAST_CHUNKS, ctl.signal, at);
       if (ctl.signal.aborted) return;
-      if (!got.length) { setNote('Nothing was recorded at that moment. Try a later time.'); return; }
+      if (!got.length) { ungive(); setNote('Nothing was recorded at that moment. Try a later time.'); return; }
       past.current = { tick: Math.max(got[0].fromTick, Math.min(got.at(-1)!.toTick, tick)), playing: cur?.playing ?? true, chunks: got, extending: false, retryAt: 0, ended: false };
       setMode('past');
       if (got[0].fromTick > tick + 5 / dts) setNote('The recording starts later than that, so this is the earliest moment kept.');
     } catch {
+      ungive();
       if (!ctl.signal.aborted) setNote('That moment could not be loaded. Check the connection and try again.');
     } finally {
       if (seeking.current === ctl) { seeking.current = null; setLoading(false); setDraft(null); }
@@ -1524,7 +1565,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       },
       hasEntity: id => !!shown.current.entities[id],
       select: (soulId, entityId) => { context.current.onSelect(soulId); context.current.setThing(entityId); },
-      seek: tick => playbackCommands.current?.seek(tick) ?? Promise.resolve(),
+      seek: (tick, now) => playbackCommands.current?.seek(tick, now) ?? Promise.resolve(),
       live: () => playbackCommands.current?.live(),
       setPlaying: playing => playbackCommands.current?.setPlaying(playing) ?? false,
     }));

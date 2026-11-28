@@ -32,8 +32,9 @@
 //!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it. A body being carried across a link
-//!   is not written while it crosses: its pose then lies on neither end's ground, so the log keeps where it last
-//!   stood until it lands (#4669: a kill mid-crossing once left every later restart refusing every move).
+//!   (a stair, a ladder) is written every tick it moves with the link and how far along it ([`row_on`], FOR-FABLE 8),
+//!   but a restart reads no such row: its pose then lies on neither end's ground, so a restart stands it where its last
+//!   row off the link has it (#4669: a kill mid-crossing once left every later restart refusing every move).
 //!
 //! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
 //!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
@@ -95,6 +96,17 @@ const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 
 /// A walk's speed, µm a second: `sim::gaits`' walk.
 pub const WALK: i64 = sim::gaits::WALK.speed;
+/// #5254: how far from the point it was sent to a walk may end and be an arrival, mm (walks end within 0.3 m of their
+/// goal), and how many times one that ends further off is sent again, while bodies move off its way, before it answers
+/// `walk.stopped-short`.
+pub const STOPPED_SHORT_MM: u64 = 400;
+pub const WALK_AGAIN: u8 = 6;
+/// How near its point another body stands to be named as the one that held a walk off it (A2-4), µm: two rings of the
+/// spot tables (`sim::spots::PITCH`).
+pub const HELD_OFF_NEAR: i64 = 2 * sim::spots::PITCH;
+/// How long after a walk stopped short it is sent again, µs: bodies in its way have time to move off (six times, three
+/// seconds).
+pub const WALK_AGAIN_AFTER: Micros = 500_000;
 
 /// The speed of a walk at `gait` (0.135 G1): that gait's, or a walk's when it names none.
 pub fn speed(gait: Option<&str>) -> i64 {
@@ -233,6 +245,18 @@ pub struct Bodies {
     ended: Vec<(Id, Result<(), String>)>,
     /// The walks that ended `done` as near their goal as a crowd there allows (A2-4), until the answer is written.
     pub short: BTreeSet<Id>,
+    /// #5254: each walk to a point that ended more than [`STOPPED_SHORT_MM`] from it, how far (mm) and whether a crowd
+    /// held it off, until its answer is written: it answers `walk.stopped-short`, never as an arrival.
+    pub stopped_short: BTreeMap<Id, (u64, bool)>,
+    /// #5254: each walk done at a place moved off the point it was sent to (that point in a passage's clearance or off
+    /// its ground), how far, mm, and the passage it cleared (the thing it belongs to and its kind; none off the
+    /// ground), until its answer is written.
+    pub goal_moved: BTreeMap<Id, (u64, Option<(Id, sim::links::Kind)>)>,
+    /// Each walk done as near as the crowd allows (A2-4): the other body nearest its point there, until its answer is
+    /// written (its end's field 11).
+    pub held_off_by: BTreeMap<Id, Id>,
+    /// How many times each such walk was sent again while bodies moved round its goal ([`WALK_AGAIN`]).
+    walked_again: BTreeMap<Id, u8>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each started walk's target, and the point on it when it was sent to one, kept to its end however it ends
@@ -242,6 +266,9 @@ pub struct Bodies {
     away_of: BTreeMap<Id, u64>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Where each body crossing a link was last written in a tick's record (FOR-FABLE 8): `logged` keeps where it
+    /// last stood, for a restart.
+    crossed: BTreeMap<Id, Pose>,
     /// Each body's motion as the world last wrote it to its node ([`Bodies::motion`]); read from the tree when absent.
     shown: BTreeMap<Id, Shown>,
     /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
@@ -334,9 +361,9 @@ fn file(rooms: &mut Rooms, tree: &Tree, thing: Id, floor: Id) {
 /// K18c, #3176). What a restart builds its bodies at.
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
 
-/// The bodies whose pose changed since the tick's record last read them, a seated one with its stance
-/// ([`Bodies::moved`]).
-pub type MovedRows = Vec<(Id, Pose, Option<Stance>)>;
+/// The bodies whose pose changed since the tick's record last read them, a seated one with its stance, one on a link
+/// (a stair, a ladder) with the link and how far along it, in millionths (FOR-FABLE 8) ([`Bodies::moved`]).
+pub type MovedRows = Vec<(Id, Pose, Option<Stance>, Option<(Id, u32)>)>;
 
 /// About how often a moving body's motion is written while nothing else about it changes (#3799): 200 ms of world
 /// time, counted in whole ticks.
@@ -401,7 +428,8 @@ fn turned(a: Vec3, b: Vec3) -> bool {
 }
 
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
-/// (1 sit, 2 lie, 3 stand in a standing slot, #3598).
+/// (1 sit, 2 lie, 3 stand in a standing slot, #3598), or `[body, pose, [link, along]]` while it is carried across a
+/// link (FOR-FABLE 8: a stair, a ladder): its place on the link's line, the link, and how far along it, in millionths.
 pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
     let mut r = vec![body.to_value(), pose.to_value()];
     match stance {
@@ -411,6 +439,35 @@ pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
         None => {}
     }
     Value::Array(r)
+}
+
+/// A body's row while it is carried across `link`, `along` millionths of the way ([`row`]).
+pub fn row_on(body: Id, pose: &Pose, (link, along): (Id, u32)) -> Value {
+    Value::Array(vec![
+        body.to_value(),
+        pose.to_value(),
+        Value::Array(vec![link.to_value(), Value::Uint(u64::from(along))]),
+    ])
+}
+
+/// Whether a row is a body's on a link ([`row_on`]): its third item is a list, read or not.
+pub fn on_link(v: &Value) -> bool {
+    matches!(v, Value::Array(p) if matches!(p.get(2), Some(Value::Array(_))))
+}
+
+/// The link and how far along it a row names, when it is a body's on a link ([`row_on`]).
+pub fn read_link(v: &Value) -> Option<(Id, u32)> {
+    let Value::Array(p) = v else { return None };
+    let [_, _, Value::Array(on)] = p.as_slice() else {
+        return None;
+    };
+    let [link, Value::Uint(along)] = on.as_slice() else {
+        return None;
+    };
+    Some((
+        replica::effects::read_id(link).ok()?,
+        u32::try_from(*along).ok()?,
+    ))
 }
 
 /// A row read back: the body, its pose and its stance in a seat.
@@ -455,7 +512,10 @@ impl Bodies {
 
     /// No bodies yet, over `town`, with `copy` (built by [`Town::copy`]) the planner's town (K18b): a world builds the
     /// copy with its town, before its clock and watchdog start, as a large town takes a while to build.
-    pub fn with_planner(town: Town, copy: Town, tick: Micros) -> R<Bodies> {
+    pub fn with_planner(mut town: Town, mut copy: Town, tick: Micros) -> R<Bodies> {
+        // The spot tables' record is a test's: a served world keeps none (#2803).
+        town.spots.forget_record();
+        copy.spots.forget_record();
         let planner = Thread::spawn(Planner::new(copy)).map_err(|e| Refusal {
             name: "planner-thread",
             detail: e.to_string(),
@@ -472,7 +532,12 @@ impl Bodies {
             forms_out: BTreeMap::new(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
-            runner: Runner::new(tick),
+            // The controller's input log is a test's: a served world keeps its inputs in its own log (#2803).
+            runner: {
+                let mut runner = Runner::new(tick);
+                runner.controller.forget_log();
+                runner
+            },
             form_map: Arc::new(town.versions.clone()),
             form_answers: BTreeMap::new(),
             form_questions: BTreeMap::new(),
@@ -488,10 +553,15 @@ impl Bodies {
             live: BTreeMap::new(),
             ended: Vec::new(),
             short: BTreeSet::new(),
+            stopped_short: BTreeMap::new(),
+            goal_moved: BTreeMap::new(),
+            held_off_by: BTreeMap::new(),
+            walked_again: BTreeMap::new(),
             took: BTreeMap::new(),
             walked_to: BTreeMap::new(),
             away_of: BTreeMap::new(),
             logged: BTreeMap::new(),
+            crossed: BTreeMap::new(),
             shown: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
@@ -948,6 +1018,7 @@ impl Bodies {
                         self.runner.controller.remove(id);
                         let Some(m) = near else {
                             self.logged.remove(&id);
+                            self.crossed.remove(&id);
                             return Err(e);
                         };
                         self.add_body_built(family, m, build)?;
@@ -1224,7 +1295,7 @@ impl Bodies {
 
     /// The bodies whose pose changed since the last call, in id order, a body in a seat's slot with its stance: what
     /// the tick's record keeps of them (K18), so a restart stands each where it last stood or seats it again.
-    pub fn moved(&mut self) -> Vec<(Id, Pose, Option<Stance>)> {
+    pub fn moved(&mut self) -> MovedRows {
         self.moved_and_poses().0
     }
 
@@ -1234,14 +1305,28 @@ impl Bodies {
         let every = self.every();
         let mut out = Vec::new();
         let mut poses = Vec::with_capacity(every.len());
+        let c = &self.runner.controller;
         for (id, (pose, stance)) in every {
             poses.push((id, pose));
             if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
                 continue;
             }
+            // FOR-FABLE 8: a body carried across a link (a stair, a ladder) writes its place on the link's line every
+            // tick it moves, with the link and how far along it, as a walk writes its own; `logged` keeps where it
+            // last stood, so a restart (which reads no row on a link) stands it there.
+            if let Some(on) = c.crossing(id)
+                && let Some(now) = c.body(id).map(|b| b.pose)
+            {
+                if self.crossed.get(&id) != Some(&now) {
+                    self.crossed.insert(id, now);
+                    out.push((id, now, None, Some(on)));
+                }
+                continue;
+            }
+            self.crossed.remove(&id);
             if self.logged.get(&id) != Some(&pose) {
                 self.logged.insert(id, pose);
-                out.push((id, pose, stance));
+                out.push((id, pose, stance, None));
             }
         }
         (out, poses)
@@ -1445,11 +1530,61 @@ impl Bodies {
         }
     }
 
+    /// A walk to point `p` of the open ground (FOR-FABLE 14, `walk x,z`): to the ground a body may stand on at that
+    /// point on the plan, the open ground's or a floor's, whichever is nearest the walker's own level (a Soul on a
+    /// frame's standing place sent to a point 2 m from its foot climbs down; one on a deck sent to a point on it stays
+    /// up). A point in a doorway's or a stair's clearance is walked to as before (#5254: moved out to a walker's
+    /// clearance, ended `walk.goal-moved`), and so is one with no ground under it within a walker's goal tolerance
+    /// of ground a body stands on ([`STOPPED_SHORT_MM`]); farther, it is refused `walk.no-ground-there`, naming the
+    /// nearest point the walker may stand on and reach on the spot tables' rings out to 7 m (map lookups only).
+    fn ground_point(&mut self, body: Id, p: Vec3) -> R<Target> {
+        let ground = self.town.ground;
+        let Some(b) = self.runner.controller.body(body).cloned() else {
+            return Ok(Target::new(ground, p));
+        };
+        // A point in a passage's clearance on the open ground (#5254) as before: the spot tables move it out. One on
+        // a floor above the ground goes to that floor (the top of a frame's ladder is in the ladder's clearance).
+        let passage = self.town.passage_at(ground, p).is_some();
+        let view = self.town.view_for(body)?;
+        match view.level_under(&b, p) {
+            Some((node, at)) if node != ground || !passage => return Ok(Target::new(node, at)),
+            _ if passage => return Ok(Target::new(ground, p)),
+            _ => {}
+        }
+        let near = i64::try_from(STOPPED_SHORT_MM).unwrap_or(0) * 1000;
+        if view
+            .standable_near(&b, p, sim::spots::REACH_PITCH, near)
+            .is_some()
+        {
+            return Ok(Target::new(ground, p));
+        }
+        let (pitch, far) = (sim::spots::PITCH, sim::spots::PITCH * sim::spots::RINGS);
+        let nearest = match view.standable_near(&b, p, pitch, far) {
+            Some(s) => format!(
+                "the nearest point to stand on: x={} z={} mm",
+                s.x / 1000,
+                s.z / 1000
+            ),
+            None => format!("no point to stand on within {} m of it", far / 1_000_000),
+        };
+        Err(Refusal {
+            name: "walk.no-ground-there",
+            detail: format!(
+                "no ground to stand on at x={} z={} mm; {nearest}",
+                p.x / 1000,
+                p.z / 1000
+            ),
+        })
+    }
+
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
     fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
+            if node == self.town.ground {
+                return self.ground_point(body, p);
+            }
             return Ok(Target::new(node, p));
         }
         // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
@@ -1614,7 +1749,26 @@ impl Bodies {
 
     /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
     pub fn walks_kept(&self) -> usize {
-        self.walked_to.len() + self.away_of.len()
+        self.walked_to.len() + self.away_of.len() + self.walked_again.len() + self.held_off_by.len()
+    }
+
+    /// The other body standing nearest point `p` of node `node` (µm), within [`HELD_OFF_NEAR`] of it on the plan: the
+    /// smaller id of two as near.
+    fn nearest_other(&self, body: Id, node: Id, p: Vec3) -> Option<Id> {
+        self.runner
+            .controller
+            .bodies()
+            .filter(|m| m.id != body && m.pose.frame.node == node)
+            .map(|m| {
+                let (dx, dz) = (m.pose.position.x - p.x, m.pose.position.z - p.z);
+                (
+                    (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt(),
+                    m.id,
+                )
+            })
+            .filter(|(d, _)| *d <= i128::from(HELD_OFF_NEAR))
+            .min()
+            .map(|(_, b)| b)
     }
 
     /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
@@ -1786,6 +1940,11 @@ impl Bodies {
             match ask {
                 Ask::Walk { node, point, gait } => {
                     let goal = self.goal(a.body, node, point);
+                    // A point on the open ground walked to on a floor above it (FOR-FABLE 14) is that floor's point:
+                    // how far from it the walk ends, and its resends, are read there.
+                    if let (Ok(g), Some(_)) = (&goal, point) {
+                        self.walked_to.insert(id, (g.node, Some(g.point())));
+                    }
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(speed(gait), self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
@@ -2099,6 +2258,77 @@ impl Bodies {
                     None if self.runner.running(body) => continue,
                     None => Err("claim-taken".to_owned()),
                 };
+                // #5254: a walk to a point that ended short of it is sent again while bodies may be moving off its way,
+                // [`WALK_AGAIN`] times (some three seconds); then it answers how far short it stopped, and why.
+                // #5254: one that came to the place it was granted off the point it was sent to is done there and says
+                // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved out to [`sim::spots::CLEAR`]
+                // off the passage (A3), however far that is; or off its ground, nearer than a walker's goal tolerance.
+                if how.is_ok()
+                    && !self.short.contains(&id)
+                    && let Some(&(t, Some(p))) = self.walked_to.get(&id)
+                    && let Some(g) = self.runner.granted.get(&body).copied()
+                    && let (Some(asked), Some(there)) =
+                        (self.gap_to(body, t, p), self.gap_to(body, t, g))
+                    && asked > 50
+                    && there <= 50
+                {
+                    match self.town.passage_at(t, p) {
+                        Some(why) => {
+                            self.goal_moved.insert(id, (asked, Some(why)));
+                        }
+                        None if asked <= STOPPED_SHORT_MM => {
+                            self.goal_moved.insert(id, (asked, None));
+                        }
+                        None => {}
+                    }
+                }
+                if how.is_ok()
+                    && !self.goal_moved.contains_key(&id)
+                    && let Some(&(t, Some(p))) = self.walked_to.get(&id)
+                    && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
+                {
+                    let n = self.walked_again.get(&id).copied().unwrap_or(0);
+                    // Sent again half a second after it stopped, so bodies in its way have time to move off.
+                    let since = self
+                        .runner
+                        .ended
+                        .get(&body)
+                        .map_or(Micros::MAX, |(at, _)| self.runner.now.saturating_sub(*at));
+                    if n < WALK_AGAIN && since < WALK_AGAIN_AFTER {
+                        continue;
+                    }
+                    if n < WALK_AGAIN {
+                        self.walked_again.insert(id, n + 1);
+                        let goal = self.goal(body, t, Some(p));
+                        let walk = Box::new(Route::sent(WALK, self.runner.tick));
+                        if goal
+                            .and_then(|g| self.runner.send(body, walk, g, id))
+                            .is_ok()
+                        {
+                            self.short.remove(&id);
+                            continue;
+                        }
+                    }
+                    // Held off its point by others (A2-4): ended short as near as the crowd allows, or at the place it
+                    // was granted while another body stands near the point (within [`HELD_OFF_NEAR`]) and the point
+                    // itself is ground it may stand on and reach, clear of every doorway and stair
+                    // (`View::stand_reached`). Done as near as the crowd allows, never `walk.stopped-short`.
+                    let crowd =
+                        self.short.contains(&id)
+                            || (self.runner.granted.get(&body).is_some_and(|g| {
+                                self.gap_to(body, t, *g).is_some_and(|mm| mm <= 50)
+                            }) && self.nearest_other(body, t, p).is_some()
+                                && self.pose(body).is_some_and(|from| {
+                                    self.town
+                                        .view_for(body)
+                                        .is_ok_and(|v| v.stand_reached(t, p, from).is_some())
+                                }));
+                    if crowd {
+                        self.short.insert(id);
+                    }
+                    self.stopped_short.insert(id, (mm, crowd));
+                }
+                self.walked_again.remove(&id);
                 self.live.remove(&body);
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
@@ -2110,12 +2340,21 @@ impl Bodies {
                         .or_else(|| self.gap_of(t, body));
                     if let Some(mm) = gap {
                         self.away_of.insert(id, mm);
+                        // A2-4: the other body nearest its point, for its end beside how far short it stood.
+                        if self.short.contains(&id)
+                            && let Some(by) = point.and_then(|p| self.nearest_other(body, t, p))
+                        {
+                            self.held_off_by.insert(id, by);
+                        }
                     }
                     self.face(body, t);
                 }
                 out.push((id, how));
             }
         }
+        // A walk sent again that was then replaced, cancelled or retired keeps no count (review of #5268).
+        let live: BTreeSet<Id> = self.live.values().map(|(id, _)| *id).collect();
+        self.walked_again.retain(|id, _| live.contains(id));
         out
     }
 
@@ -2267,6 +2506,7 @@ impl Bodies {
             self.away_of.remove(&i);
         }
         self.logged.remove(&r.body);
+        self.crossed.remove(&r.body);
         self.shown.remove(&r.body);
         self.wind.remove(r.body);
         self.wind_moves.remove(&r.body);

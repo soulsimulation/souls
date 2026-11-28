@@ -12,7 +12,7 @@ import { startNativePageFixture } from './native-page-fixture.mjs';
 import { prepareCaptureViewport } from './capture-viewport.mjs';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
 import { config } from '../../e2e/config.mjs';
-import { assertImportedAttemptBudget } from './imported-attempt-budget.mjs';
+import { assertImportedAttemptBudget, assertContinuationAuthority } from './imported-attempt-budget.mjs';
 import { launchArgs } from '../playtest/lib/platform.mjs';
 
 const TOOL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -141,6 +141,11 @@ const production = { source, changed: (root, from, to) => git(root, 'diff', '--n
   lineChanged: (root, from, to, path, line) => [...git(root, 'diff', '--unified=0', from, to, '--', path).matchAll(/^@@ .*\+(\d+)(?:,(\d+))? @@/gm)].some(m => line >= Number(m[1]) && line < Number(m[1]) + Number(m[2] ?? 1)),
   boot: o => o.kind === 'native-page' ? startNativePageFixture(o) : o.kind === 'v2-bodies' ? startV2BodyFixture(o) : o.kind === 'v2-account' ? startV2AccountFixture(o) : (requireThat(o.kind === undefined, 'unknown-fixture-kind'), startWorld(o)), browser: openBrowser, stop: stopOwnedChild, portFree, now: () => Date.now(), test: false };
 
+/** The journey's cap, and its video's: 90 s, or 600 s for a survey cycle (an id starting `survey-`), which records where
+ * a long build stands rather than passing or failing one step. 600 s: the bay's lower build through its joists is one
+ * continuous take of about 5 to 6 minutes (attempt 22). */
+export const journeyCap = o => typeof o.cycle?.id === 'string' && o.cycle.id.startsWith('survey-') ? 600000 : 90000;
+
 /** Exactly one invocation = one fresh owned lifecycle. A failed slot cannot be replaced by another sample id.
  * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot's repair loop is capped3.
  * A material corrective cycle must be explicit; changing HEAD never starts one. No URL parameter is accepted. */
@@ -153,7 +158,7 @@ async function run(o, d) {
   requireThat(o.world?.kind === undefined || (o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies' || o.world.kind === 'native-page'), 'unknown-fixture-kind');
   requireThat(o.owner?.trim() && o.cycle?.id && o.cycle.plan?.length && o.ledger, 'plan-and-agent-identity-required');
   requireThat(!('url' in o) && !('runDir' in o) && !('dataDir' in o) && !('profileDir' in o), 'existing-resource-override');
-  for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [o.journeyTimeoutMs ?? 90000, 90000], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
+  for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [o.journeyTimeoutMs ?? 90000, journeyCap(o)], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
   if (o.world.kind === 'v2-bodies') requireThat((o.world.timeoutMs ?? 30000) <= 30000, 'body-boot-timeout-out-of-bounds');
   if (!d.test) requireThat(!o.journey && o.driver?.root && o.driver?.path, 'committed-driver-required');
   const ledger = resolve(o.ledger), toolRoot = resolve(o.toolRoot ?? TOOL_ROOT), lock = ledger + '.lock';
@@ -190,15 +195,19 @@ async function run(o, d) {
     }
     state = existsSync(ledger) ? json(ledger) : { version: 1, owner: o.owner, historicalCaptures: o.history?.count ?? 0, historicalEvidence: o.history?.evidence ?? [], captures: 0, attempts: [], cycles: [] };
     const importIdentity = o.importedBudget ? { historyFile: resolve(o.importedBudget.historyFile), historyHash: o.importedBudget.historyHash } : null;
+    let imported, continuation, effectiveReview = o.review ?? null;
     if (state.importedBudget) requireThat(digest(state.importedBudget) === digest(importIdentity), 'imported-budget-required-and-pinned');
     if (o.importedBudget) {
       // Authoritative check is under this ledger's exclusive lock; an outside preflight can be stale.
-      const imported = assertImportedAttemptBudget({ ...o.importedBudget, ledgerFile: ledger, owner: o.owner,
+      imported = assertImportedAttemptBudget({ ...o.importedBudget, ledgerFile: ledger, owner: o.owner,
         plan: o.cycle.plan, arm: o.arm, repeat: o.repeat,
-        currentHeads: { product: current.product.head, tool: current.tool.head, driver: current.driver?.head } });
+        currentHeads: { product: current.product.head, tool: current.tool.head, driver: current.driver?.head },
+        continuationAuthority: o.continuationAuthority, cycle: o.cycle, current, source: d.source, now: d.now() });
+      continuation = imported.continuation;
       requireThat(digest(imported.history) === digest(o.history), 'imported-history-mismatch');
       state.importedBudget = importIdentity;
-    }
+    } else continuation = assertContinuationAuthority({ continuationAuthority: o.continuationAuthority,
+      ledgerFile: ledger, owner: o.owner, cycle: o.cycle, current, arm: o.arm, repeat: o.repeat, source: d.source, now: d.now() });
     requireThat(state.owner === o.owner, 'owner-mismatch');
     requireThat(Number.isSafeInteger(state.historicalCaptures) && state.historicalCaptures >= 0, 'historical-count-invalid');
     if (!d.test && state.historicalCaptures) requireThat(state.historicalEvidence.length, 'historical-evidence-required');
@@ -209,7 +218,17 @@ async function run(o, d) {
     requireThat(digest({ count: state.historicalCaptures, evidence: state.historicalEvidence }) === digest(o.history ?? { count: 0, evidence: [] }), 'historical-record-changed');
     if (cycle?.id !== o.cycle.id) {
       changed(o.cycle.fix, current, d.changed);
-      if (cycle) requireThat([...Object.values(cycle.armSources), cycle.toolSource, cycle.driverSource].filter(Boolean).some(s => s.root === resolve(o.cycle.fix.root) && s.head === o.cycle.fix.from), 'cycle-change-from-mismatch');
+      if (cycle) {
+        const recorded = { product: Object.values(cycle.armSources), tool: [cycle.toolSource], driver: [cycle.driverSource] };
+        const direct = Object.values(recorded).flat().filter(Boolean).some(s => s.root === resolve(o.cycle.fix.root) && s.head === o.cycle.fix.from);
+        const relocated = continuation?.relocations.some(r => {
+          const kind = r.kind ?? 'product';
+          return recorded[kind]?.some(s => s && sameSource({ [kind]: s }, { [kind]: r.from }))
+            && r.from.head === o.cycle.fix.from && r.to.root === resolve(o.cycle.fix.root) && r.to.head === o.cycle.fix.to
+            && sameSource({ [kind]: r.to }, { [kind]: current[kind] });
+        });
+        requireThat(direct || relocated, 'cycle-change-from-mismatch');
+      }
       requireThat(!state.cycles.some(c => c.id === o.cycle.id), 'cycle-id-reused');
       requireThat(new Set(o.cycle.plan.map(s => `${s.arm}:${s.repeat}`)).size === o.cycle.plan.length, 'duplicate-measurement-slot');
       requireThat(o.cycle.plan.every(s => o.cycle.arms?.[s.arm]?.head && isAbsolute(o.cycle.arms[s.arm].root) && Number.isSafeInteger(s.repeat) && s.repeat > 0), 'planned-source-required');
@@ -217,20 +236,33 @@ async function run(o, d) {
         ...(o.driver ? { driverSource: current.driver, driverPath: o.driver.path } : {}) }; state.cycles.push(cycle);
     } else requireThat(digest(cycle.plan) === digest(o.cycle.plan) && digest(cycle.arms) === digest(o.cycle.arms) && digest(cycle.fix) === digest(o.cycle.fix), 'cycle-plan-changed');
     requireThat(cycle.cursor < cycle.plan.length, 'passing-scenario-rerun');
-    requireThat(!cycle.stopped && cycle.chain < config.iterationCap, 'repair-ceiling');
+    const attemptCap = continuation ? continuation.slot.maxTotalAttempts - (imported?.priorAttempts ?? 0) : config.iterationCap;
+    requireThat(!cycle.stopped && cycle.chain < attemptCap, 'repair-ceiling');
     const slot = cycle.plan[cycle.cursor];
     requireThat(slot.arm === o.arm && slot.repeat === o.repeat, 'failed-slot-cannot-be-skipped');
     if (cycle.driverPath) requireThat(o.driver?.path === cycle.driverPath, 'driver-path-changed');
     const planned = { product: cycle.armSources[slot.arm], tool: cycle.toolSource, ...(cycle.driverSource ? { driver: cycle.driverSource } : {}) };
-    requireThat(planned.product.root === current.product.root, 'planned-source-mismatch');
+    const relocations = continuation?.relocations.filter(r => {
+      const kind = r.kind ?? 'product';
+      return sameSource({ [kind]: r.from }, { [kind]: planned[kind] }) && sameSource({ [kind]: r.to }, { [kind]: current[kind] });
+    }) ?? [];
+    requireThat(planned.product.root === current.product.root || relocations.some(r => (r.kind ?? 'product') === 'product'), 'planned-source-mismatch');
     const chain = state.attempts.filter(a => a.cycle === cycle.id && a.slot === cycle.cursor);
+    if (imported?.latestSource) requireThat(!sameSource(imported.latestSource, current), 'unchanged-retry');
     if (chain.length || !sameSource(planned, current)) {
       requireThat(o.repair, 'planned-source-mismatch-or-material-change-required');
       changed(o.repair, current, d.changed);
       if (chain.length) requireThat(!sameSource(chain.at(-1).source, current), 'unchanged-retry');
-      requireThat(Object.values(planned).some(s => s.root === resolve(o.repair.root) && s.head === o.repair.from), 'repair-from-mismatch');
+      requireThat(Object.values(planned).some(s => s.root === resolve(o.repair.root) && s.head === o.repair.from)
+        || relocations.some(r => resolve(o.repair.root) === r.to.root && o.repair.from === r.from.head), 'repair-from-mismatch');
     }
-    if (cycle.chain === 2) reviewThird(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    if (continuation && imported?.nextTotalAttempt >= 3) {
+      const review = o.importedBudget.thirdReview;
+      effectiveReview = { ...review, evidence: review.evidenceHashes, source: structuredClone(current) };
+      reviewThird(effectiveReview,
+        imported.previous.map(a => ({ reportHash: a.hash, endedAt: a.endedAt, hypothesis: a.hypothesis })), o.owner, current, o.repair, d.now(), d.lineChanged);
+    } else if (cycle.chain === 2 || continuation && cycle.chain >= 2) reviewThird(o.review, chain, o.owner, current, o.repair, d.now(), d.lineChanged);
+    if (imported?.nextTotalAttempt >= 3) effectiveReview = { ...o.importedBudget.thirdReview, evidence: o.importedBudget.thirdReview.evidenceHashes, source: structuredClone(current) };
     checkPort(o.world.port);
     requireThat(await d.portFree(o.world.port), 'occupied-resource');
     controller.signal.throwIfAborted();
@@ -239,10 +271,13 @@ async function run(o, d) {
     paths = { dir, data: join(dir, 'data'), profile: join(dir, 'profile'), video: join(dir, 'video'), log: join(dir, 'world.log') };
     for (const name of ['data', 'profile', 'video']) mkdirSync(paths[name]);
     cycle.chain++;
+    if (continuation) (state.continuationAuthorities ??= []).push(continuation.pin);
     report = { version: 1, qualified: false, injected: d.test, owner: o.owner, cycle: cycle.id, slot: cycle.cursor,
       arm: slot.arm, repeat: slot.repeat, repairAttempt: cycle.chain, cumulativeRun: state.attempts.length + 1,
-      startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: o.review?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
-      paths, driver: o.driver ?? null, browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [], evidence: [], teardown: {}, review: o.review ?? null };
+      startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: effectiveReview?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
+      paths, driver: o.driver ?? null, browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [],
+      evidence: [...(continuation ? [continuation.pin] : []), ...(effectiveReview && imported ? imported.reviewEvidence : [])], teardown: {}, review: effectiveReview ? structuredClone(effectiveReview) : null,
+      ...(continuation ? { continuationAuthority: continuation.pin } : {}) };
     cycle.inFlight = paths.dir; save(); // a crash remains an explicit unfinished ownership record
     requireThat(!state.attempts.some(a => a.runDir === paths.dir), 'reused-run-directory');
     const world = await d.boot({ ...o.world, checkout: current.product.root, data: paths.data, fresh: false, log: paths.log,
@@ -374,7 +409,7 @@ async function run(o, d) {
           const at = join(paths.video, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) });
           if (!d.test && native && file.endsWith('.webm')) {
             const seconds = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', at], { encoding: 'utf8', timeout: 5000 }));
-            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= 90, 'video-duration-out-of-bounds');
+            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= journeyCap(o) / 1000, 'video-duration-out-of-bounds');
             (report.videoDurations ??= []).push({ file: at, seconds });
           }
         }

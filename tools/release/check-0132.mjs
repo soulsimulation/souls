@@ -267,7 +267,8 @@ else if (ONLY.has('2')) {
       if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
       await card.check('#match', { timeout: 15_000 }).catch(() => {});
       await card.click('#approve', { timeout: 15_000 }).catch(() => {});
-      // the pairing finishes in the background (the client's own pair process): until then no Soul lives in the home
+      // N13: start waits for the approval, keeps the token and starts the client
+      cli('start');
       for (let i = 0; i < 60 && st?.connected !== true; i++) { st = cli('status'); if (st.connected !== true) await sleep(1000); }
       await card.context().close();
     }

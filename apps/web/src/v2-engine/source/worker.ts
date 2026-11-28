@@ -7,7 +7,9 @@
 // place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
 import * as replica from 'replica';
-import { decode, encode } from 'cborg';
+import { decode } from 'cborg';
+import { encode } from './profile.ts';
+import { sha256Hex } from '@souls/world-compiler';
 import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from './sound-record.ts';
 import { readChanged } from './changed.ts';
@@ -16,14 +18,22 @@ import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
 import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
+import {nativeId as key,carryFields,carryChangesInPart} from './carry-record.ts';
 import { moveRec } from './move-record.ts';
+import { backoffMs } from './backoff.ts';
 
-/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
-const AHEAD = 16;
+/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. 64 (#4898):
+ *  a cold arrival on an hour-old checkpoint reads some 7,000 small part files. Only while no read is refused (#5068). */
+const AHEAD = 64;
 /** How often a catch-up says how far behind it is (#4684). */
 const CATCHING_MS = 1000;
 /** The existing live pointer cadence, also used while a starting world has no pointer yet. */
 const POLL_MS = 250;
+/** How far back from the stream's newest time a course's places are worked out: the page keeps them only for its newest
+ *  84 s (bridge.ts publish: 12 s of chunks and a minute before them). A part that ends before that (every part of a cold
+ *  arrival's catch-up but the last few) is given no places; one that spans it, only from there. Working out every
+ *  course over every old part was 5 of the 5.7 s a cold Eden took to reach now (27 Nov). */
+const COURSE_KEEP_US = 90_000_000;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string } | { t: 'format'; format: number }
   | { t: 'catching'; behind: number };
@@ -34,16 +44,22 @@ const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, tra
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 type IdValue = [Uint8Array, number];
-const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 
 /** How long a pointer or part read may take before it is given up (25 Nov): a read that never answers would hold the
  *  poll, which waits for it, for good; given up, it is an error like a failed read, and the next poll reads again. */
 const READ_MS = 5000;
 
+/** #5068 item 13: whether a read was refused (any answer but a 2xx or a 404) or did not answer since this was last
+ *  cleared, and how many polls in a row had one. A 404 is a file not written yet (the next part, a starting world's
+ *  pointer): read again at the usual pace, as before. */
+let refused = false;
+let fails = 0;
+
 /** `timed`: given up after READ_MS. Baselines are not: a slow viewer's 9 MB baseline may well take longer. */
-async function get(url: URL, timed = false): Promise<Uint8Array | null> {
-  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) });
+async function get(url: URL, timed = false, onRefused?: () => void): Promise<Uint8Array | null> {
+  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) }).catch((e) => { refused = true; onRefused?.(); throw e; });
+  if (!res.ok && res.status !== 404) { refused = true; onRefused?.(); }
   return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
 }
 
@@ -124,6 +140,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const tint = f.get(145);
   const text = (t: unknown) => (typeof t === 'string' ? t : t instanceof Uint8Array ? new TextDecoder().decode(t) : null);
   if (Array.isArray(tint)) rec.tint = tint.flatMap((r) => (Array.isArray(r) && r.length === 2 && text(r[0]) !== null ? [[text(r[0])!, num(r[1])] as [string, number]] : []));
+  carryFields(rec,f); // membership, holds and (#5134) where an activity's node holds its slots' riders
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
   if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
@@ -143,8 +160,10 @@ async function run(stream: URL) {
   // parse only after it answers, outside the retry catch, so invalid pointer bytes remain a visible error.
   let first: Uint8Array | null = null;
   while (!first) {
+    refused = false;
     first = await get(new URL('pointer', stream), true).catch(() => null);
-    if (!first) await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    fails = refused ? fails + 1 : 0;
+    if (!first) await new Promise((resolve) => setTimeout(resolve, Math.max(POLL_MS, backoffMs(fails))));
   }
   let ptr = readPtr(first) as StreamPointer;
   let player: StreamPlayer;
@@ -166,10 +185,20 @@ async function run(stream: URL) {
   const readText = async (file: string, p = ptr) => addWords(await get(new URL(path(p, file), stream)));
   // A part's file (`suffix` '') or its words ('.text'), with the next AHEAD the pointer names already asked for.
   const fetching = new Map<string, Promise<Uint8Array | null>>();
+  // While reads are refused (#5068 item 13), and after they were until a part is read again, only the part played is asked
+  // for, never AHEAD at once; and a read ahead that was refused is not kept for its part's turn, which reads it again (it
+  // used to leave one part a poll after an outage). A file that is not there (404: a part with no words) is kept, as
+  // before, so it is asked for once, not again with every later part's read ahead.
+  let partRead = false;
   const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
-    for (let k = n; k < n + AHEAD && k <= (p.newest ?? n); k++) {
+    const ahead = refused || (fails > 0 && !partRead) ? 1 : AHEAD;
+    for (let k = n; k < n + ahead && k <= (p.newest ?? n); k++) {
       const file = path(p, `${k}${suffix}`);
-      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream), true).catch(() => null));
+      if (fetching.has(file)) continue;
+      let lost = false;
+      const read = get(new URL(file, stream), true, () => { lost = true; }).catch(() => null);
+      fetching.set(file, read);
+      void read.then((b) => { if (b) partRead = true; else if (lost && fetching.get(file) === read) fetching.delete(file); });
     }
     const file = path(p, `${n}${suffix}`);
     const bytes = fetching.get(file) ?? get(new URL(file, stream), true);
@@ -244,10 +273,13 @@ async function run(stream: URL) {
     // A retained unresolved record may become drawable later; transfer fresh buffers, retaining its exact bytes.
     for (const n of visible) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
     // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
-    const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, onCourse(), rest.from, rest.to) : {};
+    // Only over the time the page keeps (COURSE_KEEP_US): the places it is given for that time are the same as before.
+    const keepFrom = (ptr.newestTo ?? rest?.to ?? 0) - COURSE_KEEP_US, kept = !!rest && rest.to >= keepFrom && !!replica.courseAt;
+    const courses = kept ? coursePlaces(replica.courseAt, onCourse(), Math.max(rest.from, keepFrom), rest.to) : {};
     if (rest) coursedTo = Math.max(coursedTo, rest.to);
-    // First-day round 4: when each still thing on a course moves on (a balloon at its stop takes off)
-    const leaves = rest && replica.courseAt ? courseLeaves(replica.courseAt, onCourse(), rest.to) : {};
+    // First-day round 4: when each still thing on a course moves on (a balloon at its stop takes off). A part that spans
+    // the kept time's start also says it as of that start, as the parts before it, which are given none, would have.
+    const leaves = kept ? { ...(rest.from < keepFrom ? courseLeaves(replica.courseAt, onCourse(), keepFrom) : {}), ...courseLeaves(replica.courseAt, onCourse(), rest.to) } : {};
     if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => drawn.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}), ...(Object.keys(leaves).length ? { leaves } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
@@ -263,7 +295,8 @@ async function run(stream: URL) {
     if (!p.generation) { player = new StreamPlayer(header); active = undefined; return; }
     if (!/^[0-9a-f]{64}$/.test(p.generation) || p.baseline !== p.generation) throw new Error('stream-generation-record');
     const baseline = await get(new URL(path(p, 'baseline'), stream));
-    if (!baseline || hex(new Uint8Array(await crypto.subtle.digest('SHA-256', baseline as BufferSource))) !== p.baseline) throw new Error('stream-baseline-hash');
+    // Private HTTP viewers may lack SubtleCrypto; keep exact SHA-256 verification on both paths.
+    if (!baseline || (globalThis.crypto?.subtle ? hex(new Uint8Array(await crypto.subtle.digest('SHA-256', baseline as BufferSource))) : sha256Hex(baseline)) !== p.baseline) throw new Error('stream-baseline-hash');
     refuseFormat(baseline);
     const nextPlayer = StreamPlayer.fromBaseline(header, baseline);
     let nodes: NodeRec[], nextVersion: number;
@@ -350,10 +383,16 @@ async function run(stream: URL) {
       if (ref) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
     }
     const refs = [...said.filter(x => !x.private).map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
-    if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
+    // N8 (28 Nov): its words through the read ahead, as a catch-up's are: read one part at a time, they were 4.8 of the
+    // 10 to 12 s a cold Verdelis Eden took to reach now (44 parts, each naming a word none had given). Not needed, the
+    // read ahead's is let go.
+    if (refs.some(r => !words.has(r))) addWords(await partFile(p, n, '.text'));
+    else fetching.delete(path(p, `${n}.text`));
     for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
-    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds });
+    let carryChanges:PartRec['carryChanges']=[],carryError:string|undefined;
+    try{carryChanges=carryChangesInPart(bytes);}catch(error){carryError=String(error);}
+    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds, carryChanges, ...(carryError?{carryError}:{}) });
     return true;
   };
   const tell = () => {
@@ -366,16 +405,22 @@ async function run(stream: URL) {
     const to = sleep.asleep ? Math.max(quiet ?? -Infinity, sleep.stillUntil == null ? now : Math.min(now, sleep.stillUntil)) : quiet;
     let courses: CoursePlaces = {}, leaves: Record<string, number> = {};
     if (to !== null && to > coursedTo && Number.isFinite(coursedTo) && replica.courseAt) {
-      courses = coursePlaces(replica.courseAt, onCourse(), coursedTo, to);
+      courses = coursePlaces(replica.courseAt, onCourse(), Math.max(coursedTo, to - COURSE_KEEP_US), to);
       leaves = courseLeaves(replica.courseAt, onCourse(), to);
       coursedTo = to;
     }
     post({ t: 'pointer', p: { ...ptr, quietUntil: quiet, ...(Object.keys(courses).length ? { courses } : {}), ...(Object.keys(leaves).length ? { leaves } : {}) } });
   };
   await install(ptr);
+  // #5068 item 13: a poll with a refused or unanswered read is followed by a wait that grows (backoffMs), counted in
+  // polls passed over; the first poll whose reads are all good goes back to the usual pace.
+  let wait = 0;
   const poll = async () => {
     if (busy) return;
+    if (wait > 0) return void wait--;
     busy = true;
+    refused = false;
+    partRead = false;
     try {
       const b = await get(new URL('pointer', stream), true);
       const latest = b ? readPtr(b) as StreamPointer : ptr;
@@ -414,7 +459,11 @@ async function run(stream: URL) {
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
     } catch (e) { post({ t: 'error', message: String((e as Error)?.stack ?? e) }); }
-    finally { busy = false; }
+    finally {
+      busy = false;
+      fails = refused ? fails + 1 : 0;
+      wait = Math.floor(backoffMs(fails) / POLL_MS);
+    }
   };
   await poll();
   setInterval(poll, POLL_MS);

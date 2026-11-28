@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { offerNote } from '../converse/converse.mjs';
 import { requestOf } from '../cli/souls.mjs';
-import { MOUTH_CLEAR, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
+import { MOUTH_CLEAR, REACH, activityPin, goTime, byName, carryIntents, crewNeeds, crewOffered, crewsIn, gripSpot, loadOf, nextStep, offerNear, openCrewOffers, placer, slotPoint, workLines } from './carry.mjs';
 import { newCrew, nextOf } from '../cli/souls.mjs';
 import { slotsCard } from '../together/members.mjs';
 
@@ -62,17 +62,50 @@ test('the crew is offered, joined and left; the load lifted and set down', () =>
   assert.equal(carryIntents({ do: 'lift', crew: id(8), load: id(2) }, { ...ctx, ground: null }).code, 'carry-no-ground');
 });
 
-test('a grip is the load\'s place from its entry; a standing part\'s 2.2 m along its z; beside it 1.2 m along its x', () => {
+test('a grip is the load\'s place from its entry; a standing part\'s beside its edges along its x; beside it 1.2 m along its x', () => {
   const beam = loadOf(kinds['mars:rack_beam']);
   assert.deepEqual(beam.places, [-1_447_000, 1_447_000]);
   const walk = (req) => send(req)[0].params[1];
   near(walk({ do: 'grip', thing: id(2), end: 'front' }), [2e6, 0, 6e6 + 1_447_000], 'the beam\'s front');
   near(walk({ do: 'grip', thing: id(2), end: 'back', from: '2.2' }), [2e6, 0, 3.8e6], 'its back, 2.2 m off');
   near(walk({ do: 'grip', thing: id(9), end: 'front' }), [-12e6 + 1_447_000, 0, 20e6], 'a beam turned east: its front is east');
-  near(walk({ do: 'grip', thing: id(4), end: 'back' }), [0, 0, 3.65e6], 'the standing frame\'s back');
+  // #5067: a frame standing in a stand is taken from beside its edges (its own x, 0.35 m beyond its 0.61 m half width),
+  // where each carrier is within part:take's 0.7 m of the edge it holds; 2.2 m off its faces was 2.16 m from the hold.
+  near(walk({ do: 'grip', thing: id(4), end: 'back' }), [-959_500, 0, 5.85e6], 'the standing frame\'s back, beside its edge');
+  near(walk({ do: 'grip', thing: id(4), end: 'front' }), [959_500, 0, 5.85e6], 'its front, beside its other edge');
+  near(walk({ do: 'grip', thing: id(4), end: 'back', from: '2.2' }), [-2.2e6, 0, 5.85e6], 'its back, 2.2 m from its middle on that line');
   near(walk({ do: 'grip', thing: id(4), end: 'right' }), [1.2e6, 0, 5.85e6], 'beside the frame');
   assert.equal(send({ do: 'grip', thing: id(4), end: 'up' }).code, 'carry-usage');
   near(gripSpot({ pos: [0, 0, 0] }, null, 'front'), [0, 2.2e6], 'no entry: as a standing part');
+});
+
+test('#5067: a standing frame is approached where both part:take and carry:lift admit it, not 2.2 m off its faces', () => {
+  // Beside its edges, along its own x. part:take holds it at its edges (sim grips::assign: its grips along the carriers'
+  // line, no further out than its edge); carry:lift lays it along that line, its grips ±0.78 m from its middle
+  // (Load::check_lift). Each end within GRIP_REACH (0.7 m) of both, on the floor (a frame set down) and in its stand.
+  const GRIP_REACH = 700_000, frame = loadOf(kinds['mars:rack_upright']);
+  assert.equal(frame.hold, 609_500, 'held at its edge');
+  assert.equal(frame.joins, true, 'a part crews seat');
+  const grip = frame.places.map((p, k) => p + (k === 0 ? REACH : -REACH));
+  assert.deepEqual(grip, [-780_000, 780_000]);
+  const on = { ...ctx, parentOf: (n) => (n === id(4) ? id(1) : rows.get(n)?.parent ?? null) };
+  const mid = at(id(4)).pos;
+  for (const c of [on, ctx]) {
+    for (const [end, g, sign] of [['back', grip[0], -1], ['front', grip[1], 1]]) {
+      const p = carryIntents({ do: 'grip', thing: id(4), end }, c)[0].params[1];
+      near(p, [mid[0] + sign * 959_500, 0, mid[2]], `${end}, beside its edge`);
+      assert.ok(Math.abs(p[0] - (mid[0] + sign * frame.hold)) <= GRIP_REACH, `${end} within part:take's reach of its edge`);
+      assert.ok(Math.abs(p[0] - (mid[0] + g)) <= GRIP_REACH, `${end} within carry:lift's reach of its grip`);
+    }
+  }
+  // A timber bent is held at its edge too (its post, 0.9 m from its middle): its carriers stand 0.35 m beyond that.
+  const bent = loadOf({ geometry: { bounds_mm: [1800, 1900, 100] }, points: { low: { role: 'grip', at_mm: [0, 400, 0] }, high: { role: 'grip', at_mm: [0, 1500, 0] }, j: { role: 'joint', at_mm: [0, 0, 0] } } });
+  assert.deepEqual([bent.hold, bent.joins], [900_000, true]);
+  near(gripSpot({ pos: [0, 0, 0] }, bent, 'front', null, null, true), [1_250_000, 0], 'the bent\'s front, on the floor');
+  // The 6.1 m frame is only lifted (no joints): standing on the floor, along its z at its lift places.
+  const tall = loadOf(kinds['mars:rack_upright_6m']);
+  assert.equal(tall.joins, false);
+  near(gripSpot({ pos: [0, 0, 0] }, tall, 'front', null, null, true), [0, tall.places[1]], 'the tall frame\'s front');
 });
 
 test('front or back --out stands that far off the part\'s line, outside what it is seated in: it comes down there', () => {
@@ -94,20 +127,22 @@ test('a crew of six takes the 6.1 m frame at its six grips: front, back, and fou
   const tall = loadOf(kinds['mars:rack_upright_6m']);
   assert.deepEqual(tall.inner, [-1_649_000, -550_000, 550_000, 1_649_000], 'four grips between its ends');
   assert.equal(tall.halfWidth, 609_500);
-  // It stands at (5, 10) m: its front and back on its own z, as far out as a lift checks its ends (3.1 m, --from); the
-  // sides beside its grips along that line, half its width and REACH off it, alternating.
-  const up = { pos: [5e6, 0, 10e6] }, off = 609_500 + 350_000;
-  near(gripSpot(up, tall, 'back', 3_100_000), [5e6, 10e6 - 3_100_000], 'its back');
-  near(gripSpot(up, tall, 'front', 3_100_000), [5e6, 10e6 + 3_100_000], 'its front');
-  near(gripSpot(up, tall, 'side1'), [5e6 - off, 10e6 - 1_649_000], 'the first side, on its + side');
-  near(gripSpot(up, tall, 'side2'), [5e6 + off, 10e6 - 550_000], 'the second, across');
-  near(gripSpot(up, tall, 'side4'), [5e6 + off, 10e6 + 1_649_000], 'the fourth');
-  // A beam lying along z has one grip between its ends: one side beside its middle, and no second.
+  // It stands on the floor at (5, 10) m, to be lifted: its front and back on its own z, as far out as a lift checks its
+  // ends (3.1 m, --from); the sides beside its grips along that line, half its width and SIDE_REACH off it, alternating.
+  const up = { pos: [5e6, 0, 10e6] }, off = 609_500 + 450_000, floor = true;
+  near(gripSpot(up, tall, 'back', 3_100_000, null, floor), [5e6, 10e6 - 3_100_000], 'its back');
+  near(gripSpot(up, tall, 'front', 3_100_000, null, floor), [5e6, 10e6 + 3_100_000], 'its front');
+  near(gripSpot(up, tall, 'side1', null, null, floor), [5e6 - off, 10e6 - 1_649_000], 'the first side, on its + side');
+  near(gripSpot(up, tall, 'side2', null, null, floor), [5e6 + off, 10e6 - 550_000], 'the second, across');
+  near(gripSpot(up, tall, 'side4', null, null, floor), [5e6 + off, 10e6 + 1_649_000], 'the fourth');
+  // A beam lying along z has four grips between its ends (#5067: six in all): the first side beside the one nearest
+  // its back, the fourth beside the one nearest its front, across. The frame in its stand has none between its ends.
   const walk = (req) => send(req)[0].params[1];
-  near(walk({ do: 'grip', thing: id(2), end: 'side1' }), [2e6 - 51_000 - 350_000, 0, 6e6], 'the beam\'s side, half its height across (as it is carried, on its edge)');
-  const none = send({ do: 'grip', thing: id(2), end: 'side2' });
+  near(walk({ do: 'grip', thing: id(2), end: 'side1' }), [2e6 - 51_000 - 450_000, 0, 6e6 - 650_000], 'the beam\'s first side, half its height across (as it is carried, on its edge)');
+  near(walk({ do: 'grip', thing: id(2), end: 'side4' }), [2e6 + 51_000 + 450_000, 0, 6e6 + 650_000], 'its fourth, across');
+  const none = send({ do: 'grip', thing: id(4), end: 'side1' });
   assert.equal(none.code, 'carry-grip-unknown');
-  assert.match(none.detail, /1 grip between its ends.*a crew of 3 at most/);
+  assert.match(none.detail, /0 grips between its ends.*a crew of 2 at most/);
   assert.equal(requestOf(['carry', 'grip', id(2), 'side', '2']).req.end, 'side2', 'the command line: side <n>');
 });
 
@@ -137,16 +172,18 @@ test('a beam slot is reached from its own side: the load stops lined up outside 
     crewMiddle: () => [4e6, 6.3e6], crewEnds: () => ({ ids: [id(7), id(6)], at: [[4e6, 8.5e6], [4e6, 4.1e6]] }) };
   const out = 609_500 + 25_500 + MOUTH_CLEAR;   // the bay's half width, the beam's half width lying, the clearance
   const go = (slot, me = c) => carryIntents({ do: 'to', crew, where: id(5), slot }, me)[0].params[1];
-  near(go('beam_low_l'), [12e6 - out, 0, 6e6 - 2.2e6], 'the back, on the slot\'s z, west of the bay');
+  // #5067: the back, 2.2 m behind, stops 50 mm inside its reach of its grip: its own place and 0.3 m.
+  const most = Math.max(...loadOf(kinds['mars:rack_beam']).places.map(Math.abs)) + 300_000;
+  near(go('beam_low_l'), [12e6 - out, 0, 6e6 - most], 'the back, on the slot\'s z, west of the bay');
   assert.ok(out - 572_000 + 300_000 < 1_000_000, 'a walk 0.3 m short of it still puts within reach (worldd PUT_REACH)');
   const side = { ...c, me: id(12), placeOf: (n) => (n === id(12) ? { pos: [3.6e6, 0, 6.3e6] } : c.placeOf(n)) };
   near(go('beam_high_l', side), [12e6 - out - 400_000, 0, 6e6], 'the side keeps its place beside the middle');
   // From the bay's other side the slot across it is carried straight in, as before; a frame's slot (the bay's open end)
   // is carried into directly.
   const east = { ...c, crewMiddle: () => [20e6, 6.3e6], crewEnds: () => ({ ids: [id(7), id(6)], at: [[20e6, 8.5e6], [20e6, 4.1e6]] }), placeOf: (n) => (n === id(6) ? { pos: [20e6, 0, 4.1e6] } : place(n)) };
-  near(go('beam_low_l', east), [12e6 - 572_000, 0, 6e6 - 2.2e6], 'from the east, into the slot');
-  near(go('beam_low_r', east), [12e6 + out, 0, 6e6 - 2.2e6], 'the east slot from the east: outside it');
-  near(go('upright_a'), [12e6, 0, 6e6 - 1_448_000 - 2.2e6], 'a frame\'s slot: into it');
+  near(go('beam_low_l', east), [12e6 - 572_000, 0, 6e6 - most], 'from the east, into the slot');
+  near(go('beam_low_r', east), [12e6 + out, 0, 6e6 - most], 'the east slot from the east: outside it');
+  near(go('upright_a'), [12e6, 0, 6e6 - 1_448_000 - most], 'a frame\'s slot: into it');
 });
 
 test('carry to walks this Soul so the load reaches the point or the slot, keeping its place at it', () => {
@@ -169,22 +206,27 @@ test('into a slot, the walk names the load\'s heading there, from its back towar
 
 test('a beam carried into a slot past a beam seated at the height it is carried is refused before anyone moves', () => {
   // The bay at (12, 6) m: a beam seated in beam_high_l (slot 3) or beam_low_l (slot 5); the crew holds a beam, its
-  // length along the bay's z, west of the bay or east of it.
+  // length along the bay's z, west of the bay or east of it. A beam is carried 1.05 m up (999 to 1101 mm): over a beam
+  // seated in the bay's high slot (863 to 965 mm) as over a low one. In a bay whose high slots are 1 m up it is met.
   const crew = id(8), held = id(10), seated = id(11);
-  const copy = (slot) => {
+  const tall = structuredClone(kinds['mars:rack_bay']);
+  tall.slots.beam_high_l.at_mm[1] = 1000;
+  const copy = (slot, bay = kinds['mars:rack_bay']) => {
     const r = new Map(rows);
     r.set(held, { id: held, kind: 'mars:rack_beam', parent: crew, pos: [0, 0, 0], rot: YAW90 });
     r.set(seated, { id: seated, kind: 'mars:rack_beam', parent: id(5), pos: [0, 0, 0] });
-    const place = placer(r, (n) => (n === seated ? slot : null), (x) => kinds[x?.kind]);
-    return { ...ctx, placeOf: place, kindOf: (n) => r.get(n)?.kind, seated: (n) => (n === id(5) ? [{ id: seated, slot }] : []), heldBy: (c) => (c === crew ? held : null) };
+    const k = { ...kinds, 'mars:rack_bay': bay };
+    const place = placer(r, (n) => (n === seated ? slot : null), (x) => k[x?.kind]);
+    return { ...ctx, kinds: k, placeOf: place, kindOf: (n) => r.get(n)?.kind, seated: (n) => (n === id(5) ? [{ id: seated, slot }] : []), heldBy: (c) => (c === crew ? held : null) };
   };
-  const to = (slot, from, high = 3) => carryIntents({ do: 'to', crew, where: id(5), slot }, { ...copy(high), crewMiddle: () => from });
-  const r = to('beam_high_r', [4e6, 6e6]);
-  assert.equal(r.code, 'carry-way-crossed', 'from the west, past the first high beam');
+  const to = (slot, from, high = 3, bay = undefined) => carryIntents({ do: 'to', crew, where: id(5), slot }, { ...copy(high, bay), crewMiddle: () => from });
+  assert.equal(to('beam_high_r', [4e6, 6e6])[0].verb, 'eden:walk', 'from the west, over the first high beam, 34 mm clear');
+  const r = to('beam_high_r', [4e6, 6e6], 3, tall);
+  assert.equal(r.code, 'carry-way-crossed', 'past a beam seated at the height it is carried');
   assert.match(r.detail, /beam_high_l/);
-  assert.equal(to('beam_high_r', [20e6, 6e6])[0].verb, 'eden:walk', 'from the east it does not pass it');
+  assert.equal(to('beam_high_r', [20e6, 6e6], 3, tall)[0].verb, 'eden:walk', 'from the east it does not pass it');
   assert.equal(to('beam_high_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'a beam seated low is carried over');
-  assert.equal(to('beam_low_l', [20e6, 6e6]).code, 'carry-way-crossed', 'across the bay, under a high beam already seated, at the height it is carried');
+  assert.equal(to('beam_low_l', [20e6, 6e6], 3, tall).code, 'carry-way-crossed', 'across the bay, under a beam seated at the height it is carried');
   assert.equal(to('beam_low_l', [4e6, 6e6])[0].verb, 'eden:walk', 'from its own side it stops outside, under nothing');
   assert.equal(to('beam_low_r', [4e6, 6e6], 5)[0].verb, 'eden:walk', 'past a low beam to the far low slot');
   // Without the copy's slots (an older daemon), nothing is read and the walk is sent.
@@ -361,4 +403,110 @@ test('an offer names the crew this Soul fronts, when another Soul offered one at
   assert.deepEqual(await newCrew(one, [], { sleep: async () => {} }), { crew: id(33) }, 'the only new crew');
   const unsure = async () => ({ crews: crews.map((c) => ({ ...c, with: [] })) });
   assert.equal((await newCrew(unsure, [], { tries: 2, sleep: async () => {} })).crew, null, 'two new crews, neither shown as this Soul\'s: no guess');
+});
+
+test('#5067: part raise and part lower send their intents; carry grip top|foot stands the raise crew beside the part', async () => {
+  const { raiseSpot, RAISE_SIDE } = await import('./carry.mjs');
+  const entry = { geometry: { bounds_mm: [1219, 2438, 76] }, points: { foot: { role: 'contact', at_mm: [0, 0, 0] } } };
+  const H = Math.SQRT1_2 * 2 ** 30;
+  // lying: its own y along world +z (a quarter turn about x), its foot at (5, -3) m
+  const lying = { pos: [5e6, 38_000, -3e6], rot: [H, H, 0, 0] };
+  const top = raiseSpot(lying, entry, 'top'), foot = raiseSpot(lying, entry, 'foot');
+  near(top, [5e6 + 609_500 + RAISE_SIDE, -3e6 + 2_438_000], 'the lifter beside the top end');
+  near(foot, [5e6 - 609_500 - RAISE_SIDE, -3e6], 'the footer beside the base, on the other side');
+  // standing: either side of its base
+  near(raiseSpot({ pos: [5e6, 0, -3e6] }, entry, 'top'), [5e6 + 609_500 + RAISE_SIDE, -3e6], 'standing: beside its base');
+  assert.equal(raiseSpot(lying, { geometry: { bounds_mm: [51, 102, 2743] } }, 'top'), null, 'a kind with no foot is not raised');
+  const c = { ns: 'eden', ground: id(1), kinds: {}, me: id(6), placeOf: () => null, kindOf: () => undefined, crewMiddle: () => [1e6, 2e6] };
+  assert.deepEqual(carryIntents({ kind: 'part', do: 'raise', crew: id(8), part: id(4) }, c), [{ verb: 'part:raise', target: id(8), params: { 1: id(4) } }]);
+  assert.deepEqual(carryIntents({ kind: 'part', do: 'lower', crew: id(8) }, c), [{ verb: 'part:lower', target: id(8), params: {} }]);
+  assert.deepEqual(carryIntents({ kind: 'part', do: 'lower', crew: id(8), part: '3,2' }, c), [{ verb: 'part:lower', target: id(8), params: { 3: [2e6, 0, 0] } }]);
+  assert.equal(carryIntents({ kind: 'part', do: 'raise', crew: id(8) }, c).code, 'part-usage');
+});
+
+
+test('#5067 item 4: a put refused out of reach with where it is admitted carries the crew there and asks once more', async () => {
+  const { admittedAt, putFromAdmitted, PUT_MOVED, ADMITTED_AT } = await import('./carry.mjs');
+  const detail = `s_1 is 1047 mm from its hold; ${ADMITTED_AT} x=12350 z=-4800 mm`;
+  assert.deepEqual(admittedAt(detail), [12.35, -4.8]);
+  assert.equal(admittedAt('s_1 is 1047 mm from its hold'), null);
+  const req = { op: 'carry', kind: 'part', do: 'put', crew: 'c', into: 'b', slot: '5' };
+  const refused = { ok: false, code: 'part.grip-out-of-reach', detail };
+  const asked = [];
+  const list = (holds) => ({ ok: true, crews: [{ id: 'c', holds: holds ? [{ id: 'p' }] : [] }] });
+  const ok = await putFromAdmitted(refused, req, async (r) => { asked.push(r); return r.do === 'list' ? list(true) : { ok: true }; });
+  assert.deepEqual(asked, [{ op: 'carry', do: 'list' }, { op: 'carry', do: 'to', crew: 'c', where: '12.35,-4.8' }, req]);
+  assert.equal(ok.moved, PUT_MOVED);
+  // FOR-FABLE 7: refused again, the crew is left as it was before the first ask, and the refusal says so. Held lifted
+  // before: it still holds its load, nothing more is sent.
+  const again = { ok: false, code: 'part.grip-out-of-reach', detail: 'still' };
+  const held = [];
+  const stillHolding = await putFromAdmitted(refused, req, async (r) => { held.push(r); return r.do === 'list' ? list(true) : r.do === 'to' ? { ok: true } : again; });
+  assert.deepEqual(stillHolding, { ...again, retried: 'moved to 12.35,-4.8 and asked again; refused again: part.grip-out-of-reach; still holding' });
+  assert.deepEqual(held.map((r) => r.do), ['list', 'to', 'put']);
+  // Set down before (it held nothing), and holding after the walk there: set down again by the ordinary command.
+  const down = [];
+  let lists = 0;
+  const setDown = await putFromAdmitted(refused, req, async (r) => {
+    down.push(r);
+    if (r.do === 'list') return list(lists++ > 0);
+    return r.do === 'to' || r.do === 'set-down' ? { ok: true } : again;
+  });
+  assert.deepEqual(setDown.retried, 'moved to 12.35,-4.8 and asked again; refused again: part.grip-out-of-reach; set down again');
+  assert.deepEqual(down.map((r) => r.do), ['list', 'to', 'put', 'list', 'set-down']);
+  assert.deepEqual(down.at(-1), { op: 'carry', do: 'set-down', crew: 'c' });
+  let n = 0;
+  const unnamed = { ok: false, code: 'part.grip-out-of-reach', detail: 'x' };
+  assert.equal(await putFromAdmitted(unnamed, req, async () => { n++; }), unnamed);
+  const other = { ok: false, code: 'slot.occupied', detail };
+  assert.equal(await putFromAdmitted(other, req, async () => { n++; }), other);
+  assert.equal(n, 0);
+});
+
+test('#5067: part raise into a bay slot, named or found at the foot; lower away from its bay; put --joins', () => {
+  const M = 1_000_000;
+  const lying = { pos: [12e6 + 80_000, 38_000, 6e6 - 1_448_000], rot: [ONE, 0, 0, 0] };
+  const place = (n) => (n === id(20) ? lying : at(n));
+  const kindOf = (n) => (n === id(20) ? 'mars:rack_upright' : rows.get(n)?.kind);
+  const c = { ...ctx, placeOf: place, kindOf, loose: () => [id(2), id(3), id(5), id(20)], seated: () => [] };
+  const part = (r, k = c) => carryIntents({ kind: 'part', ...r }, k);
+  // Named: the bay and its slot.
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20), into: id(5), slot: 'upright_a' }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20), 4: id(5), 5: 1 } }]);
+  // Found: upright_a's place is 80 mm from its foot, free, and takes its kind.
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20), 4: id(5), 5: 1 } }]);
+  // Turned a half turn: found for a kind the same either way (its entry's `symmetry`), not for one that is not.
+  const back = { ...lying, rot: [0, 0, ONE, 0] };
+  const turned = { ...c, placeOf: (n) => (n === id(20) ? back : at(n)) };
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, turned), [{ verb: 'part:raise', target: id(8), params: { 1: id(20), 4: id(5), 5: 1 } }]);
+  const plainKinds = { ...kinds, 'mars:rack_upright': { ...kinds['mars:rack_upright'], state: {} } };
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, { ...turned, kinds: plainKinds }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20) } }]);
+  // Filled, or too far: raised on the ground.
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, { ...c, seated: () => [{ id: id(4), slot: 1 }] }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20) } }]);
+  const far = { ...c, placeOf: (n) => (n === id(20) ? { ...lying, pos: [12e6 + 200_000, 38_000, 6e6 - 1_448_000] } : at(n)) };
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, far), [{ verb: 'part:raise', target: id(8), params: { 1: id(20) } }]);
+  // Lowered with no direction: away from the bay it stands in; else toward its own back. A part and a direction together.
+  const inBay = { ...c, parentOf: (n) => (n === id(20) ? id(5) : n === id(8) ? id(20) : id(1)) };
+  assert.deepEqual(part({ do: 'lower', crew: id(8) }, inBay), [{ verb: 'part:lower', target: id(8), params: { 3: [80_000, 0, -1_448_000] } }]);
+  const onGround = { ...c, parentOf: (n) => (n === id(8) ? id(20) : id(1)) };
+  assert.deepEqual(part({ do: 'lower', crew: id(8), part: id(20) }, onGround), [{ verb: 'part:lower', target: id(8), params: { 1: id(20), 3: [0, 0, -M] } }]);
+  assert.deepEqual(part({ do: 'lower', crew: id(8), part: id(20), toward: '20,4.552' }, onGround), [{ verb: 'part:lower', target: id(8), params: { 1: id(20), 3: [20e6 - 12.08e6, 0, 0] } }]);
+  // A put names its joins.
+  assert.deepEqual(part({ do: 'put', crew: id(8), into: id(5), slot: 'beam_low_l', joins: `${id(2)},${id(9)}` }), [{ verb: 'part:put', target: id(8), params: { 1: id(5), 2: 5, 4: [id(2), id(9)] } }]);
+  assert.equal(part({ do: 'put', crew: id(8), into: id(5), slot: 'beam_low_l', joins: 'x' }).code, 'part-joins');
+  // The command's words.
+  assert.deepEqual(requestOf(['part', 'raise', id(8), id(20), id(5), 'upright_a']).req, { op: 'carry', do: 'raise', kind: 'part', crew: id(8), part: id(20), into: id(5), slot: 'upright_a' });
+  assert.deepEqual(requestOf(['part', 'lower', id(8), id(20), 'toward', '3,2']).req, { op: 'carry', do: 'lower', kind: 'part', crew: id(8), part: id(20), toward: '3,2' });
+  assert.deepEqual(requestOf(['part', 'put', id(8), id(5), '5', '--joins', `${id(2)},${id(9)}`]).req.joins, `${id(2)},${id(9)}`);
+});
+
+test('racks T2: the deck kinds are loads: a 4x6 sheet and a 6 ft 2x4 carried by two from their ends, a 12 ft frame by two', () => {
+  const sheet = loadOf(entry('construction', 'plywood_sheet.json')), joist = loadOf(entry('construction', 'two_by_four.json'));
+  // both lie lower than a walker is blocked by, so each end carrier stands 0.25 m (the 2x4: 75 mm past its end) beyond its grip
+  assert.deepEqual([sheet.axis, sheet.places, sheet.inner.length, sheet.joins], [0, [-1_164_000, 1_164_000], 2, true]);
+  assert.deepEqual([joist.axis, joist.places, joist.joins], [0, [-989_500, 989_500], true]);
+  assert.equal(crewNeeds(entry('construction', 'plywood_sheet.json')), 2);
+  assert.equal(crewNeeds(entry('construction', 'two_by_four.json')), 2);
+  assert.equal(crewNeeds(entry('construction', 'rack_upright_12ft.json')), 2);
+  const frame = loadOf(entry('construction', 'rack_upright_12ft.json'));
+  assert.deepEqual([frame.axis, frame.hold, frame.joins], [1, 609_500, true], 'a standing frame held at its edges');
 });

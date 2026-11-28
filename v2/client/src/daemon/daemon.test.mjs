@@ -41,12 +41,15 @@ let relay, arrivals, roots, rt;
 /**
  * A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile;
  * `refuse` closes each new connection at once; `stall(true)` moves no byte either way on any connection, new ones too,
- * and closes none (a stalled network), until `stall(false)` lets what waited through.
+ * and closes none (a stalled network), until `stall(false)` lets what waited through. `onUp(down)` is called once, as
+ * the next frame of data a client sends passes, with that client's connection: once `down.hushed`, nothing the gateway
+ * sends reaches it, and `down.write(textFrame(..))` gives it a frame of the relay's own.
  */
+const textFrame = (text) => Buffer.concat([Buffer.from([0x81, text.length]), Buffer.from(text)]); // WebSocket, under 126 B
 function makeRelay(port) {
   const pairs = new Set();
   const r = {
-    deaf: false, refuse: false, stalled: false, port: 0,
+    deaf: false, refuse: false, stalled: false, port: 0, onUp: null,
     cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); },
     stall: (on) => { r.stalled = on; for (const pair of pairs) for (const s of pair) if (on) s.pause(); else s.resume(); },
   };
@@ -55,8 +58,8 @@ function makeRelay(port) {
     const up = createConnection(port, '127.0.0.1');
     pairs.add([down, up]);
     if (r.stalled) { down.pause(); up.pause(); }
-    down.on('data', (d) => up.write(d));
-    up.on('data', (d) => { if (!r.deaf) down.write(d); });
+    down.on('data', (d) => { up.write(d); if ((d[0] & 0x0f) === 2) { const f = r.onUp; r.onUp = null; f?.(down); } }); // 2: binary
+    up.on('data', (d) => { if (!r.deaf && !down.hushed) down.write(d); });
     for (const s of [down, up]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); up.destroy(); }); }
   });
   r.server = server;
@@ -464,19 +467,19 @@ test('#4978: two clients of the Soul acting in turn share its one numbering: eve
   try {
     await waitFor(async () => (await request(otherRt.socket, { op: 'status' }).catch(() => null))?.connected, 60_000);
     const before = taken().length, acts = [];
+    const finals = (r) => (r?.receipt?.answers ?? []).filter((x) => x.answer !== 'accepted');
     // Each client's own counter would give both the same numbers: the world would take only the first of each.
+    // In turn: each act's final answer is on its own client before the other client acts. The other's act takes the
+    // Soul (the last device wins), and an answer the world gives after that goes to the client that holds it now; the
+    // one replaced has it at its next sign-in, not while the other holds the Soul.
     for (let k = 0; k < 4; k++) {
       for (const socket of [rt.socket, otherRt.socket]) {
         const a = await request(socket, { op: 'act', verb: k % 2 ? 'r2:switch_off' : 'r2:switch_on', target: LAMP });
         outputs.push(JSON.stringify(a));
         assert.equal(a.ok, true, JSON.stringify(a));
         acts.push({ socket, sequence: a.sequence });
-        await sleep(300);
+        await waitFor(async () => finals(await request(socket, { op: 'receipt', sequence: a.sequence })).length > 0, 30_000);
       }
-    }
-    const finals = (r) => (r?.receipt?.answers ?? []).filter((x) => x.answer !== 'accepted');
-    for (const { socket, sequence } of acts) {
-      await waitFor(async () => finals(await request(socket, { op: 'receipt', sequence })).length > 0, 30_000);
     }
     await sleep(500);
     for (const { socket, sequence } of acts) {
@@ -530,6 +533,40 @@ test('#4980: a socket given up over a stalled network is let go at once; an act 
   assert.equal(finals.length, 1, `answered once: ${JSON.stringify(answers)}`);
   const givenUpAfter = said().slice(from).filter((l) => /not signed in within/.test(l)).length;
   console.log(JSON.stringify({ issue: 4980, letGoMs, backMs: Math.round(backMs), givenUpAfter, finals: finals.length }));
+});
+
+test('#4980: a frame heard just after a sync was asked, then nothing: the socket is let go 10 s after that frame, never found slow by it', async () => {
+  await waitFor(async () => { const s = await status(); return s.connected && !s.syncing && s; });
+  const said = () => readFileSync(rt.log, 'utf8').split('\n');
+  const from = said().length;
+  let t0 = null, letGoMs;
+  // From the sync's ask on the gateway is heard no more, but for one frame that was on its way: it reaches the daemon
+  // 100 ms after its ask (a text frame that says nothing to it). CI's failures were this order: a sync asked at
+  // sign-in, the subscription's frames just after it, and the test before this one stalling the network then. The
+  // frame after the ask had the socket found behind, as on a slow link, and kept 60 s. (A machine that stops this
+  // process for half a second then sends no frame: one that late is no longer one on its way.)
+  relay.onUp = (down) => {
+    down.hushed = true;
+    t0 = performance.now();
+    setTimeout(() => { if (performance.now() - t0 < 500 && !down.destroyed) down.write(textFrame('{}')); }, 100);
+  };
+  try {
+    // A look asks the world once the copy is over 1 s old: asked again until a sync's ask has passed.
+    for (let i = 0; t0 === null; i++) {
+      assert.ok(i < 1000, 'a look asked the world within 10 s');
+      if (i % 50 === 0) request(rt.socket, { op: 'look' }, 30_000).catch(() => {});
+      await sleep(10);
+    }
+    assert.equal((await status()).syncing, true, 'the sync waits for its answer');
+    await waitFor(async () => !(await status()).connected, 20_000);
+    letGoMs = Math.round(performance.now() - t0);
+    assert.ok(letGoMs < 15_000, `let go ${letGoMs} ms after the last frame`);
+  } finally {
+    relay.onUp = null;
+  }
+  assert.equal(said().slice(from).filter((l) => /behind, not reconnecting/.test(l)).length, 0, 'never found slow');
+  await waitFor(async () => (await status()).connected, 10_000);
+  console.log(JSON.stringify({ issue: 4980, frameAfterAsk: true, letGoMs }));
 });
 
 test('#4977: a wait under way is told at once when the connection is lost, and when it is back with the gap', async () => {

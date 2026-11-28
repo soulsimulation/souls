@@ -122,9 +122,11 @@ impl Served {
     /// The first line starting with `prefix`, within 60 s.
     fn line(&self, prefix: &str) -> String {
         first_line(&self.lines, &self.early, prefix, Duration::from_secs(60)).unwrap_or_else(|| {
-            // Say why: a process that ended closes its pipes and the wait ends early; what it printed says how.
+            // Say why: a process that ended closes its pipes and the wait ends early; what it printed says how, and
+            // its end (an exit code or a signal) says how when it printed nothing about it.
             let said = self.all.lock().map(|a| a.join("\n")).unwrap_or_default();
-            panic!("no line {prefix:?}; it printed:\n{said}")
+            let ended = ended(self.child.id());
+            panic!("no line {prefix:?}; the process {ended}; it printed:\n{said}")
         })
     }
 
@@ -132,6 +134,39 @@ impl Served {
         // SIGKILL: no flush, no goodbye.
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// How the child `pid` ended, read without reaping it (its `Drop` still waits for it): an exit code or a signal, or
+/// that it is still running. Its pipes close as it exits, so the end is looked for a little while.
+// A real process on the real clock.
+#[allow(clippy::disallowed_methods)]
+fn ended(pid: u32) -> String {
+    let until = Instant::now() + Duration::from_secs(2);
+    loop {
+        // SAFETY: `info` is a zeroed siginfo_t that waitid fills; WNOWAIT leaves the child to be reaped by its owner.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let r = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        // SAFETY: si_pid and si_status are set by waitid for a child that changed state.
+        let (who, status) = unsafe { (info.si_pid(), info.si_status()) };
+        if r == 0 && who != 0 {
+            return match info.si_code {
+                libc::CLD_EXITED => format!("exited with code {status}"),
+                libc::CLD_KILLED | libc::CLD_DUMPED => format!("was ended by signal {status}"),
+                c => format!("ended ({c}, {status})"),
+            };
+        }
+        if r != 0 || Instant::now() > until {
+            return "is still running".to_owned();
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -158,6 +193,22 @@ fn first_line(
         }
     }
     None
+}
+
+/// A process that ends before its awaited line is said by its end, as [`Served::line`] says it: an exit code, a signal,
+/// or still running.
+#[test]
+fn a_child_s_end_is_read_without_reaping_it() {
+    for (script, said) in [
+        ("exit 3", "exited with code 3"),
+        ("kill -9 $$", "was ended by signal 9"),
+        ("sleep 30", "is still running"),
+    ] {
+        let mut c = Command::new("sh").args(["-c", script]).spawn().expect("sh");
+        assert_eq!(ended(c.id()), said, "{script}");
+        let _ = c.kill();
+        let _ = c.wait();
+    }
 }
 
 /// The clock thread's "started at tick" (stderr) can come in before the "restart:" the main thread printed first
@@ -732,6 +783,66 @@ fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id
             "published bytes survive restart"
         );
     }
+    w.kill();
+    let _ = std::fs::remove_dir_all(d);
+}
+
+/// A served world's public part costs its stream one wait on the disk (#2803 follow-up: at 1,000 agents the stream fell
+/// minutes behind the world, most of its time in four syncs a part one after another): the part's recovery objects,
+/// the chain's head, the part and text files and the pointer are written, synced together, then named. Its thread's
+/// count (`stream_io` in `health.json`): one wait a part, and at most one sync for each of those eight files. And
+/// `stream_behind_ms` says how far the stream is behind the world.
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn a_served_public_part_is_synced_in_one_wait() {
+    let d = scratch("part-syncs");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let w = serve(&dir, &socket);
+    w.line("worldd: started at tick");
+    let mut s = connect(&socket);
+    walk(&mut s, body, root.scope(), ground, 1, -34, 30);
+    assert_eq!(
+        answer(&mut s),
+        (1, String::new()),
+        "the walk ends in a receipt"
+    );
+    walk(&mut s, body, root.scope(), ground, 2, -40, 30);
+    assert_eq!(answer(&mut s), (1, String::new()), "the walk back");
+    let int = |h: &json::Value, k: &str| match h.get("stream_io").and_then(|io| io.get(k)) {
+        Some(json::Value::Int(n)) => *n,
+        other => panic!("stream_io.{k}: {other:?}"),
+    };
+    let end = Instant::now() + Duration::from_secs(20);
+    let health = loop {
+        let h = json::parse(&std::fs::read_to_string(dir.join("health.json")).unwrap_or_default())
+            .unwrap_or(json::Value::Null);
+        if h.get("stream_io").is_some() && int(&h, "parts") >= 3 {
+            break h;
+        }
+        assert!(
+            Instant::now() < end,
+            "no 3 parts in health.json: {}",
+            h.to_json()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let (parts, syncs, waits) = (
+        int(&health, "parts"),
+        int(&health, "part_syncs"),
+        int(&health, "part_waits"),
+    );
+    println!("{parts} parts, {syncs} files synced, {waits} waits");
+    assert_eq!(waits, parts, "one wait a part");
+    assert!(
+        syncs >= parts && syncs <= 8 * parts,
+        "each of a part's files synced once: {syncs} for {parts} parts"
+    );
+    assert!(
+        matches!(health.get("stream_behind_ms"), Some(json::Value::Int(n)) if *n >= 0),
+        "how far the stream is behind: {}",
+        health.to_json()
+    );
     w.kill();
     let _ = std::fs::remove_dir_all(d);
 }

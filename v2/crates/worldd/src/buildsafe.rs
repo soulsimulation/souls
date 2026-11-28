@@ -7,7 +7,8 @@
 //! - **A Soul** is a node whose kind the world's kinds give the owner `family` (a body; `replica::world_model`). A
 //!   Soul's intents name its body (`answers`'s `body_of`), so the body's id names the Soul. Its pose is where it
 //!   stands, sits or lies: its frame (parent and slot) and its place there. What it holds, G2 reads from its slots on
-//!   the same tree. Its abilities are today's walking body's, hands (`sim::walk::town` routes with them).
+//!   the same tree. Its abilities are today's walking body's, hands and the climb (`sim::walk::water::WALKER`, which
+//!   `sim::walk::town` routes with).
 //!
 //! - **Moving bodies** (G1d, #3462). The world's bodies ([`crate::bodies`], I4b) are not written to the tree, so the
 //!   clock thread hands off, each tick, every body the controller holds as the controller has it ([`moving`]): where
@@ -47,7 +48,6 @@ use sim::edit::safety::Who;
 use sim::ground::Versions;
 use sim::ground::scene::{F_SLOTS, F_SOLIDS, GROUND};
 use sim::links::Doors;
-use sim::routes::HANDS;
 use sim::walk::town::{Basis, Rebuilt, Town};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -85,6 +85,8 @@ pub fn open_ground(copy: &Replica) -> Option<Id> {
 /// parts make, and they cut the ground once seated, as in a bay seeded from a world's facts; a box would keep its
 /// builders out. A frame stand is the low rest its parts stand on, walked over as a seeded one is; a box would stop a
 /// crew's carry (`carry-load-blocked`) where the part comes down into it, and the put would be refused `part.not-held`.
+/// A kind that declares ways (floors, stairs, ladders) and no boxes of its own gets no walk box either: a seeded one has
+/// none, and the outline of its bounds would stand over its own stair.
 pub fn stand_as_kinds(
     edit: &mut replica::edit::Edit,
     entries: &Json,
@@ -109,8 +111,15 @@ pub fn stand_as_kinds(
             replica::kinds::defined::solids_of(entry),
             replica::kinds::defined::slots_of(entry),
         );
+        // A kind that declares ways and no boxes of its own (a stair flight) is walked by its ways, as a seeded one
+        // is: the outline of its bounds would stand over its own stair.
+        let walked = entry
+            .get("geometry")
+            .is_some_and(|g| g.get("solids_mm").is_none())
+            && import_eden::entry_ways(entry).is_ok_and(|w| w.is_some());
         if let Some(s) = solids
             && !holds_parts(entry, structure)
+            && !walked
         {
             fields.entry(F_SOLIDS).or_insert(s);
         }
@@ -122,7 +131,10 @@ pub fn stand_as_kinds(
 
 /// A building placed new brings its rooms (#5006, row 20): each place of a kind whose entry keeps a `building` section
 /// (`import_eden::placed`) gets, in the same batch, its walls, floors, rooms, windows, doors, doorways and stairs, as
-/// a template's building has them, so a Soul can walk in, up and out of one a creator placed. The operations are added
+/// a template's building has them, so a Soul can walk in, up and out of one a creator placed. A place of a kind whose
+/// entry declares ways instead (`geometry.floors`, `stairs`, `ladders`: a frame, a sheet, a stair flight) gets the
+/// floors and the stair and ladder links the import gives a seeded thing of it (`import_eden::placed::way_ops`), so
+/// a Soul walks up a creator-placed bay's stair onto its deck and climbs its frames. The operations are added
 /// after the batch's own, so a refusal still names the creator's operations by their places; the world then checks,
 /// judges (BUILDSAFE: a Soul standing where a wall or floor would go refuses the whole place) and records the batch
 /// as one edit, and one undo takes it all back.
@@ -197,12 +209,42 @@ pub fn with_buildings(
         else {
             continue;
         };
-        let Some(entry) = entries
-            .get(import_eden::entry_name(kind.as_str(), fields))
-            .filter(|e| e.get("building").is_some())
-        else {
+        let Some(entry) = entries.get(import_eden::entry_name(kind.as_str(), fields)) else {
             continue;
         };
+        // A kind that declares ways (racks, lane C: a frame's ladders and standing places, a sheet's top, a stair
+        // flight) brings the floors and the stair and ladder links the import gives a seeded thing of it.
+        if entry.get("building").is_none() {
+            if fields.contains_key(&F_SOLIDS)
+                || floored.contains(name)
+                || !admits(kind.as_str(), FLOOR, None)
+            {
+                continue;
+            }
+            let more = import_eden::placed::way_ops(entry, Ref::New(*name), floor, &mut next)
+                .map_err(|detail| replica::edit::Refused {
+                    op: Some(k),
+                    name: "edit.building-plan",
+                    detail: format!(
+                        "{}: its ways could not be read: {detail}",
+                        plain(kind.as_str())
+                    ),
+                })?;
+            if edit_len + added.len() + more.len() > replica::edit::OPS_MOST {
+                return Err(replica::edit::Refused {
+                    op: Some(k),
+                    name: "edit.too-many-operations",
+                    detail: format!(
+                        "{} brings {} parts (its floors and their ways), which takes this batch over {}: place fewer in one batch",
+                        plain(kind.as_str()),
+                        more.len(),
+                        replica::edit::OPS_MOST
+                    ),
+                });
+            }
+            added.extend(more);
+            continue;
+        }
         if fields.contains_key(&F_SOLIDS)
             || floored.contains(name)
             || !admits(kind.as_str(), FLOOR, None)
@@ -252,23 +294,146 @@ pub fn with_buildings(
     Ok(parts)
 }
 
-/// The most new ids each building kind's place can mint with its parts, by entry name
-/// (`import_eden::placed::ids_most`): what the world reserves for each such place when it takes an edit in.
-pub fn ids_most(entries: &Json) -> BTreeMap<String, u64> {
-    entries
-        .obj()
-        .unwrap_or(&[])
+/// Nothing is placed onto a Soul (racks, lane C): a creator's place of a kind whose entry gives `geometry.bounds_mm`
+/// is refused `edit.would-bury`, naming the Soul, while any Soul's body stands inside the placed thing's bounds (its
+/// width and depth about its origin, its height up from it), its walkable lane included, even where the ground would
+/// let it stand there afterwards. `planned` is the edit as the check planned it, `souls` the bodies G2 judges. The
+/// walk boxes a placed thing gets are as before ([`stand_as_kinds`]); this judges the bounds alone.
+pub fn bounds_clear(
+    copy: &Replica,
+    planned: &sim::edit::Planned,
+    entries: &Json,
+    souls: &[Who],
+    names: replica::ids::Minter,
+) -> Result<(), replica::edit::Refused> {
+    use replica::edit::{Op, Unsafe};
+    use sim::ground::scene::{slot_point, xform_to};
+    let bounded: Vec<(usize, u64, [i64; 3])> = planned
+        .checked
+        .edit
+        .ops
         .iter()
-        .filter_map(|(k, e)| Some((k.clone(), import_eden::placed::ids_most(e)?)))
+        .enumerate()
+        .filter_map(|(i, op)| {
+            let Op::Place {
+                name, kind, fields, ..
+            } = op
+            else {
+                return None;
+            };
+            let b = entries
+                .get(import_eden::entry_name(kind.as_str(), fields))?
+                .get("geometry")?
+                .get("bounds_mm")?
+                .arr()?;
+            let mm = |k: usize| match b.get(k) {
+                Some(Json::Int(n)) => i64::try_from(*n).ok(),
+                _ => None,
+            };
+            Some((i, *name, [mm(0)?, mm(1)?, mm(2)?]))
+        })
+        .collect();
+    if bounded.is_empty() || souls.is_empty() {
+        return Ok(());
+    }
+    let ground = open_ground(copy);
+    let mut preview = copy.frozen();
+    let mut mint = names;
+    let Ok(done) = sim::edit::commit(&mut preview, &mut mint, planned, &[], 0) else {
+        return Ok(());
+    };
+    let tree = preview.tree();
+    let Some(gh) = ground.and_then(|g| tree.handle(g)) else {
+        return Ok(());
+    };
+    // Each body's feet on the open ground's frame.
+    let feet: Vec<(&Who, Vec3)> = souls
+        .iter()
+        .filter_map(|w| {
+            let h = tree.handle(w.pose.frame.node)?;
+            let base = match w.pose.frame.slot {
+                Some(n) => slot_point(tree, h, n)?,
+                None => Vec3::ZERO,
+            };
+            let p = base.plus(w.pose.position).ok()?;
+            Some((w, xform_to(tree, h, gh).ok()?.point(p).ok()?))
+        })
+        .collect();
+    for (i, name, [w, h, d]) in bounded {
+        let Some(th) = done.names.get(&name).and_then(|id| tree.handle(*id)) else {
+            continue;
+        };
+        let Ok(x) = xform_to(tree, th, gh) else {
+            continue;
+        };
+        let [qw, qx, qy, qz] = x.rot.parts();
+        let Ok(back) = replica::pose::Quat::new(qw, -qx, -qy, -qz)
+            .or_else(|_| replica::pose::Quat::new(-qw, qx, qy, qz))
+        else {
+            continue;
+        };
+        for (who, at) in &feet {
+            let Ok(rel) = at.minus(x.pos) else {
+                continue;
+            };
+            let Ok(p) = back.rotate(rel) else { continue };
+            let inside = p.x.abs() * 2 <= w * 1000
+                && p.z.abs() * 2 <= d * 1000
+                && (0..=h * 1000).contains(&p.y);
+            if inside {
+                let u = Unsafe {
+                    name: replica::edit::BURIES,
+                    soul: who.soul,
+                    node: who.pose.frame.node,
+                    at: who.pose.position,
+                    thing: None,
+                };
+                return Err(replica::edit::Refused {
+                    op: Some(i),
+                    name: replica::edit::BURIES,
+                    detail: u.text(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The most new ids each building kind's place can mint with its parts, by entry name
+/// (`import_eden::placed::ids_most`): what the world reserves for each such place when it takes an edit in. A kind
+/// that declares a link (a part that joins: a beam, a joist, a sheet) may be placed into a bay's slot, where the
+/// world adds a joint to each part it rests on ([`crate::edit_joins`]): at most one per other slot of the bay, so as
+/// many as the most slots any kind's entry names kinds for.
+pub fn ids_most(entries: &Json) -> BTreeMap<String, u64> {
+    let all = entries.obj().unwrap_or(&[]);
+    let bay_slots = all
+        .iter()
+        .filter_map(|(_, e)| e.get("slots").and_then(Json::obj))
+        .filter(|s| s.iter().any(|(_, x)| x.get("kinds").is_some()))
+        .map(|s| s.len() as u64)
+        .max()
+        .unwrap_or(0);
+    all.iter()
+        .filter_map(|(k, e)| {
+            let joins = e
+                .get("links")
+                .and_then(Json::obj)
+                .is_some_and(|l| !l.is_empty());
+            let parts =
+                import_eden::placed::ids_most(e).or_else(|| import_eden::placed::way_ids_most(e));
+            match (parts, joins) {
+                (None, false) => None,
+                (p, j) => Some((k.clone(), p.unwrap_or(0) + if j { bay_slots } else { 0 })),
+            }
+        })
         .collect()
 }
 
 /// How many ids `edit`'s places of building kinds may mint with their parts beyond its own operations' ([`ids_most`]),
-/// as [`with_buildings`] would add them.
+/// as [`with_buildings`] would add them, and its places of parts the joints [`crate::edit_joins`] adds. Under a build
+/// claim no building brings parts, but a part placed into a bay's slot is still joined: the count is the same, at most
+/// a few ids more than are minted.
 pub fn parts_ids(edit: &replica::edit::Edit, most: &BTreeMap<String, u64>) -> u64 {
-    if edit.claim.is_some() {
-        return 0;
-    }
     edit.ops
         .iter()
         .filter_map(|op| match op {
@@ -323,7 +488,7 @@ pub fn souls(copy: &Replica, kinds: &BTreeMap<String, Kind>) -> Vec<Who> {
                 orientation: place.orientation,
                 support: place.support,
             },
-            has: HANDS,
+            has: sim::walk::water::WALKER,
             crossing: None,
         });
     }
@@ -834,7 +999,7 @@ pub fn moving(bodies: &Bodies) -> Vec<Who> {
             soul: b.id,
             body: b.id,
             pose: b.pose,
-            has: HANDS,
+            has: sim::walk::water::WALKER,
             crossing: runner.controller.carrying(b.id),
         };
         out.push(who);

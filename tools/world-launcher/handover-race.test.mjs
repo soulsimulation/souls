@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChildPool } from './children.mjs';
 import { SHARD_SCRIPT } from './shard.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(4);
 
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;

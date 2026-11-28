@@ -812,6 +812,11 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                     if ends.len() != 2 {
                         return Err("a link's ends are [node, node]".into());
                     }
+                    // A bare link (`"bare": true`, a creator's joint): the link alone, no field, row or door.
+                    let bare = matches!(o.get("bare"), Some(json::Value::Bool(true)));
+                    if bare && ["field", "row", "door"].iter().any(|k| o.get(k).is_some()) {
+                        return Err("a bare link has no field, row or door".into());
+                    }
                     Op::Link {
                         name: uint_of(o.get("name"), "a link's name")?,
                         ty: o
@@ -825,15 +830,22 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                             1 => crate::world_model::End::Second,
                             _ => return Err("a link's owner is 0 or 1".into()),
                         },
-                        field: uint_of(o.get("field"), "a link's field")?,
-                        row: match field_value(o.get("row").ok_or("a link's row")?)? {
-                            Value::Array(row) => row,
-                            _ => return Err("a link's row is an array".into()),
+                        field: match bare {
+                            true => 0,
+                            false => uint_of(o.get("field"), "a link's field")?,
+                        },
+                        row: match bare {
+                            true => Vec::new(),
+                            false => match field_value(o.get("row").ok_or("a link's row")?)? {
+                                Value::Array(row) => row,
+                                _ => return Err("a link's row is an array".into()),
+                            },
                         },
                         door: match o.get("door") {
                             None | Some(json::Value::Null) => None,
                             d => Some(ref_of(d)?),
                         },
+                        bare,
                     }
                 }
                 // #3728: rows into an array field (a land edit's changed terrain tiles).
@@ -1809,13 +1821,14 @@ pub fn wire_sync_scope(n: u64) -> Result<Vec<u8>, JsError> {
     .map_err(js)
 }
 
-/// The daemon's copy of its scope (R5's `sync::Copy`), synced one request at a time through the gateway (R5b).
+/// The daemon's copy of its scope (R5's `sync::Copy`), synced through the gateway (R5b) with several records
+/// requests in flight (N12): each request's hashes are kept by its number until its answer comes.
 #[wasm_bindgen(js_name = Copy)]
 #[derive(Default)]
 pub struct WasmCopy {
     copy: Copy,
     descent: Option<Descent>,
-    asked: Vec<Vec<u8>>,
+    asked: BTreeMap<u64, Vec<Vec<u8>>>,
 }
 
 #[wasm_bindgen(js_class = Copy)]
@@ -1838,42 +1851,89 @@ impl WasmCopy {
         let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
         let version = to_hex(&encode(version).map_err(js)?);
         // A sync cut off before it finished (its socket closed) is let go first (#3424).
+        // Its records are kept loose: the next sync takes them without asking again (`sync::Copy::abandon`).
         if let Some(old) = self.descent.take() {
             self.copy.abandon(old);
         }
+        self.asked.clear();
         self.descent = Some(self.copy.compare(&ids, hashes));
         Ok(version)
     }
 
-    /// The next records request `{20: n, 22: [hashes]}`, or nothing once the copy holds its scope.
+    /// The next records request `{20: n, 22: [hashes]}`, or nothing when nothing more is to be asked for now: the
+    /// copy holds its scope once no request is in flight either ([`WasmCopy::in_flight`]).
     pub fn next(&mut self, n: u64) -> Result<Vec<u8>, JsError> {
         let d = self
             .descent
             .as_mut()
             .ok_or_else(|| JsError::new("sync-not-started"))?;
-        self.asked = self.copy.ask(d, wire::RECORDS_MOST);
-        if self.asked.is_empty() {
+        let asked = self.copy.ask(d, wire::RECORDS_MOST);
+        if asked.is_empty() {
             return Ok(Vec::new());
         }
-        encode(&Value::Map(BTreeMap::from([
+        let frame = encode(&Value::Map(BTreeMap::from([
             (wire::ASK, Value::Uint(n)),
             (
                 wire::RECORDS,
-                Value::Array(self.asked.iter().cloned().map(Value::Bytes).collect()),
+                Value::Array(asked.iter().cloned().map(Value::Bytes).collect()),
             ),
         ])))
-        .map_err(js)
+        .map_err(js)?;
+        self.asked.insert(n, asked);
+        Ok(frame)
     }
 
-    /// A records answer: each record checked against the hash that named it, and kept.
-    #[wasm_bindgen(js_name = onRecords)]
-    pub fn on_records(&mut self, frame: &[u8]) -> Result<(), JsError> {
-        let got = read_records(&sync_map(frame)?).map_err(js)?;
+    /// Another client's records request `{20: n, 22: [hashes]}`, seen on its way: its answer, under the same number,
+    /// is taken by [`WasmCopy::on_records`]. For a copy that mirrors a client's sync from its frames.
+    pub fn expect(&mut self, frame: &[u8]) -> Result<(), JsError> {
+        let m = match decode(frame).map_err(js)?.value {
+            Value::Map(m) => m,
+            _ => return Err(JsError::new("frame-not-a-record")),
+        };
+        let (Some(Value::Uint(n)), Some(Value::Array(hs))) =
+            (m.get(&wire::ASK), m.get(&wire::RECORDS))
+        else {
+            return Err(JsError::new("sync-ask"));
+        };
+        let hs = hs
+            .iter()
+            .map(|h| match h {
+                Value::Bytes(b) => Ok(b.clone()),
+                _ => Err(JsError::new("sync-ask")),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let d = self
             .descent
             .as_mut()
             .ok_or_else(|| JsError::new("sync-not-started"))?;
-        self.copy.take(d, &self.asked, got).map_err(js)
+        self.copy.expect(d, &hs);
+        self.asked.insert(*n, hs);
+        Ok(())
+    }
+
+    /// Whether the sync under way is done: nothing in flight and nothing more to ask for ([`WasmCopy::finish`] next).
+    pub fn done(&self) -> bool {
+        self.descent.as_ref().is_some_and(|d| self.copy.done(d))
+    }
+
+    /// A records answer, to the request its key 20 numbers: each record checked against the hash that named it, and
+    /// kept.
+    #[wasm_bindgen(js_name = onRecords)]
+    pub fn on_records(&mut self, frame: &[u8]) -> Result<(), JsError> {
+        let m = sync_map(frame)?;
+        let Some(Value::Uint(n)) = m.get(&wire::ASK) else {
+            return Err(JsError::new("sync-answer"));
+        };
+        let asked = self
+            .asked
+            .remove(n)
+            .ok_or_else(|| JsError::new("sync-answer"))?;
+        let got = read_records(&m).map_err(js)?;
+        let d = self
+            .descent
+            .as_mut()
+            .ok_or_else(|| JsError::new("sync-not-started"))?;
+        self.copy.take(d, &asked, got).map_err(js)
     }
 
     /// Ends the sync: lets go what the scope no longer reaches, and gives R5's counts as JSON, with `heldBytes`, the
@@ -1883,12 +1943,15 @@ impl WasmCopy {
             .descent
             .take()
             .ok_or_else(|| JsError::new("sync-not-started"))?;
+        self.asked.clear();
         let s = self.copy.finish(d).map_err(js)?;
         Ok(format!(
-            r#"{{"rounds":{},"changed":{},"fetched":{},"sent":{},"got":{},"held":{},"heldBytes":{}}}"#,
+            r#"{{"rounds":{},"changed":{},"fetched":{},"reused":{},"inFlight":{},"sent":{},"got":{},"held":{},"heldBytes":{}}}"#,
             s.rounds,
             s.changed,
             s.fetched,
+            s.reused,
+            s.in_flight,
             s.sent,
             s.got,
             s.held,

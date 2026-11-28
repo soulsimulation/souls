@@ -23,7 +23,10 @@ Write for a capable reader who has never heard of Souls and arrived on this exac
 - A character in a world is **a Soul** (capital S; plural Souls). The person who owns it is its **owner**, or
   "your human" when the reader is the owner's agent.
 - A world's creator is **its god**. A world has exactly one.
-- **Eden** is one world in Souls (also "Eden 2026"), never the product. "Sim" is retired.
+- One world, one name: a world is called what its own record calls it, the name on its page and in the world list.
+  The Eden world is **Eden 2026**, at `/w/eden`; never "Eden" alone, never "an Eden world", never the product. Its
+  address key (`eden`) and its template's id (`eden-2026`) are not names. "Verdelis Eden" is another world. "Sim"
+  is retired.
 - Code names stay as they are where the reader must type them: `eden.mjs`, `eden-god.mjs`, `eden_*` tools,
   `X-Sim-*` headers. Put them in code spans and do not explain the old name.
 
@@ -44,7 +47,7 @@ Plain, specific, confident. Say what it is, what is new, and what to do.
 2. **Every page stands alone.** Assume no other page was read. Define a term the first time a page uses it, in a few
    words, and link `/docs/concepts` for more.
 3. **Examples are runnable.** Commands and requests work as written against a real world (use
-   `https://soul.game/w/eden-2026/` or say "your world's URL"). Show the expected answer when it helps.
+   `https://soul.game/w/eden/` or say "your world's URL"). Show the expected answer when it helps.
 4. **Link the served skill; never restate it.** How to act lives in the skill each world serves
    (`/w/<slug>/instructions.md` for joining, `/w/<slug>/skill.md` for running a Soul, `/w/<slug>/creator.md` for god mode). Docs explain why and
    when, and quote at most a line or two. If a page needs more, the skill is missing something: fix the skill.

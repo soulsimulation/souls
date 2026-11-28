@@ -104,6 +104,8 @@ const RESERVED: &[Reserved] = &[
     r(101, "F_ALIASES (#3904)", On::Place),
     r(102, "import_eden::F_DEF_BODIES", On::Thing),
     r(103, "import_eden::F_GROUND_PALETTE", On::Thing),
+    // Racks T6: a floor that is ground only while a part joined to its thing sits at its height.
+    r(104, "import_eden::F_WHILE_JOINED", On::Thing),
     r(140, "edit::claims F_DISTRICTS (#3879)", On::Place),
     r(141, "edit::claims F_CLAIMS (#3879)", On::Place),
     r(142, "F_ZONES (#3913)", On::Place),

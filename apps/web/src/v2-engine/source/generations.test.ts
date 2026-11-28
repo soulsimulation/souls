@@ -64,7 +64,7 @@ const pointerOf = (g: Gen, newest: number, from?: Gen) => JSON.stringify({
   ...(from ? { legacyVersion: from.first + from.count, legacyNext: from.count, legacyHash: `d${from.first + from.count}`, handoffFrom: from.id } : {}),
 });
 
-async function viewer(gens: Gen[], steps: string[]) {
+async function viewer(gens: Gen[], steps: string[], options: { subtle?: Pick<SubtleCrypto, 'digest'> | null; corruptBaseline?: boolean } = {}) {
   const fetched: string[] = [], parts: PartRec[] = [], errors: string[] = [], formats: number[] = [], polls: (() => Promise<void>)[] = [];
   let snapshots = 0, pointer = steps[0];
   const files = (path: string): Uint8Array | string | null => {
@@ -74,13 +74,15 @@ async function viewer(gens: Gen[], steps: string[]) {
       const dir = `/a/b/c/d/g/${g.id}/`;
       if (!path.startsWith(dir)) continue;
       const file = path.slice(dir.length);
-      if (file === 'baseline') return baselineOf(g.first, g.head);
+      if (file === 'baseline') { const bytes = baselineOf(g.first, g.head); if (options.corruptBaseline) bytes[bytes.length - 1] ^= 1; return bytes; }
       if (/^\d+$/.test(file) && Number(file) < g.count) return `${file}:${g.first + Number(file) + 1}`;
     }
     return null;
   };
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   const before = { fetch: globalThis.fetch, setInterval: globalThis.setInterval, self: (globalThis as { self?: unknown }).self };
   try {
+    if (options.subtle !== undefined) Object.defineProperty(globalThis, 'crypto', { configurable: true, value: options.subtle === null ? {} : { subtle: options.subtle } });
     globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       // #4535: a ranged fetch (a baseline's head) is recorded as `<path>#head` and answered with its first 16 bytes
@@ -105,6 +107,7 @@ async function viewer(gens: Gen[], steps: string[]) {
       await polls[0]?.();
     }
   } finally {
+    if (options.subtle !== undefined) { if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor); else Reflect.deleteProperty(globalThis, 'crypto'); }
     globalThis.fetch = before.fetch;
     globalThis.setInterval = before.setInterval;
     (globalThis as { self?: unknown }).self = before.self;
@@ -174,4 +177,43 @@ test('a live viewer does not cross a handoff into a format this page cannot read
   assert.deepEqual(formats, [2]);
   assert.match(errors[0] ?? '', /stream-format 2/);
   assert.ok(!fetched.includes(`/a/b/c/d/g/${b.id}/baseline`), 'its head only');
+});
+
+
+test('a private HTTP worker without SubtleCrypto verifies a valid generation baseline', async () => {
+  const a = gen(0, 2), before = globalThis.crypto;
+  const { parts, errors, snapshots } = await viewer([a], [pointerOf(a, 1)], { subtle: null });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(parts.map(p => p.number), [0, 1]);
+  assert.equal(snapshots, 1);
+  assert.equal(globalThis.crypto, before, 'test capability replacement is restored');
+});
+
+test('without SubtleCrypto, corrupt baseline bytes remain refused before any snapshot or part', async () => {
+  const a = gen(0, 2);
+  const { parts, errors, snapshots } = await viewer([a], [pointerOf(a, 1)], { subtle: null, corruptBaseline: true });
+  assert.deepEqual(parts, []);
+  assert.equal(snapshots, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /stream-baseline-hash/);
+});
+
+test('available native digest errors are not downgraded to a fallback hash', async () => {
+  const a = gen(0, 2); let calls = 0;
+  const { parts, errors, snapshots } = await viewer([a], [pointerOf(a, 1)], { subtle: { digest: async () => { calls++; throw Error('native digest refused'); } } });
+  assert.equal(calls, 1);
+  assert.deepEqual(parts, []);
+  assert.equal(snapshots, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /native digest refused/);
+});
+
+test('available native digest still rejects corrupted baseline bytes', async () => {
+  const a = gen(0, 2), native = globalThis.crypto.subtle; let calls = 0;
+  const { parts, errors, snapshots } = await viewer([a], [pointerOf(a, 1)], { subtle: { digest: async (algorithm, bytes) => { calls++; return native.digest(algorithm, bytes); } }, corruptBaseline: true });
+  assert.equal(calls, 1);
+  assert.deepEqual(parts, []);
+  assert.equal(snapshots, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /stream-baseline-hash/);
 });

@@ -18,6 +18,15 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   auditor's fault lines (`worldd: audit: Fault { … }`) are printed on their own thread, so a slow journal never holds
   the clock on them; lines its queue has no room for are dropped and said (`worldd: audit: N fault lines dropped`),
   and `health.json`'s `audit` counts passes, slices cut at 2 ms, and lines queued, printed and dropped.
+- **A slow edit** (#5216). A creator's edit is checked off the clock on one thread: its check, its plan with the
+  build safety rule, and the walkers' maps. `health.json`'s `edit_check` has the last edit's time by stage
+  (`last_us`: `basis`, `check`, `town`, `plan`, `places`, `maps`), the longest check, and the ground it was prepared
+  from (`last_ground`: the squares of the open ground cut again and the buildings read again). An edit whose change
+  cannot be cut alone has the whole open ground built again, seconds at Eden's size: `whole` counts them and says
+  why the last one was (a water, a place's outline or ground cover changed, the ground itself, a building that
+  shares a step with another's floor). The thread takes at most 8 edits at once (`waiting` of `most`); one sent
+  past that is refused `edit.checker-busy` at once and sent again by its sender (`refused_busy`). Nothing to do for
+  one slow edit; a `whole.count` that keeps growing names the kind of edit to make cheaper.
 - **Exit 87, `disk-failed`.** The world's log or text store failed to write (`worldd: disk-failed: <reason>` in the
   journal), so it stopped rather than run on without a record of what happened. It restarts from its log, as after
   any exit. If it keeps coming back, check the disk (free space, read-only mount, errors) and the text store's
@@ -65,9 +74,37 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   tries again after 1, 2, 4 … s, then every 60 s, until the store answers. The journal says `worldd: the public
   stream is degraded, no viewers: <fault>; try <n> refused, the next in <ms> ms` at each try, and `health.json` has
   `"stream":{"state":"degraded","fault":…,"tries":…,"next_try_ms":…}` (`serving` once it recovers). Fix the store or
-  the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait in
-  memory until the stream catches up. A stream that ends after serving (a local fault, such as the disk) says
+  the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait
+  for the stream as below. A stream that ends after serving (a local fault, such as the disk) says
   `"state":"stopped"` with its fault; a restart starts it again.
+- **A public stream behind the world.** The stream writes each half second of the world as a part on its own thread:
+  the part's files (its recovery objects, the chain's head, the part and its words, the pointer) are written, synced
+  together with one wait on the disk, then named, each after the files it names (until late November 2026, four waits
+  a part one after another; on a disk shared with other writers that put the stream minutes behind). When that is slower than the world makes records (a disk busy under other
+  writers, a recovery that takes minutes, a degraded stream), viewers see the world late, and the records wait for
+  the stream: up to 64 MiB of them and one record more in memory, the rest in the log on the disk, where every record already is and
+  which the compactor keeps until the stream has published it. The stream reads them from there, in order, once it
+  has taken those in memory. Being behind by any time costs at most that memory, and nothing is dropped.
+  `health.json` has `"stream_queue":{"queued":<records>,"queued_bytes":<bytes>,"in_log":<records>}`: `in_log` that
+  stays above 0 is a stream behind the world. `"stream_behind_ms":<ms>` is how far: the wall time now less the one at
+  which the newest world time the pointer names fell (about 0.4 to 1.1 s for a world that keeps up: a part is half a
+  second, written 0.1 s after its end; a world clock stepped ahead of the machine's, `clock` in `health.json`, adds
+  its step). `"stream_io":{"parts":…,"part_syncs":…,"part_waits":…,"syncs":…,"waits":…,
+  "bytes":…}` counts what the stream's thread wrote and synced since the start: one wait a part, at most eight files
+  synced (a part that starts a new generation, one in 240, writes its pointer after the generation's baseline,
+  a few more; a part whose words had a removal applied while it was cut writes them, then the pointer, on their own:
+  three). A part whose write is refused stops the stream (`stream-write`, `"state":"stopped"`); a restart recovers it
+  from the disk, and removes the temporary files a write killed midway left. One wait is still the disk's time: at
+  1,000 agents on a disk shared with heavy build writes (27 Nov 2026, about 2.5 GB a minute) it took about 0.2 s a
+  part and the stream fell up to five minutes behind at the start of the load; on a disk the builds did not write
+  to it kept within 1.3 s (p99), bound by the stream thread's processor time, not the disk. From 28 Nov 2026 a part
+  takes about 0.36 s of that thread at 1,000 agents in even load (1.05 s before): it reads its records' sequences, the
+  words' references and its deltas in place. On a disk others wrote up to 10 GB a minute to, the stream kept up within
+  1.4 s at p90 and 12.8 s at p99 (117.6 s before), its worst moments in the minutes of heaviest writes.
+  `STREAM_PROFILE=1` prints each stage's time, bytes, syncs and waits every 10 s to the journal, and in
+  `structural-by` how many cuts were published by rows (`rows`) and why the others were worked out whole (`whole:…`).
+  Before this (November 2026) every waiting record was held in memory: at 1,000 agents on a busy disk that was
+  about 2 GB an hour.
 - **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
   its words, its recovery objects and the chain's head are written there first: the parts under `views/`, the recovery
   chain in the spool `<world>/stream-backup/` (never served, because it holds the world's records). The store gets

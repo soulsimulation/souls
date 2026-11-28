@@ -163,8 +163,9 @@ pub const KEPT_MOST: usize = 256 << 10;
 /// What one kept intent's place in the gateway's maps is charged, bytes, besides its own.
 pub const KEPT_EACH: usize = 256;
 /// The most one agent's sync requests (R5b) waiting for the world's answer may hold at once, bytes (O8, #2805): each
-/// request's own and [`KEPT_EACH`], until the world answers it or goes away. A client's daemon asks one at a time, and
-/// a public name or two beside it; 64 KiB is about 200 of the smallest requests, or 15 of the largest. A client that
+/// request's own and [`KEPT_EACH`], until the world answers it or goes away. A client's daemon keeps up to 16 records
+/// requests out (N12, `SYNC_WINDOW` in `v2/client/src/daemon`, about 2.6 KB charged each), and a public name or two
+/// beside them; 64 KiB is about 200 of the smallest requests. A client that
 /// asks faster than the world's sync thread answers is refused [`SLOW_DOWN`] at once, under its own number, and the
 /// request never reaches the world: unbounded, a flood of them held the gateway's queue to the world and its memory,
 /// and every honest agent's acts waited behind it (honest p95 10 times the no-attack arm's). Apart from
@@ -172,7 +173,7 @@ pub const KEPT_EACH: usize = 256;
 pub const SYNCS_MOST: usize = 64 << 10;
 /// How many of one agent's sync requests may be in the world's sync line at a time, sent and not yet answered (O8):
 /// the rest wait here, in order, so a flood of them stands behind its own and an honest client's request waits behind
-/// at most this many of each other agent's. A client's daemon has one out, and a public names request beside it.
+/// at most this many of each other agent's. A client's daemon has up to 16 out (N12): the rest of them wait here, in order.
 pub const SYNC_TURN: usize = 2;
 /// How long a sync request is kept for the world's answer, µs, sent or waiting its turn: past it, it is answered
 /// [`SYNC_TIMED_OUT`] and its place goes to its agent's next, so one the world never answers never holds the agent's

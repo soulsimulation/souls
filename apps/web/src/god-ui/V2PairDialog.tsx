@@ -15,8 +15,9 @@ import { worldKey, worldPath } from '../world-path.ts';
 import { requestFollowSoul, soulPresent } from '../follow-soul-request.ts';
 import { closeApproval, closedApprovals, WINDOW_POLL_MS } from './window-approvals.ts';
 import { countPairing } from '../visitor-counts.ts';
-import { OWNED_CHANGED_EVENT, v2WorldName } from '../v2-engine/owner-mailbox.ts';
+import { v2Approved, v2WorldName } from '../v2-engine/owner-mailbox.ts';
 import { v2Creator } from './god-api.ts';
+import { nameRefusedLine } from './pair-name.ts';
 import './approval-card.css';
 
 /** `name`: the name a new Soul's agent asked for (`souls.mjs pair --name`), when it asked for one. */
@@ -126,13 +127,15 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
       if (r?.ok && body?.approved === true && creator) setBuilt(true);   // no Soul to wait for: the agent builds
       else if (r?.ok && body?.approved === true && typeof body.soul === 'string') {
         countPairing('pair:' + request.code);
+        setSoul(soulIdOf(body.soul));
+        v2Approved(soulIdOf(body.soul));   // the navbar lists it as arriving at once; its card's box starts now
+        // the name the person gave: written beside the arrival, never before it (first day, 28 Nov)
         const given = name.trim();
         if (given && !request.soul && !request.former) {
-          const n = await directoryPost(place, '/v1/account/souls/profile', { soul: body.soul, name: given }).catch(() => null);
-          if (!n?.ok) setSaid('The name was not kept; its agent can set one.');
+          void directoryPost(place, '/v1/account/souls/profile', { soul: body.soul, name: given })
+            .then(async (n) => { if (n?.ok) return; const why = await n?.json().catch(() => null) as { refused?: string } | null | undefined; setSaid(nameRefusedLine(why?.refused)); })
+            .catch(() => setSaid(nameRefusedLine(null)));
         }
-        setSoul(soulIdOf(body.soul));
-        window.dispatchEvent(new Event(OWNED_CHANGED_EVENT));   // the navbar lists it as arriving at once
       } else setSaid(!r ? 'Sign in first.' : `Not approved: ${body?.refused ?? r.status}${body?.device ? ` (connected to ${clip(body.device, 'a device')})` : ''}`);
     } catch { setSaid('The directory could not be reached. Try again.'); } finally { setBusy(false); }
   };

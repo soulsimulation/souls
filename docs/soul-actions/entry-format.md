@@ -50,8 +50,8 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `yaw_mdeg` (the way a body in it faces, the thing's +z turned by it; a thing placed live gets its slot rows from these), `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
-| 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below); `solids_mm` (optional): the thing's own walk boxes, `[[cx, cz, hx, hz, yaw_mdeg, y0, y1]]` in its frame, given to what is placed of it in place of one box its bounds' size, so a thing with gaps (a rack frame's two posts) is walked through as one seeded from a model is |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `yaw_mdeg` (the way a body in it faces, the thing's +z turned by it; a thing placed live gets its slot rows from these), `turn_mdeg` (a part's turn about the vertical in it: a put, a raise into it and a creator's place into it seat the part at the slot's point turned so, the set-in track turning to it; a kind the same either way, `symmetry` `front_back`, at it or a half turn from it, the nearer; none: a put and a raise seat it unturned, a creator's place as the creator turned it), `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below); `solids_mm` (optional): the thing's own walk boxes, `[[cx, cz, hx, hz, yaw_mdeg, y0, y1]]` in its frame, given to what is placed of it in place of one box its bounds' size, so a thing with gaps (a rack frame's two posts) is walked through as one seeded from a model is; a kind with `floors`, `stairs` or `ladders` and no `solids_mm` gets no box, as a seeded one has none (its ways are how it is walked); `floors`, `stairs`, `ladders` (optional): what a thing of it is walked on and up (below) |
 | 8 | `forms` | What can be done with it (below) |
 | 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
 | 10 | (referenced kinds) | Engine v2 T3's table of the kinds this one names, written by the encoder, never in the file |
@@ -69,6 +69,43 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 | 24 | `building` | A building kind's rooms, as a template's building of it has them at its def's defaults (written by `v2/tools/import-eden/export/buildings.ts`, never by hand): its walls (`solids`), `slots`, `floors`, `rooms` (each name a key of the text table), `openings` (doorways and windows), `stairs` and `doors`, in its frame, mm and millidegrees. A place of the kind gets them in the same edit (`worldd`'s `with_buildings`, #5006) |
 
+**What a thing is walked on and up** (section 7's `floors`, `stairs` and `ladders`, racks T9 and T6,
+`v2/crates/replica/src/kinds/ways.rs`). A part can be a floor (a plywood sheet's top), hold a stair (a flight) or be
+climbed (a rack frame). Every length is whole mm in the thing's own frame. A thing placed of the kind gets them as a
+building's are given from a world's facts: a floor child per floor, and a stair or ladder row from the ground's level to
+the floor at its top. A thing whose facts give their own `floors` or `stairs` keeps those.
+
+- `floors`: `[{"top_mm", "size_mm": [x, z], "at_mm": [x, z], "while_joined"}]`, a rectangle `size_mm` about `at_mm` (the
+  origin when left out) at height `top_mm`. Like any floor it is cut back at each edge by a body's radius and a margin
+  (341 mm for a standard body), so a place to stand needs about 0.9 m each way (a rack frame's standing place is
+  0.9 m deep and as wide as the frame). Lying within a step of the ground it is ground cover; seated in a bay's slot it
+  is a floor where it sits; carried it is no floor at all.
+- `"while_joined": true` makes it a standing place. It is ground only while a part joined to the thing, beside it in
+  the same parent (a beam beside a frame in its bay), sits at the floor's height in the thing's frame, within half that
+  part's own height (its walk boxes'; with none, exactly). It is also ground only while nothing else in that parent
+  lies over it within a standing body's height (1.8 m): another part's walk box, or another part's floor (a sheet's
+  top). So a frame's standing place is there while a beam braces the frame at that level, and gone once the beam comes
+  out. One on a frame's inner face, under a deck, is never there. A standing place is declared only 1.8 m or more
+  above the ground or the thing's floor under it, so nobody walks under a floor they cannot fit beneath; a ladder may
+  still reach a lower level (a step stood on from the ladder).
+- `stairs`: `[{"from_mm": [x, z], "to_mm": [x, z], "bottom_mm", "top_mm", "width_mm"}]`, a flight from its foot to its
+  top. A top with no floor of the thing at its height lands on the floor it meets there (a deck's sheet), as a roof
+  stair's does.
+- `ladders`: `[{"face", "at_mm", "bottom_mm", "top_mm", "width_mm", "run_mm"}]`, a ladder up the `front` (+z) or `back`
+  (-z) face. It sits `at_mm` along x (default 0) and runs from `run_mm` out from the face (default 600) to the face,
+  600 mm wide unless `width_mm` says. Its top lands on the floor of the thing nearest it at `top_mm`. It is climbed as
+  any ladder: a track, with free hands.
+
+A body on a stair or a ladder is carried along the link's line (FOR-FABLE 8). The tick's record writes its row every
+tick it moves, as a walk's: `[body, pose, [link, along]]`, its place on the line (in the frame of the floor it set out
+from), the link's id, and how far along the line it is, in millionths: 0 where it set out (the foot going up, the top
+going down), toward 1,000,000 at the far end; the tick it lands writes its row off the link. Its node's motion samples
+carry the same place at least every 200 ms, as a walk's do. A restart reads no row on a link: it stands the body where
+its last row off the link has it.
+
+A part with someone on its floor cannot be taken out of its bay (`part.stood-on`), and nor can a part under it
+(`support.none`). The rows are in the kind's hash (section 7's keys 4 to 6).
+
 A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
 thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
 chain with a wake entry of its own; the world never waits for a time or a condition.
@@ -81,6 +118,32 @@ Every kind of thing states both. `motion.how` is one closed list, shared with En
 `pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
 by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+A part the same turned a half turn about its upright (a rack frame, its beam seats on both faces) says so with an enum
+field `state.symmetry` whose default is `front_back` (else `none`). A put into a slot, and a raise into one, then seat
+it turned as the slot or a half turn from it, whichever is nearer to how it is held; a raise into a slot admits either
+turn within 15 degrees.
+
+Raised and lowered (#5067, `sim::activity::carry::raise`): a part whose entry names a point `foot` at its origin (role
+`contact`) and whose height is its longest side is tilted up about that foot by a crew of two, from lying to standing,
+and laid down again (`part:raise`, `part:lower`); `state.raise_crew`'s default is how many it takes (two when it says
+none). The Soul who asks is the lifter and stands beside the part's top end; the other, the footer, stands beside its base
+on the other side, each 0.42 m beyond a post. The world walks the lifter beside the part at 0.4 m/s and the part turns
+as far as the lifter has come, at most 0.9 degrees a tick: the foot never moves on the plan. Raised, the part stands on
+its foot with its crew holding it; a crew too small, a carrier more than 0.7 m from its hold, a part not lying (or not
+standing) and a lifter with no ground to walk on are refused by name (`raise.crew-too-small`, `part.grip-out-of-reach`,
+`raise.not-lying`, `raise.not-standing`, `raise.way-blocked`). The stream: the take's commit (the crew's node set at the
+foot, the part in its slot); `souls:carry-track` `souls:raise` or `souls:lower`; `souls:carry-grips` in that phase; one
+motion sample of the crew's node a tick, its position the foot, its turn about the base line; then `souls:raised`, the
+part's leave to the ground standing with the crew's node under it and `souls:carry-grips` `souls:held`, or
+`souls:lowered`, the part's leave to the ground lying and `souls:carry-grips` `souls:released`. A raise's end is
+tried again once a tick while the walkers' maps go stale (bodies moving near it), for up to 30 s of world time, and
+never turned back for it; past that the raise stops held where it stands: `souls:carry-track` `souls:raise-held` why
+`souls:map-busy`, then `souls:carry-grips` `souls:held`, the ask refused `raise.map-busy` if still open. Asked again
+(`part raise` by a member of the crew), it is seated as its end would have been; `part lower` lays it down from there
+(`souls:lower` why `souls:lower-asked`). Another slot named is refused `raise.not-at-slot`, a holder out of reach
+`part.grip-out-of-reach`; a leave is refused `raise.under-way` until it is seated or laid down; a world started again
+lays it down (`souls:world-restarted`), as any raise part way. A put's set-in waits the same 30 s, then is refused.
+
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
 hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else
@@ -99,13 +162,48 @@ outermost grips go to the front and the back (the back the one at the carry's ba
 between to the side carriers in join order from the back. It is kept on the carry's node (its field 6) and said to its
 audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: phase, 4: since µs, 5?: until µs, 6:
 [{1: body, 2: point:<grip>, 3: grip [x, y, z], 4: [hand, hand]}, ...]}`, points in µm in the load's own (entry) frame,
-the two hands 0.2 m either side of where the carrier holds along the load's length, from the carry's back toward its
-front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
-ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and `souls:released` (set down, seated or
-broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it is held (a frame taken standing) is held where each grip lies along its
-carriers' line, at the load's edge and the carry's height. A seating never moves a part out of the reach of a carrier
-who could reach its grip when the seating began (0.7 m on the plan, its standing reach above its feet): refused before
-anyone moves, or its set-in stopped and sent back while it runs, as `part.grip-out-of-reach`.
+the two hands 0.1 m either side of where the carrier holds along the load's length, from the carry's back toward its
+front. The phases are `souls:lift` (a take's track, the part on its way into its carriers' hands), `souls:carry`
+(lifted, or a take once `souls:lifted`), `souls:return` (a refused seating's way back, until it ends), `souls:raise` and
+`souls:lower` (a raise's track), `souls:held` (seated or raised, its crew still holding it: a frame in its bay) and
+`souls:released` (set down, seated or broken off; the last holds kept). A put keeps `souls:carry` on its set-in's track,
+said as a track of its own: `souls:carry-track` `souls:fit` with its start and end, then `souls:fitted` with the same
+times at the commit (`souls:set-in` is no longer said for a put). The set-in moves the crew's node a motion sample a tick
+to the pose that seats the part exactly, its turn blended, at 0.4 m/s and at least 0.6 s; an unseat's way out goes at the
+same pace. A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
+is held (a frame taken standing) is lifted 0.15 m, not carried at the 1.05 m of a load held by its middle, and is held by
+its front and its back at its edge on the line they stand on (a rack frame's posts, a timber bent's), its hands 0.9 m
+and 1.2 m up it: for the 2.4 m rack frame `[±609.5, 900, 0]` and `[±609.5, 1200, 0]` mm in its own frame, 1.05 m and
+1.35 m above the ground. Held standing once seated or raised (`souls:held`, two holders for a rack frame:
+`hold_crew` 2), each holder holds its own post from the frame's outer side (away from its bay's other upright, else its
+back), both hands on the post's outward face: `[±571.5, 1050, ±38]` and `[±571.5, 1350, ±38]` mm; the world walks each
+round its post to stand 0.35 m off that face, out of the space between the frames, facing it. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
+or as near as 0.25 m for a load too low to block a walker where it is set down (a rack beam: its hands 0.15 m and
+0.35 m ahead of it). Every carrier must be within reach of its
+own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its
+standing reach above its feet. No carrier is exempt, at any step:
+
+- **Take** (`part:take`, `part:unseat`): refused `part.grip-out-of-reach`, naming the carrier and how far it stands,
+  before anything is written, when any carrier would not reach its hold as the crew will hold the part. A part that
+  stands is held at its edges along its carriers' line, so it is taken from beside its edges, along its wider side
+  (0.35 m beyond each, within arm's reach of both hands: the client's `carry grip <part> front|back`), not from off its
+  faces. A part that lies is measured, and held, by its middle.
+- **Lift** (`carry:lift`): the same check against the same holds, refused `carry-grip-out-of-reach`.
+- **Put** (`part:put`): refused `part.grip-out-of-reach` before anyone moves when any carrier is out of reach where the
+  set-in track starts. A carrier who stepped away walks back to its grip and the crew puts again. On the track each
+  carrier stands or walks beside the part, keeping its place at its grip: the world carries its body along the track's
+  own line at its pace, over ground it can stand on, so it is where its hold is all the way. A set-in that moves the
+  part less than 50 mm on the plan moves nobody. Beyond that a side carrier walks with the part where the straight way
+  beside it is ground it can stand on, else it stands; the front and the back stand while they reach their holds at
+  both ends of the track, else they walk with it. A carrier who can neither stand within reach nor walk beside the part
+  refuses the put by the same name before anyone moves. While the set-in runs, a carrier who moves out of reach stops
+  it by that name; the part goes back, and those who walked beside it walk back beside it.
+- A rack beam goes into a bay from the bay's mouth (about 0.45 m off its slot's line: the frames' columns stand on that
+  line, so nobody can stand on it within reach of an end grip). Its two end carriers stand, 0.57 m from their holds
+  when it is seated; its side carriers walk in beside it, those on the bay's side into the open bay. A side carrier's
+  place is 0.45 m off the load's side, so it still stands on ground when the part is seated beside it.
+- Not checked yet: where the part is before a take. It still goes to its carriers' middle in one change of parent.
+
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
 load into walls or other fixed geometry stops the carry, the load is set down where it last was, and the world says why
 (`souls:carry-set-down`, `souls:carry-blocked`); its carriers walk on, free to lift again another way or leave.
@@ -313,7 +411,13 @@ with (a rack beam's `beam_end` mates with an upright's `beam_seat`); no other po
 link (section 4), never a parent: a beam seated between two uprights is a child of its bay
 (`content/kinds/construction/`). The kind that declares the joining link bears on the kind it names, which stands; a
 kind whose link names a kind that itself bears rests on it, a tier up, and needs as many of those held up as the link's
-`most` (a shade cloth on its two rails, `content/kinds/carpentry/`).
+`most` (a shade cloth on its two rails, `content/kinds/carpentry/`). This goes as deep as the kinds say: a joist whose
+link names a beam, a sheet whose link names the joist, a tread whose link names its flight. A part is held up when it
+is held by its crew or joined to enough held-up parts of the kinds its link names; a joint to any other kind holds
+nothing up (a sheet joined to a beam rests on nothing), and a part with something resting on it is not taken out
+(`support.none`, naming what would be left). Only a standing kind's bracing is still rack-shaped: by the kinds that
+join it directly, on a left and a right column, at one height or two. A part with a body on it, in a standing place it
+gives or on a floor it holds, is not taken out either (`part.stood-on`).
 A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
 may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
 declares its bounds.

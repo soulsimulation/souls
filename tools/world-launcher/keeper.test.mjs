@@ -10,7 +10,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.KEEPER_TEST_PORT ?? await testPort(6)), RANGE = `${PORT + 1}-${PORT + 2}`;   // a lane may move it into its own range

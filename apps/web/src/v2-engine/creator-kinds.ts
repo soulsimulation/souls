@@ -1,3 +1,4 @@
+import {entityId} from './entity-id.ts';
 // 0.133 V1: kinds that exist only in the new format, drawn on the old page by its own kind layer. A creator's kind is a
 // `souls:kind` node of the v2 world (replica::kinds::defined): its full name `ns:name@<hash>` (field 1) and its
 // canonical `souls-entry/1` record (field 2), which the stream reader hands on as `defines` and `entry`. This module
@@ -141,16 +142,7 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
     ...(fields && Object.keys(fields).length ? { fields } : {}) };
 }
 
-/** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
- *  (an imported thing), else one made from it. */
-export function entityId(node: string): string {
-  if (/^[eh]_[a-z0-9]{4,12}$/.test(node)) return node;
-  let h = 2166136261;
-  for (let i = 0; i < node.length; i++) h = Math.imul(h ^ node.charCodeAt(i), 16777619);
-  let h2 = h ^ 0x9e3779b9;
-  for (let i = node.length - 1; i >= 0; i--) h2 = Math.imul(h2 ^ node.charCodeAt(i), 16777619);
-  return `e_v${((h >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 11)}`;
-}
+export {entityId} from './entity-id.ts';
 
 type Drawn = NonNullable<ReturnType<typeof kindDef>>;
 const same = (a: Uint8Array | undefined, b: Uint8Array) => a === b || (!!a && a.length === b.length && a.every((x, i) => x === b[i]));
@@ -222,6 +214,9 @@ export class CreatorKinds {
     }
   }
 
+  /** Whether a node the stream still holds has this origin (a thing removed and placed again under it: the layer's still). */
+  private holds(o: string): boolean { for (const n of this.nodes.values()) if (n.origin === o) return true; return false; }
+
   /** Listens to the reader's worker, as WorldState.watch does; returns it. */
   watch<W extends { addEventListener(type: 'message', fn: (e: MessageEvent) => void): void }>(w: W): W {
     w.addEventListener('message', (e: MessageEvent) => {
@@ -286,7 +281,7 @@ export class CreatorKinds {
       this.sent.set(eid, key);
     }
     // sent again with each diff until the layer has dropped it (a diff it did not apply loses nothing)
-    for (const o of this.gone) { if (m.entities.has(o)) removes.push(o); else this.gone.delete(o); }
+    for (const o of this.gone) { if (m.entities.has(o) && !this.holds(o)) removes.push(o); else this.gone.delete(o); }
     for (const eid of [...this.sent.keys()]) {
       if (live.has(eid)) continue;
       this.sent.delete(eid);

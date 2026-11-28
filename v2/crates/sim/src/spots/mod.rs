@@ -5,7 +5,9 @@
 //!   ring with one, when those have none: a pond's bank), `⌊2πk⌋` places on ring `k` (so
 //!   neighbours on a ring are at least about a pitch apart), the target itself ring 0. A place is kept only where the
 //!   target's node has walkable ground ([`Ground::stand`]), and never in a doorway or on a stair
-//!   ([`Ground::passage`]). That rule is about the engine's choice only: a body whose own order is to stay in a
+//!   ([`Ground::passage`]); a target in a doorway's or a stair's clearance has the nearest points [`CLEAR`] off the
+//!   passage ([`Ground::in_passage_itself`], #5254; A3), so a walk there is moved off to them, and says how far
+//!   (`walk.goal-moved`). That rule is about the engine's choice only: a body whose own order is to stay in a
 //!   doorway is not a walker here, and nothing here refuses it.
 //! - **One table per target, owned by the target's node** ([`Spots::owners`]); a place has one holder. A walker never
 //!   writes it: it marks what it asks (the walk skill's `Mark::spot`), and at the start of each tick the owner reads
@@ -69,6 +71,11 @@ pub const RINGS: i64 = 10;
 /// doorway's between its ends: and half its widest end), µm: the engine never stops a walker in a doorway or on a
 /// stair (`walk::town::in_passage`).
 pub const CLEAR: i64 = 700_000;
+/// The fine rings round a target a body cannot stand at (#5254): their step and their reach, µm (within a walker's
+/// 0.4 m goal tolerance), and the points on each.
+pub const NEAR_PITCH: i64 = 100_000;
+pub const NEAR_MOST: i64 = 400_000;
+pub const NEAR_EACH: i64 = 12;
 /// How far round a crowded target its overflow points lie, µm (A2-5): a walker is refused `spot-none-free` only when
 /// no free standing point is within this.
 pub const OVERFLOW: i64 = 15_000_000;
@@ -93,6 +100,12 @@ pub trait Ground {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     /// Whether `p` on `node` lies in a doorway or on a stair.
     fn passage(&self, node: Id, p: Vec3) -> bool;
+    /// Whether a body standing at `p` on `node` would be in a doorway or on a stair: within [`CLEAR`] of the passage
+    /// (#5254; A3). A target in a passage ([`Ground::passage`]) is stood at as far off as this needs. A ground that
+    /// cannot tell says [`Ground::passage`].
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.passage(node, p)
+    }
     /// Whether `p` on `node`, in a passage ([`Ground::passage`]), lies only at a doorway's mouth: within [`CLEAR`] of
     /// a doorway's end, on the room's side of it, off every line and every end but a doorway's
     /// (`walk::town::in_mouth_indexed`).
@@ -125,6 +138,10 @@ pub trait Ground {
 pub trait ClassGround {
     fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool;
+    /// [`Ground::in_passage_itself`] for a body of class `size`.
+    fn in_passage_itself(&self, size: Size, node: Id, p: Vec3) -> bool {
+        self.passage(size, node, p)
+    }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
     fn may_reach(&self, _size: Size, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
         true
@@ -146,6 +163,9 @@ impl Ground for Selected<'_> {
     }
     fn passage(&self, node: Id, p: Vec3) -> bool {
         self.ground.passage(self.size, node, p)
+    }
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.ground.in_passage_itself(self.size, node, p)
     }
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.ground.walk(self.size, an, a, bn, b)
@@ -169,6 +189,9 @@ impl ClassGround for Standard<'_> {
     }
     fn passage(&self, _size: Size, node: Id, p: Vec3) -> bool {
         self.0.passage(node, p)
+    }
+    fn in_passage_itself(&self, _size: Size, node: Id, p: Vec3) -> bool {
+        self.0.in_passage_itself(node, p)
     }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         (size == Size::Standard)
@@ -288,7 +311,10 @@ pub enum Entry {
 #[derive(Default)]
 pub struct Spots {
     pub owners: BTreeMap<Id, BTreeMap<[i64; 3], Table>>,
+    /// Every grant, release and refusal, in order, unless the record is not kept ([`Spots::forget_record`]).
     pub record: Vec<Entry>,
+    /// The record is not kept.
+    unrecorded: bool,
     /// Per asker: the target and place it holds.
     held: BTreeMap<Id, Held>,
     /// Geometry caches only: every class uses the one held/refused/record authority below.
@@ -375,10 +401,77 @@ impl Table {
                 });
             }
         }
-        Table {
-            clear: g.stand(target.node, t).is_some() && !g.passage(target.node, t),
-            places,
+        let stands = g.stand(target.node, t).is_some();
+        let passage = g.passage(target.node, t);
+        let clear = stands && !passage;
+        // #5254: a target in a doorway's or a stair's clearance (on ground a body stands on, or in the opening itself)
+        // is stood at [`CLEAR`] off the passage ([`Ground::in_passage_itself`]; A3: no standing place narrows a
+        // doorway or a stair for others): its places clear of it, on fine rings [`NEAR_PITCH`] apart from the target
+        // itself out to twice [`CLEAR`], numbered after the target on its ring 0. The nearest is granted first, and the
+        // walk says how far it was moved, and why (`walk.goal-moved`). Fine places are a body's room apart from every
+        // holder, as the full rings' pitch keeps theirs (below).
+        if passage {
+            let mut k = 0u16;
+            for i in 0..=2 * CLEAR / NEAR_PITCH {
+                let n = if i == 0 {
+                    1
+                } else {
+                    (6_283 * i / 1_000).max(NEAR_EACH)
+                };
+                for j in 0..n {
+                    let off = Quat::from_yaw_mdeg(j * 360_000 / n)
+                        .and_then(|q| q.rotate(Vec3::new(0, 0, i * NEAR_PITCH)))
+                        .unwrap_or(Vec3::ZERO);
+                    let p = Vec3::new(t.x + off.x, t.y, t.z + off.z);
+                    k = k.saturating_add(1);
+                    let Some((at, world)) = g.stand(target.node, p) else {
+                        continue;
+                    };
+                    // Clear of the passage by [`CLEAR`] (A3: no standing place within a walker's clearance of it).
+                    if g.in_passage_itself(target.node, at) {
+                        continue;
+                    }
+                    places.push(Place {
+                        ring: 0,
+                        k,
+                        at,
+                        holder: None,
+                        world,
+                        joined: None,
+                    });
+                }
+            }
         }
+        // #5254: a target a body cannot stand at (off its ground) is stood at only as far off as needed: on fine rings
+        // [`NEAR_PITCH`] apart out to [`NEAR_MOST`], within a walker's own goal tolerance, before the first full ring;
+        // numbered after the target on its ring 0.
+        if !stands && !passage {
+            let mut k = 1u16;
+            for r in (1..=NEAR_MOST / NEAR_PITCH).map(|i| i * NEAR_PITCH) {
+                for j in 0..NEAR_EACH {
+                    let off = Quat::from_yaw_mdeg(j * 360_000 / NEAR_EACH)
+                        .and_then(|q| q.rotate(Vec3::new(0, 0, r)))
+                        .unwrap_or(Vec3::ZERO);
+                    let p = Vec3::new(t.x + off.x, t.y, t.z + off.z);
+                    k += 1;
+                    let Some((at, world)) = g.stand(target.node, p) else {
+                        continue;
+                    };
+                    if g.passage(target.node, at) {
+                        continue;
+                    }
+                    places.push(Place {
+                        ring: 0,
+                        k,
+                        at,
+                        holder: None,
+                        world,
+                        joined: None,
+                    });
+                }
+            }
+        }
+        Table { clear, places }
     }
 
     /// The grounds a crowded target `t` overflows onto ([`Ground::overflow_at`]), each with its points; `own` is the
@@ -997,6 +1090,15 @@ impl Spots {
         Spots::default()
     }
 
+    /// Stops keeping the record, and drops what was kept (#2803). The record is one entry for each grant, release and
+    /// refusal, which nothing drains; only tests read it. A world that runs for days (`worldd`) keeps none: at 1,000
+    /// agents the record grew by about a megabyte a minute. The tables, what each asker holds and every answer are the
+    /// same with or without it.
+    pub fn forget_record(&mut self) {
+        self.unrecorded = true;
+        self.record = Vec::new();
+    }
+
     /// Prepared geometry changed; retain shared physical holders until they are revalidated against it.
     pub fn invalidate_geometry(&mut self) {
         self.owners.clear();
@@ -1109,13 +1211,15 @@ impl Spots {
                     None => {
                         self.held.remove(&who);
                         self.revoked.push(who);
-                        self.record.push(Entry::Release {
-                            at,
-                            who,
-                            target: h.target,
-                            place: h.place,
-                            why: "ground-changed",
-                        });
+                        if !self.unrecorded {
+                            self.record.push(Entry::Release {
+                                at,
+                                who,
+                                target: h.target,
+                                place: h.place,
+                                why: "ground-changed",
+                            });
+                        }
                     }
                 }
             }
@@ -1157,13 +1261,15 @@ impl Spots {
                 continue;
             };
             p.holder = None;
-            self.record.push(Entry::Release {
-                at,
-                who,
-                target: held.target,
-                place: (p.ring, p.k),
-                why,
-            });
+            if !self.unrecorded {
+                self.record.push(Entry::Release {
+                    at,
+                    who,
+                    target: held.target,
+                    place: (p.ring, p.k),
+                    why,
+                });
+            }
         }
         self.refused.retain(|who, (t, size, _)| {
             asking
@@ -1222,8 +1328,15 @@ impl Spots {
                                 return (h.world.y - p.world.y).abs() < LEVEL
                                     && flat(h.world, p.world) < c;
                             }
+                            // A fine place round a target in a passage or off its ground (ring 0 past the target,
+                            // #5254) lies nearer its neighbours than a pitch: it keeps a body's room from every holder,
+                            // and every place keeps it from a holder of one.
+                            let fine = |(ring, k): (u16, u16)| ring == 0 && k > 0;
                             if h.target.node != t.node
-                                || (*size == Size::Standard && h.size == Size::Standard)
+                                || (*size == Size::Standard
+                                    && h.size == Size::Standard
+                                    && !fine((p.ring, p.k))
+                                    && !fine(h.place))
                             {
                                 return false;
                             }
@@ -1308,25 +1421,29 @@ impl Spots {
                             overflow,
                         },
                     );
-                    self.record.push(Entry::Grant {
-                        at,
-                        who: a.who,
-                        target: t,
-                        place: (p.ring, p.k),
-                        to: p.at,
-                        cost,
-                        cause: Cause::Intent(a.order),
-                        actor: Actor::World,
-                    });
+                    if !self.unrecorded {
+                        self.record.push(Entry::Grant {
+                            at,
+                            who: a.who,
+                            target: t,
+                            place: (p.ring, p.k),
+                            to: p.at,
+                            cost,
+                            cause: Cause::Intent(a.order),
+                            actor: Actor::World,
+                        });
+                    }
                 }
                 Err(name) => {
                     self.refused.insert(a.who, (t, *size, name));
-                    self.record.push(Entry::Refuse {
-                        at,
-                        who: a.who,
-                        target: t,
-                        name,
-                    });
+                    if !self.unrecorded {
+                        self.record.push(Entry::Refuse {
+                            at,
+                            who: a.who,
+                            target: t,
+                            name,
+                        });
+                    }
                 }
             }
         }

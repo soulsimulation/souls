@@ -4,10 +4,11 @@
 // samples are played through a bridge of their own (bridge.ts, the live stream's), so a past chunk is made exactly as
 // a live one. Nothing here draws.
 import { decode } from 'cborg';
+import type {CarriedParts} from './take-parts.ts';
 import { V2Bridge } from './bridge.ts';
 import { TICK_US, TICKS, type Frame, type RecordedChunk } from './takes.ts';
 import type { HistoryMsg, Seeked } from './history-worker.ts';
-import { DAY_US, dayIndexKey, yearCountsKey } from './history-keys.ts';
+import { DAY_US, dayIndexKey, headerKey, yearCountsKey } from './history-keys.ts';
 
 /** The world's history export, from the page's config: the route's `v2History`, else beside the stream's `views/`. */
 export function historyBase(stream: string, config: unknown): string | null {
@@ -32,11 +33,15 @@ export class V2History {
   private readonly frame: Omit<Frame, 'datetime'>;
   /** V6 (0.133): `hour=HH:MM`, as the live bridge has it: the past is drawn in that light too, its clock unchanged. */
   private readonly hour: string | undefined;
-  constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>, hour?: string) { this.base = base; this.make = make; this.frame = frame; this.hour = hour; }
+  private carryWindows:{from:number;to:number;parts:CarriedParts;bodies:ReadonlyMap<string,string>}[]=[];
+  carry(at:number){for(let i=this.carryWindows.length-1;i>=0;i--){const w=this.carryWindows[i];if(w.from<=at&&at<=w.to)return w;}return null;}
+  private readonly parts:CarriedParts|undefined;
+  constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>, hour?: string,parts?:CarriedParts) { this.base = base; this.make = make; this.frame = frame; this.hour = hour; this.parts=parts; }
 
   /** The world's first moment (µs), else the moment asked for: no seek walks to a day before it. */
   private floor: number | undefined;
-  private post(m: { seq: number; at: number; now: number; ahead?: true }): void {
+  private headerAsked = false;
+  private post(m: { seq: number; at: number; now: number; ahead?: true; floor?: number }): void {
     if (!this.worker) {
       this.worker = this.make();
       this.worker.onmessage = (e: MessageEvent<HistoryMsg>) => {
@@ -45,7 +50,7 @@ export class V2History {
         done?.(m.t === 'seeked' ? m.s : new Error(m.message));
       };
     }
-    this.worker.postMessage({ base: new URL(this.base, location.href).href, ...m, floor: this.floor });
+    this.worker.postMessage({ base: new URL(this.base, location.href).href, ...m, floor: m.floor ?? this.floor });
   }
   /** The moment `at` (µs), with the world's time `now` (µs): no seek asks for a day after now's. */
   private seek(at: number, now: number): Promise<Seeked> {
@@ -69,10 +74,18 @@ export class V2History {
    *  the bundle's bytes, which the worker keeps), so a seek the page can foresee waits only for that bundle to be
    *  applied: a moment link's while the page catches up to now, Back 1 min's and From the start's once the time panel
    *  is open. On soul.game a bundle is Eden whole, about 1.8 MB, and reading it was the slowest step of a cold seek
-   *  (0.9 to 1.7 s of about 2.1). Nothing is applied or drawn, and nothing is said back. */
-  async prepare(tick: number, nowTick?: number | null): Promise<void> {
-    const now = Math.max(tick, nowTick ?? tick) * TICK_US, at = await this.start(tick * TICK_US - LEAD_US, now);
-    this.post({ seq: 0, at, now, ahead: true });
+   *  (0.9 to 1.7 s of about 2.1). Nothing is applied or drawn, and nothing is said back.
+   *  The world's header is asked for here too, once: the worker reads it at its first seek (0.25 to 0.5 s on soul.game),
+   *  and it is immutable, so that read is then answered from the browser's cache.
+   *  `atOnce` (a link's moment, asked for as the page starts): the worker is asked before the world's first moment is
+   *  known (two requests one after the other, 0.5 to 0.7 s on soul.game), for the moment's own day only, so it never
+   *  walks back over days a young world does not have; asked again only when the first moment moves the window. */
+  async prepare(tick: number, nowTick?: number | null, atOnce = false): Promise<void> {
+    if (!this.headerAsked) { this.headerAsked = true; void fetch(new URL(headerKey(), new URL(this.base, location.href))).then((r) => r.arrayBuffer()).catch(() => {}); }
+    const now = Math.max(tick, nowTick ?? tick) * TICK_US, wanted = tick * TICK_US - LEAD_US;
+    if (atOnce && wanted >= 0) this.post({ seq: 0, at: wanted, now, ahead: true, floor: wanted - (wanted % DAY_US) });
+    const at = await this.start(wanted, now);
+    if (!atOnce || at !== wanted || wanted < 0) this.post({ seq: 0, at, now, ahead: true });
   }
 
   /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them.
@@ -80,10 +93,13 @@ export class V2History {
    *  taken to be no later than now. It is the world's own clock, which for a world made through New world began at 0. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal, nowTick?: number | null): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
+    // the bundle feed (native carry playback, history-feed.ts) is loaded on the first past window, not with the page
+    const { feedBundle } = await import('./history-feed.ts');
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
+    const parts=this.parts?.fork(),bodies=new Map<string,string>();
     const now = (nowTick ?? to) * TICK_US;
     let at = await this.start(from * TICK_US, endUs), first = true, next: number | null = null;
-    const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
+    const take = () => { for(const [node,entity]of bridge.nativeBodies)bodies.set(node,entity);for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too
     while (at < endUs + STEP_US && got.size < limit) {
       if (signal?.aborted) throw new Error('aborted');
@@ -92,10 +108,9 @@ export class V2History {
       // the bundle's time, and the quiet after it until the next bundle: a world with no records writes no bundle, so
       // past the newest one (no next yet) the world is as that bundle left it, and a minute ago is played from there
       const until = Math.min(s.next ?? Infinity, endUs + 2 * STEP_US);
-      // the bundle's state and its motion, then its time step by step
-      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples, ...(s.courses ? { courses: s.courses } : {}) } });
+      feedBundle(s, bridge, parts, take, first, STEP_US);
       first = false;
-      for (let t = s.start + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
+      for (let t = (s.timeline?.transitions.at(-1)?.at ?? s.start) + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
         bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: Math.min(t, until) } });
         take();
       }
@@ -109,6 +124,7 @@ export class V2History {
       const from2 = Math.floor(next / TICK_US);
       return this.chunks(from2, from2 + (to - from), limit, signal, nowTick ?? to);
     }
+    if(parts&&got.size){const values=[...got.values()];this.carryWindows.push({from:Math.min(...values.map(c=>c.fromTick))*TICK_US,to:Math.max(...values.map(c=>c.toTick))*TICK_US,parts,bodies});if(this.carryWindows.length>12)this.carryWindows.shift();}
     return [...got.values()].sort((a, b) => a.fromTick - b.fromTick).slice(0, limit);
   }
 

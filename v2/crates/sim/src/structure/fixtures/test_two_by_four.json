@@ -1,0 +1,136 @@
+{
+  "format": "souls-entry/1",
+  "kind": "mars:test_two_by_four",
+  "owner": "thing",
+  "state": {
+    "hold_crew": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "carry_crew": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {
+    "joint": {
+      "n": 1,
+      "from": "mars:test_deck_beam",
+      "most": 2,
+      "most_per": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "end_l": {
+      "role": "joint",
+      "connector": "beam_seat",
+      "mates": "beam_end",
+      "at_mm": [
+        -572,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "end_r": {
+      "role": "joint",
+      "connector": "beam_seat",
+      "mates": "beam_end",
+      "at_mm": [
+        572,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "top": {
+      "role": "joint",
+      "connector": "sheet_seat",
+      "mates": "sheet_edge",
+      "at_mm": [
+        0,
+        89,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "grip_back": {
+      "role": "grip",
+      "at_mm": [
+        -732,
+        44,
+        0
+      ]
+    },
+    "grip_front": {
+      "role": "grip",
+      "at_mm": [
+        732,
+        44,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1829,
+      89,
+      38
+    ]
+  },
+  "looks": {
+    "shape": {
+      "round": 3,
+      "palette": {
+        "timber": "#c9a36b"
+      },
+      "tags": [
+        "timber",
+        "two_by_four",
+        "joist",
+        "deck"
+      ],
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            44,
+            0
+          ],
+          "size": [
+            1829,
+            89,
+            38
+          ],
+          "tint": "timber"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A 6 ft 2x4 joist: two carry it and seat it across a deck bay's two beams."
+  },
+  "card": {
+    "text": "card"
+  }
+}

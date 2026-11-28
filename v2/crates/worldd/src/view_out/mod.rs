@@ -122,6 +122,93 @@ mod trace {
     }
 }
 
+/// What the public stream's thread, and the threads it writes beside it, write and sync (#2803 follow-up): bytes, files
+/// synced, the waits for them and parts published, counted always (`stream_io` in `health.json`, the served check of
+/// how many syncs a part costs) and the syncs timed with `STREAM_PROFILE=1`. A thread counts once [`io::count_here`]
+/// is called on it, and the threads [`beside`] starts from one: the views' writers and other threads are not counted.
+pub mod io {
+    // The sync time is wall time, off unless the profile asks for it (K7 allows it, as in `measures`).
+    #![allow(clippy::disallowed_methods)]
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    // 1 on the stream's thread, 2 on a thread writing beside it, 0 elsewhere.
+    thread_local!(static HERE: Cell<u8> = const { Cell::new(0) });
+    // On the stream's thread, inside `stage`: its syncs are one wait, counted when it ends.
+    thread_local!(static STAGED: Cell<u32> = const { Cell::new(0) });
+    /// Bytes written, files synced, sync waits, parts published, and the files synced and waits while writing a part
+    /// (from its recovery objects to its pointer), in that order.
+    static COUNTS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+    /// Nanoseconds spent in syncs, summed over the threads that synced (profile only).
+    static SYNC_NS: AtomicU64 = AtomicU64::new(0);
+    /// Counts what this thread writes and syncs from now on: the stream's own thread.
+    pub fn count_here() {
+        HERE.set(1);
+    }
+    /// What a thread started from this one to write beside it is counted as.
+    pub(super) fn kind() -> u8 {
+        HERE.get().min(1) * 2
+    }
+    pub(super) fn set_kind(k: u8) {
+        HERE.set(k);
+    }
+    pub(super) fn wrote(n: usize) {
+        if HERE.get() > 0 {
+            COUNTS[0].fetch_add(n as u64, Relaxed);
+        }
+    }
+    /// A file's sync, counted, and a wait of the stream's own unless inside a [`stage`]; timed when the profile is on.
+    pub(super) fn sync(f: &std::fs::File) -> std::io::Result<()> {
+        let here = HERE.get();
+        if here == 0 {
+            return f.sync_all();
+        }
+        COUNTS[1].fetch_add(1, Relaxed);
+        if here == 1 && STAGED.get() == 0 {
+            COUNTS[2].fetch_add(1, Relaxed);
+        }
+        let t = super::prof::on().then(std::time::Instant::now);
+        let done = f.sync_all();
+        if let Some(t) = t {
+            SYNC_NS.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
+        }
+        done
+    }
+    /// `write`, whose syncs (here and on threads beside it, joined in it) the stream's thread waits for as one.
+    pub(super) fn stage<T>(write: impl FnOnce() -> T) -> T {
+        if HERE.get() != 1 {
+            return write();
+        }
+        let before = COUNTS[1].load(Relaxed);
+        STAGED.set(STAGED.get() + 1);
+        let done = write();
+        STAGED.set(STAGED.get() - 1);
+        if STAGED.get() == 0 && COUNTS[1].load(Relaxed) > before {
+            COUNTS[2].fetch_add(1, Relaxed);
+        }
+        done
+    }
+    /// A part begins to be written: the syncs and waits so far.
+    pub(super) fn part_begins() -> [u64; 2] {
+        [COUNTS[1].load(Relaxed), COUNTS[2].load(Relaxed)]
+    }
+    /// The part begun at `at` is written: one part, and its syncs and waits.
+    pub(super) fn part_written(at: [u64; 2]) {
+        if HERE.get() == 1 {
+            // The part last, so a reading never has more parts than their syncs and waits.
+            COUNTS[4].fetch_add(COUNTS[1].load(Relaxed).saturating_sub(at[0]), Relaxed);
+            COUNTS[5].fetch_add(COUNTS[2].load(Relaxed).saturating_sub(at[1]), Relaxed);
+            COUNTS[3].fetch_add(1, Relaxed);
+        }
+    }
+    /// `[bytes, syncs, waits, parts, part syncs, part waits]` so far, and the syncs' time (ns, profile only).
+    pub fn totals() -> ([u64; 6], u64) {
+        (
+            std::array::from_fn(|i| COUNTS[i].load(Relaxed)),
+            SYNC_NS.load(Relaxed),
+        )
+    }
+}
+
 mod prof {
     // A profile is wall time on the writer's thread, off unless asked for (K7 allows it, as in `measures`).
     #![allow(clippy::disallowed_methods)]
@@ -144,6 +231,8 @@ mod prof {
     ];
     struct P {
         ns: [u128; 13],
+        /// Per stage: bytes written, files synced, sync waits and the syncs' time (ns), from [`super::io`].
+        io: [[u64; 4]; 13],
         records: u64,
         parts: u64,
         whole: u64,
@@ -152,7 +241,7 @@ mod prof {
         causes: std::collections::BTreeMap<&'static str, u64>,
     }
     thread_local!(static P_: RefCell<Option<P>> = const { RefCell::new(None) });
-    fn on() -> bool {
+    pub(super) fn on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ON.get_or_init(|| std::env::var("STREAM_PROFILE").is_ok_and(|v| v == "1"))
     }
@@ -165,20 +254,26 @@ mod prof {
             })
             .unwrap_or(0)
     }
-    pub struct Lap(Option<Instant>);
+    pub struct Lap(Option<(Instant, [u64; 4])>);
+    fn io_now() -> [u64; 4] {
+        let ([bytes, syncs, waits, ..], ns) = super::io::totals();
+        [bytes, syncs, waits, ns]
+    }
     impl Lap {
         pub fn start() -> Lap {
-            Lap(on().then(Instant::now))
+            Lap(on().then(|| (Instant::now(), io_now())))
         }
         pub fn mark(&mut self, stage: usize) {
-            let Some(t) = self.0 else { return };
+            let Some((t, io0)) = self.0 else { return };
             let now = Instant::now();
             let d = now.duration_since(t).as_nanos();
-            self.0 = Some(now);
+            let io1 = io_now();
+            self.0 = Some((now, io1));
             P_.with(|p| {
                 let mut p = p.borrow_mut();
                 let p = p.get_or_insert_with(|| P {
                     ns: [0; 13],
+                    io: [[0; 4]; 13],
                     records: 0,
                     parts: 0,
                     whole: 0,
@@ -187,6 +282,9 @@ mod prof {
                     causes: Default::default(),
                 });
                 p.ns[stage] += d;
+                for (k, v) in p.io[stage].iter_mut().enumerate() {
+                    *v += io1[k].saturating_sub(io0[k]);
+                }
             });
         }
     }
@@ -220,6 +318,14 @@ mod prof {
             );
             for (i, n) in NAMES.iter().enumerate() { line += &format!(" {n} {:.0}ms", ms(p.ns[i])); }
             line += &format!(" structural-by {:?}", p.causes);
+            // Per stage that wrote: bytes, files synced, waits, and the syncs' summed time (beside threads overlap).
+            line += " io";
+            for (i, n) in NAMES.iter().enumerate() {
+                let [b, s, w, t] = p.io[i];
+                if b + s + w > 0 {
+                    line += &format!(" {n} {b}B {s}syncs {w}waits {:.0}ms", t as f64 / 1e6);
+                }
+            }
             eprintln!("{line}");
             *g = None;
         });
@@ -329,8 +435,9 @@ pub fn write_text(path: &Path, bytes: &[u8]) -> R<()> {
 fn whole_via(path: &Path, tmp: &Path, bytes: &[u8]) -> R<()> {
     let mut f = fs::File::create(tmp).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
+    self::io::wrote(bytes.len());
     // Synced before the rename (B1-7): after a power cut the name holds the old bytes or the new, never a short file.
-    f.sync_all().map_err(io)?;
+    self::io::sync(&f).map_err(io)?;
     drop(f);
     fs::rename(tmp, path).map_err(io)
 }
@@ -1280,6 +1387,13 @@ pub struct PublicWriter<S> {
     /// The world time a still world's pointer was last brought up to (its quiet time, or the newest part's end), so
     /// [`PublicWriter::idle`] writes it every [`PUBLIC_QUIET_EVERY_US`] (rule 11), not each 20 ms.
     quiet_from: Option<Micros>,
+    /// The wall time, ms, at which the newest world time the pointer last published (its newest part's end, or the
+    /// quiet time it is still up to) fell, by that pointer's own anchor; `i64::MIN` before the first. How far a viewer
+    /// is behind the world is the wall time now less this (`stream_behind_ms` in `health.json`).
+    shown_wall_ms: std::sync::atomic::AtomicI64,
+    /// A part was played into the published state and its files were not all written (a refused write, #2803
+    /// follow-up): the writer's memory is ahead of the disk, so it writes nothing more (`stream-write`).
+    broken: bool,
     /// The world's closed kinds (#3948) and the containers and things it follows them by, for the entries.
     closed_kinds: Closed,
     inside: Inside,
@@ -1377,6 +1491,50 @@ fn stream_effect(header: &Header, value: Value) -> R<Effect> {
         .pop()
         .ok_or_else(|| fault("stream-frame", "missing effect"))
 }
+/// A public record's sequence and world time (its envelope's fields 1 and 2), read in place (#5282): [`stream_effect`]
+/// encodes the record, reads it back whole and checks its names, a part of the stream's core at 1,000 agents for two
+/// numbers. A record whose two fields are not plain integers is read whole, refused as before. Every record is still
+/// read whole, names checked, when the writer's player plays its part, before any of its files is named.
+fn seq_at(header: &Header, record: &Value) -> R<(u64, i64)> {
+    if let Value::Map(m) = record
+        && let Some(Value::Uint(seq)) = m.get(&1)
+        && let Some(at) = match m.get(&2) {
+            Some(Value::Uint(n)) => i64::try_from(*n).ok(),
+            Some(Value::Nint(n)) => i64::try_from(*n).ok().map(|n| -1 - n),
+            _ => None,
+        }
+    {
+        // A debug build (the tests) still reads it whole and checks the two agree.
+        debug_assert!(
+            stream_effect(header, record.clone())
+                .is_ok_and(|e| (e.envelope.sequence, e.envelope.at) == (*seq, at))
+        );
+        return Ok((*seq, at));
+    }
+    let e = stream_effect(header, record.clone())?;
+    Ok((e.envelope.sequence, e.envelope.at))
+}
+/// Adds every reference in `v` to `out`: the set `replica::audience::references` finds, read in place (#5282). That
+/// walk rebuilds a copy of the value it reads, and the words of each part read the whole public state's references.
+fn refs_into(v: &Value, out: &mut std::collections::BTreeSet<Id>) {
+    let mut todo = vec![v];
+    while let Some(v) = todo.pop() {
+        if let Some(r) = replica::audience::reference(v) {
+            out.insert(r);
+            continue;
+        }
+        match v {
+            Value::Array(a) => todo.extend(a.iter()),
+            Value::Map(m) => todo.extend(m.values()),
+            _ => {}
+        }
+    }
+}
+fn refs_of(v: &Value) -> std::collections::BTreeSet<Id> {
+    let mut out = std::collections::BTreeSet::new();
+    refs_into(v, &mut out);
+    out
+}
 fn int(n: i64) -> Value {
     u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
 }
@@ -1432,7 +1590,11 @@ fn beside<'scope, T: Send + 'scope>(
     if tests::NO_THREADS.get() {
         return Beside::Here(write());
     }
-    match std::thread::Builder::new().spawn_scoped(s, write) {
+    let kind = self::io::kind();
+    match std::thread::Builder::new().spawn_scoped(s, move || {
+        self::io::set_kind(kind);
+        write()
+    }) {
         Ok(h) => Beside::Thread(h),
         Err(_) => Beside::Here(write()),
     }
@@ -1454,22 +1616,18 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
     }
-    let same = |path: &Path| -> R<()> {
-        let meta = fs::symlink_metadata(path).map_err(io)?;
-        if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes
-        {
-            return Err(fault("stream-immutable", "existing bytes differ"));
-        }
-        Ok(())
-    };
+    let same = |path: &Path| same_bytes(path, bytes);
     if path.exists() {
         return same(path);
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    let written =
-        fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all()));
+    let written = fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(bytes)?;
+        self::io::wrote(bytes.len());
+        self::io::sync(&f)
+    });
     if let Err(e) = written {
         let _ = fs::remove_file(&tmp);
         return Err(io(e));
@@ -1480,6 +1638,169 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => same(path),
         Err(e) => Err(io(e)),
+    }
+}
+
+/// Whether `path` is a plain file holding `bytes`: an immutable file already there (`stream-immutable` if not).
+fn same_bytes(path: &Path, bytes: &[u8]) -> R<()> {
+    let meta = fs::symlink_metadata(path).map_err(io)?;
+    if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes {
+        return Err(fault("stream-immutable", "existing bytes differ"));
+    }
+    Ok(())
+}
+
+/// One part's files (#2803 follow-up): each written under its temporary name with no sync, then all synced together,
+/// the stream's thread waiting once ([`Group::sync`]), then named in the order they were added ([`Group::name`]), the
+/// last ([`Group::last`], the pointer) on its own ([`Group::name_last`]). So every file is still synced before its
+/// name (B1-7) and named after the files it names, as [`write_whole`] and [`immutable`] each do one at a time. What is
+/// not named when the group is dropped (a refused write) leaves no temporary file.
+#[derive(Default)]
+struct Group<'a> {
+    files: Vec<Pending<'a>>,
+    last: Option<Pending<'a>>,
+}
+
+struct Pending<'a> {
+    tmp: PathBuf,
+    path: PathBuf,
+    file: Option<fs::File>,
+    /// An immutable file's bytes: linked to its name, which may only ever hold them ([`immutable`]). None: renamed
+    /// over its name ([`write_whole`]).
+    immutable: Option<&'a [u8]>,
+}
+
+impl<'a> Group<'a> {
+    fn written(path: &Path, bytes: &[u8], immutable: Option<&'a [u8]>) -> R<Pending<'a>> {
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+        let file = fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).map(|_| f));
+        match file {
+            Ok(f) => {
+                self::io::wrote(bytes.len());
+                Ok(Pending {
+                    tmp,
+                    path: path.to_owned(),
+                    file: Some(f),
+                    immutable,
+                })
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp);
+                Err(io(e))
+            }
+        }
+    }
+    /// `bytes` to go whole over `path`, as [`write_whole`].
+    fn whole(&mut self, path: &Path, bytes: &[u8]) -> R<()> {
+        self.files.push(Self::written(path, bytes, None)?);
+        Ok(())
+    }
+    /// The immutable file `path`, as [`immutable`]: one already there must hold `bytes`, and is not written again.
+    fn immutable(&mut self, path: &Path, bytes: &'a [u8]) -> R<()> {
+        if let Some(p) = path.parent() {
+            fs::create_dir_all(p).map_err(io)?;
+        }
+        if path.exists() {
+            return same_bytes(path, bytes);
+        }
+        self.files.push(Self::written(path, bytes, Some(bytes))?);
+        Ok(())
+    }
+    /// `bytes` to go whole over `path` after every other file of the group is named.
+    fn last(&mut self, path: &Path, bytes: &[u8]) -> R<()> {
+        self.last = Some(Self::written(path, bytes, None)?);
+        Ok(())
+    }
+    /// Every file synced, each on a thread of its own beside this one: one wait.
+    fn sync(&mut self) -> R<()> {
+        let files: Vec<&fs::File> = self
+            .files
+            .iter()
+            .chain(&self.last)
+            .filter_map(|p| p.file.as_ref())
+            .collect();
+        let Some((first, rest)) = files.split_first() else {
+            return Ok(());
+        };
+        self::io::stage(|| {
+            std::thread::scope(|s| {
+                let others: Vec<_> = rest
+                    .iter()
+                    .map(|f| beside(s, move || self::io::sync(f).map_err(io)))
+                    .collect();
+                let mut done = self::io::sync(first).map_err(io);
+                for h in others {
+                    done = done.and(h.join("a file's sync panicked"));
+                }
+                done
+            })
+        })
+    }
+    fn name_one(p: Pending<'_>) -> R<()> {
+        drop(p.file);
+        match p.immutable {
+            None => fs::rename(&p.tmp, &p.path).map_err(|e| {
+                let _ = fs::remove_file(&p.tmp);
+                io(e)
+            }),
+            Some(bytes) => {
+                let linked = fs::hard_link(&p.tmp, &p.path);
+                let _ = fs::remove_file(&p.tmp);
+                match linked {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        same_bytes(&p.path, bytes)
+                    }
+                    Err(e) => Err(io(e)),
+                }
+            }
+        }
+    }
+    /// The files named, in the order they were added; the last is kept for [`Group::name_last`].
+    fn name(&mut self) -> R<()> {
+        while !self.files.is_empty() {
+            Self::name_one(self.files.remove(0))?;
+        }
+        Ok(())
+    }
+    fn name_last(&mut self) -> R<()> {
+        self.last.take().map_or(Ok(()), Self::name_one)
+    }
+}
+
+impl Drop for Group<'_> {
+    fn drop(&mut self) {
+        for p in self.files.drain(..).chain(self.last.take()) {
+            let _ = fs::remove_file(&p.tmp);
+        }
+    }
+}
+
+/// A writer killed during a [`Group`] leaves up to one temporary file a file of the group, and an object's re-cut may
+/// never write that name again: the writer removes them as it opens, before it writes. Only the group's own names
+/// (`<hex or number>.tmp`, `<number>.text.tmp`, `head.tmp`, the pointer's), never a text write's
+/// (`<name>.<pid>-<n>.tmp`, [`write_text`]), which a removal may be writing at once.
+fn sweep_temporaries(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".tmp")) else {
+            continue;
+        };
+        let ours = hex(stem)
+            || stem == "head"
+            || stem == POINTER
+            || stem
+                .strip_suffix(".text")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if ours && e.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = fs::remove_file(e.path());
+        }
     }
 }
 pub struct PublicStart<'a> {
@@ -1493,7 +1814,32 @@ pub struct PublicStart<'a> {
     /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
     pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
-    pub history: Option<&'a sim::log::Recovered>,
+    pub history: Option<&'a dyn History>,
+}
+
+/// The world's log records from its first kept one on, as a reader recovering from them needs them (#2803): held in
+/// memory ([`sim::log::Recovered`], a test's), or read from the disk a batch at a time (`worldd serve`'s), so a
+/// restart never holds the whole log.
+pub trait History {
+    /// The first record held.
+    fn first(&self) -> u64;
+    /// Hands each record from `from` on to `each`, in order, while it returns `Ok(true)`.
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()>;
+}
+
+impl History for sim::log::Recovered {
+    fn first(&self) -> u64 {
+        self.first
+    }
+    fn each_from(&self, from: u64, each: &mut dyn FnMut(u64, &[u8]) -> R<bool>) -> R<()> {
+        let from = from.max(self.first);
+        for (n, raw) in (from..).zip(self.after(from)) {
+            if !each(n, raw)? {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 impl PublicStart<'_> {
     /// Only the public legacy transition may choose an older retained source. The engine's newest restore stays
@@ -1635,37 +1981,47 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         Ok(hash)
     }
-    /// [`PublicWriter::put`] of each of `objects`. To the spool all at once, each on its own thread (the first on this
-    /// one), as no object waits on another's sync; to a store one by one.
-    fn put_all(&self, objects: &[&[u8]]) -> R<()> {
-        let (Some(spool), Some((first, rest))) = (&self.spool, objects.split_first()) else {
+    /// [`PublicWriter::put`] of each of `objects` into a part's `group` (#2803 follow-up): to the spool, each object not
+    /// there yet is written to be synced with the part's other files; to a store, put one by one.
+    fn put_all_into(&self, objects: &[&[u8]], group: &mut Group<'_>) -> R<()> {
+        let Some(spool) = &self.spool else {
             for o in objects {
                 self.put(o)?;
             }
             return Ok(());
         };
-        let prefix = &self.prefix;
-        let key = |b: &[u8]| {
-            format!(
-                "{prefix}objects/{}",
-                replica::encode::to_hex(&replica::ids::sha256(b))
-            )
-        };
         // The same bytes twice are one object, written once (two writers would share its temporary name).
-        let mut rest: Vec<&[u8]> = rest.iter().copied().filter(|o| o != first).collect();
-        rest.sort_unstable();
-        rest.dedup();
-        std::thread::scope(|s| {
-            let others: Vec<_> = rest
-                .iter()
-                .map(|o| beside(s, move || spool.object(&key(o), o)))
-                .collect();
-            let mut done = spool.object(&key(first), first);
-            for h in others {
-                done = done.and(h.join("an object's writer panicked"));
-            }
-            done
-        })
+        let mut unique: Vec<&[u8]> = objects.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        for o in unique {
+            let key = format!(
+                "{}objects/{}",
+                self.prefix,
+                replica::encode::to_hex(&replica::ids::sha256(o))
+            );
+            spool.object_into(&key, o, group)?;
+        }
+        Ok(())
+    }
+    /// [`PublicWriter::commit`] into a part's `group`: to the spool, the head is written to be synced with the part's
+    /// other files and named after its objects; to a store, put as before.
+    fn commit_into(&mut self, manifest: &[u8], group: &mut Group<'_>) -> R<()> {
+        if self.spool.is_none() {
+            return self.commit(manifest);
+        }
+        // Its object is in the group already ([`PublicWriter::put_all_into`]).
+        let hash = replica::ids::sha256(manifest).to_vec();
+        self.name_live(&hash, &object_map(manifest)?);
+        let bytes = wire(Value::Map(BTreeMap::from([(
+            1,
+            Value::Bytes(hash.clone()),
+        )])))?;
+        if let Some(spool) = &self.spool {
+            spool.head_into(&format!("{}head", self.prefix), &bytes, group)?;
+        }
+        self.head = Some(hash);
+        Ok(())
     }
     fn get(&self, hash: &[u8]) -> R<Vec<u8>> {
         if hash.len() != 32 {
@@ -1802,6 +2158,8 @@ impl<S: ObjectStore> PublicWriter<S> {
             still_at: None,
             asleep: None,
             quiet_from: None,
+            shown_wall_ms: std::sync::atomic::AtomicI64::new(i64::MIN),
+            broken: false,
             closed_kinds: closed,
             inside,
             hides: true,
@@ -1810,6 +2168,19 @@ impl<S: ObjectStore> PublicWriter<S> {
             fresh_at: 0,
             poisoned: None,
         };
+        // What a part's group killed midway left (#2803 follow-up): its recovery objects and head in the spool, its
+        // pointer and its generations' part files.
+        if let Some(spool) = &w.spool {
+            let base = spool.dir.join(&w.prefix);
+            sweep_temporaries(&base);
+            sweep_temporaries(&base.join("objects"));
+        }
+        sweep_temporaries(&w.dir);
+        if let Ok(generations) = fs::read_dir(w.dir.join("g")) {
+            for g in generations.flatten() {
+                sweep_temporaries(&g.path());
+            }
+        }
         let head_key = format!("{}head", w.prefix);
         // R15: the spool's head is the newest (written before the store's); its ETag is the backup's to learn.
         let (head, from_store) = match w.spool.as_ref().and_then(|s| s.read(&head_key)) {
@@ -1934,18 +2305,18 @@ impl<S: ObjectStore> PublicWriter<S> {
                     )
                 })?;
                 if w.migration_state.is_none() {
-                    w.bridge_to(history.first)?;
+                    w.bridge_to(history.first())?;
                 }
-                for (offset, raw) in history.records.iter().enumerate() {
-                    let n = history.first + offset as u64;
+                history.each_from(w.cursor, &mut |n, raw| {
                     if n < w.cursor {
-                        continue;
+                        return Ok(true);
                     }
                     if w.migration_state.is_some() {
-                        break;
+                        return Ok(false);
                     }
                     w.apply_record(n, raw)?;
-                }
+                    Ok(true)
+                })?;
                 let prefix = w.migration_state.take().ok_or_else(|| {
                     fault(
                         "stream-legacy-source-missing",
@@ -2065,12 +2436,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             };
             let id = replica::effects::read_id(&p[0])?;
             // A node taken out is a row of its id alone: no references.
-            Ok((
-                id,
-                p.get(1)
-                    .map(replica::audience::references)
-                    .unwrap_or_default(),
-            ))
+            Ok((id, p.get(1).map(refs_of).unwrap_or_default()))
         };
         // From a whole state: the one after a whole cut, or the one before the first cut by rows.
         let version = |v: &Value| match v {
@@ -2103,7 +2469,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 };
                 let id = replica::effects::read_id(&p[0])?;
                 let r = match p.get(1) {
-                    Some(v) => replica::audience::references(v),
+                    Some(v) => refs_of(v),
                     None => Default::default(),
                 };
                 if r.is_empty() {
@@ -2112,28 +2478,34 @@ impl<S: ObjectStore> PublicWriter<S> {
                     rows.insert(id, r);
                 }
             }
-            *rest = a
-                .iter()
-                .filter(|(k, _)| **k != 2)
-                .flat_map(|(_, v)| replica::audience::references(v))
-                .collect();
+            rest.clear();
+            for (_, v) in a.iter().filter(|(k, _)| **k != 2) {
+                refs_into(v, rest);
+            }
             *at = version(after);
         } else if after.is_some() || stale {
             let whole = after.unwrap_or(self.player.state());
             let at = version(whole);
-            let Value::Map(mut m) = whole.clone() else {
+            let Value::Map(m) = whole else {
                 return Err(fault("stream-words", "a state is a map"));
             };
-            let mut rows = BTreeMap::new();
-            if let Some(Value::Array(nodes)) = m.remove(&2) {
-                for row in &nodes {
-                    let (id, r) = row_refs(row)?;
-                    if !r.is_empty() {
-                        rows.insert(id, r);
+            // Read in place (#5282): the node rows' references by node, the rest's together.
+            let (mut rows, mut rest) = (BTreeMap::new(), std::collections::BTreeSet::new());
+            for (k, v) in m {
+                match (k, v) {
+                    (2, Value::Array(nodes)) => {
+                        for row in nodes {
+                            let (id, r) = row_refs(row)?;
+                            if !r.is_empty() {
+                                rows.insert(id, r);
+                            }
+                        }
                     }
+                    (2, _) => {}
+                    (_, v) => refs_into(v, &mut rest),
                 }
             }
-            self.refs = Some((at, rows, replica::audience::references(&Value::Map(m))));
+            self.refs = Some((at, rows, rest));
         }
         if after.is_none()
             && let (Some((at, rows, rest)), Some(d)) = (&mut self.refs, delta)
@@ -2148,32 +2520,34 @@ impl<S: ObjectStore> PublicWriter<S> {
                 let Value::Map(st) = self.player.state() else {
                     return Err(fault("stream-words", "a state is a map"));
                 };
-                let mut m: BTreeMap<u64, Value> = st
-                    .iter()
-                    .filter(|(k, _)| **k != 2)
-                    .map(|(k, v)| (*k, v.clone()))
-                    .collect();
-                for k in [3, 6] {
-                    let (Some(Value::Array(rows)), Some(Value::Array(old))) =
-                        (d.get(&k), m.get(&k))
+                // Read in place (#5282), never copying the state: each key but the node rows as it is, and the links
+                // and timers with the delta's rows in place of theirs (a row with no value is gone).
+                rest.clear();
+                for (k, v) in st.iter().filter(|(k, _)| **k != 2) {
+                    let (Some(Value::Array(rows)), Value::Array(old), 3 | 6) = (d.get(k), v, *k)
                     else {
+                        refs_into(v, rest);
                         continue;
                     };
                     // The order of the rows does not matter to a set of references.
-                    let mut by = BTreeMap::new();
+                    let mut by: BTreeMap<Id, (&Value, Option<&Value>)> = BTreeMap::new();
                     for r in old.iter().chain(rows) {
                         let Value::Array(p) = r else {
                             return Err(fault("stream-words", "a row is a pair"));
                         };
                         let id = replica::effects::read_id(&p[0])?;
                         match p.get(1) {
-                            Some(v) => by.insert(id, Value::Array(vec![p[0].clone(), v.clone()])),
+                            Some(v) => by.insert(id, (&p[0], Some(v))),
                             None => by.remove(&id),
                         };
                     }
-                    m.insert(k, Value::Array(by.into_values().collect()));
+                    for (id, v) in by.values() {
+                        refs_into(id, rest);
+                        if let Some(v) = v {
+                            refs_into(v, rest);
+                        }
+                    }
                 }
-                *rest = replica::audience::references(&Value::Map(m));
             }
             let changed: &[Value] = match d.get(&2) {
                 Some(Value::Array(c)) => c,
@@ -2193,11 +2567,18 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         let mut all = rest.clone();
         all.extend(rows.values().flatten().copied());
-        all.extend(replica::audience::references(&Value::Array(
-            self.records.clone(),
-        )));
-        // A part's names are those its own records create; the baseline's text holds the rest (#3574).
-        self.words_of(all, &Value::Array(self.records.clone()))
+        for r in &self.records {
+            refs_into(r, &mut all);
+        }
+        // A part's names are those its own records create; the baseline's text holds the rest (#3574). The records
+        // are lent to the value the names are read from, never copied (#5282).
+        let records = Value::Array(std::mem::take(&mut self.records));
+        let words = self.words_of(all, &records);
+        let Value::Array(records) = records else {
+            unreachable!("made above")
+        };
+        self.records = records;
+        words
     }
     fn words(&self, value: &Value, named: &Value) -> R<Vec<u8>> {
         self.words_of(replica::audience::references(value), named)
@@ -3173,12 +3554,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 self.view = view;
                 for (_, record) in self.view.take() {
                     if Carried::read(&record)?.is_none()
-                        && (kept.is_empty()
-                            || !kept.contains(
-                                &stream_effect(&self.header, record.clone())?
-                                    .envelope
-                                    .sequence,
-                            ))
+                        && (kept.is_empty() || !kept.contains(&seq_at(&self.header, &record)?.0))
                     {
                         self.records.push(record)
                     }
@@ -3230,9 +3606,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
                 for (_, record) in self.view.take() {
                     if Carried::read(&record)?.is_none() {
-                        let seq = stream_effect(&self.header, record.clone())?
-                            .envelope
-                            .sequence;
+                        let seq = seq_at(&self.header, &record)?.0;
                         if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
                             self.records.push(record)
                         }
@@ -3293,9 +3667,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
                 for (_, record) in self.view.take() {
                     if Carried::read(&record)?.is_none() {
-                        let seq = stream_effect(&self.header, record.clone())?
-                            .envelope
-                            .sequence;
+                        let seq = seq_at(&self.header, &record)?.0;
                         if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
                             self.records.push(record)
                         }
@@ -3442,9 +3814,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
             for (_, record) in self.view.take() {
                 if Carried::read(&record)?.is_none() {
-                    let seq = stream_effect(&self.header, record.clone())?
-                        .envelope
-                        .sequence;
+                    let seq = seq_at(&self.header, &record)?.0;
                     if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
                         self.records.push(record)
                     }
@@ -3477,6 +3847,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        self.whole_on_disk()?;
         let window = self.window;
         let mut lap = prof::Lap::start();
         self.apply_record(record, raw)?;
@@ -3492,11 +3863,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         lap.mark(0);
         prof::count(1, 0, 0);
         if let (Some(before), Some(last)) = (window, self.records.last())
-            && stream_effect(&self.header, last.clone())?
-                .envelope
-                .at
-                .div_euclid(stream::PERIOD_US)
-                > before
+            && seq_at(&self.header, last)?.1.div_euclid(stream::PERIOD_US) > before
         {
             self.flush()?;
         }
@@ -3582,7 +3949,19 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
         }
     }
+    /// Refused (`stream-write`) once a part's write was refused after it was played ([`PublicWriter::flush`]): what
+    /// it would write next would name a part, or a chain, that is not on the disk. A restart recovers from the disk.
+    fn whole_on_disk(&self) -> R<()> {
+        if self.broken {
+            return Err(fault(
+                "stream-write",
+                "a part's write was refused after it was played",
+            ));
+        }
+        Ok(())
+    }
     pub fn flush(&mut self) -> R<()> {
+        self.whole_on_disk()?;
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
@@ -3708,14 +4087,37 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
+            // Why a cut is whole, for the profile (#5282): it changes nothing written.
+            prof::cause(match (&timers, &links, landed, bare, sure) {
+                (None, ..) => "whole:timer-owner-not-live",
+                (_, None, ..) => "whole:link-end-not-live",
+                (_, _, false, ..) => "whole:not-landed",
+                (_, _, _, false, _) => "whole:made-with-links-or-timers",
+                (_, _, _, _, false) => "whole:row-not-live",
+                _ => "rows",
+            });
             match (timers, links, landed && bare && sure) {
                 (Some(timers), Some(links), true) => {
-                    self.player
-                        .row_delta(tree.next(), rows, timers, links, &self.made)?
+                    let d = self
+                        .player
+                        .row_delta(tree.next(), rows, timers, links, &self.made)?;
+                    if d.is_none() {
+                        prof::cause("whole:rows-not-in-place");
+                    }
+                    d
                 }
                 _ => None,
             }
         } else {
+            prof::cause(if self.structural {
+                "whole:structural"
+            } else if self.force_remainder {
+                "whole:remainder"
+            } else if self.records.is_empty() {
+                "whole:no-records"
+            } else {
+                "whole:other"
+            });
             None
         };
         let (after, after_digest) = match &delta {
@@ -3747,8 +4149,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         let mut cursor = expected;
         let mut gaps = Vec::new();
         for record in &self.records {
-            let e = stream_effect(&self.header, record.clone())?;
-            let seq = e.envelope.sequence;
+            let seq = seq_at(&self.header, record)?.0;
             if seq < cursor {
                 return Err(fault("stream-sequence", "public entry order"));
             }
@@ -3762,10 +4163,18 @@ impl<S: ObjectStore> PublicWriter<S> {
         if cursor < version {
             gaps.push((cursor, version - cursor));
         }
-        let part = wire(Value::Map(BTreeMap::from([
+        // The records are lent to the part's value, never copied (#5282).
+        let value = Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.header.hash().to_bytes())),
-            (2, Value::Array(self.records.clone())),
-        ])))?;
+            (2, Value::Array(std::mem::take(&mut self.records))),
+        ]));
+        let part = encode(&value).map_err(|e| fault("encoding", e.to_string()));
+        if let Value::Map(mut m) = value
+            && let Some(Value::Array(records)) = m.remove(&2)
+        {
+            self.records = records;
+        }
+        let part = part?;
         let at = self
             .canonical
             .tree()
@@ -3808,9 +4217,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         // The end covers every actual public effect in this cut, even across a still interval.
         if let Some(last) = self.records.last() {
-            sp.to = sp
-                .to
-                .max(stream_effect(&self.header, last.clone())?.envelope.at);
+            sp.to = sp.to.max(seq_at(&self.header, last)?.1);
         }
         // A returned public child can become live without being canonically touched by Return. Bind its
         // actual query version, including zero for an ordinary checkpoint's formerly flying child.
@@ -3908,29 +4315,26 @@ impl<S: ObjectStore> PublicWriter<S> {
             )?),
             None => None,
         };
-        let context = match (&after, &delta) {
-            // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
-            // state again was a sixth of the writer's core at 500 agents.
-            (Some(_), _) => replica::stream::public::context_with(
-                &self.baseline,
-                self.player.digest(),
-                &after_digest,
-                whole_delta.clone().expect("a whole cut has its delta"),
-                self.cursor,
-                &self.duplicates,
-                &changed,
-            )?,
-            (None, Some(delta)) => replica::stream::public::context_with(
-                &self.baseline,
-                self.player.digest(),
-                &after_digest,
-                delta.clone(),
-                self.cursor,
-                &self.duplicates,
-                &changed,
-            )?,
-            (None, None) => unreachable!("a cut is worked out whole or by rows"),
+        lap.mark(2);
+        // The part's words first, read from the deltas the context then takes, never copied (#5282).
+        let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
+        lap.mark(5);
+        let cut_delta = match (after.is_some(), whole_delta, delta) {
+            (true, whole, _) => whole.expect("a whole cut has its delta"),
+            (false, _, Some(delta)) => delta,
+            (false, _, None) => unreachable!("a cut is worked out whole or by rows"),
         };
+        // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
+        // state again was a sixth of the writer's core at 500 agents.
+        let context = replica::stream::public::context_with(
+            &self.baseline,
+            self.player.digest(),
+            &after_digest,
+            cut_delta,
+            self.cursor,
+            &self.duplicates,
+            &changed,
+        )?;
         lap.mark(2);
         let mut value = object_map(&sp.to_bytes()?)?;
         value.insert(10, Value::Bytes(context));
@@ -3950,8 +4354,6 @@ impl<S: ObjectStore> PublicWriter<S> {
             ),
         ])))?;
         lap.mark(3);
-        let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
-        lap.mark(5);
         let hash = |b: &[u8]| replica::ids::sha256(b).to_vec();
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
@@ -3962,18 +4364,23 @@ impl<S: ObjectStore> PublicWriter<S> {
             (6, Value::Bytes(hash(&text))),
             (7, Value::Uint(self.cursor)),
         ])))?;
-        // The part's objects are named by their hashes and wait on nothing but their own bytes: each is written and
-        // synced beside the others, so a part waits on one sync there, not four (on a busy disk the writer fell a
-        // part behind each period, and the page held after each activity accept).
-        self.put_all(&[&chunk, &bytes, &text, &manifest])?;
+        // A part's files are written, then synced together, one wait, then named (#2803 follow-up): its recovery
+        // objects (named by their hashes, to the spool, R15; a store's are put as before), the chain's head, the part
+        // and text files, and the pointer. Each is synced before its name (B1-7) and named after every file it
+        // names: the objects before the head, the head before the part's files (a killed publication replays the
+        // same committed bytes, never a new cut at an orphan file's address), the files before the pointer. Before,
+        // each of those four steps waited on its own syncs, and on a disk shared with other writers the stream fell
+        // minutes behind the world.
+        let begun = self::io::part_begins();
+        let mut group = Group::default();
+        self.put_all_into(&[&chunk, &bytes, &text, &manifest], &mut group)?;
         lap.mark(4);
         self.player.play(&bytes)?;
+        // From here a refused write leaves the published state ahead of the disk: final for this writer.
+        self.broken = true;
         lap.mark(6);
-        self.commit(&manifest)?;
+        self.commit_into(&manifest, &mut group)?;
         lap.mark(7);
-        // Commit exact recovery bytes (to the spool, R15, or else the store) before exposing local immutable files. A
-        // killed publication replays the same committed bytes, never a new cut at an orphan file's address. The two
-        // files are written side by side, as the objects are.
         let (part_file, text_file) = (
             self.generation_dir().join(number.to_string()),
             self.generation_dir().join(format!("{number}.text")),
@@ -3985,23 +4392,38 @@ impl<S: ObjectStore> PublicWriter<S> {
             Some(list) => purge_text(&text, list)?,
             None => None,
         };
-        let (part_written, text_written) = std::thread::scope(|s| {
-            let text = beside(s, || match &derived {
-                Some(purged) => derive(&text_file, purged),
-                None => immutable(&text_file, &text),
-            });
-            (
-                immutable(&part_file, &bytes),
-                text.join("the text file's writer panicked"),
-            )
-        });
-        part_written?;
-        text_written?;
+        group.immutable(&part_file, &bytes)?;
+        if derived.is_none() {
+            group.immutable(&text_file, &text)?;
+        }
+        self.last_to = Some(sp.to);
+        // The pointer goes with them unless the part starts a generation (its pointer names the new baseline, written
+        // after it) or a removal's text is derived (written on its own below, before the pointer).
+        let generation_full =
+            self.generation_parts > 0 && self.player.next() >= self.generation_parts;
+        let with_pointer = !generation_full && derived.is_none();
+        let mut shown = None;
+        if with_pointer {
+            let (pointer, at) = self.pointer_bytes(None)?;
+            group.last(&self.dir.join(POINTER), &pointer)?;
+            shown = at;
+        }
+        group.sync()?;
+        group.name()?;
+        if let Some(spool) = &self.spool {
+            spool.poke();
+        }
+        if let Some(purged) = &derived {
+            derive(&text_file, purged)?;
+        }
         if let (Some(store), Some(list)) = (&self.text, list) {
             settle(store, &text_file, &text, list)?;
         }
+        if with_pointer {
+            group.name_last()?;
+            self.note_shown(shown);
+        }
         lap.mark(8);
-        self.last_to = Some(sp.to);
         if let Some(began) = began {
             let wall = trace::now_ms();
             eprintln!(
@@ -4028,8 +4450,12 @@ impl<S: ObjectStore> PublicWriter<S> {
             ));
         }
         lap.mark(9);
-        self.pointer(None)?;
+        if !with_pointer {
+            self.pointer(None)?;
+        }
         self.quiet_from = self.last_to;
+        self::io::part_written(begun);
+        self.broken = false;
         lap.mark(10);
         // Old generations' deletes once the part is out: they never hold it back from the page.
         self.delete_some(DELETES_PER_PART);
@@ -4038,6 +4464,13 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
+        let (bytes, shown) = self.pointer_bytes(quiet)?;
+        write_whole(&self.dir.join(POINTER), &bytes)?;
+        self.note_shown(shown);
+        Ok(())
+    }
+    /// The pointer's bytes now, and the wall time (ms) at which the newest world time it names fell, by its anchor.
+    fn pointer_bytes(&self, quiet: Option<i64>) -> R<(Vec<u8>, Option<i64>)> {
         // The anchor pairs the world's time with the machine's wall clock, which viewers compare with their own: the
         // world's clock runs ahead of the machine's by a step (O10, `measures::CLOCK_AHEAD_MS`).
         let wall = crate::answers::now();
@@ -4090,7 +4523,26 @@ impl<S: ObjectStore> PublicWriter<S> {
         if let Some(due) = self.asleep {
             value.insert(11, Value::Array(due.map(int).into_iter().collect()));
         }
-        write_whole(&self.dir.join(POINTER), &wire(Value::Map(value))?)
+        let shown = self.last_to.max(quiet).map(|shown| {
+            wall.div_euclid(1000)
+                .saturating_sub(world.saturating_sub(shown).div_euclid(1000))
+        });
+        Ok((wire(Value::Map(value))?, shown))
+    }
+    /// A pointer naming `shown` (its [`PublicWriter::pointer_bytes`]) is on the disk.
+    fn note_shown(&self, shown: Option<i64>) {
+        if let Some(at) = shown {
+            self.shown_wall_ms
+                .store(at, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    /// The wall time, ms, at which the newest world time this stream's pointer names fell; none before its first.
+    pub fn shown_wall_ms(&self) -> Option<i64> {
+        Some(
+            self.shown_wall_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+        .filter(|w| *w != i64::MIN)
     }
     /// Before the world exits to sleep (#2731, rule 13): what is open is written, and the pointer says the world is
     /// still up to now and until `next_due`, the world time of its next due change (none: nothing is due). Refused
@@ -4111,6 +4563,7 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     /// [`PublicWriter::idle`]: whether it wrote the pointer quiet.
     fn quiet_now(&mut self, real: i64) -> R<bool> {
+        self.whole_on_disk()?;
         if self.canonical.tree().time().is_empty() && self.clock_seed.is_none() {
             return Ok(false);
         }

@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 test('a moved world\'s agents list and revoke are answered by the directory, never 404', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'launcher-agents-moved-'));

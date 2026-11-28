@@ -472,6 +472,18 @@ mod tests {
                 .unwrap();
             gateway.write_all(&f).unwrap();
         }
+        // An utterance goes to those subscribed as its tick is read, and is never sent again: each subscription's
+        // grant is read before anyone speaks, so the say is not committed ahead of a subscription still on its way.
+        gateway
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut granted = BTreeSet::new();
+        while granted.len() < 3 {
+            let m = read(&mut gateway).expect("each subscription's grant");
+            if let (Some(Value::Uint(n)), Some(5)) = (m.get(&1), m.get(&2).and_then(kind)) {
+                granted.insert(*n);
+            }
+        }
         gateway
             .set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();

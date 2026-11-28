@@ -7,8 +7,12 @@
 //!   `part:put` (target the activity; 1 the node it goes in, 2 its slot there, or 3 a point `[x, y, z]` µm in that
 //!   node's frame; 4 the parts it joins, ids, when not the bay's standing parts, or for a resting part its bearing
 //!   ones).
-//! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers, goes into the crew's
-//!   slot in one commit (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
+//! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers and each carrier
+//!   within reach of the hold the carry's rule gives it ([`Crew`], below), goes into the crew's slot in one commit
+//!   (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had; one that lies is
+//!   held by its middle between its carriers, one that stands by its foot. The commit moves nothing: the crew's node
+//!   is set where the part is, and its carry then takes it into its carriers' hands on a track, one motion sample a
+//!   tick, as a lift does (`sim::activity::carry::Carry::take_up`, said `souls:carry-track`).
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
 //! - **Put** ([`Assembly::put`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
 //!   `reach.too-high`, B18's `support.none`), by `connectors-do-not-mate` for a join the kinds' connectors do not
@@ -25,8 +29,9 @@
 //!
 //! - **Only a crew takes, only a part, only one nobody else has** ([`Assembly::take`]): the activity must be a kind
 //!   a standing part admits as its holders (`part.not-a-crew`), the thing a part B18 reads (`part.not-a-part`), not in
-//!   a body's hand (`part.in-a-hand`), not riding or held by another activity (`part.held-by-another`), and within
-//!   its carriers' standing reach (`reach.too-high`).
+//!   a body's hand (`part.in-a-hand`), not riding or held by another activity (`part.held-by-another`), within
+//!   its carriers' standing reach (`reach.too-high`), and every carrier within reach of its own hold
+//!   (`part.grip-out-of-reach`, naming the carrier).
 //! - **Put from close by** (`part.out-of-reach` beyond [`PUT_REACH`] of where the part goes): the set-in track is
 //!   short and straight.
 //! - **A seating refused at its track's end or at its commit** stops where its track has it then, and goes back along
@@ -36,15 +41,30 @@
 //!   otherwise a leave breaks the carry off and the part is set down where it is (C3), so no part goes with an
 //!   activity that ends.
 //!
-//! - **Every carrier within reach of its grip (#5067 item 3).** The set-in track and the way back move the crew's node
-//!   while its carriers stand, so a put is refused before anyone moves when it would take a carrier's grip out of its
-//!   reach ([`Carrier`], [`out_of_reach`]: [`GRIP_REACH`] on the plan, its standing reach above its feet): each carrier
-//!   within reach where the track starts must be within reach where it ends (`part.grip-out-of-reach`, naming it); on a
-//!   straight track a carrier who stands is farthest from its grip at one end or the other. A carrier already out of
-//!   reach at the start (one who took a frame from 2 m off, say: how near a take must be is the take's own admission)
-//!   is not held to it. While a set-in runs, a carrier held to its reach who moves out of it stops it by name: it goes
-//!   back as a refused seating does, to where it started, which every carrier who stood could reach; there its carry
-//!   goes on, or breaks off when its carriers have gone (`crate::engine`).
+//! - **Every carrier within reach of its hold (#5067).** A carrier's reach is measured to where it holds the part, the
+//!   middle of its two hands as its hold is said (`sim::activity::carry::grips::assign`), from its feet: at most
+//!   [`GRIP_REACH`] on the plan and its standing reach above them ([`Carrier`], [`out_of_reach`]).
+//!   - **At the take** ([`Crew`]): every carrier, its front, its back and each side, must reach its hold as the crew
+//!     will hold the part (in its slot, between its front and its back), or the take is refused
+//!     `part.grip-out-of-reach`, naming the carrier and how far it is, before anything is written. A frame that stands
+//!     is held at its edges along the line its carriers stand on, so it is taken from beside its edges, not from its
+//!     faces. The lift (`carry:lift`, `crate::engine`) checks the same holds, `carry-grip-out-of-reach`. Not checked:
+//!     each carrier's reach of its hold where the part is before the take; it comes to their middle on the take's
+//!     track, from up to [`GRASP`] off.
+//!   - **At the put** ([`ways`]): every carrier must be within reach where the set-in track starts
+//!     (`part.grip-out-of-reach`, naming it: one who stepped away walks back to its grip, an ordinary walk, and the crew
+//!     puts again). On the track each carrier either stands or walks beside the part, keeping its place from it
+//!     ([`Walk`]: the world carries its body along a straight line on its ground at the track's own pace, as it
+//!     carries a body out of a seat, so it is where its hold is all the way). A set-in that moves the part less than
+//!     [`WALK_LEAST`] on the plan moves nobody. Beyond that a side carrier walks with the part when the straight way
+//!     beside it is ground it can stand on, else it stands; the front and the back stand when they reach their holds
+//!     at both ends of the track (on a straight track a carrier who stands is farthest from its hold at one end or the
+//!     other), else they walk with it. A carrier who can neither stand within reach nor walk beside the part refuses
+//!     the put by name before anyone moves. No carrier is exempt: none is named as holding on a track while out of
+//!     reach. A seating refused at its track's end or its commit takes its walkers back with the part.
+//!   - **While a set-in runs**, a carrier who moves out of reach stops it by name: it goes back as a refused seating
+//!     does, to where it started, which every carrier could reach; there its carry goes on, or breaks off when its
+//!     carriers have gone (`crate::engine`).
 //!
 //! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
@@ -53,12 +73,13 @@ use std::collections::BTreeMap;
 use replica::effects::{Actor, Cause, Effect, Header, Refusal};
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Track, Vec3};
+use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, show};
 use sim::activity::Activities;
-use sim::activity::carry::{GRIP_REACH, HEIGHT, yaw_toward};
+use sim::activity::carry::grips::{self, Grip};
+use sim::activity::carry::{Carry, GRIP_REACH, HEIGHT, Load, between, yaw_toward};
 use sim::activity::seating::{Seating, Target};
 use sim::ground::scene::{slot_points, xform_to};
 use sim::structure::Structure;
@@ -72,15 +93,37 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
-/// How far the part's middle may be from the middle of its two carriers, along the ground, µm.
+/// How far the part may be from the middle of its two carriers, along the ground, µm: its middle when it lies, its
+/// origin when it stands.
 pub const GRASP: i64 = 1_500_000;
 /// How far, along the ground, the crew's node may be from where the part goes when it is put: the set-in track is
 /// short and straight, not a way to move a part across the world.
 pub const PUT_REACH: i64 = 1_000_000;
-/// The set-in track's pace, µm a second, and its shortest and longest time.
-const SET_IN_PACE: i64 = 500_000;
-const SET_IN_LEAST: Micros = 1_000_000;
-const SET_IN_MOST: Micros = 4_000_000;
+/// How far on the plan a set-in must move its part before any carrier walks with it, µm: a tick's step. Under it the
+/// part is set in between carriers who stand (a frame lowered into its slot, a cloth raised onto its rails).
+pub const WALK_LEAST: i64 = 50_000;
+/// How long before its set-in track ends a carrier walking beside the part is where it stands at the end, µs: two
+/// ticks, so the seating's commit finds every body at rest.
+const WALK_EARLY: Micros = 100_000;
+/// The set-in track's pace, µm a second, and its shortest time (#5067: a part set in, or unseated out of its slot, at
+/// a crew's pace, never in a quarter of a second): `distance / 0.4 m/s`, at least 0.6 s, in whole ticks.
+pub const SET_IN_PACE: i64 = 400_000;
+pub const SET_IN_LEAST: Micros = 600_000;
+
+/// How long a set-in (or an unseat's way out, or a set-in's way back) that moves its crew's node `far` µm takes, µs:
+/// at [`SET_IN_PACE`], at least [`SET_IN_LEAST`], in whole ticks.
+pub fn set_in_time(far: i64) -> Micros {
+    let tick = i128::from(sim::activity::carry::HOIST_TICK);
+    let us = (i128::from(far.max(0)) * 1_000_000 / i128::from(SET_IN_PACE))
+        .max(i128::from(SET_IN_LEAST));
+    i64::try_from((us + tick - 1) / tick * tick).unwrap_or(Micros::MAX)
+}
+
+/// How far apart two points are, µm.
+fn dist(a: Vec3, b: Vec3) -> i64 {
+    let d = |p: i64, q: i64| i128::from(p - q).pow(2);
+    i64::try_from((d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt()).unwrap_or(i64::MAX)
+}
 
 /// Which step a part of entries is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,21 +190,27 @@ pub struct Setting {
     pub by: (Id, Id),
     pub ground: Id,
     reach: i64,
-    track: Owner,
-    /// Where the set-in track started (the crew's node between its carriers), when, and its velocity, µm a second.
+    /// Where the set-in track started (the crew's node between its carriers) and when, and where it ends: the node's
+    /// pose that has the part, in its slot as it is held, exactly where it is seated (#5067). Its samples go from one to
+    /// the other a tick at a time, the position in a straight line and the turn blended (`carry::between`).
     pub start: (Vec3, Quat),
     t0: Micros,
-    velocity: Vec3,
     pub end: (Vec3, Quat),
     /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
     pub span: i64,
-    /// The carriers within reach of their grips where its track started (#5067 item 3): they stay within reach.
+    /// Its carriers where its track started, every one within reach of its hold there (#5067): they stay within reach.
     pub holding: Vec<Id>,
+    /// Its carriers who walk beside the part on the track, each from where it stood to where it stands at the end.
+    pub walks: Vec<Walk>,
 }
 
 /// The crews' seating in a running world.
 pub struct Assembly {
     seating: Seating,
+    /// The kinds a slot seats turned either way ([`symmetric_kinds`]).
+    pub symmetric: std::collections::BTreeSet<String>,
+    /// The turn each slot that declares one seats its part at ([`slot_turns`]).
+    pub slot_turns: BTreeMap<(String, u64), i64>,
     /// The part each crew holds in its slot, taken and committed (or waiting to be).
     pub held: BTreeMap<Id, Id>,
     setting: BTreeMap<Id, Setting>,
@@ -175,8 +224,9 @@ pub struct Assembly {
     pub stopped: Vec<(Id, Setting)>,
     /// Entries written at a track's end (the node at rest at the slot), by intent and Soul, for the engine to send.
     pub moved: Vec<((Id, Id), Vec<Effect>)>,
-    /// Crews' nodes going back along a track to where their set-in started, and when each gets there.
-    returning: BTreeMap<Id, (Setting, Micros, Owner)>,
+    /// Crews' nodes going back to where their set-in started: the setting, when each gets there, and where and when
+    /// its way back began.
+    returning: BTreeMap<Id, (Setting, Micros, (Vec3, Quat), Micros)>,
 }
 
 fn kind_of(tree: &Tree, id: Id) -> R<Name> {
@@ -237,8 +287,308 @@ pub fn out_of_reach(carriers: &[Carrier], node: (Vec3, Quat)) -> R<()> {
     Ok(())
 }
 
+/// A carrier's walk beside its crew's part on a set-in track or its way back (#5067): its body, where it stands when
+/// the track starts and when it ends, on the crew's ground (µm), and its pace, µm a second. The world carries its
+/// body along that straight line (`sim::controller::Track`), never a jump.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Walk {
+    pub body: Id,
+    pub from: Vec3,
+    pub to: Vec3,
+    pub speed: i64,
+}
+
+impl Walk {
+    /// The same walk the other way, in `span` µs: the way back of a seating refused.
+    pub fn back(&self, span: Micros) -> Walk {
+        Walk {
+            body: self.body,
+            from: self.to,
+            to: self.from,
+            speed: pace(self.from, self.to, span),
+        }
+    }
+}
+
+/// The pace, µm a second, that takes a body from `a` to `b` on the plan [`WALK_EARLY`] before `span` µs are over.
+fn pace(a: Vec3, b: Vec3, span: Micros) -> i64 {
+    let far = (i128::from(b.x - a.x).pow(2) + i128::from(b.z - a.z).pow(2)).isqrt();
+    let time = i128::from((span - WALK_EARLY).max(WALK_EARLY));
+    // Rounded up: never a step late.
+    i64::try_from((far * 1_000_000 + time - 1) / time)
+        .unwrap_or(i64::MAX)
+        .max(1)
+}
+
+/// Who stands and who walks on a set-in track from `from` to `to` (the crew's node's position at each end, its turn
+/// `turn` all the way), of `carriers`, the crew's `ends` its front and its back (#5067, see the module's notes).
+/// `walkable(body, a, b)`: whether `body` may walk the straight way from `a` to `b` on its ground now. Each walk from
+/// where the carrier stands to the same place from the part at the track's end; its pace is set by the track's time
+/// ([`Walk::back`], [`Assembly::put`]). `part.grip-out-of-reach`, naming the carrier, when one is out of reach where
+/// the track starts, or could neither stand within reach to its end nor walk beside the part.
+pub fn ways(
+    carriers: &[Carrier],
+    ends: [Id; 2],
+    from: Vec3,
+    to: Vec3,
+    turn: Quat,
+    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+) -> R<Vec<Walk>> {
+    ways_turning(carriers, ends, from, to, (turn, turn), walkable)
+}
+
+/// [`ways`] for a set-in whose node turns from `turns.0` where it starts to `turns.1` where it ends (#5067: the part
+/// seated turned as its slot is): each carrier's reach at the end is judged with the end's turn.
+pub fn ways_turning(
+    carriers: &[Carrier],
+    ends: [Id; 2],
+    from: Vec3,
+    to: Vec3,
+    (turn, end_turn): (Quat, Quat),
+    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+) -> R<Vec<Walk>> {
+    out_of_reach(carriers, (from, turn))?;
+    let turn = end_turn;
+    let (dx, dz) = (to.x - from.x, to.z - from.z);
+    let far = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+    if far <= i128::from(WALK_LEAST) {
+        out_of_reach(carriers, (to, turn))?;
+        return Ok(Vec::new());
+    }
+    let mut walks = Vec::new();
+    for c in carriers {
+        let beside = Vec3::new(c.feet.x + dx, c.feet.y, c.feet.z + dz);
+        let stands = out_of_reach(&[*c], (to, turn));
+        let walks_it = match (ends.contains(&c.body), &stands) {
+            // The front and the back stand when they can.
+            (true, Ok(())) => false,
+            _ => walkable(c.body, c.feet, beside),
+        };
+        if walks_it {
+            walks.push(Walk {
+                body: c.body,
+                from: c.feet,
+                to: beside,
+                speed: 0,
+            });
+        } else if let Err(r) = stands {
+            return Err(refusal(
+                r.name,
+                format!(
+                    "{}; and the way beside the part, to ({}, {}) mm, is not ground it can walk",
+                    r.detail,
+                    beside.x / 1000,
+                    beside.z / 1000
+                ),
+            ));
+        }
+    }
+    Ok(walks)
+}
+
+/// The parts a part of kind `pk` put into bay `th`'s slot `k` joins by default, a Soul's `part:put` and a creator's
+/// place alike: the bay's seated parts (those `seated` keeps) of the kinds its own kind rests on (a rail its frames, a
+/// sheet its joists), none for a standing part; a resting part only those at its own level (#5067: the ones whose
+/// slots are highest at or under its own, a joist the two beams it lies on, not the two below them).
+pub fn default_joins(
+    tree: &Tree,
+    s: &Structure,
+    th: replica::tree::Handle,
+    pk: &str,
+    k: u64,
+    seated: &dyn Fn(Id) -> bool,
+) -> Vec<Id> {
+    if s.stands(pk) {
+        return Vec::new();
+    }
+    let joins = tree
+        .children(th)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|h| tree.node(*h))
+        .filter(|n| n.slot().is_some() && s.rests_on(pk, n.kind().as_str()) && seated(n.id()))
+        .map(|n| n.id())
+        .collect::<Vec<_>>();
+    match s.rests(pk) {
+        true => at_level(tree, th, k, joins),
+        false => joins,
+    }
+}
+
+/// Of `parts` seated in `bay` (node `th`), those at the level under its slot `k` (#5067): whose slot points are the
+/// highest at or under slot `k`'s (within 10 mm), in the bay's own frame. All of them when none is under it.
+fn at_level(tree: &Tree, th: replica::tree::Handle, k: u64, parts: Vec<Id>) -> Vec<Id> {
+    let y = |n: u64| sim::ground::scene::slot_point(tree, th, n).map(|p| p.y);
+    let Some(own) = y(k) else { return parts };
+    let height = |id: &Id| {
+        tree.handle(*id)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| n.slot())
+            .and_then(y)
+    };
+    let under = parts
+        .iter()
+        .filter_map(height)
+        .filter(|h| *h <= own + 10_000)
+        .max();
+    match under {
+        Some(top) => parts
+            .into_iter()
+            .filter(|p| height(p).is_some_and(|h| (h - top).abs() <= 10_000))
+            .collect(),
+        None => parts,
+    }
+}
+
+/// The words a put's `part.grip-out-of-reach` ends with, then `x=<mm> z=<mm> mm`, when the put would be admitted with
+/// the crew's node there on its ground (#5067): a contract, read by the client's `part put`.
+pub const ADMITTED_AT: &str = "admitted with the crew's node at";
+/// The step and the extent of [`admitted_from`]'s search about where the part goes, µm.
+const ADMIT_STEP: i64 = 50_000;
+/// How far inside a carrier's reach the place [`admitted_from`] names leaves each one who stands, µm.
+const ADMIT_MARGIN: i64 = 50_000;
+
+/// Where, nearest `from` on the plan, crew `carriers` (ends `ends`) whose node goes from there to `to` on a set-in
+/// would be admitted (#5067): the whole crew moved together, each carrier the same way as its node, and [`ways`] asked
+/// of it there, within [`PUT_REACH`] of `to`. None when nowhere within it is.
+pub fn admitted_from(
+    carriers: &[Carrier],
+    ends: [Id; 2],
+    from: (Vec3, Quat),
+    (to, end_turn): (Vec3, Quat),
+    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+) -> Option<Vec3> {
+    // Moving the whole crew keeps every carrier's reach where the set-in starts: one out of reach there is not helped.
+    if out_of_reach(carriers, from).is_err() {
+        return None;
+    }
+    let n = PUT_REACH / ADMIT_STEP;
+    let mut spots: Vec<(i128, i64, i64)> = (-n..=n)
+        .flat_map(|i| (-n..=n).map(move |k| (i * ADMIT_STEP, k * ADMIT_STEP)))
+        .filter(|(dx, dz)| {
+            i128::from(*dx).pow(2) + i128::from(*dz).pow(2) <= i128::from(PUT_REACH).pow(2)
+        })
+        .map(|(dx, dz)| {
+            let (x, z) = (to.x + dx, to.z + dz);
+            (
+                i128::from(x - from.0.x).pow(2) + i128::from(z - from.0.z).pow(2),
+                x,
+                z,
+            )
+        })
+        .collect();
+    spots.sort_unstable();
+    spots.into_iter().find_map(|(_, x, z)| {
+        let d = (x - from.0.x, z - from.0.z);
+        let moved: Vec<Carrier> = carriers
+            .iter()
+            .map(|c| Carrier {
+                feet: Vec3::new(c.feet.x + d.0, c.feet.y, c.feet.z + d.1),
+                ..*c
+            })
+            .collect();
+        let at = Vec3::new(x, from.0.y, z);
+        // With a margin: every carrier who stands to the end (walks for no one) is [`ADMIT_MARGIN`] inside its reach
+        // there, judged with its feet that much further off its grip, so a walk that ends a few centimetres off still
+        // reaches.
+        let walks = ways_turning(&moved, ends, at, to, (from.1, end_turn), walkable).ok()?;
+        let standing: Vec<Carrier> = moved
+            .iter()
+            .filter(|c| !walks.iter().any(|w| w.body == c.body))
+            .map(|c| {
+                let g = end_turn.rotate(c.grip).unwrap_or(c.grip);
+                let grip = [to.x + g.x, to.z + g.z];
+                let (dx, dz) = (
+                    i128::from(c.feet.x - grip[0]),
+                    i128::from(c.feet.z - grip[1]),
+                );
+                let d = (dx * dx + dz * dz).isqrt().max(1);
+                let k = |v: i128| (v * (d + i128::from(ADMIT_MARGIN)) / d) as i64;
+                Carrier {
+                    feet: Vec3::new(grip[0] + k(dx), c.feet.y, grip[1] + k(dz)),
+                    ..*c
+                }
+            })
+            .collect();
+        out_of_reach(&standing, (to, end_turn))
+            .is_ok()
+            .then_some(at)
+    })
+}
+
+/// A take, written (#5067): the crew's node's pose where the part was taken (`from`: the part did not move), its pose
+/// between its carriers at carrying height (`to`: where its carry's track takes it), where the part lay on the crew's
+/// ground (`lay`), and each carrier with its hold in the node's frame.
+#[derive(Clone, Debug)]
+pub struct Taken {
+    pub from: (Vec3, Quat),
+    pub to: (Vec3, Quat),
+    pub lay: (Vec3, Quat),
+    pub carriers: Vec<Carrier>,
+    /// Whether the part rested on the crew's ground itself (not in a bay's slot or a stand's): where a take broken off
+    /// on its track may set it back.
+    pub rested: bool,
+}
+
+/// A carrier where it stands (#5067): its body, its feet on the crew's ground (µm) and its standing reach (µm).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stood {
+    pub body: Id,
+    pub feet: Vec3,
+    pub reach: i64,
+}
+
+/// A crew at a load it would take or lift, for each carrier's reach of its own hold (#5067): the load's grips and the
+/// load as its entry states them, its front, its back and its side carriers in join order, each where it stands.
+#[derive(Clone, Copy, Debug)]
+pub struct Crew<'a> {
+    pub grips: &'a [Grip],
+    pub load: &'a Load,
+    pub front: Stood,
+    pub back: Stood,
+    pub sides: &'a [Stood],
+}
+
+impl Crew<'_> {
+    /// Each carrier with the hold the carry's rule gives it ([`grips::assign`], exactly as it will be said), the load
+    /// held at `held` in the crew's slot (its position and turn in the crew's node's frame, µm): where it holds the load
+    /// (the middle of its hands) in that frame.
+    pub fn carriers(&self, held: (Vec3, Quat)) -> R<Vec<Carrier>> {
+        let (f, k) = (self.front.feet, self.back.feet);
+        let places: Vec<(Id, [i64; 2])> = self
+            .sides
+            .iter()
+            .map(|s| (s.body, Carry::place_of(f, k, s.feet)))
+            .collect();
+        let holds = grips::assign(
+            self.grips,
+            self.load,
+            held,
+            self.front.body,
+            self.back.body,
+            &places,
+        )?;
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let ends = [self.front, self.back];
+        let mut out = Vec::new();
+        for h in &holds {
+            let Some(s) = ends.iter().chain(self.sides).find(|s| s.body == h.body) else {
+                continue;
+            };
+            let g = held.1.rotate(h.middle()).map_err(pose)?;
+            out.push(Carrier {
+                body: s.body,
+                feet: s.feet,
+                reach: s.reach,
+                grip: Vec3::new(held.0.x + g.x, held.0.y + g.y, held.0.z + g.z),
+            });
+        }
+        Ok(out)
+    }
+}
+
 /// A crew's node on its set-in track or its way back (#5067 item 3, [`Assembly::tracks`]): its crew, where the node is
-/// on its ground (µm), when the track ends, whether it is the way back, and the carriers held to their reach on it.
+/// on its ground (µm), when the track ends, whether it is the way back, and its carriers, held to their reach on it.
 #[derive(Clone, Copy, Debug)]
 pub struct OnTrack<'a> {
     pub activity: Id,
@@ -248,15 +598,134 @@ pub struct OnTrack<'a> {
     pub holding: &'a [Id],
 }
 
-/// The conjugate of a unit quaternion: its inverse turn.
+/// The conjugate of a unit quaternion: its inverse turn. A half turn (w 0) is written with its other sign, its one
+/// byte form (a crew whose front stands straight behind its back along -x faced a 2x4 the wrong way: `orientation-sign`).
 fn conj(q: Quat) -> R<Quat> {
     let [w, x, y, z] = q.parts();
-    Quat::new(w, -x, -y, -z).map_err(|e| refusal("part-pose", format!("{e:?}")))
+    // A half turn (w 0) is written with its other sign, its one byte form (as the deck lane's #5256 has it).
+    Quat::new(w, -x, -y, -z)
+        .or_else(|_| Quat::new(-w, x, y, z))
+        .map_err(|e| refusal("part-pose", format!("{e:?}")))
+}
+
+/// The kinds (plain names) whose entries say they are the same turned a half turn about their upright
+/// (`state.symmetry`'s default `front_back`, #5067): seated in a slot turned either way, the nearer.
+pub fn symmetric_kinds(
+    entries: &replica::rules::json::Value,
+) -> std::collections::BTreeSet<String> {
+    use replica::rules::json::Value as Json;
+    entries
+        .obj()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|(_, e)| {
+            let sym = e
+                .get("state")
+                .and_then(|s| s.get("symmetry"))
+                .and_then(|f| f.get("default"))
+                .and_then(Json::str);
+            (sym == Some("front_back"))
+                .then(|| e.get("kind").and_then(Json::str).map(str::to_owned))?
+        })
+        .collect()
+}
+
+/// Each slot whose entry declares `turn_mdeg` (FOR-FABLE 10), by its kind's plain name and its number (1, 2, ... in
+/// the entry's order, as the import numbers them): the turn about the vertical a part is seated at in it, from the
+/// thing's own axes, millidegrees. A slot that declares none seats its part unturned, as before.
+pub fn slot_turns(entries: &replica::rules::json::Value) -> BTreeMap<(String, u64), i64> {
+    use replica::rules::json::Value as Json;
+    let mut out = BTreeMap::new();
+    for (_, e) in entries.obj().unwrap_or(&[]) {
+        let (Some(kind), Some(slots)) = (
+            e.get("kind").and_then(Json::str),
+            e.get("slots").and_then(Json::obj),
+        ) else {
+            continue;
+        };
+        for (n, (_, s)) in (1u64..).zip(slots) {
+            if let Some(Json::Int(t)) = s.get("turn_mdeg")
+                && let Ok(t) = i64::try_from(*t)
+            {
+                out.insert((kind.to_owned(), n), t);
+            }
+        }
+    }
+    out
+}
+
+/// The turn slot `slot` of a thing of kind `kind` seats its part at (`turns`, [`slot_turns`]): unturned when it declares
+/// none.
+pub fn slot_turn(turns: &BTreeMap<(String, u64), i64>, kind: &str, slot: u64) -> R<Quat> {
+    let mdeg = turns
+        .get(&(replica::world_model::plain(kind).to_owned(), slot))
+        .copied()
+        .unwrap_or(0);
+    Quat::from_yaw_mdeg(mdeg).map_err(|e| refusal("part-pose", format!("{e:?}")))
+}
+
+/// A creator's place into a slot that declares a turn ([`slot_turns`], FOR-FABLE 10) seats the thing at it, by the
+/// put's rule: a kind the same either way ([`symmetric_kinds`]) at the turn or the half turn from it, whichever is
+/// nearer the turn the place gives; any other at the turn. Its parent a node of `tree` or one placed earlier in the
+/// batch. A slot that declares none keeps the place's own turn.
+pub fn turned_into_slots(
+    edit: &mut replica::edit::Edit,
+    entries: &replica::rules::json::Value,
+    tree: &Tree,
+) {
+    use replica::edit::{Op, Ref};
+    let turns = slot_turns(entries);
+    if turns.is_empty() {
+        return;
+    }
+    let symmetric = symmetric_kinds(entries);
+    let mut named: BTreeMap<u64, String> = BTreeMap::new();
+    for op in &mut edit.ops {
+        let Op::Place {
+            name,
+            kind,
+            parent,
+            at,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        named.insert(*name, kind.as_str().to_owned());
+        let Some(k) = at.slot else { continue };
+        let of = match parent {
+            Ref::Node(id) => tree
+                .handle(*id)
+                .and_then(|h| tree.node(h))
+                .map(|n| n.kind().as_str().to_owned()),
+            Ref::New(n) => named.get(n).cloned(),
+        };
+        let Some(of) =
+            of.filter(|of| turns.contains_key(&(replica::world_model::plain(of).to_owned(), k)))
+        else {
+            continue;
+        };
+        let Ok(turn) = slot_turn(&turns, &of, k) else {
+            continue;
+        };
+        let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).ok();
+        let back = symmetric.contains(replica::world_model::plain(kind.as_str()))
+            && ax(at.orientation).zip(ax(turn)).is_some_and(|(a, b)| {
+                i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z) < 0
+            });
+        let half = Quat::from_yaw_mdeg(180_000).and_then(|h| turn.then(h));
+        at.orientation = match (back, half) {
+            (true, Ok(h)) => h,
+            _ => turn,
+        };
+    }
 }
 
 impl Assembly {
     pub fn new(header: Header, rules: Rules, structure: Structure) -> Assembly {
         Assembly {
+            symmetric: std::collections::BTreeSet::new(),
+            slot_turns: BTreeMap::new(),
             // The ground and audience are each crew's own, set as it acts ([`Assembly::aim`]).
             seating: Seating::new(
                 header.clone(),
@@ -329,7 +798,9 @@ impl Assembly {
 
     /// `part:take` (`unseat` false) or `part:unseat` (true) by crew `activity`, whose carriers stand at `front` and
     /// `back` on `ground` (µm in its frame): the part into the crew's slot, written on `tree` and waiting in
-    /// [`Assembly::ready`]. Returns the crew's node's pose, where its carry starts.
+    /// [`Assembly::ready`]. `crew`, for a part that is a load with grips: every carrier where it stands, each refused
+    /// `part.grip-out-of-reach` by name when it does not reach its hold as the crew will hold the part (#5067), before
+    /// anything is written. The crew's node is written where the part is ([`Taken`]); its carry takes it from there.
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -344,7 +815,8 @@ impl Assembly {
         ground: Id,
         unseat: bool,
         reach: i64,
-    ) -> R<(Vec3, Quat)> {
+        crew: Option<&Crew>,
+    ) -> R<Taken> {
         if self.held.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
         }
@@ -406,15 +878,27 @@ impl Assembly {
             _ => {}
         }
         let at = xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
+        let rested = tree.node(ph).and_then(|n| n.parent()) == Some(ground);
         let middle = Vec3::new(
             (front.x + back.x) / 2,
             (front.y + back.y) / 2,
             (front.z + back.z) / 2,
         );
         within_reach(at.pos.y - middle.y, reach)?;
+        // A part that lies is measured, and held, by its middle (a laid frame's origin is its foot, 1.2 m from it), as
+        // the lift measures it; one that stands, or one of no entry, by its origin.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let lies = match crew {
+            Some(c) => c.load.lies_along(at.rot)?.is_some(),
+            None => false,
+        };
+        let off = match crew {
+            Some(c) if lies => at.rot.rotate(c.load.middle).map_err(pose)?,
+            _ => Vec3::ZERO,
+        };
         let (dx, dz) = (
-            i128::from(at.pos.x - middle.x),
-            i128::from(at.pos.z - middle.z),
+            i128::from(at.pos.x + off.x - middle.x),
+            i128::from(at.pos.z + off.z - middle.z),
         );
         if dx * dx + dz * dz > i128::from(GRASP).pow(2) {
             return Err(refusal(
@@ -430,20 +914,254 @@ impl Assembly {
         let inside = conj(turn)?
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
-        let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
+        // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
+        // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
+        // One that stands, or whose origin is over its middle already (a beam), is held where its origin is.
+        let slot = match crew {
+            Some(c) if lies => {
+                let m = inside.rotate(c.load.middle).map_err(pose)?;
+                Vec3::new(-m.x, 0, -m.z)
+            }
+            _ => Vec3::ZERO,
+        };
+        // #5067: the carry's own height: a part that stands as it is held is lifted clear of the ground, any other
+        // carried where a standing body holds it (`Load::held_at`).
+        let height = match crew {
+            Some(c) => c.load.held_at(slot, inside)?.carried,
+            None => HEIGHT,
+        };
+        let frame = Vec3::new(middle.x, middle.y + height, middle.z);
+        // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
+        // between its front and its back, the part in its slot turned as it is).
+        let carriers = match crew {
+            Some(crew) => crew.carriers((slot, inside))?,
+            None => Vec::new(),
+        };
+        out_of_reach(&carriers, (frame, turn))?;
+        // The crew's node is set where the part is, so its change of parent moves nothing (#5067): from there the
+        // crew's carry takes it into its carriers' hands on a track (`Carry::take_up`), never in one step.
+        let off = turn.rotate(slot).map_err(pose)?;
+        let from = Vec3::new(at.pos.x - off.x, at.pos.y - off.y, at.pos.z - off.z);
         self.aim(tree, activity, ground)?;
-        self.seating
-            .take(tree, acts, mint, now, activity, part, (frame, turn), inside)?;
+        self.seating.take(
+            tree,
+            acts,
+            mint,
+            now,
+            activity,
+            part,
+            (from, turn),
+            (slot, inside),
+        )?;
         self.drain(by, activity, Step::Taken);
         self.held.insert(activity, part);
-        Ok((frame, turn))
+        Ok(Taken {
+            from: (from, turn),
+            to: (frame, turn),
+            lay: (at.pos, at.rot),
+            carriers,
+            rested,
+        })
+    }
+
+    /// The take of `part:raise` and `part:lower` (#5067): `part`, lying or standing on `ground`, into crew `activity`'s
+    /// slot with the crew's node set where the part is, turned as it is, so the part rides it unturned at its origin
+    /// (its foot) and nothing moves. Written on `tree` and waiting in [`Assembly::ready`] as a take. Returns where the
+    /// part is on `ground`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn pivot(
+        &mut self,
+        tree: &mut Tree,
+        acts: &Activities,
+        mint: &mut Minter,
+        now: Micros,
+        by: (Id, Id),
+        activity: Id,
+        part: Id,
+        ground: Id,
+    ) -> R<(Vec3, Quat)> {
+        if self.held.contains_key(&activity) {
+            return Err(refusal("part.held", show(activity)));
+        }
+        let s = &self.seating.structure;
+        if !s.is_crew(kind_of(tree, activity)?.as_str()) {
+            return Err(refusal("part.not-a-crew", show(activity)));
+        }
+        if !s.is_part(kind_of(tree, part)?.as_str()) {
+            return Err(refusal("part.not-a-part", show(part)));
+        }
+        let (ph, gh) = match (tree.handle(part), tree.handle(ground)) {
+            (Some(p), Some(g)) => (p, g),
+            _ => return Err(refusal("part-missing", show(part))),
+        };
+        let owner = |id: Id| {
+            kind_of(tree, id).ok().and_then(|k| {
+                self.seating
+                    .rules
+                    .kinds
+                    .get(k.as_str())
+                    .map(|d| d.owner.clone())
+            })
+        };
+        // Another crew of two or more on the part holds it: theirs to raise or lower.
+        if let Some(other) = tree
+            .children(ph)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .map(|n| n.id())
+            .find(|c| {
+                *c != activity
+                    && owner(*c).as_deref() == Some("activity")
+                    && acts.members(*c).map_or(0, <[_]>::len) >= 2
+            })
+        {
+            return Err(refusal("part.held-by-another", show(other)));
+        }
+        let at = xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
+        self.aim(tree, activity, ground)?;
+        self.seating.take(
+            tree,
+            acts,
+            mint,
+            now,
+            activity,
+            part,
+            (at.pos, at.rot),
+            (Vec3::ZERO, Quat::IDENTITY),
+        )?;
+        self.drain(by, activity, Step::Taken);
+        self.held.insert(activity, part);
+        Ok((at.pos, at.rot))
+    }
+
+    /// The end of a raise or a lowering (#5067): crew `activity`'s `part` out of its slot onto `ground` at `at` (its
+    /// position and turn there), its crew holding it on (`hold`: a part stood up, their node under it) or their node at
+    /// rest (one laid down). No track: the part is there already. Checked as a seating is (`site.occupied` when a body
+    /// stands where it would be), then written on `tree` and waiting in [`Assembly::ready`] as a seating.
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle(
+        &mut self,
+        tree: &mut Tree,
+        acts: &Activities,
+        mint: &mut Minter,
+        now: Micros,
+        by: (Id, Id),
+        activity: Id,
+        part: Id,
+        ground: Id,
+        at: (Vec3, Quat),
+        hold: bool,
+        reach: i64,
+    ) -> R<()> {
+        let target = Target {
+            to: Frame {
+                node: ground,
+                slot: None,
+            },
+            place: at.0,
+            turn: at.1,
+            at: at.0,
+            joins: Vec::new(),
+            hold,
+        };
+        self.aim(tree, activity, ground)?;
+        let done = self
+            .seating
+            .check(
+                tree,
+                acts,
+                &mut mint.clone(),
+                activity,
+                part,
+                &target,
+                reach,
+                &[],
+            )
+            .and_then(|()| {
+                self.seating
+                    .put(tree, acts, mint, now, activity, part, &target)
+            });
+        if let Err(r) = done {
+            self.seating.parts.clear();
+            return Err(r);
+        }
+        self.drain(by, activity, Step::Seated);
+        Ok(())
+    }
+
+    /// The end of a raise into a bay's slot (#5067): crew `activity`'s `part`, standing at `at` (the slot's point on
+    /// the crew's ground, the part slid there), seated in slot `k` of `bay` with its crew holding it, their node under it.
+    /// Checked as a seating is (`slot.occupied`, `site.occupied`, the bay's rules), then written on `tree` and waiting
+    /// in [`Assembly::ready`] as a seating. A standing part in a bay is joined to nothing by default, as a put's is.
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle_into(
+        &mut self,
+        tree: &mut Tree,
+        acts: &Activities,
+        mint: &mut Minter,
+        now: Micros,
+        by: (Id, Id),
+        activity: Id,
+        part: Id,
+        (bay, k, at, turned): (Id, u64, Vec3, Quat),
+        ground: Id,
+        reach: i64,
+    ) -> R<()> {
+        self.aim(tree, activity, ground)?;
+        // Turned as the slot, or a half turn from it for a part the same either way (`turned`: its pose on the ground).
+        let turn = {
+            let (bh, gh) = tree
+                .handle(bay)
+                .zip(tree.handle(ground))
+                .ok_or_else(|| refusal("part-nowhere", show(bay)))?;
+            let x = xform_to(tree, bh, gh).map_err(|e| refusal("part-pose", e))?;
+            conj(x.rot)?
+                .then(turned)
+                .map_err(|e| refusal("part-pose", format!("{e:?}")))?
+        };
+        let target = Target {
+            to: Frame {
+                node: bay,
+                slot: Some(k),
+            },
+            place: Vec3::ZERO,
+            turn,
+            at,
+            joins: Vec::new(),
+            hold: true,
+        };
+        let done = self
+            .seating
+            .check(
+                tree,
+                acts,
+                &mut mint.clone(),
+                activity,
+                part,
+                &target,
+                reach,
+                &[],
+            )
+            .and_then(|()| {
+                self.seating
+                    .put(tree, acts, mint, now, activity, part, &target)
+            });
+        if let Err(r) = done {
+            self.seating.parts.clear();
+            return Err(r);
+        }
+        self.drain(by, activity, Step::Seated);
+        Ok(())
     }
 
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
     /// part to `to`'s slot `slot` (or to `point` in `to`'s frame), joined to `joins` (by default, a bearing part to the
-    /// bay's standing parts, a resting part to its bearing ones). Refused before anyone moves; else the set-in track is
-    /// written on `tree` and the seating
-    /// waits for its end ([`Assembly::due`]).
+    /// bay's standing parts, a resting part to its bearing ones). `carriers`: everyone holding the part, each within
+    /// reach of its hold where the set-in track starts, and to its end standing within reach or walking beside the part
+    /// ([`ways`], `walkable` as there), or the put is refused `part.grip-out-of-reach` (#5067). Refused before anyone
+    /// moves; else the set-in track is written on `tree`, the seating waits for its end ([`Assembly::due`]), and the
+    /// walks returned are the caller's to start.
     #[allow(clippy::too_many_arguments)]
     pub fn put(
         &mut self,
@@ -460,7 +1178,8 @@ impl Assembly {
         ground: Id,
         apart: i64,
         carriers: &[Carrier],
-    ) -> R<Vec<Effect>> {
+        walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+    ) -> R<(Vec<Effect>, Vec<Walk>)> {
         let part = *self
             .held
             .get(&activity)
@@ -503,32 +1222,81 @@ impl Assembly {
                 ),
             ));
         }
-        // #5067 item 3: every carrier within reach of its grip where the set-in starts is within reach where it ends (on
-        // a straight track, so all the way). One already out of reach there is not held to it (how near a take must be
-        // is the take's own admission, #5067 item 4).
-        let holding: Vec<Carrier> = carriers
-            .iter()
-            .filter(|c| out_of_reach(&[**c], from).is_ok())
-            .copied()
-            .collect();
-        out_of_reach(&holding, (at, from.1))?;
-        // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
-        // (its rails), which it rests on.
-        let rests = s.rests(pk.as_str());
-        let joins = match joins {
-            Some(j) => j,
-            None if bay && !s.stands(pk.as_str()) => tree
-                .children(th)
-                .unwrap_or(&[])
-                .iter()
-                .filter_map(|h| tree.node(*h))
-                .filter(|n| {
-                    let k = n.kind().as_str();
-                    n.slot().is_some() && if rests { s.bears(k) } else { s.stands(k) }
-                })
-                .map(|n| n.id())
-                .collect(),
-            None => Vec::new(),
+        // #5067: where the set-in's track ends, the crew's node posed so the part, in its slot as it is held, is
+        // exactly where it is seated (at `at`, turned as `to` is): it is never moved or turned at the commit.
+        let pose = |e| refusal("part-pose", format!("{e:?}"));
+        let held = tree
+            .handle(part)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| n.place())
+            .ok_or_else(|| refusal("part.not-held", show(part)))?;
+        let x = xform_to(tree, th, gh).map_err(|e| refusal("part-pose", e))?;
+        // A part the same turned a half turn about its upright is seated turned the nearer way to how it is held now
+        // (#5067: `symmetry` `front_back`).
+        let half = Quat::from_yaw_mdeg(180_000).map_err(pose)?;
+        // FOR-FABLE 10: a slot that declares a turn seats its part at it (and a part the same either way at it or a
+        // half turn from it); one that declares none, unturned.
+        let turned = match slot {
+            Some(k) => slot_turn(&self.slot_turns, tk.as_str(), k)?,
+            None => Quat::IDENTITY,
+        };
+        let seat_turn = match slot.is_some()
+            && self
+                .symmetric
+                .contains(replica::world_model::plain(pk.as_str()))
+        {
+            true => {
+                let now = from.1.then(held.orientation).map_err(pose)?;
+                let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose);
+                let (a, b) = (ax(now)?, ax(x.rot.then(turned).map_err(pose)?)?);
+                if i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z) < 0 {
+                    turned.then(half).map_err(pose)?
+                } else {
+                    turned
+                }
+            }
+            false => turned,
+        };
+        let end = {
+            let q = x
+                .rot
+                .then(seat_turn)
+                .map_err(pose)?
+                .then(conj(held.orientation)?)
+                .map_err(pose)?;
+            let o = q.rotate(held.position).map_err(pose)?;
+            (Vec3::new(at.x - o.x, at.y - o.y, at.z - o.z), q)
+        };
+        // #5067: every carrier is within reach of its hold where the set-in starts, and to its end stands within reach
+        // or walks beside the part. One who can do neither is refused by name, never named as holding.
+        let holding = carriers.to_vec();
+        let ends = match acts.members(activity) {
+            Some([f, b, ..]) => [f.body, b.body],
+            _ => return Err(refusal("crew.size", show(activity))),
+        };
+        let mut walks = match ways_turning(carriers, ends, from.0, end.0, (from.1, end.1), walkable)
+        {
+            Ok(w) => w,
+            // #5067: refused, it says where the crew's node would be admitted from, nearest where it is: the same
+            // admission (`ways`) with the whole crew there, so a client carries it there and asks again.
+            Err(mut r) if r.name == "part.grip-out-of-reach" => {
+                if let Some(p) = admitted_from(carriers, ends, from, end, walkable) {
+                    r.detail = format!(
+                        "{}; {ADMITTED_AT} x={} z={} mm",
+                        r.detail,
+                        p.x / 1000,
+                        p.z / 1000
+                    );
+                }
+                return Err(r);
+            }
+            Err(r) => return Err(r),
+        };
+        // Joins named by the put are its own (`--joins`): never filtered. Else the default ([`default_joins`]).
+        let joins = match (joins, slot) {
+            (Some(j), _) => j,
+            (None, Some(k)) if bay => default_joins(tree, s, th, pk.as_str(), k, &|_| true),
+            (None, _) => Vec::new(),
         };
         let mut joined = Vec::new();
         for other in joins {
@@ -542,12 +1310,15 @@ impl Assembly {
         let target = Target {
             to: Frame { node: to, slot },
             place,
-            turn: Quat::IDENTITY,
+            turn: seat_turn,
             at,
             joins: joined,
             hold: bay && s.stands(pk.as_str()),
         };
         self.aim(tree, activity, ground)?;
+        // Those who will walk beside the part are not where they stand now when it is seated: left out here, counted
+        // when its track ends ([`Assembly::due`]).
+        let walking: Vec<Id> = walks.iter().map(|w| w.body).collect();
         self.seating.check(
             tree,
             acts,
@@ -556,6 +1327,7 @@ impl Assembly {
             part,
             &target,
             reach,
+            &walking,
         )?;
         // The seating as it would be committed, on a copy: the world's own rules refuse it now, not at the track's end.
         let mut copy = tree.frozen();
@@ -569,19 +1341,13 @@ impl Assembly {
             &target,
         )?;
         self.seating.parts.clear();
-        let (dx, dy, dz) = (
-            i128::from(at.x - from.0.x),
-            i128::from(at.y - from.0.y),
-            i128::from(at.z - from.0.z),
-        );
-        let far = i64::try_from((dx * dx + dy * dy + dz * dz).isqrt()).unwrap_or(i64::MAX);
-        let span = (far / SET_IN_PACE * 1_000_000).clamp(SET_IN_LEAST, SET_IN_MOST);
-        self.seating
-            .set_in(tree, acts, activity, now, from.0, from.1, at, now + span)?;
-        let effects = self.seating.parts.drain(..).flatten().collect();
-        // The track as `Seating::set_in` writes it, to hand the node back from it if the seating is refused.
-        let v = |a: i64, b: i64| (i128::from(b - a) * 1_000_000 / i128::from(span)) as i64;
-        let velocity = Vec3::new(v(from.0.x, at.x), v(from.0.y, at.y), v(from.0.z, at.z));
+        // #5067: a track as a lift's is, its node's samples written a tick at a time ([`Assembly::step`]) from here,
+        // where the carry's last sample has it.
+        let span = set_in_time(dist(from.0, end.0));
+        let effects = Vec::new();
+        for w in &mut walks {
+            w.speed = pace(w.from, w.to, span);
+        }
         self.setting.insert(
             activity,
             Setting {
@@ -591,50 +1357,80 @@ impl Assembly {
                 by,
                 ground,
                 reach,
-                track: Owner::Track(Track::Straight { t0: now, velocity }),
                 start: from,
                 t0: now,
-                velocity,
-                end: (at, from.1),
+                end,
                 span: apart,
                 holding: holding.iter().map(|c| c.body).collect(),
+                walks: walks.clone(),
             },
         );
-        Ok(effects)
+        Ok((effects, walks))
     }
 
     /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3).
     pub fn tracks(&self, now: Micros) -> Vec<OnTrack<'_>> {
-        let at = |p: Vec3, v: Vec3, dt: Micros| {
-            let m = |a: i64, v: i64| a + (i128::from(v) * i128::from(dt) / 1_000_000) as i64;
-            Vec3::new(m(p.x, v.x), m(p.y, v.y), m(p.z, v.z))
-        };
-        let going = self.setting.iter().map(|(a, s)| {
-            let dt = now.clamp(s.t0, s.due) - s.t0;
-            OnTrack {
-                activity: *a,
-                node: (at(s.start.0, s.velocity, dt), s.start.1),
-                until: s.due,
-                back: false,
-                holding: &s.holding,
-            }
+        let on = |from, to, times| between(from, to, times, now).unwrap_or(to);
+        let going = self.setting.iter().map(|(a, s)| OnTrack {
+            activity: *a,
+            node: on(s.start, s.end, (s.t0, s.due)),
+            until: s.due,
+            back: false,
+            holding: &s.holding,
         });
-        let back = self.returning.iter().map(|(a, (s, end, track))| {
-            // It gets to where its set-in started at `end`: back from there by the time left.
-            let v = match track {
-                Owner::Track(Track::Straight { velocity, .. }) => *velocity,
-                _ => Vec3::ZERO,
-            };
-            let left = -(end.saturating_sub(now).max(0));
-            OnTrack {
+        let back = self
+            .returning
+            .iter()
+            .map(|(a, (s, end, from, t0))| OnTrack {
                 activity: *a,
-                node: (at(s.start.0, v, left), s.end.1),
+                node: on(*from, s.start, (*t0, *end)),
                 until: *end,
                 back: true,
                 holding: &s.holding,
-            }
-        });
+            });
         going.chain(back).collect()
+    }
+
+    /// One tick `now` of every crew's set-in track and way back (#5067 item 3): one motion sample of each crew's node
+    /// where its track has it, written on `tree`, by the put's intent and Soul. A track's last sample is written at its
+    /// end ([`Assembly::due`], [`Assembly::returned`]).
+    pub fn step(&mut self, tree: &mut Tree, now: Micros) -> Vec<((Id, Id), Vec<Effect>)> {
+        #[allow(clippy::type_complexity)]
+        let on: Vec<(Id, (Id, Id), Id, (Vec3, Quat))> = self
+            .tracks(now)
+            .into_iter()
+            .filter(|t| now < t.until)
+            .filter_map(|t| {
+                let s = self
+                    .setting
+                    .get(&t.activity)
+                    .or_else(|| self.returning.get(&t.activity).map(|r| &r.0))?;
+                Some((t.activity, s.by, s.ground, t.node))
+            })
+            .collect();
+        let mut out = Vec::new();
+        for (activity, by, ground, node) in on {
+            match self.hand_off(
+                tree,
+                now,
+                activity,
+                ground,
+                (Owner::Mover, Owner::Mover),
+                node,
+                Vec3::ZERO,
+            ) {
+                Ok(e) => out.push((by, e)),
+                Err(r) => eprintln!("worldd: a set-in's sample was not written: {r}"),
+            }
+        }
+        out
+    }
+
+    /// When crew `activity`'s set-in track began and ended, while its seating waits for its commit (#5067).
+    pub fn set_in_times(&self, activity: Id) -> Option<(Id, Micros, Micros)> {
+        self.committing
+            .get(&activity)
+            .map(|s| (s.part, s.t0, s.due))
     }
 
     /// Stops crew `activity`'s set-in by `why` (#5067 item 3: a carrier out of reach of its grip): refused to the put's
@@ -669,24 +1465,21 @@ impl Assembly {
             .map(|(a, _)| *a)
             .collect();
         for activity in ended {
-            let Some(mut s) = self.setting.remove(&activity) else {
+            let Some(s) = self.setting.remove(&activity) else {
                 continue;
             };
-            // The node stops at the slot as its track ends, whatever its seating's fate: no track runs on past it.
-            let rest = Owner::Track(Track::Rest);
+            // The node's last sample at its track's end, the part exactly where it is seated, whatever its seating's
+            // fate: no track runs on past it.
             match self.hand_off(
                 tree,
                 s.due,
                 activity,
                 s.ground,
-                (s.track, rest),
+                (Owner::Mover, Owner::Mover),
                 s.end,
                 Vec3::ZERO,
             ) {
-                Ok(effects) => {
-                    self.moved.push((s.by, effects));
-                    s.track = rest;
-                }
+                Ok(effects) => self.moved.push((s.by, effects)),
                 Err(r) => eprintln!("worldd: a set-in track was not ended: {r}"),
             }
             // Checked again as the world is now: another crew may have filled the slot, or a Soul stepped in.
@@ -699,6 +1492,7 @@ impl Assembly {
                     s.part,
                     &s.target,
                     s.reach,
+                    &[],
                 )?;
                 self.seating
                     .put(tree, acts, mint, s.due, activity, s.part, &s.target)
@@ -794,36 +1588,19 @@ impl Assembly {
         activity: Id,
         s: Setting,
     ) -> R<Vec<Effect>> {
-        let gone = i128::from(now.min(s.due).saturating_sub(s.t0));
-        let at = |a: i64, v: i64| a + (i128::from(v) * gone / 1_000_000) as i64;
-        let here = Vec3::new(
-            at(s.start.0.x, s.velocity.x),
-            at(s.start.0.y, s.velocity.y),
-            at(s.start.0.z, s.velocity.z),
-        );
-        let (dx, dy, dz) = (
-            i128::from(s.start.0.x - here.x),
-            i128::from(s.start.0.y - here.y),
-            i128::from(s.start.0.z - here.z),
-        );
-        let far = i64::try_from((dx * dx + dy * dy + dz * dz).isqrt()).unwrap_or(i64::MAX);
-        let span = (far / SET_IN_PACE * 1_000_000).clamp(SET_IN_LEAST, SET_IN_MOST);
-        let v = |d: i128| (d * 1_000_000 / i128::from(span)) as i64;
-        let back = Vec3::new(v(dx), v(dy), v(dz));
-        let track = Owner::Track(Track::Straight {
-            t0: now,
-            velocity: back,
-        });
+        // From where its track has it now, back to where it started, a sample a tick (#5067: blended as the set-in is).
+        let here = between(s.start, s.end, (s.t0, s.due), now.min(s.due))?;
+        let span = set_in_time(dist(here.0, s.start.0));
         let effects = self.hand_off(
             tree,
             now,
             activity,
             s.ground,
-            (s.track, track),
-            (here, s.end.1),
-            back,
+            (Owner::Mover, Owner::Mover),
+            here,
+            Vec3::ZERO,
         )?;
-        self.returning.insert(activity, (s, now + span, track));
+        self.returning.insert(activity, (s, now + span, here, now));
         Ok(effects)
     }
 
@@ -833,12 +1610,12 @@ impl Assembly {
         let due: Vec<Id> = self
             .returning
             .iter()
-            .filter(|(_, (_, at, _))| *at <= now)
+            .filter(|(_, (_, at, _, _))| *at <= now)
             .map(|(a, _)| *a)
             .collect();
         let mut out = Vec::new();
         for activity in due {
-            let Some((s, at, track)) = self.returning.remove(&activity) else {
+            let Some((s, at, _, _)) = self.returning.remove(&activity) else {
                 continue;
             };
             match self.hand_off(
@@ -846,7 +1623,7 @@ impl Assembly {
                 at,
                 activity,
                 s.ground,
-                (track, Owner::Mover),
+                (Owner::Mover, Owner::Mover),
                 s.start,
                 Vec3::ZERO,
             ) {
@@ -894,6 +1671,140 @@ mod tests {
             assert_eq!(r.name, "part.grip-out-of-reach");
             assert!(r.detail.contains(&show(body)), "{}", r.detail);
         }
+    }
+
+    /// #5067: a frame that stands is taken from beside its edges (its own x), each carrier within reach of the edge it
+    /// holds; from 2.2 m off its faces each is named out of reach, 2.16 m from its hold.
+    #[test]
+    fn a_standing_frames_carriers_reach_it_from_beside_its_edges_not_from_its_faces() {
+        use replica::rules::json;
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction/rack_upright.json");
+        let e = json::parse(&std::fs::read_to_string(p).expect("the entry")).expect("json");
+        let (load, grips) = (
+            Load::of(&e).expect("a load"),
+            grips::grips_of(&e).expect("grips"),
+        );
+        let id = |n| Id::new(replica::ids::Scope([1; 16]), n).expect("an id");
+        let stood = |n, x: i64, z: i64| Stood {
+            body: id(n),
+            feet: Vec3::new(x, 0, z),
+            reach: 2_060_000,
+        };
+        // The frame stands at the origin, its width along x; the take keeps its turn in the crew's slot.
+        let taken = |front: Stood, back: Stood| {
+            let turn = yaw_toward([front.feet.x - back.feet.x, front.feet.z - back.feet.z])?;
+            let crew = Crew {
+                grips: &grips,
+                load: &load,
+                front,
+                back,
+                sides: &[],
+            };
+            let node = (Vec3::new(0, sim::activity::carry::STAND_LIFT, 0), turn);
+            out_of_reach(&crew.carriers((Vec3::ZERO, conj(turn)?))?, node)
+        };
+        assert_eq!(
+            taken(stood(1, 1_100_000, 0), stood(2, -1_100_000, 0)),
+            Ok(())
+        );
+        let r = taken(stood(1, 0, 2_200_000), stood(2, 0, -2_200_000)).expect_err("out of reach");
+        assert_eq!(r.name, "part.grip-out-of-reach");
+        assert!(r.detail.contains(&show(id(1))), "{}", r.detail);
+        assert!(
+            r.detail.contains("2162 mm") || r.detail.contains("2161 mm"),
+            "{}",
+            r.detail
+        );
+    }
+
+    /// #5067: on a set-in track that moves the part on the plan, its side carriers walk beside it and its front and its
+    /// back stand while they reach their holds at both ends; a carrier who can neither stand within reach nor walk is
+    /// named before anyone moves; a track straight down moves nobody.
+    #[test]
+    fn on_a_set_in_track_each_carrier_stands_within_reach_or_walks_beside_the_part() {
+        let id = |n| Id::new(replica::ids::Scope([1; 16]), n).expect("an id");
+        let c = |n, x: i64, z: i64, gx: i64, gz: i64| Carrier {
+            body: id(n),
+            feet: Vec3::new(x, 0, z),
+            reach: 2_060_000,
+            grip: Vec3::new(gx, 0, gz),
+        };
+        // A beam along z in the crew's slot: its ends 0.35 m beyond their grips, a side either side of it 0.45 m off
+        // its middle line, each holding its edge.
+        let crew = [
+            c(1, 0, 1_447_000, 0, 1_097_000),
+            c(2, 0, -1_447_000, 0, -1_097_000),
+            c(3, -450_000, -400_000, -25_500, -400_000),
+            c(4, 450_000, 400_000, 25_500, 400_000),
+        ];
+        let (ends, from, turn) = ([id(1), id(2)], Vec3::new(0, HEIGHT, 0), Quat::IDENTITY);
+        let open = |_: Id, _: Vec3, _: Vec3| true;
+        let walled = |_: Id, _: Vec3, _: Vec3| false;
+        let who = |w: &[Walk]| w.iter().map(|w| w.body).collect::<Vec<_>>();
+        // Straight down: nobody walks.
+        assert_eq!(
+            ways(&crew, ends, from, Vec3::ZERO, turn, &open),
+            Ok(Vec::new())
+        );
+        // 0.45 m east: the sides walk beside it, the ends stand, 0.57 m from their holds at its end.
+        let east = Vec3::new(450_000, 0, 0);
+        let w = ways(&crew, ends, from, east, turn, &open).expect("admitted");
+        assert_eq!(who(&w), [id(3), id(4)]);
+        assert_eq!(
+            (w[0].to, w[1].to),
+            (Vec3::new(0, 0, -400_000), Vec3::new(900_000, 0, 400_000))
+        );
+        assert_eq!(pace(w[0].from, w[0].to, 1_000_000), 500_000);
+        assert_eq!(w[0].back(1_000_000).to, w[0].from);
+        // No ground beside it: the west side would be 0.87 m from its hold where the track ends. Named, nothing moved.
+        let r = ways(&crew, ends, from, east, turn, &walled).expect_err("out of reach");
+        assert_eq!(r.name, "part.grip-out-of-reach");
+        assert!(r.detail.contains(&show(id(3))), "{}", r.detail);
+        // The east side alone stands when it cannot walk: the part comes toward it, within its reach.
+        let three = [crew[0], crew[1], crew[3]];
+        assert_eq!(
+            ways(&three, ends, from, east, turn, &walled),
+            Ok(Vec::new())
+        );
+        // 0.9 m east the ends cannot stand either (0.96 m): the whole crew walks beside it, or is refused by name.
+        let far = Vec3::new(900_000, 0, 0);
+        let w = ways(&crew, ends, from, far, turn, &open).expect("admitted");
+        assert_eq!(who(&w), [id(1), id(2), id(3), id(4)]);
+        let r = ways(&crew, ends, from, far, turn, &walled).expect_err("out of reach");
+        assert!(r.detail.contains(&show(id(1))), "{}", r.detail);
+        // #5067 item 4: refused, the nearest place the crew's node would be admitted from, the same `ways` with the
+        // whole crew there: with nobody able to walk, where every carrier stands within reach where the set-in ends.
+        let at = admitted_from(&crew, ends, (from, turn), (far, turn), &walled).expect("a place");
+        assert!(
+            ways(
+                &crew.map(|c| Carrier {
+                    feet: Vec3::new(c.feet.x + at.x, 0, c.feet.z + at.z),
+                    ..c
+                }),
+                ends,
+                at,
+                far,
+                turn,
+                &walled
+            )
+            .is_ok()
+        );
+        assert!(
+            at.x > 0 && at.x < far.x && at.z == 0 && at.y == from.y,
+            "toward where it goes: {at:?}"
+        );
+        // Nowhere within a metre of where it goes, a crew none of whose carriers reaches its hold at the start.
+        let off = [c(1, 0, 3_000_000, 0, 1_097_000), crew[1]];
+        assert_eq!(
+            admitted_from(&off, ends, (from, turn), (far, turn), &walled),
+            None
+        );
+        // Out of reach where the track would start: refused whoever could walk.
+        let mut off = crew;
+        off[1].feet.z -= 400_000;
+        let r = ways(&off, ends, from, east, turn, &open).expect_err("out of reach");
+        assert!(r.detail.contains(&show(id(2))), "{}", r.detail);
     }
 
     /// A take of a part above its carriers' standing reach is refused by name (the served test world has none that

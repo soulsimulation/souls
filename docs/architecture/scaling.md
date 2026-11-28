@@ -52,7 +52,7 @@ large numbers, without building that now.
 | People watching one world | Whoever holds their connections and sends the stream | The viewers bench in `tools/bench/capacity/viewers/` |
 | What each viewer is sent | Activity in the world times the number of viewers; the machine's link | Bytes per viewer by message type |
 | What a browser can draw | The page, per Soul in view | Frame time in a real browser |
-| New visitors | The front door: the page, the app's code, the first picture | Origin bytes against edge bytes |
+| New visitors | The front door: the page, the app's code, the first picture | Origin bytes against edge bytes, one cold load: `tools/cdn/first-load.mjs` |
 | Worlds | Memory for worlds with something moving; disk for the rest | The launcher's health page and the hundred-world bench |
 
 Numbers are deliberately not kept here: they change with every release. The measurement issues and the tranche

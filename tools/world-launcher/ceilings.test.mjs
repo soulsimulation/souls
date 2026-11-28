@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { launcherFlood, requestClass, soulCeilings, SOUL_CEILINGS } from './flood.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(10);
 
 const req = (method, headers = {}) => ({ method, headers });

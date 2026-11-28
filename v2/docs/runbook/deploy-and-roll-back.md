@@ -21,7 +21,10 @@ the machine, not a person. The code is `v2/crates/supervisor/src/deploy.rs`; the
    (below). It is then fed the intents the last records took (I4's answered rows), one tick's group at a time, and must give every
    one a named end, then answer the probe (below). The copy first catches its clock up from where its copied log
    ends to now, which on a quiet world can be hours of ticks, so the first group's answers have the start bound;
-   each later group's have four times the probe's, and an answer that comes late counts with a later group's. Invariants, not hashes: two builds fed the same intents need not
+   each later group's have four times the probe's, and an answer that comes late counts with a later group's. The
+   last group waits for every answer still owed, four times the probe's plus the 10 s a world keeps an act open before
+   it ends it `act.timed-out` (a move can run longer: its deadline is its route's time), within the start bound (0.147.0: Eden's window ended on a god's edit that took about
+   7 s to check). Invariants, not hashes: two builds fed the same intents need not
    write the same bytes. A failed rehearsal leaves the pin where it was. When the release staged library entries for
    the world (`<world>/entries.next`, `worldd entries stage`, [release.md](../release.md)), the copy gets those
    instead of `entries/`, and after the pin they are swapped in just before the restart (the world's own kept as

@@ -366,7 +366,8 @@ export class WorldState {
     if (!m?.worldPose || !this.unchecked.size) return;
     const pass = () => {
       for (const id of this.unchecked) {
-        const n = this.nodes.get(id), e = n?.origin ? m.entities.get(n.origin) : undefined;
+        // a thing removed and placed again under its origin in a later part: its entity is stashed, not in the layer
+        const n = this.nodes.get(id), e = n?.origin ? m.entities.get(n.origin) ?? this.stash.get(n.origin) : undefined;
         // a path or an area is world-frame geometry, not a thing set down
         if (!n?.origin || !e || (e as { shape?: unknown }).shape) continue;
         let was: ReturnType<NonNullable<typeof m.worldPose>>;

@@ -304,8 +304,13 @@ export class Director {
     if (!pending) return this.trackNow(o, movementDt, true);
     // Bounded lag: a search running (or restarted) for too long completes now.
     const finish = o.time - pending.started >= PENDING_MAX_SECONDS || pending.restarts >= PENDING_MAX_RESTARTS;
-    let r = withObservationWorlds(pending.o, () => pending.steps.next());
-    while (!r.done && (finish || more())) r = withObservationWorlds(pending.o, () => pending.steps.next());
+    // Reuse derived worlds only within this bounded synchronous batch. The
+    // outer current-observation scope is restored before tracking/application.
+    const r = withObservationWorlds(pending.o, () => {
+      let step = pending.steps.next();
+      while (!step.done && (finish || more())) step = pending.steps.next();
+      return step;
+    });
     if (!r.done) return this.trackNow(o, movementDt, true);
     this.pending = undefined;
     if (pending.epoch !== this.epoch) return this.update(o, movementDt);

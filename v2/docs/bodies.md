@@ -80,7 +80,10 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    (field 41), and the link shows field 42 until none waits and none is inside on its turn. Grants are fair, at any link
    taken in turns: a waiter passed over by later ones twice (six times at a narrow link) goes next. A walk held near its goal by a body at rest nearer it sets field 49 (1)
    on its own body and is done short of it; the world writes its `souls:move-ended` as
-   `done.as-near-as-the-crowd-allows` and takes the field off. A walk to its own granted spot ends so only when a
+   `done.as-near-as-the-crowd-allows` and takes the field off; so does a walk that reached the place it was granted
+   off a point it may stand on and reach clear of every doorway and stair while another body stands within 1.4 m of
+   the point (#5279 follow-up). Such an end carries field 7 (how far short, mm) and field 11, the other body nearest
+   the point then (within 1.4 m). A walk to its own granted spot ends so only when a
    body at rest stands on that spot, or once held there past a way round's ticks; its spot is then released. A
    place whose own standing spots its walk reaches are all held overflows (A2-5): the next sent there is granted the
    nearest free standing point round it on the open ground (never in a room), out to 15 m, a body's room from every
@@ -91,7 +94,21 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    its nearest bank, and only a target with none within 15 m is refused `spot-none-near` (0.133). A done walk's
    `souls:move-ended` carries field 7: how far from its target the body ended, mm (0 on or inside its area; to a body,
    from that body), which the client gives as `away_m` on the walk's receipt. A walk that ends any other way
-   (refused, stopped, replaced, timed out) carries none.
+   (refused, stopped, replaced, timed out) carries none. **A goal in a doorway or on a stair (#5254).** A point within
+   0.7 m of a doorway's or a stair's end, or of its width along its line, is no place a walker stops; a walk sent to
+   one is granted the nearest point 0.7 m clear of the passage, so no Soul stands where it narrows a doorway or a stair
+   for others (others sent there take the next nearest, a body's room apart), and ends `walk.goal-moved`: field 7 how far, mm, field 9 the thing the passage
+   belongs to, field 10 its kind (`doorway`, `stairs`, `ramp`, `ladder` or `step`). A walk to a point off the ground
+   ends `walk.goal-moved` when it stands within 0.4 m of it, else `walk.stopped-short` (on the open ground, a point
+   with no ground within 0.4 m is refused at the start, below). **A point on the open ground
+   (FOR-FABLE 14, the client's `walk x,z`).** A walk to a point of the open ground, its height not read, goes to the
+   ground a body may stand on at that point on the plan, the open ground's own (at its terrain's height) or a floor's
+   (a deck's top, a frame's standing place, a room), whichever is nearest the walker's own level, those its walk
+   may reach first: a Soul on a frame's standing place sent to a
+   point beside the frame's foot climbs down to it; one on a deck sent to a point on it stays up. A point with no such
+   ground under it and none within 0.4 m is refused `walk.no-ground-there`, naming the nearest point the walker may
+   stand on and reach on the spot tables' rings out to 7 m, or that there is none; a point in a doorway's or a
+   stair's clearance is moved out of it as above.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it). A body is logged where it stands, never mid-crossing: while it is carried across a

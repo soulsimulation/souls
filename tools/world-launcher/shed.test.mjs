@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { listenTimeoutMs, soulCeilings, SOUL_CEILINGS } from './flood.mjs';
 import { metricsText } from './metrics.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(8);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

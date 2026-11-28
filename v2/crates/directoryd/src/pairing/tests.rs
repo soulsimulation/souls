@@ -160,17 +160,14 @@ fn a5_polling_too_soon_is_told_to_slow_down_by_5_s() {
     let (p, _) = store();
     let (secret, _) = ask(&p, "studio laptop", None, false, T0);
     assert_eq!(p.poll(&secret, T0 + INTERVAL), Poll::Pending);
-    assert_eq!(
-        p.poll(&secret, T0 + INTERVAL + 1),
-        Poll::SlowDown(INTERVAL + 5)
-    );
+    assert_eq!(p.poll(&secret, T0 + INTERVAL), Poll::SlowDown(INTERVAL + 5));
     // The interval stays grown: a poll 5 s later is still too soon.
     assert_eq!(
-        p.poll(&secret, T0 + INTERVAL + 6),
+        p.poll(&secret, T0 + INTERVAL + 5),
         Poll::SlowDown(INTERVAL + 10)
     );
     assert_eq!(
-        p.poll(&secret, T0 + INTERVAL + 6 + INTERVAL + 10),
+        p.poll(&secret, T0 + INTERVAL + 5 + INTERVAL + 10),
         Poll::Pending
     );
 }
@@ -2367,6 +2364,110 @@ fn a_created_world_pairs_its_creator_by_any_key_and_a_soul_there_keeps_its_world
         &json!({"test_person": "Bea"}),
     );
     assert_eq!(mine["souls"][0]["world"], "my-mars-lab-2", "{mine}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 27 Nov (walk-0148 on soul.game): a world New world made had no God Mode for its creator, as its tokens file stayed
+/// the fork's, with no creator marker, so its gateway (`--creator-authority-required`) refused the page's exchange
+/// `creator-authority-unavailable` until the directory restarted. The create's ready answer now writes the file: it
+/// names the creator before anyone pairs there.
+#[test]
+fn a_created_world_names_its_creator_in_its_tokens_file_once_placed() {
+    use crate::accounts::serve::{App, run};
+    use crate::directory::{Directory, store::Memory};
+    use crate::worlds::list::{Template, Worlds};
+    use serde_json::json;
+    use std::sync::Arc;
+    let root =
+        std::env::temp_dir().join(format!("souls-created-marker-{}", to_hex(&random::<8>())));
+    std::fs::create_dir_all(root.join("worlds")).unwrap();
+    let root = root.canonicalize().unwrap();
+    let registry = root.join("authority.json");
+    let place = {
+        let (root, registry) = (root.clone(), registry.clone());
+        move |worlds: serde_json::Value| {
+            let map =
+                json!({"format": "souls/world-authority/1", "worldsRoot": root, "worlds": worlds});
+            std::fs::write(&registry, serde_json::to_vec(&map).unwrap()).unwrap();
+        }
+    };
+    place(json!({}));
+    let mut pairing =
+        Pairing::open(&root.join("pairing.sqlite"), None, "http://127.0.0.1:1").unwrap();
+    pairing.authority_file = Some(registry.clone());
+    let store: &'static (dyn crate::directory::store::Store + Send + Sync) =
+        Box::leak(Box::new(Memory::default()));
+    let zone = replica::ids::Id::new(replica::ids::Scope([0xe0; 16]), 1).unwrap();
+    let mut templates = BTreeMap::new();
+    templates.insert(
+        "hello-hamlet".to_owned(),
+        Template {
+            dir: "hello-hamlet".into(),
+            lineage: [0xe0; 16],
+            zone,
+        },
+    );
+    // The placement, as place-created-world.mjs runs it: the fork's tokens file (no marker) and the registry row, both
+    // before the world is ready.
+    let placing = root.clone();
+    let worlds = Worlds::new(
+        Directory::new(store, replica::encode::Name::new("m1").unwrap()),
+        templates,
+        Box::new(move |s| {
+            let creator = crate::accounts::principal_text(s.creator);
+            let instance = format!(
+                "{}-{}",
+                to_hex(&s.lineage),
+                crate::accounts::principal_text(zone).replace(':', "-")
+            );
+            std::fs::create_dir_all(placing.join("worlds").join(&instance)).unwrap();
+            std::fs::write(
+                placing.join("worlds").join(&instance).join("tokens"),
+                "# World-bound pairing authority\n",
+            )
+            .unwrap();
+            let mut row = serde_json::Map::new();
+            row.insert(
+                s.name.to_owned(),
+                json!({"instance": instance, "creator": creator}),
+            );
+            place(serde_json::Value::Object(row));
+            Ok(())
+        }),
+    );
+    let app = Arc::new(App {
+        store: crate::accounts::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: None,
+        origin: None,
+        mailbox_key: None,
+        pairing: Some(pairing),
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: Some(worlds),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let serving = app.clone();
+    std::thread::spawn(move || run(listener, serving));
+
+    let ask =
+        json!({"key": "click-1", "name": "walk-0148", "template": "hello-hamlet", "label": "Walk"});
+    let (status, made) = served(&addr, "/v1/worlds", Some("test:Ada"), &ask);
+    assert_eq!(status, 200, "{made}");
+    let row = &made["world"];
+    let creator = row["creator"].as_str().unwrap();
+    let instance = format!(
+        "{}-{}",
+        row["lineage"].as_str().unwrap(),
+        row["zone"].as_str().unwrap().replace(':', "-")
+    );
+    let tokens =
+        std::fs::read_to_string(root.join("worlds").join(&instance).join("tokens")).unwrap();
+    assert!(
+        tokens.contains(&format!("# souls-creator/1 0 {creator}\n")),
+        "{tokens}"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 

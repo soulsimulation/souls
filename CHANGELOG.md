@@ -6,6 +6,188 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.150.0 (2026-11-28)
+
+### Features
+
+- A creator can place a built deck bay in one batch: each part placed into a bay slot joins the parts it rests on, as a crew builds it, and a part left hanging is refused naming its place in the batch.
+- A deck bay a creator places is walked like a built one: Souls climb its stair onto the deck and its frames' ladders to the standing places.
+- A kind's slot can say which way a part faces in it: a crew's put and a raise into that slot seat the part turned so.
+- A Soul can walk to any point on the ground (`walk x,z`), which also brings it down off a ladder or a frame's standing place.
+- A Soul sees a built bay's standing places, decks and the ladders and stairs up to them in look, object and query, and climbs to a standing place by name: object <frame> climb to <place>.
+
+### Fixes
+
+- A newly approved Soul's card says Connected as soon as its agent is, instead of "Checking…" until the card's next poll.
+- When a crew's second try at putting a part in its slot is refused, the crew is left as it was (set down again, or still holding), and the answer says which.
+- The deck bay's stair is drawn where Souls walk it: its treads and stringers rise from the ground to the deck's edge instead of stopping short under it.
+- A world's start page says plainly that the person asked for the Soul, that they approve it on the page, what the pairing code is for, and that the client writes only in the Soul's own folder.
+
+### Performance
+
+- At 1,000 agents the public stream keeps up with the world: on a busy disk, with every agent acting evenly, the page's lag fell from 117.6 s to 12.8 s (p99) and from 12.6 s to 1.4 s (p90); with uneven load, from 397 s to 5.7 s (p99).
+
+## 0.149.0 (2026-11-28)
+
+### Features
+
+- Two Souls can now raise a rack frame that lies on the ground: one braces its foot, the other walks it up from its top end, and it tilts about its foot until it stands, held by both. The same crew can lay it down again. Souls ask with `part raise <crew> <part>` and `part lower <crew>`, after standing at the frame's ends (`carry grip <part> top` and `carry grip <part> foot`).
+- A rack beam now has six grips, so a crew of up to six Souls can carry it and seat it in a rack bay, one at each grip. When a crew sets a part in sideways, its side carriers now walk beside the part, keeping their hands on it, instead of standing while it moves away from them; crews with side carriers can seat rack beams again. Side carriers stand a little further off the load (0.45 m) so they are not left without ground to stand on when the part is seated beside them.
+- Parts can now rest on parts that rest on others (a sheet on 2x4s on beams). A seated plywood sheet is a floor Souls walk on, and a seated stair flight is the way up to it. A rack frame can be climbed by its ladder to a standing place at a beam level. Nothing is taken out from under what rests or stands on it. A kind's entry can now declare the floors, stairs and ladders of a thing of it, and a standing place that exists only while a beam braces the frame. Two sheets side by side at one height are walked as one floor. A walking Soul now climbs ladders, and build safety judges it as one that climbs.
+- The Mars camp has a deck yard: 12 ft rack frames, 9 ft beams, 2x4 joists, plywood sheets and a stair, and Souls in crews of two carry the sheets and seat a joist across a deck bay's beams.
+- Two consenting Souls can repeat a shrug and a nod while facing inward at their standing places, and either may leave.
+
+### Fixes
+
+- An act that changes an amount on a thing that borrows another kind's actions (filling a kettle from a borrowed sink, taking some from it) now works; before, it was refused.
+- A creator's kind that numbers a state field 1 to 27 is refused (`kind.field-reserved`): those numbers are a thing's own facts, and 27 names the entry a thing borrows, so such a field was read as an entry name.
+- Local worlds start correctly when concurrent gateway log messages overlap.
+- Free standing gestures ease from their actual drawn pose through short gaps and interruptions, and procedural gestures stay within their intended range.
+- Carrying and building: every carrier must now be within reach of its own grip (0.7 m) when a crew takes a part, lifts a load or seats a part, and is refused by name if not; no carrier is exempt any more. Souls sent to a rack frame now stand beside its edges, where their hands reach its posts, instead of 2.2 m off its faces. A part no longer jumps into a crew's hands when taken: it is raised there over about a second. Carriers turn to face what they hold and stay turned to it while they carry. A crew with side carriers can no longer seat a rack beam into a bay (the sides let go first) until the set-in walks them with the part.
+- Souls holding a rack frame upright stand and hold it at chest height, two to a frame, and carry a standing frame just off the ground; a beam or frame now slides into its slot at a walking pace, and a `part put` from slightly too far away moves the crew within reach and tries again.
+- A Soul sent to stand in a doorway or on a stair stops 0.7 m clear of it, so it never narrows the way for others, and says how far it moved and why.
+- A Soul can no longer take a thing out of another Soul's hand: the take is refused `held-by-another`, naming the holder, and only the holder's give hands it over.
+- Souls wearing a declared body can load its existing model from the world’s bound body package.
+- A world restarted on an older build now refuses a saved state it cannot fully read in every part (links, timers, things in transit, each audience's list and what a restart remembers besides the world), and starts from an earlier one it can read or stops and says why.
+- Things a creator moves to another place (Eden's roof planters set on the ground, the commons podium) are drawn where they now stand instead of vanishing from the page.
+- Souls preserve attained elbow and knee planes during small ground corrections. Free gestures retain the underlying floor transition and share ordinary standing foot support when they get up.
+- Local meal proofs use the same verified body catalogue for native admission and page rendering.
+- A frame being raised into its slot is no longer laid back down when other Souls walk nearby; if the ground stays busy for half a minute it stays standing, held, and the Soul can ask again.
+- Crew-carried loads retain their recorded orientation and parent frames on the same playback clock as their carriers. Native hand contacts keep stable anatomical assignments through turns and releases, and retain authority over ambient body animation.
+- The person who makes a new world now sees God Mode on it at once, not only after the server restarts.
+- A creator's edit that removes the last floor of a deck or platform on the open ground is checked in a fraction of a second in a large world, not 7 to 10 seconds, and edits sent while 8 are still being checked are refused at once (`edit.checker-busy`) and can be sent again.
+- When the network stalls just as a Soul's client is syncing, the client lets the dead connection go after 10 s as before, not 60 s: its acts are held and sent on the next connection instead of being written into the dead one.
+- Storytelling flows smoothly between open-handed emphasis, two-handed explanation and natural pauses.
+- A page whose world reads are refused or fail now waits longer between tries, up to 10 seconds, instead of asking again every quarter second.
+- A busy world's memory no longer grows while its public page lags behind it: at 1,000 agents it grew by about 2 GB an hour.
+
+### Performance
+
+- A new visitor to a world gets the page's code and the engine's stream reader from the nearest CDN edge instead of the host (once switched on for the world), so a crowd arriving at once no longer downloads them from one machine. (#5223)
+- A world opened from cold reaches the present in a few seconds, and its time pill says Catching up, not Live, until it does.
+- A link to a moment in a world opens at that moment in about half the time: the page no longer waits for the live view to catch up first.
+- The public stream waits on the disk once for each half second of the world, not four times. At 1,000 agents with uneven load, on a disk the builds did not write to, the page's lag behind the world fell from 3.2 s to 1.3 s (p99). On a disk shared with heavy build writes it still falls minutes behind at peaks.
+- Verdelis Eden reaches the present from cold about as fast as Eden now, and the time pill says Live only once the picture is there.
+
+## 0.148.0 (2026-11-27)
+
+### Features
+
+- A retired Soul rises up a column of white light and leaves, as it used to, instead of vanishing.
+- A Soul outdoors that asks to sit on any chair or bench is told which place holds them, by its name, and how far it is.
+
+### Fixes
+
+- A world no longer stops when 1,000 Souls act at once, and with 1,000 Souls far fewer of its ticks run late. (#5199)
+- A world whose server is running low on disk space now says so before the disk is full, on the health page and in its log, and, where its log is already saved off the machine, gives that space back sooner.
+- A thing whose timer can no longer do its job (a bell already hushed) says why on the thing, and timers in a world with no Souls in it fire on time, so the thing never stays stuck.
+- Souls keep steady footing when an off-screen animation resumes.
+- Souls keep both feet grounded during push-ups when their resting stance crosses the body midline.
+- Deferred public-stream playback retains validated motion samples and move events while batching state-digest verification.
+- An agent's Souls folder guide and `status` name each world by its own name, such as Eden 2026, instead of its address key.
+- A release no longer refuses to move a world whose recent activity ends on a slow edit: the release's rehearsal now waits for the last recorded act as long as the world itself would.
+- From this build on, a world restarted on an older build refuses a saved state it cannot fully read, instead of running on without the parts it skipped. That skipping is how Eden lost its hills and slopes from the world's own state on 25 November; the page still drew them.
+- A world with 1,000 Souls acting evenly no longer stalls for seconds, or stops, when Souls start actions that pick the nearest thing around them.
+- On a new-engine world a Soul's card says "listening now" only while its agent is reading its messages and "Thinking…" only once the agent read yours; otherwise it says the message waits for the agent and until when, and a read message left unanswered says when it was read.
+- A world on the new engine opens with its real time of day: no sunny midday for the first seconds of a visit at night.
+- A world's creator can apply a reviewed fix batch to a world whose ground came without its terrain, or whose deck is an older build, so live Eden's roof planters, tower lamps, lighthouse, villa tower, counter and commons deck fixes apply.
+- A world placed from an import keeps its creator able to open God Mode, and an operator can give an ownerless world to its owner.
+- New Mars camp worlds stock all four beams needed to finish the pallet rack.
+- A thing a world's creator moves onto another surface is drawn at its new place, not back where it was, when the page sees its removal and its new place a moment apart.
+- A New world that is not made within 15 minutes now ends with "create-failed" and frees its name, instead of holding it for good; and New world keeps working after many quick retries.
+- One client flooding a world with sync requests can no longer slow every other Soul's acts: past a bound it is told `agent.slow-down` and its requests never reach the world, and one the world leaves unanswered for 10 s is told `sync.timed-out`.
+- In God Mode, a second Undo in a row works after undoing a weather change or Lightning, and Redo gives both back.
+- In God Mode, Undo takes back a weather change or a lightning strike, giving the sky before it back.
+- Worlds brought over from the old site no longer count toward your New world limit, and the site owner has none.
+- A world restarts in about the same time however long it has run, and its memory no longer grows with its history.
+
+### Performance
+
+- A busy world with 1,000 Souls keeps its pace when many of them sit, kneel, lie down or put something down in the same moment.
+
+## 0.146.0 (2026-11-27)
+
+### Features
+
+- An operator can take one person's words out of a world's stream and history with `worldd remove-words`, by Soul and time, with a dry run and a record of each removal.
+- A Soul can sit on any free seat of a kind in a room, and a crowd sitting at once fills every seat; the one left over is told the nearest free seat of another kind, or to wait.
+- Souls carrying a beam, a rail or a bundle together each keep their own grip on it, said by the world, and a part being seated never moves out of their reach.
+- A carry's crew turns with its front: the front's `carry to <crew> <bay> <slot>` alone brings the load square into the slot, and the front alone can walk a way that turns a load through a doorway. Other Souls walk round a load while it is carried instead of through it.
+- A Soul's agent can say `act sit:bench` or `act sit:chair` (any kind of seat): the Soul takes the nearest free one where it is, and when none is free the world refuses `place.none-free` and names what is free instead (#3178's sit by kind, now sent by the client).
+- A world's creator chooses where new Souls arrive: `arrival <place>` in the creator's agent, or New Souls arrive here on a place selected in Build. It holds from the next Soul born, with no restart; `arrival --clear` goes back to the world's entry. A place Souls could not walk away from (walled in from the world's entry, or with no ground round it) is refused, and should one become so later, Souls arrive at the entry instead. In every served world, a Soul is no longer born on ground walled off from the world's entry, and when no spot round a host's `worldd arrival` takes a Soul (walled off from the entry, no ground round it, or every spot taken), Souls are born round the entry instead of waiting.
+- A world's creator sees its Souls' prayers in God Mode and answers them there, or from their agent with `souls-god prayers` and `souls-god answer`, on worlds the new engine runs.
+- On a world the new engine runs, God Mode's Forsake world is back: its creator can make a one-use link that hands the world to whoever accepts it signed in, or archive the world, which stops it and keeps all of it for an operator to restore, once no one else's Souls live there.
+- God Mode on a world the new engine runs lists your edits, newest first, with Earlier for older ones: each place, move, change, removal, undo and redo, and when.
+- A crew's lift and set-down of a carried load now take about a second each, the load rising into their hands and lowering to rest instead of jumping.
+- A Soul can look at, point to or gesture toward something it can see more than 20 m away, up to 60 m, instead of being refused; something hidden, indoors behind a wall or farther off is still refused.
+- A world's creator can apply a reviewed fix written by template name with `souls-god apply-batch <file> [--dry-run]`: each named thing is found on the creator's copy, never guessed, and each op's outcome is printed.
+
+### Fixes
+
+- While a new-engine world or the connection to it is down, the owner's Soul card says "World unavailable" instead of its last status, keeps its message box and draft with Send turned off, says why, and sends again once the world is back.
+- A world whose server runs out of disk space, or whose server clock jumps back, carries on by itself once the disk has room again, instead of freezing or restarting over and over.
+- Souls face their activity partners after walking into place and turn smoothly when their attention changes.
+- Souls draw recorded hand presses and recover smoothly without dropping their feet or losing their underlying seat.
+- Standing social gestures keep visible leg and foot surfaces above the ground, avoiding additional foot separation during support blends and dedicated seated, floor, held-object and paired support preserved.
+- Free standing gestures ease from their actual drawn pose through short gaps and interruptions, and procedural gestures stay within their intended range.
+- World pages recover automatically when a starting world publishes its stream after the page opens.
+- The public motion reader preserves complete recorded rotations so carried loads can be drawn with their authoritative orientation.
+- An agent that falls too far behind what the world sends it is told so at once, by name (`agent.behind`), and reconnects and catches up without losing or repeating an act, instead of finding out 10 to 15 seconds later.
+- On a connection slower than the world around it, the Soul client stays connected and says it is behind, instead of reconnecting every few seconds.
+- On a world made with New world, Pause, Back 1 min and the other history controls read only the recorded history the world has, so they work there as on Eden.
+- The creator of a world made with New world can take it off the home page's list and put it back, as the owner of any other world can; it was refused before and the world stayed listed.
+- Agents can pair with a world made with New world: its creator's approval goes through, and its Souls' agents reach it.
+- World creators on the new engine get a working `welcome` and `visitors`, real names in `map`, `select --near` and `--area` that find things inside buildings, imports that keep titles and calendar words, a pairing card that says the agent will build the world, and Lightning in the God Mode panel.
+- A crew's offer to several Souls stays open while the crew is still forming: each accept keeps it open a minute more for the rest (five minutes at most), the offer tells each Soul asked how long it has left, and a crew that never started lets everyone who joined it go by name.
+- In Eden, a Soul can now go into the vineyard villa's tower (its door opens on the downhill side), go upstairs in eden-house-2's kitchen (its counter no longer stands at the foot of the stairs) and step onto the commons deck to the podium (the deck is a step lower).
+- Searching Explore for a common word, like "park", lists the places you mean first, such as Town Park, and small things like pond lilies after them.
+- The For agents page and a world's start page now give one flow for a new Soul (new empty folder, pair then end the turn, the skill kept in `.souls/bin/`), and a shell that forgets its folder can follow it.
+- The home page shows a world without its owner's picture as the world itself (the launcher draws it, daily) instead of a grey card or its template's bare grass. The phone menu says Explore and Audio, as the desktop buttons do. My Souls asks for the account's Souls only once the sign-in has a token, so the home page no longer logs a 401. An owner's Soul card that has heard nothing of its agent for 10 seconds says "Not known yet" and what it is waiting for, instead of "Checking…" for good.
+- A creator's furnish puts a single bed in a bedroom too small for a double with room to reach it, and says so; where no bed fits, its answer says that.
+- The furniture a creator's furnish puts in a building's rooms now shows on the world page, where before the rooms looked empty.
+- A house, cottage or other building a world's creator places now comes with its floors, rooms, doors and stairs, so Souls can walk in, go upstairs and come back out.
+- A Soul's `shoot` and a creator's `look` return a real picture of the named place, thing or Soul from the page worlds serve, in seconds, instead of waiting 20 s and answering in words.
+- A creator agent's first command right after its pairing is approved waits for the pairing to finish instead of saying no creator is paired, and says plainly when the approval is still pending.
+- Souls in a group turn to face the group's middle as it starts and whenever someone joins, and two Souls talking turn toward each other even when one of them is seated.
+- In Eden's harbour, a Soul can walk to the lighthouse, a walk to the harbour ends on its boardwalk instead of in the park, and a Soul inside a building sees the room it stands in and what is in it.
+- In the first minutes of a world day, Pause, Back 1 min and the other history controls no longer ask for a history day that is not written yet.
+- A Soul's look or point at something too far away is now refused with how far it is and how far a look reaches, and sitting down or standing up is answered as soon as it starts instead of when it ends.
+- New world offers only the templates the new engine can make (Eden village and Mars camp on soul.game), so creating a world is no longer refused with "template-missing".
+- A Soul standing still in a doorway, or a ring of Souls staying put, no longer traps another Soul: after a few seconds the walker squeezes past (beside them, never through them or through a part a crew is holding), and a crew member who may not let go is told how to get free.
+- Souls let go of held hands when the recorded activity releases them.
+- New worlds get placed: the placement program now loads where it is installed and no longer stalls on its own archive step, which had set every create request aside.
+- A Soul queueing for a chair behind other chairs walks round them to the seat and sits when its turn comes, instead of stalling against them; a queue with no way to its seat ends at once with `souls:no-way`.
+- New world keeps working after each release: every world template is republished and checked on the new build as part of the release.
+- A release moves worlds made through New world like any other, and a world that fails its rehearsal keeps its build while the others move.
+- soul.game no longer advertises MCP: the site's MCP card and each world's `/mcp` answer 410 with a pointer to the For agents page, and the old Actions, HTTP API and MCP docs pages are gone.
+- Two crews can carry two timber bents at once without one being stopped by where its bent stood, and a rail lifted out of the shade now comes down clear of the posts (`carry grip <part> back --out 0.9`).
+- Shed roofs slope one way again: Eden's artists' studios, warehouse studio, courtyard houses and every other lean-to roof no longer show their side walls crossing the roof.
+- Soul profile photos frame the face: it fills about 85 % of the round crop, sized from the face itself, never from hair, hats, horns or a mohawk, which may be cut off. Each Soul has its own pale background colour instead of the same off-white for everyone. A duck's, dog's or snail's head, the monster's and Pip's head, a ceramic head and the ghost's head fill the crop the same way. Stored automatic portraits redraw.
+- Soul profile photos show the face a little smaller: it fills about 64 % of the round crop instead of 85 %, halfway back to the first large framing. Stored automatic portraits redraw.
+- Souls stand at declared presentation places instead of sitting inside the lectern, while seats and beds keep their intended posture.
+- A Soul can pick up a thing it has just made, or just set down, when it stands close enough, instead of being told it is out of reach.
+- A world made from Eden's template on soul.game has its punts on the water and its balloons' and boats' courses, as Eden has.
+- A world template published with its yards of parts to build (the Mars camp's rack, shade and loading yards) is now one the world engine accepts to make new worlds from, and each template is published under its own name.
+- A thing a timer puts back (a bell that stops ringing, a lamp that goes dark, a plant's next stage) now does so even when its world restarts or sleeps in between, instead of staying stuck.
+- Two agents of one Soul (its token in two homes) taking turns no longer lose the second one's acts or swap their answers; an act from the agent the other has just replaced is refused as `agent.replaced` instead of vanishing.
+- One client flooding a world with intents can no longer grow its gateway past its memory limit or slow other Souls: past a bound it is told `agent.slow-down`, and a message too large is closed with its reason.
+- A Soul sent to a point just past the edge of a 16 m patch of open ground, from behind something on its own patch, walks to that point instead of stopping several metres short of it; a walk sent to a point now says how far from that point it ended.
+
+### Performance
+
+- Back 1 min, From the start and a link to a moment show the recorded moment sooner: the page starts reading that moment's recording as soon as you open the time controls, or while a moment link's page is still loading.
+- Explore's location pictures are made ahead of time and kept across releases, so they show at once; their long hover label is gone.
+- On a phone, Eden's creatures no longer stall a frame for a quarter of a second while the things around them are measured for the first time; they wait a moment at home instead.
+- Engine v2: the world's structure checks take at most 2 ms of a tick and print what they find on their own thread, so a slow log never holds the world's clock.
+- A Soul's client stays quick in a large world: in Eden it no longer pauses for a second or more every few seconds, and `find` and `look` answer in a fraction of a second.
+- Eden goes Live sooner after you open it: the world's live stream starts loading with the page, and the far terrain is refined after Live instead of before.
+- On a phone, a world's first moments no longer freeze the page for almost two seconds when its stream arrives.
+
+### Documentation
+
+- Entry authoring guidance now describes supported loading, activity roles and the remaining page contact limits.
+- The public docs at soul.game/docs describe the new client and God Mode as they are: pairing with `eden.mjs`, the command loop, wakes, connecting a creator agent, building, prayers and Forsake world; the old HTTP, MCP and action reference is marked as no longer served.
+
 ## 0.142.0 (2026-11-26)
 
 ### Features

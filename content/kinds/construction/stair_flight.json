@@ -1,0 +1,318 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:stair_flight",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:deck_beam",
+   "most": 1,
+   "most_per": 8,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "hook": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [
+    1250,
+    1980,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [
+    -1000,
+    0,
+    0
+   ]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [
+    1000,
+    0,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   2500,
+   1980,
+   900
+  ],
+  "solids_mm": [
+   [
+    0,
+    -431,
+    1250,
+    19,
+    0,
+    0,
+    1980
+   ],
+   [
+    0,
+    431,
+    1250,
+    19,
+    0,
+    0,
+    1980
+   ]
+  ],
+  "stairs": [
+   {
+    "from_mm": [
+     -1250,
+     0
+    ],
+    "to_mm": [
+     1250,
+     0
+    ],
+    "bottom_mm": 0,
+    "top_mm": 2010,
+    "width_mm": 900
+   }
+  ],
+  "floors": [
+   {
+    "top_mm": 2010,
+    "size_mm": [
+     500,
+     900
+    ],
+    "at_mm": [
+     1500,
+     0
+    ]
+   }
+  ]
+ },
+ "looks": {
+  "shape": {
+   "round": 3,
+   "palette": {
+    "timber": "#b8905a",
+    "tread": "#c9a36b"
+   },
+   "tags": [
+    "stair",
+    "stringer",
+    "deck"
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      44,
+      950,
+      -431
+     ],
+     "size": [
+      3208,
+      140,
+      38
+     ],
+     "roll": 38799,
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      44,
+      950,
+      431
+     ],
+     "size": [
+      3208,
+      140,
+      38
+     ],
+     "roll": 38799,
+     "tint": "timber"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -1125,
+      81,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -875,
+      283,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -625,
+      483,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -375,
+      685,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -125,
+      885,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      125,
+      1087,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      375,
+      1287,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      625,
+      1489,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      875,
+      1689,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    },
+    {
+     "kind": "box",
+     "at": [
+      1125,
+      1891,
+      0
+     ],
+     "size": [
+      235,
+      38,
+      824
+     ],
+     "tint": "tread"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_souls"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A ten-tread stair flight, 1.98 m rise: two to four carry it to the deck."
+ },
+ "card": {
+  "text": "card"
+ }
+}

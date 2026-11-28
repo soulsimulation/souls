@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
-import {drawnLoad,drawnGrips,observeRender,gradeContact,retainResult,bodyGeometry} from './oracle.mjs';
+import {drawnLoad,drawnGrips,observeRender,gradeContact,gradeInactive,retainResult,bodyGeometry} from './oracle.mjs';
 const {Scene,Group,Mesh,BoxGeometry,MeshBasicMaterial,InstancedMesh,Matrix4,Vector3,Euler,Quaternion}=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url))('three');
 const matrix=(p=[0,0,0],r=[0,0,0],s=1)=>new Matrix4().compose(new Vector3(...p),new Quaternion().setFromEuler(new Euler(...r)),new Vector3(s,s,s));
 const entry={format:'souls-entry/1',points:{a:{role:'grip',at_mm:[0,100,500]},b:{role:'grip',at_mm:[0,100,-500]}}};
@@ -31,8 +31,8 @@ test('unknown slots, singular geometry transforms, hidden parts and detached pla
 });
 const sample=()=>({stage:'after-world-render',units:'m',currentCanvas:true,renderTarget:null,frame:3,at:100,worldSeconds:10,
  load:{native:'n-load',entity:'e-load',entrySha256:'hash',kind:'test:load',parts:2,matrix:new Matrix4().toArray()},grips:[{name:'a',world:[0,1,0]},{name:'b',world:[0,1,1]}],
- bodies:[{native:'n-body',entity:'e-body',soul:'s-body',visibleSkin:true,palms:{left:[0,1,-.2],right:[0,1,.2]}}]});
-function nativeSample(){const s=sample();s.crew={native:'n-crew',source:'native-membership',observedWorldUs:10_000_000,members:['n-body']};s.nativeContacts={source:'souls:carry-grips',units:'um',space:'load-local',observedWorldUs:10_000_000,crew:'n-crew',load:'n-load',phase:'souls:carry',sinceUs:9_000_000,holds:[{body:'n-body',grip:'point:a',gripUm:[0,1_000_000,0],handsUm:[[0,1_000_000,-200_000],[0,1_000_000,200_000]]}]};return s;}
+ bodies:[{native:'n-body',entity:'e-body',soul:'s-body',visibleSkin:true,order:[0,1],palms:{left:[0,1,-.2],right:[0,1,.2]}}]});
+function nativeSample(){const s=sample();s.crew={native:'n-crew',source:'native-membership',observedWorldUs:10_000_000,members:['n-body']};s.nativeContacts={source:'souls:carry-grips',units:'um',space:'load-local',observedWorldUs:10_000_000,crew:'n-crew',load:'n-load',phase:'souls:carry',sinceUs:9_000_000,holds:[{body:'n-body',grip:'point:a',gripUm:[0,1_000_000,0],handsUm:[[0,1_000_000,-200_000],[0,1_000_000,200_000]]}]};s.nativeHistory=[s.nativeContacts];s.expectedLoad={source:'native-records',atUs:10000000,previousAtUs:9983333,matrix:new Matrix4().toArray(),previousMatrix:new Matrix4().toArray(),pointsUm:[[-3000000,0,0],[3000000,0,0]]};return s;}
 test('unknown native contacts stay unproved: entry-centre distances are not offset-contact bounds',()=>{
  const s=sample();s.bodies[0].palms.left=[200,1,0];s.bodies[0].palms.right=[200,1,1];
  const r=gradeContact(s,{now:110});assert.equal(r.status,'unproved');assert.equal(r.ok,false);assert.equal(r.legacy.certifiesNativeContact,false);assert.equal(r.legacy.contacts[0].nearest.distanceM,200);
@@ -40,7 +40,8 @@ test('unknown native contacts stay unproved: entry-centre distances are not offs
 });
 test('native pair is matched bijectively, without guessing anatomical labels or reusing one point',()=>{
  const s=nativeSample();[s.bodies[0].palms.left,s.bodies[0].palms.right]=[s.bodies[0].palms.right,s.bodies[0].palms.left];
- const r=gradeContact(s,{now:110});assert.equal(r.ok,true);assert.deepEqual(r.contacts.map(c=>c.targetIndex),[1,0]);
+ s.bodies[0].order=[1,0];const r=gradeContact(s,{now:110});assert.equal(r.ok,true);assert.deepEqual(r.contacts.map(c=>c.targetIndex),[1,0]);
+ assert.equal(gradeContact(s,{now:110,previousAssignments:{'n-crew|n-load|n-body|point:a|9000000':[0,1]}}).status,'failed-measurement');
  s.bodies[0].palms.right=s.bodies[0].palms.left;const duplicate=gradeContact(s,{now:110});assert.equal(duplicate.status,'failed-native-pair');assert.equal(new Set(duplicate.contacts.map(c=>c.targetIndex)).size,2);assert.equal(Math.max(...duplicate.contacts.map(c=>c.errorM)),.4);
  s.nativeContacts.holds[0].handsUm[1]=s.nativeContacts.holds[0].handsUm[0];assert.equal(gradeContact(s,{now:110}).status,'failed-measurement');
 });
@@ -51,7 +52,7 @@ test('either palm beyond 3cm or missing fails, even when the other palm is exact
  }
 });
 test('native local micrometre contacts use the actual translated, rotated and scaled load root',()=>{
- const s=nativeSample(),m=matrix([12,2,-3],[.3,1.2,-.2],1.7);s.load.matrix=m.toArray();
+ const s=nativeSample(),m=matrix([12,2,-3],[.3,1.2,-.2],1.7);s.load.matrix=m.toArray();s.expectedLoad.matrix=m.toArray();s.expectedLoad.previousMatrix=m.toArray();
  for(const[hand,i]of[['left',0],['right',1]])s.bodies[0].palms[hand]=new Vector3(...s.nativeContacts.holds[0].handsUm[i].map(v=>v/1e6)).applyMatrix4(m).toArray();
  assert.equal(gradeContact(s,{now:110}).ok,true);s.load.matrix=new Matrix4().toArray();assert.equal(gradeContact(s,{now:110}).status,'failed-native-pair');
  s.load.matrix=matrix([0,0,0],[0,0,0],0).toArray();assert.equal(gradeContact(s,{now:110}).status,'failed-measurement');
@@ -91,4 +92,45 @@ test('every draw is graded after bounded raw storage fills; a later one-frame mi
 test('a degenerate carrier root and wholly transparent indexed skin cannot certify visibility',()=>{
  const scene=new Scene(),root=new Group(),skin=new Mesh(new BoxGeometry(),new MeshBasicMaterial());skin.isSkinnedMesh=true;skin.userData.bodyDraw=true;root.add(skin);scene.add(root);scene.updateMatrixWorld(true);
  assert.equal(bodyGeometry(root,scene),1);skin.material.opacity=0;assert.throws(()=>bodyGeometry(root,scene),/visible indexed/);skin.material.opacity=1;root.scale.x=0;scene.updateMatrixWorld(true);assert.throws(()=>bodyGeometry(root,scene),/nondegenerate/);
+});
+test('hands and load lagging together cannot pass the independent full-pose endpoint clock',()=>{
+ const s=nativeSample();s.expectedLoad.matrix=matrix([.1,0,0]).toArray();s.expectedLoad.previousMatrix=matrix([.08,0,0]).toArray();const r=gradeContact(s,{now:110});assert.equal(r.ok,false);assert.equal(r.clock.ok,false);assert(Math.abs(r.clock.clockErrorM-.1)<1e-8);assert(Math.abs(r.clock.oneFrameTravelM-.02)<1e-8);
+ const pivot=nativeSample();pivot.expectedLoad.matrix=matrix([0,0,0],[0,.1,0]).toArray();pivot.expectedLoad.previousMatrix=matrix([0,0,0],[0,.095,0]).toArray();const p=gradeContact(pivot,{now:110});assert.equal(p.ok,false);assert(p.clock.clockErrorM>.29,'stationary-root rotation moves the endpoints');
+ const missing=nativeSample();delete missing.expectedLoad;assert.equal(gradeContact(missing,{now:110}).status,'failed-measurement');
+});
+
+test('an independently recorded release begins a new anatomical episode, while an unaffected membership change cannot reset it',()=>{const s=nativeSample(),old=structuredClone(s.nativeContacts),released={...structuredClone(old),phase:'souls:released',sinceUs:8000000};old.sinceUs=7000000;s.nativeHistory=[old,released,s.nativeContacts];s.bodies[0].order=[1,0];[s.bodies[0].palms.left,s.bodies[0].palms.right]=[s.bodies[0].palms.right,s.bodies[0].palms.left];assert.equal(gradeContact(s,{now:110,previousAssignments:{'n-crew|n-load|n-body|point:a|7000000':[0,1]}}).ok,true);s.nativeHistory=[old,{...s.nativeContacts,sinceUs:8500000},s.nativeContacts];assert.equal(gradeContact(s,{now:110,previousAssignments:{'n-crew|n-load|n-body|point:a|7000000':[0,1]}}).status,'failed-measurement');});
+
+test('only independently known absent/released phases are inactive; their load clock and release ownership still grade',()=>{
+ const s=nativeSample();s.nativeContacts=null;s.contactState={at:10000000,crew:'n-crew',field:'absent',members:[{body:'n-body'}],grips:null};
+ assert.equal(gradeInactive(s,{now:110}).status,'native-inactive-observation');
+ s.contactState.field='unknown';assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');
+ s.contactState={at:10000000,crew:'n-crew',field:'valid',members:[],grips:{phase:'souls:released',load:'n-load',sinceUs:9500000}};
+ assert.equal(gradeInactive(s,{now:110}).releaseComplete,true);s.bodies[0].nativeCarryOwned=true;assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');delete s.bodies[0].nativeCarryOwned;
+ s.expectedLoad.matrix=matrix([1,0,0]).toArray();s.expectedLoad.previousMatrix=matrix([1,0,0]).toArray();assert.equal(gradeInactive(s,{now:110}).status,'failed-load-clock');
+ delete s.expectedLoad;assert.equal(gradeInactive(s,{now:110}).status,'failed-measurement');
+});
+
+
+test('release completion accepts only independently upcoming new ownership, not a stale old marker',()=>{const s=nativeSample();s.nativeContacts=null;s.contactState={at:10e6,crew:'n-crew',field:'valid',grips:{crew:'n-crew',load:'n-load',phase:'souls:released',sinceUs:9e6,holds:[]}};s.bodies[0].nativeCarryOwned=true;s.bodies[0].nativeCarryIdentity={crew:'next-crew',load:'next-load',sinceUs:10100000,preparing:true};s.nativeUpcoming=[{crew:'next-crew',load:'next-load',sinceUs:10100000,holds:[{body:'n-body'}]}];assert.equal(gradeInactive(s,{now:110}).ok,true);s.bodies[0].nativeCarryIdentity.sinceUs=9e6;assert.equal(gradeInactive(s,{now:110}).ok,false);s.bodies[0].nativeCarryIdentity.sinceUs=10100000;s.nativeUpcoming=[];assert.equal(gradeInactive(s,{now:110}).ok,false);});
+
+test('actual module import and synchronous observer hooks emit ordered installation boundaries and preserve methods', async () => {
+  const { contactTools } = await import('./oracle.mjs');
+  const prior = { window: globalThis.window, document: globalThis.document, location: globalThis.location, debug: console.debug };
+  const rows = [], render = function () { return 7; }, renderer = { render, getRenderTarget: () => null };
+  globalThis.window = { __soulsEntity: { scene: {}, camera: {}, renderer } };
+  globalThis.document = { baseURI: 'https://example.test/world/' }; globalThis.location = { href: 'https://example.test/world/' };
+  console.debug = text => { assert(text.startsWith('carry-install-stage ')); rows.push(JSON.parse(text.slice(20))); };
+  const kitURL = 'data:text/javascript,export class TakePeople{show(a){return this.value+a}palmOf(){}bodyObject(){}}';
+  try {
+    assert.deepEqual(await contactTools({ kitURL }), { installed: true });
+    assert.deepEqual(rows.map(r => r.stage), ['factory-enter', 'import-begin', 'import-complete', 'show-hook-begin', 'show-hook-complete', 'render-hook-begin', 'render-hook-complete', 'install-return']);
+    assert.equal(rows[0].resolvedURL, kitURL);
+    const { TakePeople } = await import(kitURL), person = new TakePeople(); person.value = 5;
+    assert.equal(person.show(3), 8); assert.equal(window.__carryContactObserver.active, false);
+    window.__carryContactObserver.stop(); assert.equal(renderer.render, render);
+    delete window.__carryContactObserver; rows.length = 0;
+    await assert.rejects(contactTools({ kitURL: 'data:text/javascript,throw new Error("fixture import failure")' }), /fixture import failure/);
+    assert.deepEqual(rows.map(r => r.stage), ['factory-enter', 'import-begin', 'install-error']);
+  } finally { globalThis.window = prior.window; globalThis.document = prior.document; globalThis.location = prior.location; console.debug = prior.debug; }
 });

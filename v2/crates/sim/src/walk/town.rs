@@ -49,10 +49,11 @@
 //!   the target's node, or within half the link's width and half that of its line (placed on the open ground by its
 //!   building's frame).
 
+use super::water::Water;
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::open::Index;
-use crate::ground::scene::xform_to;
+use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::{
     HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
 };
@@ -62,7 +63,7 @@ use crate::links::{
     Building, Doors, F_OPEN, Kind, Open, SquareMeet, back, floor_joins, ground_doors,
 };
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
+use crate::routes::{CLIMB, HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, ClassGround, Granted, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
@@ -72,7 +73,7 @@ use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
-use replica::world_model::show;
+use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -190,6 +191,8 @@ pub struct Town {
     /// The walks planned on ground the last installs changed, not yet planned again: each body with how soon its
     /// route reaches the change (its index in the ground the plan crossed; 0 for the node it stood on).
     pub stale: BTreeMap<Id, usize>,
+    /// Who may wade or swim, who stands in the water, and the open ground's wet surfaces (#3225).
+    pub water: Water,
 }
 
 /// What a rebuild off the clock thread reads besides the tree (#3276): the open ground as cut (each square's pieces,
@@ -335,6 +338,18 @@ fn reach(b: &Building) -> Option<[i64; 4]> {
             r[3] + JOIN_REACH,
         ]
     })
+}
+
+/// Whether `thing` is a building in `tree`, as a whole build lists them (`Map::build_cut`): there, with a floor among
+/// its children. A thing whose last floor was removed (#5216: a deck whose one floor went) is one no longer.
+fn is_building(tree: &Tree, thing: Id) -> bool {
+    let floor = |&c| {
+        tree.node(c)
+            .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
+    };
+    tree.handle(thing)
+        .and_then(|h| tree.children(h))
+        .is_some_and(|kids| kids.iter().any(floor))
 }
 
 /// Whether boxes `a` and `b` meet.
@@ -491,6 +506,14 @@ impl Rebuilt {
         match &self.fresh {
             Fresh::Squares(sq, ..) => sq.len(),
             _ => 0,
+        }
+    }
+
+    /// How many buildings were read again alone: 0 when the whole was built.
+    pub fn buildings(&self) -> usize {
+        match &self.fresh {
+            Fresh::Squares(_, _, bs) | Fresh::Buildings(bs) => bs.len(),
+            Fresh::Whole(_) => 0,
         }
     }
 }
@@ -675,11 +698,23 @@ impl Installing<'_> {
                         next += n;
                     }
                 }
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions);
+                put_buildings(
+                    self.map,
+                    self.surfaces,
+                    self.buildings,
+                    (tree, ground),
+                    bs,
+                    versions,
+                );
             }
-            Fresh::Buildings(bs) => {
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions)
-            }
+            Fresh::Buildings(bs) => put_buildings(
+                self.map,
+                self.surfaces,
+                self.buildings,
+                (tree, ground),
+                bs,
+                versions,
+            ),
         }
         *self.basis = after;
         *self.link_at = link_index(self.buildings);
@@ -687,12 +722,13 @@ impl Installing<'_> {
     }
 }
 
-/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it.
+/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it, and
+/// its open ground (whose gates are a building of its own, never one that left).
 fn put_buildings(
     map: &mut Map,
     surfaces: &mut BTreeMap<Id, Surface>,
     buildings: &mut Vec<Building>,
-    tree: &Tree,
+    (tree, ground): (&Tree, Id),
     bs: Vec<(Building, BTreeMap<Id, Surface>)>,
     versions: &Versions,
 ) {
@@ -701,8 +737,8 @@ fn put_buildings(
         map.replace(&b, &|n| versions.of(n));
         surfaces.extend(floors);
         let at = buildings.iter().position(|o| o.thing == b.thing);
-        // A building removed (S13): it leaves the list, with its floors' surfaces.
-        if tree.handle(b.thing).is_none() {
+        // A building removed (S13), or left with no floor (#5216): it leaves the list, with its floors' surfaces.
+        if b.thing != ground && !is_building(tree, b.thing) {
             if let Some(i) = at {
                 for f in buildings.remove(i).floors.keys() {
                     surfaces.remove(f);
@@ -791,6 +827,7 @@ impl Town {
             planned: BTreeMap::new(),
             planned_squares: BTreeMap::new(),
             stale: BTreeMap::new(),
+            water: Water::default(),
         })
     }
 
@@ -840,6 +877,30 @@ impl Town {
             }
         }
         Ok(())
+    }
+
+    /// Gives `body` the abilities `has` (`crate::routes`' masks, #3225): its routes, lines and crossings are a body's
+    /// with them. The open ground's wet surfaces are cut the first time a body may wade or swim.
+    pub fn allow(&mut self, body: Id, has: Mask) {
+        self.water.abilities.insert(body, has);
+        if has & (crate::routes::WADE | crate::routes::SWIM) != 0 && !self.water.built {
+            self.water
+                .cut(&self.map, self.ground, self.basis.open.terrain.as_ref());
+        }
+    }
+
+    /// The surfaces a body of class `size` steps on while it stands on `ground` (#3225): its class's on dry ground,
+    /// the open ground's wet surfaces otherwise (the standard class only).
+    pub fn surfaces_on(
+        &self,
+        size: Size,
+        ground: crate::gaits::Ground,
+    ) -> Option<&BTreeMap<Id, Surface>> {
+        match ground {
+            crate::gaits::Ground::Dry => self.surfaces_for(size),
+            g if size == Size::Standard => self.water.surfaces(g),
+            _ => None,
+        }
     }
 
     pub fn surfaces_for(&self, size: Size) -> Option<&BTreeMap<Id, Surface>> {
@@ -930,6 +991,31 @@ impl Town {
         crate::commit::off_clock();
         // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
         let ids = changed(base, part);
+        // A part that holds a floor, a stair or a ladder of its own, or a frame whose standing place a joint makes or
+        // unmakes (racks T9, T6), changes what is ground where it is: the ground is built again from the tree, as a
+        // start builds it, never left as it was. A part is in a thing (a bay, a crew) before or after the change; a
+        // building on the open ground before and after is read again where it is, as before (G3b).
+        let in_thing = |t: &Tree, id: &Id| {
+            t.handle(*id)
+                .and_then(|h| t.node(h))
+                .and_then(|n| n.parent())
+                .is_some_and(|p| p != ground)
+        };
+        // Read before the change and after it: a part made straight into a bay holds its floor only after.
+        let holds_ways = |t: &Tree, id: &Id| {
+            t.handle(*id)
+                .and_then(|h| t.children(h))
+                .unwrap_or(&[])
+                .iter()
+                .any(|&c| {
+                    t.node(c).is_some_and(|n| {
+                        replica::world_model::plain(n.kind().as_str())
+                            == crate::ground::scene::FLOOR
+                    })
+                })
+        };
+        let part_ways = |t: &Tree| ids.iter().any(|id| holds_ways(t, id) && in_thing(t, id));
+        let mut ways = part_ways(base);
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -941,6 +1027,7 @@ impl Town {
         base.apply(header, part)
             .map_err(|e| format!("{}: {}", e.name, e.detail))?;
         grounds(base, &ids, &mut touched);
+        ways = ways || part_ways(base);
         let mut versions = versions.clone();
         versions.bump(&touched);
         let (versions, base): (Versions, &Tree) = (versions, base);
@@ -948,7 +1035,12 @@ impl Town {
         // its own squares and the same read of its buildings (S13b), each built whole only when it must be.
         let class = |basis: &Basis| -> Result<(Fresh, Basis, Option<&'static str>), String> {
             let mut why = None;
-            let fresh = if touched.contains(&ground) {
+            let fresh = if ways {
+                why = Some("a part that holds a floor, a stair or a ladder moved");
+                Fresh::Whole(Box::new(Town::assemble_for(
+                    base, ground, &versions, basis.size, 1,
+                )?))
+            } else if touched.contains(&ground) {
                 // The buildings whose floors the part touches besides the open ground (a creator's new building, S13):
                 // read again with the squares cut again, not the whole ground built.
                 let things: Option<BTreeSet<Id>> = touched
@@ -1011,7 +1103,7 @@ impl Town {
                     for (id, surface) in surfaces {
                         floors.insert(*id, Arc::new(surface.clone()));
                     }
-                    if building.thing != ground && base.handle(building.thing).is_none() {
+                    if building.thing != ground && !is_building(base, building.thing) {
                         known.remove(&building.thing);
                         reaches.remove(&building.thing);
                     } else if building.thing != ground {
@@ -1259,8 +1351,9 @@ impl Town {
                 return None;
             }
             // A building removed with the squares it stood on cut again (S13): a building of nothing, whose floors
-            // and links leave the map, when its links met the open ground on those squares only.
-            if cut.is_some() && after.handle(thing).is_none() {
+            // and links leave the map, when its links met the open ground on those squares only. So is a thing left
+            // with no floor (#5216: a deck whose one floor was removed): a whole build lists it no longer.
+            if cut.is_some() && thing != ground && !is_building(after, thing) {
                 let elsewhere = |l: &Id| {
                     open.meets
                         .iter()
@@ -1421,6 +1514,11 @@ impl Town {
         }
         .put(&self.tree, ground, fresh, after, &versions);
         self.versions = versions;
+        // The wet surfaces follow the map's wet pieces (#3225).
+        if self.water.built {
+            self.water
+                .cut(&self.map, ground, self.basis.open.terrain.as_ref());
+        }
         // How far along its squares a walk first reaches a square cut again (0: where it starts), if it does.
         let reaches = |who: &Id| match &cut {
             None => Some(0),
@@ -1664,6 +1762,12 @@ impl Town {
             .is_ok_and(|(m, ..)| sealed_on(m, Some(from), node, at))
     }
 
+    /// The doorway or stair whose passage `p` (µm, `node`'s frame) lies in, as the spot tables keep walkers out of it
+    /// ([`passage_named`], a walker's clearance): the thing it belongs to and the link's kind (#5254).
+    pub fn passage_at(&self, node: Id, p: Vec3) -> Option<(Id, Kind)> {
+        passage_named(&self.buildings, &self.passages, self.ground, node, p, None)
+    }
+
     /// The world's entry as [`Town::set_entry`] took it, on dry ground: where the main ground is judged from. `None`:
     /// none known, and no ground is sealed.
     pub fn entry(&self) -> Option<(Id, Vec3)> {
@@ -1691,8 +1795,9 @@ impl Town {
     /// kept; refused when it stands on none (`off-ground`).
     pub fn relocate(&self, body: &Body) -> Result<Body, Refusal> {
         let node = node_of(body);
+        // On the ground it stands on (#3225): a body in the water is found again on the water's surface.
         let mut b = self
-            .surfaces_for(self.size_of(body.id))
+            .surfaces_on(self.size_of(body.id), self.water.ground(body.id))
             .ok_or_else(|| refusal("body-class-unprepared", "no prepared geometry"))?
             .get(&node)
             .ok_or_else(|| refusal("no-surface", show(node)))?
@@ -1772,6 +1877,7 @@ impl Town {
             planned: BTreeMap::new(),
             planned_squares: BTreeMap::new(),
             stale: BTreeMap::new(),
+            water: Water::default(),
         }
     }
 
@@ -1827,6 +1933,7 @@ impl Town {
             planned: BTreeMap::new(),
             planned_squares: BTreeMap::new(),
             stale: BTreeMap::new(),
+            water: Water::default(),
         };
         Ok((town, planner))
     }
@@ -1935,6 +2042,7 @@ impl Town {
                 meter: self.meter,
                 ground: self.ground,
                 entry: self.entry,
+                water: &self.water,
             },
             scratches: &mut self.scratches[..workers],
             lines: &mut self.lines,
@@ -1966,6 +2074,7 @@ pub struct Shared<'a> {
     meter: Option<fn() -> u64>,
     ground: Id,
     entry: Option<(Id, Vec3)>,
+    water: &'a Water,
 }
 
 impl crate::mover::Floors for Shared<'_> {
@@ -2084,6 +2193,7 @@ impl<'a> Shared<'a> {
             lines: RefCell::new(lines),
             ground: self.ground,
             entry: self.entry,
+            water: (size == Size::Standard).then_some(self.water),
         })
     }
 }
@@ -2159,6 +2269,8 @@ pub struct View<'a> {
     lines: RefCell<Lines<'a>>,
     ground: Id,
     entry: Option<(Id, Vec3)>,
+    /// Who may wade or swim and who stands in the water (#3225); none for a class that never leaves dry ground.
+    water: Option<&'a Water>,
 }
 
 /// A corner is reached within this, µm.
@@ -2403,7 +2515,7 @@ pub fn in_passage_but(
         }
         b.links
             .iter()
-            .any(|l| link_passage(b, l, ground, node, p, door, false) != Lies::Clear)
+            .any(|l| link_passage(b, l, ground, node, p, door, false, CLEARS) != Lies::Clear)
     })
 }
 
@@ -2464,12 +2576,45 @@ fn passage_indexed(
             p,
             door,
             mouths,
+            CLEARS,
         ));
         if most == Lies::In {
             break;
         }
     }
     most
+}
+
+/// The passage's clearances [`in_passage_but`] tests (µm): [`CLEAR`] round a link's end on a floor, and half
+/// [`CLEAR`] past its width along its line.
+const CLEARS: (i64, i64) = (CLEAR, CLEAR / 2);
+
+/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with a walker's clearance
+/// ([`CLEARS`]: [`CLEAR`] round its ends, half [`CLEAR`] past its width along its line, #5254; A3): the thing it
+/// belongs to and the link's kind. It is the passage [`in_passage_indexed`] finds.
+pub fn passage_named(
+    buildings: &[Building],
+    passages: &Passages,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+) -> Option<(Id, Kind)> {
+    for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
+        let i = bi as usize;
+        if node == ground
+            && let Some(bx) = passages.boxes.get(i)
+            && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
+        {
+            continue;
+        }
+        let b = &buildings[i];
+        let l = &b.links[li as usize];
+        if link_passage(b, l, ground, node, p, door, false, CLEARS) != Lies::Clear {
+            return Some((b.thing, l.kind));
+        }
+    }
+    None
 }
 
 /// How a point lies in one link's passage ([`link_passage`]): clear of it, only at its mouth (a doorway's, on the
@@ -2482,7 +2627,9 @@ enum Lies {
 }
 
 /// How `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`). With `mouths`
-/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line.
+/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line. `(end, band)` is how far round
+/// its ends and past its width along its line it reaches, µm: [`CLEARS`] for a walker's passage (#5254).
+#[allow(clippy::too_many_arguments)]
 fn link_passage(
     b: &Building,
     l: &crate::links::Link,
@@ -2491,6 +2638,7 @@ fn link_passage(
     p: Vec3,
     door: Option<Id>,
     mouths: bool,
+    (end, band): (i64, i64),
 ) -> Lies {
     if door.is_some() && l.door == door {
         return Lies::Clear;
@@ -2500,12 +2648,21 @@ fn link_passage(
     if l.kind == Kind::Step && l.nodes[0] == l.nodes[1] {
         return Lies::Clear;
     }
+    // So is a step between two things' floors, neither the open ground (racks T9): the seam where two deck sheets meet,
+    // a boat beside a pier.
+    if l.kind == Kind::Step && !l.nodes.contains(&ground) {
+        return Lies::Clear;
+    }
+    // And a ladder's top on a floor its own thing holds (racks T6: a frame's standing place) is where one stands.
+    if l.kind == Kind::Ladder && node != ground && b.floors.contains_key(&node) {
+        return Lies::Clear;
+    }
     let doorway = l.kind == Kind::Doorway;
     let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
     let (mut on, mut at_end) = (false, false);
     for e in ends {
         on = true;
-        if to_segment(p, e.a, e.b) < CLEAR {
+        if to_segment(p, e.a, e.b) < end {
             if !(mouths && doorway) {
                 return Lies::In;
             }
@@ -2538,13 +2695,13 @@ fn link_passage(
     // Between a doorway's ends its band is as wide as they are (the passage where it meets each floor), and half CLEAR;
     // past them only half CLEAR, so an opening's width is no disc round its ends.
     let reach = match l.kind {
-        Kind::Step => CLEAR / 2,
+        Kind::Step => band,
         Kind::Doorway if between => {
             let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
-            held.unwrap_or(0) + CLEAR / 2
+            held.unwrap_or(0) + band
         }
-        Kind::Doorway => CLEAR / 2,
-        _ => l.width / 2 + CLEAR / 2,
+        Kind::Doorway => band,
+        _ => l.width / 2 + band,
     };
     let on_line = read
         && l.line.windows(2).any(|s| {
@@ -2643,6 +2800,11 @@ impl ClassGround for ClassGrounds<'_> {
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool {
         self.0.get(&size).is_none_or(|g| g.passage(node, p))
     }
+    fn in_passage_itself(&self, size: Size, node: Id, p: Vec3) -> bool {
+        self.0
+            .get(&size)
+            .is_none_or(|g| g.passage_within(node, p, size))
+    }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.0.get_mut(&size)?.walk(an, a, bn, b)
     }
@@ -2657,6 +2819,23 @@ impl ClassGround for ClassGrounds<'_> {
     }
     fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         self.0.get(&size)?.start(node, p)
+    }
+}
+
+impl Grounds<'_> {
+    /// Whether a body of class `size` standing at `p` (µm, `node`'s frame) would be in a doorway or on a stair: within
+    /// [`CLEAR`] of a link's end or of its width along its line, as a walker is kept (A3: no standing place narrows a
+    /// doorway or a stair for others; #5254).
+    fn passage_within(&self, node: Id, p: Vec3, _size: Size) -> bool {
+        passage_named(
+            self.buildings,
+            self.passages,
+            self.ground,
+            node,
+            p,
+            self.door,
+        )
+        .is_some()
     }
 }
 
@@ -2690,6 +2869,10 @@ impl Ground for Grounds<'_> {
             p,
             self.door,
         )
+    }
+
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.passage_within(node, p, Size::Standard)
     }
 
     fn mouth(&self, node: Id, p: Vec3) -> bool {
@@ -2730,7 +2913,9 @@ impl Ground for Grounds<'_> {
         if !self.map.get().may_reach(from.piece, to.piece) {
             return None;
         }
-        let r = self.map.route(self.tree, from, to, HANDS).ok()?;
+        // A place up a ladder is a place (racks T6: a frame's standing place): the walk there is the body's, which
+        // still needs the climb.
+        let r = self.map.route(self.tree, from, to, HANDS | CLIMB).ok()?;
         // As a body could walk it, not by the coarse search's middles of the squares' edges (#5012's short walk).
         Some(self.map.walked(&r, from, to) as i64 * 1000)
     }
@@ -2944,6 +3129,11 @@ impl Town {
         goal: Vec3,
     ) -> Result<(Vec<Leg>, RouteMetrics), Refusal> {
         let size = self.size_of(body.id);
+        let (has, wet) = if size == Size::Standard {
+            (self.water.has(body.id), self.water.here(&self.map, body))
+        } else {
+            (super::water::WALKER, None)
+        };
         let (map, link_at, buildings) = if size == Size::Standard {
             (&mut self.map, &self.link_at, self.buildings.as_slice())
         } else {
@@ -2959,6 +3149,7 @@ impl Town {
             link_at,
             buildings,
             self.ground,
+            (has, wet),
             body,
             node,
             goal,
@@ -2983,20 +3174,21 @@ fn plan_on(
     link_at: &BTreeMap<Id, (usize, usize)>,
     buildings: &[Building],
     open: Id,
+    (has, wet): (Mask, Option<Spot>),
     body: &Body,
     node: Id,
     goal: Vec3,
 ) -> Result<(Vec<Leg>, Crossed, Squares, RouteMetrics), Refusal> {
     let here = node_of(body);
-    let from = map
-        .get()
-        .spot_near(here, body.pose.position, AT_EDGE)
+    // A body in the water starts from its own wet piece (#3225).
+    let from = wet
+        .or_else(|| map.get().spot_near(here, body.pose.position, AT_EDGE))
         .ok_or_else(|| refusal("off-ground", show(here)))?;
     let to = map
         .get()
-        .spot(node, goal)
+        .spot_for(node, goal, has)
         .ok_or_else(|| refusal("destination-gone", show(node)))?;
-    let route = map.route(tree, from, to, HANDS)?;
+    let route = map.route(tree, from, to, has)?;
     let mut ground: Vec<(Id, u64)> = Vec::new();
     let mut squares: Vec<(i32, i32)> = Vec::new();
     for p in route.patches() {
@@ -3012,7 +3204,19 @@ fn plan_on(
     }
     let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
     for h in &route.hops {
-        let Hop::Link { id, .. } = h else { continue };
+        let Hop::Link { id, kind } = h else { continue };
+        // A shore (#3225): its near end is the middle of the edge the two grounds share, on the open ground.
+        if matches!(kind, Kind::Wade | Kind::Swim)
+            && let Some((_, _, a, b)) = map.get().shore(*id)
+        {
+            at = Vec3::new((a[0] + b[0]) * 500, 0, (a[1] + b[1]) * 500);
+            on = open;
+            legs.push(Leg {
+                to: at,
+                link: Some(*id),
+            });
+            continue;
+        }
         let l = find_link(link_at, buildings, *id)
             .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
         let near = (0..2)
@@ -3045,6 +3249,28 @@ fn plan_on(
 }
 
 impl<'a> View<'a> {
+    /// `body`'s abilities, and its own wet piece when it stands in the water (#3225).
+    fn wet(&self, body: &Body) -> (Mask, Option<Spot>) {
+        self.water.map_or((super::water::WALKER, None), |w| {
+            (w.has(body.id), w.here(self.map, body))
+        })
+    }
+
+    /// The ground `body` stands on (#3225).
+    fn ground_of(&self, body: &Body) -> crate::gaits::Ground {
+        self.water
+            .map_or(crate::gaits::Ground::Dry, |w| w.ground(body.id))
+    }
+
+    /// The surface `body` steps on: its node's, or on wading ground or water the open ground's wet one (#3225).
+    fn surface_of(&self, body: &Body) -> Option<&'a Surface> {
+        let node = node_of(body);
+        match (self.ground_of(body), self.water) {
+            (crate::gaits::Ground::Dry, _) | (_, None) => self.surfaces.get(&node),
+            (g, Some(w)) => w.surfaces(g)?.get(&node),
+        }
+    }
+
     fn now(&self) -> u64 {
         self.meter.map_or(0, |m| m())
     }
@@ -3071,8 +3297,7 @@ impl<'a> View<'a> {
     fn straight(&self, body: &Body, to: [i64; 2], within: i64) -> Result<bool, Refusal> {
         let node = node_of(body);
         let s = self
-            .surfaces
-            .get(&node)
+            .surface_of(body)
             .ok_or_else(|| refusal("no-surface", show(node)))?;
         let p = body.pose.position;
         // In one second, at the velocity that is the whole way: the controller's dry run, moving nothing.
@@ -3221,6 +3446,96 @@ impl<'a> View<'a> {
         (!passage && self.map.may_reach(start.piece, to.piece)).then_some(p)
     }
 
+    /// Where `body` would stand at point `p` of the open ground (µm, the ground's frame; its height is not read): of
+    /// the ground a body may stand on at that point on the plan, the open ground's own (at its terrain's height) and
+    /// each floor's (a deck's top, a frame's standing place, a room), the one whose height is nearest the body's own
+    /// level, of those its walk may reach first. The node and the point in its frame, or `None` when no ground a body
+    /// may stand on lies there (a walk to a point, FOR-FABLE 14).
+    pub fn level_under(&self, body: &Body, p: Vec3) -> Option<(Id, Vec3)> {
+        let ground = self.tree.handle(self.ground)?;
+        let height = |node: Id, at: Vec3| -> Option<i64> {
+            let x = xform_to(self.tree, self.tree.handle(node)?, ground).ok()?;
+            Some(x.point(at).ok()?.y)
+        };
+        let own = height(node_of(body), body.pose.position)?;
+        let (has, _) = self.wet(body);
+        // Where its walk leaves from: a level the map joins to it by no portal or link is not one it walks to.
+        let start = self
+            .map
+            .spot_near(node_of(body), body.pose.position, AT_EDGE);
+        let joined = |s: &Spot| start.is_none_or(|a| self.map.may_reach(a.piece, s.piece));
+        // The nearest level its walk may reach, else (none joined to it: a pocket of ground walled in) the nearest of
+        // all, which the walk then goes as near to as it can, as before.
+        let mut best: Option<(bool, i64, Id, Vec3)> = None;
+        let mut keep = |node: Id, s: Spot, y: i64| {
+            let gap = (y - own).abs();
+            let at = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+            let far = !joined(&s);
+            if best.is_none_or(|(f, g, ..)| (far, gap) < (f, g)) {
+                best = Some((far, gap, node, at));
+            }
+        };
+        if let Some(s) = self.map.spot_for(self.ground, Vec3::new(p.x, 0, p.z), has) {
+            // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
+            let at = Vec3::new(s.at[0] * 1000, 0, s.at[2] * 1000);
+            let frame = Frame {
+                node: self.ground,
+                slot: None,
+            };
+            let y = self
+                .surfaces
+                .get(&self.ground)
+                .and_then(|g| g.place(body.id, frame, at, body.pose.orientation).ok())
+                .map_or(0, |b| b.pose.position.y);
+            keep(self.ground, s, y);
+        }
+        for &node in self.surfaces.keys() {
+            if node == self.ground || !self.map.is_floor(node) {
+                continue;
+            }
+            let Some(x) = self
+                .tree
+                .handle(node)
+                .and_then(|h| xform_to(self.tree, h, ground).ok())
+            else {
+                continue;
+            };
+            // The point in the floor's frame: the inverse of its move to the ground's frame.
+            let [w, qx, qy, qz] = x.rot.parts();
+            let Some(local) = Quat::new(w, -qx, -qy, -qz)
+                .or_else(|_| Quat::new(-w, qx, qy, qz))
+                .ok()
+                .and_then(|back| back.rotate(Vec3::new(p.x, 0, p.z).minus(x.pos).ok()?).ok())
+            else {
+                continue;
+            };
+            if let Some(s) = self.map.spot(node, local) {
+                keep(node, s, self.map.world(s.piece, s.at)[1] * 1000);
+            }
+        }
+        best.map(|(_, _, node, at)| (node, at))
+    }
+
+    /// The nearest point of the open ground's plan (µm, the ground's frame) round `p` where `body` would stand
+    /// ([`View::level_under`]), on rings `pitch` apart out to `out`, `⌊2πk⌋` points on ring `k` (at least six), as the
+    /// spot tables lay theirs (`crate::spots`): the first ring with one, its first point. Map lookups only, no route
+    /// search. `None` with none.
+    pub fn standable_near(&self, body: &Body, p: Vec3, pitch: i64, out: i64) -> Option<Vec3> {
+        for k in 1..=out / pitch.max(1) {
+            let n = (6_283 * k / 1_000).max(6);
+            for j in 0..n {
+                let off = Quat::from_yaw_mdeg(j * 360_000 / n)
+                    .and_then(|q| q.rotate(Vec3::new(0, 0, k * pitch)))
+                    .ok()?;
+                let q = Vec3::new(p.x + off.x, 0, p.z + off.z);
+                if self.level_under(body, q).is_some() {
+                    return Some(q);
+                }
+            }
+        }
+        None
+    }
+
     /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
     /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
     pub fn stand_near_door(
@@ -3306,6 +3621,7 @@ impl<'a> View<'a> {
             self.link_at,
             self.buildings,
             self.ground,
+            self.wet(body),
             body,
             node,
             goal,
@@ -3351,15 +3667,21 @@ impl<'a> View<'a> {
             return Ok(line(vec![p, [to.x, to.z]], true));
         }
         let map = self.map;
+        let (has, wet) = self.wet(body);
+        let g = self.ground_of(body);
         let (Some(from), Some(goal)) = (
-            map.spot_near(node, body.pose.position, AT_EDGE),
-            // A link's near end lies on its piece's edge, within the grid's rounding.
-            map.spot_near(node, to, AT_EDGE),
+            wet.or_else(|| map.spot_near(node, body.pose.position, AT_EDGE)),
+            // A link's near end lies on its piece's edge, within the grid's rounding; in the water, on its own
+            // ground's edge (#3225).
+            match (g, self.water) {
+                (crate::gaits::Ground::Dry, _) | (_, None) => map.spot_near(node, to, AT_EDGE),
+                (g, Some(w)) => w.near(map, g, to),
+            },
         ) else {
             return Err(refusal("off-ground", show(node)));
         };
         let t0 = self.now();
-        let r = map.route_in(&mut self.scratch.borrow_mut(), self.tree, from, goal, HANDS);
+        let r = map.route_in(&mut self.scratch.borrow_mut(), self.tree, from, goal, has);
         let t1 = self.now();
         self.spend(|s| {
             s.searches += 1;
@@ -3394,7 +3716,7 @@ impl<'a> View<'a> {
         }
         let mut points = vec![p];
         points.extend(corners.iter().map(|c| [c[0] * 1000, c[1] * 1000]));
-        self.round(node, &mut points);
+        self.round(body, &mut points);
         Ok(line(points, whole))
     }
 
@@ -3402,8 +3724,9 @@ impl<'a> View<'a> {
     /// that is off the surface), so a walker that reaches it and turns for the next is clear of the edge it went round
     /// (#3473). Otherwise a square corner (N11a's steep cells, cut whole) stops a walker: it comes within
     /// [`AT_CORNER`] of the corner, turns for the next, walks into the face beside it, and slides ever less along it.
-    fn round(&self, node: Id, points: &mut [[i64; 2]]) {
-        let Some(s) = self.surfaces.get(&node) else {
+    fn round(&self, body: &Body, points: &mut [[i64; 2]]) {
+        let node = node_of(body);
+        let Some(s) = self.surface_of(body) else {
             return;
         };
         let line = points.to_vec();
@@ -3718,6 +4041,10 @@ impl Links for Town {
         speed: i64,
         at: Micros,
     ) -> Result<Option<Track>, Refusal> {
+        self.water.lands.remove(&body.id);
+        if let Some(t) = self.shore_track(body, link, speed) {
+            return t.map(Some);
+        }
         // The world opens a shut door for the walker: its own rule, the walker as the acting Soul.
         let (from, track) = self.track_of(body, link, Cause::World, speed, at)?;
         if track.is_some() {
@@ -3729,6 +4056,69 @@ impl Links for Town {
 
     fn in_turns(&self, link: Id) -> bool {
         self.read_link(link).is_some()
+    }
+
+    fn lands_on(&mut self, body: Id) -> Option<crate::gaits::Ground> {
+        self.water.lands.remove(&body)
+    }
+}
+
+impl Town {
+    /// The track across shore `link` for `body` (#3225, [`super::water`]): from where it stands at the near end, the
+    /// middle of the edge the two grounds share, to the nearest point of the far piece, at the slower of `speed` and
+    /// the wetter ground's gait; then it stands on the far ground's surface, which [`Links::lands_on`] names. Refused
+    /// by name into water the body may not use, and from further than [`REACH`] off the near end. `None` for any
+    /// other link.
+    fn shore_track(&mut self, body: &Body, link: Id, speed: i64) -> Option<Result<Track, Refusal>> {
+        // A link of a building (a doorway, a stair, a step) is no shore: no search of the map's links for it.
+        if self.size_of(body.id) != Size::Standard || self.link_at.contains_key(&link) {
+            return None;
+        }
+        let shore = match self.water.shore(&self.map, body.id, link)? {
+            Ok(s) => s,
+            Err(r) => return Some(Err(r)),
+        };
+        let p = body.pose.position;
+        if flat2(shore.middle, p) > i128::from(REACH) * i128::from(REACH) {
+            return Some(Err(refusal(
+                "link-not-here",
+                format!("{} from {} µm", show(link), flat2(shore.middle, p).isqrt()),
+            )));
+        }
+        let ground = self.ground;
+        let dry = self.surfaces.get(&ground)?;
+        let Some(land) = self.water.landing(&self.map, dry, &shore) else {
+            return Some(Err(refusal("link-end-off-ground", show(link))));
+        };
+        let on = match shore.ground {
+            crate::gaits::Ground::Dry => Some(dry),
+            g => self.water.surfaces(g).and_then(|s| s.get(&ground)),
+        };
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
+        let stand = match on.map(|s| s.place(body.id, frame, land, body.pose.orientation)) {
+            Some(Ok(b)) => b.pose.position,
+            Some(Err(r)) => return Some(Err(r)),
+            None => return Some(Err(refusal("no-surface", show(ground)))),
+        };
+        // A carry shorter than a tick's walk would end in the tick it starts, unseen by the walk, which would ask to
+        // cross again and be carried back: a landing that near is refused, and the walk ends by name where it stands.
+        if flat2(stand, p) < i128::from(super::water::IN / 2).pow(2) {
+            return Some(Err(refusal("link-end-off-ground", show(link))));
+        }
+        if shore.ground != crate::gaits::Ground::Dry {
+            self.water.lands.insert(body.id, shore.ground);
+        }
+        Some(Ok(Track {
+            link: Some(link),
+            line: vec![stand],
+            speed: speed.min(shore.gait),
+            to: ground,
+            arrive: Some(stand),
+            hold: true,
+        }))
     }
 }
 
