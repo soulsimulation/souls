@@ -287,7 +287,7 @@ export class FollowCamera{
     return a<=b?Math.max(a,Math.min(b,current)):Math.max(low,Math.min(high,centre));
    };
    let desiredX=whole?choose(x,safe.left+x-minX,safe.right+x-maxX,(safe.left+safe.right)/2,.14):null;
-   let desiredY=whole?choose(y,safe.bottom+y-minY,safe.top+y-maxY,(safe.bottom+safe.top)/2,.10):null;
+   let desiredY=whole?choose(y,safe.bottom+y-minY,safe.top+y-maxY,safe.top-.65*(safe.top-safe.bottom),.10):null;
    if(desiredX===null||desiredY===null){
     // An infeasible full-body rectangle must not cancel useful reacquisition.
     // These are observed head and bounds-centre targets, not anatomical volumes.
