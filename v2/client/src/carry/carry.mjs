@@ -262,7 +262,9 @@ export function raiseSlot(ctx, part) {
       // turned as the slot within 15 degrees (worldd's bound too): its own x, its base line, along the bay's
       const px = turn(at.rot ?? [ONE, 0, 0, 0], [M, 0, 0]), bx = turn(b.rot ?? [ONE, 0, 0, 0], [M, 0, 0]);
       const cos = (px[0] * bx[0] + px[2] * bx[2]) / ((Math.hypot(px[0], px[2]) * Math.hypot(bx[0], bx[2])) || 1);
-      if (d <= RAISE_INTO && cos >= RAISE_INTO_COS && (!best || d < best.d)) best = { bay, n: s.n, name, d };
+      // a kind the same turned a half turn (`state.symmetry` front_back) is raised into the slot turned either way
+      const either = kinds[kindOf(part)]?.state?.symmetry?.default === 'front_back';
+      if (d <= RAISE_INTO && (either ? Math.abs(cos) : cos) >= RAISE_INTO_COS && (!best || d < best.d)) best = { bay, n: s.n, name, d };
     }
   }
   return best && { bay: best.bay, n: best.n, name: best.name };

@@ -117,11 +117,33 @@ impl Engine {
             turn -= 360_000;
         }
         let turn = turn.clamp(-179_000, 179_000);
-        let ticks = (turn.abs() + RATE - 1) / RATE;
+        let mut ticks = (turn.abs() + RATE - 1) / RATE;
         if ticks == 0 {
             return Ok(());
         }
+        // No carrier is walked round faster than a walk (review of #5268): a long load turns slower. Its arc is at most
+        // its radius times the turn, in radians (π/180000 a millidegree, as 1745/10^8).
+        let radius = members
+            .iter()
+            .filter_map(|b| stands(c, *b).ok())
+            .map(|(_, f)| (i128::from(f.x - mid.x).pow(2) + i128::from(f.z - mid.z).pow(2)).isqrt())
+            .max()
+            .unwrap_or(0);
+        let arc = radius * i128::from(turn.abs()) * 1745 / 100_000_000;
+        let fastest = i128::from(crate::bodies::WALK) * i128::from(HOIST_TICK) / 1_000_000;
+        ticks = ticks.max(i64::try_from((arc + fastest - 1) / fastest.max(1)).unwrap_or(ticks));
         let ground = carry.ground;
+        // A crew still walking (its front's walk, a carrier's own) turns once it stands (review of #5268): the world
+        // never walks a body round while its own walk would take it on after.
+        if let Some(b) = members
+            .iter()
+            .find(|b| c.body(**b).is_some_and(|m| m.linear != Vec3::ZERO) || c.carried(**b))
+        {
+            return Err(refusal(
+                "carry-turn-walking",
+                format!("{} is walking; next: turn it once the crew stands", show(*b)),
+            ));
+        }
         // The load as it is held, at every tick of the turn, against its ground's fixed geometry.
         let fixed = Fixed::of(tree, ground).map_err(|e| refusal("carry-geometry", e))?;
         let (plan, band) = carry.load.as_held()?;

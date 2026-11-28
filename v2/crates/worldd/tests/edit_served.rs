@@ -5018,7 +5018,9 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     use sim::activity::carry::raise::{SIDE, Spec};
     let d = scratch("raiseinto");
     let (facts, slots) = yard_world(&d);
-    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    // Two raise it; two more walk past the bay all through the raise and its end (the camp's walkers: its standing
+    // commit was refused `edit.body-stale` while bodies moved, #5067).
+    let w = seed_entries(&d, &facts, 4, (52, -20), Some(&d.join("entries")));
     let (creator_id, creator_actor) = creator(0xa8);
     static_creator(&w, creator_id);
     let socket = d.join("s");
@@ -5082,9 +5084,18 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     for (k, p) in stations.iter().enumerate() {
         hands[k].walk_to(g, *p);
     }
-    for h in hands.iter_mut() {
+    for h in hands[..2].iter_mut() {
         let e = socket_end(&mut h.s);
         assert_eq!(e.kind, 1, "to its raise station: {e:?}");
+    }
+    // The two bystanders to their lanes' starts, 3 m west of the bay.
+    let lanes = [(v3(53 * M, 0, -20 * M), v3(53 * M, 0, -30 * M)), (v3(52 * M, 0, -30 * M), v3(52 * M, 0, -20 * M))];
+    for (k, (a, _)) in lanes.iter().enumerate() {
+        hands[2 + k].walk_to(g, *a);
+    }
+    for h in hands[2..].iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "a bystander to its lane: {e:?}");
     }
     let body = body_of(&w, w.souls[1]);
     let got = hands[0].act(
@@ -5109,6 +5120,13 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     let got = hands[0].act("part:raise", crew, into(slots["upright_a"]));
     println!("raised into upright_a: {got:?}");
     assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    // The two walk to and fro 3 m west of the bay while it is raised, slid and seated (each was born at its lane's
+    // start before the raise).
+    let mut leg = [0usize; 2];
+    for (k, (_, z)) in lanes.iter().enumerate() {
+        hands[2 + k].walk_to(g, *z);
+        leg[k] = 1;
+    }
     // Raised, slid and seated, held by both.
     let t0 = std::time::Instant::now();
     let held = loop {
@@ -5121,6 +5139,17 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
             .next_back();
         if let Some(h) = h.filter(|h| h.phase == HELD) {
             break h;
+        }
+        // A bystander whose walk has ended sets off along its lane the other way.
+        for k in 0..2 {
+            let b = body_at(&w, body_of(&w, w.souls[2 + k]));
+            let (a, z) = lanes[k];
+            let goal = if leg[k] % 2 == 0 { a } else { z };
+            if apart_mm(b, goal) < 400 {
+                leg[k] += 1;
+                let _ = socket_end(&mut hands[2 + k].s);
+                hands[2 + k].walk_to(g, if leg[k] % 2 == 0 { a } else { z });
+            }
         }
         if t0.elapsed() > Duration::from_secs(40) {
             while let Ok(l) = s.lines.try_recv() {
@@ -5140,7 +5169,7 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
         std::thread::sleep(Duration::from_millis(200));
     };
     let (parent, slot, pos) = where_is(&w, frame);
-    println!("seated: {parent:?} slot {slot:?} at {pos:?}; held {:?}", held.holds);
+    println!("seated: {parent:?} slot {slot:?} at {pos:?}, the bystanders walking {leg:?} legs; held {:?}", held.holds);
     assert_eq!((parent, slot), (Some(bay), Some(slots["upright_a"])), "in upright_a");
     assert!(apart_mm(pos, ua) <= 2, "where the slot is: {pos:?} {ua:?}");
     // Held from outside the bay: away from upright_b, which is at the bay's +z of upright_a, so the frame's own -z.
@@ -5172,9 +5201,10 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     // The holders walk round behind its posts: each 0.35 m off its outer face, outside the bay.
     let t0 = std::time::Instant::now();
     loop {
-        let z: Vec<i64> = w.souls.iter().map(|s| body_at(&w, body_of(&w, *s)).z).collect();
+        let z: Vec<i64> = w.souls[..2].iter().map(|s| body_at(&w, body_of(&w, *s)).z).collect();
         if z.iter().all(|z| *z < ua.z - 300_000) {
             println!("the holders stand outside the bay, z {z:?} mm off {}", ua.z);
+            hands_on_the_face_held_from(&w, crew, frame);
             break;
         }
         assert!(t0.elapsed() < Duration::from_secs(20), "holders behind its posts: {z:?} {}", ua.z);
@@ -5351,6 +5381,7 @@ fn a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way() {
         let z: Vec<i64> = w.souls.iter().map(|s| body_at(&w, body_of(&w, *s)).z).collect();
         if z.iter().all(|z| *z > ub.z + 300_000) {
             println!("the holders stand outside the bay, z {z:?} mm off {}", ub.z);
+            hands_on_the_face_held_from(&w, crew, frame);
             break;
         }
         assert!(t0.elapsed() < Duration::from_secs(20), "holders behind its posts: {z:?} {}", ub.z);
@@ -5569,6 +5600,33 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     }
     let (parent, slot, _) = where_is(&w, frame);
     assert_eq!((parent, slot), (Some(bay), Some(slots["upright_a"])), "raised into upright_a");
+}
+
+/// #5067: each holder of crew `crew`'s standing `part` has its hands on the face it stands at: the hands' side of the
+/// part's plane (its own z, as it is seated) is the side its feet are on, and its hands are on that face.
+fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
+    use sim::activity::carry::grips::{GRIPS, Holds};
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let x = sim::ground::scene::xform_to(t, t.handle(part).unwrap(), t.handle(w.ground).unwrap()).unwrap();
+    drop(copy);
+    let h = logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+        .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+        .next_back()
+        .expect("its holds");
+    let n = x.rot.rotate(Vec3::new(0, 0, M)).unwrap();
+    let side = |p: Vec3| (i128::from(p.x - x.pos.x) * i128::from(n.x) + i128::from(p.z - x.pos.z) * i128::from(n.z)).signum();
+    for hold in &h.holds {
+        let hand = x.point(hold.hands[0]).unwrap();
+        let feet = body_at(w, hold.body);
+        println!("{} holds at {hand:?} (its face {}), stands at {feet:?} (side {})", hold.grip, side(hand), side(feet));
+        assert_eq!(side(hand), side(feet), "{}'s hands on the face it stands at: {hold:?}", hold.grip);
+        assert_ne!(side(hand), 0, "on a face, not in the frame's plane");
+    }
 }
 
 fn apart_mm(a: Vec3, b: Vec3) -> i64 {
@@ -9083,6 +9141,13 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         let got = souls[front].act("activity:leave", c, BTreeMap::new()).await;
         println!("one of frame {slot}'s two holders lets go: {got:?}");
         assert_eq!((got.kind, got.reason.as_str()), (2, "support.holders"), "refused: {got:?}");
+        // A refused leave changes nothing: the crew's last word of who holds it still names both.
+        std::thread::sleep(Duration::from_millis(500));
+        let last = grips_said(&w, c, |_, _| true);
+        assert_eq!(last, ("souls:held".to_owned(), vec![a, b]), "frame in {slot}: both still hold it");
+        // Each holder walks round to behind its post, its hands on that face.
+        std::thread::sleep(Duration::from_secs(3));
+        hands_on_the_face_held_from(&w, c, frame);
     }
 
     // Each beam by the front's commands alone. The crew's places at the take, in the carry's frame from its middle
