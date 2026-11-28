@@ -48,9 +48,11 @@ use crate::assembly::{Carrier, Ready, Step, out_of_reach};
 pub const RAISE: &str = "souls:raise";
 pub const LOWER: &str = "souls:lower";
 /// A raise whose end could not be committed for the world's seat wait (FOR-FABLE 15): it stops held where it stands,
-/// its crew holding it (`souls:carry-track` in this phase, why [`MAP_BUSY`]), and the Soul who asked may ask again.
+/// its crew holding it (`souls:carry-track` in this phase, why [`BUSY_WORD`]); the Soul who asked is refused
+/// [`MAP_BUSY`] and may ask again.
 pub const RAISE_HELD: &str = "souls:raise-held";
 pub const MAP_BUSY: &str = "raise.map-busy";
+const BUSY_WORD: &str = "souls:map-busy";
 /// How near its end the lifter's walk has to come for the part to finish its turn, µm.
 const NEAR: i64 = 60_000;
 /// How many ticks a part may stay still on its way before it goes on without its lifter, for good.
@@ -733,7 +735,7 @@ impl Engine {
 
     /// Crew `activity`'s raise, if it is one, ended its end's wait for a stale map past the world's seat wait
     /// (FOR-FABLE 15): stopped held where it stands, never turned back, its crew holding it. Said `souls:carry-track`
-    /// [`RAISE_HELD`] why [`MAP_BUSY`] and `souls:carry-grips` `souls:held`; the intent that ended it, if still open, is
+    /// [`RAISE_HELD`] why [`BUSY_WORD`] and `souls:carry-grips` `souls:held`; the intent that ended it, if still open, is
     /// refused [`MAP_BUSY`]. `false` when it is no raise.
     pub(super) fn raise_busy(&mut self, r: &Ready, now: Micros, live: &Tree) -> bool {
         let Some(ra) = self.raising.get_mut(&r.activity) else {
@@ -752,7 +754,7 @@ impl Engine {
             part,
             RAISE_HELD,
             (since, now),
-            Some(MAP_BUSY),
+            Some(BUSY_WORD),
             word,
         ) {
             eprintln!("worldd: a raise stopped held was not said: {e}");

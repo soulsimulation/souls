@@ -5288,7 +5288,7 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
 
 /// FOR-FABLE 15, past the world's seat wait (shortened to 3 s here, `WORLDD_SEAT_WAIT_S`): crew B's lifter walks on
 /// through A's end for longer than A's seating may wait, so A stops held where it stands, its crew holding it
-/// (`souls:raise-held`, why `raise.map-busy`), never turned back; once B's crew stands still, A's lifter asks again and
+/// (`souls:raise-held`, why `souls:map-busy`), never turned back; once B's crew stands still, A's lifter asks again and
 /// it is seated in `upright_a`.
 #[test]
 fn a_raise_into_a_slot_past_the_seat_wait_stops_held_and_is_seated_when_asked_again() {
@@ -5475,7 +5475,7 @@ fn raise_beside_a_walking_crew(busy: bool) {
     let t0 = std::time::Instant::now();
     loop {
         let said = words(crew);
-        if busy && said.iter().any(|s| s.contains("raise.map-busy")) {
+        if busy && said.iter().any(|s| s.contains("souls:map-busy")) {
             break;
         }
         if !busy && grips_of(crew).is_some_and(|h| h.phase == HELD) {
