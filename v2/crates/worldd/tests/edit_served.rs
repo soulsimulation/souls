@@ -6358,7 +6358,13 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         (fa, ua, (2, 3), "Souls 3 and 4 to frame A"),
         (fb, ub, (4, 5), "Souls 5 and 6 to frame B"),
     ] {
-        let (f0, f1) = frame_across(at);
+        // Behind its posts, outside the bay, where its holders stood (`grips::stance`: its posts 571.5 mm either side
+        // of its middle, 0.35 m off its 38 mm face): the bay's seated parts keep a walker off its edges' places.
+        let out = if at.z < (ua.z + ub.z) / 2 { -1 } else { 1 };
+        let (f0, f1) = (
+            v3(at.x + 571_500, 0, at.z + out * 388_000),
+            v3(at.x - 571_500, 0, at.z + out * 388_000),
+        );
         both(&w, &mut souls, g, (a, b), f0, f1, what).await;
         holds.push(crew(&mut souls, (a, b), f).await);
     }
