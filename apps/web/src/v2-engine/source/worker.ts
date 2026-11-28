@@ -379,7 +379,11 @@ async function run(stream: URL) {
       if (ref) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
     }
     const refs = [...said.filter(x => !x.private).map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
-    if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
+    // N8 (28 Nov): its words through the read ahead, as a catch-up's are: read one part at a time, they were 4.8 of the
+    // 10 to 12 s a cold Verdelis Eden took to reach now (44 parts, each naming a word none had given). Not needed, the
+    // read ahead's is let go.
+    if (refs.some(r => !words.has(r))) addWords(await partFile(p, n, '.text'));
+    else fetching.delete(path(p, `${n}.text`));
     for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
     observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds });

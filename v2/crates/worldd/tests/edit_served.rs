@@ -2348,6 +2348,8 @@ mod sit_by_kind;
 
 #[path = "edit_served/six_beam.rs"]
 mod six_beam;
+#[path = "edit_served/slow_edit.rs"]
+mod slow_edit;
 
 #[path = "edit_served/teardown.rs"]
 mod teardown;

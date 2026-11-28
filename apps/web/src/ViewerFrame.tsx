@@ -8,7 +8,7 @@ import { requestBroadcast } from './follow-soul-request.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
 import { arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
-import { arrivalCatching } from './arrival-catching.ts';
+import { ArrivalLag, arrivalCatching } from './arrival-catching.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
@@ -241,10 +241,12 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const ago = recorded && shownMs !== null ? momentAgo(shownMs, Date.now()) : '';
   // 27 Nov: a cold arrival's first picture is the stream's checkpoint, up to an hour back: Catching up until it is at
   // now, once (arrival-catching.ts); later lags say why through the reasons above, as before
-  const drawnAt = useRef<number | null>(null), reachedNow = useRef(false);
+  const drawnAt = useRef<number | null>(null), reachedNow = useRef(false), lag = useRef<ArrivalLag | null>(null);
   if (shownMs !== null && !state?.loading) drawnAt.current ??= performance.now();
+  // N8: and while the picture still gains on the clock (arrival-catching.ts ArrivalLag), so Live waits for it to be at now
+  const gaining = v2 && !recorded && !arriving && shownMs !== null && !reachedNow.current && (lag.current ??= new ArrivalLag()).gaining(performance.now(), Date.now() - shownMs);
   const catchingUp = v2 && !recorded && !arriving && shownMs !== null && !reachedNow.current
-    && arrivalCatching(shownMs, Date.now(), performance.now() - (drawnAt.current ?? performance.now()));
+    && arrivalCatching(shownMs, Date.now(), performance.now() - (drawnAt.current ?? performance.now()), gaining);
   if (shownMs !== null && !arriving && !state?.loading && !catchingUp) reachedNow.current = true;
   const busy = !handle || shownTick == null || !!state?.loading;
   const minute = v2 ? 60e6 / TICK_US : 60 / dt;

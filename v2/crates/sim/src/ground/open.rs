@@ -7,8 +7,10 @@
 //!   lists its boxes in the order the whole one does, and each square is cut from the same boxes in the same order.
 //! - **What a change cuts again** ([`Index::recut`]): the children holding the nodes a part changes, read again from
 //!   the tree it leaves, and the squares that meet their old or new bounds, grown by [`affect`] and by the reach of
-//!   any doorway near them (a box beside a doorway sets how deep it is). Those squares are cut from a scene of the
-//!   parts that meet them, grown by [`SELECT`] and twice the widest doorway, on the terrain under it alone.
+//!   any doorway near them (a box beside a doorway sets how deep it is). Each changed child's squares are found from
+//!   its own bounds (#5216): changes whose squares meet are cut together as one box of squares, and changes far apart
+//!   leave the squares between them as they are. Each box of squares is cut from a scene of the parts that meet it,
+//!   grown by [`SELECT`] and twice the widest doorway, on the terrain under it alone.
 //! - **What it gives back**: each square's dry pieces and its doorways' meets. A square's water pieces are cut from
 //!   the waters and the ground cover only, so they are kept; the shores between them and the new dry pieces are
 //!   found again by the route map (`crate::routes::Map::replace_squares`). A doorway whose meets changed has its
@@ -319,7 +321,9 @@ impl Index {
             kids.extend(self.child_of(after, n));
         }
         let mut parts = (*self.parts).clone();
-        let mut changed_bb: Option<[i64; 4]> = None;
+        // Each changed child's bounds, before and after, and each changed gate's: each is cut again about itself
+        // (#5216), never all that lies between two changes far apart.
+        let mut changed_bbs: Vec<[i64; 4]> = Vec::new();
         for &k in &kids {
             let old = parts.remove(&k);
             let new = match after.handle(k) {
@@ -339,9 +343,7 @@ impl Index {
                 if !s.waters.is_empty() || !s.areas.is_empty() || !s.covers.is_empty() {
                     return Err("a water, a place's outline or ground cover");
                 }
-                if let Some(b) = p.bb {
-                    changed_bb = Some(join(changed_bb, b));
-                }
+                changed_bbs.extend(p.bb);
             }
             if let Some(p) = new {
                 parts.insert(k, p);
@@ -353,10 +355,10 @@ impl Index {
         let gates_moved = gates != *self.gates;
         let gates = if gates_moved {
             for d in self.gates.iter().filter(|d| !gates.contains(d)) {
-                changed_bb = Some(join(changed_bb, door_bb(d)));
+                changed_bbs.push(door_bb(d));
             }
             for d in gates.iter().filter(|d| !self.gates.contains(d)) {
-                changed_bb = Some(join(changed_bb, door_bb(d)));
+                changed_bbs.push(door_bb(d));
             }
             Arc::new(gates)
         } else {
@@ -376,69 +378,82 @@ impl Index {
             terrain: self.terrain.clone(),
             widest,
         };
-        let Some(changed_bb) = changed_bb else {
+        if changed_bbs.is_empty() {
             return Ok(Recut {
                 squares: Vec::new(),
                 index,
                 gates_moved,
             });
-        };
-        // The change, grown, and every doorway near it (a box beside one sets its depth).
-        let mut affect = grow(changed_bb, affect(radius));
+        }
+        // Each change, grown, and every doorway near it (a box beside one sets its depth), as the squares it meets
+        // (least i, least j, most i, most j). Changes whose squares meet are cut together, as one box of squares;
+        // changes apart are cut apart, so the squares between them are left as they are (#5216).
         let doors = index.doorways(gh, after);
-        for d in &doors {
-            let b = door_bb(d);
-            if meets(&b, &affect) {
-                affect = join(Some(affect), b);
-            }
-        }
         let sq = SQUARE * 1000;
-        let mut squares = Vec::new();
-        for j in affect[1].div_euclid(sq)..=affect[3].div_euclid(sq) {
-            for i in affect[0].div_euclid(sq)..=affect[2].div_euclid(sq) {
-                squares.push((i as i32, j as i32));
+        let mut groups: Vec<[i64; 4]> = Vec::new();
+        for bb in changed_bbs {
+            let mut affect = grow(bb, affect(radius));
+            for d in &doors {
+                let b = door_bb(d);
+                if meets(&b, &affect) {
+                    affect = join(Some(affect), b);
+                }
             }
-        }
-        let mut window: Option<[i64; 4]> = None;
-        for &s in &squares {
-            cut(s).ok_or("a square not cut before")?;
-            window = Some(join(window, square_bb(s)));
-        }
-        let window = grow(window.ok_or("no square")?, SELECT + 2 * self.widest);
-        let mut scene = Scene {
-            open: true,
-            terrain: Terrain::within(after, self.ground, window).map_err(|_| "the terrain")?,
-            ..Scene::default()
-        };
-        for &c in after.children(gh).ok_or("no ground")? {
-            let Some(id) = after.node(c).map(|n| n.id()) else {
-                continue;
-            };
-            if let Some(p) = index.parts.get(&id)
-                && p.bb.is_some_and(|b| meets(&b, &window))
-            {
-                scene.add((*p.scene).clone());
+            let mut group = affect.map(|v| v.div_euclid(sq));
+            while let Some(k) = groups.iter().position(|g| meets(g, &group)) {
+                group = join(Some(group), groups.swap_remove(k));
             }
+            groups.push(group);
         }
-        scene.doorways.extend(
-            index
-                .gates
-                .iter()
-                .filter(|d| meets(&door_bb(d), &window))
-                .cloned(),
-        );
-        let terrain = scene.terrain.clone();
-        let mut open = OpenGround(
-            prepare(&scene, radius, Turn::NONE).map_err(|_| "the scene")?,
-            None,
-        );
-        open.1 = terrain;
         let mut out = Vec::new();
-        for (i, j) in squares {
-            let p = open.cut_square(i, j);
-            let on = open.on_terrain(&p.pieces);
-            out.push(((i, j), p.pieces, p.meets, on));
+        for g in groups {
+            let mut squares = Vec::new();
+            let mut window: Option<[i64; 4]> = None;
+            for j in g[1]..=g[3] {
+                for i in g[0]..=g[2] {
+                    let s = (i as i32, j as i32);
+                    cut(s).ok_or("a square not cut before")?;
+                    window = Some(join(window, square_bb(s)));
+                    squares.push(s);
+                }
+            }
+            let window = grow(window.ok_or("no square")?, SELECT + 2 * self.widest);
+            let mut scene = Scene {
+                open: true,
+                terrain: Terrain::within(after, self.ground, window).map_err(|_| "the terrain")?,
+                ..Scene::default()
+            };
+            for &c in after.children(gh).ok_or("no ground")? {
+                let Some(id) = after.node(c).map(|n| n.id()) else {
+                    continue;
+                };
+                if let Some(p) = index.parts.get(&id)
+                    && p.bb.is_some_and(|b| meets(&b, &window))
+                {
+                    scene.add((*p.scene).clone());
+                }
+            }
+            scene.doorways.extend(
+                index
+                    .gates
+                    .iter()
+                    .filter(|d| meets(&door_bb(d), &window))
+                    .cloned(),
+            );
+            let terrain = scene.terrain.clone();
+            let mut open = OpenGround(
+                prepare(&scene, radius, Turn::NONE).map_err(|_| "the scene")?,
+                None,
+            );
+            open.1 = terrain;
+            for (i, j) in squares {
+                let p = open.cut_square(i, j);
+                let on = open.on_terrain(&p.pieces);
+                out.push(((i, j), p.pieces, p.meets, on));
+            }
         }
+        // In one order whatever the groups': by square, z then x, as one box of squares is listed.
+        out.sort_by_key(|(s, ..)| (s.1, s.0));
         Ok(Recut {
             squares: out,
             index,
