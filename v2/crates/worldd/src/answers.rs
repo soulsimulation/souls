@@ -3063,8 +3063,10 @@ impl Clock {
                         })
                     })
             });
-            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
-            if r.step == crate::assembly::Step::Retired
+            // A part whose walkers' maps went stale before its commit is prepared again from the world as it is then
+            // (0.135 A2: a retiring holder's set-down, its body leaving; #5067: a raise's or a seating's end, bodies
+            // walking meanwhile), never refused for it: at most `RETRIES` times.
+            if r.step != crate::assembly::Step::Taken
                 && done
                     .as_ref()
                     .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))

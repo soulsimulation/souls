@@ -20,8 +20,9 @@
 //!   `souls:raise` or `souls:lower`, then `souls:held` or `souls:released`.
 //! - **A restart part way.** A raise is not stored. A world started again finds a part riding its crew's slot unturned
 //!   at its foot, the node turned off the upright ([`Raise::resume`]), and lowers it from where it is on the same
-//!   track, by itself, until it lies; then it is put down and let go. It is never left leaning. A part standing in
-//!   its crew's slot (a raise on its last tick, or a part carried standing) is set down standing, as a carry's is.
+//!   track, by itself, until it lies; then it is put down and let go. It is never left leaning. A part at its foot
+//!   upright (a raise on its last tick) is lowered the same way, toward its own front. A part carried standing (its
+//!   crew's node at carrying height, not at the foot) is set down standing, as a carry's is.
 
 use replica::effects::{Actor, Cause};
 use replica::ids::Id;
@@ -80,6 +81,9 @@ pub struct Raising {
     still: u32,
     driven: bool,
     waited: u32,
+    /// For how many ticks in a row its tick could not be written: at [`WAIT`] it is given up (review of #5264), so a
+    /// failing write never keeps its crew for ever.
+    failed: u32,
     /// When its track began.
     since: Micros,
     /// The grip the lifter is said to hold: the kind's highest, its name and its point (the foot when it names none).
@@ -145,9 +149,31 @@ impl Engine {
             .handle(activity)
             .and_then(|h| tree.node(h))
             .and_then(|n| n.parent());
+        // A lowering with no part named lowers the one its crew holds: the standing part its node is under, else the one
+        // in its slot.
+        let holds = || {
+            let under = held.filter(|p| {
+                tree.handle(*p)
+                    .and_then(|h| tree.node(h))
+                    .is_some_and(|n| self.raise_specs.contains_key(plain(n.kind().as_str())))
+            });
+            let carried = || {
+                tree.handle(activity)
+                    .and_then(|h| tree.children(h))
+                    .and_then(|c| c.first().copied())
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.id())
+            };
+            under.or_else(carried).ok_or_else(|| {
+                refusal(
+                    "raise-needs-a-part",
+                    format!("{} holds no part; next: name the part (part lower <crew> <part>)", show(activity)),
+                )
+            })
+        };
         let part = match (a.params.contains_key(&1), up) {
             (true, _) => param_id(&a.params, 1, "raise-needs-a-part")?,
-            (false, false) => held.ok_or_else(|| refusal("raise-needs-a-part", "parameter 1"))?,
+            (false, false) => holds()?,
             (false, true) => return Err(refusal("raise-needs-a-part", "parameter 1: a part")),
         };
         let node = tree
@@ -235,6 +261,7 @@ impl Engine {
             still: 0,
             driven: false,
             waited: 0,
+            failed: 0,
             since: now,
             grip,
         };
@@ -416,7 +443,20 @@ impl Engine {
             ),
             None => (None, false),
         };
-        let found = match spec.filter(|_| at_foot) {
+        // A raise's node is at the part's foot, on the ground (within its thickness); a part carried standing rides
+        // its crew's slot at carrying height. Only the first is a raise part way (review of #5264).
+        let floor = {
+            let base = sim::ground::scene::Terrain::within(
+                tree,
+                ground,
+                [here.0.x - 1, here.0.z - 1, here.0.x + 1, here.0.z + 1],
+            )
+            .ok()
+            .flatten();
+            sim::ground::scene::Terrain::ground(base.as_ref(), here.0.x, here.0.z, here.0.y)
+        };
+        let on_ground = |s: &sim::activity::carry::raise::Spec| here.0.y - floor <= s.half_thick + 50_000;
+        let found = match spec.filter(|s| at_foot && on_ground(s)) {
             Some(spec) => Raise::resume(spec, here.0, here.1).ok().flatten(),
             None => None,
         };
@@ -447,6 +487,7 @@ impl Engine {
             still: 0,
             driven: true,
             waited: 0,
+            failed: 0,
             since: now,
             grip: ("foot".to_owned(), Vec3::ZERO),
         };
@@ -498,12 +539,31 @@ impl Engine {
             let moving = ra.carry.is_some() && !ra.settling;
             ra.waited = if moving { 0 } else { ra.waited + 1 };
             let done = match (moving, ra.waited > WAIT) {
-                (true, _) => self
-                    .raise_step(tree, c, town, activity, &mut ra, now)
-                    .unwrap_or_else(|e| {
+                (true, _) => match self.raise_step(tree, c, town, activity, &mut ra, now) {
+                    Ok(done) => {
+                        ra.failed = 0;
+                        done
+                    }
+                    Err(e) => {
                         eprintln!("worldd: a raise's tick was not written: {e}");
-                        false
-                    }),
+                        ra.failed += 1;
+                        // Given up after WAIT ticks in a row: its crew is let go and may leave; the part stays
+                        // where its last sample had it, and the failure stays in the log.
+                        if ra.failed > WAIT {
+                            eprintln!("worldd: {}'s raise was given up: its ticks fail", show(activity));
+                            let word = (now, Actor::World, Cause::World);
+                            if let Err(e) =
+                                regrip(&mut self.activities, tree, activity, grips::RELEASED, None, word)
+                            {
+                                eprintln!("worldd: a given-up raise's holds were not let go: {e}");
+                            }
+                            if let Some(asm) = self.asm.as_mut() {
+                                asm.ended(activity);
+                            }
+                        }
+                        ra.failed > WAIT
+                    }
+                },
                 // A take whose commit never came back: nothing was taken as far as the world knows; given up.
                 (false, true) if ra.carry.is_none() => {
                     eprintln!("worldd: {}'s raise was given up: its take never came back", show(activity));
