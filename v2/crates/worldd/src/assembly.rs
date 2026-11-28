@@ -206,6 +206,8 @@ pub struct Setting {
 /// The crews' seating in a running world.
 pub struct Assembly {
     seating: Seating,
+    /// The kinds a slot seats turned either way ([`symmetric_kinds`]).
+    pub symmetric: std::collections::BTreeSet<String>,
     /// The part each crew holds in its slot, taken and committed (or waiting to be).
     pub held: BTreeMap<Id, Id>,
     setting: BTreeMap<Id, Setting>,
@@ -529,20 +531,29 @@ fn conj(q: Quat) -> R<Quat> {
         .map_err(|e| refusal("part-pose", format!("{e:?}")))
 }
 
-/// Whether a part of `kind` is the same turned a half turn about its upright (`state.symmetry` `front_back`, #5067):
-/// seated in a slot turned either way, the nearer.
-fn symmetric(rules: &replica::tree::Rules, kind: &str) -> bool {
-    rules.kinds.get(kind).is_some_and(|k| {
-        k.state.values().any(|f| {
-            f.name.as_str() == "symmetry"
-                && matches!(&f.default, replica::encode::Value::Text(t) if t.as_str().ends_with("front_back"))
+/// The kinds (plain names) whose entries say they are the same turned a half turn about their upright
+/// (`state.symmetry`'s default `front_back`, #5067): seated in a slot turned either way, the nearer.
+pub fn symmetric_kinds(entries: &replica::rules::json::Value) -> std::collections::BTreeSet<String> {
+    use replica::rules::json::Value as Json;
+    entries
+        .obj()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|(_, e)| {
+            let sym = e
+                .get("state")
+                .and_then(|s| s.get("symmetry"))
+                .and_then(|f| f.get("default"))
+                .and_then(Json::str);
+            (sym == Some("front_back")).then(|| e.get("kind").and_then(Json::str).map(str::to_owned))?
         })
-    })
+        .collect()
 }
 
 impl Assembly {
     pub fn new(header: Header, rules: Rules, structure: Structure) -> Assembly {
         Assembly {
+            symmetric: std::collections::BTreeSet::new(),
             // The ground and audience are each crew's own, set as it acts ([`Assembly::aim`]).
             seating: Seating::new(
                 header.clone(),
@@ -1036,7 +1047,7 @@ impl Assembly {
         // A part the same turned a half turn about its upright is seated turned the nearer way to how it is held now
         // (#5067: `symmetry` `front_back`).
         let half = Quat::from_yaw_mdeg(180_000).map_err(pose)?;
-        let seat_turn = match slot.is_some() && symmetric(&self.seating.rules, pk.as_str()) {
+        let seat_turn = match slot.is_some() && self.symmetric.contains(replica::world_model::plain(pk.as_str())) {
             true => {
                 let now = from.1.then(held.orientation).map_err(pose)?;
                 let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose);
