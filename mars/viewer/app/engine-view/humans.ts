@@ -651,6 +651,11 @@ export class HumanViews {
     const h = hashId(id);
     const v: View = { rig, prev: s, cur: { ...s }, speed: 0, activity, age: 0, base: activity, arms, legs, spine, seat: SEAT_DEFAULT, vary: (h % 1000) / 1000, cross: ((Math.imul(h, 2654435761) >>> 15) & 1) === 1, saved, layered: false, reachRatio: [], ankle: [], footRest: [], footLat: [], surf: { foot: new Map(), hand: new Map() }, dist: 0, libOn: new Set() };
     v.clipReference=[];rig.model.traverse(o=>{if((o as THREE.Bone).isBone)v.clipReference!.push({o,p:o.position.clone(),q:o.quaternion.clone(),s:o.scale.clone()});});
+    // The reference is sampled in the standing Idle pose, which turns the whole-body bone about 27 degrees and squares the
+    // chest again further up. The seated loops carry no track for that bone (it rests there), so they must fall back to
+    // the rig's rest turn: with Idle's, every seated chest and head drew that far off the seat's forward.
+    const bodyRest=rig.template.gltf.scene.getObjectByName('Body'),bodyReference=v.clipReference.find(s=>s.o.name==='Body');
+    if(bodyRest&&bodyReference)bodyReference.q.copy(bodyRest.quaternion);
     measure(v);
     holdable(v);
     this.views.set(id, v);
