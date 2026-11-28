@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {Group,Mesh,PlaneGeometry,MeshBasicMaterial,Vector3,Matrix4,PerspectiveCamera,BoxGeometry,InstancedMesh} from 'three';
 import {DisplayedCameraObserver} from './observation.ts';
-import {FollowGeometry,FOLLOW_LIMITS} from './follow-camera.ts';import {InteriorView,proposeDoorStage,checkDoorStage} from './interior.ts';import type {NearbyOpeningContext,EnclosureResult} from './enclosure.ts';
+import {FollowGeometry,FOLLOW_LIMITS} from './follow-camera.ts';import {InteriorView} from './interior.ts';import type {EnclosureResult} from './enclosure.ts';
 const v=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 const room={id:'room',floor:0,y:0,height:4,poly:[[-4,-4],[4,-4],[4,4],[-4,4]]};
 const context=()=>({status:'enclosed',building:'b',room:'room',floor:0,revision:'r',sourceRevision:'s',worldMatrix:new Matrix4().toArray(),region:room,proposals:[[0,1.6,0]]} as unknown as EnclosureResult);
@@ -41,38 +41,20 @@ test('invalid or discontinuous travel discards retreat preparation and refused d
  for(const refusal of['blocked','unknown'] as const){const f=retreatFixture();f.q.segmentAuthored=()=>refusal;f.p.prepareRetreat(1,f.subject(1),f.camera,f.eye,f.viewport,f.projection,f.check);assert.deepEqual(f.p.destination()!.eye.toArray(),f.eye.toArray());assert.equal(f.p.diagnostic.retreat,'target-'+refusal);}
 });
 
-test('far doorway proposal derives bounded world depth and opposing tangent bias under transformed metadata',()=>{
- const c={...context(),openingProposals:[{kind:'door' as const,floor:0,at:[0,4] as const,width:1.6,height:2.1,sill:0,from:'room',to:null}]},m=new Matrix4().makeRotationY(.7).multiply(new Matrix4().makeScale(2,1.5,.5));m.setPosition(8,2,-3);c.worldMatrix=m.toArray();
- const opening=v(0,1.6,4).applyMatrix4(m),centre=v(0,1.6,0).applyMatrix4(m),axis=opening.clone().sub(centre).normalize(),tangent=v(-axis.z,0,axis.x),travel=axis.clone().add(tangent),eye=opening.clone().addScaledVector(axis,20),root=opening.clone().addScaledVector(axis,-3);
- const stage=proposeDoorStage(c as unknown as NearbyOpeningContext,eye,root,travel,7)!;assert.ok(stage);assert.ok(Math.abs(stage.eye.clone().sub(opening).dot(axis)-8)<1e-8);assert.ok(Math.abs(stage.eye.clone().sub(opening).dot(tangent)+1.5)<1e-8);assert.equal(stage.eye.y,centre.y);assert.equal(stage.executed,false);
- assert.equal(proposeDoorStage({...c,openingProposals:[...c.openingProposals,...c.openingProposals]} as unknown as NearbyOpeningContext,eye,root,travel,7),null);assert.equal(proposeDoorStage(c as unknown as NearbyOpeningContext,eye,root,travel.clone().negate(),7),null);
-});
-test('complete six-query stage unit fits real shared terrain work and exhausted fresh work refuses',t=>{
- const root=new Group(),terrain=new PlaneGeometry(128,128,128,128);terrain.rotateX(-Math.PI/2);terrain.attributes.position.setY(0,20);terrain.attributes.position.needsUpdate=true;
- const wall=new Mesh(new BoxGeometry(.2,4,4),new MeshBasicMaterial());wall.position.set(3,2,0);root.add(new Mesh(terrain,new MeshBasicMaterial()),wall);root.updateMatrixWorld(true);const q=new FollowGeometry(),eye=v(6,2,0),points=[v(0,1,0),v(0,1.6,0)],camera=new PerspectiveCamera(45,390/844,.1,100);camera.position.copy(eye);camera.lookAt(points[0]);camera.updateMatrixWorld(true);
- const f=retreatFixture(),body=f.subject(0,1),c={...context(),openingProposals:[{kind:'door' as const,floor:0,at:[0,4] as const,width:1.6,height:2.1,sill:0,from:'room',to:null}]};body.transform.positionM=[0,1,0];
- const stage=proposeDoorStage(c as unknown as NearbyOpeningContext,v(6,2,10),v(0,1,0),v(0,0,1),0)!;assert.ok(stage);
- for(let i=0;i<100;i++){q.prepare([root],'r');q.segmentAuthored(eye,points[0]);q.exteriorWitness(stage.eye,.2);}
- q.prepare([root],'r');assert.equal(q.segmentAuthored(eye,eye,.2),'clear');const checked=checkDoorStage(stage,body,camera,eye,points,v(0,0,1),q,.2,()=>0,f.viewport,f.projection);assert.equal(checked.ready,true);assert.equal(checked.benefit,true);assert.equal(checked.frame?.usefulDwell,2);assert.equal(q.stats.queries,6);t.diagnostic(`complete stage unit: ${q.stats.queries} queries, ${q.stats.blockVisits} block visits`);assert.ok(q.stats.blockVisits>0&&q.stats.blockVisits<=4096,`actual complete work ${q.stats.blockVisits}`);assert.equal(q.stats.unknown,null);
- for(let i=0;i<200;i++)q.segmentAuthored(stage.eye,points[0]);const exhausted=checkDoorStage(stage,body,camera,eye,points,v(0,0,1),q,.2,()=>0,f.viewport,f.projection);assert.equal(exhausted.ready,false);assert.equal(exhausted.benefit,false);assert.ok(q.stats.blockVisits<=4096);assert.ok(q.stats.unknown);
-});
-
-test('native-population complete stage unit refuses flat work and admits charged groups without changing query legs',t=>{
+test('native-population six-query geometry unit refuses flat work and completes charged groups',t=>{
  const root=new Group(),material=new MeshBasicMaterial();
  for(const z of[-128,128]){const terrain=new PlaneGeometry(256,256,128,128);terrain.rotateX(-Math.PI/2);terrain.attributes.position.setY(0,4);terrain.attributes.position.needsUpdate=true;const tile=new Mesh(terrain,material);tile.position.set(128,0,z);root.add(tile);}
  const wall=new Mesh(new BoxGeometry(.2,4,4),material);wall.position.set(1400,2,1000);root.add(wall);
  const boxes=new BoxGeometry(1,2,1),instances=new InstancedMesh(boxes,material,35);for(let i=0;i<35;i++)instances.setMatrixAt(i,new Matrix4().makeTranslation(2000+i*4,1,2000));root.add(instances);
  for(let i=0;i<104;i++){const mesh=new Mesh(boxes,material);mesh.position.set(1000+i*4,1,1000);root.add(mesh);}root.updateMatrixWorld(true);
  const q=new FollowGeometry(),eye=v(14.273,5,5.953),points=[v(9.35,.852,-2.351),v(9.35,1.498,-2.351)],camera=new PerspectiveCamera(45,390/844,.1,100);camera.position.copy(eye);camera.lookAt(points[0]);camera.updateMatrixWorld(true);
- const f=retreatFixture(),body=f.subject(0,1),c={...context(),openingProposals:[{kind:'door' as const,floor:0,at:[0,4] as const,width:1.6,height:2.1,sill:0,from:'room',to:null}]};body.transform.positionM=[9.35,0,-2.351];body.bounds={min:[-.556,-.008,-.381],max:[.568,1.713,.349]};body.travelMps.value=[0,0,-.4];const stage=proposeDoorStage(c as unknown as NearbyOpeningContext,v(0,2,12),v(0,1,0),v(0,0,1),0)!;stage.eye.set(12,1.7,3.89);
- for(let i=0;i<120;i++){q.prepare([root],'native-population');q.segmentAuthored(stage.eye,points[0]);q.exteriorWitness(stage.eye,.2);assert.ok(q.stats.vertices+q.stats.groupPrepWork<=4096);assert.ok(q.stats.retainedBlocks+q.stats.retainedGroups<=4096);}
- // Disabling only this private acceleration flag exercises the original exact flat path.
- const blocks=(q as unknown as{blocks:Map<unknown,{groupComplete:boolean}>}).blocks;
- for(const block of blocks.values())block.groupComplete=false;
+ const destination=v(12,1.7,3.89),future=points[0].clone().add(v(0,0,-.6));
+ const unit=()=>[q.segmentAuthored(eye,eye,.2),q.segmentAuthored(destination,points[0],0,true),q.segmentAuthored(destination,points[1],0,true),q.segmentAuthored(destination,future,0,true),q.segmentAuthored(eye,future,0,true),q.exteriorWitness(destination,.2).status];
+ for(let i=0;i<120;i++){q.prepare([root],'native-population');q.segmentAuthored(destination,points[0]);q.exteriorWitness(destination,.2);assert.ok(q.stats.vertices+q.stats.groupPrepWork<=4096);assert.ok(q.stats.retainedBlocks+q.stats.retainedGroups<=4096);}
+ // Disable only private group acceleration to exercise the original exact flat path.
+ const blocks=(q as unknown as{blocks:Map<unknown,{groupComplete:boolean}>}).blocks;for(const block of blocks.values())block.groupComplete=false;
  q.stats.blockVisits=q.stats.queries=q.stats.instances=q.stats.triangles=0;q.stats.unknown=null;
- assert.equal(q.segmentAuthored(eye,eye,.2),'clear');const flat=checkDoorStage(stage,body,camera,eye,points,v(0,0,-.4),q,.2,()=>0,f.viewport,f.projection);
- assert.equal(flat.ready,false);assert.equal(flat.benefit,false);assert.equal(q.stats.blockVisits,4096);assert.equal(q.stats.queries,5);assert.equal(q.stats.unknown,'witness-bound-cap');
- q.prepare([root],'native-population');assert.equal(q.segmentAuthored(eye,eye,.2),'clear');const grouped=checkDoorStage(stage,body,camera,eye,points,v(0,0,-.4),q,.2,()=>0,f.viewport,f.projection);
- assert.equal(grouped.ready,true);assert.equal(grouped.benefit,false);assert.equal(grouped.frame?.usefulDwell,2);assert.equal(q.stats.queries,6);assert.equal(q.stats.meshes,108);assert.equal(q.stats.retainedBlocks,1024);assert.equal(q.stats.retainedGroups,64);assert.ok(q.stats.blockVisits>0&&q.stats.blockVisits<4096);assert.equal(q.stats.unknown,null);
- t.diagnostic(`flat:5 queries/4096 visits/refused; grouped:${q.stats.queries} queries/${q.stats.blockVisits} visits, ${q.stats.retainedBlocks}+${q.stats.retainedGroups} retained boxes`);
+ const flat=unit();assert.equal(flat[5],'unknown');assert.equal(q.stats.blockVisits,4096);assert.equal(q.stats.queries,5);assert.equal(q.stats.unknown,'witness-bound-cap');
+ q.prepare([root],'native-population');assert.deepEqual(unit(),['clear','clear','clear','clear','clear','clear']);assert.equal(q.stats.queries,6);assert.equal(q.stats.meshes,108);assert.equal(q.stats.retainedBlocks,1024);assert.equal(q.stats.retainedGroups,64);assert.ok(q.stats.blockVisits>0&&q.stats.blockVisits<4096);assert.equal(q.stats.unknown,null);
+ t.diagnostic(`flat:5 queries/4096 visits/refused; grouped:${q.stats.queries} queries/${q.stats.blockVisits} visits, ${q.stats.retainedBlocks}+${q.stats.retainedGroups} retained boxes; geometry completion only`);
 });

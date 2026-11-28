@@ -38,9 +38,3 @@ test('only audited render-only ground-cover cards are excluded from obstacle wit
  cards.name='ground cover: tall';cards.userData={cameraTransparent:true,edenWindMode:'grass',keepDetail:true};cards.geometry.setAttribute('coverRank',new InstancedBufferAttribute(new Float32Array([.5]),1));material.customProgramCacheKey=()=> 'ground-cover-v3:tall|eden-atmos-wind-v2:grass';cards.setMatrixAt(0,new Matrix4().makeTranslation(4,2,0));root.add(cards);root.updateMatrixWorld(true);q.prepare([root],'r');assert.equal(q.exteriorWitness(v(4,2,0),.2).status,'clear');
  for(const change of[()=>{cards.name='ordinary grass';},()=>{cards.name='ground cover: tall';material.customProgramCacheKey=()=> 'other-shader';},()=>{material.customProgramCacheKey=()=> 'ground-cover-v3:tall';cards.geometry.deleteAttribute('coverRank');}]){change();q.prepare([root],'r');assert.equal(q.exteriorWitness(v(4,2,0),.2).status,'unknown');}
 });
-
-test('persistent fresh readiness can precede benefit without spending a cut or weakening old limits',()=>{
- const a=new CutAuthority();for(let i=0;i<5;i++)assert.equal(a.consider(i*.25,'stage',true,2,[0,2,8],'clear',false),false);assert.equal(a.diagnostic.status,'cut-prepared-no-benefit');assert.equal(a.diagnostic.preparedSeconds,1);assert.equal(a.diagnostic.total,0);assert.equal(a.consider(1.25,'stage',true,2,[0,2,8],'clear',true),true);
- a.clear();for(let i=0;i<5;i++)assert.equal(a.consider(2+i*.25,'other',true,2,[0,2,8],'clear',true),false);assert.equal(a.diagnostic.status,'cut-rate-limited');
- const b=new CutAuthority();for(let i=0;i<3;i++)b.consider(i*.25,'stage',true,2,[0,2,8],'clear',false);b.consider(.75,'stage',false,2,[0,2,8],'unknown',false);assert.equal(b.consider(1,'stage',true,2,[0,2,8],'clear',true),false);assert.equal(b.diagnostic.preparedSeconds,0);
-});

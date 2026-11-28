@@ -1,9 +1,9 @@
 /** A bounded room view proposal. It never writes a camera, actor, or scene. */
 import {Matrix4,Vector3,type PerspectiveCamera} from 'three';
 import {prepareCutFrame} from './transitions.ts';
-import type {EnclosureResult,NearbyOpeningContext} from './enclosure.ts';
+import type {EnclosureResult} from './enclosure.ts';
 import type {FollowGeometry,Sight,PresentSubject,FollowViewport,FollowProjection} from './follow-camera.ts';
-export type InteriorDiagnostic={status:string;key:string|null;anchor:number[]|null;proposal:number[]|null;visibility:Sight|null;passage:Sight|null;tested:number;retreat:string;validation:'full-authored-building-surfaces-and-current-obstacles';containment:'unproved';stage?:{status:string;target:number[]|null;executed:boolean;ready:boolean;benefit:boolean}};
+export type InteriorDiagnostic={status:string;key:string|null;anchor:number[]|null;proposal:number[]|null;visibility:Sight|null;passage:Sight|null;tested:number;retreat:string;validation:'full-authored-building-surfaces-and-current-obstacles';containment:'unproved'};
 export class InteriorView{
  private retreatPlan:{root:Vector3;eye:Vector3;axis:Vector3;progress:number}|null=null;private nextRetreat=0;
  private key='';private region:EnclosureResult['region']=null;private anchor:Vector3|null=null;private proposals:Vector3[]=[];private cursor=0;private next=0;private retried=false;
@@ -12,19 +12,17 @@ export class InteriorView{
  discardRetreat(){this.retreatPlan=null;this.nextRetreat=0;}
  destination(){return this.anchor?{eye:this.anchor.clone(),key:this.key}:null;}
  reset(){this.retreatPlan=null;this.nextRetreat=0;this.key='';this.region=null;this.anchor=null;this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.diagnostic=this.blank();}
- install(context:NearbyOpeningContext,eye:Vector3,generation:number){this.sync(null,false,generation,context);this.anchor=eye.clone();this.diagnostic={...this.diagnostic,status:'cut-anchor',anchor:eye.toArray()};}
- sync(context:EnclosureResult|null|undefined,manual:boolean,generation:number,held?:NearbyOpeningContext){
-  const selected=context?.status==='enclosed'?context:held;
-  if(manual||!selected?.region||!selected.worldMatrix){this.reset();this.diagnostic.status=manual?'manual':'inactive';return null;}
-  const roomContext=selected;const key=interiorContextKey(roomContext,generation);
-  if(key!==this.key||roomContext.region!==this.region){this.reset();this.key=key;this.region=roomContext.region;const r=selected.region,m=new Matrix4().fromArray(selected.worldMatrix),centre=new Vector3();for(const p of r.poly){centre.x+=p[0]/r.poly.length;centre.z+=p[1]/r.poly.length;}centre.y=r.y+Math.min(1.6,r.height*.55);
+ sync(context:EnclosureResult|null|undefined,manual:boolean,generation:number){
+  if(manual||context?.status!=='enclosed'||!context.region||!context.worldMatrix){this.reset();this.diagnostic.status=manual?'manual':'inactive';return null;}
+  const key=JSON.stringify([context.building,context.room,context.floor,context.revision,context.sourceRevision,context.worldMatrix,generation]);
+  if(key!==this.key||context.region!==this.region){this.reset();this.key=key;this.region=context.region;const r=context.region,m=new Matrix4().fromArray(context.worldMatrix),centre=new Vector3();for(const p of r.poly){centre.x+=p[0]/r.poly.length;centre.z+=p[1]/r.poly.length;}centre.y=r.y+Math.min(1.6,r.height*.55);
    // Opening-adjacent exterior proposals first. Direction from room centre is
    // only a placement heuristic, never a portal normal/connectivity guarantee.
-   for(const o of roomContext.openingProposals??[]){if(o.at.length!==2||!o.at.every(Number.isFinite))continue;const opening=new Vector3(o.at[0],centre.y,o.at[1]),world=opening.clone().applyMatrix4(m),outward=world.clone().sub(new Vector3(centre.x,opening.y,centre.z).applyMatrix4(m));outward.y=0;if(outward.lengthSq()<1e-8)continue;world.addScaledVector(outward.normalize(),1.2);world.y=new Vector3(centre.x,centre.y,centre.z).applyMatrix4(m).y;this.proposals.push(world);}
+   for(const o of context.openingProposals??[]){if(o.at.length!==2||!o.at.every(Number.isFinite))continue;const opening=new Vector3(o.at[0],centre.y,o.at[1]),world=opening.clone().applyMatrix4(m),outward=world.clone().sub(new Vector3(centre.x,opening.y,centre.z).applyMatrix4(m));outward.y=0;if(outward.lengthSq()<1e-8)continue;world.addScaledVector(outward.normalize(),1.2);world.y=new Vector3(centre.x,centre.y,centre.z).applyMatrix4(m).y;this.proposals.push(world);}
    // At most eight perimeter proposals plus the retained bounded centre proposals.
    // Concave polygons may put these outside: geometry/visibility never infer validity.
    for(let i=0;i<Math.min(8,r.poly.length);i++){const p=r.poly[Math.floor(i*r.poly.length/Math.min(8,r.poly.length))],v=new Vector3(p[0],centre.y,p[1]).lerp(centre,.25);this.proposals.push(v.applyMatrix4(m));}
-   for(const p of roomContext.proposals.slice(0,9))this.proposals.push(new Vector3().fromArray(p));
+   for(const p of context.proposals.slice(0,9))this.proposals.push(new Vector3().fromArray(p));
   }
   this.diagnostic={...this.blank(),status:this.anchor?'holding':'searching',key:this.key,anchor:this.anchor?.toArray()??null};return this.anchor?.clone()??null;
  }
@@ -78,31 +76,4 @@ export class InteriorView{
   d.passage=geometry.segmentAuthored(eye,proposal,r);if(d.passage!=='clear'){d.status=d.passage==='unknown'?'passage-unknown':'readable-proposal-unreachable';if(d.passage==='unknown')unknown();else advance();return;}
   advance();this.anchor=proposal.clone();d.anchor=proposal.toArray();d.status='selected';
  }
-}
-
-/** Metadata only proposes a destination. Current represented geometry admits it. */
-export const DOOR_STAGE_LIMITS=Object.freeze({closing:.25,minDepth:4,maxDepth:8,tangentSeconds:1.5,tangent:2,forecastSeconds:1.5,forecastDistance:2});
-export function interiorContextKey(context:Pick<EnclosureResult,'building'|'room'|'floor'|'revision'|'sourceRevision'|'worldMatrix'>,generation:number){return JSON.stringify([context.building,context.room,context.floor,context.revision,context.sourceRevision,context.worldMatrix,generation]);}
-export function hasStageOpening(context:NearbyOpeningContext,key:string){return context.openingProposals.some(o=>(o.kind==='door'||o.kind==='arch')&&JSON.stringify(o)===key);}
-export type DoorStage={eye:Vector3;direction:Vector3;context:NearbyOpeningContext;roomKey:string;openingKey:string;executed:boolean;entered:boolean};
-export function proposeDoorStage(context:NearbyOpeningContext,eye:Vector3,root:Vector3,travel:Vector3,generation:number):DoorStage|null{
- const openings=context.openingProposals.filter(o=>o.kind==='door'||o.kind==='arch');
- if(openings.length!==1||context.worldMatrix.length!==16||!context.worldMatrix.every(Number.isFinite)||!context.region?.poly.length||![...eye,...root,...travel].every(Number.isFinite)||travel.length()>4)return null;
- const o=openings[0],r=context.region,m=new Matrix4().fromArray(context.worldMatrix);if(![r.y,r.height,o.width,o.height,o.sill].every(Number.isFinite)||r.height<=0||o.width<=0||o.height<=0||Math.abs(m.determinant())<1e-10||o.at.length!==2||!o.at.every(Number.isFinite)||o.floor!==context.floor)return null;
- const centre=new Vector3();for(const p of r.poly){if(p.length!==2||!p.every(Number.isFinite))return null;centre.x+=p[0]/r.poly.length;centre.z+=p[1]/r.poly.length;}centre.y=r.y+Math.min(1.6,r.height*.55);
- const opening=new Vector3(o.at[0],centre.y,o.at[1]).applyMatrix4(m),worldCentre=centre.applyMatrix4(m),outward=opening.clone().sub(worldCentre);outward.y=0;
- const closing=opening.clone().sub(root);closing.y=0;if(outward.lengthSq()<1e-8||closing.lengthSq()<1e-8||travel.dot(closing.normalize())<=DOOR_STAGE_LIMITS.closing)return null;
- outward.normalize();const tangent=new Vector3(-outward.z,0,outward.x),depth=Math.max(DOOR_STAGE_LIMITS.minDepth,Math.min(DOOR_STAGE_LIMITS.maxDepth,eye.clone().sub(opening).dot(outward))),bias=Math.max(-DOOR_STAGE_LIMITS.tangent,Math.min(DOOR_STAGE_LIMITS.tangent,-travel.dot(tangent)*DOOR_STAGE_LIMITS.tangentSeconds));
- const destination=opening.clone().addScaledVector(outward,depth).addScaledVector(tangent,bias);destination.y=worldCentre.y;if(![...destination].every(Number.isFinite))return null;
- return{eye:destination,direction:travel.clone().setY(0).normalize(),context,roomKey:interiorContextKey(context,generation),openingKey:JSON.stringify(o),executed:false,entered:false};
-}
-/** All safety answers belong to this call. A forecast is only an execution cue. */
-export function checkDoorStage(stage:DoorStage,subject:PresentSubject,camera:PerspectiveCamera,eye:Vector3,points:readonly Vector3[],travel:Vector3,geometry:FollowGeometry,radius:number|null,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport,projection?:FollowProjection){
- const frame=prepareCutFrame(subject,camera,stage.eye,viewport,projection),y=ground(stage.eye.x,stage.eye.z);
- if(!frame||radius===null||y===null||!Number.isFinite(y)||stage.eye.y<y+1.2)return{ready:false,admitted:false,benefit:false,frame,occupancy:'stage-framing-or-ground-unavailable'};
- const present=points.map(p=>geometry.segmentAuthored(stage.eye,p,0,true));
- const future=points[0].clone().add(travel.clone().multiplyScalar(DOOR_STAGE_LIMITS.forecastSeconds).clampLength(0,DOOR_STAGE_LIMITS.forecastDistance));
- const targetFuture=geometry.segmentAuthored(stage.eye,future,0,true),incumbentFuture=geometry.segmentAuthored(eye,future,0,true),occupancy=geometry.exteriorWitness(stage.eye,radius);
- const admitted=present.every(s=>s==='clear')&&targetFuture==='clear'&&incumbentFuture!=='unknown'&&occupancy.status==='clear';
- return{ready:admitted&&frame.usefulDwell>=2,admitted,benefit:incumbentFuture==='blocked'&&targetFuture==='clear',frame,occupancy:occupancy.reason};
 }

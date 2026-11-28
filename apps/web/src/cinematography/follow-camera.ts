@@ -8,8 +8,8 @@ import {fitNearPlane} from '../../../../mars/viewer/lib/depth-fit.ts';
 import type {ViewportInsets} from '../WorldViewport.ts';
 export type FollowProjection={width:number;height:number;insets?:ViewportInsets;fov:number};
 export type FollowViewport={width:number;height:number;insets?:ViewportInsets};
-import type {NearbyOpeningContext,EnclosureResult} from './enclosure.ts';
-import {InteriorView,proposeDoorStage,checkDoorStage,interiorContextKey,hasStageOpening,type DoorStage,type InteriorDiagnostic} from './interior.ts';
+import type {EnclosureResult} from './enclosure.ts';
+import {InteriorView,type InteriorDiagnostic} from './interior.ts';
 import {CutAuthority,CUT_LIMITS,prepareCutFrame,type CutDiagnostic} from './transitions.ts';
 import type {CameraSubject} from '../../../../packages/camera/src/observation.ts';
 export type PresentSubject=Extract<CameraSubject,{state:'present'}>;
@@ -177,19 +177,19 @@ export type FollowResult={cut:CutDiagnostic;interior:InteriorDiagnostic;preview:
 /** Persistent world-space viewpoints let the subject turn inside a portrait dead/soft zone. */
 export class FollowCamera{
  private cuts=new CutAuthority();private nextCutCheck=0;
- private interior=new InteriorView();private wasInterior=false;private stage:DoorStage|null=null;private nextStageCheck=0;private stageDiagnostic={status:'inactive',target:null as number[]|null,executed:false,ready:false,benefit:false};
+ private interior=new InteriorView();private wasInterior=false;
  private eye=new Vector3();private aim=new Vector3();private velocity=new Vector3();private aimVelocity=new Vector3();private offset=new Vector3();private anchor:Vector3|null=null;private initialized=false;private clock=0;private nextSearch=0;private heldUntil=0;private gestureUntil=0;private index=0;private probe=0;private travel=new Vector3();private travelAge=0;
- reset(eye?:Vector3,aim?:Vector3){this.stage=null;this.nextStageCheck=0;this.cuts.clear();this.nextCutCheck=0;this.interior.reset();this.wasInterior=false;this.travel.set(0,0,0);this.travelAge=0;this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
- gesture(eye:Vector3,aim:Vector3){this.stage=null;this.nextStageCheck=0;this.cuts.refuse('cut-manual');if(this.wasInterior)this.velocity.set(0,0,0);this.interior.reset();this.travel.set(0,0,0);this.travelAge=0;if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
+ reset(eye?:Vector3,aim?:Vector3){this.cuts.clear();this.nextCutCheck=0;this.interior.reset();this.wasInterior=false;this.travel.set(0,0,0);this.travelAge=0;this.anchor=null;this.initialized=!!eye&&!!aim;if(eye&&aim){this.eye.copy(eye);this.aim.copy(aim);}this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);this.clock=this.nextSearch=this.heldUntil=this.gestureUntil=0;this.index=0;}
+ gesture(eye:Vector3,aim:Vector3){this.cuts.refuse('cut-manual');if(this.wasInterior)this.velocity.set(0,0,0);this.interior.reset();this.travel.set(0,0,0);this.travelAge=0;if(!this.initialized)this.reset(eye,aim);if(this.anchor)this.offset.add(eye.clone().sub(this.eye));this.eye.copy(eye);this.aim.copy(aim);this.aimVelocity.set(0,0,0);this.gestureUntil=this.clock+2;}
  step(subject:PresentSubject,camera:PerspectiveCamera,aim:Vector3,dt:number,geometry:FollowGeometry,ground:(x:number,z:number)=>number|null,viewport?:FollowViewport,projection?:FollowProjection,context?:EnclosureResult|null,now=performance.now()/1000,cutReadiness?:{ready:boolean;reason:string;revision:string}):FollowResult{
-  this.stageDiagnostic={status:'inactive',target:null,executed:false,ready:false,benefit:false};this.cuts.begin();if(!cutReadiness?.ready)this.cuts.refuse(cutReadiness?.reason??'cut-source-readiness-unknown');
+  this.cuts.begin();if(!cutReadiness?.ready)this.cuts.refuse(cutReadiness?.reason??'cut-source-readiness-unknown');
   if(!this.initialized)this.reset(camera.position,aim);const invalidStep=!Number.isFinite(dt)||dt<0;dt=invalidStep?0:Math.min(.05,dt);this.clock+=dt;const manual=this.clock<this.gestureUntil;if(manual||invalidStep){this.eye.copy(camera.position);this.aim.copy(aim);}
   const q=new Quaternion().fromArray(subject.transform.rotationXyzw),bounds=subject.bounds,root=new Vector3().fromArray(subject.transform.positionM);
   const centre=bounds?new Vector3().fromArray(bounds.min).add(new Vector3().fromArray(bounds.max)).multiplyScalar(.5).applyQuaternion(q).add(root):null;
-  const preview:FollowPreview={status:'unavailable',shift:[0,0,0],current:null,alternative:null,selected:false};let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({cut:{...this.cuts.diagnostic,history:[...this.cuts.diagnostic.history]},interior:{...this.interior.diagnostic,stage:{...this.stageDiagnostic}},preview,eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
+  const preview:FollowPreview={status:'unavailable',shift:[0,0,0],current:null,alternative:null,selected:false};let motion:FollowResult['motion']=null;const result=(reason:string,screen:[number,number]=[0,0],candidates=0)=>({cut:{...this.cuts.diagnostic,history:[...this.cuts.diagnostic.history]},interior:{...this.interior.diagnostic},preview,eye:this.eye.clone(),aim:this.aim.clone(),reason,candidate:this.index,screen,candidates,motion});
   if(!geometry.stats.complete||!centre)this.interior.discardRetreat();
-  if(invalidStep){this.stage=null;this.interior.discardRetreat();this.cuts.refuse('cut-invalid-input');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
-  if(!centre||(!geometry.stats.complete&&manual)){this.stage=null;this.cuts.refuse('cut-input-unavailable');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
+  if(invalidStep){this.interior.discardRetreat();this.cuts.refuse('cut-invalid-input');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('invalid-timestep');}
+  if(!centre||(!geometry.stats.complete&&manual)){this.cuts.refuse('cut-input-unavailable');this.travel.set(0,0,0);this.travelAge=0;this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result((manual?'user-hold:':'')+(!centre?'subject-bounds-unknown':geometry.stats.unknown??'geometry-unknown'));}
   // Reset and gestures preserve the actual eye. Translation is relative to the
   // depicted root, independently of framing aim and animated bounds centre.
   if(!this.anchor){this.anchor=root.clone();this.offset.copy(this.eye).sub(root);}else this.anchor.copy(root);
@@ -206,17 +206,7 @@ export class FollowCamera{
   const top=new Vector3(0,bounds!.max[1],0).applyQuaternion(q).add(root);
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3,shift?:Vector3,coreOnly=false):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of coreOnly?[centre]:points){const s=geometry.segment(eye,shift?p.clone().add(shift):p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/(coreOnly?1:points.length);};
-  const hint=context?.status==='enclosed'?context as unknown as NearbyOpeningContext:context?.nearby;
-  const stageTravel=valid?new Vector3().fromArray(observed!):null,stageMotion=!!stageTravel&&stageTravel.length()>=.1&&stageTravel.length()<=4;
-  if(valid&&stageTravel!.length()>4){this.travel.set(0,0,0);this.travelAge=0;preview.status='discontinuity';preview.shift=[0,0,0];}
-  if(this.stage&&(!hint||interiorContextKey(hint,geometry.generation)!==this.stage.roomKey||!hasStageOpening(hint,this.stage.openingKey)||manual||!geometry.stats.complete)){this.stage=null;this.nextStageCheck=0;this.cuts.refuse('cut-stage-context-invalid');}
-  if(this.stage&&context?.status==='enclosed'){if(this.stage.executed)this.stage.entered=true;else{this.stage=null;this.cuts.refuse('cut-stage-entry-window-missed');}}
-  if(this.stage?.executed&&this.stage.entered&&context?.status!=='enclosed'){this.stage=null;this.cuts.refuse('cut-stage-exit');}
-  if(this.stage&&!this.stage.executed&&(!stageMotion||preview.status!=='stable'||stageTravel!.clone().setY(0).normalize().dot(this.stage.direction)<.8)){this.stage=null;this.cuts.refuse('cut-stage-motion-invalid');}
-  if(!this.stage&&!manual&&geometry.stats.complete&&context?.status!=='enclosed'&&hint&&stageMotion&&preview.status==='stable')this.stage=proposeDoorStage(hint,this.eye,root,stageTravel!,geometry.generation);
-  if(this.stage)this.stageDiagnostic={status:this.stage.executed?'holding':'preparing',target:this.stage.eye.toArray(),executed:this.stage.executed,ready:false,benefit:false};
-  const held=this.stage?.executed?this.stage.context:undefined;
-  const interiorGoal=this.interior.sync(context,manual,geometry.generation,held),interiorActive=!manual&&(context?.status==='enclosed'||!!held);
+  const interiorGoal=this.interior.sync(context,manual,geometry.generation),interiorActive=!manual&&context?.status==='enclosed';
   // Ordinary exit resumes the retained outdoor desired offset through the same
   // bounded sweep. Manual cancellation instead adopts the actual user view.
   if(this.wasInterior&&!interiorActive&&manual)this.offset.copy(this.eye).sub(root);this.wasInterior=interiorActive;
@@ -233,24 +223,10 @@ export class FollowCamera{
   if(manualEye){this.cuts.refuse('cut-manual');this.aim.add(this.eye.clone().sub(manualEye));return result(reason==='tracking'?'user-hold':'user-hold:'+reason,screen);}
   // Movement gets the first query budget. Probe one alternative per search tick, never
   // consume a whole candidate fan before the safety sweep has run.
-  let stageChecked=false;const preparingStage=!!this.stage&&!this.stage.executed;
-  if(preparingStage&&this.clock>=this.nextStageCheck){
-   stageChecked=true;this.nextStageCheck=this.clock+CUT_LIMITS.checkInterval;
-   if(!cutReadiness?.ready){this.cuts.refuse(cutReadiness?.reason??'cut-source-readiness-unknown');this.stageDiagnostic.status='source-unready';}
-   else{
-    const stage=this.stage!,r=followClearanceRadius(camera,projection,stage.eye),checked=checkDoorStage(stage,subject,camera,this.eye,points,stageTravel!,geometry,r,ground,viewport,projection),key=JSON.stringify([stage.roomKey,stage.openingKey,stage.eye.toArray(),cutReadiness.revision,projection]);
-    this.stageDiagnostic={status:checked.ready?'ready':'refused',target:stage.eye.toArray(),executed:false,ready:checked.ready,benefit:checked.benefit};
-    if(this.cuts.consider(now,key,checked.ready,checked.frame?.usefulDwell??0,stage.eye.toArray(),checked.occupancy,checked.benefit)){
-     const frame=checked.frame!;this.cuts.direction(this.aim.clone().sub(this.eye).normalize().toArray(),frame.aim.clone().sub(frame.eye).normalize().toArray());stage.executed=true;this.interior.install(stage.context,frame.eye,geometry.generation);this.wasInterior=true;this.stageDiagnostic.status='executed';this.stageDiagnostic.executed=true;this.eye.copy(frame.eye);this.aim.copy(frame.aim);this.velocity.set(0,0,0);this.aimVelocity.set(0,0,0);return result('deliberate-cut',screen,tested);
-    }
-    if(!checked.admitted)this.stage=null;
-   }
-  }
-  const retreatChecked=!preparingStage&&interiorActive&&this.interior.prepareRetreat(this.clock,subject,camera,this.eye,viewport,projection,{geometry,points,radius:eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground});
+  const retreatChecked=interiorActive&&this.interior.prepareRetreat(this.clock,subject,camera,this.eye,viewport,projection,{geometry,points,radius:eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground});
   const cutDue=!!cutReadiness?.ready&&interiorActive&&!!this.interior.destination()&&this.clock>=this.nextCutCheck;
-  if(!preparingStage&&interiorActive&&!cutDue&&!retreatChecked){this.interior.search(this.clock,this.eye,points,geometry,eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground);}
+  if(interiorActive&&!cutDue&&!retreatChecked){this.interior.search(this.clock,this.eye,points,geometry,eye=>{const value=followClearanceRadius(camera,projection,eye);return value===null?null:Math.max(radius,value);},ground);}
   const destination=this.interior.destination();
-  if(!preparingStage){
   if(!cutReadiness?.ready)this.cuts.refuse(cutReadiness?.reason??'cut-source-readiness-unknown');
   else if(!interiorActive||manual||!destination)this.cuts.refuse('cut-no-preparation');
   else if(this.interior.diagnostic.tested===0&&this.clock>=this.nextCutCheck){this.nextCutCheck=this.clock+CUT_LIMITS.checkInterval;
@@ -264,8 +240,7 @@ export class FollowCamera{
     }
    }
   }
-  }
-  if(!stageChecked&&!interiorActive&&!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
+  if(!interiorActive&&!motion?.surfaceStartOverlap&&dt>0&&this.clock>=this.nextSearch){this.nextSearch=this.clock+.25;const angles=[Math.PI/6,-Math.PI/6,Math.PI/3,-Math.PI/3,Math.PI/2,-Math.PI/2],i=this.probe++%angles.length;
    const current=query(root.clone().add(this.offset)),offset=this.offset.clone().applyAxisAngle(new Vector3(0,1,0),angles[i]),eye=root.clone().add(offset);tested=2;
    const alternative=query(eye),passageRadius=followClearanceRadius(camera,projection,eye),passage=passageRadius===null?'unknown':geometry.segmentAuthored(this.eye,eye,Math.max(radius,passageRadius));
    if(preview.status==='stable'&&current!==null&&alternative!==null&&alternative>=current&&passage==='clear'){
