@@ -60,7 +60,7 @@ use sim::slots::Slots;
 use sim::timers::DueList;
 
 mod raise;
-mod turn;
+mod turning;
 
 type R<T> = Result<T, Refusal>;
 
@@ -111,7 +111,7 @@ pub enum Verb {
     /// [`raise`]).
     Raise,
     Lower,
-    /// A crew turns the load it carries about its middle (#5067, [`turn`]).
+    /// A crew turns the load it carries about its middle (#5067, [`turning`]).
     Turn,
 }
 
