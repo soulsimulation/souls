@@ -7962,6 +7962,10 @@ fn edit_checker(
                                         &entries,
                                         copy.tree(),
                                     );
+                                    // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
+                                    crate::edit_joins::with_joins(
+                                        &mut e, &copy, world, &structure,
+                                    )?;
                                     edit::check(e, &copy, world)
                                 })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))
@@ -8246,6 +8250,7 @@ mod tests {
             field: 22,
             row: Vec::new(),
             door: None,
+            bare: false,
         };
         let e = Edit {
             intent: id(9),
