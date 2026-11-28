@@ -2469,6 +2469,7 @@ function thingOf(id) {
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
   // A part's ways (`../view/ways.mjs`): its places that exist now, the ways up to them, and a climb to each standing place.
   const ways = waysOf(rows, row, entry);
+  if (process.env.SOULS_WAYS_DEBUG) { const facts = (r) => ({ id: r.id, name: r.name, kind: r.kind, parent: r.parent, pos: r.pos, rot: r.rot, level: r.level, surfaces: r.surfaces, slot: r.slot, solids: r.solids, links: r.links }); const sib = [...rows.values()].filter((r) => r.parent === row.parent || r.parent === row.id || rows.get(r.parent)?.parent === row.parent).map(facts); log(`ways debug: entry ${Boolean(entry)} geometry ${JSON.stringify(entry?.geometry?.floors ?? null)} ${JSON.stringify(sib)}`); }
   return { ok: true, row, entry, ways, offers: [...offersOf(row.id, entry, { moving: Boolean(row.moving) }), ...climbOffers(ways)], fields: heldState(kinds).nodes[row.id]?.fields };
 }
 
