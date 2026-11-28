@@ -62,6 +62,7 @@ const SCENES = {
       beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], more: [['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'],
         ['deck-beam-3', ['-25.022,23.372'], 'beam_high_l'], ['deck-beam-4', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_high_r']],
       joists: { names: ['two-by-four-1', 'two-by-four-2', 'two-by-four-3', 'two-by-four-4', 'two-by-four-5'], slots: ['j1', 'j2', 'j3', 'j4', 'j5'],
+        turnAt: ['-26.5,22.2', '-26.5,22.8', '-26.5,23.37', '-26.5,23.95', '-26.5,24.55'], turn: '90', under: ['-24,22.2', '-24,22.8', '-24,23.37', '-24,23.95', '-24,24.55'],
         crews: [['ada', 'bo', [0, 3]], ['di', 'cy', [1, 4]], ['ed', 'fi', [2]]] } } },
 };
 const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
@@ -394,6 +395,26 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
   await setupGate(state, page, signal);
   check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
   try {
+    // the joists laid across the bay under their slots before the frames go up: a joist cannot yet be brought into a
+    // closed bay (a design question on the frontier lane's list); each crew lays its own, turned square to its slot
+    const js = [];
+    if (T.joists?.under) {
+      for (const name of T.joists.names) js.push(await find(state, name));
+      await Promise.all(T.joists.crews.map(async ([a, b, idx], n) => {
+        await wait(n * 3000);
+        const jc = await crewOf(state, a, b);
+        for (const i of idx) {
+          await gripEnds(state, js[i].id, a, b);
+          await retried(state, a, 'part', 'take', jc, js[i].id);
+          await retried(state, a, 'carry', 'to', jc, T.joists.turnAt[i]); await wait(6000);
+          await retried(state, a, 'carry', 'turn', jc, T.joists.turn); await wait(5000);
+          await retried(state, a, 'carry', 'to', jc, T.joists.under[i]); await wait(5000);
+          await retried(state, a, 'carry', 'set-down', jc); await wait(2500);
+        }
+        for (const who of [a, b]) await cli(state, who, 'carry', 'leave', jc);
+      }));
+      await shot('joists-laid-under-their-slots');
+    }
     let leave; const left = new Promise(ok => { leave = ok; }); const crews = [];
     await Promise.all(T.frames.map(async ([name, lift, foot, place, away, slot], k) => {
       const frame = frames[k];
@@ -450,16 +471,18 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
         await wait(3000); await shot('holders-let-go'); await wait(3000); await shot('bay-stands');
         // the joists across the high beams, by three crews at once, each a few seconds behind the one before
         if (T.joists && leaves.every(l => l.ok === true)) {
-          const js = []; for (const name of T.joists.names) js.push(await find(state, name));
+          if (!js.length) for (const name of T.joists.names) js.push(await find(state, name));
           await Promise.all(T.joists.crews.map(async ([a, b, idx], n) => {
             await wait(n * 3000);
             const jc = a === back ? bc : await crewOf(state, a, b); // the beam crew carries on as it is
             for (const i of idx) {
               await gripEnds(state, js[i].id, a, b);
-              await retried(state, a, 'part', 'take', jc, js[i].id);
-              await retried(state, a, 'carry', 'to', jc, bay, T.joists.slots[i]); await wait(3000);
+              await retried(state, a, 'part', 'take', jc, js[i].id); await wait(1500);
+              // laid under its slot: put from where it is taken; else carried to the slot by the client's approach
+              if (!T.joists.under) { await retried(state, a, 'carry', 'to', jc, bay, T.joists.slots[i]); await wait(3000); }
               const r = await putAsked(a, 'part', 'put', jc, bay, T.joists.slots[i]);
               (state.joistPuts ??= []).push({ slot: T.joists.slots[i], ok: r.ok === true, code: r.code ?? null, detail: r.detail ?? null });
+              if (r.ok !== true) break; // refused: this crew keeps it and stops; the survey records the answer
             }
           }));
           await wait(2500); await shot('joists-seated');
