@@ -958,6 +958,21 @@ impl Town {
         crate::commit::off_clock();
         // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
         let ids = changed(base, part);
+        // A part that holds a floor, a stair or a ladder of its own, or a frame whose standing place a joint makes or
+        // unmakes (racks T9, T6), changes what is ground where it is: the ground is built again from the tree, as a
+        // start builds it, never left as it was.
+        let holds_ways = |id: &Id| {
+            base.handle(*id)
+                .and_then(|h| base.children(h))
+                .unwrap_or(&[])
+                .iter()
+                .any(|&c| {
+                    base.node(c).is_some_and(|n| {
+                        replica::world_model::plain(n.kind().as_str()) == crate::ground::scene::FLOOR
+                    })
+                })
+        };
+        let ways = ids.iter().any(holds_ways);
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -976,7 +991,12 @@ impl Town {
         // its own squares and the same read of its buildings (S13b), each built whole only when it must be.
         let class = |basis: &Basis| -> Result<(Fresh, Basis, Option<&'static str>), String> {
             let mut why = None;
-            let fresh = if touched.contains(&ground) {
+            let fresh = if ways {
+                why = Some("a part that holds a floor, a stair or a ladder moved");
+                Fresh::Whole(Box::new(Town::assemble_for(
+                    base, ground, &versions, basis.size, 1,
+                )?))
+            } else if touched.contains(&ground) {
                 // The buildings whose floors the part touches besides the open ground (a creator's new building, S13):
                 // read again with the squares cut again, not the whole ground built.
                 let things: Option<BTreeSet<Id>> = touched

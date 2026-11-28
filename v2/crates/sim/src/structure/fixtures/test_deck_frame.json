@@ -191,34 +191,30 @@
     "ladders": [
       {
         "face": "back",
-        "at_mm": -400,
         "bottom_mm": 0,
         "top_mm": 500,
-        "width_mm": 300,
+        "width_mm": 900,
         "run_mm": 1400
       },
       {
         "face": "back",
-        "at_mm": 100,
         "bottom_mm": 0,
         "top_mm": 1800,
-        "width_mm": 400,
+        "width_mm": 900,
         "run_mm": 1400
       },
       {
         "face": "front",
-        "at_mm": -400,
         "bottom_mm": 0,
         "top_mm": 500,
-        "width_mm": 300,
+        "width_mm": 900,
         "run_mm": 1400
       },
       {
         "face": "front",
-        "at_mm": 100,
         "bottom_mm": 0,
         "top_mm": 1800,
-        "width_mm": 400,
+        "width_mm": 900,
         "run_mm": 1400
       }
     ]
