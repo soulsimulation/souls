@@ -242,21 +242,26 @@ async function find(state, name) {
 }
 const crewOf = async (state, a, b) => { const crew = (await cli(state, a, 'carry', 'offer', state.bodies[b])).crew; if (!crew) throw Error('carry-proof.crew'); await cli(state, b, 'carry', 'accept', crew); return crew; };
 const gripEnds = (state, thing, back, front) => Promise.all([[back, 'back'], [front, 'front']].map(([who, end]) => cli(state, who, 'carry', 'grip', thing, end)));
-// The front asks once its crew has arrived; a put asked a moment early is refused and asked again.
-async function putIn(state, front, crew, bay, slot) {
-  for (let i = 0; ; i++) { const a = await asked(state, front, 'part', 'put', crew, bay, slot); if (a.ok === true) return; if (i >= 8) throw Error(`carry-proof.command-refused: ${front} part put ${slot} ${a.code ?? ''}`); await delay(1500, state.signal); }
+// A command the world refuses for a moment (a way out still blocked by the crew ahead, a body that moved while the
+// change was prepared) is asked again, as a Soul's own agent asks again.
+async function retried(state, who, ...words) {
+  for (let i = 0; ; i++) { const a = await asked(state, who, ...words); if (a.ok === true) return a; if (i >= 8) throw Error(`carry-proof.command-refused: ${who} ${words.join(' ')} ${a.code ?? ''}`); await delay(1500, state.signal); }
 }
-/** The survey scene's frames: both crews at once, each frame from the stand into its upright slot; its east carrier stays holding it. */
+/** The survey scene's frames: each from the stand into its upright slot, the stand's first frame first and the second six
+ *  seconds behind it (attempt 12: the second crew, first to its frame, found its way out blocked); its east carrier stays holding it. */
 async function standFrames(state) {
   const B = SCENE.build, mark = step => (state.steps ??= []).push({ step, at: new Date().toISOString() });
   state.bay = (await find(state, B.bay)).id;
   const frames = []; for (const [name] of B.frames) frames.push((await find(state, name)).id);
+  let leave; const left = new Promise(ok => { leave = ok; });
   await Promise.all(B.frames.map(async ([name, slot, lead, holder], k) => {
     await gripEnds(state, frames[k], lead, holder);
+    if (k) await left;
     const crew = await crewOf(state, lead, holder);
     await cli(state, lead, 'part', 'take', crew, frames[k]); mark(name + '-taken');
-    await cli(state, lead, 'carry', 'to', crew, state.bay, slot); mark(name + '-at-the-bay');
-    await putIn(state, lead, crew, state.bay, slot); mark(`${name}-in-${slot}`);
+    if (!k) setTimeout(leave, 6000);
+    await retried(state, lead, 'carry', 'to', crew, state.bay, slot); mark(name + '-at-the-bay');
+    await delay(500, state.signal); await retried(state, lead, 'part', 'put', crew, state.bay, slot); mark(`${name}-in-${slot}`);
     await cli(state, lead, 'carry', 'leave', crew); mark(`${name}-held-by-${holder}`);
   }));
 }
@@ -270,17 +275,17 @@ async function bayBuild({ state, page, paths, signal, check, arm, root }) {
   check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
   try {
     const stood = await state.frames; if (!stood.ok) throw Error(stood.error);
-    await delay(1500, signal); await shot('frames-held');
+    await delay(1000, signal); await shot('frames-held');
     state.crew = await crewOf(state, back, front);
     const beam = await find(state, name);
     await gripEnds(state, beam.id, back, front);
     await watchBeam({ state, page, check, beam, manifest, root });
     await cli(state, back, 'part', 'take', state.crew, beam.id);
     await delay(1500, signal); await shot('beam-taken'); await phase(state, page, 'take');
-    await cli(state, back, 'carry', 'to', state.crew, mouth);
+    await retried(state, back, 'carry', 'to', state.crew, mouth);
     await shot('beam-at-the-mouth'); await phase(state, page, 'carry');
-    await putIn(state, back, state.crew, state.bay, slot);
-    await delay(3000, signal); await shot('beam-seated'); await phase(state, page, 'seat');
+    await delay(500, signal); await retried(state, back, 'part', 'put', state.crew, state.bay, slot);
+    await delay(2500, signal); await shot('beam-seated'); await phase(state, page, 'seat');
     const ends = []; for (const part of [...B.frames.map(f => f[0]), name]) ends.push({ name: part, in: (await find(state, part)).in });
     check('parts-in-the-bay', ends.every(e => String(e.in).includes(B.bay)), JSON.stringify(ends));
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
