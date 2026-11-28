@@ -85,6 +85,8 @@ pub fn open_ground(copy: &Replica) -> Option<Id> {
 /// parts make, and they cut the ground once seated, as in a bay seeded from a world's facts; a box would keep its
 /// builders out. A frame stand is the low rest its parts stand on, walked over as a seeded one is; a box would stop a
 /// crew's carry (`carry-load-blocked`) where the part comes down into it, and the put would be refused `part.not-held`.
+/// A kind that declares ways (floors, stairs, ladders) and no boxes of its own gets no walk box either: a seeded one has
+/// none, and the outline of its bounds would stand over its own stair.
 pub fn stand_as_kinds(
     edit: &mut replica::edit::Edit,
     entries: &Json,
@@ -109,8 +111,15 @@ pub fn stand_as_kinds(
             replica::kinds::defined::solids_of(entry),
             replica::kinds::defined::slots_of(entry),
         );
+        // A kind that declares ways and no boxes of its own (a stair flight) is walked by its ways, as a seeded one
+        // is: the outline of its bounds would stand over its own stair.
+        let walked = entry
+            .get("geometry")
+            .is_some_and(|g| g.get("solids_mm").is_none())
+            && import_eden::entry_ways(entry).is_ok_and(|w| w.is_some());
         if let Some(s) = solids
             && !holds_parts(entry, structure)
+            && !walked
         {
             fields.entry(F_SOLIDS).or_insert(s);
         }
