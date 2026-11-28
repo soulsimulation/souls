@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import type { HeldEntry, HeldSet } from './held-entry.ts';
 export type NativeHands = { body: string; kindHash: string; resources: readonly (readonly [string, number, number?])[] };
 export type HeldPicture = { object: THREE.Object3D; grip: readonly [number, number, number]; bounds?: {min: readonly [number,number,number]; max: readonly [number,number,number]}; dispose(): void };
-export type HeldPictureFactory = (entry: HeldEntry) => HeldPicture | null;
+export type HeldPictureFactory = (entry: HeldEntry, mode?:'probe') => HeldPicture | null;
 export type HeldProjection = { entry: HeldEntry; hand: 'left' | 'right' };
 
 /** Additive public body metadata is optional; malformed recorded fields never become a hand mapping. */

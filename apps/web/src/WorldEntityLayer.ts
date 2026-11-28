@@ -2,7 +2,7 @@ import type { HeldEntry } from '../../../mars/viewer/app/engine-view/held-entry.
 import { heldMeshBounds, type HeldPicture } from '../../../mars/viewer/app/engine-view/held-projection.ts';
 import { heldKindOf, entityId } from './v2-engine/held-kind.ts';
 import {handActuatorFrame,knockContacts,opPoint,HAND_REACH_SECONDS,LOCK_TURN_SECONDS,type HandActuatorMotion} from '../../../mars/viewer/engine/social/hand-actuator.ts';
-import {lockPose, paletteTint} from './gen-mesh/vocab-look.ts';
+import {lockPose, paletteTint, applyLook} from './gen-mesh/vocab-look.ts';
 import {frozenMatrixWorld} from './rendering/FrozenMatrixWorld.ts';
 // The entity world's picture (spec <eden4>/28 §8): terrain baked from the
 // same ground recipe the server uses, water, a horizon ring, and one mesh per
@@ -19,7 +19,9 @@ import type { SnapshotDecoder, SnapshotDelta } from './snapshot-delta.ts';
 import * as THREE from 'three';
 import { TILE_M, TILE_N, Terrain, groundForTile, heightAt, waterLevelAt, type Ground } from '@souls/ground';
 import { WorldModel, stableStringify, CAN_OPENING, CAN_ROSE, CUP_RIM, KETTLE_OPENING, KETTLE_SPOUT, KETTLE_SPOUT_ANGLE, KETTLE_SWITCH, SPOUT_SPEED, cupSteam, spoutSpeed, isKettleDef, isTeaCupDef, kettleHeat, spoutRun, containerInside, keptBehindDoor, type Def, type Entity, type StoredDef } from '@souls/world-compiler';
-import { GENERATORS } from '@souls/generators';
+import { GENERATORS, expandKitProgram } from '@souls/generators';
+import {buildKit} from './gen-mesh/kit.mesh.ts';
+import {isSprayShape} from './fx/water.ts';
 import { meshFor, type MeshCtx } from './gen-mesh/index.ts';
 import { clearBuildingPrefetch, prefetchBuilding } from './gen-mesh/building.mesh.ts';
 import { MaterialLib } from './gen-mesh/materials.ts';
@@ -1747,9 +1749,10 @@ export class WorldEntityLayer {
     { const st = this.steamers.get(id); if (st) { st.pts.removeFromParent(); (st.pts.material as THREE.Material).dispose(); st.lamp?.removeFromParent(); this.steamers.delete(id); } } this.keptIn.delete(id);
   }
   /** The same canonical mesh factory as scenery, detached from world entities while native-held. */
-  heldPicture(entry: HeldEntry): HeldPicture | null {
+  heldPicture(entry: HeldEntry, mode?:'probe'): HeldPicture | null {
     if (!this.model) return null;
     const resolved = heldKindOf(entry); if (!resolved) return null;
+    if(mode==='probe'){try{return this.probeHeld(entry,resolved);}catch{return null;}}
     // The stream world layer removes hand children; never draw a second copy during that handoff.
     if (this.drawn.has(entityId(entry.id)) || entry.origin && this.drawn.has(entry.origin)) return null;
     const entity = { id: entry.id, def: resolved.def.ref, in: { parent: 'world' }, state: resolved.state,
@@ -1762,6 +1765,31 @@ export class WorldEntityLayer {
     return { object, grip: resolved.grip, bounds: {min:box.min.toArray(),max:box.max.toArray()}, dispose: () => {
       if (disposed) return; disposed = true; object.removeFromParent(); disposeObject(object); this.releaseGeometry(object);
     } };
+  }
+
+  /** Same canonical kit recipe, isolated from live prototype/effect/material and geometry-owner caches. */
+  private probeHeld(entry:HeldEntry,resolved:NonNullable<ReturnType<typeof heldKindOf>>):HeldPicture|null {
+    const def=resolved.def;if(def.make.kind!=='gen'||def.make.gen!=='kit/2')return null;
+    const entity={id:entry.id,def:def.ref,in:{parent:'world'},state:resolved.state,...(entry.params?{params:entry.params}:{})} as Entity;
+    const params=paramsOf(entity,def),args=def.make.args??{};
+    // These paths use shared textures/effects; no speculative probe may touch their lifetime or caches.
+    const expanded=expandKitProgram(args,params);
+    if(params.condition==='construction'||expanded.shapes.some(s=>s.faces||s.material==='water'||isSprayShape(s)))return null;
+    const materials=new MaterialLib(),geometries=new Set<THREE.BufferGeometry>(),initialMaterials=new Set<THREE.Material>();
+    let object:THREE.Object3D|null=null;
+    const collect=(o:THREE.Object3D)=>o.traverse(c=>{const m=c as THREE.Mesh;if(!m.isMesh)return;geometries.add(m.geometry);for(const mat of Array.isArray(m.material)?m.material:[m.material])initialMaterials.add(mat);});
+    try {
+      const model=new WorldModel({constants:this.model!.constants,seed:'held-history-probe'});
+      const ctx:MeshCtx={canonicalContext:true,def,entity,params,args,baked:model.bake(def,entity.params??{},0),model,materials,tint:paletteTint(def,params,entity.state)};
+      object=buildKit(args,{materials,tint:ctx.tint,params,state:resolved.state,smokeFx:false});collect(object);
+      object=applyLook(object,ctx);if(!object)return null;
+      const box=heldMeshBounds(object);if(box.isEmpty())return null;
+      const metadata=new THREE.Group();
+      return {object:metadata,grip:resolved.grip,bounds:{min:box.min.toArray(),max:box.max.toArray()},dispose(){metadata.removeFromParent();}};
+    } finally {
+      if(object)object.traverse(c=>{const m=c as THREE.Mesh;if(!m.isMesh)return;geometries.add(m.geometry);for(const mat of Array.isArray(m.material)?m.material:[m.material])if(!initialMaterials.has(mat))mat.dispose();});
+      for(const geometry of geometries)geometry.dispose();materials.dispose();object?.removeFromParent();
+    }
   }
 
   /** One Object3D for an entity, from its def's mesh half (gen-mesh registry). Null when it has no picture (landforms, prefab roots, bodies). */

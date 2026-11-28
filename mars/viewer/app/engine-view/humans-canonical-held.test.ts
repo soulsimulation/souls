@@ -10,6 +10,9 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WorldModel,coreLibrary} from '@souls/world-compiler';
 import {HumanViews,setHumanGround,type SampledHuman} from './humans.ts';
 import {templateFromGltf} from './people.ts';
+import {TakePeople} from './take-replay.ts';
+import {chunkOf} from '../../../../apps/web/src/v2-engine/takes.ts';
+import type {Take} from '../../engine/take/types.ts';
 import {CHARACTER_WIRE} from './character-wire.ts';
 import {CreatorKinds,setHeldKinds,entityId} from '../../../../apps/web/src/v2-engine/creator-kinds.ts';
 import '../../../../apps/web/src/gen-mesh/kit.mesh.ts';
@@ -37,7 +40,7 @@ test('canonical held quantity, owner and arrival controls follow production palm
   const bowl=JSON.parse(readFileSync(new URL('../../../../content/kinds/food/soup_bowl.json',import.meta.url),'utf8'));
   const kinds=new CreatorKinds();kinds.apply([{id:'entry:bowl',kind:'souls:kind',parent:null,defines:'eden:soup_bowl@aa',entry:new TextEncoder().encode(JSON.stringify(bowl))}],[]);setHeldKinds(kinds);
   const builds:THREE.Object3D[]=[],disposed:THREE.Object3D[]=[];
-  views.setHeldPictureFactory(entry=>{const picture=layer.heldPicture(entry);if(!picture)return null;builds.push(picture.object);return {...picture,dispose(){disposed.push(picture.object);picture.dispose();}};});
+  views.setHeldPictureFactory((entry,mode)=>{const picture=layer.heldPicture(entry,mode);if(!picture)return null;if(mode==='probe')return picture;builds.push(picture.object);return {...picture,dispose(){disposed.push(picture.object);picture.dispose();}};});
   const nativeHands={body:'native-body',kindHash:'ab'.repeat(32),resources:[['souls:hand-left',2,7],['souls:hand-right',2,4]] as const};
   const sample:SampledHuman={id:'declared-body',bodyModel:'casual',p:[2,0,3],yaw:.7,walk:0,walkDist:0,activity:'sit',seatHeight:.5,baseActivity:'sit',nativeHands};
   const bones=(h:THREE.Object3D)=>{h.updateMatrixWorld(true);const out:Record<string,number[]>={};h.traverse(o=>{if((o as THREE.Bone).isBone)out[o.name]=o.matrixWorld.elements.slice();});return out;};
@@ -48,6 +51,16 @@ test('canonical held quantity, owner and arrival controls follow production palm
     drawn.set(entityId(duplicate.id),{obj:new THREE.Group()});
     try { assert.equal(layer.heldPicture(duplicate),null,'native entity drawn during handoff blocks duplicate even with a different origin'); } finally { drawn.delete(entityId(duplicate.id)); }
     const retry=layer.heldPicture(duplicate);assert(retry,'same observation can acquire canonical picture after world draw retires');retry.dispose();
+    for(const soup of [2,1,0]){
+      const entry={...duplicate,fields:{28:soup}},live=layer.heldPicture(entry)!;assert(live);
+      const internals=layer as unknown as {geoRefs:Map<unknown,number>;geometryOwners:Map<unknown,unknown>;steamers:Map<unknown,unknown>;pours:Map<unknown,unknown>};
+      const refs=[...internals.geoRefs],owners=internals.geometryOwners.size,materials=(layer.lib as unknown as{cache:Map<string,THREE.Material>}).cache;
+      const materialEntries=[...materials],effects=[internals.steamers.size,internals.pours.size];let sharedDisposed=0;
+      live.object.traverse(o=>{const m=o as THREE.Mesh;if(!m.isMesh)return;m.geometry.addEventListener('dispose',()=>sharedDisposed++);for(const mat of Array.isArray(m.material)?m.material:[m.material])mat.addEventListener('dispose',()=>sharedDisposed++);});
+      const probe=layer.heldPicture(entry,'probe')!;assert(probe);assert.deepEqual(probe.bounds,live.bounds,'pure canonical recipe matches actual live soup '+soup);
+      assert.equal(probe.object.children.length,0,'probe returns no rendered geometry');probe.dispose();probe.dispose();
+      assert.deepEqual([...internals.geoRefs],refs);assert.equal(internals.geometryOwners.size,owners);assert.deepEqual([...materials],materialEntries);assert.deepEqual([internals.steamers.size,internals.pours.size],effects);assert.equal(sharedDisposed,0,'probe never disposes shared live geometry/material');live.dispose();
+    }
     const counts:number[]=[];
     for(const soup of [2,1,0,2]){
       const held={observedAt:soup,entries:[{id:'same-bowl',kind:'eden:soup_bowl@aa',parent:'native-body',slot:7,pos:[0,0,0] as const,rot:[Q,0,0,0] as const,fields:{28:soup}}]};
@@ -127,8 +140,38 @@ test('canonical held quantity, owner and arrival controls follow production palm
     views.setFrame([waving],9002);views.render(1);reference.setFrame([{...waving,heldEntries:undefined}],9002);reference.render(1);
     assert.deepEqual(bones(views.bodyObject(sample.id)!),bones(reference.bodyObject(sample.id)!),'active wave keeps limb pose while canonical object follows its palm');
     assert(builds.at(-1)?.parent,'wave retains actual object rather than generic replacement');
+    views.setFrame([{...waving,heldArmKnown:true,heldArmOrigin:{at:1,age:.1,hands:['right'],sample:{...noLegacy,heldEntries:{observedAt:0,entries:[]}}}}],9002);views.render(1);
+    assert.deepEqual(bones(views.bodyObject(sample.id)!),bones(reference.bodyObject(sample.id)!),'active clip owner also wins over an observed held-arm origin');
     const priorDisposed=disposed.length,priorBuilds=builds.length;
     views.setFrame([{...sample,nativeHands:undefined,prop:'plate',heldEntries:held}],9000);views.render(1);assert.equal(disposed.length,priorDisposed+1,'unknown default metadata cannot attach');
     views.setFrame([{...sample,heldEntries:held,hands:{left:[2,1,3]}}],9000);views.render(1);assert.equal(builds.length,priorBuilds,'native hand owner wins');
+    // The ordinary take path, with display clock intentionally unrelated to world time.
+    const observed=(at:number,soup?:number,slot=7)=>({observedAt:at,entries:soup===undefined?[]:[{id:'same-bowl',kind:'eden:soup_bowl@aa',parent:'native-body',slot,pos:[0,0,0] as const,rot:[Q,0,0,0] as const,fields:{28:soup}}]});
+    const skin=(holder:THREE.Object3D)=>{holder.updateMatrixWorld(true);const out:number[]=[];holder.traverse(o=>{const m=o as THREE.SkinnedMesh;if(!m.isSkinnedMesh||!m.userData.bodyDraw||!m.visible)return;const g=m.geometry,index=g.index!,materials=Array.isArray(m.material)?m.material:[m.material],seen=new Set<number>();for(const group of g.groups.length?g.groups:[{start:0,count:index.count,materialIndex:0}]){if(!materials[group.materialIndex??0]?.visible)continue;for(let i=Math.max(group.start,g.drawRange.start);i<Math.min(group.start+group.count,g.drawRange.start+g.drawRange.count,index.count);i++)seen.add(index.getX(i));}for(const i of seen)out.push(...m.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(m.matrixWorld).toArray());});assert(out.length>3000);return out;};
+    const close=(a:number[],b:number[],why:string,epsilon=1e-6)=>{assert.equal(a.length,b.length);let max=0;for(let i=0;i<a.length;i++)max=Math.max(max,Math.abs(a[i]-b[i]));assert(max<epsilon,why+' max='+max);};
+    for(const seated of [false,true]){
+      const observations=[observed(0),observed(100000,2),observed(200000,1),observed(250000),observed(300000,2),observed(400000,0),observed(450000)];
+      const b={entity:sample.id,soul:'soul',name:'Person',heading:sample.yaw,samples:[{at:0,p:[2000,0,3000] as [number,number,number]}],held:[{at:100000,prop:'plate'},{at:250000,prop:null},{at:300000,prop:'plate'},{at:450000,prop:null}],heldEntries:observations,look:{family:'humanoid',model:'casual',params:{},nativeBody:'native-body',nativeKindHash:nativeHands.kindHash,nativeResources:nativeHands.resources}};
+      const take=chunkOf([b],0,{rulesVersion:'held-arm-rig',datetime:null},40).take as unknown as Take;
+      if(seated){take.changes.push([0,sample.id,'activity','sit'],[0,sample.id,'baseActivity','sit'],[0,sample.id,'seatHeight',.5]);take.changes.sort((a,b)=>a[0]-b[0]);}
+      const create=()=>{const p=new TakePeople(take,{heldPicture:(entry,mode)=>layer.heldPicture(entry,mode)});p.setTemplates([template]);p.setBodyTemplates(new Map([['casual',template]]));return p;};
+      const warm=create();try{
+        for(const boundary of [.1,.25,.3,.45]){warm.show(boundary-1e-7,9000);const before=skin(warm.bodyObject(sample.id)!);warm.show(boundary,9000);close(skin(warm.bodyObject(sample.id)!),before,'submitted skin continuous '+seated+' at '+boundary,2e-5);if(boundary===.25||boundary===.45)assert.equal(warm.group.getObjectsByProperty('name','entity same-bowl').length,0,'object gone at release while arm returns');}
+        for(const t of [.12,.23,.275,.325,.425,.5,.8,.12]){
+          warm.show(t,9000);const cold=create();try{cold.show(t,9000);close(skin(cold.bodyObject(sample.id)!),skin(warm.bodyObject(sample.id)!),'fresh/backward seek skin '+seated+' at '+t);const a=bones(warm.bodyObject(sample.id)!),other=bones(cold.bodyObject(sample.id)!);for(const name of ['Root','Hips','FootL','FootR','UpperArmR','LowerArmR','WristR'])assert.deepEqual(a[name],other[name],name+' remains deterministic and authoritative');}finally{cold.dispose();}
+        }
+      }finally{warm.dispose();}
+    }
+    // More contributing boundaries than the bounded pose cache: no recursive/truncated chain.
+    const rapid=[observed(0),...Array.from({length:45},(_,i)=>observed(50000*(i+1),i%3===2?undefined:2,i%4<2?7:4))];
+    const rapidBody={entity:sample.id,soul:'soul',name:'Person',heading:sample.yaw,samples:[{at:0,p:[2000,0,3000] as [number,number,number]}],held:[],heldEntries:rapid,look:{family:'humanoid',model:'casual',params:{},nativeBody:'native-body',nativeKindHash:nativeHands.kindHash,nativeResources:nativeHands.resources}};
+    const rapidTake=chunkOf([rapidBody],0,{rulesVersion:'held-arm-rapid',datetime:null},80).take as unknown as Take;
+    const createRapid=()=>{const p=new TakePeople(rapidTake,{heldPicture:(entry,mode)=>layer.heldPicture(entry,mode)});p.setTemplates([template]);p.setBodyTemplates(new Map([['casual',template]]));return p;};
+    const warmRapid=createRapid();try{
+      for(const t of [2.245,2.255,2.245]){warmRapid.show(t,9000);const cold=createRapid();try{cold.show(t,9000);close(skin(warmRapid.bodyObject(sample.id)!),skin(cold.bodyObject(sample.id)!),'45-boundary cold/backward chain at '+t);}finally{cold.dispose();}}
+      const hv=(warmRapid as unknown as{humans:{views:Map<string,{heldArmCache:Map<string,unknown>}>}}).humans;
+      assert.equal(hv.views.get(sample.id)!.heldArmCache.size,32,'old prefixes evicted without changing the pose');
+      for(const t of [.1,.2,2.2,2.25]){warmRapid.show(t-1e-7,9000);const before=skin(warmRapid.bodyObject(sample.id)!);warmRapid.show(t,9000);close(skin(warmRapid.bodyObject(sample.id)!),before,'rapid hand/release boundary '+t,2e-5);}
+    }finally{warmRapid.dispose();}
   }finally{views.clear();reference.clear();setHeldKinds(null);layer.dispose();setHumanGround(()=>0);}
 });
